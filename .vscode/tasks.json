@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-vscode-extension",
+      "type": "shell",
+      "command": "node",
+      "args": ["esbuild.mjs"],
+      "options": {
+        "cwd": "${workspaceFolder}/apps/vscode"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

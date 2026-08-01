@@ -1,0 +1,40 @@
+{
+  "name": "light-code-vscode",
+  "displayName": "Light Code",
+  "description": "A minimal agentic coding assistant for VS Code.",
+  "private": true,
+  "version": "0.0.0",
+  "publisher": "ChosenGeneration",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chosengenerationdev/light-code.git"
+  },
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "lightCode.openPanel",
+        "title": "Light Code: Open Panel"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node ./esbuild.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/vscode": "1.102.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1"
+  }
+}
