@@ -7,5 +7,6 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"]
   },
+  "references": [{ "path": "../core" }],
   "include": ["src"]
 }

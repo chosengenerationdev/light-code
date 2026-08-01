@@ -41,6 +41,9 @@ importers:
       '@light-code/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@light-code/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
     devDependencies:
       '@types/node':
         specifier: ^26.1.2
@@ -70,6 +73,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@light-code/core':
+        specifier: workspace:*
+        version: link:../core
       react:
         specifier: ^19.2.8
         version: 19.2.8

@@ -6,10 +6,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json"
   },
   "dependencies": {
+    "@light-code/core": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

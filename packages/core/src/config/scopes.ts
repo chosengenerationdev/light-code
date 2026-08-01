@@ -2,9 +2,11 @@ import type { LightCodeConfig } from './schema.js'
 
 /**
  * Dotted paths that are user-scope only (invariant 5). A hostile repo must not be able
- * to repoint credentials or executables via workspace config.
+ * to repoint credentials or executables via workspace config — this means the entire
+ * `profiles` list and `activeProfileId` are restricted, not just `baseUrl`/`auth`
+ * within a profile: injecting a whole new profile is just as dangerous as editing one.
  */
-export const USER_SCOPE_ONLY_KEYS = ['provider.baseUrl', 'auth', 'certDir', 'python.uvPath'] as const
+export const USER_SCOPE_ONLY_KEYS = ['profiles', 'activeProfileId', 'certDir', 'python.uvPath'] as const
 
 export interface ScopeMergeResult {
   config: LightCodeConfig

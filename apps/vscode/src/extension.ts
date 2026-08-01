@@ -1,31 +1,18 @@
 import * as vscode from 'vscode'
+import { ChatViewProvider } from './webview/chatViewProvider.js'
 
 export function activate(context: vscode.ExtensionContext): void {
-  const disposable = vscode.commands.registerCommand('lightCode.openPanel', () => {
-    const panel = vscode.window.createWebviewPanel(
-      'lightCode.panel',
-      'Light Code',
-      vscode.ViewColumn.Beside,
-      { enableScripts: false },
-    )
-    panel.webview.html = getHtml(panel.webview)
+  const outputChannel = vscode.window.createOutputChannel('Light Code')
+  context.subscriptions.push(outputChannel)
+
+  const provider = new ChatViewProvider(context, outputChannel)
+  const viewDisposable = vscode.window.registerWebviewViewProvider('lightCode.chatView', provider)
+
+  const openCommand = vscode.commands.registerCommand('lightCode.openPanel', () => {
+    void vscode.commands.executeCommand('workbench.view.extension.lightCode')
   })
 
-  context.subscriptions.push(disposable)
+  context.subscriptions.push(viewDisposable, openCommand)
 }
 
 export function deactivate(): void {}
-
-function getHtml(webview: vscode.Webview): string {
-  const csp = `default-src 'none'; style-src ${webview.cspSource};`
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="${csp}" />
-  <title>Light Code</title>
-</head>
-<body>
-</body>
-</html>`
-}

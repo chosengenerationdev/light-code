@@ -1,17 +1,12 @@
 import { z } from 'zod'
+import { providerProfileSchema } from '../providers/types.js'
 
 /**
  * The whole config file, one schema shared by the UI and the file loader (§15) so a
  * hand-edited file and a UI save fail identically. Only the shape needed so far
- * (Phase 1) is modelled; providers, MCP servers, approvals, etc. extend this in
- * later phases without redesigning it.
+ * (Phase 2) is modelled; MCP servers, approvals, etc. extend this in later phases
+ * without redesigning it.
  */
-export const providerConfigSchema = z
-  .object({
-    baseUrl: z.string(),
-  })
-  .partial()
-
 export const pythonConfigSchema = z
   .object({
     uvPath: z.string(),
@@ -20,9 +15,8 @@ export const pythonConfigSchema = z
 
 export const configSchema = z
   .object({
-    provider: providerConfigSchema,
-    /** Opaque for now — the concrete `Auth` shape lands in Phase 2/6. */
-    auth: z.record(z.string(), z.unknown()),
+    profiles: z.array(providerProfileSchema),
+    activeProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,
   })

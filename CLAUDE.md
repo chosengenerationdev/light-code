@@ -62,8 +62,13 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 4. **No telemetry, no update checks, no remote assets.** All webview assets are bundled
    locally. CI fails if built output contains an absolute external URL.
 5. **These config keys are user-scope only and are ignored if found in workspace config:**
-   `provider.baseUrl`, everything under `auth`, `certDir`, `python.uvPath`.
-   A hostile repo must not be able to repoint credentials or executables.
+   the entire `profiles` list, `activeProfileId`, `certDir`, `python.uvPath`.
+   A hostile repo must not be able to repoint credentials or executables — this means a
+   workspace can't inject a whole new profile (its own `baseUrl`/`auth`/`model`) any more
+   than it could edit an existing one, and can't switch which profile is active. (Originally
+   worded as `provider.baseUrl` + "everything under `auth`" for a single active profile;
+   broadened to the whole list once named profiles — §9 — made that shape a list of
+   profiles rather than one singleton.)
 6. **Cert/key files must live outside the workspace root**, and their resolved paths are on
    a hard deny list for every file-reading tool.
 7. **Secrets never cross the bridge toward the UI.** Write-only. No `getSecret` message
@@ -587,7 +592,82 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 1 complete — see `IMPLEMENTATION_PLAN.md`. Phase 2 not started.
+**Current phase:** Phase 2 complete (plus a slice of 2b, pulled forward — see below) —
+see `IMPLEMENTATION_PLAN.md`. Phase 2b (the rest of it) not started.
+
+**Phase 2 done, plus deliberate scope changes from the plan as written:**
+- `packages/core/src/providers/`: `types.ts` (zod schemas + inferred types for
+  `WireFormat`, `Auth`, `ProviderProfile`, plus `ChatMessage`/`StreamChunk`/`ChatProvider`),
+  `openai.ts` (SSE-streaming OpenAI-compatible adapter over `HttpClient`), `registry.ts`
+  (`resolveActiveProfile`), `auth/apiKey.ts` (`apiKey`/`none` strategies). `agent/`:
+  `messages.ts` (`Conversation`), `loop.ts` (`runAgentTurn` — minimal, no tools),
+  `protocol.ts` (`UiToHostMessage`/`HostToUiMessage`, shared by ui and vscode).
+- **Config schema changed from Phase 1's assumption.** Invariant 5 originally named
+  `provider.baseUrl` + `auth` (a single active profile). Implementing named profiles
+  (§9) properly required `profiles: ProviderProfile[]` + `activeProfileId`, and the
+  right security boundary is the **whole list** being user-scope-only — a workspace
+  injecting a brand-new profile is exactly invariant 5's threat, not just editing an
+  existing one's `baseUrl`/`auth`. Invariant 5's wording was updated to match, in the
+  same commit as the schema change. `USER_SCOPE_ONLY_KEYS` is now
+  `['profiles', 'activeProfileId', 'certDir', 'python.uvPath']`.
+- **The webview is a sidebar `WebviewView` (Activity Bar icon), not a command-opened
+  `WebviewPanel`** — changed from the original plan based on direct user feedback
+  mid-phase. `apps/vscode/src/webview/chatViewProvider.ts` replaces the old `panel.ts`;
+  `contributes.viewsContainers`/`views` in `apps/vscode/package.json`. `bridge.ts` now
+  takes a plain `vscode.Webview`, not a `WebviewPanel`, so it works for either host.
+- **A minimal settings screen was pulled forward from Phase 2b**, also from mid-phase
+  user feedback (nobody should have to use `showInputBox` prompts to configure a
+  provider). `packages/ui/src/Settings.tsx` + a gear-icon toggle in `App.tsx`; host
+  side handles `requestProfile`/`saveProfile` in `bridge.ts` against the single
+  `'default'` profile ID. **This is not Phase 2b** — there's no multi-profile
+  create/duplicate/delete UI, no `ScopeBadge`, no `SecretField` "Set — replace?"
+  polish. Real Phase 2b should treat this as a rough draft to replace, not extend.
+- Icons: `apps/vscode/resources/` holds real brand assets (activity-bar-icon.svg,
+  icon-256.png for the marketplace listing, etc.) supplied by the user, replacing the
+  placeholder chat-bubble glyph from initial scaffolding. `packages/ui/src/icons.tsx`
+  has small inline SVG icons (send/stop/back/settings) — no icon font/library, keeps
+  the bundle small and the CSP unloosened.
+- Styling uses VS Code's `--vscode-*` theme CSS variables (`packages/ui/src/theme.ts`)
+  exclusively, via React's `style` prop (CSSOM property assignment — not subject to
+  `style-src` CSP at all, so the webview CSP stays `default-src 'none'` with no
+  `style-src` exception needed). This is deliberate: it makes the UI track whatever
+  theme the user has active rather than a fixed palette.
+- 36 unit tests total (up from 18): SSE parsing (split-chunk buffering, malformed
+  frames, HTTP errors, network errors, clean abort), auth strategies, profile
+  resolution, and the agent loop (including the two bugs below).
+- Manual end-to-end verification against a real DeepSeek endpoint: streaming works,
+  cancellation works, a deliberately-wrong base URL produces a readable error.
+
+**Two real bugs found and fixed during manual testing (not caught by unit tests —
+worth having caught in Phase 3+'s test strategy for the UI side):**
+1. **Late-error text loss.** If a stream errored *after* sending some text (e.g. a
+   connection drop near the end of a long response), both `runAgentTurn` and the UI
+   discarded everything already received instead of keeping it. Fixed in both places:
+   `runAgentTurn` now calls `conversation.addAssistantMessage` before `onError` if any
+   text arrived; the UI does the equivalent for its own state.
+2. **The actual root cause of "response streams in, then vanishes to an empty bubble":**
+   `App.tsx` kept the in-progress assistant reply in *separate* state
+   (`streamingText`/a ref) from the finalized `messages` array, manually handed off at
+   the `done`/`error` boundary. This is exactly the shape of bug that's easy to get
+   wrong and hard to fully rule out by inspection — fixed by removing the separate
+   state entirely: the in-progress message now lives *inside* `messages` (a `pending`
+   flag), updated in place. No hand-off moment means no seam for this class of bug to
+   hide in. Also made `HostToUiMessage`'s `textChunk` carry the *full* accumulated
+   text rather than a delta, since `webview.postMessage` delivery isn't guaranteed
+   (confirmed via `Thenable<boolean>` — false means undelivered) and cumulative
+   messages are self-correcting if one is ever dropped. `WebviewTransport` now logs a
+   warning (via the `Light Code` Output channel) if delivery ever reports failure.
+3. **Separately, a `Settings.tsx` race condition** looked like "the API key isn't
+   persisting" but wasn't a persistence bug at all: `useState(props.baseUrl)` only
+   applies its argument once, at mount. `openSettings()` fires `requestProfile` and
+   switches views in the same synchronous call, so `Settings` can mount *before* the
+   host's response arrives — whichever happens to win that race determined whether the
+   fields showed real data or stayed empty forever after. Fixed with a `useEffect`
+   that resyncs local state whenever the `baseUrl`/`model` props change. Confirmed via
+   direct inspection (both the config file on disk and the encrypted secret in VS
+   Code's `state.vscdb`) that the underlying data was correct the whole time — this
+   was purely a rendering bug, and a good reminder not to trust "it looks unpersisted"
+   reports at face value without checking storage directly.
 
 **Phase 1 done:**
 - All six platform interfaces defined in `packages/core/src/platform/`

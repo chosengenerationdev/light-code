@@ -16,6 +16,7 @@
   "categories": [
     "Other"
   ],
+  "icon": "resources/icon-256.png",
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
@@ -24,7 +25,25 @@
         "command": "lightCode.openPanel",
         "title": "Light Code: Open Panel"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lightCode",
+          "title": "Light Code",
+          "icon": "resources/activity-bar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "lightCode": [
+        {
+          "type": "webview",
+          "id": "lightCode.chatView",
+          "name": "Chat"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node ./esbuild.mjs",
@@ -38,6 +57,7 @@
     "esbuild": "^0.28.1"
   },
   "dependencies": {
-    "@light-code/core": "workspace:*"
+    "@light-code/core": "workspace:*",
+    "@light-code/ui": "workspace:*"
   }
 }
