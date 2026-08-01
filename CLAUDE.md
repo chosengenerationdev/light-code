@@ -587,7 +587,37 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 0 complete — see `IMPLEMENTATION_PLAN.md`. Phase 1 not started.
+**Current phase:** Phase 1 complete — see `IMPLEMENTATION_PLAN.md`. Phase 2 not started.
+
+**Phase 1 done:**
+- All six platform interfaces defined in `packages/core/src/platform/`
+  (`FileSystem`, `Terminal`, `SecretStore`, `ConfigStore`, `Transport`, `HttpClient`).
+  `HttpClient` is the one with a real implementation in core (`FetchHttpClient`, using
+  global `fetch`) — the other five are interfaces only, implemented in
+  `apps/vscode/src/platform/` (`NodeFileSystem`, `NodeTerminal`, `VSCodeSecretStore`,
+  `VSCodeConfigStore`, `WebviewTransport`). None have callers yet — that's expected
+  until later phases build the tools/UI/auth that consume them.
+- `packages/core/src/config/`: a zod schema modelling exactly the four user-scope-only
+  fields named in invariant 5 (nothing else yet — no other config shape has been
+  designed), `mergeScopes()` enforcing that list (workspace values for those keys are
+  dropped and reported in `ignoredWorkspaceKeys`, never silently applied or silently
+  dropped), and a `ConfigManager` tying schema + scopes + `ConfigStore` together for
+  load/validate/save/watch.
+- `packages/core/src/logging/`: `redact()` (known-secret values, `Bearer` tokens,
+  `sk-`-style keys) and a `Logger` that always routes through it.
+- `packages/core/src/fs/`: `confine()` (realpath + case-insensitive containment per
+  §16, handles not-yet-existing paths for writes) and `PathDenylist` (invariant 6,
+  compares resolved paths so a symlink can't launder a denied file under another name).
+- 18 unit tests (`confine`, `denylist`, `scopes`, `redact`), all passing. The symlink
+  test is `skipIf`-guarded and currently **skips on this dev machine** (no Developer
+  Mode / symlink privilege) — it will actually run wherever that privilege exists,
+  which should include CI's `windows-latest` job; worth confirming once CI runs for
+  real rather than assuming.
+- `SecretStore` round-trip through real `vscode.SecretStorage` and `ConfigStore`
+  hot-reload against a real `globalStorageUri` were **not** independently verified —
+  both need a real extension host and currently have no caller in `extension.ts`
+  (Phase 1's own scope fence: "Not in this phase: Any UI. Any provider."). Verify
+  these for real the first time something in Phase 2+ actually wires them in.
 
 **Phase 0 done:**
 - pnpm workspace scaffolded (`packages/core`, `packages/ui`, `apps/vscode`), all four
@@ -624,6 +654,26 @@ Update this section every session.
   `@types/vscode` is pinned exactly (no `^`) so that using an API newer than the
   `engines` floor is a typecheck error, not a runtime surprise on an older VS Code.
   Bump both together, deliberately, if the minimum supported version ever changes.
+
+**Surprised us in Phase 1:**
+- TypeScript wasn't auto-discovering `@types/node` under this pnpm layout — `process`,
+  `fetch`, `node:path`, etc. all failed with "Cannot find name". Root cause not fully
+  chased down (plausibly a pnpm-isolated-`node_modules` interaction with TS's
+  typeRoots walk); fixed by adding `"types": ["node"]` explicitly in
+  `tsconfig.base.json` rather than relying on auto-discovery. If a package ever needs
+  to *not* have Node globals ambiently available, it'll need to override this.
+- `apps/vscode` importing `@light-code/core` broke `tsc --noEmit` because core's
+  `package.json` points `types` at `dist/index.d.ts`, which doesn't exist until core
+  is built — and running `pnpm typecheck` alone (as opposed to `pnpm build`) never
+  builds it. A `paths` mapping to core's `src/index.ts` doesn't work either: it
+  collides with `rootDir`. Fixed properly with TS project references
+  (`apps/vscode/tsconfig.json` → `references: [{ path: "../../packages/core" }]`,
+  `typecheck` script → `tsc -b tsconfig.json`), which is also the standard fix for
+  Phase 2+ as more packages start depending on core.
+- The `execute_command` tool's real implementation (Phase 3) still needs a decision:
+  keep `Terminal`'s current `node:child_process` implementation, or switch to VS
+  Code's terminal shell-integration API for a visible terminal and shell-reported
+  exit codes. Flagged here rather than decided silently.
 
 **Open questions for the user:**
 - None blocking. Apigee specifics (token path, client credentials, header name, expiry)

@@ -28,7 +28,7 @@
   },
   "scripts": {
     "build": "node ./esbuild.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -b tsconfig.json",
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {
@@ -36,5 +36,8 @@
     "@types/vscode": "1.102.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1"
+  },
+  "dependencies": {
+    "@light-code/core": "workspace:*"
   }
 }
