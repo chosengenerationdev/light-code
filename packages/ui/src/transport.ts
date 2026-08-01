@@ -1,4 +1,4 @@
-import type { Transport } from '@light-code/core'
+import type { Transport } from '@light-code/core/browser'
 
 interface VsCodeApi {
   postMessage(message: unknown): void

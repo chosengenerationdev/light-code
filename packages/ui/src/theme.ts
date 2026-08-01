@@ -91,3 +91,36 @@ export function labelStyle(): CSSProperties {
     marginBottom: 4,
   }
 }
+
+export function secondaryButtonStyle(): CSSProperties {
+  return {
+    background: colors.secondaryButtonBackground,
+    color: colors.secondaryButtonForeground,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 2,
+    padding: '4px 10px',
+    cursor: 'pointer',
+    fontFamily,
+    fontSize: 12,
+  }
+}
+
+export function fieldErrorStyle(): CSSProperties {
+  return {
+    color: colors.error,
+    fontSize: 11,
+    display: 'block',
+    marginTop: 2,
+  }
+}
+
+export function badgeStyle(kind: 'neutral' | 'warning' = 'neutral'): CSSProperties {
+  return {
+    display: 'inline-block',
+    fontSize: 10,
+    padding: '1px 6px',
+    borderRadius: 8,
+    border: `1px solid ${colors.border}`,
+    color: kind === 'warning' ? colors.error : colors.muted,
+  }
+}

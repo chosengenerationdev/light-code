@@ -592,8 +592,61 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 2 complete (plus a slice of 2b, pulled forward — see below) —
-see `IMPLEMENTATION_PLAN.md`. Phase 2b (the rest of it) not started.
+**Current phase:** Phase 2b complete — see `IMPLEMENTATION_PLAN.md`. Phase 3 not started.
+
+**Phase 2b done:**
+- Full multi-profile CRUD replaces the single-`'default'`-profile draft from Phase 2:
+  `packages/ui/src/settings/` — `SettingsPanel.tsx` (tabbed shell, one tab so far),
+  `ProvidersTab.tsx` (list, Use/Edit/Duplicate/Delete, Export/Import buttons),
+  `ProviderForm.tsx` (preset dropdown + fields + inline field-level errors),
+  `ScopeBadge.tsx`, `SecretField.tsx` (write-only "Set — Replace?").
+  `packages/core/src/providers/presets.ts` (OpenAI/DeepSeek/Custom, prefilling
+  base URL + wire format, all fields still editable per §9).
+  `packages/core/src/config/validate.ts` derives field-level validation from
+  `providerProfileSchema.pick(...)` — the exact same schema the file loader uses, so a
+  bad UI save and a bad hand-edit fail identically. `baseUrl` now validates as a real
+  URL (`.url()`), not just non-empty — a deliberate strengthening of invariant-adjacent
+  validation, shared by both paths since it lives in the one schema.
+- `bridge.ts` handles `requestProfiles`/`saveProfile`/`duplicateProfile`/
+  `deleteProfile`/`setActiveProfile`/`exportConfig`/`importConfig`. Duplicate copies the
+  actual secret value to a new `SecretStorage` key (not just the reference) so the copy
+  works standalone; delete removes the profile's secret too, not just the config entry.
+  Export/import go through `vscode.window.showSaveDialog`/`showOpenDialog` — config
+  export is safe by construction, not by redaction: the file format only ever stores
+  `apiKeyRef` pointers, never key values, so there's nothing to strip.
+- Fresh-install CTA: `App.tsx` requests the profile list on mount (not just when
+  Settings opens) and shows "No provider configured yet" instead of a blank chat when
+  the list is empty.
+- Verified per the phase's own Verify step: grepped `HostToUiMessage` — no variant
+  carries a secret value, only `hasApiKey: boolean` per profile. The one `secrets.get()`
+  call in the codebase (inside `duplicateProfile`, to copy the value) never reaches a
+  `post()` call.
+- 42 unit tests total (up from 36): presets and `validateProviderForm`.
+
+**Surprised us in Phase 2b:**
+- **The webview bundle broke** the moment `ProviderForm.tsx` imported a real value
+  (`providerPresets`, `validateProviderForm`) from `@light-code/core` rather than only
+  types. Type-only imports get erased by TypeScript, so they were free; a value import
+  pulls in core's whole barrel file, which transitively reaches `node:fs`/`node:path`
+  (via `ConfigManager`, `confine()`, `env-paths`, etc.) — and esbuild's tree-shaking
+  through a multi-layer barrel wasn't reliable enough to strip those back out even
+  with `"sideEffects": false` set. Fixed properly, not papered over: added
+  `packages/core/src/browser.ts`, a second entry point (`@light-code/core/browser` via
+  `package.json` `exports`) containing only what's genuinely safe for a browser bundle
+  — protocol types, `Transport`, provider/preset types, `providerPresets`,
+  `validateProviderForm`. **packages/ui must only ever import from `@light-code/core/browser`,
+  never the bare package** — if a future value export needs to reach the UI, it goes
+  through this file deliberately, not by accident. Worth remembering before Phase 3
+  adds more shared value-level exports (tool result types, etc.) that `packages/ui`
+  might want to import.
+- A live DeepSeek response claiming "I'm a chat model" while `deepseek-reasoner` was
+  correctly selected (confirmed via the request log AND the presence of
+  `reasoning_content` deltas, which only the reasoner model emits) turned out to be the
+  model being wrong about its own identity — not a profile-routing bug. Worth
+  remembering as a category: LLMs are unreliable narrators of which model/version they
+  are, and that alone isn't evidence of a client-side bug. `reasoning_content` deltas
+  are correctly ignored (not displayed) by the current adapter — showing a reasoning
+  trace in the UI is a future enhancement, not a gap.
 
 **Phase 2 done, plus deliberate scope changes from the plan as written:**
 - `packages/core/src/providers/`: `types.ts` (zod schemas + inferred types for
@@ -615,13 +668,12 @@ see `IMPLEMENTATION_PLAN.md`. Phase 2b (the rest of it) not started.
   mid-phase. `apps/vscode/src/webview/chatViewProvider.ts` replaces the old `panel.ts`;
   `contributes.viewsContainers`/`views` in `apps/vscode/package.json`. `bridge.ts` now
   takes a plain `vscode.Webview`, not a `WebviewPanel`, so it works for either host.
-- **A minimal settings screen was pulled forward from Phase 2b**, also from mid-phase
-  user feedback (nobody should have to use `showInputBox` prompts to configure a
-  provider). `packages/ui/src/Settings.tsx` + a gear-icon toggle in `App.tsx`; host
-  side handles `requestProfile`/`saveProfile` in `bridge.ts` against the single
-  `'default'` profile ID. **This is not Phase 2b** — there's no multi-profile
-  create/duplicate/delete UI, no `ScopeBadge`, no `SecretField` "Set — replace?"
-  polish. Real Phase 2b should treat this as a rough draft to replace, not extend.
+- **A minimal single-profile settings screen was pulled forward from Phase 2b**, also
+  from mid-phase user feedback (nobody should have to use `showInputBox` prompts to
+  configure a provider). `packages/ui/src/Settings.tsx` + a gear-icon toggle in
+  `App.tsx`; host side handled `requestProfile`/`saveProfile` in `bridge.ts` against a
+  single hardcoded `'default'` profile ID. **Fully replaced by the real Phase 2b work
+  below** — `Settings.tsx` no longer exists; see the Phase 2b entry.
 - Icons: `apps/vscode/resources/` holds real brand assets (activity-bar-icon.svg,
   icon-256.png for the marketplace listing, etc.) supplied by the user, replacing the
   placeholder chat-bubble glyph from initial scaffolding. `packages/ui/src/icons.tsx`

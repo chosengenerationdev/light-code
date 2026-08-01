@@ -13,6 +13,7 @@ export { configSchema, parseConfig, ConfigValidationError } from './config/schem
 export { mergeScopes, USER_SCOPE_ONLY_KEYS, type ScopeMergeResult } from './config/scopes.js'
 export { defaultUserConfigPath, workspaceConfigPath } from './config/paths.js'
 export { ConfigManager } from './config/manager.js'
+export { validateProviderForm, type FieldError } from './config/validate.js'
 
 export { redact } from './logging/redact.js'
 export { Logger, type LogLevel, type LoggerOptions } from './logging/logger.js'
@@ -34,7 +35,13 @@ export { wireFormatSchema, authSchema, providerProfileSchema } from './providers
 export { resolveActiveProfile, NoActiveProfileError, ProfileNotFoundError } from './providers/registry.js'
 export { ApiKeyAuthStrategy, NoAuthStrategy, createAuthStrategy } from './providers/auth/apiKey.js'
 export { OpenAIProvider } from './providers/openai.js'
+export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export { Conversation } from './agent/messages.js'
 export { runAgentTurn, type AgentTurnEvents } from './agent/loop.js'
-export type { UiToHostMessage, HostToUiMessage } from './agent/protocol.js'
+export type {
+  UiToHostMessage,
+  HostToUiMessage,
+  ProfileSummary,
+  ProfileInput,
+} from './agent/protocol.js'

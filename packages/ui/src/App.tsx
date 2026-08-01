@@ -1,22 +1,16 @@
-import type { HostToUiMessage, Transport, UiToHostMessage } from '@light-code/core'
+import type { HostToUiMessage, ProfileInput, ProfileSummary, Transport, UiToHostMessage } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { Chat } from './Chat.js'
 import type { DisplayMessage } from './MessageList.js'
-import { Settings } from './Settings.js'
+import { SettingsPanel } from './settings/SettingsPanel.js'
 import { BackIcon, SettingsIcon } from './icons.js'
-import { colors, fontFamily, iconButtonStyle } from './theme.js'
+import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
 
 export interface AppProps {
   transport: Transport
 }
 
 type View = 'chat' | 'settings'
-
-interface ProfileFields {
-  baseUrl: string
-  model: string
-  hasApiKey: boolean
-}
 
 /** If the last message is still streaming, finalize it (drop the `pending` flag) in place. */
 function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
@@ -30,10 +24,12 @@ export function App(props: AppProps): ReactElement {
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
-  const [profile, setProfile] = useState<ProfileFields>({ baseUrl: '', model: '', hasApiKey: false })
+  const [profiles, setProfiles] = useState<ProfileSummary[]>([])
+  const [activeProfileId, setActiveProfileId] = useState<string | undefined>(undefined)
+  const [profilesLoaded, setProfilesLoaded] = useState(false)
 
   useEffect(() => {
-    return props.transport.onMessage((raw) => {
+    const unsubscribe = props.transport.onMessage((raw) => {
       const message = raw as HostToUiMessage
       if (message.type === 'textChunk') {
         // `message.text` is the full accumulated response so far, not a delta — see
@@ -57,16 +53,25 @@ export function App(props: AppProps): ReactElement {
         setMessages(finalizePendingMessage)
         setError(message.message)
         setIsStreaming(false)
-      } else if (message.type === 'profile') {
-        setProfile({ baseUrl: message.baseUrl, model: message.model, hasApiKey: message.hasApiKey })
+      } else if (message.type === 'profiles') {
+        setProfiles(message.profiles)
+        setActiveProfileId(message.activeProfileId)
+        setProfilesLoaded(true)
       } else if (message.type === 'profileSaved') {
         setView('chat')
       }
     })
+
+    // Fetch once on mount so the fresh-install CTA (or the chat) can render correctly
+    // without the user having to open Settings first.
+    const outgoing: UiToHostMessage = { type: 'requestProfiles' }
+    props.transport.post(outgoing)
+
+    return unsubscribe
   }, [props.transport])
 
   const openSettings = (): void => {
-    const outgoing: UiToHostMessage = { type: 'requestProfile' }
+    const outgoing: UiToHostMessage = { type: 'requestProfiles' }
     props.transport.post(outgoing)
     setView('settings')
   }
@@ -84,10 +89,26 @@ export function App(props: AppProps): ReactElement {
     props.transport.post(outgoing)
   }
 
-  const saveProfile = (baseUrl: string, model: string, apiKey: string): void => {
-    const outgoing: UiToHostMessage = { type: 'saveProfile', baseUrl, model, apiKey }
-    props.transport.post(outgoing)
+  const saveProfile = (input: ProfileInput): void => {
+    props.transport.post({ type: 'saveProfile', profile: input } satisfies UiToHostMessage)
   }
+  const duplicateProfile = (id: string): void => {
+    props.transport.post({ type: 'duplicateProfile', id } satisfies UiToHostMessage)
+  }
+  const deleteProfile = (id: string): void => {
+    props.transport.post({ type: 'deleteProfile', id } satisfies UiToHostMessage)
+  }
+  const setActiveProfile = (id: string): void => {
+    props.transport.post({ type: 'setActiveProfile', id } satisfies UiToHostMessage)
+  }
+  const exportConfig = (): void => {
+    props.transport.post({ type: 'exportConfig' } satisfies UiToHostMessage)
+  }
+  const importConfig = (): void => {
+    props.transport.post({ type: 'importConfig' } satisfies UiToHostMessage)
+  }
+
+  const hasNoProviders = profilesLoaded && profiles.length === 0
 
   return (
     <div
@@ -124,10 +145,26 @@ export function App(props: AppProps): ReactElement {
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {view === 'chat' ? (
-          <Chat messages={messages} isStreaming={isStreaming} error={error} onSend={send} onCancel={cancel} />
+        {view === 'settings' ? (
+          <SettingsPanel
+            profiles={profiles}
+            activeProfileId={activeProfileId}
+            onSave={saveProfile}
+            onDuplicate={duplicateProfile}
+            onDelete={deleteProfile}
+            onSetActive={setActiveProfile}
+            onExport={exportConfig}
+            onImport={importConfig}
+          />
+        ) : hasNoProviders ? (
+          <div style={{ padding: 20, textAlign: 'center' }}>
+            <p style={{ color: colors.muted }}>No provider configured yet.</p>
+            <button type="button" style={primaryButtonStyle(false)} onClick={openSettings}>
+              Configure a Provider
+            </button>
+          </div>
         ) : (
-          <Settings baseUrl={profile.baseUrl} model={profile.model} hasApiKey={profile.hasApiKey} onSave={saveProfile} />
+          <Chat messages={messages} isStreaming={isStreaming} error={error} onSend={send} onCancel={cancel} />
         )}
       </div>
     </div>

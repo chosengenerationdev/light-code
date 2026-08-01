@@ -16,10 +16,10 @@ export type Auth = z.infer<typeof authSchema>
 
 export const providerProfileSchema = z.object({
   id: z.string().min(1),
-  label: z.string().min(1),
+  label: z.string().min(1, 'Label is required'),
   wireFormat: wireFormatSchema,
-  baseUrl: z.string().min(1),
-  model: z.string().min(1),
+  baseUrl: z.string().min(1, 'Base URL is required').url('Must be a valid URL'),
+  model: z.string().min(1, 'Model is required'),
   auth: authSchema,
   headers: z.record(z.string(), z.string()).optional(),
 })
