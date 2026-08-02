@@ -636,8 +636,8 @@ session at the seam the plan itself suggests.
 - 69 unit tests (up from 42), including the full `apply_diff` cascade: CRLF file,
   whitespace-only mismatch, 6-line anchor match, non-unique rejection, malformed block
   rejection, and all-or-nothing multi-block application.
-- **Not yet manually verified end to end** — automated checks are green, but a real
-  multi-step tool run against a live provider hasn't been confirmed.
+- **Manually verified** against a live DeepSeek endpoint: a multi-step run
+  (`list_files` → `attempt_completion`) executes and renders correctly.
 
 **Surprised us in Phase 3:**
 - **`@vscode/ripgrep` cannot be bundled by esbuild.** It resolves its binary via
@@ -661,6 +661,17 @@ session at the seam the plan itself suggests.
   one assert what only the other knows.**
 - Added **secret audit logging** (`VSCodeSecretStore` + `context.secrets.onDidChange`) so a
   future disappearance is diagnosable rather than inferred. Key names only, never values.
+- **`WebviewView` is destroyed whenever the view is hidden.** Switching to Explorer and
+  back silently discarded the entire transcript. Fixed with
+  `registerWebviewViewProvider(..., { webviewOptions: { retainContextWhenHidden: true } })`
+  — note this is an option on the *provider registration*, not on `webview.options` where
+  the other webview settings live. Survives view switches, not a window reload; that's
+  Phase 6b.
+- **Control tools should not render as tool blocks.** `attempt_completion` and
+  `ask_followup_question` carry the model's actual message to the user, so showing them as
+  collapsed "tool ran → done" blocks buried the answer behind a click. They now post as
+  ordinary assistant text. Worth remembering when the approval UI lands: these two are
+  never approval-worthy either — they perform no work.
 
 **Plan changed during Phase 3** — three additions to `IMPLEMENTATION_PLAN.md`, all
 user-requested mid-phase:

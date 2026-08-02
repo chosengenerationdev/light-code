@@ -33,6 +33,13 @@ import { VSCodeConfigStore } from '../platform/config.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
 import { WebviewTransport } from '../platform/transport.js'
 
+/**
+ * Tools whose "result" is really the model addressing the user, not work performed.
+ * The agent loop already terminates on these (see `runAgentTurn`); here they also skip
+ * the tool-block rendering and appear as ordinary assistant messages.
+ */
+const CONTROL_TOOLS = new Set(['attempt_completion', 'ask_followup_question'])
+
 function apiKeyRefFor(profileId: string): string {
   return `profile:${profileId}:apiKey`
 }
@@ -145,6 +152,7 @@ export function wireChatBridge(
           onToolCall: (toolCall) => {
             // Each tool call starts a fresh assistant text block in the transcript.
             cumulativeText = ''
+            if (CONTROL_TOOLS.has(toolCall.name)) return
             const summary: ToolCallSummary = {
               id: toolCall.id,
               name: toolCall.name,
@@ -153,6 +161,13 @@ export function wireChatBridge(
             post({ type: 'toolCall', toolCall: summary })
           },
           onToolResult: (toolCall, result) => {
+            // The control tools aren't work being done — they're the model addressing the
+            // user. Their content is the answer, so render it as a message rather than
+            // something the user has to expand a collapsed block to read.
+            if (CONTROL_TOOLS.has(toolCall.name)) {
+              post({ type: 'textChunk', text: result.content })
+              return
+            }
             const summary: ToolCallSummary = {
               id: toolCall.id,
               name: toolCall.name,

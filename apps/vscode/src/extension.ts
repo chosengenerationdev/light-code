@@ -15,7 +15,12 @@ export function activate(context: vscode.ExtensionContext): void {
   )
 
   const provider = new ChatViewProvider(context, outputChannel)
-  const viewDisposable = vscode.window.registerWebviewViewProvider('lightCode.chatView', provider)
+  // Without `retainContextWhenHidden`, VS Code tears the webview down whenever the view is
+  // hidden — switching to Explorer and back would silently discard the whole transcript.
+  // This keeps it across view switches; surviving a window reload is Phase 6b's job.
+  const viewDisposable = vscode.window.registerWebviewViewProvider('lightCode.chatView', provider, {
+    webviewOptions: { retainContextWhenHidden: true },
+  })
 
   const openCommand = vscode.commands.registerCommand('lightCode.openPanel', () => {
     void vscode.commands.executeCommand('workbench.view.extension.lightCode')
