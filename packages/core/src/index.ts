@@ -18,7 +18,7 @@ export { validateProviderForm, type FieldError } from './config/validate.js'
 export { redact } from './logging/redact.js'
 export { Logger, type LogLevel, type LoggerOptions } from './logging/logger.js'
 
-export { confine, PathConfinementError } from './fs/confine.js'
+export { confine, PathConfinementError, normalizeForComparison } from './fs/confine.js'
 export { PathDenylist } from './fs/denylist.js'
 
 export type {
@@ -38,10 +38,36 @@ export { OpenAIProvider } from './providers/openai.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export { Conversation } from './agent/messages.js'
-export { runAgentTurn, type AgentTurnEvents } from './agent/loop.js'
+export { buildSystemPrompt } from './agent/systemPrompt.js'
+export { runAgentTurn, type AgentTurnEvents, type RunAgentTurnOptions } from './agent/loop.js'
+export {
+  DiskTruncationStore,
+  truncateToolResult,
+  type TruncationStore,
+  type TruncationResult,
+} from './agent/truncate.js'
 export type {
   UiToHostMessage,
   HostToUiMessage,
   ProfileSummary,
   ProfileInput,
+  ToolCallSummary,
 } from './agent/protocol.js'
+
+export {
+  ToolRegistry,
+  createDefaultToolRegistry,
+  createReadToolResultTool,
+  readFileTool,
+  listFilesTool,
+  searchFilesTool,
+  writeToFileTool,
+  applyDiffTool,
+  executeCommandTool,
+  askFollowupQuestionTool,
+  attemptCompletionTool,
+  type Tool,
+  type ToolGroup,
+  type ToolResult,
+  type ToolExecutionContext,
+} from './tools/index.js'

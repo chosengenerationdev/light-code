@@ -1,13 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
+import path from 'node:path'
 import * as vscode from 'vscode'
 import {
   ConfigManager,
   Conversation,
+  DiskTruncationStore,
   FetchHttpClient,
   Logger,
   OpenAIProvider,
+  PathDenylist,
+  buildSystemPrompt,
   createAuthStrategy,
+  createDefaultToolRegistry,
+  createReadToolResultTool,
   parseConfig,
   resolveActiveProfile,
   runAgentTurn,
@@ -17,8 +23,12 @@ import {
   type ProfileInput,
   type ProfileSummary,
   type ProviderProfile,
+  type ToolCallSummary,
+  type ToolExecutionContext,
   type UiToHostMessage,
 } from '@light-code/core'
+import { NodeFileSystem } from '../platform/filesystem.js'
+import { NodeTerminal } from '../platform/terminal.js'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
 import { WebviewTransport } from '../platform/transport.js'
@@ -27,14 +37,31 @@ function apiKeyRefFor(profileId: string): string {
   return `profile:${profileId}:apiKey`
 }
 
-function toSummary(profile: ProviderProfile): ProfileSummary {
+/**
+ * `hasApiKey` reflects whether the secret **actually exists in the store**, not merely
+ * whether config claims an `apiKeyRef`. Those can diverge (a secret deleted or never
+ * written leaves a dangling reference), and reporting the config's claim would show
+ * "Set — leave blank to keep" for a key that isn't there — leaving the user no way to
+ * fix it from the UI. Still never sends the value itself (invariant 7).
+ */
+async function toSummary(profile: ProviderProfile, secrets: VSCodeSecretStore): Promise<ProfileSummary> {
+  const hasApiKey = profile.auth.type === 'apiKey' && (await secrets.get(profile.auth.apiKeyRef)) !== undefined
   return {
     id: profile.id,
     label: profile.label,
     wireFormat: profile.wireFormat,
     baseUrl: profile.baseUrl,
     model: profile.model,
-    hasApiKey: profile.auth.type === 'apiKey',
+    hasApiKey,
+  }
+}
+
+/** Pretty-prints tool arguments for display; falls back to the raw string if it isn't JSON. */
+function formatToolArguments(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw.length > 0 ? raw : '{}'), null, 2)
+  } catch {
+    return raw
   }
 }
 
@@ -46,11 +73,20 @@ export function wireChatBridge(
 ): vscode.Disposable {
   const logger = new Logger({ level: 'debug', sink: (line) => outputChannel.appendLine(line) })
   const transport = new WebviewTransport(webview, logger)
-  const secrets = new VSCodeSecretStore(context.secrets)
+  const secrets = new VSCodeSecretStore(context.secrets, logger)
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
   const configManager = new ConfigManager(new VSCodeConfigStore(context, workspaceRoot))
   const httpClient = new FetchHttpClient()
-  const conversation = new Conversation()
+  const conversation = new Conversation(workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined)
+
+  const truncationStore = new DiskTruncationStore(path.join(context.globalStorageUri.fsPath, 'tool-results'))
+  const toolRegistry = createDefaultToolRegistry()
+  toolRegistry.register(createReadToolResultTool(truncationStore))
+
+  // Files read via read_file this session; write_to_file/apply_diff check this before
+  // touching an existing file. Session-scoped, so it lives alongside the conversation.
+  const readFiles = new Set<string>()
+  const denylist = new PathDenylist()
 
   let activeAbortController: AbortController | undefined
 
@@ -60,17 +96,36 @@ export function wireChatBridge(
 
   async function postProfiles(): Promise<void> {
     const { config } = await configManager.load()
-    const profiles = (config.profiles ?? []).map(toSummary)
+    const profiles = await Promise.all((config.profiles ?? []).map((profile) => toSummary(profile, secrets)))
     post({ type: 'profiles', profiles, activeProfileId: config.activeProfileId })
   }
 
   async function handleSendMessage(text: string): Promise<void> {
+    if (workspaceRoot === undefined) {
+      post({ type: 'error', message: 'Open a folder in VS Code before using Light Code — tools need a workspace root.' })
+      return
+    }
+
     activeAbortController = new AbortController()
     try {
       const { config } = await configManager.load()
+
+      // Invariant 6: cert/key paths are unreadable by every file tool. Re-added each
+      // turn so a config change takes effect without restarting the session.
+      if (config.certDir !== undefined) await denylist.add(config.certDir)
+
       const profile = resolveActiveProfile(config)
       const authStrategy = createAuthStrategy(profile.auth, secrets)
       const provider = new OpenAIProvider(httpClient, profile, authStrategy, logger)
+
+      const toolContext: ToolExecutionContext = {
+        fs: new NodeFileSystem(),
+        terminal: new NodeTerminal(),
+        workspaceRoot,
+        denylist,
+        readFiles,
+        signal: activeAbortController.signal,
+      }
 
       // Send cumulative text, not the delta — webview `postMessage` delivery isn't
       // guaranteed, and this makes each message self-correcting rather than letting
@@ -80,15 +135,37 @@ export function wireChatBridge(
         provider,
         conversation,
         text,
+        toolRegistry,
+        toolContext,
         {
           onTextChunk: (chunk) => {
             cumulativeText += chunk
             post({ type: 'textChunk', text: cumulativeText })
           },
+          onToolCall: (toolCall) => {
+            // Each tool call starts a fresh assistant text block in the transcript.
+            cumulativeText = ''
+            const summary: ToolCallSummary = {
+              id: toolCall.id,
+              name: toolCall.name,
+              arguments: formatToolArguments(toolCall.arguments),
+            }
+            post({ type: 'toolCall', toolCall: summary })
+          },
+          onToolResult: (toolCall, result) => {
+            const summary: ToolCallSummary = {
+              id: toolCall.id,
+              name: toolCall.name,
+              arguments: formatToolArguments(toolCall.arguments),
+              result: result.content,
+              ...(result.isError === true ? { isError: true } : {}),
+            }
+            post({ type: 'toolResult', toolCall: summary })
+          },
           onDone: () => post({ type: 'done' }),
           onError: (message) => post({ type: 'error', message }),
         },
-        { signal: activeAbortController.signal },
+        { signal: activeAbortController.signal, truncationStore },
       )
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -116,11 +193,14 @@ export function wireChatBridge(
       const existing = profiles.find((p) => p.id === id)
       const apiKeyRef = apiKeyRefFor(id)
 
+      // Only ever claim `apiKey` auth when the secret genuinely exists in the store.
+      // Trusting config's own claim here is what lets a dangling apiKeyRef survive
+      // every subsequent save, leaving the profile permanently unusable.
       let auth: Auth
       if (input.apiKey.trim().length > 0) {
         await secrets.set(apiKeyRef, input.apiKey.trim())
         auth = { type: 'apiKey', apiKeyRef }
-      } else if (existing?.auth.type === 'apiKey') {
+      } else if (existing?.auth.type === 'apiKey' && (await secrets.get(apiKeyRef)) !== undefined) {
         auth = { type: 'apiKey', apiKeyRef } // leave the existing secret untouched
       } else {
         auth = { type: 'none' }
@@ -161,9 +241,13 @@ export function wireChatBridge(
       let auth: Auth = { type: 'none' }
       if (source.auth.type === 'apiKey') {
         const existingKey = await secrets.get(source.auth.apiKeyRef)
-        const newRef = apiKeyRefFor(newId)
-        if (existingKey !== undefined) await secrets.set(newRef, existingKey)
-        auth = { type: 'apiKey', apiKeyRef: newRef }
+        // If the source secret is missing there's nothing to copy — leave the duplicate
+        // as `none` rather than pointing it at a secret that was never written.
+        if (existingKey !== undefined) {
+          const newRef = apiKeyRefFor(newId)
+          await secrets.set(newRef, existingKey)
+          auth = { type: 'apiKey', apiKeyRef: newRef }
+        }
       }
 
       const duplicate: ProviderProfile = { ...source, id: newId, label: `${source.label} (copy)`, auth }
@@ -233,9 +317,29 @@ export function wireChatBridge(
 
       const raw = await fs.readFile(uri.fsPath, 'utf8')
       const imported = parseConfig(raw) // throws ConfigValidationError with a readable message on bad input
-      await configManager.save('user', imported)
+
+      // Exports deliberately carry no secrets, so an imported profile's `apiKeyRef`
+      // points at a secret this machine may not have. Downgrade those to `none` rather
+      // than leaving a dangling reference that fails later at request time, and name
+      // the affected profiles so the user knows exactly which keys to re-enter.
+      const needKeys: string[] = []
+      const reconciled = await Promise.all(
+        (imported.profiles ?? []).map(async (profile): Promise<ProviderProfile> => {
+          if (profile.auth.type !== 'apiKey') return profile
+          if ((await secrets.get(profile.auth.apiKeyRef)) !== undefined) return profile
+          needKeys.push(profile.label)
+          return { ...profile, auth: { type: 'none' } }
+        }),
+      )
+
+      await configManager.save('user', { ...imported, profiles: reconciled })
       await postProfiles()
-      void vscode.window.showInformationMessage('Light Code config imported.')
+
+      void vscode.window.showInformationMessage(
+        needKeys.length > 0
+          ? `Light Code config imported. Re-enter the API key for: ${needKeys.join(', ')} (exports never include secrets).`
+          : 'Light Code config imported.',
+      )
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }

@@ -144,6 +144,15 @@ Nine in v1:
 `insert_content`, `list_code_definition_names`, mode-switching and subtask tools, a fetch
 tool.
 
+Browser automation was raised again in Phase 3 and **stays excluded** — no browser tool,
+no bundled browser MCP server. A user who wants it configures a Chrome DevTools MCP server
+themselves once Phase 5 lands, which needs nothing from us.
+
+**Two tools arrive after v1**, both added to the plan during Phase 3:
+`read_tool_result` (already built — the re-read half of result truncation, §12) and
+`notify` (a VS Code toast, needed so unattended scheduled runs can surface results —
+Phase 9b).
+
 Constraint: **the model must have read a file in the current session before editing it.**
 Cheap invariant, eliminates a class of hallucinated edits.
 
@@ -583,8 +592,9 @@ Record the reason, not just the difference.
 | Deterministic matching, no fuzzy threshold | Roo's Levenshtein matcher produced both false rejections and silent-misapply risk. |
 | One wire adapter in v1 | Gateway fronting is the deployment; avoids auditing SDKs for hidden endpoints. |
 | No shell auto-approve on Windows | PowerShell parsing is too easy to get wrong; a broken allowlist is worse than none. |
-| No browser tool, no semantic search | Out of scope; embeddings conflict with the offline posture. |
+| No browser tool, no semantic search | Out of scope; embeddings conflict with the offline posture. Browser access, if wanted, is a user-configured MCP server — not something we ship. |
 | Dynamic Python tools + skills | New capability Roo did not have. |
+| Scheduled prompts, read-only by default | New capability Roo did not have. Unattended runs have nobody to approve anything, so they get a restricted mode rather than inheriting auto-approve — Phase 9b. |
 
 ---
 
@@ -592,7 +602,90 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 2b complete — see `IMPLEMENTATION_PLAN.md`. Phase 3 not started.
+**Current phase:** Phase 3 **half done** — see `IMPLEMENTATION_PLAN.md`. Tools and the
+multi-step loop are built; **approval UI and checkpoints are not**, deferred to a follow-up
+session at the seam the plan itself suggests.
+
+> ⚠️ **Tools currently execute without asking.** There is no approval gate until Phase 3's
+> second half lands. The model can write files and run shell commands unprompted. Test in a
+> scratch folder or a committed repo. This is a known, temporary state — not the design.
+
+**Phase 3 (first half) done:**
+- **Tool-calling in the provider layer.** `OpenAIProvider` now sends `tools`/`tool_choice`
+  and parses streamed `tool_calls` deltas (arguments arrive fragmented across chunks and
+  are accumulated by index until `finish_reason: "tool_calls"`). `ChatMessage` became a
+  discriminated union so `assistant` can carry `toolCalls` and `tool` can carry a
+  `toolCallId`; `toWireMessage` maps that to OpenAI's shape.
+- **Nine tools** in `packages/core/src/tools/`: `read_file`, `list_files`, `search_files`
+  (the last two ripgrep-backed), `write_to_file`, `apply_diff`, `execute_command`,
+  `ask_followup_question`, `attempt_completion`, plus `read_tool_result`. Every path-taking
+  tool goes through `resolveToolPath()` → `confine()` + `PathDenylist` (invariants 5, 6).
+- **`apply_diff`** — the four-tier cascade per §7 (exact → whitespace-insensitive → anchor
+  for 5+ line blocks → fail with surrounding context). No fuzzy scoring. All blocks
+  validated before any write; applied bottom-up so earlier edits don't shift later ones.
+- **The read-before-edit constraint** (§6) is enforced via a session-scoped `readFiles` set
+  that only `read_file` populates.
+- **`runAgentTurn` is now a real loop**: one tool call per assistant message, result fed
+  back as the next turn, terminating on `attempt_completion`/`ask_followup_question`, a
+  plain text answer, the iteration cap (default 25), or 3 consecutive failures on the same
+  file.
+- **Result truncation** (§12) — `agent/truncate.ts` caps oversized results (~8k chars),
+  spills the full output to disk, and returns a handle `read_tool_result` can re-read with
+  an offset. Built now precisely because retrofitting it would change every tool's return
+  path.
+- 69 unit tests (up from 42), including the full `apply_diff` cascade: CRLF file,
+  whitespace-only mismatch, 6-line anchor match, non-unique rejection, malformed block
+  rejection, and all-or-nothing multi-block application.
+- **Not yet manually verified end to end** — automated checks are green, but a real
+  multi-step tool run against a live provider hasn't been confirmed.
+
+**Surprised us in Phase 3:**
+- **`@vscode/ripgrep` cannot be bundled by esbuild.** It resolves its binary via
+  `createRequire(import.meta.url)`, and esbuild stubs `import.meta` to `{}` in CJS output —
+  so `rgPath` resolution throws at runtime the first time any search runs. Typecheck and
+  build both pass; only executing it fails. Fixed by marking it `external` in
+  `esbuild.mjs` and adding it as a direct dependency of `apps/vscode` so it resolves from
+  `node_modules` at runtime. **Watch for this with any dependency that locates a binary
+  on disk.**
+- **Three dangling-secret bugs**, surfaced by a user report of "the API key vanished".
+  Direct inspection of `state.vscdb` vs its backup confirmed the secret genuinely
+  disappeared between sessions while config still referenced it. The mechanism was never
+  proven, but three real bugs let that state exist *and persist*: `duplicateProfile`
+  claimed `apiKey` auth even when the source secret was missing; `saveProfile` preserved
+  an `apiKeyRef` based on config's claim without checking the store (this is what made it
+  unrecoverable — every save re-blessed the broken pointer); and `toSummary` derived
+  `hasApiKey` from config, so Settings showed "Set — leave blank to keep" for a key that
+  wasn't there. All three now treat the secret store as the source of truth. Import also
+  reconciles now, since exports deliberately carry no secrets.
+  **General lesson: config and the secret store are two stores that can diverge; never let
+  one assert what only the other knows.**
+- Added **secret audit logging** (`VSCodeSecretStore` + `context.secrets.onDidChange`) so a
+  future disappearance is diagnosable rather than inferred. Key names only, never values.
+
+**Plan changed during Phase 3** — three additions to `IMPLEMENTATION_PLAN.md`, all
+user-requested mid-phase:
+
+1. **Phase 6b — Task history and session persistence.** Nothing in the original plan
+   persisted conversations; the transcript lives only in memory in `bridge.ts` and dies
+   with the webview. An omission rather than a deliberate exclusion (absent from §18's
+   do-not-build list, and Roo has task history). Sequenced before Phase 7 because
+   compaction rewrites how history is assembled — building it after means touching the
+   same code twice.
+2. **Browser/Chrome access: raised, considered, and left excluded.** Browser automation is
+   on the do-not-build list in three places. Shipping a Chrome DevTools MCP server (either
+   bundled or as an `npx` preset) was drafted and then dropped — a user who wants browser
+   control configures that MCP server themselves once Phase 5 exists, and Light Code needs
+   no special support for it. Nothing changed in the plan; recorded only so the question
+   isn't re-opened from scratch a third time.
+3. **Phase 9b — Scheduled prompts and background sessions,** with a `notify` toast tool.
+   Placed after release: it depends on Phase 4 (modes) and Phase 6b (sessions), isn't
+   needed for v1, and is the second-sharpest security surface after Python tools.
+   **The design problem is approval:** §8 assumes a human is present per invocation, and a
+   schedule removes that assumption. Resolved with a *restricted autonomous mode* built on
+   Phase 4's modes mechanism — read-only by default, widening is per-schedule and warned
+   about, never a global auto-approve. Called out explicitly in the plan: browser/MCP
+   access + unattended execution + edit/command tools is a direct prompt-injection →
+   code-execution path, and must never be the default.
 
 **Phase 2b done:**
 - Full multi-profile CRUD replaces the single-`'default'`-profile draft from Phase 2:

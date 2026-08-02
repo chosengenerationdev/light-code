@@ -44,7 +44,7 @@ describe('ApiKeyAuthStrategy', () => {
     const secrets = new FakeSecretStore()
     const strategy = new ApiKeyAuthStrategy(secrets, 'profile:test:apiKey')
 
-    await expect(strategy.resolveHeaders()).rejects.toThrow(/credential missing/i)
+    await expect(strategy.resolveHeaders()).rejects.toThrow(/API key missing/i)
   })
 })
 

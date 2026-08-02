@@ -141,4 +141,72 @@ describe('OpenAIProvider', () => {
     expect(chunks[0]?.type).toBe('error')
     expect((chunks[0] as { error: string }).error).toContain('no response body')
   })
+
+  it('accumulates a tool call streamed across multiple argument fragments', async () => {
+    const sse =
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}\n\n' +
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":"}}]},"finish_reason":null}]}\n\n' +
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"a.ts\\"}"}}]},"finish_reason":null}]}\n\n' +
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n' +
+      'data: [DONE]\n\n'
+    const client = new FakeHttpClient(() => okResponse(streamFromChunks([sse])))
+
+    const provider = new OpenAIProvider(client, profile, new NoAuthStrategy())
+    const chunks = await collect(provider.streamChat([]))
+
+    expect(chunks).toEqual([
+      { type: 'toolCall', toolCall: { id: 'call_1', name: 'read_file', arguments: '{"path":"a.ts"}' } },
+      { type: 'done' },
+    ])
+  })
+
+  it('sends tools and tool_choice in the request body when tools are provided', async () => {
+    let capturedBody: string | undefined
+    const client = new FakeHttpClient((_url, options) => {
+      capturedBody = options?.body
+      return okResponse(streamFromChunks(['data: [DONE]\n\n']))
+    })
+
+    const provider = new OpenAIProvider(client, profile, new NoAuthStrategy())
+    await collect(
+      provider.streamChat([], {
+        tools: [{ name: 'read_file', description: 'Read a file', parameters: { type: 'object' } }],
+      }),
+    )
+
+    const parsed = JSON.parse(capturedBody ?? '{}') as { tools?: unknown; tool_choice?: unknown }
+    expect(parsed.tool_choice).toBe('auto')
+    expect(parsed.tools).toEqual([
+      { type: 'function', function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object' } } },
+    ])
+  })
+
+  it('maps assistant tool-call and tool-result messages to the wire format', async () => {
+    let capturedBody: string | undefined
+    const client = new FakeHttpClient((_url, options) => {
+      capturedBody = options?.body
+      return okResponse(streamFromChunks(['data: [DONE]\n\n']))
+    })
+
+    const provider = new OpenAIProvider(client, profile, new NoAuthStrategy())
+    await collect(
+      provider.streamChat([
+        { role: 'user', content: 'read a.ts' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call_1', name: 'read_file', arguments: '{"path":"a.ts"}' }],
+        },
+        { role: 'tool', toolCallId: 'call_1', content: 'file contents' },
+      ]),
+    )
+
+    const parsed = JSON.parse(capturedBody ?? '{}') as { messages: Record<string, unknown>[] }
+    expect(parsed.messages[1]).toEqual({
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }],
+    })
+    expect(parsed.messages[2]).toEqual({ role: 'tool', tool_call_id: 'call_1', content: 'file contents' })
+  })
 })

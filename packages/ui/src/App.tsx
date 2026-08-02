@@ -15,8 +15,8 @@ type View = 'chat' | 'settings'
 /** If the last message is still streaming, finalize it (drop the `pending` flag) in place. */
 function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
   const last = messages[messages.length - 1]
-  if (last === undefined || !last.pending) return messages
-  return [...messages.slice(0, -1), { role: last.role, content: last.content }]
+  if (last === undefined || last.kind !== 'text' || !last.pending) return messages
+  return [...messages.slice(0, -1), { kind: 'text', role: last.role, content: last.content }]
 }
 
 export function App(props: AppProps): ReactElement {
@@ -38,11 +38,20 @@ export function App(props: AppProps): ReactElement {
         // there's no hand-off moment between "streaming" and "final" for a bug to hide in.
         setMessages((prev) => {
           const last = prev[prev.length - 1]
-          const updated: DisplayMessage = { role: 'assistant', content: message.text, pending: true }
-          if (last?.role === 'assistant' && last.pending) {
+          const updated: DisplayMessage = { kind: 'text', role: 'assistant', content: message.text, pending: true }
+          if (last?.kind === 'text' && last.role === 'assistant' && last.pending) {
             return [...prev.slice(0, -1), updated]
           }
           return [...prev, updated]
+        })
+      } else if (message.type === 'toolCall') {
+        setMessages((prev) => [...finalizePendingMessage(prev), { kind: 'tool', toolCall: message.toolCall }])
+      } else if (message.type === 'toolResult') {
+        // Replace the pending entry for this call rather than appending a second one.
+        setMessages((prev) => {
+          const index = prev.findIndex((m) => m.kind === 'tool' && m.toolCall.id === message.toolCall.id)
+          if (index === -1) return [...prev, { kind: 'tool', toolCall: message.toolCall }]
+          return [...prev.slice(0, index), { kind: 'tool', toolCall: message.toolCall }, ...prev.slice(index + 1)]
         })
       } else if (message.type === 'done') {
         setMessages(finalizePendingMessage)
@@ -78,7 +87,7 @@ export function App(props: AppProps): ReactElement {
 
   const send = (text: string): void => {
     setError(undefined)
-    setMessages((prev) => [...prev, { role: 'user', content: text }])
+    setMessages((prev) => [...prev, { kind: 'text', role: 'user', content: text }])
     setIsStreaming(true)
     const outgoing: UiToHostMessage = { type: 'sendMessage', text }
     props.transport.post(outgoing)

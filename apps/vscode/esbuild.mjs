@@ -6,7 +6,10 @@ const extensionCtx = await esbuild.context({
   entryPoints: ['src/extension.ts'],
   bundle: true,
   outfile: 'dist/extension.js',
-  external: ['vscode'],
+  // `@vscode/ripgrep` must stay external: it resolves a real binary on disk via
+  // `createRequire(import.meta.url)`, which esbuild stubs to `{}` in CJS output —
+  // bundling it makes `rgPath` resolution throw at runtime on the first search.
+  external: ['vscode', '@vscode/ripgrep'],
   format: 'cjs',
   platform: 'node',
   target: 'node18',

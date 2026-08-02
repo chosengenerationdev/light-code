@@ -20,6 +20,16 @@ export interface ProfileInput {
   apiKey: string
 }
 
+/** A tool invocation and its outcome, rendered inline in the chat transcript. */
+export interface ToolCallSummary {
+  id: string
+  name: string
+  /** Pretty-printed arguments — ground truth, not the model's description of them (invariant 8). */
+  arguments: string
+  result?: string
+  isError?: boolean
+}
+
 /** Shared by packages/ui and apps/vscode so both sides agree on the wire shape. */
 export type UiToHostMessage =
   | { type: 'sendMessage'; text: string }
@@ -39,6 +49,8 @@ export type HostToUiMessage =
    * message self-correcting, so one dropped message doesn't corrupt everything after it.
    */
   | { type: 'textChunk'; text: string }
+  | { type: 'toolCall'; toolCall: ToolCallSummary }
+  | { type: 'toolResult'; toolCall: ToolCallSummary }
   | { type: 'done' }
   | { type: 'error'; message: string }
   | { type: 'profiles'; profiles: ProfileSummary[]; activeProfileId: string | undefined }

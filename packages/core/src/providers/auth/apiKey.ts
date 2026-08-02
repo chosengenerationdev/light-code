@@ -10,7 +10,10 @@ export class ApiKeyAuthStrategy implements AuthStrategy {
   async resolveHeaders(): Promise<Record<string, string>> {
     const key = await this.secrets.get(this.apiKeyRef)
     if (key === undefined) {
-      throw new Error(`Credential missing for profile — no secret found at "${this.apiKeyRef}". Reconfigure the provider.`)
+      throw new Error(
+        'API key missing for this provider profile. Open Settings (the icon in the Light Code header), ' +
+          'edit the active profile, and enter the API key again.',
+      )
     }
     return { Authorization: `Bearer ${key}` }
   }

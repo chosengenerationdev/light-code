@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../providers/types.js'
+import type { ChatMessage, ToolCall } from '../providers/types.js'
 
 export class Conversation {
   private readonly messages: ChatMessage[] = []
@@ -13,8 +13,16 @@ export class Conversation {
     this.messages.push({ role: 'user', content })
   }
 
-  addAssistantMessage(content: string): void {
-    this.messages.push({ role: 'assistant', content })
+  addAssistantMessage(content: string, toolCalls?: ToolCall[]): void {
+    this.messages.push(
+      toolCalls !== undefined && toolCalls.length > 0
+        ? { role: 'assistant', content, toolCalls }
+        : { role: 'assistant', content },
+    )
+  }
+
+  addToolResultMessage(toolCallId: string, content: string): void {
+    this.messages.push({ role: 'tool', toolCallId, content })
   }
 
   toArray(): ChatMessage[] {

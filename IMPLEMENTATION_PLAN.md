@@ -396,6 +396,71 @@ against the gateway. Confirm a missing CA produces a comprehensible message, not
 
 ---
 
+## Phase 6b — Task history and session persistence
+
+**Goal:** conversations survive closing the panel, reloading the window, and restarting
+VS Code. The user can browse past tasks, reopen one, and delete it.
+
+Added to the plan after Phase 3, when it became clear this was an omission rather than a
+deliberate exclusion — the conversation currently lives only in memory in `bridge.ts` and
+is lost the moment the webview goes away. **Sequenced before Phase 7 deliberately:**
+compaction rewrites how history is assembled, so building persistence afterwards means
+touching the same code twice.
+
+**Build**
+
+```
+packages/core/src/history/
+  types.ts          Task = { id, workspaceRoot, title, createdAt, updatedAt, messages[] }
+  store.ts          TaskStore interface: list, load, save, delete
+  titles.ts         derive a task title from the first user message
+
+apps/vscode/src/platform/taskStore.ts    JSON files under globalStorageUri
+
+packages/ui/src/history/
+  HistoryList.tsx   past tasks, newest first; open / delete
+```
+
+Follows the §15 pattern: core owns the format and the interface, the host supplies the
+path. Storage is per workspace so another project's tasks don't appear in this one's list.
+
+**Design decisions to settle here, not improvise**
+
+- **Persist the full transcript; compact only what is *sent*.** Phase 7's compaction must
+  not destroy stored history — the user should still be able to read what actually
+  happened, even after the model's view of it has been summarised.
+- **Large tool results are already spilled to disk** by `agent/truncate.ts`. History
+  references those handles rather than duplicating the content, and deleting a task
+  deletes its stored results too.
+- **Everything written goes through `redact()`** (§15). Tool output can echo secrets —
+  a command that prints an env var, a config file read back. Persisting a transcript
+  turns a transient leak into one on disk.
+- **`readFiles` is NOT restored on resume.** The read-before-edit constraint (§6) is
+  deliberately session-scoped; a resumed task must re-read a file before editing it.
+  Restoring that set would quietly weaken the invariant across a restart.
+
+**Done when**
+
+- A conversation survives closing the sidebar, reloading the window, and restarting VS Code
+- Past tasks are listed newest-first with a readable title, and reopening one restores the
+  full transcript including tool calls and their results
+- Deleting a task removes its transcript *and* its spilled tool results
+- Tasks are scoped per workspace
+- Resuming a task and immediately asking for an edit is refused until the file is re-read
+- Nothing secret-shaped is present in the stored files
+
+**Verify**
+
+Run a task that reads files and runs commands, restart VS Code entirely, reopen it, and
+confirm the transcript is intact. Then grep the stored files for the API key and for
+`Bearer` — there must be no hits.
+
+**Not in this phase**
+
+Search across tasks, export/share a transcript, cross-workspace history, cloud sync.
+
+---
+
 ## Phase 7 — Anthropic and Gemini, images, context management
 
 **Goal:** provider breadth and long-session survival.
@@ -505,6 +570,82 @@ tool file edited outside Light Code fails its hash check.
 
 ---
 
+## Phase 9b — Scheduled prompts and background sessions
+
+**Goal:** a prompt runs on a cron-like schedule without the user present, each run lands in
+its own reviewable session, and the user is notified when something needs attention.
+
+Requested during Phase 3. Placed after release deliberately: it depends on Phase 4 (modes),
+Phase 6b (session persistence), and optionally Phase 5 (MCP), it isn't needed for v1 to
+ship, and it is the second-sharpest security surface in the project after Python tools —
+it deserves its own attention rather than being rushed in before Phase 8. Movable earlier
+if daily use demands it, but not before Phase 6b.
+
+**Build**
+
+```
+packages/core/src/schedule/
+  types.ts          Schedule = { id, name, cron, prompt, mode, enabled, lastRun }
+  cron.ts           parse + next-fire-time. Use a vetted parser; do not hand-roll
+  runner.ts         fires a schedule into a fresh Task, headless
+  autonomy.ts       the restricted permission set for unattended runs
+
+packages/core/src/tools/notify.ts        toast notification tool
+apps/vscode/src/platform/notifier.ts     vscode.window.show*Message
+
+packages/ui/src/settings/SchedulesTab.tsx   list, add, edit, enable/disable, run-now
+```
+
+### Unattended approval — the core design problem
+
+§8 says *"Per-invocation by default. All auto-approve toggles ship off."* A scheduled run
+has nobody to approve anything, so it cannot inherit the interactive model. It gets a
+**restricted autonomous mode** instead, built on the Phase 4 modes mechanism rather than a
+second parallel one:
+
+- Each schedule names a mode. The default is **read-only** — `read` + `always` groups
+  only. No `edit`, no `command`, no `mcp`.
+- Widening it (allowing edits, shell, or MCP/browser) is **per schedule, explicit, and
+  warned about in the UI** — never a global "auto-approve everything" switch.
+- Command auto-approve stays unavailable on Windows (§8) — that restriction does not
+  get quietly lifted just because the run is unattended.
+- Every autonomous run is written to the audit log (§15) with its mode and tool calls.
+
+### The combination that must be called out
+
+Browser/MCP access + unattended execution + edit or command tools is a direct
+**prompt-injection → code-execution** path: a scheduled job fetches a page, the page
+contains instructions, the model acts on them with nobody watching. The UI must say this
+plainly when a schedule is granted anything beyond read-only, and the default must never
+be the dangerous combination.
+
+**Done when**
+
+- A schedule fires on time, runs headless, and produces a normal reviewable session in the
+  Phase 6b history, labelled as scheduled rather than interactive
+- The default mode for a new schedule is read-only, and widening it shows an explicit warning
+- A scheduled run cannot use a tool outside its mode, verified by a test, not by inspection
+- The notify tool raises a VS Code toast; clicking it opens that run's session
+- Schedules survive a VS Code restart and do not double-fire after one
+- A run that overruns its next fire time does not start a second concurrent run
+- Disabling a schedule stops it firing without deleting its history
+- Failures notify rather than dying silently — an unattended error nobody sees is the
+  worst outcome here
+- Every autonomous run appears in the audit log with the mode it ran under
+
+**Verify**
+
+Set a one-minute schedule, close the panel, and confirm it still fires and records a
+session. Then give a schedule a prompt that tries to use a tool outside its mode and
+confirm the run refuses rather than escalating.
+
+**Not in this phase**
+
+Schedules that trigger on file/git events rather than time, chaining one schedule's output
+into another, sharing schedules across machines.
+
+---
+
 ## Phase 10 — Node host and browser UI (deferred)
 
 Do not start until Phase 8 has shipped and had real use.
@@ -532,9 +673,21 @@ Things most likely to go wrong, and where.
   including a timestamp in the prefix. The token bar is how you catch it.
 - **Python worker environment** (Phase 9) — key leakage here is a genuine exfiltration
   primitive, not a theoretical one.
+- **Persisted transcripts** (Phase 6b) — writing conversations to disk turns any secret
+  that leaked into tool output from a transient exposure into a durable one. The
+  redaction pass is the whole defence; test it with a real key, not a placeholder.
+- **Unattended runs** (Phase 9b) — the approval model assumes a human is present, and a
+  schedule removes that assumption. The failure isn't a crash, it's a scheduled job
+  quietly doing the wrong thing for a week. Read-only by default is the safety net;
+  resist widening it for convenience.
 
 ## Deliberately not built
 
 Recorded so they don't get reintroduced by accident: browser automation, semantic codebase
 search, MCP resources/prompts/sampling, custom modes, fuzzy diff matching, telemetry, a
 fetch tool, `insert_content`, mode-switching and subtask tools.
+
+"No browser automation" means Light Code ships no browser tool and no bundled browser
+server — raised and settled during Phase 3. A user who wants browser control configures a
+Chrome DevTools MCP server themselves, like any other MCP server; that needs no support
+from us beyond the Phase 5 client.

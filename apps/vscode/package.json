@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@light-code/core": "workspace:*",
-    "@light-code/ui": "workspace:*"
+    "@light-code/ui": "workspace:*",
+    "@vscode/ripgrep": "^1.18.0"
   }
 }

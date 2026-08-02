@@ -29,18 +29,41 @@ export interface AuthStrategy {
   resolveHeaders(): Promise<Record<string, string>>
 }
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string
+export interface ToolDefinition {
+  name: string
+  description: string
+  /** JSON Schema for the tool's parameters. */
+  parameters: unknown
 }
+
+export interface ToolCall {
+  id: string
+  name: string
+  /** Raw JSON string — the tool executor parses and validates it, not the provider. */
+  arguments: string
+}
+
+/**
+ * A discriminated union rather than one flat shape: `assistant` optionally carries
+ * `toolCalls`, `tool` carries a `toolCallId` linking a result back to its call. Neither
+ * makes sense on `system`/`user` messages.
+ */
+export type ChatMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'tool'; toolCallId: string; content: string }
 
 export type StreamChunk =
   | { type: 'text'; text: string }
+  | { type: 'toolCall'; toolCall: ToolCall }
   | { type: 'done' }
   | { type: 'error'; error: string }
 
 export interface ChatStreamOptions {
   signal?: AbortSignal
+  /** Omit to disable tool-calling for this turn (e.g. a provider profile with no tools enabled). */
+  tools?: ToolDefinition[]
 }
 
 export interface ChatProvider {

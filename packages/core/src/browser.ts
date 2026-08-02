@@ -18,4 +18,5 @@ export type {
   HostToUiMessage,
   ProfileSummary,
   ProfileInput,
+  ToolCallSummary,
 } from './agent/protocol.js'
