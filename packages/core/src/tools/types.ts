@@ -26,10 +26,29 @@ export interface ToolExecutionContext {
   signal?: AbortSignal
 }
 
+/**
+ * What executing a tool would actually do, computed by the tool itself — never the
+ * model's description of its own intent. This is invariant 8 ("approval UI shows ground
+ * truth") expressed as a type: the approval prompt renders only these.
+ */
+export type ToolPreview =
+  /** The literal command line that will be run, verbatim. */
+  | { kind: 'command'; command: string; cwd: string }
+  /** A real diff, produced by running the edit against the file's current content. */
+  | { kind: 'diff'; path: string; before: string; after: string }
+  /** Fallback for tools with nothing richer to show — the resolved parameters. */
+  | { kind: 'text'; text: string }
+
 export interface Tool<TParams = Record<string, unknown>> {
   name: string
   group: ToolGroup
   description: string
   parametersSchema: z.ZodType<TParams>
   execute(params: TParams, context: ToolExecutionContext): Promise<ToolResult>
+  /**
+   * Computes ground truth for the approval prompt without performing the action. Tools
+   * that change the world (edit, command) must implement this; read-only tools may
+   * omit it and fall back to showing their arguments.
+   */
+  preview?(params: TParams, context: ToolExecutionContext): Promise<ToolPreview>
 }

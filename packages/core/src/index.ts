@@ -39,6 +39,15 @@ export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export { Conversation } from './agent/messages.js'
 export { buildSystemPrompt } from './agent/systemPrompt.js'
+
+export {
+  AlwaysApproveGate,
+  requiresApproval,
+  type ApprovalGate,
+  type ApprovalRequest,
+  type ApprovalDecision,
+} from './approval/types.js'
+export { ShadowGit, type Checkpoint } from './checkpoints/shadowGit.js'
 export { runAgentTurn, type AgentTurnEvents, type RunAgentTurnOptions } from './agent/loop.js'
 export {
   DiskTruncationStore,
@@ -68,6 +77,7 @@ export {
   attemptCompletionTool,
   type Tool,
   type ToolGroup,
+  type ToolPreview,
   type ToolResult,
   type ToolExecutionContext,
 } from './tools/index.js'

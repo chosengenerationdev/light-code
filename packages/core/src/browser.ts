@@ -9,6 +9,8 @@
 export type { Transport } from './platform/transport.js'
 
 export type { WireFormat, Auth, ProviderProfile } from './providers/types.js'
+export type { ToolGroup, ToolPreview } from './tools/types.js'
+export type { ApprovalDecision } from './approval/types.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export { validateProviderForm, type FieldError } from './config/validate.js'

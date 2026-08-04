@@ -10,6 +10,7 @@ import {
   Logger,
   OpenAIProvider,
   PathDenylist,
+  ShadowGit,
   buildSystemPrompt,
   createAuthStrategy,
   createDefaultToolRegistry,
@@ -19,14 +20,17 @@ import {
   runAgentTurn,
   validateProviderForm,
   type Auth,
+  type Checkpoint,
   type HostToUiMessage,
   type ProfileInput,
   type ProfileSummary,
   type ProviderProfile,
+  type RunAgentTurnOptions,
   type ToolCallSummary,
   type ToolExecutionContext,
   type UiToHostMessage,
 } from '@light-code/core'
+import { WebviewApprovalGate } from './approvalGate.js'
 import { NodeFileSystem } from '../platform/filesystem.js'
 import { NodeTerminal } from '../platform/terminal.js'
 import { VSCodeConfigStore } from '../platform/config.js'
@@ -96,10 +100,21 @@ export function wireChatBridge(
   const denylist = new PathDenylist()
 
   let activeAbortController: AbortController | undefined
+  /** The task's rollback point — the snapshot taken before its first edit. */
+  let taskCheckpoint: Checkpoint | undefined
 
   function post(message: HostToUiMessage): void {
     transport.post(message)
   }
+
+  const approvalGate = new WebviewApprovalGate(post)
+
+  // Kept outside globalStorage's config area and outside the workspace, so a checkpoint
+  // never lands inside the very tree it snapshots.
+  const shadowGit =
+    workspaceRoot !== undefined
+      ? new ShadowGit(workspaceRoot, path.join(context.globalStorageUri.fsPath, 'checkpoints', 'shadow.git'))
+      : undefined
 
   async function postProfiles(): Promise<void> {
     const { config } = await configManager.load()
@@ -132,6 +147,19 @@ export function wireChatBridge(
         denylist,
         readFiles,
         signal: activeAbortController.signal,
+      }
+
+      const turnOptions: RunAgentTurnOptions = {
+        signal: activeAbortController.signal,
+        truncationStore,
+        approvalGate,
+      }
+      // Checkpoints degrade to unavailable rather than blocking the session when git
+      // isn't installed — but edits then proceed with no rollback point, so say so.
+      if (shadowGit !== undefined && (await ShadowGit.isGitAvailable())) {
+        turnOptions.shadowGit = shadowGit
+      } else {
+        logger.warn('git not found on PATH — edits will proceed without a rollback checkpoint')
       }
 
       // Send cumulative text, not the delta — webview `postMessage` delivery isn't
@@ -177,14 +205,20 @@ export function wireChatBridge(
             }
             post({ type: 'toolResult', toolCall: summary })
           },
+          onCheckpoint: (checkpoint) => {
+            taskCheckpoint = checkpoint
+            post({ type: 'checkpointAvailable' })
+          },
           onDone: () => post({ type: 'done' }),
           onError: (message) => post({ type: 'error', message }),
         },
-        { signal: activeAbortController.signal, truncationStore },
+        turnOptions,
       )
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     } finally {
+      // Never leave the loop parked on an approval that can no longer be answered.
+      approvalGate.denyAll()
       activeAbortController = undefined
     }
   }
@@ -360,6 +394,25 @@ export function wireChatBridge(
     }
   }
 
+  async function handleRollback(): Promise<void> {
+    if (shadowGit === undefined || taskCheckpoint === undefined) {
+      post({ type: 'error', message: 'There is no checkpoint to roll back to.' })
+      return
+    }
+    try {
+      await shadowGit.restore(taskCheckpoint)
+      taskCheckpoint = undefined
+      // The model's view of the files is now stale — say so rather than letting it keep
+      // editing against content that no longer exists.
+      conversation.addUserMessage('I rolled the workspace back to its state before your edits.')
+      readFiles.clear()
+      post({ type: 'rolledBack' })
+      void vscode.window.showInformationMessage('Light Code: workspace rolled back.')
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   const unsubscribe = transport.onMessage((raw) => {
     const message = raw as UiToHostMessage
     if (message.type === 'sendMessage') {
@@ -372,6 +425,11 @@ export function wireChatBridge(
       void handleSendMessage(message.text)
     } else if (message.type === 'cancel') {
       activeAbortController?.abort()
+      approvalGate.denyAll()
+    } else if (message.type === 'approvalResponse') {
+      approvalGate.resolve(message.id, message.decision)
+    } else if (message.type === 'rollback') {
+      void handleRollback()
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
     } else if (message.type === 'saveProfile') {
@@ -389,5 +447,11 @@ export function wireChatBridge(
     }
   })
 
-  return { dispose: unsubscribe }
+  return {
+    dispose: () => {
+      // Disposing while a turn awaits approval would otherwise leak a pending promise.
+      approvalGate.denyAll()
+      unsubscribe()
+    },
+  }
 }

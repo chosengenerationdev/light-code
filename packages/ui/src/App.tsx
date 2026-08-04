@@ -1,6 +1,14 @@
-import type { HostToUiMessage, ProfileInput, ProfileSummary, Transport, UiToHostMessage } from '@light-code/core/browser'
+import type {
+  ApprovalDecision,
+  HostToUiMessage,
+  ProfileInput,
+  ProfileSummary,
+  Transport,
+  UiToHostMessage,
+} from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { Chat } from './Chat.js'
+import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
 import { BackIcon, SettingsIcon } from './icons.js'
@@ -27,6 +35,8 @@ export function App(props: AppProps): ReactElement {
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])
   const [activeProfileId, setActiveProfileId] = useState<string | undefined>(undefined)
   const [profilesLoaded, setProfilesLoaded] = useState(false)
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | undefined>(undefined)
+  const [canRollback, setCanRollback] = useState(false)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -53,13 +63,27 @@ export function App(props: AppProps): ReactElement {
           if (index === -1) return [...prev, { kind: 'tool', toolCall: message.toolCall }]
           return [...prev.slice(0, index), { kind: 'tool', toolCall: message.toolCall }, ...prev.slice(index + 1)]
         })
+      } else if (message.type === 'approvalRequest') {
+        setMessages(finalizePendingMessage)
+        setPendingApproval({
+          id: message.id,
+          toolName: message.toolName,
+          group: message.group,
+          preview: message.preview,
+        })
+      } else if (message.type === 'checkpointAvailable') {
+        setCanRollback(true)
+      } else if (message.type === 'rolledBack') {
+        setCanRollback(false)
       } else if (message.type === 'done') {
         setMessages(finalizePendingMessage)
+        setPendingApproval(undefined)
         setIsStreaming(false)
       } else if (message.type === 'error') {
         // A late error must not erase text that already streamed in successfully —
         // finalize whatever arrived, and show the error alongside it, not instead of it.
         setMessages(finalizePendingMessage)
+        setPendingApproval(undefined)
         setError(message.message)
         setIsStreaming(false)
       } else if (message.type === 'profiles') {
@@ -96,6 +120,15 @@ export function App(props: AppProps): ReactElement {
   const cancel = (): void => {
     const outgoing: UiToHostMessage = { type: 'cancel' }
     props.transport.post(outgoing)
+  }
+
+  const decideApproval = (id: string, decision: ApprovalDecision): void => {
+    setPendingApproval(undefined)
+    props.transport.post({ type: 'approvalResponse', id, decision } satisfies UiToHostMessage)
+  }
+
+  const rollback = (): void => {
+    props.transport.post({ type: 'rollback' } satisfies UiToHostMessage)
   }
 
   const saveProfile = (input: ProfileInput): void => {
@@ -173,7 +206,17 @@ export function App(props: AppProps): ReactElement {
             </button>
           </div>
         ) : (
-          <Chat messages={messages} isStreaming={isStreaming} error={error} onSend={send} onCancel={cancel} />
+          <Chat
+            messages={messages}
+            isStreaming={isStreaming}
+            error={error}
+            pendingApproval={pendingApproval}
+            canRollback={canRollback}
+            onSend={send}
+            onCancel={cancel}
+            onDecideApproval={decideApproval}
+            onRollback={rollback}
+          />
         )}
       </div>
     </div>

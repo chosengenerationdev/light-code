@@ -287,19 +287,37 @@ packages/core/src/modes/
 
 packages/core/src/approval/
   policy.ts        per-category auto-approve; workspace-scoped "always allow"
-  windows.ts       command auto-approve disabled on win32
+  commands.ts      exact-match command allowlist (no pattern matching, ever)
 
 packages/ui/src/settings/ApprovalsTab.tsx
 packages/ui/src/settings/ModesTab.tsx
 packages/ui/src/ModeSelector.tsx      in the chat header
 ```
 
+The approval *gate* already exists from Phase 3 (`ApprovalGate`, `runOneToolCall`); this
+phase adds the policy that can answer without asking the user.
+
+### Command allowlist is exact-match, on every platform
+
+Revised during Phase 3 — the plan previously disabled command auto-approve on Windows
+entirely. The real hazard was never Windows as such: it was that deciding whether a
+command is *covered by a pattern* requires tokenising PowerShell (`;`, `&&`, `|`,
+`$(...)`, nested quoting), and a parsing bug silently auto-approves a chained
+destructive command.
+
+Byte-for-byte comparison needs no parser, so the hazard and the platform carve-out both
+disappear — `windows.ts` is no longer needed at all. **Never widen this to prefix or
+glob matching**; that reintroduces precisely the problem it avoids.
+
 **Done when**
 
 - Switching to Ask mode removes edit and command tools from the system prompt entirely
 - Auto-approve toggles all default off and persist per category
 - "Always allow" scopes to tool + workspace, is visible in the UI, and is revocable
-- Command auto-approve is absent from the UI on Windows, with an explanatory note
+- Allowing `npm test` auto-approves exactly `npm test`; `npm test && echo hi`,
+  `npm  test` (double space), and ` npm test` each still prompt — asserted by tests,
+  since this is the whole safety property
+- The allowlist is per workspace, listed in the UI, and individually revocable
 
 **Verify**
 

@@ -4,6 +4,10 @@ export { MessageList, type MessageListProps, type DisplayMessage } from './Messa
 export { Composer, type ComposerProps } from './Composer.js'
 export { VsCodeTransport } from './transport.js'
 
+export { ApprovalPrompt, type ApprovalPromptProps, type PendingApproval } from './approval/ApprovalPrompt.js'
+export { DiffView, type DiffViewProps } from './approval/DiffView.js'
+export { diffLines, collapseContext, type DiffLine } from './approval/diff.js'
+
 export { SettingsPanel } from './settings/SettingsPanel.js'
 export { ProvidersTab, type ProvidersTabProps } from './settings/ProvidersTab.js'
 export { ProviderForm, type ProviderFormProps, type ProviderFormValues } from './settings/ProviderForm.js'

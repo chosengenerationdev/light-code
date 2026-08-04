@@ -220,9 +220,17 @@ misapplied edit costs data.
 
 - Per-invocation by default. **All auto-approve toggles ship off.**
 - Granular auto-approve by category: read / edit / command / mcp.
-- Command allowlist for `execute_command` auto-approve — **not available on Windows in
-  v1.** PowerShell chaining and quoting are too easy to get wrong, and a broken allowlist
-  is worse than none.
+- **Command "always allow" is exact-match only, on every platform.** A command is
+  auto-approved only when its string is byte-for-byte identical to one previously
+  approved in this workspace. `npm test` covers exactly `npm test` and nothing else —
+  `npm test; rm -rf /` is a different string and still prompts.
+  *(Revised during Phase 3. This was originally "no command allowlist on Windows",
+  because deciding whether a command is covered by a pattern means tokenising
+  PowerShell's grammar — `;`, `&&`, `|`, `$(...)`, nested quoting — and a parsing bug
+  silently auto-approves a chained destructive command. Exact matching needs no parser
+  at all, so the hazard disappears and the platform carve-out with it. **Do not
+  "improve" this into prefix or glob matching** — that reintroduces exactly the problem
+  this avoids.)*
 - "Always allow" scopes to a specific tool in a specific workspace. Never global.
 - Approval UI renders ground truth (invariant 8).
 
@@ -591,7 +599,7 @@ Record the reason, not just the difference.
 | Greenfield, not a fork | Roo is archived; no upstream fixes. Minimalism is the product. |
 | Deterministic matching, no fuzzy threshold | Roo's Levenshtein matcher produced both false rejections and silent-misapply risk. |
 | One wire adapter in v1 | Gateway fronting is the deployment; avoids auditing SDKs for hidden endpoints. |
-| No shell auto-approve on Windows | PowerShell parsing is too easy to get wrong; a broken allowlist is worse than none. |
+| Exact-match command allowlist, no patterns | Pattern matching requires tokenising PowerShell correctly, and a bug there auto-approves a chained destructive command. Byte-for-byte matching needs no parser, so it is safe on every platform — see §8. |
 | No browser tool, no semantic search | Out of scope; embeddings conflict with the offline posture. Browser access, if wanted, is a user-configured MCP server — not something we ship. |
 | Dynamic Python tools + skills | New capability Roo did not have. |
 | Scheduled prompts, read-only by default | New capability Roo did not have. Unattended runs have nobody to approve anything, so they get a restricted mode rather than inheriting auto-approve — Phase 9b. |
@@ -602,13 +610,52 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 3 **half done** — see `IMPLEMENTATION_PLAN.md`. Tools and the
-multi-step loop are built; **approval UI and checkpoints are not**, deferred to a follow-up
-session at the seam the plan itself suggests.
+**Current phase:** Phase 3 complete — see `IMPLEMENTATION_PLAN.md`. Phase 4 not started.
 
-> ⚠️ **Tools currently execute without asking.** There is no approval gate until Phase 3's
-> second half lands. The model can write files and run shell commands unprompted. Test in a
-> scratch folder or a committed repo. This is a known, temporary state — not the design.
+**Phase 3 (second half) done — approval and checkpoints:**
+- **The gate lives in the loop, not the UI.** `runOneToolCall()` in `agent/loop.ts` is the
+  single path from "the model asked" to "it happened": validate → checkpoint → approve →
+  execute. Ordering is load-bearing — validation precedes approval so the preview shows
+  *real* parameters, and the checkpoint precedes execution so a rollback point exists.
+- **`ToolPreview` is how invariant 8 is expressed as a type.** A tool computes its own
+  ground truth (`{kind:'diff'}` / `{kind:'command'}` / `{kind:'text'}`); the prompt renders
+  only that, never model prose. `apply_diff.preview()` runs the *real* matching cascade
+  without writing, so the approved diff is byte-for-byte what `execute()` will produce
+  rather than a re-derivation that could drift from it.
+- **Denial is a tool result, not an abort.** The model is told "the user denied permission"
+  and gets another turn to try something else, instead of the conversation just stopping.
+- **A failed checkpoint blocks the edit.** Editing anyway would leave the user believing
+  they can roll back when they cannot — worse than not editing.
+- **A throwing `preview()` never becomes implicit approval** — it degrades to a text
+  preview explaining the failure, and the user is still asked.
+- `checkpoints/shadowGit.ts` uses a **separate `--git-dir` with the workspace as work
+  tree**, so the user's own repo — index, branches, stash, history — is never touched.
+  Snapshot is once per task (before the first edit), not per edit. `restore()` also runs
+  `clean -fd`, since leaving files created after the snapshot would produce a state that
+  never existed. Missing `git` degrades to "no checkpoints" with a logged warning rather
+  than breaking the session.
+- Rollback clears `readFiles` and tells the model the workspace was reverted — otherwise
+  it would keep editing against content that no longer exists.
+- `WebviewApprovalGate` parks a promise per request id; `denyAll()` on cancel/dispose so a
+  turn can never be left waiting on an answer that will never arrive. **Deny is the safe
+  direction for every abandoned request.**
+- UI: `approval/ApprovalPrompt.tsx`, `approval/DiffView.tsx`, and a dependency-free
+  line-level LCS differ (`approval/diff.ts`) with collapsed unchanged context. Written
+  rather than pulled in, because this is what the user relies on to judge whether an edit
+  is safe.
+- 80 unit tests (up from 69). The 11 new ones assert the security properties directly:
+  denial blocks execution, denial still feeds back, control tools are never gated, read
+  tools *are* gated, the computed preview reaches the gate, a failed checkpoint blocks the
+  edit, and snapshots happen once per task.
+- **Not yet manually verified** — automated checks are green, but the prompt, diff,
+  denial, and rollback have not been exercised against a live session.
+
+**Decision revised during Phase 3:** command "always allow" is **exact-match on every
+platform**, replacing "no command auto-approve on Windows" (§8, §18). The hazard was never
+Windows itself — it was that *pattern* matching requires tokenising PowerShell correctly,
+and a parsing bug silently auto-approves a chained destructive command. Byte-for-byte
+comparison needs no parser, so both the hazard and the platform carve-out disappear
+(Phase 4's `windows.ts` is no longer needed). **Do not widen this to prefix/glob matching.**
 
 **Phase 3 (first half) done:**
 - **Tool-calling in the provider layer.** `OpenAIProvider` now sends `tools`/`tool_choice`

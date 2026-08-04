@@ -2,7 +2,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { normalizeForComparison } from '../fs/confine.js'
 import { resolveToolPath } from './paths.js'
-import type { Tool, ToolResult } from './types.js'
+import type { Tool, ToolPreview, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
   path: z.string().min(1).describe('Path to the file, relative to the workspace root.'),
@@ -37,5 +37,15 @@ export const writeToFileTool: Tool<WriteToFileParams> = {
     context.readFiles.add(normalizeForComparison(resolved.realPath))
 
     return { content: `Wrote ${params.content.length} characters to "${params.path}".`, path: params.path }
+  },
+  async preview(params, context): Promise<ToolPreview> {
+    const resolved = await resolveToolPath(context, params.path)
+    if (!resolved.ok) return { kind: 'text', text: resolved.message }
+
+    // Read the file's *current* content so the diff is against reality, not assumption.
+    const before = (await context.fs.exists(resolved.realPath))
+      ? await context.fs.readFile(resolved.realPath).catch(() => '')
+      : ''
+    return { kind: 'diff', path: params.path, before, after: params.content }
   },
 }

@@ -1,4 +1,6 @@
+import type { ApprovalDecision } from '../approval/types.js'
 import type { WireFormat } from '../providers/types.js'
+import type { ToolGroup, ToolPreview } from '../tools/types.js'
 
 /** Never carries a secret value — invariant 7. `hasApiKey` only says whether one is set. */
 export interface ProfileSummary {
@@ -34,6 +36,8 @@ export interface ToolCallSummary {
 export type UiToHostMessage =
   | { type: 'sendMessage'; text: string }
   | { type: 'cancel' }
+  | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
+  | { type: 'rollback' }
   | { type: 'requestProfiles' }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }
@@ -51,6 +55,11 @@ export type HostToUiMessage =
   | { type: 'textChunk'; text: string }
   | { type: 'toolCall'; toolCall: ToolCallSummary }
   | { type: 'toolResult'; toolCall: ToolCallSummary }
+  /** Ground truth for the approval prompt — invariant 8. The UI renders only `preview`. */
+  | { type: 'approvalRequest'; id: string; toolName: string; group: ToolGroup; preview: ToolPreview }
+  /** A rollback point now exists; the UI can offer to undo back to it. */
+  | { type: 'checkpointAvailable' }
+  | { type: 'rolledBack' }
   | { type: 'done' }
   | { type: 'error'; message: string }
   | { type: 'profiles'; profiles: ProfileSummary[]; activeProfileId: string | undefined }

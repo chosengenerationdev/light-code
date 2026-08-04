@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Tool, ToolResult } from './types.js'
+import type { Tool, ToolPreview, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
   command: z.string().min(1).describe('The shell command to run.'),
@@ -48,5 +48,9 @@ export const executeCommandTool: Tool<ExecuteCommandParams> = {
       content: `Exit code: ${exitCode}\n\n${output}${note}`,
       isError: exitCode !== 0,
     }
+  },
+  async preview(params, context): Promise<ToolPreview> {
+    // The literal command string, unmodified — this is exactly what gets spawned.
+    return { kind: 'command', command: params.command, cwd: params.cwd ?? context.workspaceRoot }
   },
 }

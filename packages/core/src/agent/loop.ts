@@ -1,5 +1,7 @@
+import { requiresApproval, type ApprovalGate } from '../approval/types.js'
+import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
 import type { ChatProvider, ChatStreamOptions, ToolCall } from '../providers/types.js'
-import type { ToolExecutionContext, ToolRegistry, ToolResult } from '../tools/index.js'
+import type { Tool, ToolExecutionContext, ToolPreview, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { Conversation } from './messages.js'
 import { truncateToolResult, type TruncationStore } from './truncate.js'
 
@@ -9,6 +11,8 @@ export interface AgentTurnEvents {
   onToolResult(toolCall: ToolCall, result: ToolResult): void
   onDone(): void
   onError(message: string): void
+  /** Fired once per task, the first time an edit is about to happen. */
+  onCheckpoint?(checkpoint: Checkpoint): void
 }
 
 export interface RunAgentTurnOptions {
@@ -17,19 +21,24 @@ export interface RunAgentTurnOptions {
   maxIterations?: number
   /** When provided, oversized tool results are capped and stored for re-reading (§12). */
   truncationStore?: TruncationStore
+  /** Omitted means every tool runs unapproved — only valid for tests and headless runs. */
+  approvalGate?: ApprovalGate
+  /** Omitted means no checkpoint is taken (e.g. git unavailable). */
+  shadowGit?: ShadowGit
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
 const MAX_CONSECUTIVE_MISTAKES = 3
 
-async function executeToolCall(
-  toolCall: ToolCall,
-  registry: ToolRegistry,
-  context: ToolExecutionContext,
-): Promise<ToolResult> {
+type PreparedCall =
+  | { ok: true; tool: Tool; params: Record<string, unknown> }
+  | { ok: false; result: ToolResult }
+
+/** Resolves and validates a tool call without running it, so approval sees real params. */
+function prepareToolCall(toolCall: ToolCall, registry: ToolRegistry): PreparedCall {
   const tool = registry.get(toolCall.name)
   if (tool === undefined) {
-    return { content: `Unknown tool "${toolCall.name}".`, isError: true }
+    return { ok: false, result: { content: `Unknown tool "${toolCall.name}".`, isError: true } }
   }
 
   let params: unknown
@@ -37,20 +46,94 @@ async function executeToolCall(
     params = JSON.parse(toolCall.arguments.length > 0 ? toolCall.arguments : '{}')
   } catch (error) {
     return {
-      content: `Tool "${toolCall.name}" received malformed JSON arguments: ${error instanceof Error ? error.message : String(error)}`,
-      isError: true,
+      ok: false,
+      result: {
+        content: `Tool "${toolCall.name}" received malformed JSON arguments: ${error instanceof Error ? error.message : String(error)}`,
+        isError: true,
+      },
     }
   }
 
   const parsed = tool.parametersSchema.safeParse(params)
   if (!parsed.success) {
     return {
-      content: `Invalid arguments for "${toolCall.name}": ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`,
-      isError: true,
+      ok: false,
+      result: {
+        content: `Invalid arguments for "${toolCall.name}": ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`,
+        isError: true,
+      },
     }
   }
 
-  return tool.execute(parsed.data, context)
+  return { ok: true, tool, params: parsed.data as Record<string, unknown> }
+}
+
+interface CheckpointTracker {
+  hasCheckpoint(): boolean
+  markCheckpointTaken(): void
+}
+
+/**
+ * Everything between "the model asked for a tool" and "it happened": validate, snapshot
+ * before the first edit, ask the user, then run it. Ordering matters — validation must
+ * precede approval so the preview reflects the real parameters, and the checkpoint must
+ * precede execution so there is something to roll back to.
+ */
+async function runOneToolCall(
+  toolCall: ToolCall,
+  registry: ToolRegistry,
+  context: ToolExecutionContext,
+  options: RunAgentTurnOptions,
+  events: AgentTurnEvents,
+  checkpoints: CheckpointTracker,
+): Promise<ToolResult> {
+  const prepared = prepareToolCall(toolCall, registry)
+  if (!prepared.ok) return prepared.result
+
+  const { tool, params } = prepared
+
+  // Snapshot before the *first* edit of the task, not before every one — CLAUDE.md §8.
+  // A failed snapshot must not silently proceed: the user would think they can roll back.
+  if (tool.group === 'edit' && !checkpoints.hasCheckpoint() && options.shadowGit !== undefined) {
+    try {
+      const checkpoint = await options.shadowGit.snapshot()
+      checkpoints.markCheckpointTaken()
+      events.onCheckpoint?.(checkpoint)
+    } catch (error) {
+      return {
+        content: `Could not create a checkpoint before editing, so the edit was not attempted: ${error instanceof Error ? error.message : String(error)}`,
+        isError: true,
+      }
+    }
+  }
+
+  if (options.approvalGate !== undefined && requiresApproval(tool.group)) {
+    let preview: ToolPreview
+    try {
+      preview =
+        tool.preview !== undefined
+          ? await tool.preview(params, context)
+          : { kind: 'text', text: JSON.stringify(params, null, 2) }
+    } catch (error) {
+      // A preview that throws must not become an implicit approval.
+      preview = { kind: 'text', text: `Could not preview this action: ${error instanceof Error ? error.message : String(error)}` }
+    }
+
+    const decision = await options.approvalGate.requestApproval({
+      id: toolCall.id,
+      toolName: tool.name,
+      group: tool.group,
+      preview,
+    })
+
+    if (decision === 'deny') {
+      // Told to the model as a normal tool result rather than aborting the turn, so it can
+      // choose a different approach instead of the conversation simply stopping.
+      return { content: `The user denied permission to run "${tool.name}".`, isError: true }
+    }
+  }
+
+  return tool.execute(params, context)
 }
 
 /**
@@ -73,6 +156,7 @@ export async function runAgentTurn(
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
   const mistakeCounts = new Map<string, number>()
   const tools = toolRegistry.toToolDefinitions()
+  let checkpointTaken = false
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const streamOptions: ChatStreamOptions = { tools }
@@ -118,7 +202,12 @@ export async function runAgentTurn(
     conversation.addAssistantMessage(assistantText, [toolCall])
     events.onToolCall(toolCall)
 
-    const result = await executeToolCall(toolCall, toolRegistry, toolContext)
+    const result = await runOneToolCall(toolCall, toolRegistry, toolContext, options, events, {
+      hasCheckpoint: () => checkpointTaken,
+      markCheckpointTaken: () => {
+        checkpointTaken = true
+      },
+    })
     // The conversation gets the capped text; the UI event carries the full result so the
     // user still sees everything that actually happened.
     const forModel =
