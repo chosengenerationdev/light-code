@@ -127,6 +127,7 @@ export type { Mode } from './modes/types.js'
 export { runAgentTurn, type AgentTurnEvents, type RunAgentTurnOptions } from './agent/loop.js'
 export {
   DiskTruncationStore,
+  RecordingTruncationStore,
   truncateToolResult,
   type TruncationStore,
   type TruncationResult,
@@ -137,7 +138,14 @@ export type {
   ProfileSummary,
   ProfileInput,
   ToolCallSummary,
+  TranscriptEntry,
+  TaskListEntry,
 } from './agent/protocol.js'
+
+export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'
+export { deriveTitle } from './history/titles.js'
+export { toTranscript, formatToolArguments, CONTROL_TOOLS } from './history/transcript.js'
+export { redactTask, redactMessage } from './history/redactTask.js'
 
 export {
   ToolRegistry,

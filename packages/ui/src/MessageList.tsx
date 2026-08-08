@@ -1,16 +1,18 @@
-import type { ToolCallSummary } from '@light-code/core/browser'
+import type { ToolCallSummary, TranscriptEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { colors, fontFamily } from './theme.js'
 
+/**
+ * A `TranscriptEntry` plus the one piece of state that only exists live. Defined as an
+ * extension of the shared protocol type rather than a parallel shape, so a restored task
+ * renders through exactly the same path as a streaming one.
+ */
 export type DisplayMessage =
-  | {
-      kind: 'text'
-      role: 'user' | 'assistant'
-      content: string
+  | (Extract<TranscriptEntry, { kind: 'text' }> & {
       /** True while an assistant message is still streaming in. */
       pending?: boolean
-    }
-  | { kind: 'tool'; toolCall: ToolCallSummary }
+    })
+  | Extract<TranscriptEntry, { kind: 'tool' }>
 
 export interface MessageListProps {
   messages: DisplayMessage[]

@@ -642,8 +642,68 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 6 complete — see `IMPLEMENTATION_PLAN.md`. Phase 6b (task history
-and session persistence) not started.
+**Current phase:** Phase 6b code complete — see `IMPLEMENTATION_PLAN.md`. **Not yet
+exercised in a real Extension Development Host** (see the manual list below). Phase 7
+(Anthropic/Gemini, images, context management) not started.
+
+**Phase 6b done — task history and session persistence:**
+- `history/types.ts` — `Task` stores **only** the model-facing `ChatMessage[]`. What the UI
+  renders is derived from it by `history/transcript.ts`, never stored alongside it: two
+  saved views of one conversation would drift, which is the same reasoning as §15's
+  single-schema rule. `TranscriptEntry` is now the shared shape, and `DisplayMessage` in
+  the UI is defined as that type plus a `pending` flag, so a restored task renders through
+  exactly the same path as a streaming one.
+- `CONTROL_TOOLS` and `formatToolArguments` **moved from `bridge.ts` into core**, because
+  the live transcript and a restored one have to agree about how a task looked.
+- `history/titles.ts` — title from the first user message. Deliberately not model-generated:
+  that costs a request per task, and what the user typed describes the intent better than a
+  summary of what happened.
+- `apps/vscode/src/platform/taskStore.ts` — one JSON file per task plus an `index.json`.
+  **The index is a cache; the task files are the truth.** A missing or unparseable index is
+  rebuilt by scanning rather than reported as "no history" — otherwise one corrupt write
+  silently erases the whole list while the transcripts sit intact on disk. Writes go to a
+  temp file and rename, so an interrupted write cannot replace a good transcript with a
+  truncated one.
+- Tasks live in **global** storage, not the workspace: a transcript is the user's, not the
+  repository's, and `.lightcode/` is checked in. They are *listed* per workspace.
+- `RecordingTruncationStore` wraps the spill store so a task knows which spilled results it
+  owns; deleting a task deletes them. A wrapper rather than threading the handle back out
+  through every tool's `ToolResult`.
+- The active task id lives in `workspaceState`, so a reload reopens **the conversation that
+  was in progress** rather than the most recent one — those differ as soon as the user
+  reopens an older task.
+- Saving happens in the turn's `finally`, so a cancelled or errored turn is still persisted.
+  A turn that failed halfway is exactly the one worth seeing again.
+- **`readFiles` is deliberately NOT restored** on resume. The read-before-edit constraint
+  (§6) is session-scoped on purpose: a resumed task must re-read a file before editing it,
+  because the file may have changed since the transcript was written. Restoring the set
+  would quietly weaken the invariant across a restart — precisely when the model's picture
+  of the workspace is most likely to be stale.
+- 272 unit tests (up from 223).
+
+**A real hole found by the plan's own "grep the stored files for secrets" step:** the
+transcript was redacted but **the spilled tool-result files were not**, and those are the
+larger target — whole-file reads and raw command output, written by `truncateToolResult`
+since Phase 3 and, before this phase, never cleaned up at all. Redaction now happens inside
+`DiskTruncationStore.save()`, at the boundary where content actually reaches disk, with
+known secret values supplied by the bridge and refreshed *before* each turn (the spill
+happens during the turn, so populating them only at save time would leave the first turn's
+output in the clear). Verified by grepping `tool-results/` as well as `tasks/`.
+
+Accepted consequence, stated so it is not treated as a bug later: **resuming a task feeds
+the model the redacted text**, not the original. Losing a value the model should not have
+been shown twice is the better failure.
+
+**Verified end to end against real files on disk** (19/19): a session with a tool call and a
+spilled result saves, reloads, and renders identically; `attempt_completion` still renders
+as assistant text rather than a collapsed block; resuming keeps the *current* system prompt
+rather than the stored one; deletion removes the transcript, the index entry, and the
+spilled output; a deleted index rebuilds from the task files; and neither the API key nor a
+Bearer token appears anywhere under `tasks/` or `tool-results/`.
+
+**Still to verify manually in a real Extension Host:** the restart-survival path itself
+(close the sidebar, reload the window, restart VS Code), the history list UI, and reopening
+a task then being refused an edit until the file is re-read.
 
 **Phase 6 done — Apigee mTLS auth, model dropdown, Test Connection:**
 - `platform/http.ts` now uses **undici**, not global `fetch`. Node's built-in fetch has no

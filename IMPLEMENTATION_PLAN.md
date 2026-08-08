@@ -486,6 +486,12 @@ Run a task that reads files and runs commands, restart VS Code entirely, reopen 
 confirm the transcript is intact. Then grep the stored files for the API key and for
 `Bearer` — there must be no hits.
 
+> **Done, except the VS Code restart itself.** The save → reload → render → delete cycle
+> was driven against real files on disk (19/19 checks), including the secret grep. That
+> grep found a real hole: spilled tool results were not redacted, only transcripts. Fixed
+> at the write boundary — see CLAUDE.md §19. The restart path, the history UI, and
+> read-before-edit-after-resume still need a real Extension Host.
+
 **Not in this phase**
 
 Search across tasks, export/share a transcript, cross-workspace history, cloud sync.

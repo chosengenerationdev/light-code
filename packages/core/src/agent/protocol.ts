@@ -79,6 +79,23 @@ export interface ProfileInput {
   modelCapabilities?: ModelCapabilityInput
 }
 
+/**
+ * One rendered entry of a conversation. Shared by the live stream and a restored task, so
+ * a reopened transcript looks identical to the one that was live.
+ */
+export type TranscriptEntry =
+  | { kind: 'text'; role: 'user' | 'assistant'; content: string }
+  | { kind: 'tool'; toolCall: ToolCallSummary }
+
+/** Enough to render the history list without loading every transcript. */
+export interface TaskListEntry {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+}
+
 /** One line per step of load-certs → get-token → list-models (§10). */
 export interface TestConnectionStep {
   step: 'certificates' | 'token' | 'models'
@@ -105,6 +122,11 @@ export type UiToHostMessage =
   | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' }
   | { type: 'rollback' }
   | { type: 'requestSettings' }
+  | { type: 'requestTasks' }
+  | { type: 'openTask'; id: string }
+  | { type: 'deleteTask'; id: string }
+  /** Start a fresh conversation; the current one is already saved. */
+  | { type: 'newTask' }
   | { type: 'setMode'; modeId: string }
   | { type: 'setAutoApprove'; group: ApprovableGroup; enabled: boolean }
   | { type: 'revokeAllowedTool'; toolName: string }
@@ -160,3 +182,10 @@ export type HostToUiMessage =
    */
   | { type: 'models'; models: string[]; warning?: string }
   | { type: 'testConnectionResult'; ok: boolean; steps: TestConnectionStep[] }
+  /** Past tasks for this workspace, newest first. */
+  | { type: 'tasks'; tasks: TaskListEntry[]; activeTaskId: string | undefined }
+  /**
+   * Replaces the whole transcript — sent when a task is reopened, and on panel load to
+   * restore the task that was in progress. `entries` is empty for a new task.
+   */
+  | { type: 'taskRestored'; taskId: string | undefined; entries: TranscriptEntry[] }

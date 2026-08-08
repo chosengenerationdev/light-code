@@ -38,6 +38,44 @@ export function BackIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+export function HistoryIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 8a5.5 5.5 0 1 0 1.7-4" />
+      <path d="M2 2.5 V5.5 H5" />
+      <path d="M8 5 V8.4 L10.3 9.8" />
+    </svg>
+  )
+}
+
+export function NewTaskIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="8" y1="3" x2="8" y2="13" />
+      <line x1="3" y1="8" x2="13" y2="8" />
+    </svg>
+  )
+}
+
 export function SettingsIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg

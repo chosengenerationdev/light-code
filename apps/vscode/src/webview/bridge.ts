@@ -8,6 +8,7 @@ import {
   DiskTruncationStore,
   FetchHttpClient,
   Logger,
+  RecordingTruncationStore,
   McpRegistry,
   OpenAIProvider,
   PathDenylist,
@@ -17,18 +18,23 @@ import {
   addToAllowlist,
   assertCertDirOutsideWorkspace,
   buildSystemPrompt,
+  formatToolArguments,
+  CONTROL_TOOLS,
   createAuthStrategy,
   createDefaultToolRegistry,
   createReadToolResultTool,
+  deriveTitle,
   findMode,
   listModels,
   mcpServersSchema,
   namespacedToolName,
   parseConfig,
+  redactTask,
   removeFromAllowlist,
   resolveActiveProfile,
   runAgentTurn,
   testConnection,
+  toTranscript,
   validateProviderForm,
   type ApprovableGroup,
   type AuthStrategy,
@@ -43,6 +49,7 @@ import {
   type ProfileSummary,
   type ProviderProfile,
   type RunAgentTurnOptions,
+  type Task,
   type ToolCallSummary,
   type ToolExecutionContext,
   type UiToHostMessage,
@@ -52,15 +59,9 @@ import { WebviewApprovalGate } from './approvalGate.js'
 import { NodeFileSystem } from '../platform/filesystem.js'
 import { NodeTerminal } from '../platform/terminal.js'
 import { VSCodeConfigStore } from '../platform/config.js'
+import { JsonTaskStore } from '../platform/taskStore.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
 import { WebviewTransport } from '../platform/transport.js'
-
-/**
- * Tools whose "result" is really the model addressing the user, not work performed.
- * The agent loop already terminates on these (see `runAgentTurn`); here they also skip
- * the tool-block rendering and appear as ordinary assistant messages.
- */
-const CONTROL_TOOLS = new Set(['attempt_completion', 'ask_followup_question'])
 
 /**
  * Secret keys are namespaced by profile so deleting a profile reliably deletes everything
@@ -125,15 +126,6 @@ function stripEmpty<T extends object>(source: T): Partial<T> {
   return result as Partial<T>
 }
 
-/** Pretty-prints tool arguments for display; falls back to the raw string if it isn't JSON. */
-function formatToolArguments(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw.length > 0 ? raw : '{}'), null, 2)
-  } catch {
-    return raw
-  }
-}
-
 /** Wires the webview's chat UI to the agent loop and the Providers settings screen. */
 export function wireChatBridge(
   webview: vscode.Webview,
@@ -148,7 +140,15 @@ export function wireChatBridge(
   const httpClient = new FetchHttpClient()
   const conversation = new Conversation(workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined)
 
-  const truncationStore = new DiskTruncationStore(path.join(context.globalStorageUri.fsPath, 'tool-results'))
+  // Wrapped so the current task knows which spilled results it owns — deleting a task has
+  // to delete its spilled output, and only this layer sees the handles.
+  // Refreshed whenever config is loaded (once per turn). Read synchronously by the spill
+  // path, which cannot await a keychain lookup in the middle of writing a tool result.
+  let cachedSecretValues: readonly string[] = []
+  const truncationStore = new RecordingTruncationStore(
+    new DiskTruncationStore(path.join(context.globalStorageUri.fsPath, 'tool-results'), () => cachedSecretValues),
+  )
+  const taskStore = new JsonTaskStore(context.globalStorageUri.fsPath, truncationStore, logger)
   const builtinTools = createDefaultToolRegistry()
   builtinTools.register(createReadToolResultTool(truncationStore))
 
@@ -162,6 +162,23 @@ export function wireChatBridge(
   let activeAbortController: AbortController | undefined
   /** The task's rollback point — the snapshot taken before its first edit. */
   let taskCheckpoint: Checkpoint | undefined
+
+  /**
+   * The task being worked on. Created lazily on the first user message, so merely opening
+   * the panel never leaves an empty task in the history list.
+   *
+   * Remembered in `workspaceState` rather than in memory, so reloading the window or
+   * restarting VS Code reopens the conversation that was in progress rather than the most
+   * recent one — those differ the moment the user reopens an older task.
+   */
+  const ACTIVE_TASK_KEY = 'lightCode.activeTaskId'
+  let activeTaskId: string | undefined = context.workspaceState.get<string>(ACTIVE_TASK_KEY)
+  let activeTaskCreatedAt = Date.now()
+
+  async function setActiveTaskId(id: string | undefined): Promise<void> {
+    activeTaskId = id
+    await context.workspaceState.update(ACTIVE_TASK_KEY, id)
+  }
 
   function post(message: HostToUiMessage): void {
     transport.post(message)
@@ -285,6 +302,136 @@ export function wireChatBridge(
     }
   }
 
+  /**
+   * Values that must never reach a stored transcript, gathered from the secret store.
+   *
+   * `redact()`'s patterns catch `Bearer` tokens and `sk-`-style keys, but a corporate
+   * gateway key often looks like neither. Passing the actual values means a tool result
+   * that happens to echo one — a command printing an env var, a config file read back —
+   * is caught by exact match rather than by hoping it matches a shape.
+   */
+  async function knownSecretValues(): Promise<string[]> {
+    try {
+      const { config } = await configManager.load()
+      const refs = (config.profiles ?? []).flatMap((profile) => SECRET_REFS_PER_PROFILE.map((refFor) => refFor(profile.id)))
+      const values = await Promise.all(refs.map((ref) => secrets.get(ref)))
+      cachedSecretValues = values.filter((value): value is string => value !== undefined && value.length > 0)
+      return [...cachedSecretValues]
+    } catch (error) {
+      // Redaction must never be the reason a transcript fails to save; the pattern-based
+      // rules still apply, so this degrades rather than disables.
+      logger.warn('could not read secrets for redaction', String(error))
+      return []
+    }
+  }
+
+  /** Writes the current conversation. Called after every turn, not only at the end. */
+  async function persistActiveTask(): Promise<void> {
+    if (workspaceRoot === undefined || conversation.isEmpty()) return
+
+    if (activeTaskId === undefined) {
+      await setActiveTaskId(randomUUID())
+      activeTaskCreatedAt = Date.now()
+      truncationStore.startTask()
+    }
+
+    const messages = conversation.toArray()
+    const task: Task = {
+      id: activeTaskId as string,
+      workspaceRoot,
+      title: deriveTitle(messages),
+      createdAt: activeTaskCreatedAt,
+      updatedAt: Date.now(),
+      messages,
+      resultHandles: truncationStore.spilledHandles(),
+    }
+
+    try {
+      await taskStore.save(redactTask(task, await knownSecretValues()))
+    } catch (error) {
+      // A failed save must not take the conversation down with it — the user would lose
+      // the turn they just had on top of the history they were already going to lose.
+      logger.warn('could not save task history', String(error))
+    }
+  }
+
+  async function postTasks(): Promise<void> {
+    if (workspaceRoot === undefined) {
+      post({ type: 'tasks', tasks: [], activeTaskId: undefined })
+      return
+    }
+    post({ type: 'tasks', tasks: await taskStore.list(workspaceRoot), activeTaskId })
+  }
+
+  /**
+   * Loads a stored task into the live conversation.
+   *
+   * `readFiles` is deliberately NOT restored. The read-before-edit constraint (§6) is
+   * session-scoped on purpose: a resumed task must re-read a file before editing it,
+   * because the file may have changed since the transcript was written. Restoring the set
+   * would quietly weaken the invariant across a restart — the exact case where the
+   * model's picture of the workspace is most likely to be stale.
+   */
+  async function openTask(id: string): Promise<void> {
+    const task = await taskStore.load(id)
+    if (task === undefined) {
+      post({ type: 'error', message: 'That task could not be loaded — it may have been deleted.' })
+      await postTasks()
+      return
+    }
+
+    conversation.restore(task.messages)
+    readFiles.clear()
+    taskCheckpoint = undefined
+    activeTaskCreatedAt = task.createdAt
+    truncationStore.startTask(task.resultHandles)
+    await setActiveTaskId(task.id)
+
+    post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
+    await postTasks()
+  }
+
+  async function startNewTask(): Promise<void> {
+    // The current task is already saved after each turn, so nothing needs flushing here.
+    conversation.reset()
+    readFiles.clear()
+    taskCheckpoint = undefined
+    activeTaskCreatedAt = Date.now()
+    truncationStore.startTask()
+    await setActiveTaskId(undefined)
+
+    post({ type: 'taskRestored', taskId: undefined, entries: [] })
+    await postTasks()
+  }
+
+  async function deleteTask(id: string): Promise<void> {
+    // Cascades to the task's spilled tool results inside the store.
+    await taskStore.delete(id)
+    if (id === activeTaskId) await startNewTask()
+    else await postTasks()
+  }
+
+  /** Restores the in-progress task when the panel loads, so a reload is not a data loss. */
+  async function restoreActiveTaskOnLoad(): Promise<void> {
+    if (activeTaskId === undefined) {
+      post({ type: 'taskRestored', taskId: undefined, entries: [] })
+      return
+    }
+
+    const task = await taskStore.load(activeTaskId)
+    if (task === undefined || task.workspaceRoot !== workspaceRoot) {
+      // Deleted behind our back, or the remembered id belongs to another workspace.
+      await setActiveTaskId(undefined)
+      post({ type: 'taskRestored', taskId: undefined, entries: [] })
+      return
+    }
+
+    conversation.restore(task.messages)
+    activeTaskCreatedAt = task.createdAt
+    truncationStore.startTask(task.resultHandles)
+    post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
+  }
+
   async function handleSendMessage(text: string): Promise<void> {
     if (workspaceRoot === undefined) {
       post({ type: 'error', message: 'Open a folder in VS Code before using Light Code — tools need a workspace root.' })
@@ -298,6 +445,11 @@ export function wireChatBridge(
       // Invariant 6: cert/key paths are unreadable by every file tool. Re-added each
       // turn so a config change takes effect without restarting the session.
       if (config.certDir !== undefined) await denylist.add(config.certDir)
+
+      // Refresh before the turn, not after: tool results spill to disk *during* the turn,
+      // and the spill path reads this synchronously. Populating it only at save time would
+      // leave the very first turn's spilled output unredacted.
+      await knownSecretValues()
 
       const profile = resolveActiveProfile(config)
       const provider = new OpenAIProvider(httpClient, profile, authStrategyFor(config, profile), logger)
@@ -390,6 +542,10 @@ export function wireChatBridge(
       // Never leave the loop parked on an approval that can no longer be answered.
       userGate.denyAll()
       activeAbortController = undefined
+      // Save in `finally`, so a cancelled or errored turn is still persisted. A turn that
+      // failed halfway is exactly the one the user most wants to see again afterwards.
+      await persistActiveTask()
+      await postTasks()
     }
   }
 
@@ -862,6 +1018,14 @@ export function wireChatBridge(
       void handleRollback()
     } else if (message.type === 'requestSettings') {
       void postSettings()
+    } else if (message.type === 'requestTasks') {
+      void postTasks()
+    } else if (message.type === 'openTask') {
+      void openTask(message.id)
+    } else if (message.type === 'deleteTask') {
+      void deleteTask(message.id)
+    } else if (message.type === 'newTask') {
+      void startNewTask()
     } else if (message.type === 'setMode') {
       void handleSetMode(message.modeId)
     } else if (message.type === 'setAutoApprove') {
@@ -922,6 +1086,19 @@ export function wireChatBridge(
       await mcp.ensureConnected()
     } catch (error) {
       logger.warn(`Could not start MCP servers: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })()
+
+  // Restore the conversation that was in progress. The webview is rebuilt whenever the
+  // view is hidden and on every window reload, so without this a reload silently discards
+  // the transcript — which is the whole reason this phase exists.
+  void (async () => {
+    try {
+      await restoreActiveTaskOnLoad()
+      await postTasks()
+    } catch (error) {
+      logger.warn(`Could not restore the previous task: ${error instanceof Error ? error.message : String(error)}`)
+      post({ type: 'taskRestored', taskId: undefined, entries: [] })
     }
   })()
 

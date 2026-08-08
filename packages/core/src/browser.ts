@@ -35,4 +35,6 @@ export type {
   CertSummary,
   ModelCapabilityInput,
   TestConnectionStep,
+  TranscriptEntry,
+  TaskListEntry,
 } from './agent/protocol.js'

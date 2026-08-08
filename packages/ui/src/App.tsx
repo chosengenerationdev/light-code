@@ -5,6 +5,7 @@ import {
   type ProfileInput,
   type ProfileSummary,
   type ApprovableGroup,
+  type TaskListEntry,
   type McpServerState,
   type McpToolPermission,
   type TestConnectionStep,
@@ -18,14 +19,15 @@ import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
 import { ModeSelector } from './ModeSelector.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
-import { BackIcon, SettingsIcon } from './icons.js'
+import { HistoryList } from './history/HistoryList.js'
+import { BackIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
 
 export interface AppProps {
   transport: Transport
 }
 
-type View = 'chat' | 'settings'
+type View = 'chat' | 'settings' | 'history'
 
 /** If the last message is still streaming, finalize it (drop the `pending` flag) in place. */
 function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
@@ -55,6 +57,8 @@ export function App(props: AppProps): ReactElement {
   const [modelsLoading, setModelsLoading] = useState(false)
   const [testRunning, setTestRunning] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; steps: TestConnectionStep[] } | undefined>(undefined)
+  const [tasks, setTasks] = useState<TaskListEntry[]>([])
+  const [activeTaskId, setActiveTaskId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -127,6 +131,19 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'testConnectionResult') {
         setTestResult({ ok: message.ok, steps: message.steps })
         setTestRunning(false)
+      } else if (message.type === 'tasks') {
+        setTasks(message.tasks)
+        setActiveTaskId(message.activeTaskId)
+      } else if (message.type === 'taskRestored') {
+        // A wholesale replacement, not a merge: this arrives on panel load and when a task
+        // is opened, and in both cases the previous transcript is no longer what's shown.
+        setMessages(message.entries)
+        setActiveTaskId(message.taskId)
+        setError(undefined)
+        setPendingApproval(undefined)
+        setIsStreaming(false)
+        // The rollback point belongs to the session that took it, not to the transcript.
+        setCanRollback(false)
       }
     })
 
@@ -182,6 +199,24 @@ export function App(props: AppProps): ReactElement {
   const revokeCommand = (command: string): void => {
     props.transport.post({ type: 'revokeAllowedCommand', command } satisfies UiToHostMessage)
   }
+  const openHistory = (): void => {
+    props.transport.post({ type: 'requestTasks' } satisfies UiToHostMessage)
+    setView('history')
+  }
+  const openTask = (id: string): void => {
+    props.transport.post({ type: 'openTask', id } satisfies UiToHostMessage)
+    // Switch immediately rather than waiting for `taskRestored`; the host replaces the
+    // transcript when it arrives, and leaving the user staring at the list feels broken.
+    setView('chat')
+  }
+  const newTask = (): void => {
+    props.transport.post({ type: 'newTask' } satisfies UiToHostMessage)
+    setView('chat')
+  }
+  const deleteTask = (id: string): void => {
+    props.transport.post({ type: 'deleteTask', id } satisfies UiToHostMessage)
+  }
+
   const requestModels = (profile: ProfileInput): void => {
     setModelsLoading(true)
     setModelsWarning(undefined)
@@ -269,9 +304,24 @@ export function App(props: AppProps): ReactElement {
           {view === 'chat' && <ModeSelector modeId={modeId} disabled={isStreaming} onChange={changeMode} />}
         </div>
         {view === 'chat' ? (
-          <button type="button" aria-label="Settings" title="Settings" style={iconButtonStyle('ghost')} onClick={openSettings}>
-            <SettingsIcon />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <button
+              type="button"
+              aria-label="New task"
+              title="New task"
+              style={iconButtonStyle('ghost', isStreaming)}
+              disabled={isStreaming}
+              onClick={newTask}
+            >
+              <NewTaskIcon />
+            </button>
+            <button type="button" aria-label="History" title="History" style={iconButtonStyle('ghost')} onClick={openHistory}>
+              <HistoryIcon />
+            </button>
+            <button type="button" aria-label="Settings" title="Settings" style={iconButtonStyle('ghost')} onClick={openSettings}>
+              <SettingsIcon />
+            </button>
+          </div>
         ) : (
           <button type="button" aria-label="Back" title="Back" style={iconButtonStyle('ghost')} onClick={() => setView('chat')}>
             <BackIcon />
@@ -310,6 +360,14 @@ export function App(props: AppProps): ReactElement {
             onSetMcpServerEnabled={setMcpServerEnabled}
             onSetMcpToolPermission={setMcpToolPermission}
             onConnectMcp={connectMcp}
+          />
+        ) : view === 'history' ? (
+          <HistoryList
+            tasks={tasks}
+            activeTaskId={activeTaskId}
+            onOpen={openTask}
+            onDelete={deleteTask}
+            onNew={newTask}
           />
         ) : hasNoProviders ? (
           <div style={{ padding: 20, textAlign: 'center' }}>
