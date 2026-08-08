@@ -81,6 +81,8 @@ export class McpConnection {
     private readonly secrets: SecretStore,
     /** Called when the server announces its tool list changed (`tools/list_changed`). */
     private readonly onToolsChanged: () => void,
+    /** Receives the server's stderr, line by line. */
+    private readonly onLog: (line: string) => void = () => {},
   ) {}
 
   async connect(): Promise<void> {
@@ -89,9 +91,32 @@ export class McpConnection {
       listChanged: { tools: { onChanged: () => this.onToolsChanged() } },
     })
     const transport = await buildTransport(this.config, this.secrets)
+
+    // Attached *before* connect, so startup diagnostics aren't missed — and, more
+    // importantly, so the pipe is drained. `stderr: 'pipe'` with no reader fills the OS
+    // buffer (~64KB) and then blocks the child on its next write, which looks like the
+    // server mysteriously hanging partway through work.
+    if (transport instanceof StdioClientTransport) {
+      this.attachStderr(transport)
+    }
+
     await client.connect(transport)
     this.client = client
     this.transport = transport
+  }
+
+  private attachStderr(transport: StdioClientTransport): void {
+    const stream = transport.stderr
+    if (stream === null) return
+    let buffered = ''
+    stream.on('data', (chunk: Buffer | string) => {
+      buffered += chunk.toString()
+      const lines = buffered.split(/\r?\n/)
+      buffered = lines.pop() ?? ''
+      for (const line of lines) {
+        if (line.trim().length > 0) this.onLog(line)
+      }
+    })
   }
 
   async listTools(): Promise<McpToolDescriptor[]> {

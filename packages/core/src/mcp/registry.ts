@@ -57,6 +57,8 @@ export interface McpRegistryEvents {
   onStateChanged(): void
 }
 
+const MAX_LOG_LINES = 200
+
 interface DiscoveredTool {
   descriptor: McpToolDescriptor
   tool: Tool
@@ -71,6 +73,7 @@ export class McpRegistry {
   private readonly statuses = new Map<string, McpServerStatus>()
   private readonly errors = new Map<string, string>()
   private readonly toolsByServer = new Map<string, DiscoveredTool[]>()
+  private readonly logs = new Map<string, string[]>()
   private servers: McpServersConfig = {}
 
   constructor(
@@ -125,6 +128,19 @@ export class McpRegistry {
     ]
   }
 
+  /**
+   * Connects one server on demand. Lazy connect (§11) is about not spawning processes at
+   * startup — it should never mean the user cannot find out whether a config is valid
+   * until something happens to trigger it. This backs the UI's explicit Connect action
+   * and the automatic verification after a config save.
+   */
+  async connectServer(name: string): Promise<void> {
+    if (this.connections.has(name)) return
+    const config = this.servers[name]
+    if (config === undefined || config.disabled === true) return
+    await this.connect(name, config)
+  }
+
   /** Connects every enabled server that is not connected yet. Failures are per-server. */
   async ensureConnected(): Promise<void> {
     await Promise.all(
@@ -134,18 +150,38 @@ export class McpRegistry {
     )
   }
 
+  /** Bounded so a chatty server cannot grow this without limit over a long session. */
+  private appendLog(name: string, line: string): void {
+    const existing = this.logs.get(name) ?? []
+    existing.push(line)
+    if (existing.length > MAX_LOG_LINES) existing.splice(0, existing.length - MAX_LOG_LINES)
+    this.logs.set(name, existing)
+    this.events.onStateChanged()
+  }
+
   private async connect(name: string, config: McpServerConfig): Promise<void> {
     this.statuses.set(name, 'connecting')
     this.errors.delete(name)
+    this.appendLog(name, `Starting ${isStdioServer(config) ? config.command : config.url}…`)
     this.events.onStateChanged()
 
-    const connection = new McpConnection(name, config, this.secrets, () => {
-      void this.refreshTools(name)
-    })
+    const connection = new McpConnection(
+      name,
+      config,
+      this.secrets,
+      () => {
+        void this.refreshTools(name)
+      },
+      (line) => {
+        this.logger?.debug(`[mcp:${name}] ${line}`)
+        this.appendLog(name, line)
+      },
+    )
 
     try {
       await connection.connect()
       this.connections.set(name, connection)
+      this.appendLog(name, 'Connected.')
       await this.refreshTools(name)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -153,6 +189,7 @@ export class McpRegistry {
       // One server failing must not affect the others — state is per-server.
       this.statuses.set(name, 'failed')
       this.errors.set(name, message)
+      this.appendLog(name, `Failed: ${message}`)
       this.events.onStateChanged()
     }
   }
@@ -174,6 +211,7 @@ export class McpRegistry {
       )
       this.statuses.set(name, 'ready')
       this.errors.delete(name)
+      this.appendLog(name, `Discovered ${descriptors.length} tool(s).`)
     } catch (error) {
       this.statuses.set(name, 'failed')
       this.errors.set(name, error instanceof Error ? error.message : String(error))
@@ -241,6 +279,7 @@ export class McpRegistry {
           description: descriptor.description,
           permission: this.permissionFor(name, descriptor.name),
         })),
+        logs: this.logs.get(name) ?? [],
         ...(error !== undefined ? { error } : {}),
       }
     })

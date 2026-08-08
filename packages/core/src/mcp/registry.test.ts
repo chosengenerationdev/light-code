@@ -53,7 +53,7 @@ describe('McpRegistry enable/disable', () => {
     const mcp = registry()
     await mcp.configure({ a: { command: 'node', disabled: true } })
 
-    expect(mcp.states_()).toEqual([{ name: 'a', status: 'disabled', enabled: false, tools: [] }])
+    expect(mcp.states_()).toEqual([{ name: 'a', status: 'disabled', enabled: false, tools: [], logs: [] }])
     // No tools are contributed, so nothing reaches the system prompt.
     expect(mcp.enabledTools()).toEqual([])
   })

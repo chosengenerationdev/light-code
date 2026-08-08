@@ -51,6 +51,7 @@ export type UiToHostMessage =
   /** The raw `mcpServers` JSON from the editor, validated host-side before saving. */
   | { type: 'saveMcpServers'; json: string }
   | { type: 'restartMcpServer'; name: string }
+  | { type: 'connectMcpServer'; name: string }
   | { type: 'setMcpServerEnabled'; name: string; enabled: boolean }
   | { type: 'setMcpToolPermission'; server: string; tool: string; permission: McpToolPermission }
   | { type: 'requestProfiles' }

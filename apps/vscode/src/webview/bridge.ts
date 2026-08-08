@@ -602,6 +602,10 @@ export function wireChatBridge(
       await mcp.configure(result.data)
       mcpJson = JSON.stringify({ mcpServers: result.data }, null, 2)
       postMcp()
+      // Verify immediately rather than leaving the user to discover a typo the next time
+      // they happen to use the server. Lazy connect is about startup cost, not about
+      // withholding feedback on something just configured.
+      await mcp.ensureConnected()
     } catch (error) {
       post({ type: 'mcpSaveError', message: error instanceof Error ? error.message : String(error) })
     }
@@ -646,6 +650,8 @@ export function wireChatBridge(
       void handleRequestMcp()
     } else if (message.type === 'saveMcpServers') {
       void handleSaveMcpServers(message.json)
+    } else if (message.type === 'connectMcpServer') {
+      void mcp.connectServer(message.name)
     } else if (message.type === 'restartMcpServer') {
       void mcp.restart(message.name)
     } else if (message.type === 'setMcpServerEnabled') {

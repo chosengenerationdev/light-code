@@ -670,6 +670,15 @@ model dropdown, Test Connection) not started.
   never resurrect a tool the user hid. Setting one state clears the other.
 - Connections are closed on dispose — stdio servers are child processes, and not closing
   them leaks one per panel open.
+- **`stderr: 'pipe'` must always be drained.** Setting it without attaching a reader
+  discards the server's diagnostics *and* fills the ~64KB OS pipe buffer, after which the
+  child blocks on its next write — presenting as a server that hangs partway through
+  work. `McpConnection` attaches the reader *before* `connect()` so startup output is
+  captured too; lines go to a bounded per-server buffer surfaced in the MCP tab.
+- **Lazy connect is about startup cost, not about withholding feedback.** Applied too
+  literally at first: a server sat at `idle` with no way to learn whether its command was
+  even valid until something happened to use it. There is now an explicit **Connect**
+  action, and saving the config verifies immediately. Still nothing spawns at activation.
 - 132 unit tests (up from 107).
 - **`mcpServers` is deliberately NOT on invariant 5's user-scope-only list**, unlike
   `approvals`. A workspace-supplied server cannot bypass approval, because every MCP tool

@@ -178,6 +178,9 @@ export function App(props: AppProps): ReactElement {
   const setMcpServerEnabled = (name: string, enabled: boolean): void => {
     props.transport.post({ type: 'setMcpServerEnabled', name, enabled } satisfies UiToHostMessage)
   }
+  const connectMcp = (name: string): void => {
+    props.transport.post({ type: 'connectMcpServer', name } satisfies UiToHostMessage)
+  }
   const setMcpToolPermission = (server: string, tool: string, permission: McpToolPermission): void => {
     props.transport.post({ type: 'setMcpToolPermission', server, tool, permission } satisfies UiToHostMessage)
   }
@@ -267,6 +270,7 @@ export function App(props: AppProps): ReactElement {
             onRestartMcp={restartMcp}
             onSetMcpServerEnabled={setMcpServerEnabled}
             onSetMcpToolPermission={setMcpToolPermission}
+            onConnectMcp={connectMcp}
           />
         ) : hasNoProviders ? (
           <div style={{ padding: 20, textAlign: 'center' }}>

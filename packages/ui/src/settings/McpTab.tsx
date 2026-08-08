@@ -11,6 +11,7 @@ export interface McpTabProps {
   onRestart: (name: string) => void
   onSetServerEnabled: (name: string, enabled: boolean) => void
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
+  onConnect: (name: string) => void
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -66,15 +67,27 @@ function PermissionPicker(props: {
   )
 }
 
+/** `idle` is accurate but unhelpful — say what it means and what will happen. */
+const STATUS_LABEL: Record<McpServerStatus, string> = {
+  ready: 'ready',
+  connecting: 'starting…',
+  idle: 'not started',
+  disabled: 'disabled',
+  failed: 'failed',
+}
+
 function ServerRow(props: {
   server: McpServerState
   warnings: string[]
   onRestart: (name: string) => void
+  onConnect: (name: string) => void
   onSetServerEnabled: (name: string, enabled: boolean) => void
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
 }): ReactElement {
   const { server } = props
   const [expanded, setExpanded] = useState(false)
+  const [showLogs, setShowLogs] = useState(false)
+  const started = server.status === 'ready' || server.status === 'connecting'
 
   return (
     <div style={{ borderBottom: `1px solid ${colors.border}`, padding: '6px 0' }}>
@@ -97,7 +110,7 @@ function ServerRow(props: {
         <span style={{ color: STATUS_COLOR[server.status], fontSize: 10 }}>●</span>
         <strong style={{ fontFamily: monospace, fontSize: 12 }}>{server.name}</strong>
         <span style={{ color: colors.muted, fontSize: 11 }}>
-          {server.status}
+          {STATUS_LABEL[server.status]}
           {server.status === 'ready' && ` · ${server.tools.length} tool${server.tools.length === 1 ? '' : 's'}`}
         </span>
 
@@ -112,9 +125,16 @@ function ServerRow(props: {
           />
           Enabled
         </label>
-        <button type="button" style={secondaryButtonStyle()} onClick={() => props.onRestart(server.name)}>
-          Restart
-        </button>
+        {server.enabled && !started && (
+          <button type="button" style={secondaryButtonStyle()} onClick={() => props.onConnect(server.name)}>
+            Connect
+          </button>
+        )}
+        {started && (
+          <button type="button" style={secondaryButtonStyle()} onClick={() => props.onRestart(server.name)}>
+            Restart
+          </button>
+        )}
       </div>
 
       {server.error !== undefined && <div style={fieldErrorStyle()}>{server.error}</div>}
@@ -124,12 +144,51 @@ function ServerRow(props: {
         </div>
       ))}
 
+      {server.logs.length > 0 && (
+        <div style={{ marginTop: 4, paddingLeft: 22 }}>
+          <button
+            type="button"
+            onClick={() => setShowLogs(!showLogs)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: colors.muted,
+              cursor: 'pointer',
+              padding: 0,
+              fontFamily,
+              fontSize: 11,
+            }}
+          >
+            {showLogs ? '▾' : '▸'} Log ({server.logs.length})
+          </button>
+          {showLogs && (
+            <pre
+              style={{
+                margin: '4px 0 0',
+                padding: 6,
+                maxHeight: 160,
+                overflow: 'auto',
+                background: colors.inputBackground,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 3,
+                fontFamily: monospace,
+                fontSize: 11,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {server.logs.join('\n')}
+            </pre>
+          )}
+        </div>
+      )}
+
       {expanded && (
         <div style={{ marginTop: 6, paddingLeft: 22 }}>
           {server.tools.length === 0 ? (
             <p style={{ color: colors.muted, fontSize: 11, margin: 0 }}>
               {server.enabled
-                ? 'No tools discovered yet — the server connects on first use.'
+                ? 'No tools discovered yet — press Connect, or they load on first use.'
                 : 'Enable this server to see its tools.'}
             </p>
           ) : (
@@ -196,6 +255,7 @@ export function McpTab(props: McpTabProps): ReactElement {
             server={server}
             warnings={props.warnings[server.name] ?? []}
             onRestart={props.onRestart}
+            onConnect={props.onConnect}
             onSetServerEnabled={props.onSetServerEnabled}
             onSetToolPermission={props.onSetToolPermission}
           />

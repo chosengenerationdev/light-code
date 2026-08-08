@@ -18,6 +18,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onRestartMcp: (name: string) => void
   onSetMcpServerEnabled: (name: string, enabled: boolean) => void
   onSetMcpToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
+  onConnectMcp: (name: string) => void
 }
 
 type TabId = 'providers' | 'approvals' | 'mcp'
@@ -88,6 +89,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRestart={props.onRestartMcp}
             onSetServerEnabled={props.onSetMcpServerEnabled}
             onSetToolPermission={props.onSetMcpToolPermission}
+            onConnect={props.onConnectMcp}
           />
         )}
       </div>

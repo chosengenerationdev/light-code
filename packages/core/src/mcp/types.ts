@@ -80,6 +80,8 @@ export interface McpServerState {
   status: McpServerStatus
   enabled: boolean
   tools: McpToolState[]
+  /** Recent stderr from the server plus lifecycle notes, newest last. Bounded. */
+  logs: string[]
   error?: string
 }
 
