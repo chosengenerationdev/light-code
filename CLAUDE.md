@@ -379,8 +379,16 @@ was already stale once):
   inevitable.
 - Per-server and per-tool enable toggles **from the start** — a single server can expose
   forty tools and they all land in the system prompt.
-- Lazy connect on first use; health status in the UI; restart on crash; handle
-  `tools/list_changed`.
+- **Connect when the Light Code panel opens** — health status in the UI; restart on
+  crash; handle `tools/list_changed`.
+  *(Revised in Phase 5. This said "lazy connect on first use", which was applied too
+  literally: a server sat at `idle`, and a mistyped command was indistinguishable from a
+  working one until something happened to use it. The constraint that actually matters is
+  not spawning processes at VS Code startup — and the extension activates on
+  `onView:lightCode.chatView`, so panel-open is already well after startup and is a clear
+  signal of intent. Note this means an `npx`-based server fetches from the network when
+  the panel opens; that is why the §3 package-runner warning is shown in the MCP tab.
+  Startup is fire-and-forget so a slow server never delays the panel rendering.)*
 - Secrets interpolated from `SecretStorage`/env, never written into the config file.
 - **Schema translation per provider** is a common source of silent tool-call failures.
   MCP gives JSON Schema; Anthropic wants `input_schema`, OpenAI nests under
@@ -677,8 +685,10 @@ model dropdown, Test Connection) not started.
   captured too; lines go to a bounded per-server buffer surfaced in the MCP tab.
 - **Lazy connect is about startup cost, not about withholding feedback.** Applied too
   literally at first: a server sat at `idle` with no way to learn whether its command was
-  even valid until something happened to use it. There is now an explicit **Connect**
-  action, and saving the config verifies immediately. Still nothing spawns at activation.
+  even valid until something happened to use it. Enabled servers now connect when the
+  panel opens (§11, revised), plus an explicit **Connect** action and verify-on-save.
+  Nothing spawns at VS Code startup — the extension only activates once the view is
+  revealed.
 - 132 unit tests (up from 107).
 - **`mcpServers` is deliberately NOT on invariant 5's user-scope-only list**, unlike
   `approvals`. A workspace-supplied server cannot bypass approval, because every MCP tool

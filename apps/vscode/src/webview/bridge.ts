@@ -675,6 +675,22 @@ export function wireChatBridge(
     }
   })
 
+  // Start enabled servers as soon as the panel opens. The extension activates on
+  // `onView:lightCode.chatView` (auto-generated from the `views` contribution), so this
+  // runs when the user opens Light Code — not at VS Code startup. Doing it here means
+  // tools are ready before the first message and health is visible immediately, rather
+  // than a mistyped command sitting undetected until something happens to use it.
+  // Deliberately not awaited: a slow server must not delay the panel rendering.
+  void (async () => {
+    try {
+      const { config } = await configManager.load()
+      await syncMcpFromConfig(config)
+      await mcp.ensureConnected()
+    } catch (error) {
+      logger.warn(`Could not start MCP servers: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })()
+
   return {
     dispose: () => {
       // Disposing while a turn awaits approval would otherwise leak a pending promise.
