@@ -31,6 +31,7 @@ export function toToolDefinitions(tools: Tool[]): ToolDefinition[] {
   return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    parameters: toJSONSchema(tool.parametersSchema),
+    // An MCP server's own schema wins over a zod round-trip — see `rawJsonSchema`.
+    parameters: tool.rawJsonSchema ?? toJSONSchema(tool.parametersSchema),
   }))
 }

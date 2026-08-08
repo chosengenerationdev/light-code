@@ -8,16 +8,19 @@ import {
   DiskTruncationStore,
   FetchHttpClient,
   Logger,
+  McpRegistry,
   OpenAIProvider,
   PathDenylist,
   PolicyApprovalGate,
   ShadowGit,
+  ToolRegistry,
   addToAllowlist,
   buildSystemPrompt,
   createAuthStrategy,
   createDefaultToolRegistry,
   createReadToolResultTool,
   findMode,
+  mcpServersSchema,
   parseConfig,
   removeFromAllowlist,
   resolveActiveProfile,
@@ -28,6 +31,7 @@ import {
   type Checkpoint,
   type HostToUiMessage,
   type LightCodeConfig,
+  type McpServersConfig,
   type ProfileInput,
   type ProfileSummary,
   type ProviderProfile,
@@ -98,8 +102,8 @@ export function wireChatBridge(
   const conversation = new Conversation(workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined)
 
   const truncationStore = new DiskTruncationStore(path.join(context.globalStorageUri.fsPath, 'tool-results'))
-  const toolRegistry = createDefaultToolRegistry()
-  toolRegistry.register(createReadToolResultTool(truncationStore))
+  const builtinTools = createDefaultToolRegistry()
+  builtinTools.register(createReadToolResultTool(truncationStore))
 
   // Files read via read_file this session; write_to_file/apply_diff check this before
   // touching an existing file. Session-scoped, so it lives alongside the conversation.
@@ -141,6 +145,34 @@ export function wireChatBridge(
   // Policy answers what it can from settings; anything else falls through to the user.
   const approvalGate = new PolicyApprovalGate(userGate, () => cachedApprovals)
 
+  let mcpJson = '{\n  "mcpServers": {}\n}'
+  const mcp = new McpRegistry(secrets, { onStateChanged: () => postMcp() }, logger)
+
+  function postMcp(): void {
+    const servers = mcp.states_()
+    const warnings: Record<string, string[]> = {}
+    for (const server of servers) warnings[server.name] = mcp.warningsFor(server.name)
+    post({ type: 'mcp', servers, json: mcpJson, warnings })
+  }
+
+  /**
+   * Built-ins plus every enabled MCP tool, rebuilt per turn. MCP tools are ordinary
+   * `Tool`s by this point, so mode filtering and the approval gate apply to them with
+   * no special-casing.
+   */
+  function currentToolRegistry(): ToolRegistry {
+    const combined = new ToolRegistry()
+    for (const tool of builtinTools.list()) combined.register(tool)
+    for (const tool of mcp.enabledTools()) combined.register(tool)
+    return combined
+  }
+
+  async function syncMcpFromConfig(config: LightCodeConfig): Promise<void> {
+    const servers: McpServersConfig = config.mcpServers ?? {}
+    mcpJson = JSON.stringify({ mcpServers: servers }, null, 2)
+    await mcp.configure(servers)
+  }
+
   // Kept outside globalStorage's config area and outside the workspace, so a checkpoint
   // never lands inside the very tree it snapshots.
   const shadowGit =
@@ -171,6 +203,11 @@ export function wireChatBridge(
       const profile = resolveActiveProfile(config)
       const authStrategy = createAuthStrategy(profile.auth, secrets)
       const provider = new OpenAIProvider(httpClient, profile, authStrategy, logger)
+
+      // Lazy connect (§11): a configured-but-unused server costs nothing until a turn
+      // actually needs its tools. Failures are per-server and surface in the MCP tab.
+      await syncMcpFromConfig(config)
+      await mcp.ensureConnected()
 
       const toolContext: ToolExecutionContext = {
         fs: new NodeFileSystem(),
@@ -205,7 +242,7 @@ export function wireChatBridge(
         provider,
         conversation,
         text,
-        toolRegistry,
+        currentToolRegistry(),
         toolContext,
         {
           onTextChunk: (chunk) => {
@@ -485,6 +522,49 @@ export function wireChatBridge(
     await postSettings()
   }
 
+  async function handleRequestMcp(): Promise<void> {
+    const { config } = await configManager.load()
+    await syncMcpFromConfig(config)
+    postMcp()
+  }
+
+  /**
+   * Validated against the same schema the file loader uses, so a bad paste fails here
+   * with a readable message rather than at spawn time (§15).
+   */
+  async function handleSaveMcpServers(json: string): Promise<void> {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(json)
+    } catch (error) {
+      post({ type: 'mcpSaveError', message: `Not valid JSON: ${error instanceof Error ? error.message : String(error)}` })
+      return
+    }
+
+    // Accept either the whole `{ "mcpServers": {...} }` wrapper or just the inner map,
+    // since both forms get pasted in practice.
+    const candidate =
+      typeof parsed === 'object' && parsed !== null && 'mcpServers' in parsed
+        ? (parsed as { mcpServers: unknown }).mcpServers
+        : parsed
+
+    const result = mcpServersSchema.safeParse(candidate)
+    if (!result.success) {
+      const detail = result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')
+      post({ type: 'mcpSaveError', message: detail })
+      return
+    }
+
+    try {
+      await configManager.save('user', { mcpServers: result.data })
+      await mcp.configure(result.data)
+      mcpJson = JSON.stringify({ mcpServers: result.data }, null, 2)
+      postMcp()
+    } catch (error) {
+      post({ type: 'mcpSaveError', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   const unsubscribe = transport.onMessage((raw) => {
     const message = raw as UiToHostMessage
     if (message.type === 'sendMessage') {
@@ -520,6 +600,12 @@ export function wireChatBridge(
         ...cachedApprovals,
         allowedCommands: removeFromAllowlist(message.command, cachedApprovals.allowedCommands ?? []),
       })
+    } else if (message.type === 'requestMcp') {
+      void handleRequestMcp()
+    } else if (message.type === 'saveMcpServers') {
+      void handleSaveMcpServers(message.json)
+    } else if (message.type === 'restartMcpServer') {
+      void mcp.restart(message.name)
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
     } else if (message.type === 'saveProfile') {
@@ -541,6 +627,8 @@ export function wireChatBridge(
     dispose: () => {
       // Disposing while a turn awaits approval would otherwise leak a pending promise.
       userGate.denyAll()
+      // stdio servers are child processes — not closing them leaks one per panel open.
+      void mcp.closeAll()
       unsubscribe()
     },
   }

@@ -12,6 +12,7 @@ export { ModeSelector, type ModeSelectorProps } from './ModeSelector.js'
 
 export { SettingsPanel, type SettingsPanelProps } from './settings/SettingsPanel.js'
 export { ApprovalsTab, type ApprovalsTabProps } from './settings/ApprovalsTab.js'
+export { McpTab, type McpTabProps } from './settings/McpTab.js'
 export { ProvidersTab, type ProvidersTabProps } from './settings/ProvidersTab.js'
 export { ProviderForm, type ProviderFormProps, type ProviderFormValues } from './settings/ProviderForm.js'
 export { ScopeBadge, type ScopeBadgeProps } from './settings/ScopeBadge.js'

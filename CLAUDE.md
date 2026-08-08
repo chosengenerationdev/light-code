@@ -355,6 +355,23 @@ processes and opens sockets, so it can never run in the webview.
 - Transports: **stdio** (common case) and **Streamable HTTP**. Check current SDK/spec
   status before implementing — this area moves quickly. SSE is superseded but still
   deployed in the wild.
+
+**SDK notes, verified against 1.30.0 in Phase 5** (re-verify on upgrade — this section
+was already stale once):
+- Transports live at `@modelcontextprotocol/sdk/client/stdio.js` and
+  `.../client/streamableHttp.js`; the `Client` class at `.../client/index.js`.
+- `tools/list_changed` no longer needs a hand-registered notification handler —
+  `ClientOptions.listChanged.tools.onChanged` covers it.
+- `jsonSchemaValidator` is configurable (`./validation/ajv`, `./validation/cfworker`) but
+  optional; Ajv is the default and is what we use.
+- **`StdioServerParameters.env` replaces the default rather than merging.** The SDK's
+  `getDefaultEnvironment()` is already a safe allowlist (`PATH`, `HOME`, … — no blanket
+  inheritance), which is exactly what §15 wants. But passing any `env` at all drops it,
+  so a server given one variable would lose `PATH` and fail to spawn. Always spread:
+  `{ ...getDefaultEnvironment(), ...configured }`.
+- The SDK's concrete transports are **not assignable to its own `Transport` interface**
+  under `exactOptionalPropertyTypes` (`sessionId: string | undefined` vs `sessionId?:
+  string`). One narrow cast in `mcp/client.ts` handles it; drop the cast if upstream fixes it.
 - Config uses the standard `mcpServers` shape so users can paste configs from other
   clients unchanged.
 - Global and workspace scopes; workspace wins.
@@ -617,7 +634,40 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 4 complete — see `IMPLEMENTATION_PLAN.md`. Phase 5 (MCP) not started.
+**Current phase:** Phase 5 complete — see `IMPLEMENTATION_PLAN.md`. Phase 6 (Apigee auth,
+model dropdown, Test Connection) not started.
+
+**Phase 5 done — MCP client:**
+- `mcp/types.ts` — the standard `mcpServers` shape, with transport **inferred** from the
+  entry (`command` → stdio, `url` → HTTP) rather than declared. Requiring an explicit
+  `type` would break the "paste a config from another client unchanged" requirement,
+  which has a test using a verbatim third-party-shaped config.
+- `mcp/client.ts` — thin SDK wrapper. Secrets are `${secret:NAME}` references resolved
+  from `SecretStore` **at spawn time**, never written to config (§15); an unresolvable
+  reference throws rather than passing the literal placeholder to the server.
+- `mcp/registry.ts` — lazy connect, per-server health, restart, `tools/list_changed`
+  refresh, and per-server / per-tool toggles. **A disabled server or tool contributes no
+  tools at all**, so it never reaches the system prompt — the same rule as mode filtering,
+  not a refusal at call time. One server failing is isolated: state is per-server.
+- **MCP tools are adapted into the ordinary `Tool` interface.** That is the design choice
+  that matters: the agent loop, the approval gate, and mode filtering treat an MCP tool
+  exactly like `execute_command`, with no special-casing anywhere upstream. An MCP tool
+  call is approval-gated for free.
+- `Tool.rawJsonSchema` added: an MCP server's own JSON Schema is passed through
+  **untouched** rather than round-tripped through zod, which would silently drop keywords.
+  §11 names schema translation as a silent-failure source, so the safe move is not to
+  translate. Local `parametersSchema` is permissive; the server validates authoritatively.
+- Package-runner commands (`npx`, `uvx`, `pnpm` …) produce the §3 warning in the MCP tab.
+- `McpTab` — health per server, restart, and a raw JSON editor validated against the same
+  schema the file loader uses, accepting either the `{"mcpServers":{...}}` wrapper or the
+  bare map since both get pasted.
+- Connections are closed on dispose — stdio servers are child processes, and not closing
+  them leaks one per panel open.
+- 132 unit tests (up from 107).
+- **`mcpServers` is deliberately NOT on invariant 5's user-scope-only list**, unlike
+  `approvals`. A workspace-supplied server cannot bypass approval, because every MCP tool
+  call is gated like any other. Reconsider only if that ever stops being true.
+- **Not yet manually verified** — needs a real MCP server to exercise.
 
 **Phase 4 done — modes, tool groups, Approvals tab:**
 - `modes/` — `Code` (all groups) and `Ask` (read + mcp + always). **Filtering happens

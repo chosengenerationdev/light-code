@@ -1,7 +1,8 @@
-import type { ApprovableGroup, WorkspaceApprovals } from '@light-code/core/browser'
+import type { ApprovableGroup, McpServerState, WorkspaceApprovals } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
 import { ApprovalsTab } from './ApprovalsTab.js'
+import { McpTab } from './McpTab.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -9,13 +10,20 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetAutoApprove: (group: ApprovableGroup, enabled: boolean) => void
   onRevokeTool: (toolName: string) => void
   onRevokeCommand: (command: string) => void
+  mcpServers: McpServerState[]
+  mcpJson: string
+  mcpWarnings: Record<string, string[]>
+  mcpSaveError: string | undefined
+  onSaveMcp: (json: string) => void
+  onRestartMcp: (name: string) => void
 }
 
-type TabId = 'providers' | 'approvals'
+type TabId = 'providers' | 'approvals' | 'mcp'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'providers', label: 'Providers' },
   { id: 'approvals', label: 'Approvals' },
+  { id: 'mcp', label: 'MCP' },
 ]
 
 /**
@@ -61,12 +69,21 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onExport={props.onExport}
             onImport={props.onImport}
           />
-        ) : (
+        ) : active === 'approvals' ? (
           <ApprovalsTab
             approvals={props.approvals}
             onSetAutoApprove={props.onSetAutoApprove}
             onRevokeTool={props.onRevokeTool}
             onRevokeCommand={props.onRevokeCommand}
+          />
+        ) : (
+          <McpTab
+            servers={props.mcpServers}
+            json={props.mcpJson}
+            warnings={props.mcpWarnings}
+            saveError={props.mcpSaveError}
+            onSave={props.onSaveMcp}
+            onRestart={props.onRestartMcp}
           />
         )}
       </div>

@@ -5,6 +5,7 @@ import {
   type ProfileInput,
   type ProfileSummary,
   type ApprovableGroup,
+  type McpServerState,
   type Transport,
   type UiToHostMessage,
   type WorkspaceApprovals,
@@ -43,6 +44,10 @@ export function App(props: AppProps): ReactElement {
   const [canRollback, setCanRollback] = useState(false)
   const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID)
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
+  const [mcpServers, setMcpServers] = useState<McpServerState[]>([])
+  const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
+  const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
+  const [mcpSaveError, setMcpSaveError] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -80,6 +85,13 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
         setApprovals(message.approvals)
+      } else if (message.type === 'mcp') {
+        setMcpServers(message.servers)
+        setMcpJson(message.json)
+        setMcpWarnings(message.warnings)
+        setMcpSaveError(undefined)
+      } else if (message.type === 'mcpSaveError') {
+        setMcpSaveError(message.message)
       } else if (message.type === 'checkpointAvailable') {
         setCanRollback(true)
       } else if (message.type === 'rolledBack') {
@@ -108,6 +120,7 @@ export function App(props: AppProps): ReactElement {
     // without the user having to open Settings first.
     props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSettings' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -154,6 +167,12 @@ export function App(props: AppProps): ReactElement {
   }
   const revokeCommand = (command: string): void => {
     props.transport.post({ type: 'revokeAllowedCommand', command } satisfies UiToHostMessage)
+  }
+  const saveMcp = (json: string): void => {
+    props.transport.post({ type: 'saveMcpServers', json } satisfies UiToHostMessage)
+  }
+  const restartMcp = (name: string): void => {
+    props.transport.post({ type: 'restartMcpServer', name } satisfies UiToHostMessage)
   }
 
   const rollback = (): void => {
@@ -233,6 +252,12 @@ export function App(props: AppProps): ReactElement {
             onSetAutoApprove={setAutoApprove}
             onRevokeTool={revokeTool}
             onRevokeCommand={revokeCommand}
+            mcpServers={mcpServers}
+            mcpJson={mcpJson}
+            mcpWarnings={mcpWarnings}
+            mcpSaveError={mcpSaveError}
+            onSaveMcp={saveMcp}
+            onRestartMcp={restartMcp}
           />
         ) : hasNoProviders ? (
           <div style={{ padding: 20, textAlign: 'center' }}>

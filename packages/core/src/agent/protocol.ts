@@ -1,4 +1,5 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
+import type { McpServerState } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
@@ -46,6 +47,10 @@ export type UiToHostMessage =
   | { type: 'setAutoApprove'; group: ApprovableGroup; enabled: boolean }
   | { type: 'revokeAllowedTool'; toolName: string }
   | { type: 'revokeAllowedCommand'; command: string }
+  | { type: 'requestMcp' }
+  /** The raw `mcpServers` JSON from the editor, validated host-side before saving. */
+  | { type: 'saveMcpServers'; json: string }
+  | { type: 'restartMcpServer'; name: string }
   | { type: 'requestProfiles' }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }
@@ -70,6 +75,9 @@ export type HostToUiMessage =
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */
   | { type: 'settings'; modeId: string; approvals: WorkspaceApprovals }
+  /** Server health plus the raw JSON the editor round-trips, and any spawn warnings. */
+  | { type: 'mcp'; servers: McpServerState[]; json: string; warnings: Record<string, string[]> }
+  | { type: 'mcpSaveError'; message: string }
   | { type: 'done' }
   | { type: 'error'; message: string }
   | { type: 'profiles'; profiles: ProfileSummary[]; activeProfileId: string | undefined }

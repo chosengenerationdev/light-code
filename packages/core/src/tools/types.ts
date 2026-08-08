@@ -50,6 +50,13 @@ export interface Tool<TParams = Record<string, unknown>> {
   group: ToolGroup
   description: string
   parametersSchema: z.ZodType<TParams>
+  /**
+   * Authoritative JSON Schema, when the tool has one that did not come from zod — MCP
+   * servers supply their own. Preferred over converting `parametersSchema`, because
+   * round-tripping through zod can silently drop keywords the provider relies on
+   * (CLAUDE.md §11 calls schema translation a silent-failure source).
+   */
+  rawJsonSchema?: unknown
   execute(params: TParams, context: ToolExecutionContext): Promise<ToolResult>
   /**
    * Computes ground truth for the approval prompt without performing the action. Tools

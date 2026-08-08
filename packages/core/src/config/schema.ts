@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { mcpServersSchema } from '../mcp/types.js'
 import { providerProfileSchema } from '../providers/types.js'
 
 /**
@@ -52,6 +53,14 @@ export const configSchema = z
     approvals: z.record(z.string(), workspaceApprovalsSchema),
     /** Active mode id; falls back to Code when absent or unrecognised. */
     modeId: z.string(),
+    /**
+     * Standard `mcpServers` shape so configs paste in from other clients unmodified (§11).
+     * Global and workspace scopes both allowed — workspace wins — because an MCP server
+     * is often project-specific. Note this is *deliberately not* on invariant 5's list:
+     * unlike approvals, adding a server does not bypass approval, since every MCP tool
+     * call is gated exactly like any other tool.
+     */
+    mcpServers: mcpServersSchema,
   })
   .partial()
 

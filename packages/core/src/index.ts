@@ -58,6 +58,22 @@ export {
 export { isCommandAllowlisted, addToAllowlist, removeFromAllowlist } from './approval/commands.js'
 export { ShadowGit, type Checkpoint } from './checkpoints/shadowGit.js'
 
+export { McpRegistry, type McpRegistryEvents } from './mcp/registry.js'
+export { McpConnection, interpolateSecrets } from './mcp/client.js'
+export {
+  isStdioServer,
+  isPackageRunnerCommand,
+  namespacedToolName,
+  parseNamespacedToolName,
+  mcpServersSchema,
+  type McpServerConfig,
+  type McpServersConfig,
+  type McpServerState,
+  type McpServerStatus,
+  type StdioServerConfig,
+  type HttpServerConfig,
+} from './mcp/types.js'
+
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
 export { toolsForMode } from './modes/resolve.js'
 export type { Mode } from './modes/types.js'
