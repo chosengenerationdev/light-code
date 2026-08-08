@@ -1,4 +1,4 @@
-import type { ApprovableGroup, McpServerState, WorkspaceApprovals } from '@light-code/core/browser'
+import type { ApprovableGroup, McpServerState, McpToolPermission, WorkspaceApprovals } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
 import { ApprovalsTab } from './ApprovalsTab.js'
@@ -16,6 +16,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   mcpSaveError: string | undefined
   onSaveMcp: (json: string) => void
   onRestartMcp: (name: string) => void
+  onSetMcpServerEnabled: (name: string, enabled: boolean) => void
+  onSetMcpToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
 }
 
 type TabId = 'providers' | 'approvals' | 'mcp'
@@ -84,6 +86,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             saveError={props.mcpSaveError}
             onSave={props.onSaveMcp}
             onRestart={props.onRestartMcp}
+            onSetServerEnabled={props.onSetMcpServerEnabled}
+            onSetToolPermission={props.onSetMcpToolPermission}
           />
         )}
       </div>

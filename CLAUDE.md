@@ -658,9 +658,16 @@ model dropdown, Test Connection) not started.
   §11 names schema translation as a silent-failure source, so the safe move is not to
   translate. Local `parametersSchema` is permissive; the server validates authoritatively.
 - Package-runner commands (`npx`, `uvx`, `pnpm` …) produce the §3 warning in the MCP tab.
-- `McpTab` — health per server, restart, and a raw JSON editor validated against the same
-  schema the file loader uses, accepting either the `{"mcpServers":{...}}` wrapper or the
-  bare map since both get pasted.
+- `McpTab` — expandable server list with a per-server enable toggle, each server's tools
+  listed individually with a **three-state control (Always / Ask / Never)**, plus health,
+  restart, and a collapsed raw JSON editor validated against the same schema the file
+  loader uses (accepting either the `{"mcpServers":{...}}` wrapper or the bare map, since
+  both get pasted).
+- **Per-tool permission is composed from the two stores that already existed**, not a
+  third: `never` is the server's `disabledTools`, `always` is the workspace's
+  `allowedTools`, `ask` is neither. `resolveToolPermission()` is a pure function so the
+  precedence is testable — and **`never` beats `always`**, so a stale allow-entry can
+  never resurrect a tool the user hid. Setting one state clears the other.
 - Connections are closed on dispose — stdio servers are child processes, and not closing
   them leaks one per panel open.
 - 132 unit tests (up from 107).

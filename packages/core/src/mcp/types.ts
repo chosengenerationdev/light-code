@@ -42,11 +42,44 @@ export function isStdioServer(config: McpServerConfig): config is StdioServerCon
 
 export type McpServerStatus = 'idle' | 'connecting' | 'ready' | 'failed' | 'disabled'
 
+/**
+ * Per-tool permission, composed from state that already exists rather than a fourth
+ * store: `never` is the server's `disabledTools`, `always` is the workspace's
+ * `allowedTools`, and `ask` is the default — the ordinary approval gate.
+ */
+export type McpToolPermission = 'always' | 'ask' | 'never'
+
+/**
+ * Precedence is deliberate: **`never` wins over `always`.** The two stores are
+ * independent, so both flags can end up set (config hand-edited, or a tool allowed and
+ * later hidden). Resolving in favour of the restrictive one means a stale allow-entry
+ * can never resurrect a tool the user hid.
+ */
+export function resolveToolPermission(
+  toolName: string,
+  namespacedName: string,
+  disabledTools: readonly string[] | undefined,
+  alwaysAllowedTools: readonly string[],
+): McpToolPermission {
+  if (disabledTools?.includes(toolName) === true) return 'never'
+  if (alwaysAllowedTools.includes(namespacedName)) return 'always'
+  return 'ask'
+}
+
+export interface McpToolState {
+  /** As advertised by the server, before namespacing. */
+  name: string
+  /** What the model actually sees, e.g. `filesystem__read_file`. */
+  namespacedName: string
+  description: string
+  permission: McpToolPermission
+}
+
 export interface McpServerState {
   name: string
   status: McpServerStatus
-  /** Tool names as advertised by the server, before namespacing. */
-  toolNames: string[]
+  enabled: boolean
+  tools: McpToolState[]
   error?: string
 }
 

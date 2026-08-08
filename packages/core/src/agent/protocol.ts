@@ -1,5 +1,5 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
-import type { McpServerState } from '../mcp/types.js'
+import type { McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
@@ -51,6 +51,8 @@ export type UiToHostMessage =
   /** The raw `mcpServers` JSON from the editor, validated host-side before saving. */
   | { type: 'saveMcpServers'; json: string }
   | { type: 'restartMcpServer'; name: string }
+  | { type: 'setMcpServerEnabled'; name: string; enabled: boolean }
+  | { type: 'setMcpToolPermission'; server: string; tool: string; permission: McpToolPermission }
   | { type: 'requestProfiles' }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }

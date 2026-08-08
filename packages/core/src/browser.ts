@@ -14,7 +14,7 @@ export type { ApprovalDecision } from './approval/types.js'
 export type { AutoApproveSettings, WorkspaceApprovals, ApprovableGroup } from './approval/policy.js'
 export type { Mode } from './modes/types.js'
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
-export type { McpServerState, McpServerStatus, McpServersConfig } from './mcp/types.js'
+export type { McpServerState, McpServerStatus, McpServersConfig, McpToolState, McpToolPermission } from './mcp/types.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export { validateProviderForm, type FieldError } from './config/validate.js'

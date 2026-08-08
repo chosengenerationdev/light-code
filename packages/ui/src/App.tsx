@@ -6,6 +6,7 @@ import {
   type ProfileSummary,
   type ApprovableGroup,
   type McpServerState,
+  type McpToolPermission,
   type Transport,
   type UiToHostMessage,
   type WorkspaceApprovals,
@@ -174,6 +175,12 @@ export function App(props: AppProps): ReactElement {
   const restartMcp = (name: string): void => {
     props.transport.post({ type: 'restartMcpServer', name } satisfies UiToHostMessage)
   }
+  const setMcpServerEnabled = (name: string, enabled: boolean): void => {
+    props.transport.post({ type: 'setMcpServerEnabled', name, enabled } satisfies UiToHostMessage)
+  }
+  const setMcpToolPermission = (server: string, tool: string, permission: McpToolPermission): void => {
+    props.transport.post({ type: 'setMcpToolPermission', server, tool, permission } satisfies UiToHostMessage)
+  }
 
   const rollback = (): void => {
     props.transport.post({ type: 'rollback' } satisfies UiToHostMessage)
@@ -258,6 +265,8 @@ export function App(props: AppProps): ReactElement {
             mcpSaveError={mcpSaveError}
             onSaveMcp={saveMcp}
             onRestartMcp={restartMcp}
+            onSetMcpServerEnabled={setMcpServerEnabled}
+            onSetMcpToolPermission={setMcpToolPermission}
           />
         ) : hasNoProviders ? (
           <div style={{ padding: 20, textAlign: 'center' }}>

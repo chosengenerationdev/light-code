@@ -25,8 +25,8 @@ class FakeSecretStore implements SecretStore {
   }
 }
 
-function registry(secrets = new FakeSecretStore()): McpRegistry {
-  return new McpRegistry(secrets, { onStateChanged: () => {} })
+function registry(alwaysAllowed: string[] = [], secrets = new FakeSecretStore()): McpRegistry {
+  return new McpRegistry(secrets, { onStateChanged: () => {} }, undefined, () => alwaysAllowed)
 }
 
 describe('interpolateSecrets', () => {
@@ -53,7 +53,7 @@ describe('McpRegistry enable/disable', () => {
     const mcp = registry()
     await mcp.configure({ a: { command: 'node', disabled: true } })
 
-    expect(mcp.states_()).toEqual([{ name: 'a', status: 'disabled', toolNames: [] }])
+    expect(mcp.states_()).toEqual([{ name: 'a', status: 'disabled', enabled: false, tools: [] }])
     // No tools are contributed, so nothing reaches the system prompt.
     expect(mcp.enabledTools()).toEqual([])
   })
@@ -62,9 +62,9 @@ describe('McpRegistry enable/disable', () => {
     const mcp = registry()
     await mcp.configure({ a: { command: 'node' }, b: { url: 'https://example.com/mcp' } })
 
-    expect(mcp.states_().map((s) => [s.name, s.status])).toEqual([
-      ['a', 'idle'],
-      ['b', 'idle'],
+    expect(mcp.states_().map((s) => [s.name, s.status, s.enabled])).toEqual([
+      ['a', 'idle', true],
+      ['b', 'idle', true],
     ])
   })
 
@@ -74,6 +74,15 @@ describe('McpRegistry enable/disable', () => {
     await mcp.configure({ a: { command: 'node' } })
 
     expect(mcp.states_().map((s) => s.name)).toEqual(['a'])
+  })
+
+  it('re-enabling a server restores it to idle rather than leaving it disabled', async () => {
+    const mcp = registry()
+    await mcp.configure({ a: { command: 'node', disabled: true } })
+    expect(mcp.states_()[0]?.status).toBe('disabled')
+
+    await mcp.configure({ a: { command: 'node' } })
+    expect(mcp.states_()[0]).toMatchObject({ status: 'idle', enabled: true })
   })
 
   it('warns about package-runner commands, and only those', async () => {

@@ -2,14 +2,17 @@ import { z } from 'zod'
 import type { Logger } from '../logging/logger.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
-import { McpConnection } from './client.js'
+import { McpConnection, type McpToolDescriptor } from './client.js'
 import {
   isPackageRunnerCommand,
   isStdioServer,
   namespacedToolName,
+  resolveToolPermission,
   type McpServerConfig,
   type McpServersConfig,
   type McpServerState,
+  type McpServerStatus,
+  type McpToolPermission,
 } from './types.js'
 
 /**
@@ -54,20 +57,28 @@ export interface McpRegistryEvents {
   onStateChanged(): void
 }
 
+interface DiscoveredTool {
+  descriptor: McpToolDescriptor
+  tool: Tool
+}
+
 /**
  * Owns connections, their lifecycle, and the tools they expose. Connects lazily — a
  * configured-but-unused server should not cost a process at startup (§11).
  */
 export class McpRegistry {
   private readonly connections = new Map<string, McpConnection>()
-  private readonly states = new Map<string, McpServerState>()
-  private readonly toolsByServer = new Map<string, Tool[]>()
+  private readonly statuses = new Map<string, McpServerStatus>()
+  private readonly errors = new Map<string, string>()
+  private readonly toolsByServer = new Map<string, DiscoveredTool[]>()
   private servers: McpServersConfig = {}
 
   constructor(
     private readonly secrets: SecretStore,
     private readonly events: McpRegistryEvents,
     private readonly logger?: Logger,
+    /** Namespaced tool names the workspace always allows — see `WorkspaceApprovals`. */
+    private readonly getAlwaysAllowed: () => readonly string[] = () => [],
   ) {}
 
   /** Replaces the configured server set, closing any that disappeared or changed. */
@@ -85,13 +96,19 @@ export class McpRegistry {
 
     for (const [name, config] of Object.entries(servers)) {
       if (config.disabled === true) {
-        this.states.set(name, { name, status: 'disabled', toolNames: [] })
-      } else if (!this.states.has(name) || this.states.get(name)?.status === 'disabled') {
-        this.states.set(name, { name, status: 'idle', toolNames: [] })
+        this.statuses.set(name, 'disabled')
+        this.toolsByServer.delete(name)
+        await this.disconnect(name, { silent: true })
+      } else if (!this.statuses.has(name) || this.statuses.get(name) === 'disabled') {
+        this.statuses.set(name, 'idle')
       }
     }
-    for (const name of [...this.states.keys()]) {
-      if (servers[name] === undefined) this.states.delete(name)
+    for (const name of [...this.statuses.keys()]) {
+      if (servers[name] === undefined) {
+        this.statuses.delete(name)
+        this.errors.delete(name)
+        this.toolsByServer.delete(name)
+      }
     }
 
     this.events.onStateChanged()
@@ -118,7 +135,8 @@ export class McpRegistry {
   }
 
   private async connect(name: string, config: McpServerConfig): Promise<void> {
-    this.states.set(name, { name, status: 'connecting', toolNames: [] })
+    this.statuses.set(name, 'connecting')
+    this.errors.delete(name)
     this.events.onStateChanged()
 
     const connection = new McpConnection(name, config, this.secrets, () => {
@@ -133,7 +151,8 @@ export class McpRegistry {
       const message = error instanceof Error ? error.message : String(error)
       this.logger?.warn(`MCP server "${name}" failed to connect: ${message}`)
       // One server failing must not affect the others — state is per-server.
-      this.states.set(name, { name, status: 'failed', toolNames: [], error: message })
+      this.statuses.set(name, 'failed')
+      this.errors.set(name, message)
       this.events.onStateChanged()
     }
   }
@@ -144,28 +163,32 @@ export class McpRegistry {
 
     try {
       const descriptors = await connection.listTools()
-      const tools = descriptors.map((descriptor) =>
-        adaptTool(name, descriptor.name, descriptor.description, descriptor.inputSchema, (args) =>
-          connection.callTool(descriptor.name, args),
-        ),
+      this.toolsByServer.set(
+        name,
+        descriptors.map((descriptor) => ({
+          descriptor,
+          tool: adaptTool(name, descriptor.name, descriptor.description, descriptor.inputSchema, (args) =>
+            connection.callTool(descriptor.name, args),
+          ),
+        })),
       )
-      this.toolsByServer.set(name, tools)
-      this.states.set(name, { name, status: 'ready', toolNames: descriptors.map((d) => d.name) })
+      this.statuses.set(name, 'ready')
+      this.errors.delete(name)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.states.set(name, { name, status: 'failed', toolNames: [], error: message })
+      this.statuses.set(name, 'failed')
+      this.errors.set(name, error instanceof Error ? error.message : String(error))
     }
     this.events.onStateChanged()
   }
 
-  async disconnect(name: string): Promise<void> {
+  async disconnect(name: string, options: { silent?: boolean } = {}): Promise<void> {
     await this.connections.get(name)?.close()
     this.connections.delete(name)
     this.toolsByServer.delete(name)
-    if (this.servers[name] !== undefined) {
-      this.states.set(name, { name, status: 'idle', toolNames: [] })
+    if (this.servers[name] !== undefined && this.servers[name]?.disabled !== true) {
+      this.statuses.set(name, 'idle')
     }
-    this.events.onStateChanged()
+    if (options.silent !== true) this.events.onStateChanged()
   }
 
   async restart(name: string): Promise<void> {
@@ -180,20 +203,47 @@ export class McpRegistry {
    */
   enabledTools(): Tool[] {
     const out: Tool[] = []
-    for (const [name, tools] of this.toolsByServer) {
+    for (const [name, discovered] of this.toolsByServer) {
       const config = this.servers[name]
       if (config === undefined || config.disabled === true) continue
       const disabledTools = new Set(config.disabledTools ?? [])
-      for (const tool of tools) {
-        const bare = tool.name.slice(name.length + 2)
-        if (!disabledTools.has(bare)) out.push(tool)
+      for (const { descriptor, tool } of discovered) {
+        if (!disabledTools.has(descriptor.name)) out.push(tool)
       }
     }
     return out
   }
 
+  /**
+   * Composed from the two stores that already exist rather than a third — see
+   * `resolveToolPermission` for why `never` takes precedence over `always`.
+   */
+  private permissionFor(serverName: string, toolName: string): McpToolPermission {
+    return resolveToolPermission(
+      toolName,
+      namespacedToolName(serverName, toolName),
+      this.servers[serverName]?.disabledTools,
+      this.getAlwaysAllowed(),
+    )
+  }
+
   states_(): McpServerState[] {
-    return [...this.states.values()]
+    return Object.entries(this.servers).map(([name, config]) => {
+      const discovered = this.toolsByServer.get(name) ?? []
+      const error = this.errors.get(name)
+      return {
+        name,
+        status: this.statuses.get(name) ?? 'idle',
+        enabled: config.disabled !== true,
+        tools: discovered.map(({ descriptor }) => ({
+          name: descriptor.name,
+          namespacedName: namespacedToolName(name, descriptor.name),
+          description: descriptor.description,
+          permission: this.permissionFor(name, descriptor.name),
+        })),
+        ...(error !== undefined ? { error } : {}),
+      }
+    })
   }
 
   async closeAll(): Promise<void> {

@@ -70,6 +70,8 @@ export {
   type McpServersConfig,
   type McpServerState,
   type McpServerStatus,
+  type McpToolState,
+  type McpToolPermission,
   type StdioServerConfig,
   type HttpServerConfig,
 } from './mcp/types.js'

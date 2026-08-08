@@ -21,6 +21,7 @@ import {
   createReadToolResultTool,
   findMode,
   mcpServersSchema,
+  namespacedToolName,
   parseConfig,
   removeFromAllowlist,
   resolveActiveProfile,
@@ -32,6 +33,7 @@ import {
   type HostToUiMessage,
   type LightCodeConfig,
   type McpServersConfig,
+  type McpToolPermission,
   type ProfileInput,
   type ProfileSummary,
   type ProviderProfile,
@@ -146,7 +148,7 @@ export function wireChatBridge(
   const approvalGate = new PolicyApprovalGate(userGate, () => cachedApprovals)
 
   let mcpJson = '{\n  "mcpServers": {}\n}'
-  const mcp = new McpRegistry(secrets, { onStateChanged: () => postMcp() }, logger)
+  const mcp = new McpRegistry(secrets, { onStateChanged: () => postMcp() }, logger, () => cachedApprovals.allowedTools ?? [])
 
   function postMcp(): void {
     const servers = mcp.states_()
@@ -522,6 +524,46 @@ export function wireChatBridge(
     await postSettings()
   }
 
+  /** Reads the current server map, applies a change, persists, and re-syncs. */
+  async function updateMcpServer(
+    name: string,
+    change: (entry: McpServersConfig[string]) => McpServersConfig[string],
+  ): Promise<void> {
+    const { config } = await configManager.load()
+    const servers = config.mcpServers ?? {}
+    const existing = servers[name]
+    if (existing === undefined) return
+
+    const next: McpServersConfig = { ...servers, [name]: change(existing) }
+    await configManager.save('user', { mcpServers: next })
+    mcpJson = JSON.stringify({ mcpServers: next }, null, 2)
+    await mcp.configure(next)
+  }
+
+  /**
+   * Three-state per tool, composed from the two stores that already exist rather than a
+   * third: `never` is the server's `disabledTools`, `always` is the workspace allow-list,
+   * `ask` is neither. Switching to one state must clear the other, or a tool could be
+   * simultaneously always-allowed and hidden.
+   */
+  async function handleSetToolPermission(server: string, tool: string, permission: McpToolPermission): Promise<void> {
+    const namespaced = namespacedToolName(server, tool)
+
+    await updateMcpServer(server, (entry) => {
+      const disabled = new Set(entry.disabledTools ?? [])
+      if (permission === 'never') disabled.add(tool)
+      else disabled.delete(tool)
+      return { ...entry, disabledTools: [...disabled] }
+    })
+
+    const allowed = cachedApprovals.allowedTools ?? []
+    const nextAllowed = permission === 'always' ? addToAllowlist(namespaced, allowed) : removeFromAllowlist(namespaced, allowed)
+    if (nextAllowed.length !== allowed.length) {
+      await saveApprovals({ ...cachedApprovals, allowedTools: nextAllowed })
+    }
+    postMcp()
+  }
+
   async function handleRequestMcp(): Promise<void> {
     const { config } = await configManager.load()
     await syncMcpFromConfig(config)
@@ -606,6 +648,10 @@ export function wireChatBridge(
       void handleSaveMcpServers(message.json)
     } else if (message.type === 'restartMcpServer') {
       void mcp.restart(message.name)
+    } else if (message.type === 'setMcpServerEnabled') {
+      void updateMcpServer(message.name, (entry) => ({ ...entry, disabled: !message.enabled })).then(() => postMcp())
+    } else if (message.type === 'setMcpToolPermission') {
+      void handleSetToolPermission(message.server, message.tool, message.permission)
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
     } else if (message.type === 'saveProfile') {

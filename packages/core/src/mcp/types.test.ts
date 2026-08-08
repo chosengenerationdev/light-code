@@ -6,6 +6,7 @@ import {
   mcpServersSchema,
   namespacedToolName,
   parseNamespacedToolName,
+  resolveToolPermission,
 } from './types.js'
 
 describe('namespacing', () => {
@@ -41,6 +42,32 @@ describe('package runner detection', () => {
 
   it.each(['node', 'python', './my-server', 'C:\\tools\\server.exe'])('does not flag %s', (command) => {
     expect(isPackageRunnerCommand(command)).toBe(false)
+  })
+})
+
+describe('resolveToolPermission', () => {
+  const namespaced = namespacedToolName('fs', 'read_file')
+
+  it('defaults to ask', () => {
+    expect(resolveToolPermission('read_file', namespaced, undefined, [])).toBe('ask')
+  })
+
+  it('reports always when the namespaced name is allow-listed', () => {
+    expect(resolveToolPermission('read_file', namespaced, undefined, [namespaced])).toBe('always')
+  })
+
+  it('reports never when the bare name is in the server disabled list', () => {
+    expect(resolveToolPermission('read_file', namespaced, ['read_file'], [])).toBe('never')
+  })
+
+  it('lets never win over always, so a stale allow entry cannot resurrect a hidden tool', () => {
+    expect(resolveToolPermission('read_file', namespaced, ['read_file'], [namespaced])).toBe('never')
+  })
+
+  it('does not confuse tools of the same bare name on different servers', () => {
+    const other = namespacedToolName('git', 'read_file')
+    // Allow-listed on `fs` only — `git`'s same-named tool stays on ask.
+    expect(resolveToolPermission('read_file', other, undefined, [namespaced])).toBe('ask')
   })
 })
 
