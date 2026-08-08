@@ -19,10 +19,20 @@ export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export { validateProviderForm, type FieldError } from './config/validate.js'
 
+/**
+ * Pure lookup over a static table — no `node:*`, so the webview can show a model's context
+ * window as it is typed without a round trip to the host.
+ */
+export { lookupModelCapabilities, resolveModelCapabilities, type ModelCapabilities } from './providers/models.js'
+
 export type {
   UiToHostMessage,
   HostToUiMessage,
   ProfileSummary,
   ProfileInput,
   ToolCallSummary,
+  ApigeeSummary,
+  CertSummary,
+  ModelCapabilityInput,
+  TestConnectionStep,
 } from './agent/protocol.js'

@@ -1,7 +1,20 @@
-import { providerPresets, validateProviderForm, type FieldError, type ProfileInput, type WireFormat } from '@light-code/core/browser'
+import {
+  providerPresets,
+  validateProviderForm,
+  type ApigeeSummary,
+  type CertSummary,
+  type FieldError,
+  type ModelCapabilityInput,
+  type ProfileInput,
+  type TestConnectionStep,
+  type WireFormat,
+} from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { colors, fieldErrorStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { AdvancedAuthSection, type AuthType } from './AdvancedAuthSection.js'
+import { ModelSelect } from './ModelSelect.js'
 import { SecretField } from './SecretField.js'
+import { TestConnectionPanel } from './TestConnectionPanel.js'
 
 export interface ProviderFormValues {
   id?: string
@@ -9,13 +22,27 @@ export interface ProviderFormValues {
   wireFormat: WireFormat
   baseUrl: string
   model: string
+  authType: AuthType
   hasApiKey: boolean
+  hasClientSecret: boolean
+  hasCertPassphrase: boolean
+  apigee?: ApigeeSummary
+  certs?: CertSummary
+  modelCapabilities?: ModelCapabilityInput
 }
 
 export interface ProviderFormProps {
   initial: ProviderFormValues
   onSave: (input: ProfileInput) => void
   onCancel: () => void
+  /** Ask the host to fetch the catalogue for the profile as currently typed. */
+  onRequestModels: (input: ProfileInput) => void
+  onTestConnection: (input: ProfileInput) => void
+  models: string[]
+  modelsWarning?: string
+  modelsLoading: boolean
+  testRunning: boolean
+  testResult?: { ok: boolean; steps: TestConnectionStep[] }
 }
 
 export function ProviderForm(props: ProviderFormProps): ReactElement {
@@ -24,6 +51,12 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
   const [baseUrl, setBaseUrl] = useState(props.initial.baseUrl)
   const [model, setModel] = useState(props.initial.model)
   const [apiKey, setApiKey] = useState('')
+  const [authType, setAuthType] = useState<AuthType>(props.initial.authType)
+  const [apigee, setApigee] = useState<ApigeeSummary>(props.initial.apigee ?? {})
+  const [clientSecret, setClientSecret] = useState('')
+  const [certs, setCerts] = useState<CertSummary>(props.initial.certs ?? {})
+  const [certPassphrase, setCertPassphrase] = useState('')
+  const [capabilities, setCapabilities] = useState<ModelCapabilityInput>(props.initial.modelCapabilities ?? {})
   const [errors, setErrors] = useState<FieldError[]>([])
 
   const errorFor = (path: string): string | undefined => errors.find((e) => e.path === path)?.message
@@ -36,18 +69,28 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
     if (label.trim().length === 0) setLabel(preset.label)
   }
 
+  /**
+   * The form's current state as a `ProfileInput`. Used for Save, Refresh Models, and Test
+   * Connection alike, so all three see exactly the same configuration — testing something
+   * other than what would be saved is the one thing that would make the button useless.
+   */
+  const currentInput = (): ProfileInput => ({
+    ...(props.initial.id !== undefined ? { id: props.initial.id } : {}),
+    label,
+    wireFormat,
+    baseUrl,
+    model,
+    authType,
+    apiKey,
+    ...(authType === 'apigeeMtls' ? { apigee, clientSecret, certs, certPassphrase } : {}),
+    ...(Object.keys(capabilities).length > 0 ? { modelCapabilities: capabilities } : {}),
+  })
+
   const submit = (): void => {
     const fieldErrors = validateProviderForm({ label, wireFormat, baseUrl, model })
     setErrors(fieldErrors)
     if (fieldErrors.length > 0) return
-    props.onSave({
-      ...(props.initial.id !== undefined ? { id: props.initial.id } : {}),
-      label,
-      wireFormat,
-      baseUrl,
-      model,
-      apiKey,
-    })
+    props.onSave(currentInput())
   }
 
   return (
@@ -95,22 +138,42 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         {errorFor('baseUrl') !== undefined && <span style={fieldErrorStyle()}>{errorFor('baseUrl')}</span>}
       </div>
 
-      <div style={{ marginBottom: 12 }}>
-        <label htmlFor="lc-model" style={labelStyle()}>
-          Model
-        </label>
-        <input
-          id="lc-model"
-          type="text"
-          value={model}
-          placeholder="gpt-4o-mini"
-          onChange={(event) => setModel(event.target.value)}
-          style={textFieldStyle()}
-        />
-        {errorFor('model') !== undefined && <span style={fieldErrorStyle()}>{errorFor('model')}</span>}
-      </div>
+      <ModelSelect
+        value={model}
+        onChange={setModel}
+        models={props.models}
+        {...(props.modelsWarning !== undefined ? { warning: props.modelsWarning } : {})}
+        loading={props.modelsLoading}
+        onRefresh={() => props.onRequestModels(currentInput())}
+        {...(errorFor('model') !== undefined ? { error: errorFor('model') } : {})}
+      />
 
-      <SecretField id="lc-api-key" label="API key" hasValue={props.initial.hasApiKey} value={apiKey} onChange={setApiKey} />
+      {authType === 'apiKey' && (
+        <SecretField id="lc-api-key" label="API key" hasValue={props.initial.hasApiKey} value={apiKey} onChange={setApiKey} />
+      )}
+
+      <AdvancedAuthSection
+        authType={authType}
+        onAuthTypeChange={setAuthType}
+        apigee={apigee}
+        onApigeeChange={setApigee}
+        clientSecret={clientSecret}
+        onClientSecretChange={setClientSecret}
+        hasClientSecret={props.initial.hasClientSecret}
+        certs={certs}
+        onCertsChange={setCerts}
+        certPassphrase={certPassphrase}
+        onCertPassphraseChange={setCertPassphrase}
+        hasCertPassphrase={props.initial.hasCertPassphrase}
+        capabilities={capabilities}
+        onCapabilitiesChange={setCapabilities}
+      />
+
+      <TestConnectionPanel
+        running={props.testRunning}
+        {...(props.testResult !== undefined ? { result: props.testResult } : { result: undefined })}
+        onRun={() => props.onTestConnection(currentInput())}
+      />
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" style={primaryButtonStyle(false)} onClick={submit}>

@@ -71,6 +71,14 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onSetActive={props.onSetActive}
             onExport={props.onExport}
             onImport={props.onImport}
+            onRequestModels={props.onRequestModels}
+            onTestConnection={props.onTestConnection}
+            onEditingChange={props.onEditingChange}
+            models={props.models}
+            {...(props.modelsWarning !== undefined ? { modelsWarning: props.modelsWarning } : {})}
+            modelsLoading={props.modelsLoading}
+            testRunning={props.testRunning}
+            {...(props.testResult !== undefined ? { testResult: props.testResult } : {})}
           />
         ) : active === 'approvals' ? (
           <ApprovalsTab

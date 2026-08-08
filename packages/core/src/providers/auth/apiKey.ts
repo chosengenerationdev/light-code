@@ -1,5 +1,5 @@
 import type { SecretStore } from '../../platform/secrets.js'
-import type { Auth, AuthStrategy } from '../types.js'
+import type { AuthStrategy } from '../types.js'
 
 export class ApiKeyAuthStrategy implements AuthStrategy {
   constructor(
@@ -22,14 +22,5 @@ export class ApiKeyAuthStrategy implements AuthStrategy {
 export class NoAuthStrategy implements AuthStrategy {
   async resolveHeaders(): Promise<Record<string, string>> {
     return {}
-  }
-}
-
-export function createAuthStrategy(auth: Auth, secrets: SecretStore): AuthStrategy {
-  switch (auth.type) {
-    case 'apiKey':
-      return new ApiKeyAuthStrategy(secrets, auth.apiKeyRef)
-    case 'none':
-      return new NoAuthStrategy()
   }
 }

@@ -642,8 +642,85 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 5 complete — see `IMPLEMENTATION_PLAN.md`. Phase 6 (Apigee auth,
-model dropdown, Test Connection) not started.
+**Current phase:** Phase 6 complete — see `IMPLEMENTATION_PLAN.md`. Phase 6b (task history
+and session persistence) not started.
+
+**Phase 6 done — Apigee mTLS auth, model dropdown, Test Connection:**
+- `platform/http.ts` now uses **undici**, not global `fetch`. Node's built-in fetch has no
+  supported way to present a client certificate, so mTLS was impossible without this.
+  `HttpRequestOptions.tls` carries the material; agents are pooled per material so
+  connection reuse survives.
+- `providers/auth/certs.ts` — PEM and PFX, `notAfter`, expiry warnings at 30/7 days and
+  after expiry, and a real key/cert match check (sign a probe with the key, verify with the
+  cert's public key). Tested against **genuine OpenSSL-generated X.509**, not fixtures.
+  PFX deliberately reports no `notAfter`: Node only validates a PFX at handshake time, and
+  absent is honest where a guessed date would not be.
+- `providers/auth/apigeeMtls.ts` — client-credentials over mTLS. Token in memory only, with
+  no getter: the only way it leaves the class is inside a request header. Proactive refresh
+  at `issuedAt + expiresIn - skew`, single-flight via a shared in-flight promise, exactly
+  one 401 retry, and `ensureTokenForStream()` (120s margin) so a token cannot expire
+  mid-generation.
+- `providers/auth/factory.ts` — builds a strategy from config. Secrets are resolved **per
+  request** through a callback rather than captured at construction, so rotating one in
+  storage takes effect on the next refresh (§15).
+- `platform/tls.ts` — CA merging. Lives beside `http.ts` rather than under `providers/auth`
+  as the plan sketched, because `platform` importing `providers` would invert the layering.
+- `providers/models.ts` — `/models` fetch that **never throws** (a warning plus an empty
+  list; the dropdown is never a hard dependency) and a local capability table matched by
+  substring, longest key first, so gateway aliases like `corp-openai-gpt-4o-v2` resolve.
+  Unknown ids default to 32k / no vision, deliberately conservative.
+- `providers/testConnection.ts` — load-certs → get-token → list-models, reporting which
+  step failed and skipping the rest.
+- UI: `ModelSelect` (dropdown *and* free text, always both), `TestConnectionPanel`,
+  `AdvancedAuthSection`. Selecting `apigeeMtls` removes the API key field entirely.
+- 223 unit tests pass (1 skipped: the symlink case, still needing symlink privilege).
+
+**Verified for real, without an Apigee gateway.** The user has no Apigee setup, so the whole
+path was driven against a **local HTTPS server that genuinely requires a client
+certificate** (`requestCert: true, rejectUnauthorized: true`, CA/server/client certs minted
+with OpenSSL): real undici TLS stack, real handshake, real grant, real trust failures.
+14/14 checks pass — the server confirms it saw `CN=lc-test-client`, the issued token reaches
+the inference request, a mismatched key is rejected before any network call, and an
+untrusted CA produces a sentence naming the fix. **Still unverified:** this particular
+gateway's own quirks (its token path, header name, expiry semantics) — all configurable,
+all defaulted.
+
+**That live test found two bugs the mocks could not. Both are worth remembering:**
+- **undici hides every transport failure behind `TypeError: fetch failed`,** with the real
+  reason on `.cause` (sometimes nested twice). `describeTlsError` read only the top-level
+  message, so the single most likely corporate failure — an untrusted intercepting root —
+  surfaced as "fetch failed", which is precisely what §10 forbids. It now walks the cause
+  chain (depth-capped; a self-referential `cause` is real). Regression tests cover it.
+- **The bridge rebuilt the auth strategy every turn,** which meant the token cache, the
+  proactive refresh and the single-flight guard could never engage — every user message
+  would have triggered a fresh handshake and a new grant. The strategy is now cached and
+  keyed on profile id + auth block + certDir, and dropped explicitly on profile save (the
+  key cannot see a *rotated* secret, since the ref is unchanged).
+
+**Also worth knowing before Phase 6b:**
+- **Passing `ca` to Node/undici replaces the bundled Mozilla root store rather than adding
+  to it.** A user supplying a corporate root to make their gateway work would silently lose
+  every public CA, and the symptom would appear against an unrelated host much later.
+  `platform/tls.ts` merges `tls.rootCertificates` + `NODE_EXTRA_CA_CERTS` + configured CA.
+  `NODE_EXTRA_CA_CERTS` needs re-reading explicitly: Node folds it into the *default* store
+  at startup, which an explicit `ca` bypasses entirely, so setting it would otherwise
+  appear to do nothing.
+- **The TLS agent cache was keyed on byte lengths** and is now keyed on a content hash. A
+  renewed certificate is overwhelmingly likely to be the same length as the one it replaces
+  (same key size, issuer, subject), so the old key would have kept serving the retired
+  certificate until the extension host restarted — defeating the rotation support it was
+  written to provide.
+- Invariant 4's "CI fails if built output contains an absolute external URL" check **does
+  not exist yet**; `.github/workflows/ci.yml` runs only lint/typecheck/build/test. Note that
+  the webview bundle now legitimately contains example URLs as form placeholders, so that
+  check will need to distinguish a placeholder from a fetch target when it is written.
+
+**Manual verification still outstanding (carried from Phases 3–5, never done):** Deny blocks
+execution; `execute_command` shows the literal command; the computed diff; "Undo all
+changes"; Ask mode hides edit/command tools; **"Always allow this command" on `node
+--version` must NOT allow `node --version && echo hi`**; Approvals tab revoke. Phase 6 adds:
+the model dropdown populating against live DeepSeek, and Test Connection's three steps
+rendering in the real webview.
 
 **Phase 5 done — MCP client:**
 - `mcp/types.ts` — the standard `mcpServers` shape, with transport **inferred** from the

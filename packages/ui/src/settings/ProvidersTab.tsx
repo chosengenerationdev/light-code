@@ -1,7 +1,7 @@
-import type { ProfileInput, ProfileSummary } from '@light-code/core/browser'
+import type { ProfileInput, ProfileSummary, TestConnectionStep } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
-import { ProviderForm } from './ProviderForm.js'
+import { ProviderForm, type ProviderFormValues } from './ProviderForm.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
 export interface ProvidersTabProps {
@@ -13,6 +13,16 @@ export interface ProvidersTabProps {
   onSetActive: (id: string) => void
   onExport: () => void
   onImport: () => void
+  onRequestModels: (input: ProfileInput) => void
+  onTestConnection: (input: ProfileInput) => void
+  /** Results live here rather than in the form so they survive a re-render of the list. */
+  models: string[]
+  modelsWarning?: string
+  modelsLoading: boolean
+  testRunning: boolean
+  testResult?: { ok: boolean; steps: TestConnectionStep[] }
+  /** Clears stale model/test results when a different profile is opened. */
+  onEditingChange: () => void
 }
 
 type EditingState = { mode: 'closed' } | { mode: 'create' } | { mode: 'edit'; profile: ProfileSummary }
@@ -20,8 +30,13 @@ type EditingState = { mode: 'closed' } | { mode: 'create' } | { mode: 'edit'; pr
 export function ProvidersTab(props: ProvidersTabProps): ReactElement {
   const [editing, setEditing] = useState<EditingState>({ mode: 'closed' })
 
+  const open = (next: EditingState): void => {
+    props.onEditingChange()
+    setEditing(next)
+  }
+
   if (editing.mode !== 'closed') {
-    const initial =
+    const initial: ProviderFormValues =
       editing.mode === 'edit'
         ? {
             id: editing.profile.id,
@@ -29,9 +44,28 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
             wireFormat: editing.profile.wireFormat,
             baseUrl: editing.profile.baseUrl,
             model: editing.profile.model,
+            authType: editing.profile.authType,
             hasApiKey: editing.profile.hasApiKey,
+            hasClientSecret: editing.profile.hasClientSecret,
+            hasCertPassphrase: editing.profile.hasCertPassphrase,
+            ...(editing.profile.apigee !== undefined ? { apigee: editing.profile.apigee } : {}),
+            ...(editing.profile.certs !== undefined ? { certs: editing.profile.certs } : {}),
+            ...(editing.profile.modelCapabilities !== undefined
+              ? { modelCapabilities: editing.profile.modelCapabilities }
+              : {}),
           }
-        : { label: '', wireFormat: 'openai' as const, baseUrl: '', model: '', hasApiKey: false }
+        : {
+            label: '',
+            wireFormat: 'openai' as const,
+            baseUrl: '',
+            model: '',
+            // API key is the default because it is what almost every provider needs; mTLS
+            // is opted into from the Authentication dropdown.
+            authType: 'apiKey' as const,
+            hasApiKey: false,
+            hasClientSecret: false,
+            hasCertPassphrase: false,
+          }
 
     return (
       <ProviderForm
@@ -41,6 +75,13 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
           setEditing({ mode: 'closed' })
         }}
         onCancel={() => setEditing({ mode: 'closed' })}
+        onRequestModels={props.onRequestModels}
+        onTestConnection={props.onTestConnection}
+        models={props.models}
+        {...(props.modelsWarning !== undefined ? { modelsWarning: props.modelsWarning } : {})}
+        modelsLoading={props.modelsLoading}
+        testRunning={props.testRunning}
+        {...(props.testResult !== undefined ? { testResult: props.testResult } : {})}
       />
     )
   }
@@ -82,7 +123,7 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
                   Use
                 </button>
               )}
-              <button type="button" style={secondaryButtonStyle()} onClick={() => setEditing({ mode: 'edit', profile })}>
+              <button type="button" style={secondaryButtonStyle()} onClick={() => open({ mode: 'edit', profile })}>
                 Edit
               </button>
               <button type="button" style={secondaryButtonStyle()} onClick={() => props.onDuplicate(profile.id)}>
@@ -96,7 +137,7 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
         )
       })}
 
-      <button type="button" style={primaryButtonStyle(false)} onClick={() => setEditing({ mode: 'create' })}>
+      <button type="button" style={primaryButtonStyle(false)} onClick={() => open({ mode: 'create' })}>
         Add Provider
       </button>
 

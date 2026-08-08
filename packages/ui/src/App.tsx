@@ -7,6 +7,7 @@ import {
   type ApprovableGroup,
   type McpServerState,
   type McpToolPermission,
+  type TestConnectionStep,
   type Transport,
   type UiToHostMessage,
   type WorkspaceApprovals,
@@ -49,6 +50,11 @@ export function App(props: AppProps): ReactElement {
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
   const [mcpSaveError, setMcpSaveError] = useState<string | undefined>(undefined)
+  const [models, setModels] = useState<string[]>([])
+  const [modelsWarning, setModelsWarning] = useState<string | undefined>(undefined)
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [testRunning, setTestRunning] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; steps: TestConnectionStep[] } | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -114,6 +120,13 @@ export function App(props: AppProps): ReactElement {
         setProfilesLoaded(true)
       } else if (message.type === 'profileSaved') {
         setView('chat')
+      } else if (message.type === 'models') {
+        setModels(message.models)
+        setModelsWarning(message.warning)
+        setModelsLoading(false)
+      } else if (message.type === 'testConnectionResult') {
+        setTestResult({ ok: message.ok, steps: message.steps })
+        setTestRunning(false)
       }
     })
 
@@ -168,6 +181,24 @@ export function App(props: AppProps): ReactElement {
   }
   const revokeCommand = (command: string): void => {
     props.transport.post({ type: 'revokeAllowedCommand', command } satisfies UiToHostMessage)
+  }
+  const requestModels = (profile: ProfileInput): void => {
+    setModelsLoading(true)
+    setModelsWarning(undefined)
+    props.transport.post({ type: 'requestModels', profile } satisfies UiToHostMessage)
+  }
+  const runTestConnection = (profile: ProfileInput): void => {
+    setTestRunning(true)
+    setTestResult(undefined)
+    props.transport.post({ type: 'testConnection', profile } satisfies UiToHostMessage)
+  }
+  /** Results belong to the profile that produced them; opening another must not inherit them. */
+  const resetProviderProbes = (): void => {
+    setModels([])
+    setModelsWarning(undefined)
+    setModelsLoading(false)
+    setTestResult(undefined)
+    setTestRunning(false)
   }
   const saveMcp = (json: string): void => {
     props.transport.post({ type: 'saveMcpServers', json } satisfies UiToHostMessage)
@@ -258,6 +289,14 @@ export function App(props: AppProps): ReactElement {
             onSetActive={setActiveProfile}
             onExport={exportConfig}
             onImport={importConfig}
+            onRequestModels={requestModels}
+            onTestConnection={runTestConnection}
+            onEditingChange={resetProviderProbes}
+            models={models}
+            {...(modelsWarning !== undefined ? { modelsWarning } : {})}
+            modelsLoading={modelsLoading}
+            testRunning={testRunning}
+            {...(testResult !== undefined ? { testResult } : {})}
             approvals={approvals}
             onSetAutoApprove={setAutoApprove}
             onRevokeTool={revokeTool}

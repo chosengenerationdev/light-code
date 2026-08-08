@@ -382,14 +382,20 @@ Resources, prompts, sampling.
 packages/core/src/providers/auth/
   apigeeMtls.ts      token fetch, proactive refresh, single-flight, 401 retry
   certs.ts           load PEM or PFX; validate; report notAfter; watch for change
-  tls.ts             agent construction; ca / NODE_EXTRA_CA_CERTS
+  factory.ts         config -> strategy; resolves secret refs at request time
 
-packages/core/src/providers/models.ts      list models; local metadata table
+packages/core/src/platform/tls.ts          CA merge; NODE_EXTRA_CA_CERTS
+                                           (next to http.ts, its only consumer —
+                                            platform importing providers would
+                                            invert the layering)
+
+packages/core/src/providers/models.ts          list models; local metadata table
+packages/core/src/providers/testConnection.ts  three-step diagnosis
 
 packages/ui/src/settings/
   AdvancedAuthSection.tsx
-  ModelSelect.tsx        dropdown + free text + refresh
-  TestConnection.tsx     reports which of three steps failed
+  ModelSelect.tsx           dropdown + free text + refresh
+  TestConnectionPanel.tsx   reports which of three steps failed
 ```
 
 **Done when**
@@ -411,6 +417,13 @@ packages/ui/src/settings/
 Mock Apigee endpoint tests for the refresh, concurrency, and retry cases. Then a real run
 against the gateway. Confirm a missing CA produces a comprehensible message, not
 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`.
+
+> **Done, with one substitution.** No Apigee gateway is available to test against, so in
+> addition to the mock tests the whole path was driven against a **local HTTPS server that
+> genuinely requires a client certificate** (`requestCert` + `rejectUnauthorized`, certs
+> minted with OpenSSL). That exercises the real undici TLS stack, a real handshake, a real
+> `client_credentials` grant, and real CA-trust failures — everything except this specific
+> gateway's quirks. It found two bugs the mocks could not; see CLAUDE.md §19.
 
 ---
 

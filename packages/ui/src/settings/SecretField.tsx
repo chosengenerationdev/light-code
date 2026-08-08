@@ -8,6 +8,7 @@ export interface SecretFieldProps {
   hasValue: boolean
   value: string
   onChange: (value: string) => void
+  placeholder?: string
 }
 
 /**
@@ -41,7 +42,7 @@ export function SecretField(props: SecretFieldProps): ReactElement {
           id={props.id}
           type="password"
           value={props.value}
-          placeholder="sk-..."
+          placeholder={props.placeholder ?? 'sk-...'}
           onChange={(event) => props.onChange(event.target.value)}
           style={textFieldStyle()}
         />

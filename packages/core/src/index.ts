@@ -31,9 +31,54 @@ export type {
   ChatStreamOptions,
   ChatProvider,
 } from './providers/types.js'
-export { wireFormatSchema, authSchema, providerProfileSchema } from './providers/types.js'
+export {
+  wireFormatSchema,
+  authSchema,
+  providerProfileSchema,
+  certConfigSchema,
+  apigeeMtlsSettingsSchema,
+  type CertConfigInput,
+  type ApigeeMtlsSettingsInput,
+} from './providers/types.js'
 export { resolveActiveProfile, NoActiveProfileError, ProfileNotFoundError } from './providers/registry.js'
-export { ApiKeyAuthStrategy, NoAuthStrategy, createAuthStrategy } from './providers/auth/apiKey.js'
+export { ApiKeyAuthStrategy, NoAuthStrategy } from './providers/auth/apiKey.js'
+export {
+  createAuthStrategy,
+  createCertLoader,
+  AuthConfigError,
+  type AuthStrategyContext,
+} from './providers/auth/factory.js'
+export {
+  ApigeeMtlsAuthStrategy,
+  ApigeeAuthError,
+  describeTlsError,
+  defaultTokenUrl,
+  type ApigeeMtlsSettings,
+} from './providers/auth/apigeeMtls.js'
+export { buildCaBundle, buildConnectOptions, readNodeExtraCaCerts, type ConnectOptions } from './platform/tls.js'
+export {
+  loadCerts,
+  checkExpiry,
+  assertCertDirOutsideWorkspace,
+  CertError,
+  type CertConfig,
+  type LoadedCerts,
+  type ExpiryWarning,
+} from './providers/auth/certs.js'
+export {
+  listModels,
+  lookupModelCapabilities,
+  resolveModelCapabilities,
+  type ModelCapabilities,
+  type ModelCapabilityOverrides,
+  type ListModelsResult,
+} from './providers/models.js'
+export {
+  testConnection,
+  type TestConnectionResult,
+  type TestStepResult,
+  type TestStepName,
+} from './providers/testConnection.js'
 export { OpenAIProvider } from './providers/openai.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
 

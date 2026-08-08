@@ -15,19 +15,24 @@ import {
   ShadowGit,
   ToolRegistry,
   addToAllowlist,
+  assertCertDirOutsideWorkspace,
   buildSystemPrompt,
   createAuthStrategy,
   createDefaultToolRegistry,
   createReadToolResultTool,
   findMode,
+  listModels,
   mcpServersSchema,
   namespacedToolName,
   parseConfig,
   removeFromAllowlist,
   resolveActiveProfile,
   runAgentTurn,
+  testConnection,
   validateProviderForm,
   type ApprovableGroup,
+  type AuthStrategy,
+  type AuthStrategyContext,
   type Auth,
   type Checkpoint,
   type HostToUiMessage,
@@ -57,9 +62,20 @@ import { WebviewTransport } from '../platform/transport.js'
  */
 const CONTROL_TOOLS = new Set(['attempt_completion', 'ask_followup_question'])
 
+/**
+ * Secret keys are namespaced by profile so deleting a profile reliably deletes everything
+ * it owns (§15) — orphans otherwise accumulate invisibly in the keychain.
+ */
 function apiKeyRefFor(profileId: string): string {
   return `profile:${profileId}:apiKey`
 }
+function clientSecretRefFor(profileId: string): string {
+  return `profile:${profileId}:clientSecret`
+}
+function certPassphraseRefFor(profileId: string): string {
+  return `profile:${profileId}:certPassphrase`
+}
+const SECRET_REFS_PER_PROFILE = [apiKeyRefFor, clientSecretRefFor, certPassphraseRefFor]
 
 /**
  * `hasApiKey` reflects whether the secret **actually exists in the store**, not merely
@@ -69,15 +85,44 @@ function apiKeyRefFor(profileId: string): string {
  * fix it from the UI. Still never sends the value itself (invariant 7).
  */
 async function toSummary(profile: ProviderProfile, secrets: VSCodeSecretStore): Promise<ProfileSummary> {
-  const hasApiKey = profile.auth.type === 'apiKey' && (await secrets.get(profile.auth.apiKeyRef)) !== undefined
-  return {
+  const summary: ProfileSummary = {
     id: profile.id,
     label: profile.label,
     wireFormat: profile.wireFormat,
     baseUrl: profile.baseUrl,
     model: profile.model,
-    hasApiKey,
+    authType: profile.auth.type,
+    hasApiKey: profile.auth.type === 'apiKey' && (await secrets.get(profile.auth.apiKeyRef)) !== undefined,
+    hasClientSecret: false,
+    hasCertPassphrase: false,
   }
+  if (profile.modelCapabilities !== undefined) summary.modelCapabilities = profile.modelCapabilities
+
+  if (profile.auth.type === 'apigeeMtls') {
+    // Every field below is non-secret: URLs, ids, header names, and cert *paths* (§15).
+    // `clientSecretRef` and `passphraseRef` are deliberately reduced to booleans.
+    const { clientSecretRef, ...apigee } = profile.auth.apigee
+    const { passphraseRef, ...certs } = profile.auth.certs
+    summary.apigee = apigee
+    summary.certs = certs
+    summary.hasClientSecret = clientSecretRef !== undefined && (await secrets.get(clientSecretRef)) !== undefined
+    summary.hasCertPassphrase = passphraseRef !== undefined && (await secrets.get(passphraseRef)) !== undefined
+  }
+  return summary
+}
+
+/**
+ * Drops empty strings so a cleared form field removes the key instead of persisting `""` —
+ * an empty `tokenUrl` must fall back to the derived default, not override it with nothing.
+ */
+function stripEmpty<T extends object>(source: T): Partial<T> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'string' && value.trim().length === 0) continue
+    if (value === undefined) continue
+    result[key] = typeof value === 'string' ? value.trim() : value
+  }
+  return result as Partial<T>
 }
 
 /** Pretty-prints tool arguments for display; falls back to the raw string if it isn't JSON. */
@@ -111,6 +156,8 @@ export function wireChatBridge(
   // touching an existing file. Session-scoped, so it lives alongside the conversation.
   const readFiles = new Set<string>()
   const denylist = new PathDenylist()
+  /** Certificates are re-read every request; without this the same warning would repeat. */
+  const warnedExpiries = new Set<string>()
 
   let activeAbortController: AbortController | undefined
   /** The task's rollback point — the snapshot taken before its first edit. */
@@ -188,6 +235,56 @@ export function wireChatBridge(
     post({ type: 'profiles', profiles, activeProfileId: config.activeProfileId })
   }
 
+  /**
+   * The live auth strategy, kept across turns.
+   *
+   * This must NOT be rebuilt per turn: the token cache, the proactive refresh timer, and
+   * the single-flight guard all live inside the strategy instance, so a fresh one every
+   * turn would mean a full mTLS handshake and a new `client_credentials` grant for every
+   * user message — the caching in §10 would never engage at all.
+   *
+   * Keyed by profile id plus a fingerprint of the auth block, so editing credentials or
+   * switching profiles discards the cached token instead of silently reusing a stale one.
+   */
+  let cachedAuth: { key: string; strategy: AuthStrategy } | undefined
+
+  function authStrategyFor(config: LightCodeConfig, profile: ProviderProfile): AuthStrategy {
+    const key = `${profile.id}|${profile.baseUrl}|${JSON.stringify(profile.auth)}|${config.certDir ?? ''}`
+    const cached = cachedAuth
+    if (cached !== undefined && cached.key === key) return cached.strategy
+
+    const strategy = createAuthStrategy(profile.auth, buildAuthContext(config, profile))
+    cachedAuth = { key, strategy }
+    return strategy
+  }
+
+  /**
+   * Assembles what core needs to build an auth strategy. Kept in one place so the chat
+   * turn, the model list, and Test Connection all authenticate identically — a divergence
+   * here would make "Test Connection passed but chat fails" possible, which would destroy
+   * the whole point of that button (§10).
+   */
+  function buildAuthContext(config: LightCodeConfig, profile: ProviderProfile): AuthStrategyContext {
+    return {
+      secrets,
+      http: httpClient,
+      baseUrl: profile.baseUrl,
+      ...(config.certDir !== undefined ? { defaultCertDir: config.certDir } : {}),
+      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+      // Invariant 6: whatever the loader actually read becomes unreadable to file tools.
+      onCertPaths: (paths) => {
+        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch((error: unknown) => {
+          logger.warn('could not add cert path to the deny list', String(error))
+        })
+      },
+      onExpiryWarning: (warning) => {
+        if (warnedExpiries.has(warning.message)) return
+        warnedExpiries.add(warning.message)
+        void vscode.window.showWarningMessage(`Light Code: ${warning.message}`)
+      },
+    }
+  }
+
   async function handleSendMessage(text: string): Promise<void> {
     if (workspaceRoot === undefined) {
       post({ type: 'error', message: 'Open a folder in VS Code before using Light Code — tools need a workspace root.' })
@@ -203,8 +300,7 @@ export function wireChatBridge(
       if (config.certDir !== undefined) await denylist.add(config.certDir)
 
       const profile = resolveActiveProfile(config)
-      const authStrategy = createAuthStrategy(profile.auth, secrets)
-      const provider = new OpenAIProvider(httpClient, profile, authStrategy, logger)
+      const provider = new OpenAIProvider(httpClient, profile, authStrategyFor(config, profile), logger)
 
       // Lazy connect (§11): a configured-but-unused server costs nothing until a turn
       // actually needs its tools. Failures are per-server and surface in the MCP tab.
@@ -297,6 +393,57 @@ export function wireChatBridge(
     }
   }
 
+  /**
+   * Writes any newly-typed secrets and returns the `Auth` block that references them.
+   *
+   * The write-only rule (invariant 7) means an empty secret field is ambiguous — "unchanged"
+   * or "never set" — so it is resolved by asking the store, never by trusting config. A
+   * config that claims a ref the store doesn't have is exactly the dangling-reference bug
+   * that made a profile permanently unusable with no way to fix it from the UI.
+   */
+  async function buildAuthFromInput(input: ProfileInput, id: string): Promise<Auth> {
+    /** Stores a newly-typed secret, or reports whether a usable one is already there. */
+    async function persistSecret(ref: string, typed: string | undefined): Promise<boolean> {
+      const value = typed?.trim() ?? ''
+      if (value.length > 0) {
+        await secrets.set(ref, value)
+        return true
+      }
+      return (await secrets.get(ref)) !== undefined
+    }
+
+    if (input.authType === 'apigeeMtls') {
+      const hasClientSecret = await persistSecret(clientSecretRefFor(id), input.clientSecret)
+      const hasPassphrase = await persistSecret(certPassphraseRefFor(id), input.certPassphrase)
+      // Switching a profile to mTLS retires its API key rather than leaving it in the
+      // keychain — §10 is explicit that the two must never both be live.
+      await secrets.delete(apiKeyRefFor(id))
+
+      const certs = input.certs ?? {}
+      return {
+        type: 'apigeeMtls',
+        certs: {
+          ...stripEmpty(certs),
+          ...(hasPassphrase ? { passphraseRef: certPassphraseRefFor(id) } : {}),
+        },
+        apigee: {
+          ...stripEmpty(input.apigee ?? {}),
+          ...(hasClientSecret ? { clientSecretRef: clientSecretRefFor(id) } : {}),
+        },
+      }
+    }
+
+    if (input.authType === 'none') return { type: 'none' }
+
+    const apiKeyRef = apiKeyRefFor(id)
+    if (await persistSecret(apiKeyRef, input.apiKey)) {
+      return { type: 'apiKey', apiKeyRef }
+    }
+    // No key typed and none stored — `none` rather than a reference to a secret that was
+    // never written, which is the dangling-ref case described above.
+    return { type: 'none' }
+  }
+
   async function handleSaveProfile(input: ProfileInput): Promise<void> {
     const fieldErrors = validateProviderForm({
       label: input.label,
@@ -309,25 +456,26 @@ export function wireChatBridge(
       return
     }
 
+    // Invariant 6, checked **at config time** rather than only when a handshake is
+    // attempted (§10). Rejecting the save is what stops the bad path from ever existing;
+    // catching it later would mean key material already sat inside the workspace.
+    const certDir = input.certs?.certDir
+    if (input.authType === 'apigeeMtls' && certDir !== undefined && certDir.trim().length > 0) {
+      try {
+        assertCertDirOutsideWorkspace(certDir.trim(), workspaceRoot)
+      } catch (error) {
+        post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        return
+      }
+    }
+
     try {
       const { config } = await configManager.load()
       const profiles = config.profiles ?? []
       const id = input.id ?? randomUUID()
       const existing = profiles.find((p) => p.id === id)
-      const apiKeyRef = apiKeyRefFor(id)
 
-      // Only ever claim `apiKey` auth when the secret genuinely exists in the store.
-      // Trusting config's own claim here is what lets a dangling apiKeyRef survive
-      // every subsequent save, leaving the profile permanently unusable.
-      let auth: Auth
-      if (input.apiKey.trim().length > 0) {
-        await secrets.set(apiKeyRef, input.apiKey.trim())
-        auth = { type: 'apiKey', apiKeyRef }
-      } else if (existing?.auth.type === 'apiKey' && (await secrets.get(apiKeyRef)) !== undefined) {
-        auth = { type: 'apiKey', apiKeyRef } // leave the existing secret untouched
-      } else {
-        auth = { type: 'none' }
-      }
+      const auth = await buildAuthFromInput(input, id)
 
       const saved: ProviderProfile = {
         id,
@@ -337,11 +485,15 @@ export function wireChatBridge(
         model: input.model.trim(),
         auth,
       }
+      if (input.modelCapabilities !== undefined) saved.modelCapabilities = input.modelCapabilities
 
       const nextProfiles = existing ? profiles.map((p) => (p.id === id ? saved : p)) : [...profiles, saved]
       // The very first profile ever created becomes active automatically.
       const activeProfileId = config.activeProfileId ?? (nextProfiles.length === 1 ? id : undefined)
       await configManager.save('user', { profiles: nextProfiles, activeProfileId })
+      // The cache key can't see a *rotated* secret — the ref is unchanged — so any save
+      // drops the cached strategy rather than leaving a token minted from the old one.
+      cachedAuth = undefined
 
       post({ type: 'profileSaved' })
       await postProfiles()
@@ -361,15 +513,32 @@ export function wireChatBridge(
       }
 
       const newId = randomUUID()
+
+      /** Copies a secret under the new profile's namespace; false when there was none. */
+      async function copySecret(fromRef: string | undefined, toRef: string): Promise<boolean> {
+        if (fromRef === undefined) return false
+        const value = await secrets.get(fromRef)
+        if (value === undefined) return false
+        await secrets.set(toRef, value)
+        return true
+      }
+
       let auth: Auth = { type: 'none' }
       if (source.auth.type === 'apiKey') {
-        const existingKey = await secrets.get(source.auth.apiKeyRef)
         // If the source secret is missing there's nothing to copy — leave the duplicate
         // as `none` rather than pointing it at a secret that was never written.
-        if (existingKey !== undefined) {
-          const newRef = apiKeyRefFor(newId)
-          await secrets.set(newRef, existingKey)
-          auth = { type: 'apiKey', apiKeyRef: newRef }
+        if (await copySecret(source.auth.apiKeyRef, apiKeyRefFor(newId))) {
+          auth = { type: 'apiKey', apiKeyRef: apiKeyRefFor(newId) }
+        }
+      } else if (source.auth.type === 'apigeeMtls') {
+        const { clientSecretRef, ...apigee } = source.auth.apigee
+        const { passphraseRef, ...certs } = source.auth.certs
+        const copiedSecret = await copySecret(clientSecretRef, clientSecretRefFor(newId))
+        const copiedPassphrase = await copySecret(passphraseRef, certPassphraseRefFor(newId))
+        auth = {
+          type: 'apigeeMtls',
+          certs: { ...certs, ...(copiedPassphrase ? { passphraseRef: certPassphraseRefFor(newId) } : {}) },
+          apigee: { ...apigee, ...(copiedSecret ? { clientSecretRef: clientSecretRefFor(newId) } : {}) },
         }
       }
 
@@ -387,7 +556,9 @@ export function wireChatBridge(
       const profiles = config.profiles ?? []
       const remaining = profiles.filter((p) => p.id !== id)
 
-      await secrets.delete(apiKeyRefFor(id))
+      // Every secret this profile could own, not just the one its current auth type uses —
+      // a profile switched from apiKey to mTLS would otherwise leave an orphan behind (§15).
+      for (const refFor of SECRET_REFS_PER_PROFILE) await secrets.delete(refFor(id))
 
       const activeProfileId =
         config.activeProfileId === id ? remaining[0]?.id : config.activeProfileId
@@ -410,6 +581,65 @@ export function wireChatBridge(
       await postProfiles()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Builds a throwaway profile from whatever is currently in the form, so Refresh Models
+   * and Test Connection work before the profile is saved. Secrets are read from the store
+   * under the form's profile id; a not-yet-saved profile therefore tests only what it can.
+   */
+  async function profileFromForm(input: ProfileInput): Promise<{ profile: ProviderProfile; auth: Auth } | undefined> {
+    const baseUrl = input.baseUrl.trim()
+    if (baseUrl.length === 0) {
+      post({ type: 'error', message: 'Enter a base URL first.' })
+      return undefined
+    }
+
+    const id = input.id ?? '__unsaved__'
+    // Deliberately writes any typed secret to the store before testing: otherwise a first
+    // Test Connection on a new profile could never succeed, which is when it matters most.
+    const auth = await buildAuthFromInput(input, id)
+    const profile: ProviderProfile = {
+      id,
+      label: input.label.trim().length > 0 ? input.label.trim() : 'Untitled',
+      wireFormat: input.wireFormat,
+      baseUrl,
+      model: input.model.trim().length > 0 ? input.model.trim() : 'unset',
+      auth,
+    }
+    return { profile, auth }
+  }
+
+  async function handleRequestModels(input: ProfileInput): Promise<void> {
+    try {
+      const built = await profileFromForm(input)
+      if (built === undefined) return
+
+      const { config } = await configManager.load()
+      const strategy = authStrategyFor(config, built.profile)
+      const result = await listModels(httpClient, built.profile, strategy)
+      post({ type: 'models', models: result.ids, ...(result.warning !== undefined ? { warning: result.warning } : {}) })
+    } catch (error) {
+      // listModels itself never throws; this catches config/secret failures above it.
+      post({ type: 'models', models: [], warning: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleTestConnection(input: ProfileInput): Promise<void> {
+    try {
+      const built = await profileFromForm(input)
+      if (built === undefined) return
+
+      const { config } = await configManager.load()
+      const result = await testConnection(built.profile, buildAuthContext(config, built.profile), httpClient)
+      post({ type: 'testConnectionResult', ok: result.ok, steps: result.steps })
+    } catch (error) {
+      post({
+        type: 'testConnectionResult',
+        ok: false,
+        steps: [{ step: 'certificates', status: 'failed', detail: error instanceof Error ? error.message : String(error) }],
+      })
     }
   }
 
@@ -662,6 +892,10 @@ export function wireChatBridge(
       void postProfiles()
     } else if (message.type === 'saveProfile') {
       void handleSaveProfile(message.profile)
+    } else if (message.type === 'requestModels') {
+      void handleRequestModels(message.profile)
+    } else if (message.type === 'testConnection') {
+      void handleTestConnection(message.profile)
     } else if (message.type === 'duplicateProfile') {
       void handleDuplicateProfile(message.id)
     } else if (message.type === 'deleteProfile') {

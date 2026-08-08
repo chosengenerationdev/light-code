@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SecretStore } from '../../platform/secrets.js'
-import { ApiKeyAuthStrategy, createAuthStrategy, NoAuthStrategy } from './apiKey.js'
+import { ApiKeyAuthStrategy, NoAuthStrategy } from './apiKey.js'
 
 class FakeSecretStore implements SecretStore {
   private readonly values = new Map<string, string>()
@@ -52,19 +52,5 @@ describe('NoAuthStrategy', () => {
   it('resolves no headers', async () => {
     const headers = await new NoAuthStrategy().resolveHeaders()
     expect(headers).toEqual({})
-  })
-})
-
-describe('createAuthStrategy', () => {
-  it('builds an ApiKeyAuthStrategy for type "apiKey"', async () => {
-    const secrets = new FakeSecretStore({ ref: 'sk-x' })
-    const strategy = createAuthStrategy({ type: 'apiKey', apiKeyRef: 'ref' }, secrets)
-    expect(strategy).toBeInstanceOf(ApiKeyAuthStrategy)
-    await expect(strategy.resolveHeaders()).resolves.toEqual({ Authorization: 'Bearer sk-x' })
-  })
-
-  it('builds a NoAuthStrategy for type "none"', () => {
-    const strategy = createAuthStrategy({ type: 'none' }, new FakeSecretStore())
-    expect(strategy).toBeInstanceOf(NoAuthStrategy)
   })
 })

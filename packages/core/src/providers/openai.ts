@@ -1,5 +1,6 @@
 import type { Logger } from '../logging/logger.js'
-import type { HttpClient, HttpResponse } from '../platform/http.js'
+import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
+import { describeTlsError } from './auth/apigeeMtls.js'
 import type {
   AuthStrategy,
   ChatMessage,
@@ -12,8 +13,9 @@ import type {
 } from './types.js'
 
 function describeRequestError(error: unknown, url: string): string {
-  const message = error instanceof Error ? error.message : String(error)
-  return `Could not reach ${url}: ${message}`
+  // TLS failures dominate here on a corporate gateway, and OpenSSL codes are unreadable —
+  // §10 requires naming the actual cause instead.
+  return `Could not reach ${url}: ${describeTlsError(error)}`
 }
 
 /** Maps our `ChatMessage` union to OpenAI's wire format for the `messages` array. */
@@ -68,13 +70,18 @@ export class OpenAIProvider implements ChatProvider {
 
     let response: HttpResponse
     try {
-      const authHeaders = await this.auth.resolveHeaders()
-      response = await this.http.request(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders, ...this.profile.headers },
-        body: JSON.stringify(body),
-        ...(options.signal !== undefined ? { signal: options.signal } : {}),
-      })
+      // A token that expires mid-generation aborts the response with no way to resume, so
+      // it is replaced up front rather than discovered halfway through (§10).
+      await this.auth.ensureTokenForStream?.()
+      response = await this.send(url, body, options.signal)
+
+      if (response.status === 401 && this.auth.onUnauthorized !== undefined) {
+        this.logger?.debug('401 received; asking the auth strategy to refresh once')
+        // Exactly one retry. `onUnauthorized` returning false is what stops a loop.
+        if (await this.auth.onUnauthorized()) {
+          response = await this.send(url, body, options.signal)
+        }
+      }
     } catch (error) {
       yield { type: 'error', error: describeRequestError(error, url) }
       return
@@ -97,6 +104,19 @@ export class OpenAIProvider implements ChatProvider {
     }
 
     yield* parseSseStream(response.body, url, options.signal, this.logger)
+  }
+
+  private async send(url: string, body: Record<string, unknown>, signal: AbortSignal | undefined): Promise<HttpResponse> {
+    const authHeaders = await this.auth.resolveHeaders()
+    const tls = await this.auth.tls?.()
+    const request: HttpRequestOptions = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders, ...this.profile.headers },
+      body: JSON.stringify(body),
+    }
+    if (signal !== undefined) request.signal = signal
+    if (tls !== undefined) request.tls = tls
+    return this.http.request(url, request)
   }
 }
 
