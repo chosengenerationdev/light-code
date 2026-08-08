@@ -62,13 +62,20 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 4. **No telemetry, no update checks, no remote assets.** All webview assets are bundled
    locally. CI fails if built output contains an absolute external URL.
 5. **These config keys are user-scope only and are ignored if found in workspace config:**
-   the entire `profiles` list, `activeProfileId`, `certDir`, `python.uvPath`.
+   the entire `profiles` list, `activeProfileId`, `certDir`, `python.uvPath`, and
+   `approvals`.
    A hostile repo must not be able to repoint credentials or executables — this means a
    workspace can't inject a whole new profile (its own `baseUrl`/`auth`/`model`) any more
    than it could edit an existing one, and can't switch which profile is active. (Originally
    worded as `provider.baseUrl` + "everything under `auth`" for a single active profile;
    broadened to the whole list once named profiles — §9 — made that shape a list of
    profiles rather than one singleton.)
+   **`approvals` was added in Phase 4.** Auto-approve toggles and the "always allow" list
+   are *scoped* per workspace (§8) but *stored* user-side, keyed by workspace path.
+   Storing them in `.lightcode/config.json` would let any repo you clone pre-approve its
+   own shell commands before you had looked at it — a worse hole than the one this
+   invariant already closes. **Scope and storage location are separate decisions; do not
+   collapse them.**
 6. **Cert/key files must live outside the workspace root**, and their resolved paths are on
    a hard deny list for every file-reading tool.
 7. **Secrets never cross the bridge toward the UI.** Write-only. No `getSecret` message
@@ -610,7 +617,45 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 3 complete — see `IMPLEMENTATION_PLAN.md`. Phase 4 not started.
+**Current phase:** Phase 4 complete — see `IMPLEMENTATION_PLAN.md`. Phase 5 (MCP) not started.
+
+**Phase 4 done — modes, tool groups, Approvals tab:**
+- `modes/` — `Code` (all groups) and `Ask` (read + mcp + always). **Filtering happens
+  before tool definitions are built**, so an excluded tool never enters the system prompt;
+  the model is not told it exists. The loop *also* rejects an out-of-mode tool call as
+  defence in depth, because after a mid-session switch the history still references tools
+  that are no longer offered.
+- `approval/policy.ts` — `PolicyApprovalGate` **wraps** the user-facing gate rather than
+  teaching the loop about policy: it answers what it can from settings and delegates the
+  rest. The loop's single responsibility ("ask before acting") stays intact.
+- `approval/commands.ts` — exact-match allowlist, `Array.includes` and nothing else. The
+  test table is the specification: `npm test && echo hi`, `npm  test` (double space),
+  ` npm test`, and `NPM TEST` must all still prompt when `npm test` is allowed.
+- **`execute_command` is deliberately stricter than its category.** A command is
+  auto-approved if it is on the exact allowlist *or* the category toggle is on — because
+  "auto-approve the commands I listed" and "auto-approve all commands" are very different
+  grants, and only the latter should require the blunt toggle.
+- The allowlist is checked against **the tool's own preview**, not the model's arguments —
+  same ground-truth principle as invariant 8, applied to the policy decision.
+- UI: `ApprovalsTab` (category toggles + revocable allowlists), `ModeSelector` in the chat
+  header (disabled mid-turn), and `SettingsPanel` is now a real tabbed shell.
+- Mode is resolved **once per turn**, not per tool call, so tool definitions stay
+  byte-stable for the whole loop and the prompt-cache prefix survives (§12).
+- 107 unit tests (up from 80).
+
+**Invariant 5 extended in Phase 4 — this was a real hole.** `approvals` is now
+user-scope-only. The spec said "always allow" is *scoped* per workspace but never said
+where it is *stored*; storing it in `.lightcode/config.json` would have let any repo you
+clone ship its own pre-approvals and run shell commands the moment you opened it — worse
+than the hole invariant 5 already closed. Approvals are keyed by workspace path inside
+user config instead. `scopes.test.ts` has a test named for the attack. **Scope and storage
+location are separate decisions; do not collapse them.**
+
+**Also unified in Phase 4:** `WorkspaceApprovals`/`AutoApproveSettings` are now inferred
+from the zod schema rather than hand-written alongside it — the two had already drifted
+(`exactOptionalPropertyTypes` caught it), which is exactly the drift §15's
+single-schema rule exists to prevent. `ApprovableGroup` is `Exclude<ToolGroup, 'always'>`,
+so control tools cannot be added to an auto-approve list even by mistake.
 
 **Phase 3 (second half) done — approval and checkpoints:**
 - **The gate lives in the loop, not the UI.** `runOneToolCall()` in `agent/loop.ts` is the

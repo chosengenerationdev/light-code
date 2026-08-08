@@ -19,10 +19,18 @@ export class ToolRegistry {
 
   /** Namespaced per §11 for MCP tools; built-in tools use their bare name. */
   toToolDefinitions(): ToolDefinition[] {
-    return this.list().map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: toJSONSchema(tool.parametersSchema),
-    }))
+    return toToolDefinitions(this.list())
   }
+}
+
+/**
+ * Standalone so a mode-filtered subset can be turned into definitions without going
+ * through the registry — an excluded tool must never reach the system prompt (§8).
+ */
+export function toToolDefinitions(tools: Tool[]): ToolDefinition[] {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: toJSONSchema(tool.parametersSchema),
+  }))
 }

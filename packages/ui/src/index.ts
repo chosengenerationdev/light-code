@@ -8,7 +8,10 @@ export { ApprovalPrompt, type ApprovalPromptProps, type PendingApproval } from '
 export { DiffView, type DiffViewProps } from './approval/DiffView.js'
 export { diffLines, collapseContext, type DiffLine } from './approval/diff.js'
 
-export { SettingsPanel } from './settings/SettingsPanel.js'
+export { ModeSelector, type ModeSelectorProps } from './ModeSelector.js'
+
+export { SettingsPanel, type SettingsPanelProps } from './settings/SettingsPanel.js'
+export { ApprovalsTab, type ApprovalsTabProps } from './settings/ApprovalsTab.js'
 export { ProvidersTab, type ProvidersTabProps } from './settings/ProvidersTab.js'
 export { ProviderForm, type ProviderFormProps, type ProviderFormValues } from './settings/ProviderForm.js'
 export { ScopeBadge, type ScopeBadgeProps } from './settings/ScopeBadge.js'

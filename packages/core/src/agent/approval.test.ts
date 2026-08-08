@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { ApprovalDecision, ApprovalGate, ApprovalRequest } from '../approval/types.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
 import { PathDenylist } from '../fs/denylist.js'
+import { ASK_MODE, CODE_MODE } from '../modes/builtin.js'
 import type { ChatProvider, StreamChunk } from '../providers/types.js'
 import { ToolRegistry, type Tool, type ToolExecutionContext, type ToolGroup, type ToolResult } from '../tools/index.js'
 import { runAgentTurn, type AgentTurnEvents } from './loop.js'
@@ -231,6 +232,50 @@ describe('approval gate', () => {
     expect(gate.seen).toHaveLength(1)
     expect(gate.seen[0]?.preview.kind).toBe('text')
     expect(tool.ran).toBe(false)
+  })
+})
+
+describe('mode enforcement in the loop', () => {
+  it('refuses a tool outside the active mode even if the model calls it anyway', async () => {
+    // Simulates a mid-session switch to Ask: the tool is gone from the prompt, but the
+    // history still mentions it, so the model may try.
+    const tool = spyTool('write_to_file', 'edit')
+    const registry = new ToolRegistry()
+    registry.register(tool)
+    const { events, results } = recordingEvents()
+
+    await runAgentTurn(
+      new ScriptedProvider(callThen('write_to_file')),
+      new Conversation(),
+      'edit something',
+      registry,
+      toolContext(),
+      events,
+      { mode: ASK_MODE, approvalGate: new FixedGate('approve') },
+    )
+
+    expect(tool.ran).toBe(false)
+    expect(results[0]?.isError).toBe(true)
+    expect(results[0]?.content).toMatch(/not available in Ask mode/i)
+  })
+
+  it('allows the same tool in Code mode', async () => {
+    const tool = spyTool('write_to_file', 'edit')
+    const registry = new ToolRegistry()
+    registry.register(tool)
+    const { events } = recordingEvents()
+
+    await runAgentTurn(
+      new ScriptedProvider(callThen('write_to_file')),
+      new Conversation(),
+      'edit something',
+      registry,
+      toolContext(),
+      events,
+      { mode: CODE_MODE, approvalGate: new FixedGate('approve') },
+    )
+
+    expect(tool.ran).toBe(true)
   })
 })
 

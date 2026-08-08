@@ -13,12 +13,45 @@ export const pythonConfigSchema = z
   })
   .partial()
 
+export const autoApproveSchema = z
+  .object({
+    read: z.boolean(),
+    edit: z.boolean(),
+    command: z.boolean(),
+    mcp: z.boolean(),
+  })
+  .partial()
+
+export const workspaceApprovalsSchema = z
+  .object({
+    autoApprove: autoApproveSchema,
+    allowedTools: z.array(z.string()),
+    /** Exact command strings — never patterns. See approval/commands.ts and §8. */
+    allowedCommands: z.array(z.string()),
+  })
+  .partial()
+
+/**
+ * Inferred from the schema rather than hand-written, so the validator and the type can
+ * never drift apart — the same single-schema principle as §15.
+ */
+export type AutoApproveSettings = z.infer<typeof autoApproveSchema>
+export type WorkspaceApprovals = z.infer<typeof workspaceApprovalsSchema>
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
     activeProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,
+    /**
+     * Keyed by workspace path. Per-workspace in *behaviour* (§8) but stored user-side and
+     * user-scope-only (invariant 5) — a repo must not be able to ship its own
+     * pre-approvals in `.lightcode/config.json`.
+     */
+    approvals: z.record(z.string(), workspaceApprovalsSchema),
+    /** Active mode id; falls back to Code when absent or unrecognised. */
+    modeId: z.string(),
   })
   .partial()
 

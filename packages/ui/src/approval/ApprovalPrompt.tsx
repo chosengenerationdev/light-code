@@ -13,6 +13,8 @@ export interface PendingApproval {
 export interface ApprovalPromptProps {
   approval: PendingApproval
   onDecide: (id: string, decision: ApprovalDecision) => void
+  /** Approve now *and* remember, scoped to this workspace. */
+  onAlwaysAllow: (id: string, scope: 'tool' | 'command') => void
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -99,13 +101,32 @@ export function ApprovalPrompt(props: ApprovalPromptProps): ReactElement {
 
       <PreviewBody preview={approval.preview} />
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
         <button type="button" style={primaryButtonStyle(false)} onClick={() => props.onDecide(approval.id, 'approve')}>
           Approve
         </button>
         <button type="button" style={secondaryButtonStyle()} onClick={() => props.onDecide(approval.id, 'deny')}>
           Deny
         </button>
+        {approval.preview.kind === 'command' ? (
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            title="Allow this exact command string in this workspace. Anything appended still prompts."
+            onClick={() => props.onAlwaysAllow(approval.id, 'command')}
+          >
+            Always allow this command
+          </button>
+        ) : (
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            title={`Always allow ${approval.toolName} in this workspace`}
+            onClick={() => props.onAlwaysAllow(approval.id, 'tool')}
+          >
+            Always allow {approval.toolName}
+          </button>
+        )}
       </div>
     </div>
   )

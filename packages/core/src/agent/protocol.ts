@@ -1,3 +1,4 @@
+import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
 import type { ApprovalDecision } from '../approval/types.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
@@ -37,7 +38,14 @@ export type UiToHostMessage =
   | { type: 'sendMessage'; text: string }
   | { type: 'cancel' }
   | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
+  /** Approve *and* remember, so this exact command / this tool stops prompting here. */
+  | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' }
   | { type: 'rollback' }
+  | { type: 'requestSettings' }
+  | { type: 'setMode'; modeId: string }
+  | { type: 'setAutoApprove'; group: ApprovableGroup; enabled: boolean }
+  | { type: 'revokeAllowedTool'; toolName: string }
+  | { type: 'revokeAllowedCommand'; command: string }
   | { type: 'requestProfiles' }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }
@@ -60,6 +68,8 @@ export type HostToUiMessage =
   /** A rollback point now exists; the UI can offer to undo back to it. */
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
+  /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */
+  | { type: 'settings'; modeId: string; approvals: WorkspaceApprovals }
   | { type: 'done' }
   | { type: 'error'; message: string }
   | { type: 'profiles'; profiles: ProfileSummary[]; activeProfileId: string | undefined }

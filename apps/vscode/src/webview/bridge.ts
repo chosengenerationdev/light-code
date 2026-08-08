@@ -10,18 +10,24 @@ import {
   Logger,
   OpenAIProvider,
   PathDenylist,
+  PolicyApprovalGate,
   ShadowGit,
+  addToAllowlist,
   buildSystemPrompt,
   createAuthStrategy,
   createDefaultToolRegistry,
   createReadToolResultTool,
+  findMode,
   parseConfig,
+  removeFromAllowlist,
   resolveActiveProfile,
   runAgentTurn,
   validateProviderForm,
+  type ApprovableGroup,
   type Auth,
   type Checkpoint,
   type HostToUiMessage,
+  type LightCodeConfig,
   type ProfileInput,
   type ProfileSummary,
   type ProviderProfile,
@@ -29,6 +35,7 @@ import {
   type ToolCallSummary,
   type ToolExecutionContext,
   type UiToHostMessage,
+  type WorkspaceApprovals,
 } from '@light-code/core'
 import { WebviewApprovalGate } from './approvalGate.js'
 import { NodeFileSystem } from '../platform/filesystem.js'
@@ -107,7 +114,32 @@ export function wireChatBridge(
     transport.post(message)
   }
 
-  const approvalGate = new WebviewApprovalGate(post)
+  /**
+   * Approvals are keyed by workspace path but stored user-side (invariant 5) — a repo
+   * must not be able to grant itself permissions via `.lightcode/config.json`.
+   */
+  const approvalsKey = workspaceRoot ?? '__no_workspace__'
+  // Cached so the policy gate can answer synchronously mid-turn without re-reading config.
+  let cachedApprovals: WorkspaceApprovals = {}
+  let cachedModeId: string | undefined
+
+  async function loadSettings(): Promise<LightCodeConfig> {
+    const { config } = await configManager.load()
+    cachedApprovals = config.approvals?.[approvalsKey] ?? {}
+    cachedModeId = config.modeId
+    return config
+  }
+
+  async function saveApprovals(next: WorkspaceApprovals): Promise<void> {
+    const { config } = await configManager.load()
+    await configManager.save('user', { approvals: { ...config.approvals, [approvalsKey]: next } })
+    cachedApprovals = next
+    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: next })
+  }
+
+  const userGate = new WebviewApprovalGate(post)
+  // Policy answers what it can from settings; anything else falls through to the user.
+  const approvalGate = new PolicyApprovalGate(userGate, () => cachedApprovals)
 
   // Kept outside globalStorage's config area and outside the workspace, so a checkpoint
   // never lands inside the very tree it snapshots.
@@ -130,7 +162,7 @@ export function wireChatBridge(
 
     activeAbortController = new AbortController()
     try {
-      const { config } = await configManager.load()
+      const config = await loadSettings()
 
       // Invariant 6: cert/key paths are unreadable by every file tool. Re-added each
       // turn so a config change takes effect without restarting the session.
@@ -153,6 +185,9 @@ export function wireChatBridge(
         signal: activeAbortController.signal,
         truncationStore,
         approvalGate,
+        // Resolved once per turn, so the tool definitions stay byte-stable for the whole
+        // loop — swapping them mid-turn would break the prompt cache prefix (§12).
+        mode: findMode(config.modeId),
       }
       // Checkpoints degrade to unavailable rather than blocking the session when git
       // isn't installed — but edits then proceed with no rollback point, so say so.
@@ -218,7 +253,7 @@ export function wireChatBridge(
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     } finally {
       // Never leave the loop parked on an approval that can no longer be answered.
-      approvalGate.denyAll()
+      userGate.denyAll()
       activeAbortController = undefined
     }
   }
@@ -413,6 +448,43 @@ export function wireChatBridge(
     }
   }
 
+  async function postSettings(): Promise<void> {
+    await loadSettings()
+    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: cachedApprovals })
+  }
+
+  /** Approve now, and remember it for this workspace. */
+  async function handleAlwaysAllow(id: string, scope: 'tool' | 'command'): Promise<void> {
+    const request = userGate.getRequest(id)
+    userGate.resolve(id, 'approve')
+    if (request === undefined) return
+
+    if (scope === 'command' && request.preview.kind === 'command') {
+      // Remembers the exact string from ground truth, not from the model's arguments.
+      await saveApprovals({
+        ...cachedApprovals,
+        allowedCommands: addToAllowlist(request.preview.command, cachedApprovals.allowedCommands ?? []),
+      })
+      return
+    }
+    await saveApprovals({
+      ...cachedApprovals,
+      allowedTools: addToAllowlist(request.toolName, cachedApprovals.allowedTools ?? []),
+    })
+  }
+
+  async function handleSetAutoApprove(group: ApprovableGroup, enabled: boolean): Promise<void> {
+    await saveApprovals({
+      ...cachedApprovals,
+      autoApprove: { ...cachedApprovals.autoApprove, [group]: enabled },
+    })
+  }
+
+  async function handleSetMode(modeId: string): Promise<void> {
+    await configManager.save('user', { modeId: findMode(modeId).id })
+    await postSettings()
+  }
+
   const unsubscribe = transport.onMessage((raw) => {
     const message = raw as UiToHostMessage
     if (message.type === 'sendMessage') {
@@ -425,11 +497,29 @@ export function wireChatBridge(
       void handleSendMessage(message.text)
     } else if (message.type === 'cancel') {
       activeAbortController?.abort()
-      approvalGate.denyAll()
+      userGate.denyAll()
     } else if (message.type === 'approvalResponse') {
-      approvalGate.resolve(message.id, message.decision)
+      userGate.resolve(message.id, message.decision)
+    } else if (message.type === 'approvalResponseAlways') {
+      void handleAlwaysAllow(message.id, message.scope)
     } else if (message.type === 'rollback') {
       void handleRollback()
+    } else if (message.type === 'requestSettings') {
+      void postSettings()
+    } else if (message.type === 'setMode') {
+      void handleSetMode(message.modeId)
+    } else if (message.type === 'setAutoApprove') {
+      void handleSetAutoApprove(message.group, message.enabled)
+    } else if (message.type === 'revokeAllowedTool') {
+      void saveApprovals({
+        ...cachedApprovals,
+        allowedTools: removeFromAllowlist(message.toolName, cachedApprovals.allowedTools ?? []),
+      })
+    } else if (message.type === 'revokeAllowedCommand') {
+      void saveApprovals({
+        ...cachedApprovals,
+        allowedCommands: removeFromAllowlist(message.command, cachedApprovals.allowedCommands ?? []),
+      })
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
     } else if (message.type === 'saveProfile') {
@@ -450,7 +540,7 @@ export function wireChatBridge(
   return {
     dispose: () => {
       // Disposing while a turn awaits approval would otherwise leak a pending promise.
-      approvalGate.denyAll()
+      userGate.denyAll()
       unsubscribe()
     },
   }

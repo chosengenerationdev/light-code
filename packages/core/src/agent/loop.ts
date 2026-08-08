@@ -1,6 +1,10 @@
 import { requiresApproval, type ApprovalGate } from '../approval/types.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
+import { CODE_MODE } from '../modes/builtin.js'
+import { toolsForMode } from '../modes/resolve.js'
+import type { Mode } from '../modes/types.js'
 import type { ChatProvider, ChatStreamOptions, ToolCall } from '../providers/types.js'
+import { toToolDefinitions } from '../tools/registry.js'
 import type { Tool, ToolExecutionContext, ToolPreview, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { Conversation } from './messages.js'
 import { truncateToolResult, type TruncationStore } from './truncate.js'
@@ -25,6 +29,8 @@ export interface RunAgentTurnOptions {
   approvalGate?: ApprovalGate
   /** Omitted means no checkpoint is taken (e.g. git unavailable). */
   shadowGit?: ShadowGit
+  /** Restricts which tool groups are available. Defaults to Code (everything). */
+  mode?: Mode
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
@@ -35,10 +41,22 @@ type PreparedCall =
   | { ok: false; result: ToolResult }
 
 /** Resolves and validates a tool call without running it, so approval sees real params. */
-function prepareToolCall(toolCall: ToolCall, registry: ToolRegistry): PreparedCall {
+function prepareToolCall(toolCall: ToolCall, registry: ToolRegistry, mode: Mode): PreparedCall {
   const tool = registry.get(toolCall.name)
   if (tool === undefined) {
     return { ok: false, result: { content: `Unknown tool "${toolCall.name}".`, isError: true } }
+  }
+
+  // Defence in depth: the tool was already withheld from the system prompt, but earlier
+  // turns in the history may still reference it after a mid-session mode switch.
+  if (!mode.groups.includes(tool.group)) {
+    return {
+      ok: false,
+      result: {
+        content: `"${tool.name}" is not available in ${mode.name} mode.`,
+        isError: true,
+      },
+    }
   }
 
   let params: unknown
@@ -86,8 +104,9 @@ async function runOneToolCall(
   options: RunAgentTurnOptions,
   events: AgentTurnEvents,
   checkpoints: CheckpointTracker,
+  mode: Mode,
 ): Promise<ToolResult> {
-  const prepared = prepareToolCall(toolCall, registry)
+  const prepared = prepareToolCall(toolCall, registry, mode)
   if (!prepared.ok) return prepared.result
 
   const { tool, params } = prepared
@@ -155,7 +174,10 @@ export async function runAgentTurn(
 
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
   const mistakeCounts = new Map<string, number>()
-  const tools = toolRegistry.toToolDefinitions()
+  const mode = options.mode ?? CODE_MODE
+  // Filtered before definitions are built: an excluded tool never reaches the system
+  // prompt, so the model is never told it exists (§8).
+  const tools = toToolDefinitions(toolsForMode(toolRegistry, mode))
   let checkpointTaken = false
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
@@ -207,7 +229,7 @@ export async function runAgentTurn(
       markCheckpointTaken: () => {
         checkpointTaken = true
       },
-    })
+    }, mode)
     // The conversation gets the capped text; the UI event carries the full result so the
     // user still sees everything that actually happened.
     const forModel =

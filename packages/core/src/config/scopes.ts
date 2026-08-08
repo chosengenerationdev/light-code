@@ -6,7 +6,16 @@ import type { LightCodeConfig } from './schema.js'
  * `profiles` list and `activeProfileId` are restricted, not just `baseUrl`/`auth`
  * within a profile: injecting a whole new profile is just as dangerous as editing one.
  */
-export const USER_SCOPE_ONLY_KEYS = ['profiles', 'activeProfileId', 'certDir', 'python.uvPath'] as const
+export const USER_SCOPE_ONLY_KEYS = [
+  'profiles',
+  'activeProfileId',
+  'certDir',
+  'python.uvPath',
+  // Added in Phase 4. Auto-approve settings are per-workspace in behaviour but stored
+  // user-side: a repo that could ship its own pre-approvals could run shell commands
+  // unprompted the moment you opened it.
+  'approvals',
+] as const
 
 export interface ScopeMergeResult {
   config: LightCodeConfig

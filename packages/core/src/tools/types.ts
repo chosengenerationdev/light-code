@@ -5,6 +5,12 @@ import type { Terminal } from '../platform/terminal.js'
 
 export type ToolGroup = 'read' | 'edit' | 'command' | 'mcp' | 'always'
 
+/**
+ * Groups that can be auto-approved. `always` is excluded because it is never gated at
+ * all — control tools perform no work, so there is nothing to approve.
+ */
+export type ApprovableGroup = Exclude<ToolGroup, 'always'>
+
 export interface ToolResult {
   content: string
   isError?: boolean

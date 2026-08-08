@@ -1,15 +1,19 @@
-import type {
-  ApprovalDecision,
-  HostToUiMessage,
-  ProfileInput,
-  ProfileSummary,
-  Transport,
-  UiToHostMessage,
+import {
+  DEFAULT_MODE_ID,
+  type ApprovalDecision,
+  type HostToUiMessage,
+  type ProfileInput,
+  type ProfileSummary,
+  type ApprovableGroup,
+  type Transport,
+  type UiToHostMessage,
+  type WorkspaceApprovals,
 } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { Chat } from './Chat.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
+import { ModeSelector } from './ModeSelector.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
 import { BackIcon, SettingsIcon } from './icons.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
@@ -37,6 +41,8 @@ export function App(props: AppProps): ReactElement {
   const [profilesLoaded, setProfilesLoaded] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | undefined>(undefined)
   const [canRollback, setCanRollback] = useState(false)
+  const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID)
+  const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -71,6 +77,9 @@ export function App(props: AppProps): ReactElement {
           group: message.group,
           preview: message.preview,
         })
+      } else if (message.type === 'settings') {
+        setModeId(message.modeId)
+        setApprovals(message.approvals)
       } else if (message.type === 'checkpointAvailable') {
         setCanRollback(true)
       } else if (message.type === 'rolledBack') {
@@ -97,8 +106,8 @@ export function App(props: AppProps): ReactElement {
 
     // Fetch once on mount so the fresh-install CTA (or the chat) can render correctly
     // without the user having to open Settings first.
-    const outgoing: UiToHostMessage = { type: 'requestProfiles' }
-    props.transport.post(outgoing)
+    props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestSettings' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -125,6 +134,26 @@ export function App(props: AppProps): ReactElement {
   const decideApproval = (id: string, decision: ApprovalDecision): void => {
     setPendingApproval(undefined)
     props.transport.post({ type: 'approvalResponse', id, decision } satisfies UiToHostMessage)
+  }
+
+  const alwaysAllow = (id: string, scope: 'tool' | 'command'): void => {
+    setPendingApproval(undefined)
+    props.transport.post({ type: 'approvalResponseAlways', id, scope } satisfies UiToHostMessage)
+  }
+
+  const changeMode = (nextModeId: string): void => {
+    setModeId(nextModeId)
+    props.transport.post({ type: 'setMode', modeId: nextModeId } satisfies UiToHostMessage)
+  }
+
+  const setAutoApprove = (group: ApprovableGroup, enabled: boolean): void => {
+    props.transport.post({ type: 'setAutoApprove', group, enabled } satisfies UiToHostMessage)
+  }
+  const revokeTool = (toolName: string): void => {
+    props.transport.post({ type: 'revokeAllowedTool', toolName } satisfies UiToHostMessage)
+  }
+  const revokeCommand = (command: string): void => {
+    props.transport.post({ type: 'revokeAllowedCommand', command } satisfies UiToHostMessage)
   }
 
   const rollback = (): void => {
@@ -175,7 +204,10 @@ export function App(props: AppProps): ReactElement {
           flexShrink: 0,
         }}
       >
-        <strong>Light Code</strong>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <strong>Light Code</strong>
+          {view === 'chat' && <ModeSelector modeId={modeId} disabled={isStreaming} onChange={changeMode} />}
+        </div>
         {view === 'chat' ? (
           <button type="button" aria-label="Settings" title="Settings" style={iconButtonStyle('ghost')} onClick={openSettings}>
             <SettingsIcon />
@@ -197,6 +229,10 @@ export function App(props: AppProps): ReactElement {
             onSetActive={setActiveProfile}
             onExport={exportConfig}
             onImport={importConfig}
+            approvals={approvals}
+            onSetAutoApprove={setAutoApprove}
+            onRevokeTool={revokeTool}
+            onRevokeCommand={revokeCommand}
           />
         ) : hasNoProviders ? (
           <div style={{ padding: 20, textAlign: 'center' }}>
@@ -215,6 +251,7 @@ export function App(props: AppProps): ReactElement {
             onSend={send}
             onCancel={cancel}
             onDecideApproval={decideApproval}
+            onAlwaysAllow={alwaysAllow}
             onRollback={rollback}
           />
         )}

@@ -1,35 +1,74 @@
-import type { ReactElement } from 'react'
+import type { ApprovableGroup, WorkspaceApprovals } from '@light-code/core/browser'
+import { useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
+import { ApprovalsTab } from './ApprovalsTab.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 
+export interface SettingsPanelProps extends ProvidersTabProps {
+  approvals: WorkspaceApprovals
+  onSetAutoApprove: (group: ApprovableGroup, enabled: boolean) => void
+  onRevokeTool: (toolName: string) => void
+  onRevokeCommand: (command: string) => void
+}
+
+type TabId = 'providers' | 'approvals'
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'providers', label: 'Providers' },
+  { id: 'approvals', label: 'Approvals' },
+]
+
 /**
- * Tabbed shell. Providers is the only tab in Phase 2b — Approvals, Modes, and MCP
- * tabs land in later phases and slot in here without redesigning this shell.
+ * Tabbed shell. MCP and Modes tabs slot in here in later phases without redesigning it.
+ * (Modes has no tab of its own — the mode selector lives in the chat header, where it is
+ * actually used.)
  */
-export function SettingsPanel(props: ProvidersTabProps): ReactElement {
+export function SettingsPanel(props: SettingsPanelProps): ReactElement {
+  const [active, setActive] = useState<TabId>('providers')
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          display: 'flex',
-          borderBottom: `1px solid ${colors.border}`,
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            padding: '8px 12px',
-            fontFamily,
-            fontSize: 12,
-            color: colors.foreground,
-            borderBottom: `2px solid ${colors.buttonBackground}`,
-          }}
-        >
-          Providers
-        </div>
+      <div style={{ display: 'flex', borderBottom: `1px solid ${colors.border}`, flexShrink: 0 }}>
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActive(tab.id)}
+            style={{
+              padding: '8px 12px',
+              fontFamily,
+              fontSize: 12,
+              background: 'transparent',
+              color: active === tab.id ? colors.foreground : colors.muted,
+              border: 'none',
+              borderBottom: `2px solid ${active === tab.id ? colors.buttonBackground : 'transparent'}`,
+              cursor: 'pointer',
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        <ProvidersTab {...props} />
+        {active === 'providers' ? (
+          <ProvidersTab
+            profiles={props.profiles}
+            activeProfileId={props.activeProfileId}
+            onSave={props.onSave}
+            onDuplicate={props.onDuplicate}
+            onDelete={props.onDelete}
+            onSetActive={props.onSetActive}
+            onExport={props.onExport}
+            onImport={props.onImport}
+          />
+        ) : (
+          <ApprovalsTab
+            approvals={props.approvals}
+            onSetAutoApprove={props.onSetAutoApprove}
+            onRevokeTool={props.onRevokeTool}
+            onRevokeCommand={props.onRevokeCommand}
+          />
+        )}
       </div>
     </div>
   )

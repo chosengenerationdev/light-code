@@ -14,6 +14,7 @@ export interface ChatProps {
   onSend: (text: string) => void
   onCancel: () => void
   onDecideApproval: (id: string, decision: ApprovalDecision) => void
+  onAlwaysAllow: (id: string, scope: 'tool' | 'command') => void
   onRollback: () => void
 }
 
@@ -23,7 +24,11 @@ export function Chat(props: ChatProps): ReactElement {
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <MessageList messages={props.messages} error={props.error} />
         {props.pendingApproval !== undefined && (
-          <ApprovalPrompt approval={props.pendingApproval} onDecide={props.onDecideApproval} />
+          <ApprovalPrompt
+            approval={props.pendingApproval}
+            onDecide={props.onDecideApproval}
+            onAlwaysAllow={props.onAlwaysAllow}
+          />
         )}
       </div>
       {props.canRollback && (
