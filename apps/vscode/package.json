@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -16,7 +16,7 @@
   "homepage": "https://github.com/chosengenerationdev/light-code#readme",
   "qna": "https://github.com/chosengenerationdev/light-code/issues",
   "engines": {
-    "vscode": "^1.102.0"
+    "vscode": "^1.84.0"
   },
   "categories": [
     "AI",
@@ -76,7 +76,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
-    "@types/vscode": "1.102.0",
+    "@types/vscode": "1.84.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1"
   },

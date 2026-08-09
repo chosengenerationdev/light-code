@@ -1366,6 +1366,13 @@ worth having caught in Phase 3+'s test strategy for the UI side):**
   `@types/vscode` is pinned exactly (no `^`) so that using an API newer than the
   `engines` floor is a typecheck error, not a runtime surprise on an older VS Code.
   Bump both together, deliberately, if the minimum supported version ever changes.
+  **Lowered to `1.84.0` in 0.1.1** after a real install failed on a VS Code 1.98 machine.
+  The floor was always a policy ("about a year old"), never an API requirement — the
+  newest API the extension touches is `SecretStorage` (1.53) — so it was excluding users
+  for nothing. 1.84 matches Roo Code's final release (v3.54.0), which is the comparison
+  the user asked for. The pinning discipline is what made this a safe two-line change:
+  lowering `@types/vscode` to match and getting a clean typecheck *is* the proof that no
+  newer API is in use. Do not raise the floor again without a specific API that needs it.
 
 **Surprised us in Phase 1:**
 - TypeScript wasn't auto-discovering `@types/node` under this pnpm layout — `process`,
