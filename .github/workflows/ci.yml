@@ -30,3 +30,53 @@ jobs:
       - run: pnpm build
 
       - run: pnpm test
+
+      # Invariant 4: no telemetry, no update checks, no remote assets. Fails on any host in
+      # the built output that is not on the reviewed allowlist, and on any network
+      # primitive in the webview bundle.
+      - run: pnpm check:no-external-urls
+
+      # Packages a VSIX, then loads and activates it with a stubbed `vscode`. Everything
+      # above passed while the published extension could not activate at all, because
+      # nothing looked at the artifact — see scripts/smoke-test-vsix.mjs.
+      - name: Package and smoke-test the VSIX
+        run: |
+          pnpm package
+          pnpm smoke
+
+  # Proves a full session works with no route to the internet, per CLAUDE.md §17. The point
+  # is not that the model responds — there is no gateway to reach — but that nothing in
+  # startup, activation, config, or tool execution silently depends on being online.
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --ignore-scripts
+
+      - run: pnpm build
+
+      # Everything after this point runs with outbound traffic blocked. Loopback stays up
+      # so the test HTTPS servers in the suite still work — those are the point, not an
+      # exception: they prove TLS and streaming without reaching anything external.
+      - name: Block outbound network
+        run: |
+          sudo iptables -A OUTPUT -o lo -j ACCEPT
+          sudo iptables -A OUTPUT -d 127.0.0.0/8 -j ACCEPT
+          sudo iptables -A OUTPUT -p tcp --dport 443 -j REJECT
+          sudo iptables -A OUTPUT -p tcp --dport 80 -j REJECT
+
+      - name: Full suite with no route out
+        run: pnpm test
+
+      - name: Activation with no route out
+        run: |
+          pnpm package
+          pnpm smoke

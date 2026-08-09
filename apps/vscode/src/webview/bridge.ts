@@ -64,6 +64,7 @@ import { NodeFileSystem } from '../platform/filesystem.js'
 import { NodeTerminal } from '../platform/terminal.js'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { JsonTaskStore } from '../platform/taskStore.js'
+import { resolveRipgrepPath } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
 import { WebviewTransport } from '../platform/transport.js'
 
@@ -160,6 +161,9 @@ export function wireChatBridge(
   // touching an existing file. Session-scoped, so it lives alongside the conversation.
   const readFiles = new Set<string>()
   const denylist = new PathDenylist()
+  // Resolved once: the answer cannot change within a session, and a missing binary should
+  // be reported to the log once rather than on every turn.
+  const ripgrepPath = resolveRipgrepPath(context.extensionPath, logger)
   /** Certificates are re-read every request; without this the same warning would repeat. */
   const warnedExpiries = new Set<string>()
 
@@ -472,6 +476,9 @@ export function wireChatBridge(
         denylist,
         readFiles,
         signal: activeAbortController.signal,
+        // Supplied by the host, not imported by core: the binary is platform-specific and
+        // lives in the VSIX, so resolving it is a host concern (§4).
+        ...(ripgrepPath !== undefined ? { ripgrepPath } : {}),
       }
 
       // `@`-mentions are resolved here, not by the model: the user named these paths

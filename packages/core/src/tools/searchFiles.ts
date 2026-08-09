@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { rgPath } from '@vscode/ripgrep'
 import { z } from 'zod'
 import { resolveToolPath } from './paths.js'
 import type { Tool, ToolResult } from './types.js'
@@ -16,6 +15,7 @@ function isRipgrepNoMatchError(error: unknown): boolean {
 }
 
 function runRipgrepSearch(
+  rgPath: string,
   dir: string,
   pattern: string,
   filePattern: string | undefined,
@@ -45,8 +45,18 @@ export const searchFilesTool: Tool<SearchFilesParams> = {
     const resolved = await resolveToolPath(context, params.path)
     if (!resolved.ok) return { content: resolved.message, isError: true }
 
+    if (context.ripgrepPath === undefined) {
+      return { content: 'Search is unavailable: ripgrep was not found on this installation.', isError: true }
+    }
+
     try {
-      const output = await runRipgrepSearch(resolved.realPath, params.pattern, params.filePattern, context.signal)
+      const output = await runRipgrepSearch(
+        context.ripgrepPath,
+        resolved.realPath,
+        params.pattern,
+        params.filePattern,
+        context.signal,
+      )
       return { content: output.trim().length > 0 ? output : '(no matches)' }
     } catch (error) {
       return { content: `Search failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }

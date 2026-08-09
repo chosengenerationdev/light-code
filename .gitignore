@@ -10,3 +10,4 @@ coverage/
 .registry.json
 .lightcode/
 *.tsbuildinfo
+.ripgrep-cache/

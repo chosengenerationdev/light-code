@@ -1,22 +1,46 @@
 {
   "name": "light-code-vscode",
   "displayName": "Light Code",
-  "description": "A minimal agentic coding assistant for VS Code.",
+  "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/chosengenerationdev/light-code.git"
   },
+  "bugs": {
+    "url": "https://github.com/chosengenerationdev/light-code/issues"
+  },
+  "homepage": "https://github.com/chosengenerationdev/light-code#readme",
+  "qna": "https://github.com/chosengenerationdev/light-code/issues",
   "engines": {
     "vscode": "^1.102.0"
   },
   "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages",
     "Other"
   ],
+  "keywords": [
+    "ai",
+    "agent",
+    "chatgpt",
+    "claude",
+    "copilot",
+    "gemini",
+    "llm",
+    "mcp",
+    "openai",
+    "assistant"
+  ],
   "icon": "resources/icon-256.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {

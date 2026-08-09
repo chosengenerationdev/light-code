@@ -685,10 +685,55 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 7 code complete — see `IMPLEMENTATION_PLAN.md`. **Phases 6, 6b and
-7 have not been exercised in a real Extension Development Host** (see the manual list
-below); the backlog now spans five phases and is the main outstanding risk. Phase 8
-(release) not started.
+**Current phase:** Phase 8 (release) engineering complete; **not yet published**. Phases
+3–7 have still not been exercised in a real Extension Development Host — see
+`MANUAL_VERIFICATION.md`.
+
+**Phase 8 done — release engineering. It found a bug that would have shipped a dead
+extension:**
+- **`@vscode/ripgrep` was imported from core**, which put a *top-level* `require` for it
+  into the bundle. That package is not inside the VSIX under `--no-dependencies`, so
+  **every published install would have failed to activate with `MODULE_NOT_FOUND`** — not a
+  broken search tool, a dead extension. `pnpm build`, `pnpm typecheck`, `pnpm test` and
+  `vsce package` all passed. Nothing in the pipeline had ever looked at the artifact.
+- Fixed properly rather than patched: **core no longer knows ripgrep exists.** The binary
+  path arrives via `ToolExecutionContext.ripgrepPath`, supplied by the host — which is what
+  §4 required all along, since a platform-specific binary is a platform concern. The host
+  resolves `dist/bin/rg` (packaged) or falls back to `@vscode/ripgrep` (F5 from source),
+  and the fallback is a **lazy call expression inside a function**, never an import: an
+  import is hoisted back to a top-level require and reintroduces the bug. There is a
+  comment saying so at the call site. Missing ripgrep now degrades two tools with a clear
+  message instead of taking activation down.
+- `scripts/smoke-test-vsix.mjs` — **extracts the packaged VSIX, loads `extension.js` with a
+  stubbed `vscode`, and calls `activate()`.** This is the check whose absence let the above
+  through, and it runs in CI on every push. It also asserts that every asset the manifest
+  references is actually in the package.
+- `scripts/check-no-external-urls.mjs` — **invariant 4's CI check, which CLAUDE.md had
+  claimed since Phase 0 and which did not exist.** Not "no URL strings": presets and
+  placeholders legitimately appear in the bundle. It is (a) an allowlist of hosts, each
+  with a recorded reason, so a *new* host is a deliberate decision rather than an unnoticed
+  diff, and (b) **no network primitives at all in `webview.js`** — `fetch`, `XMLHttpRequest`,
+  `WebSocket`, `EventSource`, `sendBeacon`. Verified non-vacuous by planting an exfiltrating
+  `fetch()` and confirming both detectors fire.
+- **Platform-specific VSIXes.** ripgrep ships one npm package per platform, so the release
+  workflow builds six targets and each carries exactly one ~5MB binary.
+  `scripts/fetch-ripgrep.mjs` fetches a cross-platform binary via `npm pack` (a build step,
+  not something the product does). `esbuild.mjs --target=` selects it and **clears
+  `dist/bin` first** — otherwise a linux build followed by a win32 build ships both.
+- `.github/workflows/release.yml` — manual dispatch only, with an explicit publish choice.
+  Refuses to run if the manifest version does not match the requested one. Open VSX is
+  `continue-on-error` so a failure there cannot leave the main marketplace half-published.
+- CI now also runs an **offline job**: full suite plus VSIX activation with outbound 80/443
+  rejected, proving nothing in startup silently depends on being online.
+- README rewritten — **it is the marketplace listing page**, and it previously said
+  "early scaffold. Not yet usable." Now carries the honest capabilities-and-limits section
+  §3 requires, including no sandboxing and no protection from same-user processes.
+- Changesets configured with `@light-code/core` and `@light-code/ui` on the ignore list;
+  they are bundled, never published, and would otherwise be pushed to npm every release.
+
+**Still to do before publishing:** create the Azure DevOps PAT and the Open VSX token (only
+the user can), add them as `VSCE_PAT` / `OVSX_PAT` repository secrets, and run the Release
+workflow. `pnpm verify:release` runs the whole gate locally.
 
 **Phase 7 done — Anthropic and Gemini, images, `@` mentions, context management:**
 - `providers/schema.ts` — tool schema translation per wire format, the surface §11 names as

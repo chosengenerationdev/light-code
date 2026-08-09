@@ -29,6 +29,19 @@ export interface ToolExecutionContext {
    * invariant, eliminates a class of hallucinated edits. See CLAUDE.md §6.
    */
   readFiles: Set<string>
+  /**
+   * Absolute path to the `rg` executable, supplied by the host.
+   *
+   * Core deliberately does **not** import `@vscode/ripgrep`. That package resolves a
+   * platform-specific binary on disk, which makes it a platform concern (§4) — and
+   * importing it from core put a top-level `require` into the bundled extension for a
+   * package that is not inside the VSIX, so loading the published extension failed
+   * outright with `MODULE_NOT_FOUND`. Build, typecheck and package all passed; only
+   * installing it revealed the problem.
+   *
+   * Omitted disables the ripgrep-backed paths, which degrade rather than throw.
+   */
+  ripgrepPath?: string
   signal?: AbortSignal
 }
 

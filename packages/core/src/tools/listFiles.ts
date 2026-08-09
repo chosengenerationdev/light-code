@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { rgPath } from '@vscode/ripgrep'
 import { z } from 'zod'
 import { resolveToolPath } from './paths.js'
 import type { Tool, ToolResult } from './types.js'
@@ -14,7 +13,7 @@ function isRipgrepNoMatchError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === 1
 }
 
-function runRipgrepFiles(dir: string, signal: AbortSignal | undefined): Promise<string[]> {
+function runRipgrepFiles(rgPath: string, dir: string, signal: AbortSignal | undefined): Promise<string[]> {
   return new Promise((resolve, reject) => {
     execFile(
       rgPath,
@@ -47,8 +46,14 @@ export const listFilesTool: Tool<ListFilesParams> = {
     if (!resolved.ok) return { content: resolved.message, isError: true }
 
     if (params.recursive === true) {
+      if (context.ripgrepPath === undefined) {
+        return {
+          content: 'Recursive listing is unavailable: ripgrep was not found. List one directory at a time instead.',
+          isError: true,
+        }
+      }
       try {
-        const files = await runRipgrepFiles(resolved.realPath, context.signal)
+        const files = await runRipgrepFiles(context.ripgrepPath, resolved.realPath, context.signal)
         return { content: files.length > 0 ? files.join('\n') : '(no files found)' }
       } catch (error) {
         return { content: `Could not list files: ${error instanceof Error ? error.message : String(error)}`, isError: true }

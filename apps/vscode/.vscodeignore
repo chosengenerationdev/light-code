@@ -1,0 +1,27 @@
+# Everything the extension does not need at runtime.
+#
+# `vsce package --no-dependencies` already skips node_modules, but @vscode/ripgrep is a
+# genuine runtime dependency (it is marked external in esbuild.mjs because it resolves its
+# binary via createRequire, which esbuild cannot bundle). The negated rules at the bottom
+# put it back.
+
+src/**
+tsconfig.json
+tsconfig.tsbuildinfo
+esbuild.mjs
+.vscodeignore
+
+# Source maps are ~4MB and only useful with the repo checked out alongside.
+**/*.map
+
+# Only the two icons the manifest references are needed.
+resources/icon-512.png
+resources/icon.png
+resources/icon.svg
+resources/mark-white.png
+
+# ripgrep: the binary and the shim that locates it.
+!node_modules/@vscode/ripgrep/**
+node_modules/@vscode/ripgrep/**/*.md
+node_modules/@vscode/ripgrep/**/*.ts
+node_modules/@vscode/ripgrep/.github/**

@@ -1,0 +1,142 @@
+name: Release
+
+# Publishing is deliberately manual. Tagging is easy to do by accident; asking for a
+# version and an explicit confirmation is not.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, e.g. 0.1.0 (must match apps/vscode/package.json)'
+        required: true
+      publish:
+        description: 'Publish to the marketplaces? "no" builds and attaches artifacts only.'
+        required: true
+        default: 'no'
+        type: choice
+        options: ['no', 'yes']
+
+jobs:
+  # One VSIX per platform, because ripgrep ships a platform-specific binary and each
+  # package carries exactly one. The marketplace serves the right build automatically.
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win32-x64
+            os: windows-latest
+          - target: win32-arm64
+            os: windows-latest
+          - target: darwin-x64
+            os: macos-latest
+          - target: darwin-arm64
+            os: macos-latest
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: linux-arm64
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --ignore-scripts
+
+      - name: Confirm the manifest matches the requested version
+        shell: bash
+        run: |
+          declared=$(node -p "require('./apps/vscode/package.json').version")
+          if [ "$declared" != "${{ inputs.version }}" ]; then
+            echo "apps/vscode/package.json says $declared but you asked for ${{ inputs.version }}."
+            echo "Run 'pnpm changeset version' and commit before releasing."
+            exit 1
+          fi
+
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # A runner only installs the ripgrep binary for its own platform, so cross-targets
+      # (win32-arm64 on x64, linux-arm64 on x64) need theirs fetched explicitly.
+      - name: Fetch the ripgrep binary for ${{ matrix.target }}
+        run: node scripts/fetch-ripgrep.mjs ${{ matrix.target }}
+
+      - name: Build for ${{ matrix.target }}
+        run: pnpm --filter light-code-vscode exec node ./esbuild.mjs --target=${{ matrix.target }}
+
+      - run: pnpm check:no-external-urls
+
+      - name: Package
+        run: pnpm --filter light-code-vscode exec vsce package --no-dependencies --target ${{ matrix.target }}
+
+      # Only meaningful where the runner can execute the binary it just packaged; a
+      # win32-arm64 VSIX cannot be activated on an x64 runner.
+      - name: Smoke-test the VSIX
+        if: matrix.target == 'win32-x64' || matrix.target == 'darwin-arm64' || matrix.target == 'linux-x64'
+        run: pnpm smoke
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: apps/vscode/*.vsix
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    if: inputs.publish == 'yes'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --ignore-scripts
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: vsix-*
+          merge-multiple: true
+
+      - name: Publish to the Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for vsix in artifacts/*.vsix; do
+            echo "Publishing $vsix"
+            npx @vscode/vsce publish --packagePath "$vsix" --pat "$VSCE_PAT"
+          done
+
+      # Open VSX serves VSCodium and other non-Microsoft builds. Failing here must not
+      # leave the main marketplace half-published, so it runs after and is non-fatal.
+      - name: Publish to Open VSX
+        continue-on-error: true
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          for vsix in artifacts/*.vsix; do
+            echo "Publishing $vsix to Open VSX"
+            npx ovsx publish "$vsix" --pat "$OVSX_PAT"
+          done
+
+      # Attached so air-gapped users can install a specific build by hand.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" artifacts/*.vsix \
+            --title "v${{ inputs.version }}" \
+            --generate-notes
