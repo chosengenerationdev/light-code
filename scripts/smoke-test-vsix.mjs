@@ -61,11 +61,20 @@ try {
     check(`referenced asset exists: ${relative}`, fs.existsSync(path.join(extensionRoot, relative)))
   }
 
+  // Mirrors resolveRipgrepPath: a universal VSIX nests binaries per platform, a
+  // platform-specific one puts a single binary at the top of `bin`.
   const executable = process.platform === 'win32' ? 'rg.exe' : 'rg'
+  const binDir = path.join(extensionRoot, 'dist', 'bin')
+  const flat = path.join(binDir, executable)
+  const perPlatform = path.join(binDir, `${process.platform}-${process.arch}`, executable)
+  const universalCount = fs.existsSync(binDir)
+    ? fs.readdirSync(binDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).length
+    : 0
+
   check(
-    'ripgrep binary is bundled',
-    fs.existsSync(path.join(extensionRoot, 'dist', 'bin', executable)),
-    'without it, search degrades — and it used to break activation entirely',
+    'a ripgrep binary for this platform is bundled',
+    fs.existsSync(flat) || fs.existsSync(perPlatform),
+    universalCount > 0 ? `universal build, ${universalCount} platforms` : 'platform-specific build',
   )
 
   // Stub `vscode` before loading. The extension host injects it; Node does not have it.

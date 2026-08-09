@@ -27,8 +27,28 @@ import type { Logger } from '@light-code/core'
  * than taking the extension down with it.
  */
 export function resolveRipgrepPath(extensionPath: string, logger?: Logger): string | undefined {
-  const bundled = path.join(extensionPath, 'dist', 'bin', process.platform === 'win32' ? 'rg.exe' : 'rg')
-  if (fs.existsSync(bundled)) return bundled
+  const executable = process.platform === 'win32' ? 'rg.exe' : 'rg'
+  const binDir = path.join(extensionPath, 'dist', 'bin')
+
+  // A universal VSIX carries every platform under its own subdirectory; a platform-specific
+  // one carries a single binary at the top of `bin`. Both layouts ship, so both are checked.
+  for (const candidate of [
+    path.join(binDir, `${process.platform}-${process.arch}`, executable),
+    path.join(binDir, executable),
+  ]) {
+    if (fs.existsSync(candidate)) {
+      // A tarball extracted on Windows and repackaged loses the executable bit, and the
+      // marketplace does not restore it. Cheap to reassert; silently unrunnable otherwise.
+      if (process.platform !== 'win32') {
+        try {
+          fs.chmodSync(candidate, 0o755)
+        } catch {
+          // Read-only install location — if it was already executable this is harmless.
+        }
+      }
+      return candidate
+    }
+  }
 
   try {
     // Must stay a lazy call expression rather than an import: an import is hoisted to a

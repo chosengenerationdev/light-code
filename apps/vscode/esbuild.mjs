@@ -23,15 +23,44 @@ const target = targetArg?.slice('--target='.length) ?? `${process.platform}-${pr
  * `vsce package --no-dependencies`. That combination shipped an extension that failed to
  * activate at all, while build, typecheck and package all passed.
  */
+/** Targets a universal build bundles. Must match scripts/fetch-ripgrep.mjs. */
+const UNIVERSAL_TARGETS = ['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64']
+
 async function copyRipgrepBinary() {
   const outDir = path.join('dist', 'bin')
-  const executable = target.startsWith('win32') ? 'rg.exe' : 'rg'
-  const destination = path.join(outDir, executable)
 
   // Cleared first: building linux then win32 in the same tree would otherwise leave both
   // binaries behind, and every VSIX would carry 5MB of another platform's ripgrep.
   fs.rmSync(outDir, { recursive: true, force: true })
 
+  if (target === 'universal') {
+    // One VSIX for every platform, each binary in its own subdirectory. Larger, but it is
+    // a single file to upload by hand — which matters when publishing through the web UI
+    // rather than the release workflow.
+    let copied = 0
+    for (const platformTarget of UNIVERSAL_TARGETS) {
+      const executable = platformTarget.startsWith('win32') ? 'rg.exe' : 'rg'
+      const source = locateRipgrepBinary(platformTarget, executable)
+      if (source === undefined) {
+        console.warn(`[esbuild] universal build is missing ${platformTarget} — that platform will have no search.`)
+        continue
+      }
+      const destinationDir = path.join(outDir, platformTarget)
+      fs.mkdirSync(destinationDir, { recursive: true })
+      const destination = path.join(destinationDir, executable)
+      fs.copyFileSync(source, destination)
+      if (!platformTarget.startsWith('win32')) fs.chmodSync(destination, 0o755)
+      copied += 1
+    }
+    console.log(`[esbuild] universal build: ${copied}/${UNIVERSAL_TARGETS.length} ripgrep binaries bundled`)
+    if (copied < UNIVERSAL_TARGETS.length) {
+      console.warn('[esbuild] run `node scripts/fetch-ripgrep.mjs` to cache the rest before publishing.')
+    }
+    return
+  }
+
+  const executable = target.startsWith('win32') ? 'rg.exe' : 'rg'
+  const destination = path.join(outDir, executable)
   const source = locateRipgrepBinary(target, executable)
   if (source === undefined) {
     console.warn(
