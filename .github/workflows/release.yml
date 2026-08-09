@@ -111,28 +111,42 @@ jobs:
           pattern: vsix-*
           merge-multiple: true
 
+      # Each marketplace is independent. A missing token skips that channel rather than
+      # failing the run, so the GitHub release still happens and the other channel still
+      # publishes — getting an Azure DevOps account working should not block shipping.
       - name: Publish to the Visual Studio Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::warning::VSCE_PAT is not set — skipping the Visual Studio Marketplace."
+            exit 0
+          fi
           for vsix in artifacts/*.vsix; do
             echo "Publishing $vsix"
             npx @vscode/vsce publish --packagePath "$vsix" --pat "$VSCE_PAT"
           done
 
-      # Open VSX serves VSCodium and other non-Microsoft builds. Failing here must not
-      # leave the main marketplace half-published, so it runs after and is non-fatal.
+      # Open VSX serves VSCodium and other non-Microsoft builds, and needs no Microsoft
+      # account at all. Non-fatal so a failure here cannot leave the other channel
+      # half-published.
       - name: Publish to Open VSX
         continue-on-error: true
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::warning::OVSX_PAT is not set — skipping Open VSX."
+            exit 0
+          fi
           for vsix in artifacts/*.vsix; do
             echo "Publishing $vsix to Open VSX"
             npx ovsx publish "$vsix" --pat "$OVSX_PAT"
           done
 
-      # Attached so air-gapped users can install a specific build by hand.
+      # Needs no account beyond this repository, so it always runs. Air-gapped users — and
+      # anyone while a marketplace account is still being sorted out — install by hand:
+      #   code --install-extension light-code-vscode-<platform>-<version>.vsix
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -96,6 +96,28 @@ pnpm changeset
 Pick the bump, write a line aimed at someone reading a release note. Internal refactors and
 test-only changes do not need one.
 
+## Releasing
+
+`pnpm verify:release` runs the whole gate locally: lint, typecheck, tests, build, the
+invariant-4 host check, packaging, and a smoke test that loads the packaged VSIX and calls
+`activate()`. That last one exists because a published build once could not activate at all
+while every other check passed.
+
+Then Actions → **Release** → Run workflow. It builds one VSIX per platform (ripgrep ships a
+platform-specific binary), refuses to run if the manifest version does not match the one you
+typed, and attaches every artifact to a GitHub release.
+
+Three channels, each independent:
+
+| Channel | Needs | If the token is missing |
+|---|---|---|
+| GitHub release | nothing | always runs |
+| Open VSX | an Open VSX token (GitHub + Eclipse account) | skipped with a warning |
+| VS Code Marketplace | an Azure DevOps PAT, scope Marketplace → Manage | skipped with a warning |
+
+A missing token skips that channel rather than failing the run, so a marketplace account
+problem never blocks the others.
+
 ## Reporting bugs
 
 Include your VS Code version, your OS, the wire format and model, and whatever is in the
