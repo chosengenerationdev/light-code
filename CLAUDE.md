@@ -278,9 +278,15 @@ user-defined modes are deferred.
 
 Three wire adapters, one interface:
 
-- **OpenAI-compatible** — ships first. DeepSeek is a preset over this (base URL + label).
-- **Anthropic Messages** — phase 7.
-- **Gemini `generateContent`** — phase 7.
+- **OpenAI-compatible** — DeepSeek is a preset over this (base URL + label).
+- **Anthropic Messages** — built in Phase 7.
+- **Gemini `generateContent`** — built in Phase 7.
+
+`providers/factory.ts` picks the adapter from `profile.wireFormat`. Because auth is a
+separate axis, that is a one-line switch and mutual TLS composes with Anthropic exactly as
+it does with OpenAI. **An API key's header name is wire-format-specific** (`x-api-key`,
+`x-goog-api-key`, `Authorization: Bearer`) and is derived from the profile — getting it
+wrong is a 401 that reads as a bad key.
 
 Presets prefill base URL and wire format. **Every field remains user-editable.** No
 hardcoded endpoints anywhere (invariant 3).
@@ -664,7 +670,8 @@ Record the reason, not just the difference.
 |---|---|
 | Greenfield, not a fork | Roo is archived; no upstream fixes. Minimalism is the product. |
 | Deterministic matching, no fuzzy threshold | Roo's Levenshtein matcher produced both false rejections and silent-misapply risk. |
-| One wire adapter in v1 | Gateway fronting is the deployment; avoids auditing SDKs for hidden endpoints. |
+| One wire adapter in v1 (all three from Phase 7) | Gateway fronting is the deployment; avoids auditing SDKs for hidden endpoints. Anthropic and Gemini landed in Phase 7, still hand-written over `HttpClient` rather than via their SDKs, for the same reason. |
+| `@` mentions resolved host-side, not as a tool | The user named the path, so there is nothing for the model to decide and nothing to approve. Confinement and the deny list still apply, because the path is user-typed text rather than a capability. |
 | Exact-match command allowlist, no patterns | Pattern matching requires tokenising PowerShell correctly, and a bug there auto-approves a chained destructive command. Byte-for-byte matching needs no parser, so it is safe on every platform — see §8. |
 | No browser tool | Out of scope. Browser access, if wanted, is a user-configured MCP server — not something we ship. |
 | ~~No semantic search~~ — **reversed 2026-08-09** | Originally excluded because embeddings conflict with the offline posture. The user overrode it: the deployment context is an organisation with an internal gateway, where an internal vector store and embedding endpoint break nothing, and codebase indexing is a capability Roo shipped and people use. Now Phase 8b — opt-in and disabled by default, so the offline posture holds for anyone who leaves it off. Both original objections survive as constraints rather than blocks; see §12. |
@@ -678,9 +685,75 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 6b code complete — see `IMPLEMENTATION_PLAN.md`. **Not yet
-exercised in a real Extension Development Host** (see the manual list below). Phase 7
-(Anthropic/Gemini, images, context management) not started.
+**Current phase:** Phase 7 code complete — see `IMPLEMENTATION_PLAN.md`. **Phases 6, 6b and
+7 have not been exercised in a real Extension Development Host** (see the manual list
+below); the backlog now spans five phases and is the main outstanding risk. Phase 8
+(release) not started.
+
+**Phase 7 done — Anthropic and Gemini, images, `@` mentions, context management:**
+- `providers/schema.ts` — tool schema translation per wire format, the surface §11 names as
+  a silent-failure source. The rule is **translate structure, drop what a target cannot
+  represent, never pass through and hope**: a provider that does not understand a keyword
+  usually *ignores* it, so the model emits arguments the tool rejects and nothing points at
+  the schema. Gemini is the strict one — `additionalProperties`, `oneOf`, `minLength` and
+  friends are a 400, not a warning — so they are pruned **recursively**. Pruning only the
+  top level looks correct against a flat schema and breaks on any nested array or object;
+  there is a test for exactly that, and another proving a property literally *named*
+  `format` or `default` is not mistaken for a keyword.
+- `providers/anthropic.ts` — three divergences, each silent if missed: the system prompt is
+  a top-level `system` parameter, tool results are `user` messages carrying `tool_result`
+  blocks (and **consecutive results must be merged**, or parallel tool calls produce an
+  invalid alternation), and content is a block array. Streaming accumulates
+  `input_json_delta` fragments per block index until `content_block_stop`.
+- `providers/gemini.ts` — diverges further. Model id in the URL path; **`alt=sse` is
+  required** or the response is a chunked JSON array that parses fine until a large response
+  splits mid-object; the assistant role is `model`; and **function calls carry no id**,
+  while the loop, transcript and approval gate all key results by id — so one is synthesised
+  and mapped back by *name*, which is all Gemini offers to match on.
+- **`ApiKeyAuthStrategy` is now wire-format-aware.** Anthropic wants `x-api-key`, Gemini
+  wants `x-goog-api-key`, OpenAI wants `Authorization: Bearer`. Hardcoding Bearer would have
+  produced a 401 that reads as a bad key rather than a bad header. Derived from the profile,
+  still overridable for a gateway that fronts a provider differently.
+- `context/supersede.ts` — drops superseded `read_file` results. Two constraints: only
+  reads (a repeated `execute_command` is not redundant — running the tests twice gives two
+  real answers), and the tool message is **replaced, not removed**, because deleting it
+  orphans the tool call and every provider rejects that. Keyed on full arguments, so reading
+  lines 1–100 and then 200–300 does not supersede.
+- `context/compact.ts` — `findSafeBoundary` walks **backwards** from the preferred cut until
+  no tool call is separated from its result; forwards would silently discard turns the user
+  just had. Returns 0 for "do not compact" rather than cutting anyway. Failure leaves history
+  untouched, and a summary larger than what it replaced is refused.
+- `context/budget.ts` — estimates, and the UI says so. A real tokeniser means a WASM blob
+  per encoding and would still be wrong for a gateway that rewrites the prompt; the point is
+  proportion, and a 10% error does not change "tool results are 70% of the window".
+- `context/mentions.ts` — **`@` mentions, requested mid-phase.** Not a tool: the user named
+  the path, so there is nothing to decide and nothing to approve. But a mention path is
+  user-typed text, not a capability, so it goes through `confine()` and the deny list
+  exactly as a tool path does — `@../../../.ssh/id_rsa` fails the same way.
+- **`Conversation` now holds two views.** `toArray()` is the full record (persisted and
+  rendered); `toModelMessages()` applies compaction. Compacting in place would save the same
+  tokens but turn the stored transcript into a summary of the session rather than the
+  session — which Phase 6b explicitly forbids.
+- UI: `TokenBar` (proportional bar, expandable breakdown, cache hit rate), composer image
+  attachment via button/paste/drop gated on the capability table, and `@` autocomplete
+  backed by `vscode.workspace.findFiles` so `files.exclude` is honoured for free.
+- 373 unit tests (up from 272).
+
+**Prefix stability is now asserted in CI, not just watched.** The plan's Verify step was
+"run a 40-turn session and watch the token bar; if cache hit rate collapses, something is
+mutating the prefix". That is a good live check but slow and indirect, so
+`agent/prefixStability.test.ts` asserts the property directly across **all three adapters**:
+three turns with a growing conversation must produce a byte-identical tool block, and
+Anthropic's `system` / Gemini's `systemInstruction` must not drift. Key *ordering* is
+covered too — two deeply-equal objects that serialise differently defeat a prefix cache just
+as thoroughly as different content.
+
+**Not yet verified against live Anthropic or Gemini endpoints.** Both adapters are covered
+by mock-stream tests built from the documented event shapes, and DeepSeek still works
+through the OpenAI adapter, but neither new wire format has been exercised against the real
+service. Watch specifically for: Anthropic's alternation rules on a long tool-heavy session,
+and whether Gemini's function-call-name matching survives two calls to the same tool in one
+turn.
 
 **Plan changed 2026-08-09 — Phase 8b, vector stores and semantic retrieval.** User-requested:
 OpenSearch, Qdrant, or Chroma, selectable per data type, defaulting to Qdrant for codebase

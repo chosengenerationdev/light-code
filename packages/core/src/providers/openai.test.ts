@@ -176,8 +176,13 @@ describe('OpenAIProvider', () => {
 
     const parsed = JSON.parse(capturedBody ?? '{}') as { tools?: unknown; tool_choice?: unknown }
     expect(parsed.tool_choice).toBe('auto')
+    // `properties: {}` is added by normalizeObjectSchema — some gateways reject an object
+    // schema without it, which surfaces as a rejected request rather than a schema error.
     expect(parsed.tools).toEqual([
-      { type: 'function', function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object' } } },
+      {
+        type: 'function',
+        function: { name: 'read_file', description: 'Read a file', parameters: { type: 'object', properties: {} } },
+      },
     ])
   })
 

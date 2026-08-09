@@ -80,7 +80,38 @@ export {
   type TestStepName,
 } from './providers/testConnection.js'
 export { OpenAIProvider } from './providers/openai.js'
+export { AnthropicProvider, toAnthropicMessages } from './providers/anthropic.js'
+export { GeminiProvider, toGeminiContents } from './providers/gemini.js'
+export { createChatProvider } from './providers/factory.js'
+export { toOpenAITools, toAnthropicTools, toGeminiTools, normalizeObjectSchema } from './providers/schema.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
+
+export {
+  estimateTokens,
+  computeBreakdown,
+  computeCacheStats,
+  applyReportedUsage,
+  type TokenBreakdown,
+  type CacheStats,
+  type ReportedUsage,
+} from './context/budget.js'
+export { dropSupersededReads, type SupersedeResult } from './context/supersede.js'
+export {
+  parseMentions,
+  resolveMentions,
+  attachMentions,
+  type ResolvedMention,
+  type MentionContext,
+} from './context/mentions.js'
+export {
+  compactHistory,
+  shouldCompact,
+  findSafeBoundary,
+  buildSummaryPrompt,
+  isSummaryMessage,
+  type CompactionOptions,
+  type CompactionResult,
+} from './context/compact.js'
 
 export { Conversation } from './agent/messages.js'
 export { buildSystemPrompt } from './agent/systemPrompt.js'
@@ -140,6 +171,8 @@ export type {
   ToolCallSummary,
   TranscriptEntry,
   TaskListEntry,
+  ContextUsage,
+  ImageAttachmentInput,
 } from './agent/protocol.js'
 
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'

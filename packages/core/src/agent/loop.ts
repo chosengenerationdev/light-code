@@ -1,9 +1,12 @@
 import { requiresApproval, type ApprovalGate } from '../approval/types.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
+import { computeBreakdown, type TokenBreakdown } from '../context/budget.js'
+import { compactHistory, isSummaryMessage, shouldCompact, type CompactionOptions } from '../context/compact.js'
+import { dropSupersededReads } from '../context/supersede.js'
 import { CODE_MODE } from '../modes/builtin.js'
 import { toolsForMode } from '../modes/resolve.js'
 import type { Mode } from '../modes/types.js'
-import type { ChatProvider, ChatStreamOptions, ToolCall } from '../providers/types.js'
+import type { ChatProvider, ChatStreamOptions, ImageAttachment, ToolCall } from '../providers/types.js'
 import { toToolDefinitions } from '../tools/registry.js'
 import type { Tool, ToolExecutionContext, ToolPreview, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { Conversation } from './messages.js'
@@ -17,6 +20,10 @@ export interface AgentTurnEvents {
   onError(message: string): void
   /** Fired once per task, the first time an edit is about to happen. */
   onCheckpoint?(checkpoint: Checkpoint): void
+  /** Per-request token accounting for the UI (§12: "instrument it"). */
+  onContextUpdate?(breakdown: TokenBreakdown, supersededCount: number, compactedCount: number): void
+  /** Fired when history was summarised, so the UI can say so rather than silently losing detail. */
+  onCompacted?(summarisedCount: number): void
 }
 
 export interface RunAgentTurnOptions {
@@ -31,10 +38,63 @@ export interface RunAgentTurnOptions {
   shadowGit?: ShadowGit
   /** Restricts which tool groups are available. Defaults to Code (everything). */
   mode?: Mode
+  /**
+   * The active model's context window, from the capability table (§9). Compaction and the
+   * token breakdown both need it; omitted disables both rather than guessing a size.
+   */
+  contextWindow?: number
+  /** Overrides for when compaction triggers and how much stays verbatim. */
+  compaction?: CompactionOptions
+  /** Set false to disable compaction entirely for this turn. */
+  compactionEnabled?: boolean
+  /** Images attached to this user message. */
+  images?: ImageAttachment[]
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
 const MAX_CONSECUTIVE_MISTAKES = 3
+
+/**
+ * Builds the message list for one request: compact if the window demands it, then drop
+ * superseded reads, then report the breakdown.
+ *
+ * Ordering matters. Compaction runs first because it can remove whole turns, and there is
+ * no point superseding a read that is about to be summarised away. Superseding runs on
+ * every request rather than being written back, so the full result stays in the transcript.
+ */
+async function prepareModelMessages(
+  conversation: Conversation,
+  provider: ChatProvider,
+  tools: ReturnType<typeof toToolDefinitions>,
+  options: RunAgentTurnOptions,
+  events: AgentTurnEvents,
+): Promise<ReturnType<Conversation['toModelMessages']>> {
+  const contextWindow = options.contextWindow ?? 0
+  let messages = conversation.toModelMessages()
+
+  if (options.compactionEnabled !== false && contextWindow > 0) {
+    const estimated = computeBreakdown(messages, tools, contextWindow).total
+    if (shouldCompact(messages, estimated, contextWindow, options.compaction ?? {})) {
+      const result = await compactHistory(messages, provider, options.compaction ?? {})
+      if (result.compacted) {
+        const summary = result.messages.find(isSummaryMessage)
+        if (summary !== undefined) {
+          // `summarisedCount` counts non-system messages, which is exactly what
+          // `applyCompaction` measures against.
+          conversation.applyCompaction(summary, conversation.compactedCount() + result.summarisedCount)
+          events.onCompacted?.(result.summarisedCount)
+          messages = conversation.toModelMessages()
+        }
+      }
+    }
+  }
+
+  const superseded = dropSupersededReads(messages)
+  const breakdown = computeBreakdown(superseded.messages, tools, contextWindow)
+  events.onContextUpdate?.(breakdown, superseded.supersededCount, conversation.compactedCount())
+
+  return superseded.messages
+}
 
 type PreparedCall =
   | { ok: true; tool: Tool; params: Record<string, unknown> }
@@ -170,7 +230,7 @@ export async function runAgentTurn(
   events: AgentTurnEvents,
   options: RunAgentTurnOptions = {},
 ): Promise<void> {
-  conversation.addUserMessage(userMessage)
+  conversation.addUserMessage(userMessage, options.images)
 
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
   const mistakeCounts = new Map<string, number>()
@@ -184,11 +244,15 @@ export async function runAgentTurn(
     const streamOptions: ChatStreamOptions = { tools }
     if (options.signal !== undefined) streamOptions.signal = options.signal
 
+    // What the model sees is derived per request; the conversation itself keeps the full
+    // record (§12, and the Phase 6b rule that compaction must not destroy stored history).
+    const modelMessages = await prepareModelMessages(conversation, provider, tools, options, events)
+
     let assistantText = ''
     let toolCall: ToolCall | undefined
     let streamError: string | undefined
 
-    for await (const chunk of provider.streamChat(conversation.toArray(), streamOptions)) {
+    for await (const chunk of provider.streamChat(modelMessages, streamOptions)) {
       if (chunk.type === 'text') {
         assistantText += chunk.text
         events.onTextChunk(chunk.text)

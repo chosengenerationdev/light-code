@@ -536,6 +536,23 @@ packages/ui/src/
 Run a 40-turn session and watch the token bar. If cache hit rate collapses, something is
 mutating the prefix — find it.
 
+> **Done, and the prefix check was made automatic.** Watching the token bar is a slow,
+> indirect signal, so `agent/prefixStability.test.ts` asserts the property directly across
+> all three adapters — three turns must produce a byte-identical tool block, and Anthropic's
+> `system` / Gemini's `systemInstruction` must not drift. The live 40-turn run is still
+> worth doing once, but a regression now fails in CI instead of showing up as a bill.
+>
+> **Still unverified:** live Anthropic and Gemini endpoints. Both adapters are covered by
+> mock-stream tests built from the documented event shapes; neither has been run against the
+> real service.
+
+**Added mid-phase at the user's request:** `@`-mentions for files and folders
+(`context/mentions.ts` plus composer autocomplete), and file/image attachment in the input
+field. Mentions are resolved host-side and appended to the user's message — not a tool,
+because the user chose the path, but still subject to `confine()` and the deny list since
+the path is user-typed text. Roo's other mention kinds (problems, terminal output, git
+diff, URLs) are **not** built; revisit if they are actually wanted.
+
 ---
 
 ## Phase 8 — Release

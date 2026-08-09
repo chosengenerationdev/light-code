@@ -5,6 +5,8 @@ import {
   type ProfileInput,
   type ProfileSummary,
   type ApprovableGroup,
+  type ContextUsage,
+  type ImageAttachmentInput,
   type TaskListEntry,
   type McpServerState,
   type McpToolPermission,
@@ -59,6 +61,9 @@ export function App(props: AppProps): ReactElement {
   const [testResult, setTestResult] = useState<{ ok: boolean; steps: TestConnectionStep[] } | undefined>(undefined)
   const [tasks, setTasks] = useState<TaskListEntry[]>([])
   const [activeTaskId, setActiveTaskId] = useState<string | undefined>(undefined)
+  const [usage, setUsage] = useState<ContextUsage | undefined>(undefined)
+  const [supportsVision, setSupportsVision] = useState(false)
+  const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -131,6 +136,22 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'testConnectionResult') {
         setTestResult({ ok: message.ok, steps: message.steps })
         setTestRunning(false)
+      } else if (message.type === 'contextUsage') {
+        setUsage(message.usage)
+      } else if (message.type === 'compacted') {
+        // Say so rather than letting detail vanish silently mid-session.
+        setMessages((prev) => [
+          ...prev,
+          {
+            kind: 'text',
+            role: 'assistant',
+            content: `[${message.summarisedCount} earlier messages were summarised to stay within the context window. The full transcript is still saved.]`,
+          },
+        ])
+      } else if (message.type === 'mentionCandidates') {
+        setMentionCandidates(message.paths)
+      } else if (message.type === 'capabilities') {
+        setSupportsVision(message.supportsVision)
       } else if (message.type === 'tasks') {
         setTasks(message.tasks)
         setActiveTaskId(message.activeTaskId)
@@ -162,12 +183,21 @@ export function App(props: AppProps): ReactElement {
     setView('settings')
   }
 
-  const send = (text: string): void => {
+  const send = (text: string, images: ImageAttachmentInput[]): void => {
     setError(undefined)
-    setMessages((prev) => [...prev, { kind: 'text', role: 'user', content: text }])
+    // The transcript shows what the user typed, mentions unexpanded — the host attaches
+    // the file contents on the way to the model, and echoing them here would bury the
+    // question under the source it refers to.
+    const shown = images.length > 0 ? `${text}${text.length > 0 ? '\n' : ''}[${images.length} image(s) attached]` : text
+    setMessages((prev) => [...prev, { kind: 'text', role: 'user', content: shown }])
     setIsStreaming(true)
-    const outgoing: UiToHostMessage = { type: 'sendMessage', text }
+    const outgoing: UiToHostMessage =
+      images.length > 0 ? { type: 'sendMessage', text, images } : { type: 'sendMessage', text }
     props.transport.post(outgoing)
+  }
+
+  const queryMentions = (query: string): void => {
+    props.transport.post({ type: 'requestMentionCandidates', query } satisfies UiToHostMessage)
   }
 
   const cancel = (): void => {
@@ -388,6 +418,10 @@ export function App(props: AppProps): ReactElement {
             onDecideApproval={decideApproval}
             onAlwaysAllow={alwaysAllow}
             onRollback={rollback}
+            usage={usage}
+            supportsVision={supportsVision}
+            mentionCandidates={mentionCandidates}
+            onQueryMentions={queryMentions}
           />
         )}
       </div>

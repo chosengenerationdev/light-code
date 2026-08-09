@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import type { TlsOptions } from '../platform/http.js'
 
-/** Only OpenAI-compatible ships in Phase 2. Anthropic/Gemini formats land in Phase 7. */
-export const wireFormatSchema = z.enum(['openai'])
+/** All three wire formats from Phase 7. Auth is a separate axis (§10), not implied by this. */
+export const wireFormatSchema = z.enum(['openai', 'anthropic', 'gemini'])
 export type WireFormat = z.infer<typeof wireFormatSchema>
 
 /**
@@ -71,6 +71,11 @@ export const providerProfileSchema = z.object({
   auth: authSchema,
   headers: z.record(z.string(), z.string()).optional(),
   /**
+   * Anthropic *requires* `max_tokens` — there is no "use the model default" — so this has
+   * a working fallback in the adapter rather than being mandatory here.
+   */
+  maxTokens: z.number().int().positive().optional(),
+  /**
    * Per-profile corrections to the local capability table (§9). Needed because gateway
    * aliases hide the underlying model, so the table cannot recognise them.
    */
@@ -120,13 +125,25 @@ export interface ToolCall {
 }
 
 /**
+ * An image attached to a user message. Base64 without the `data:` prefix, because each
+ * wire format wants it differently — OpenAI wants a data URL, Anthropic wants
+ * `{media_type, data}`, Gemini wants `inline_data` — and only the adapter should know that.
+ */
+export interface ImageAttachment {
+  /** e.g. `image/png`. Providers reject anything outside a small supported set. */
+  mediaType: string
+  /** Base64-encoded bytes, no `data:image/png;base64,` prefix. */
+  data: string
+}
+
+/**
  * A discriminated union rather than one flat shape: `assistant` optionally carries
- * `toolCalls`, `tool` carries a `toolCallId` linking a result back to its call. Neither
- * makes sense on `system`/`user` messages.
+ * `toolCalls`, `tool` carries a `toolCallId` linking a result back to its call, and only
+ * `user` carries images. None of those make sense on the other roles.
  */
 export type ChatMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; images?: ImageAttachment[] }
   | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
   | { role: 'tool'; toolCallId: string; content: string }
 

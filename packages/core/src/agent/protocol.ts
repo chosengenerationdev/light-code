@@ -114,8 +114,36 @@ export interface ToolCallSummary {
 }
 
 /** Shared by packages/ui and apps/vscode so both sides agree on the wire shape. */
+/** An image the user attached in the composer. Base64, no `data:` prefix. */
+export interface ImageAttachmentInput {
+  mediaType: string
+  data: string
+  /** Shown in the composer so the user can tell two screenshots apart. */
+  name: string
+}
+
+/** Live token accounting for the context bar (§12: "instrument it"). */
+export interface ContextUsage {
+  system: number
+  toolDefinitions: number
+  history: number
+  results: number
+  total: number
+  contextWindow: number
+  /** True when these are character-based estimates rather than provider-reported. */
+  estimated: boolean
+  /** How many superseded file reads were dropped from this request. */
+  supersededCount: number
+  /** How many messages the model no longer sees verbatim. */
+  compactedCount: number
+  /** 0–1, when the provider reports cache figures. */
+  cacheHitRate?: number
+}
+
 export type UiToHostMessage =
-  | { type: 'sendMessage'; text: string }
+  | { type: 'sendMessage'; text: string; images?: ImageAttachmentInput[] }
+  /** Ask the host to resolve `@` mentions for autocomplete as the user types. */
+  | { type: 'requestMentionCandidates'; query: string }
   | { type: 'cancel' }
   | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
   /** Approve *and* remember, so this exact command / this tool stops prompting here. */
@@ -184,6 +212,14 @@ export type HostToUiMessage =
   | { type: 'testConnectionResult'; ok: boolean; steps: TestConnectionStep[] }
   /** Past tasks for this workspace, newest first. */
   | { type: 'tasks'; tasks: TaskListEntry[]; activeTaskId: string | undefined }
+  /** Live token accounting, posted before each request. */
+  | { type: 'contextUsage'; usage: ContextUsage }
+  /** History was summarised; the UI says so rather than silently losing detail. */
+  | { type: 'compacted'; summarisedCount: number }
+  /** Workspace-relative paths matching an `@` query, for composer autocomplete. */
+  | { type: 'mentionCandidates'; query: string; paths: string[] }
+  /** Whether the active model accepts images, from the capability table (§9). */
+  | { type: 'capabilities'; supportsVision: boolean; supportsTools: boolean; contextWindow: number }
   /**
    * Replaces the whole transcript — sent when a task is reopened, and on panel load to
    * restore the task that was in progress. `entries` is empty for a new task.

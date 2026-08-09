@@ -37,4 +37,6 @@ export type {
   TestConnectionStep,
   TranscriptEntry,
   TaskListEntry,
+  ContextUsage,
+  ImageAttachmentInput,
 } from './agent/protocol.js'

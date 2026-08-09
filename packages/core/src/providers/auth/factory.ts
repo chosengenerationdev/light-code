@@ -1,8 +1,8 @@
 import type { HttpClient, TlsOptions } from '../../platform/http.js'
 import type { SecretStore } from '../../platform/secrets.js'
-import type { Auth, AuthStrategy } from '../types.js'
+import type { Auth, AuthStrategy, WireFormat } from '../types.js'
 import { ApigeeMtlsAuthStrategy } from './apigeeMtls.js'
-import { ApiKeyAuthStrategy, NoAuthStrategy } from './apiKey.js'
+import { ApiKeyAuthStrategy, defaultApiKeyHeader, NoAuthStrategy } from './apiKey.js'
 import { assertCertDirOutsideWorkspace, type CertConfig, checkExpiry, type ExpiryWarning, loadCerts } from './certs.js'
 
 export interface AuthStrategyContext {
@@ -10,6 +10,15 @@ export interface AuthStrategyContext {
   http: HttpClient
   /** The profile's inference base URL — the token URL defaults to its origin. */
   baseUrl: string
+  /**
+   * Decides which header an API key goes in: Anthropic wants `x-api-key`, Gemini wants
+   * `x-goog-api-key`, OpenAI wants `Authorization: Bearer`. Omitted means OpenAI-style,
+   * which keeps existing callers working.
+   */
+  wireFormat?: WireFormat
+  /** Overrides the derived header name, for a gateway that fronts a provider differently. */
+  apiKeyHeaderName?: string
+  apiKeyHeaderPrefix?: string
   /** Top-level user-scope `certDir`, used when the auth block does not name its own. */
   defaultCertDir?: string
   /** Used to enforce invariant 6. Omit when no folder is open. */
@@ -80,8 +89,13 @@ export function createCertLoader(
 
 export function createAuthStrategy(auth: Auth, context: AuthStrategyContext): AuthStrategy {
   switch (auth.type) {
-    case 'apiKey':
-      return new ApiKeyAuthStrategy(context.secrets, auth.apiKeyRef)
+    case 'apiKey': {
+      const derived = defaultApiKeyHeader(context.wireFormat ?? 'openai')
+      return new ApiKeyAuthStrategy(context.secrets, auth.apiKeyRef, {
+        name: context.apiKeyHeaderName ?? derived.name,
+        prefix: context.apiKeyHeaderPrefix ?? derived.prefix,
+      })
+    }
     case 'none':
       return new NoAuthStrategy()
     case 'apigeeMtls': {

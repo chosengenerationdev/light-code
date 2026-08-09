@@ -71,10 +71,11 @@ export function lookupModelCapabilities(modelId: string): ModelCapabilities {
   return { ...CONSERVATIVE_DEFAULT, known: false }
 }
 
+/** Optional fields are explicitly `| undefined`: these come from a zod `.optional()` schema. */
 export interface ModelCapabilityOverrides {
-  contextWindow?: number
-  supportsVision?: boolean
-  supportsTools?: boolean
+  contextWindow?: number | undefined
+  supportsVision?: boolean | undefined
+  supportsTools?: boolean | undefined
 }
 
 /** Per-profile overrides win over the table, which wins over the conservative default. */

@@ -10,17 +10,18 @@ import {
   Logger,
   RecordingTruncationStore,
   McpRegistry,
-  OpenAIProvider,
   PathDenylist,
   PolicyApprovalGate,
   ShadowGit,
   ToolRegistry,
   addToAllowlist,
   assertCertDirOutsideWorkspace,
+  attachMentions,
   buildSystemPrompt,
   formatToolArguments,
   CONTROL_TOOLS,
   createAuthStrategy,
+  createChatProvider,
   createDefaultToolRegistry,
   createReadToolResultTool,
   deriveTitle,
@@ -32,6 +33,8 @@ import {
   redactTask,
   removeFromAllowlist,
   resolveActiveProfile,
+  resolveMentions,
+  resolveModelCapabilities,
   runAgentTurn,
   testConnection,
   toTranscript,
@@ -42,6 +45,7 @@ import {
   type Auth,
   type Checkpoint,
   type HostToUiMessage,
+  type ImageAttachmentInput,
   type LightCodeConfig,
   type McpServersConfig,
   type McpToolPermission,
@@ -432,7 +436,7 @@ export function wireChatBridge(
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
   }
 
-  async function handleSendMessage(text: string): Promise<void> {
+  async function handleSendMessage(text: string, images?: ImageAttachmentInput[]): Promise<void> {
     if (workspaceRoot === undefined) {
       post({ type: 'error', message: 'Open a folder in VS Code before using Light Code — tools need a workspace root.' })
       return
@@ -452,7 +456,9 @@ export function wireChatBridge(
       await knownSecretValues()
 
       const profile = resolveActiveProfile(config)
-      const provider = new OpenAIProvider(httpClient, profile, authStrategyFor(config, profile), logger)
+      // The wire adapter is chosen per profile; auth composes with any of them (§10).
+      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+      const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
 
       // Lazy connect (§11): a configured-but-unused server costs nothing until a turn
       // actually needs its tools. Failures are per-server and surface in the MCP tab.
@@ -468,6 +474,12 @@ export function wireChatBridge(
         signal: activeAbortController.signal,
       }
 
+      // `@`-mentions are resolved here, not by the model: the user named these paths
+      // explicitly, so there is nothing to decide and nothing to approve. Confinement and
+      // the deny list still apply, since the path is user-typed text.
+      const mentions = await resolveMentions(text, { fs: toolContext.fs, workspaceRoot, denylist })
+      const messageText = attachMentions(text, mentions)
+
       const turnOptions: RunAgentTurnOptions = {
         signal: activeAbortController.signal,
         truncationStore,
@@ -475,6 +487,17 @@ export function wireChatBridge(
         // Resolved once per turn, so the tool definitions stay byte-stable for the whole
         // loop — swapping them mid-turn would break the prompt cache prefix (§12).
         mode: findMode(config.modeId),
+        contextWindow: capabilities.contextWindow,
+      }
+      // Silently dropping an image on a text-only model would look like the model ignoring
+      // it; the composer already hides attachment, so this is the backstop.
+      if (images !== undefined && images.length > 0 && capabilities.supportsVision) {
+        turnOptions.images = images.map((image) => ({ mediaType: image.mediaType, data: image.data }))
+      } else if (images !== undefined && images.length > 0) {
+        post({
+          type: 'error',
+          message: `${profile.model} does not accept images. Attachments were not sent — set "Supports images" in the profile's advanced settings if that is wrong.`,
+        })
       }
       // Checkpoints degrade to unavailable rather than blocking the session when git
       // isn't installed — but edits then proceed with no rollback point, so say so.
@@ -491,10 +514,14 @@ export function wireChatBridge(
       await runAgentTurn(
         provider,
         conversation,
-        text,
+        messageText,
         currentToolRegistry(),
         toolContext,
         {
+          onContextUpdate: (breakdown, supersededCount, compactedCount) => {
+            post({ type: 'contextUsage', usage: { ...breakdown, supersededCount, compactedCount } })
+          },
+          onCompacted: (summarisedCount) => post({ type: 'compacted', summarisedCount }),
           onTextChunk: (chunk) => {
             cumulativeText += chunk
             post({ type: 'textChunk', text: cumulativeText })
@@ -767,6 +794,49 @@ export function wireChatBridge(
     return { profile, auth }
   }
 
+  /**
+   * Workspace files matching an `@` query, for composer autocomplete.
+   *
+   * Uses VS Code's own file index rather than walking the tree: it already respects
+   * `files.exclude` and `search.exclude`, so `node_modules` never appears, and it stays
+   * fast in a large repository where a manual walk would not.
+   */
+  async function handleMentionCandidates(query: string): Promise<void> {
+    if (workspaceRoot === undefined) {
+      post({ type: 'mentionCandidates', query, paths: [] })
+      return
+    }
+    try {
+      const pattern = query.length > 0 ? `**/*${query}*` : '**/*'
+      const found = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 30)
+      const paths = found
+        .map((uri) => path.relative(workspaceRoot, uri.fsPath).split(path.sep).join('/'))
+        .sort((a, b) => a.length - b.length)
+      post({ type: 'mentionCandidates', query, paths })
+    } catch (error) {
+      logger.warn('mention lookup failed', String(error))
+      post({ type: 'mentionCandidates', query, paths: [] })
+    }
+  }
+
+  /** Tells the composer whether to offer image attachment for the active model (§9). */
+  async function postCapabilities(): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const profile = resolveActiveProfile(config)
+      const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
+      post({
+        type: 'capabilities',
+        supportsVision: capabilities.supportsVision,
+        supportsTools: capabilities.supportsTools,
+        contextWindow: capabilities.contextWindow,
+      })
+    } catch {
+      // No profile configured yet — the composer simply offers no attachment button.
+      post({ type: 'capabilities', supportsVision: false, supportsTools: true, contextWindow: 0 })
+    }
+  }
+
   async function handleRequestModels(input: ProfileInput): Promise<void> {
     try {
       const built = await profileFromForm(input)
@@ -1006,7 +1076,9 @@ export function wireChatBridge(
         logger.warn('Ignoring sendMessage: a turn is already in progress.')
         return
       }
-      void handleSendMessage(message.text)
+      void handleSendMessage(message.text, message.images)
+    } else if (message.type === 'requestMentionCandidates') {
+      void handleMentionCandidates(message.query)
     } else if (message.type === 'cancel') {
       activeAbortController?.abort()
       userGate.denyAll()
@@ -1054,6 +1126,9 @@ export function wireChatBridge(
       void handleSetToolPermission(message.server, message.tool, message.permission)
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
+      // Capabilities travel with the profile list: switching profiles can change whether
+      // the composer offers attachment at all.
+      void postCapabilities()
     } else if (message.type === 'saveProfile') {
       void handleSaveProfile(message.profile)
     } else if (message.type === 'requestModels') {

@@ -38,6 +38,24 @@ export function BackIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+export function AttachIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9.5 4 L5 8.5 a2.1 2.1 0 0 0 3 3 L12.5 7 a3.5 3.5 0 0 0-5-5 L3.5 6" />
+    </svg>
+  )
+}
+
 export function HistoryIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg

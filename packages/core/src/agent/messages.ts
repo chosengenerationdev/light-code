@@ -1,7 +1,13 @@
-import type { ChatMessage, ToolCall } from '../providers/types.js'
+import type { ChatMessage, ImageAttachment, ToolCall } from '../providers/types.js'
 
 export class Conversation {
   private messages: ChatMessage[] = []
+  /**
+   * Set once history has been compacted. The summary replaces the first `replacedCount`
+   * non-system messages **in what is sent to the model only** — `messages` keeps the
+   * originals.
+   */
+  private compaction: { summary: ChatMessage; replacedCount: number } | undefined
 
   constructor(systemPrompt?: string) {
     if (systemPrompt !== undefined) {
@@ -19,6 +25,9 @@ export class Conversation {
     const systemPrompt = this.messages.find((message) => message.role === 'system')
     const restored = messages.filter((message) => message.role !== 'system')
     this.messages = systemPrompt !== undefined ? [systemPrompt, ...restored] : [...restored]
+    // A stored transcript is the full record, so it starts uncompacted. Compaction will
+    // re-trigger on the next turn if the restored history is still over the threshold.
+    this.compaction = undefined
   }
 
   /** Back to a fresh task, keeping the system prompt. */
@@ -30,8 +39,8 @@ export class Conversation {
     return this.messages.every((message) => message.role === 'system')
   }
 
-  addUserMessage(content: string): void {
-    this.messages.push({ role: 'user', content })
+  addUserMessage(content: string, images?: ImageAttachment[]): void {
+    this.messages.push(images !== undefined && images.length > 0 ? { role: 'user', content, images } : { role: 'user', content })
   }
 
   addAssistantMessage(content: string, toolCalls?: ToolCall[]): void {
@@ -46,7 +55,42 @@ export class Conversation {
     this.messages.push({ role: 'tool', toolCallId, content })
   }
 
+  /**
+   * The complete record of what happened. This is what gets persisted and rendered —
+   * compaction must never destroy stored history, so the user can still read what actually
+   * happened after the model's view of it has been summarised.
+   */
   toArray(): ChatMessage[] {
     return [...this.messages]
+  }
+
+  /**
+   * What is actually sent to the model: the same history with any compaction applied.
+   *
+   * Keeping these two separate is the whole point. Compacting `messages` in place would
+   * save the same tokens, but the transcript on disk would then be a summary of the
+   * session rather than the session.
+   */
+  toModelMessages(): ChatMessage[] {
+    const compaction = this.compaction
+    if (compaction === undefined) return [...this.messages]
+
+    const system = this.messages.filter((message) => message.role === 'system')
+    const rest = this.messages.filter((message) => message.role !== 'system')
+    return [...system, compaction.summary, ...rest.slice(compaction.replacedCount)]
+  }
+
+  /**
+   * Records that the oldest `replacedCount` non-system messages are now represented by
+   * `summary` in what is sent. Replaces any previous compaction rather than stacking, so
+   * the count is always measured against the full history.
+   */
+  applyCompaction(summary: ChatMessage, replacedCount: number): void {
+    this.compaction = { summary, replacedCount }
+  }
+
+  /** How many messages the model no longer sees verbatim. */
+  compactedCount(): number {
+    return this.compaction?.replacedCount ?? 0
   }
 }

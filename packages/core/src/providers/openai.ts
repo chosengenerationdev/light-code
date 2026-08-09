@@ -1,6 +1,7 @@
 import type { Logger } from '../logging/logger.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { describeTlsError } from './auth/apigeeMtls.js'
+import { toOpenAITools } from './schema.js'
 import type {
   AuthStrategy,
   ChatMessage,
@@ -9,7 +10,6 @@ import type {
   ProviderProfile,
   StreamChunk,
   ToolCall,
-  ToolDefinition,
 } from './types.js'
 
 function describeRequestError(error: unknown, url: string): string {
@@ -20,6 +20,17 @@ function describeRequestError(error: unknown, url: string): string {
 
 /** Maps our `ChatMessage` union to OpenAI's wire format for the `messages` array. */
 function toWireMessage(message: ChatMessage): Record<string, unknown> {
+  if (message.role === 'user' && message.images !== undefined && message.images.length > 0) {
+    // OpenAI takes images as a `content` parts array with data URLs — note this is a
+    // different encoding from Anthropic's `{media_type, data}` and Gemini's `inlineData`,
+    // which is why `ImageAttachment` stores bare base64 and each adapter wraps it.
+    const parts: Record<string, unknown>[] = message.images.map((image) => ({
+      type: 'image_url',
+      image_url: { url: `data:${image.mediaType};base64,${image.data}` },
+    }))
+    if (message.content.length > 0) parts.push({ type: 'text', text: message.content })
+    return { role: 'user', content: parts }
+  }
   if (message.role === 'assistant') {
     const wire: Record<string, unknown> = { role: 'assistant', content: message.content }
     if (message.toolCalls !== undefined && message.toolCalls.length > 0) {
@@ -36,13 +47,6 @@ function toWireMessage(message: ChatMessage): Record<string, unknown> {
     return { role: 'tool', tool_call_id: message.toolCallId, content: message.content }
   }
   return { role: message.role, content: message.content }
-}
-
-function toWireTools(tools: ToolDefinition[]): Record<string, unknown>[] {
-  return tools.map((tool) => ({
-    type: 'function',
-    function: { name: tool.name, description: tool.description, parameters: tool.parameters },
-  }))
 }
 
 /** OpenAI-compatible chat completions over Server-Sent Events, with tool-calling support. */
@@ -64,7 +68,7 @@ export class OpenAIProvider implements ChatProvider {
       stream: true,
     }
     if (options.tools !== undefined && options.tools.length > 0) {
-      body.tools = toWireTools(options.tools)
+      body.tools = toOpenAITools(options.tools)
       body.tool_choice = 'auto'
     }
 
