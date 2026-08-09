@@ -62,8 +62,8 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 4. **No telemetry, no update checks, no remote assets.** All webview assets are bundled
    locally. CI fails if built output contains an absolute external URL.
 5. **These config keys are user-scope only and are ignored if found in workspace config:**
-   the entire `profiles` list, `activeProfileId`, `certDir`, `python.uvPath`, and
-   `approvals`.
+   the entire `profiles` list, `activeProfileId`, `certDir`, `python.uvPath`, `approvals`,
+   and — from Phase 8b — `vectorStores`, `embedder`, and `collections`.
    A hostile repo must not be able to repoint credentials or executables — this means a
    workspace can't inject a whole new profile (its own `baseUrl`/`auth`/`model`) any more
    than it could edit an existing one, and can't switch which profile is active. (Originally
@@ -76,6 +76,12 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
    own shell commands before you had looked at it — a worse hole than the one this
    invariant already closes. **Scope and storage location are separate decisions; do not
    collapse them.**
+   **The indexing keys were added when Phase 8b was planned (2026-08-09)**, and they are the
+   sharpest case on this list. A workspace able to set `embedder.baseUrl` would exfiltrate
+   every file you indexed to an endpoint of its choosing, the moment you opened the repo —
+   same threat as repointing a profile, but the payload is your source code. Note the
+   contrast with `mcpServers`, which is deliberately *not* here: an MCP server still passes
+   through the approval gate on every call, and indexing does not pass through anything.
 6. **Cert/key files must live outside the workspace root**, and their resolved paths are on
    a hard deny list for every file-reading tool.
 7. **Secrets never cross the bridge toward the UI.** Write-only. No `getSecret` message
@@ -87,9 +93,14 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 
 > Light Code makes no network connection the user has not configured. It ships with zero
 > default endpoints, no telemetry, no update checks, and no remote assets. The only hosts
-> it contacts are the model gateway and MCP servers named in config. Code that Light Code
-> executes on the user's instruction — shell commands, Python tools, MCP servers — is
-> outside this boundary and governed by the user's environment.
+> it contacts are the model gateway, MCP servers, and — if indexing is enabled — the vector
+> store and embedding endpoint named in config. Code that Light Code executes on the user's
+> instruction — shell commands, Python tools, MCP servers — is outside this boundary and
+> governed by the user's environment.
+
+**Indexing is the largest egress in the product** and the README must say so plainly:
+enabling it sends the contents of the workspace to the configured embedding endpoint. It is
+opt-in, ships disabled, and confirms the destination on first use (Phase 8b).
 
 We do **not** sandbox executed code, and we do not protect against another process running
 as the same user. Say so plainly in the README. Do not overclaim.
@@ -150,6 +161,10 @@ Nine in v1:
 **Explicitly not in v1:** browser automation, semantic/embedding codebase search,
 `insert_content`, `list_code_definition_names`, mode-switching and subtask tools, a fetch
 tool.
+
+**Semantic search is no longer excluded outright — it moved out of v1 rather than out of
+the project.** Reversed by the user on 2026-08-09; two tools (`search_codebase`,
+`search_docs`) arrive in Phase 8b, after release. See §12 and §18 for what changed.
 
 Browser automation was raised again in Phase 3 and **stays excluded** — no browser tool,
 no bundled browser MCP server. A user who wants it configures a Chrome DevTools MCP server
@@ -421,6 +436,25 @@ Three things compete for the window, and they scale very differently. Results do
 Semantic retrieval over tool descriptions is **out** — silent misses, embedding dependency,
 and turn-1 queries don't predict step-7 needs.
 
+**Revised 2026-08-09.** The user asked for skill and tool documentation to be retrievable
+from a vector store, which reverses the paragraph above. The reasoning behind it was never
+"retrieval is useless" — it was that **tool definitions sit at the front of the prompt, so
+varying them per turn invalidates the cache prefix and everything after it.** That cost is
+real and unchanged, so Phase 8b resolves it structurally rather than by accepting it:
+
+- Retrieval is exposed as **tools the model calls** (`search_docs`, `search_codebase`).
+  Results arrive as tool results, mid-conversation, where they cost nothing at the prefix.
+- The set of *available* tools stays byte-stable for a whole session. Using retrieval to
+  choose **which** tools load is permitted only at a mode or session boundary — the
+  carve-out this section already made.
+
+**Do not turn this into per-turn tool-definition selection.** That is the specific thing
+the original decision ruled out, and the reason still holds.
+
+The other two original objections stand as warnings rather than blocks: a silent miss is
+still a silent miss, so `search_docs` supplements `read_file` and never replaces it, and the
+embedding dependency is why the whole feature is opt-in and ships disabled.
+
 ---
 
 ## 13. Python interop and skills (phase 9)
@@ -632,7 +666,9 @@ Record the reason, not just the difference.
 | Deterministic matching, no fuzzy threshold | Roo's Levenshtein matcher produced both false rejections and silent-misapply risk. |
 | One wire adapter in v1 | Gateway fronting is the deployment; avoids auditing SDKs for hidden endpoints. |
 | Exact-match command allowlist, no patterns | Pattern matching requires tokenising PowerShell correctly, and a bug there auto-approves a chained destructive command. Byte-for-byte matching needs no parser, so it is safe on every platform — see §8. |
-| No browser tool, no semantic search | Out of scope; embeddings conflict with the offline posture. Browser access, if wanted, is a user-configured MCP server — not something we ship. |
+| No browser tool | Out of scope. Browser access, if wanted, is a user-configured MCP server — not something we ship. |
+| ~~No semantic search~~ — **reversed 2026-08-09** | Originally excluded because embeddings conflict with the offline posture. The user overrode it: the deployment context is an organisation with an internal gateway, where an internal vector store and embedding endpoint break nothing, and codebase indexing is a capability Roo shipped and people use. Now Phase 8b — opt-in and disabled by default, so the offline posture holds for anyone who leaves it off. Both original objections survive as constraints rather than blocks; see §12. |
+| Three vector backends behind one interface, no vendor SDKs | Invariant 2 sends all egress through core's `HttpClient`, and the OpenSearch/Qdrant/Chroma clients each carry their own HTTP stack. All three databases are plain REST, so thin hand-written clients are the required design, not a workaround. |
 | Dynamic Python tools + skills | New capability Roo did not have. |
 | Scheduled prompts, read-only by default | New capability Roo did not have. Unattended runs have nobody to approve anything, so they get a restricted mode rather than inheriting auto-approve — Phase 9b. |
 
@@ -645,6 +681,18 @@ Update this section every session.
 **Current phase:** Phase 6b code complete — see `IMPLEMENTATION_PLAN.md`. **Not yet
 exercised in a real Extension Development Host** (see the manual list below). Phase 7
 (Anthropic/Gemini, images, context management) not started.
+
+**Plan changed 2026-08-09 — Phase 8b, vector stores and semantic retrieval.** User-requested:
+OpenSearch, Qdrant, or Chroma, selectable per data type, defaulting to Qdrant for codebase
+indexing and OpenSearch for skills and tool documentation. This **reverses three recorded
+decisions** (§6, §12, §18), which is why the reasoning is written into each of those sections
+rather than only into the plan. Three things to carry into that phase:
+- **Retrieval is exposed as tools, never as dynamic tool definitions.** §12's objection was
+  specifically that varying the front of the prompt per turn destroys the cache prefix, and
+  that cost has not changed. `search_docs`/`search_codebase` return tool results instead.
+- **`vectorStores`, `embedder`, `collections` are user-scope only** (invariant 5). A
+  workspace that could set the embedder URL would exfiltrate your source code on open.
+- Sequenced **after Phase 8 (release)** — nothing in v1 needs it.
 
 **Phase 6b done — task history and session persistence:**
 - `history/types.ts` — `Task` stores **only** the model-facing `ChatMessage[]`. What the UI

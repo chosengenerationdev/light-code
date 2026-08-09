@@ -563,6 +563,138 @@ config file by hand.
 
 ---
 
+## Phase 8b — Vector stores and semantic retrieval
+
+**Goal:** the model can search an indexed codebase, and search skill and tool documentation,
+against a user-configured vector database.
+
+**Added 2026-08-09 at the user's request, reversing three recorded decisions** — §6's
+"no semantic/embedding codebase search", §12's "semantic retrieval over tool descriptions is
+out", and §18's row on both. The reasons those decisions were made are still written down;
+see CLAUDE.md §18 for what changed and why the user overrode them. Sequenced after release
+because none of it is needed for v1 and Phase 7's context management is the more urgent
+problem for long sessions.
+
+### The prompt-cache constraint, and how this design respects it
+
+§12's objection to retrieval over tool descriptions was never "retrieval is useless" — it
+was that **tool definitions sit at the front of the prompt, so varying them per turn
+invalidates the cache prefix and every message after it.** That is still true, so retrieval
+here is exposed as **tools the model calls**, not as dynamic tool definitions:
+
+- `search_codebase` and `search_docs` are ordinary tools in the `read` group. Their results
+  arrive as tool results, mid-conversation, where they cost nothing at the prefix.
+- The set of *available* tools stays byte-stable for a whole session. If retrieval is ever
+  used to decide **which** tools load, that resolves at a mode or session boundary only —
+  exactly the carve-out §12 already allows.
+
+This is the reconciliation that makes the feature safe to build. **Do not "improve" it into
+per-turn tool-definition selection** — that reintroduces precisely the cost §12 measured.
+
+### Build
+
+```
+packages/core/src/rag/
+  types.ts        VectorStore: ensureCollection, upsert, query, deleteByFilter
+                  VectorDocument = { id, text, metadata, vector }
+  embedder.ts     Embedder interface + an OpenAI-compatible /embeddings client
+  chunk.ts        line-window chunking with overlap; symbol-aware is a later refinement
+  indexer.ts      walk -> chunk -> embed -> upsert, driven by a content-hash manifest
+  registry.ts     resolves which configured store backs which collection
+
+packages/core/src/rag/stores/
+  opensearch.ts   knn_vector mapping; REST; HTTP basic auth
+  qdrant.ts       REST; api-key header
+  chroma.ts       REST
+
+packages/core/src/tools/
+  searchCodebase.ts   read group
+  searchDocs.ts       read group; skills + built-in and MCP tool documentation
+
+packages/ui/src/settings/
+  IndexingTab.tsx     store definitions, per-collection assignment, Test Connection,
+                      index status and a manual reindex
+```
+
+**Invariant 2 rules out the official clients.** `@opensearch-project/opensearch`,
+`@qdrant/js-client-rest`, and `chromadb` all carry their own HTTP stacks, and all outbound
+traffic goes through core's `HttpClient`. All three databases are plain REST, so these are
+thin hand-written clients — not a workaround, the required design.
+
+### Config
+
+Named stores, then a per-collection assignment, so one database can back several
+collections without repeating credentials:
+
+```jsonc
+{
+  "vectorStores": {
+    "corp-search": { "kind": "opensearch", "url": "", "usernameRef": "...", "passwordRef": "..." },
+    "local-qdrant": { "kind": "qdrant", "url": "", "apiKeyRef": "..." }
+  },
+  "embedder": { "baseUrl": "", "model": "", "apiKeyRef": "...", "dimensions": 1536 },
+  "collections": {
+    "codebase": { "store": "local-qdrant", "enabled": false },
+    "skills":   { "store": "corp-search",  "enabled": false },
+    "toolDocs": { "store": "corp-search",  "enabled": false }
+  }
+}
+```
+
+Defaults are **kinds, not endpoints** — Qdrant for `codebase`, OpenSearch for `skills` and
+`toolDocs`, as requested. Every URL ships empty; invariant 3 is unchanged. Everything ships
+`enabled: false`.
+
+### Security — read this before starting
+
+**Indexing sends the entire codebase to an embedding endpoint.** That is a larger egress
+than anything Light Code does today, and it punches a hole in §3's boundary statement, which
+promised the only hosts contacted are the model gateway and MCP servers. §3 is updated in
+the same commit as this phase.
+
+- **`vectorStores`, `embedder`, and `collections` are user-scope only (invariant 5).** A
+  workspace that could set `embedder.baseUrl` would exfiltrate every file you indexed to an
+  attacker's endpoint the moment you opened the repo. This is the same threat invariant 5
+  already closes for `profiles`, and it is sharper here because the payload is source code.
+  **`mcpServers` is deliberately *not* on that list; this is, and the difference is that an
+  MCP server still passes through the approval gate while indexing does not.**
+- **Indexing honours `.gitignore`, the tool deny list, and `certDir`.** Anything
+  `read_file` may not read must never be embedded — otherwise the deny list is bypassed by
+  a different route.
+- Store credentials and the embedder key are `SecretStorage` refs, never literals (§15).
+- The manifest and any cached vectors live in global storage, not the workspace — a cache,
+  and not something to commit.
+- **Opt-in, off by default**, with an explicit first-run confirmation naming the endpoint
+  the code will be sent to.
+
+### Done when
+
+- A user can define stores, assign a collection to each, and Test Connection reports which
+  step failed (reach store → authenticate → embed a probe → query) — same shape as §10's
+- `search_codebase` returns ranked chunks with file paths and line ranges
+- `search_docs` returns skill and tool documentation, including MCP tool descriptions
+- Re-indexing after an edit updates only the changed files; deleting a file removes its
+  vectors
+- A file excluded by `.gitignore` or the deny list is never embedded
+- An unreachable store degrades to a clear tool error and the session continues — never a
+  blocked turn, the same "never a hard dependency" rule as the model dropdown (§9)
+- Tool definitions remain byte-stable across a session with retrieval enabled
+
+### Verify
+
+Index this repository against a local Qdrant in Docker and a local OpenSearch, and confirm
+`search_codebase` finds a symbol by description rather than by name. Point the embedder at a
+local endpoint and confirm with a proxy that **no file content leaves for any other host**.
+Put a secret in a gitignored file and confirm it is never embedded. Then capture the request
+bodies for two consecutive turns and diff the tool-definition block — it must be identical.
+
+### Not in this phase
+
+Reranking, hybrid keyword+vector fusion, symbol-aware chunking, multi-workspace shared
+indexes, or embedding the conversation history.
+
+---
+
 ## Phase 9 — Python tools and skills
 
 **Goal:** the model can learn and extend itself. This is the differentiator, and the
