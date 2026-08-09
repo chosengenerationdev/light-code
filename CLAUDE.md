@@ -896,12 +896,17 @@ all defaulted.
   the webview bundle now legitimately contains example URLs as form placeholders, so that
   check will need to distinguish a placeholder from a fetch target when it is written.
 
-**Manual verification still outstanding (carried from Phases 3–5, never done):** Deny blocks
-execution; `execute_command` shows the literal command; the computed diff; "Undo all
-changes"; Ask mode hides edit/command tools; **"Always allow this command" on `node
---version` must NOT allow `node --version && echo hi`**; Approvals tab revoke. Phase 6 adds:
-the model dropdown populating against live DeepSeek, and Test Connection's three steps
-rendering in the real webview.
+**Manual verification is now a checked-in procedure: `MANUAL_VERIFICATION.md`,** with a
+fixture-workspace generator at `scripts/make-verification-workspace.mjs`. It is ordered by
+consequence rather than by phase — Session A is the security properties, where "it looked
+fine" is not evidence, and the sharpest single check is that **"Always allow" on
+`node --version` must NOT allow `node --version && echo hi`**. Work through it before any
+release; record findings back into this section.
+
+**One item is already partly confirmed.** Inspecting global storage on 2026-08-09 found a
+task written by a real Extension Host run — correct shape, title derived from the first user
+message, system prompt excluded from the count, matching index entry. Phase 6b's *write*
+path therefore works outside tests; the restore paths are still unproven.
 
 **Phase 5 done — MCP client:**
 - `mcp/types.ts` — the standard `mcpServers` shape, with transport **inferred** from the
