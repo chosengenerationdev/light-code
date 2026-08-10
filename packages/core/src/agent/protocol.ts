@@ -40,6 +40,17 @@ export interface ModelCapabilityInput {
 }
 
 /**
+ * Connection trust for a profile: an extra CA, and whether to verify the server
+ * certificate at all. Not a secret — a CA path and a boolean — so it crosses the bridge
+ * freely, unlike the passphrase in `CertSummary`.
+ */
+export interface ConnectionTlsInput {
+  caFile?: string | undefined
+  /** `false` means "accept any certificate". Absent means verify, which is the default. */
+  rejectUnauthorized?: boolean | undefined
+}
+
+/**
  * Never carries a secret value — invariant 7. The `has*` booleans only say whether one is
  * set, so the UI can render "Set — replace?" without ever round-tripping the value.
  */
@@ -56,6 +67,7 @@ export interface ProfileSummary {
   apigee?: ApigeeSummary
   certs?: CertSummary
   modelCapabilities?: ModelCapabilityInput
+  connectionTls?: ConnectionTlsInput
 }
 
 /**
@@ -77,6 +89,7 @@ export interface ProfileInput {
   /** Write-only. */
   certPassphrase?: string
   modelCapabilities?: ModelCapabilityInput
+  connectionTls?: ConnectionTlsInput
 }
 
 /**

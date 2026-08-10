@@ -91,3 +91,30 @@ describe('buildConnectOptions', () => {
     expect(buildConnectOptions({ pfx, passphrase: 'pw' }, {})).toEqual({ pfx, passphrase: 'pw' })
   })
 })
+
+describe('rejectUnauthorized', () => {
+  beforeEach(clearExtraCaCache)
+  afterEach(clearExtraCaCache)
+
+  /**
+   * Only an explicit `false` is written. Emitting `rejectUnauthorized: true` would make an
+   * accidental `undefined` indistinguishable from a deliberate opt-out at the call site.
+   */
+  it('is absent unless explicitly disabled', () => {
+    expect('rejectUnauthorized' in buildConnectOptions({}, {})).toBe(false)
+    expect('rejectUnauthorized' in buildConnectOptions({ rejectUnauthorized: true }, {})).toBe(false)
+  })
+
+  it('is passed through when disabled', () => {
+    expect(buildConnectOptions({ rejectUnauthorized: false }, {}).rejectUnauthorized).toBe(false)
+  })
+
+  /** Turning verification off must not also throw away a configured corporate root. */
+  it('composes with a configured CA', () => {
+    const corporate = Buffer.from('corp-pem')
+    const connect = buildConnectOptions({ rejectUnauthorized: false, ca: [corporate] }, {})
+
+    expect(connect.rejectUnauthorized).toBe(false)
+    expect(connect.ca).toContain(corporate)
+  })
+})

@@ -71,10 +71,14 @@ export interface ConnectOptions {
   pfx?: Buffer
   passphrase?: string
   ca?: (string | Buffer)[]
+  rejectUnauthorized?: boolean
 }
 
 export function buildConnectOptions(options: TlsOptions, env: NodeJS.ProcessEnv = process.env): ConnectOptions {
   const connect: ConnectOptions = {}
+  // Only ever written when explicitly false. Node defaults to true, and writing `true`
+  // here would make an accidental `undefined` indistinguishable from a deliberate choice.
+  if (options.rejectUnauthorized === false) connect.rejectUnauthorized = false
   if (options.cert !== undefined) connect.cert = options.cert
   if (options.key !== undefined) connect.key = options.key
   if (options.pfx !== undefined) connect.pfx = options.pfx

@@ -142,3 +142,35 @@ describe('listModels', () => {
     expect(presented).toBe(true)
   })
 })
+
+describe('self-hosted model families', () => {
+  /** These arrive renamed behind a corporate gateway, which is what substring matching is for. */
+  it('recognises Qwen, including prefixed gateway aliases', () => {
+    expect(lookupModelCapabilities('qwen2.5-coder-32b-instruct').known).toBe(true)
+    expect(lookupModelCapabilities('internal-qwen3-coder-480b').contextWindow).toBe(262_144)
+    expect(lookupModelCapabilities('Qwen/Qwen2.5-72B-Instruct').known).toBe(true)
+  })
+
+  it('knows which Qwen variants take images', () => {
+    expect(lookupModelCapabilities('qwen2.5-vl-7b').supportsVision).toBe(true)
+    expect(lookupModelCapabilities('qwen2.5-coder').supportsVision).toBe(false)
+  })
+
+  it('falls back to the bare qwen entry for an unlisted version', () => {
+    const caps = lookupModelCapabilities('qwen9-something-new')
+    expect(caps.known).toBe(true)
+    expect(caps.supportsTools).toBe(true)
+  })
+
+  it('recognises Gemma, including a version not in the table', () => {
+    expect(lookupModelCapabilities('gemma-3-27b-it').contextWindow).toBe(131_072)
+    expect(lookupModelCapabilities('gemma-2-9b').contextWindow).toBe(8_192)
+    // A future or internally-named release still matches the family rather than
+    // dropping to the 32k default, which is what made token counts wrong.
+    expect(lookupModelCapabilities('gemma-4-12b').known).toBe(true)
+  })
+
+  it('treats Gemma as vision-capable, so pasting a screenshot is not silently refused', () => {
+    expect(lookupModelCapabilities('gemma-3-12b-it').supportsVision).toBe(true)
+  })
+})

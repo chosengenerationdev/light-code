@@ -34,6 +34,7 @@ export type {
   ApigeeSummary,
   CertSummary,
   ModelCapabilityInput,
+  ConnectionTlsInput,
   TestConnectionStep,
   TranscriptEntry,
   TaskListEntry,

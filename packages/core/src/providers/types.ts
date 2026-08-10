@@ -71,6 +71,25 @@ export const providerProfileSchema = z.object({
   auth: authSchema,
   headers: z.record(z.string(), z.string()).optional(),
   /**
+   * Connection trust, independent of authentication.
+   *
+   * Separate from `auth.certs` on purpose: a *client* certificate is how the gateway
+   * identifies you, whereas this is how you decide to trust the gateway. Most corporate
+   * users need the second without the first — an ordinary API key behind a TLS-intercepting
+   * proxy — and tying the two together left them with no way to supply a CA at all.
+   *
+   * Safe to keep here rather than under a separate invariant-5 entry: the whole `profiles`
+   * list is already user-scope only, so a workspace cannot switch verification off.
+   */
+  tls: z
+    .object({
+      /** Absolute path, or relative to the user-scope `certDir`. PEM, may hold a chain. */
+      caFile: z.string().optional(),
+      /** `false` accepts any server certificate. See `TlsOptions.rejectUnauthorized`. */
+      rejectUnauthorized: z.boolean().optional(),
+    })
+    .optional(),
+  /**
    * Anthropic *requires* `max_tokens` — there is no "use the model default" — so this has
    * a working fallback in the adapter rather than being mandatory here.
    */

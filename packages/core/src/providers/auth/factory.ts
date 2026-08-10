@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import type { HttpClient, TlsOptions } from '../../platform/http.js'
 import type { SecretStore } from '../../platform/secrets.js'
-import type { Auth, AuthStrategy, WireFormat } from '../types.js'
+import type { Auth, AuthStrategy, ProviderProfile, WireFormat } from '../types.js'
 import { ApigeeMtlsAuthStrategy } from './apigeeMtls.js'
 import { ApiKeyAuthStrategy, defaultApiKeyHeader, NoAuthStrategy } from './apiKey.js'
 import { assertCertDirOutsideWorkspace, type CertConfig, checkExpiry, type ExpiryWarning, loadCerts } from './certs.js'
@@ -19,6 +21,8 @@ export interface AuthStrategyContext {
   /** Overrides the derived header name, for a gateway that fronts a provider differently. */
   apiKeyHeaderName?: string
   apiKeyHeaderPrefix?: string
+  /** The profile's `tls` block: an extra CA, and whether to verify the server certificate. */
+  connectionTls?: ProviderProfile['tls']
   /** Top-level user-scope `certDir`, used when the auth block does not name its own. */
   defaultCertDir?: string
   /** Used to enforce invariant 6. Omit when no folder is open. */
@@ -87,7 +91,84 @@ export function createCertLoader(
   }
 }
 
+/**
+ * Loads the profile's connection-trust settings: an extra CA, and whether to verify the
+ * server certificate at all.
+ *
+ * Applies to every auth type. A client certificate answers "who am I"; this answers "do I
+ * trust the other end", and a corporate user behind a TLS-intercepting proxy needs the
+ * second whether or not they need the first.
+ */
+export function createConnectionTlsLoader(
+  connection: ProviderProfile['tls'],
+  context: AuthStrategyContext,
+): (() => Promise<TlsOptions | undefined>) | undefined {
+  if (connection === undefined) return undefined
+  const { caFile, rejectUnauthorized } = connection
+  if (caFile === undefined && rejectUnauthorized !== false) return undefined
+
+  return async () => {
+    const tls: TlsOptions = {}
+    if (rejectUnauthorized === false) tls.rejectUnauthorized = false
+
+    if (caFile !== undefined && caFile.trim().length > 0) {
+      // Absolute wins; otherwise resolve against the user-scope certDir, matching how
+      // client certificate filenames already work (§10).
+      const resolved = path.isAbsolute(caFile)
+        ? caFile
+        : context.defaultCertDir !== undefined
+          ? path.join(context.defaultCertDir, caFile)
+          : caFile
+      try {
+        tls.ca = [await fs.readFile(resolved)]
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        throw new AuthConfigError(
+          code === 'ENOENT'
+            ? `The CA certificate was not found at "${resolved}". Check the path in Settings → Advanced.`
+            : `Could not read the CA certificate at "${resolved}": ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    return tls
+  }
+}
+
+/** Merges profile-level connection trust into whatever TLS the auth strategy supplies. */
+function withConnectionTls(
+  strategy: AuthStrategy,
+  loadConnectionTls: (() => Promise<TlsOptions | undefined>) | undefined,
+): AuthStrategy {
+  if (loadConnectionTls === undefined) return strategy
+
+  const wrapped: AuthStrategy = {
+    resolveHeaders: () => strategy.resolveHeaders(),
+    async tls() {
+      const connection = await loadConnectionTls()
+      const fromAuth = await strategy.tls?.()
+      if (connection === undefined) return fromAuth
+      if (fromAuth === undefined) return connection
+      // Client material from the auth strategy, trust settings from the profile. Both
+      // `ca` lists are merged rather than one replacing the other.
+      return {
+        ...fromAuth,
+        ...(connection.rejectUnauthorized === false ? { rejectUnauthorized: false } : {}),
+        ...(connection.ca !== undefined || fromAuth.ca !== undefined
+          ? { ca: [...(fromAuth.ca ?? []), ...(connection.ca ?? [])] }
+          : {}),
+      }
+    },
+  }
+  if (strategy.onUnauthorized !== undefined) wrapped.onUnauthorized = () => strategy.onUnauthorized!()
+  if (strategy.ensureTokenForStream !== undefined) wrapped.ensureTokenForStream = () => strategy.ensureTokenForStream!()
+  return wrapped
+}
+
 export function createAuthStrategy(auth: Auth, context: AuthStrategyContext): AuthStrategy {
+  return withConnectionTls(createBaseAuthStrategy(auth, context), createConnectionTlsLoader(context.connectionTls, context))
+}
+
+function createBaseAuthStrategy(auth: Auth, context: AuthStrategyContext): AuthStrategy {
   switch (auth.type) {
     case 'apiKey': {
       const derived = defaultApiKeyHeader(context.wireFormat ?? 'openai')

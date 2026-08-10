@@ -344,6 +344,24 @@ All of these are configurable in Advanced with working defaults:
 `fallbackExpirySeconds` (default 3600 — some gateways omit expiry entirely),
 `refreshSkewSeconds`, `extraHeaders`.
 
+### Connection trust vs. client identity — keep these separate
+
+A **client certificate** is how the gateway identifies you. **Connection trust** is how you
+decide the gateway is who it claims to be. Until 0.1.2 they were tangled: a CA could only be
+supplied inside the `apigeeMtls` auth block, so an ordinary API-key user behind a
+TLS-intercepting corporate proxy had **no way to add their root CA at all** and was simply
+blocked. `ProviderProfile.tls` now carries `caFile` and `rejectUnauthorized` for every auth
+type, and it merges with any client material the auth strategy supplies.
+
+`rejectUnauthorized: false` exists, per-profile and off by default. It is a genuine hole —
+an interceptor can read and modify the traffic including the API key, undetectably — and
+the UI says so in those terms whenever it is on. It is here because "my gateway uses an
+internal CA I cannot easily export" is a real, common situation that otherwise blocks the
+product entirely, and someone in that position will find a worse workaround. **The CA path
+is the fix; this is the escape hatch.** Note it needs no invariant-5 entry of its own: the
+whole `profiles` list is already user-scope only, so a workspace cannot switch verification
+off.
+
 ### Certificates
 
 User specifies a **directory** plus filenames; filenames resolve against it, absolute paths

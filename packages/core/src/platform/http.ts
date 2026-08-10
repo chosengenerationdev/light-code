@@ -14,6 +14,19 @@ export interface TlsOptions {
   passphrase?: string
   /** Extra CA roots — corporate TLS interception otherwise breaks the one real connection. */
   ca?: Buffer[]
+  /**
+   * Set `false` to accept any server certificate.
+   *
+   * This disables the guarantee that you are talking to who you think you are: an attacker
+   * positioned on the network can read and modify the traffic, including the API key, and
+   * nothing will detect it. Supplying the corporate root through `ca` is the correct fix
+   * and keeps verification on.
+   *
+   * It exists because "my gateway uses an internal CA I cannot easily export" is a real
+   * situation that otherwise blocks the product entirely, and people will reach for a
+   * worse workaround. It is off by default, per-profile, and the UI states the cost.
+   */
+  rejectUnauthorized?: boolean
 }
 
 export interface HttpRequestOptions {

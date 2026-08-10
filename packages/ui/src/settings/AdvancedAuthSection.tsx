@@ -1,4 +1,4 @@
-import type { ApigeeSummary, CertSummary, ModelCapabilityInput } from '@light-code/core/browser'
+import type { ApigeeSummary, CertSummary, ConnectionTlsInput } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
 import { SecretField } from './SecretField.js'
@@ -21,8 +21,9 @@ export interface AdvancedAuthSectionProps {
   onCertPassphraseChange: (value: string) => void
   hasCertPassphrase: boolean
 
-  capabilities: ModelCapabilityInput
-  onCapabilitiesChange: (value: ModelCapabilityInput) => void
+  /** Connection trust — applies to every auth type, not just mutual TLS. */
+  connectionTls: ConnectionTlsInput
+  onConnectionTlsChange: (value: ConnectionTlsInput) => void
 }
 
 function TextRow(props: {
@@ -279,44 +280,51 @@ export function AdvancedAuthSection(props: AdvancedAuthSectionProps): ReactEleme
         </>
       )}
 
-      <Disclosure title="Model capability overrides">
-        <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
-          Only needed when your gateway renames models so Light Code cannot recognise them.
+      {/* Model capability overrides used to live here, behind a disclosure inside Advanced.
+          Nobody found them, so an unrecognised model silently meant wrong token counts and
+          no image attachment. They are now inline under the model field. */}
+
+      <div style={{ marginBottom: 12, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+        <strong style={{ fontSize: 12, color: colors.foreground }}>Connection security</strong>
+        <p style={{ color: colors.muted, fontSize: 11, margin: '4px 0 8px' }}>
+          Needed when your network intercepts TLS, which is common on a corporate gateway.
+          This is separate from the client certificate above: it decides whether you trust
+          the server, not how the server identifies you.
         </p>
-        <NumberRow
-          id="lc-context-window"
-          label="Context window (tokens)"
-          value={props.capabilities.contextWindow}
-          placeholder="from the built-in table"
-          onChange={(value) => {
-            // Clearing the field must remove the key entirely, not store 0 — an absent
-            // override is what falls back to the built-in table.
-            const rest = { ...props.capabilities }
-            delete rest.contextWindow
-            props.onCapabilitiesChange(value !== undefined ? { ...rest, contextWindow: value } : rest)
-          }}
+      </div>
+
+      <TextRow
+        id="lc-connection-ca"
+        label="CA certificate file"
+        value={props.connectionTls.caFile}
+        placeholder="C:\\certs\\corp-root.pem"
+        hint="PEM, may contain a chain. Added to the built-in roots, never replacing them. NODE_EXTRA_CA_CERTS also works."
+        onChange={(value) => props.onConnectionTlsChange({ ...props.connectionTls, caFile: value })}
+      />
+
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6, fontSize: 12 }}>
+        <input
+          type="checkbox"
+          style={{ marginTop: 2 }}
+          checked={props.connectionTls.rejectUnauthorized === false}
+          onChange={(event) =>
+            props.onConnectionTlsChange({
+              ...props.connectionTls,
+              // Absent means "verify", which is the default. Only an explicit false is stored.
+              ...(event.target.checked ? { rejectUnauthorized: false } : { rejectUnauthorized: undefined }),
+            })
+          }
         />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 12 }}>
-          <input
-            type="checkbox"
-            checked={props.capabilities.supportsVision ?? false}
-            onChange={(event) =>
-              props.onCapabilitiesChange({ ...props.capabilities, supportsVision: event.target.checked })
-            }
-          />
-          Supports images
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <input
-            type="checkbox"
-            checked={props.capabilities.supportsTools ?? true}
-            onChange={(event) =>
-              props.onCapabilitiesChange({ ...props.capabilities, supportsTools: event.target.checked })
-            }
-          />
-          Supports tool calling
-        </label>
-      </Disclosure>
+        <span style={{ color: colors.foreground }}>Skip certificate verification for this profile</span>
+      </label>
+
+      {props.connectionTls.rejectUnauthorized === false && (
+        <p style={{ color: colors.error, fontSize: 11, margin: '0 0 12px', paddingLeft: 22 }}>
+          Anyone able to intercept this connection can now read and modify it, including your
+          API key, and nothing will detect it. Supplying the CA file above is the safe fix and
+          solves the same problem.
+        </p>
+      )}
     </div>
   )
 }

@@ -123,8 +123,19 @@ export function Composer(props: ComposerProps): ReactElement {
 
   const canSend = (text.trim().length > 0 || images.length > 0) && !props.isStreaming
 
+  /**
+   * Attaching is never blocked on the capability table.
+   *
+   * It used to be, and the result was that pasting a screenshot did nothing at all for any
+   * model the table did not recognise — which is most models behind a corporate gateway,
+   * since the id is usually renamed. Silence is the worst possible response: there is
+   * nothing to react to and no hint that a setting exists.
+   *
+   * So the paste always lands, and an unrecognised model gets a note pointing at the
+   * override. The host still refuses to send images to a model marked text-only, and says
+   * why.
+   */
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
-    if (!props.supportsVision) return
     const files = Array.from(event.clipboardData.files)
     if (files.length === 0) return
     event.preventDefault()
@@ -132,7 +143,7 @@ export function Composer(props: ComposerProps): ReactElement {
   }
 
   const handleDrop = (event: DragEvent<HTMLDivElement>): void => {
-    if (!props.supportsVision || event.dataTransfer.files.length === 0) return
+    if (event.dataTransfer.files.length === 0) return
     event.preventDefault()
     void addFiles(event.dataTransfer.files)
   }
@@ -220,6 +231,13 @@ export function Composer(props: ComposerProps): ReactElement {
 
       {notice !== undefined && <div style={{ padding: '4px 10px 0', fontSize: 11, color: colors.error }}>{notice}</div>}
 
+      {images.length > 0 && !props.supportsVision && (
+        <div style={{ padding: '4px 10px 0', fontSize: 11, color: colors.error }}>
+          This model is not known to accept images. If it does, tick “Supports images” in
+          Settings → Providers → Edit → Model capability overrides.
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', padding: 8 }}>
         <textarea
           ref={textareaRef}
@@ -278,31 +296,29 @@ export function Composer(props: ComposerProps): ReactElement {
           }}
         />
 
-        {props.supportsVision && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={SUPPORTED_IMAGE_TYPES.join(',')}
-              multiple
-              hidden
-              onChange={(event) => {
-                if (event.target.files !== null) void addFiles(event.target.files)
-                event.target.value = ''
-              }}
-            />
-            <button
-              type="button"
-              title="Attach an image"
-              aria-label="Attach an image"
-              style={iconButtonStyle('secondary', props.isStreaming)}
-              disabled={props.isStreaming}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <AttachIcon />
-            </button>
-          </>
-        )}
+        {/* Always offered. Hiding it for an unrecognised model made attachment look
+            unsupported when it was only unknown. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={SUPPORTED_IMAGE_TYPES.join(',')}
+          multiple
+          hidden
+          onChange={(event) => {
+            if (event.target.files !== null) void addFiles(event.target.files)
+            event.target.value = ''
+          }}
+        />
+        <button
+          type="button"
+          title={props.supportsVision ? 'Attach an image' : 'Attach an image (this model is not known to accept images)'}
+          aria-label="Attach an image"
+          style={iconButtonStyle('secondary', props.isStreaming)}
+          disabled={props.isStreaming}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <AttachIcon />
+        </button>
 
         {props.isStreaming ? (
           <button type="button" title="Cancel" aria-label="Cancel" style={iconButtonStyle('secondary')} onClick={props.onCancel}>

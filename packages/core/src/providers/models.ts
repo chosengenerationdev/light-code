@@ -44,9 +44,40 @@ const MODEL_TABLE: Record<string, Omit<ModelCapabilities, 'known'>> = {
 
   'llama-3.3': { contextWindow: 128_000, supportsVision: false, supportsTools: true },
   'llama-3.1': { contextWindow: 128_000, supportsVision: false, supportsTools: true },
-  'qwen2.5-coder': { contextWindow: 32_768, supportsVision: false, supportsTools: true },
   mistral: { contextWindow: 32_768, supportsVision: false, supportsTools: true },
+
+  // Qwen. Widely self-hosted behind an OpenAI-compatible gateway, so the ids that arrive
+  // are often prefixed or suffixed — substring matching handles that, and the bare
+  // `qwen` entry catches versions not listed here rather than dropping to the default.
+  'qwen2.5-coder': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  'qwen2.5-vl': { contextWindow: 131_072, supportsVision: true, supportsTools: true },
+  'qwen2.5': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  'qwen3-coder': { contextWindow: 262_144, supportsVision: false, supportsTools: true },
+  'qwen3-vl': { contextWindow: 262_144, supportsVision: true, supportsTools: true },
+  qwen3: { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  'qwen-vl': { contextWindow: 131_072, supportsVision: true, supportsTools: true },
+  'qwen-max': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  'qwen-plus': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  'qwen-turbo': { contextWindow: 1_000_000, supportsVision: false, supportsTools: true },
+  qwq: { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  qwen: { contextWindow: 32_768, supportsVision: false, supportsTools: true },
+
+  // Gemma. Open-weight, so the deployed context window is whatever the server was started
+  // with — these are the model's own maximums and a self-hosted deployment is often
+  // configured lower. Override per profile when it matters.
+  'gemma-3n': { contextWindow: 32_768, supportsVision: true, supportsTools: true },
+  'gemma-3': { contextWindow: 131_072, supportsVision: true, supportsTools: true },
+  'gemma-2': { contextWindow: 8_192, supportsVision: false, supportsTools: true },
+  gemma: { contextWindow: 131_072, supportsVision: true, supportsTools: true },
 }
+
+/**
+ * A note on `supportsTools` for open-weight models: whether tool calling works is a
+ * property of the **server**, not the model. vLLM, llama.cpp and Ollama each apply their
+ * own template, so the same Gemma or Qwen build may or may not emit tool calls depending
+ * on how it was started. Nothing gates on this field, so it is set optimistically —
+ * reporting "no tool support" for a model that works would be worse than saying nothing.
+ */
 
 /**
  * What an unrecognised id gets. Gateway aliases are common and often opaque, so the

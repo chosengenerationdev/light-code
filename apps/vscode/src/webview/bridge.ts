@@ -103,6 +103,8 @@ async function toSummary(profile: ProviderProfile, secrets: VSCodeSecretStore): 
     hasCertPassphrase: false,
   }
   if (profile.modelCapabilities !== undefined) summary.modelCapabilities = profile.modelCapabilities
+  // Not a secret: a path and a boolean. Only the passphrase is withheld (§15).
+  if (profile.tls !== undefined) summary.connectionTls = profile.tls
 
   if (profile.auth.type === 'apigeeMtls') {
     // Every field below is non-secret: URLs, ids, header names, and cert *paths* (§15).
@@ -294,6 +296,8 @@ export function wireChatBridge(
       secrets,
       http: httpClient,
       baseUrl: profile.baseUrl,
+      wireFormat: profile.wireFormat,
+      ...(profile.tls !== undefined ? { connectionTls: profile.tls } : {}),
       ...(config.certDir !== undefined ? { defaultCertDir: config.certDir } : {}),
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       // Invariant 6: whatever the loader actually read becomes unreadable to file tools.
@@ -676,6 +680,8 @@ export function wireChatBridge(
         auth,
       }
       if (input.modelCapabilities !== undefined) saved.modelCapabilities = input.modelCapabilities
+      const connectionTls = stripEmpty(input.connectionTls ?? {})
+      if (Object.keys(connectionTls).length > 0) saved.tls = connectionTls
 
       const nextProfiles = existing ? profiles.map((p) => (p.id === id ? saved : p)) : [...profiles, saved]
       // The very first profile ever created becomes active automatically.
@@ -797,6 +803,7 @@ export function wireChatBridge(
       baseUrl,
       model: input.model.trim().length > 0 ? input.model.trim() : 'unset',
       auth,
+      ...(input.connectionTls !== undefined ? { tls: stripEmpty(input.connectionTls) } : {}),
     }
     return { profile, auth }
   }

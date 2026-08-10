@@ -53,6 +53,7 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
             ...(editing.profile.modelCapabilities !== undefined
               ? { modelCapabilities: editing.profile.modelCapabilities }
               : {}),
+            ...(editing.profile.connectionTls !== undefined ? { connectionTls: editing.profile.connectionTls } : {}),
           }
         : {
             label: '',

@@ -3,6 +3,7 @@ import {
   validateProviderForm,
   type ApigeeSummary,
   type CertSummary,
+  type ConnectionTlsInput,
   type FieldError,
   type ModelCapabilityInput,
   type ProfileInput,
@@ -29,6 +30,7 @@ export interface ProviderFormValues {
   apigee?: ApigeeSummary
   certs?: CertSummary
   modelCapabilities?: ModelCapabilityInput
+  connectionTls?: ConnectionTlsInput
 }
 
 export interface ProviderFormProps {
@@ -57,7 +59,10 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
   const [certs, setCerts] = useState<CertSummary>(props.initial.certs ?? {})
   const [certPassphrase, setCertPassphrase] = useState('')
   const [capabilities, setCapabilities] = useState<ModelCapabilityInput>(props.initial.modelCapabilities ?? {})
+  const [connectionTls, setConnectionTls] = useState<ConnectionTlsInput>(props.initial.connectionTls ?? {})
   const [errors, setErrors] = useState<FieldError[]>([])
+  /** Prevents a re-fetch every time focus leaves the URL field without it having changed. */
+  const [lastFetchedUrl, setLastFetchedUrl] = useState<string | undefined>(undefined)
 
   const errorFor = (path: string): string | undefined => errors.find((e) => e.path === path)?.message
 
@@ -84,7 +89,35 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
     apiKey,
     ...(authType === 'apigeeMtls' ? { apigee, clientSecret, certs, certPassphrase } : {}),
     ...(Object.keys(capabilities).length > 0 ? { modelCapabilities: capabilities } : {}),
+    ...(connectionTls.caFile !== undefined || connectionTls.rejectUnauthorized !== undefined
+      ? { connectionTls }
+      : {}),
   })
+
+  /**
+   * Fetches the catalogue once the base URL looks usable, so the list is simply there
+   * rather than behind a button nobody knows to press.
+   *
+   * Fires on **blur, not on every keystroke**, and only for a URL that actually parses.
+   * That matters: the request carries the API key, and firing mid-typing would send it to
+   * whatever prefix happened to be in the field at the time.
+   */
+  const maybeAutoFetchModels = (): void => {
+    const url = baseUrl.trim()
+    if (url === lastFetchedUrl || url.length === 0) return
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return
+    } catch {
+      return
+    }
+    // A profile with no credential yet would just 401; wait until there is one to send.
+    const hasCredential = authType === 'none' || apiKey.trim().length > 0 || props.initial.hasApiKey || authType === 'apigeeMtls'
+    if (!hasCredential) return
+
+    setLastFetchedUrl(url)
+    props.onRequestModels(currentInput())
+  }
 
   const submit = (): void => {
     const fieldErrors = validateProviderForm({ label, wireFormat, baseUrl, model })
@@ -133,6 +166,7 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
           value={baseUrl}
           placeholder="https://api.openai.com/v1"
           onChange={(event) => setBaseUrl(event.target.value)}
+          onBlur={maybeAutoFetchModels}
           style={textFieldStyle()}
         />
         {errorFor('baseUrl') !== undefined && <span style={fieldErrorStyle()}>{errorFor('baseUrl')}</span>}
@@ -146,10 +180,14 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         loading={props.modelsLoading}
         onRefresh={() => props.onRequestModels(currentInput())}
         {...(errorFor('model') !== undefined ? { error: errorFor('model') } : {})}
+        capabilities={capabilities}
+        onCapabilitiesChange={setCapabilities}
       />
 
       {authType === 'apiKey' && (
-        <SecretField id="lc-api-key" label="API key" hasValue={props.initial.hasApiKey} value={apiKey} onChange={setApiKey} />
+        <div onBlur={maybeAutoFetchModels}>
+          <SecretField id="lc-api-key" label="API key" hasValue={props.initial.hasApiKey} value={apiKey} onChange={setApiKey} />
+        </div>
       )}
 
       <AdvancedAuthSection
@@ -165,8 +203,8 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         certPassphrase={certPassphrase}
         onCertPassphraseChange={setCertPassphrase}
         hasCertPassphrase={props.initial.hasCertPassphrase}
-        capabilities={capabilities}
-        onCapabilitiesChange={setCapabilities}
+        connectionTls={connectionTls}
+        onConnectionTlsChange={setConnectionTls}
       />
 
       <TestConnectionPanel
