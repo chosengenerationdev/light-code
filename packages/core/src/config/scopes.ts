@@ -19,6 +19,12 @@ export const USER_SCOPE_ONLY_KEYS = [
   // its choosing as soon as the panel opened — the same threat as `python.uvPath`.
   // `expert.enabled` is here too, so a repo cannot switch on paid API calls by itself.
   'expert',
+  // Added for Phase 8b, and the sharpest entries on this list. A workspace able to name a
+  // cluster, or repoint the embedder at a profile of its choosing, would exfiltrate
+  // whatever gets indexed — and what gets indexed is the source code.
+  'vectorStores',
+  'activeVectorStoreId',
+  'embedder',
 ] as const
 
 export interface ScopeMergeResult {

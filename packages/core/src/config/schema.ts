@@ -57,10 +57,59 @@ export const expertConfigSchema = z
   })
   .partial()
 
+/**
+ * One OpenSearch cluster. A named list rather than a singleton because different
+ * environments run different clusters — the same reasoning as provider profiles.
+ */
+export const vectorStoreSchema = z.object({
+  /** Only OpenSearch in this phase; Qdrant and Chroma are deferred until it is proven. */
+  kind: z.literal('opensearch'),
+  label: z.string().min(1),
+  /** User-supplied. No default endpoint exists anywhere (invariant 3). */
+  url: z.string().min(1).url('Must be a valid URL'),
+  /** SecretStorage references, never literals (§15). */
+  usernameRef: z.string().optional(),
+  passwordRef: z.string().optional(),
+  /** Used when the model names no index. */
+  defaultIndex: z.string().optional(),
+  /**
+   * Connection trust, mirroring `ProviderProfile.tls` — a corporate cluster sits behind
+   * the same intercepting proxy the gateway does.
+   */
+  caFile: z.string().optional(),
+  rejectUnauthorized: z.boolean().optional(),
+})
+export type VectorStoreConfig = z.infer<typeof vectorStoreSchema>
+
+/**
+ * Embeddings, borrowed from an existing provider profile.
+ *
+ * `profileId` rather than its own URL and credentials: the profile already carries a
+ * working base URL, auth strategy, client certificate and CA. A gateway proven for chat is
+ * proven for embeddings, and duplicating that configuration would mean two places to get
+ * mutual TLS right instead of one.
+ */
+export const embedderConfigSchema = z
+  .object({
+    profileId: z.string().min(1),
+    model: z.string().min(1),
+    /** Required to create the `knn_vector` mapping — OpenSearch needs a fixed dimension. */
+    dimensions: z.number().int().positive(),
+  })
+  .partial()
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
     expert: expertConfigSchema,
+    /**
+     * User-scope only (invariant 5). A workspace able to name a cluster or repoint the
+     * embedder would exfiltrate whatever gets indexed — sharper than the existing entries,
+     * because the payload is source code.
+     */
+    vectorStores: z.record(z.string(), vectorStoreSchema),
+    activeVectorStoreId: z.string(),
+    embedder: embedderConfigSchema,
     activeProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,

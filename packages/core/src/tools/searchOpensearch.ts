@@ -1,0 +1,119 @@
+import { z } from 'zod'
+import { buildSearchQuery, summariseHit } from '../rag/opensearch/query.js'
+import type { OpenSearchClient } from '../rag/opensearch/client.js'
+import type { Tool, ToolResult } from './types.js'
+
+const paramsSchema = z.object({
+  query: z.string().min(1).describe('What to search for, in plain words.'),
+  index: z.string().optional().describe('Which index to search. Omit to use the connection default.'),
+  filters: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe('Exact-match field filters, e.g. {"level":"ERROR"}. Only for fields you know exist.'),
+  after: z.string().optional().describe('ISO timestamp; only documents newer than this.'),
+  before: z.string().optional().describe('ISO timestamp; only documents older than this.'),
+  size: z.number().int().min(1).max(50).optional().describe('How many results. Default 10.'),
+})
+export type SearchOpensearchParams = z.infer<typeof paramsSchema>
+
+export interface SearchOpensearchOptions {
+  client: OpenSearchClient
+  /** Label of the active connection, so previews and errors name it. */
+  connectionLabel: string
+  defaultIndex?: string
+  /** Index names the model may search. Empty means any. */
+  availableIndexes?: string[]
+}
+
+/**
+ * Searches an OpenSearch index the organisation already runs — logs, tickets, documentation.
+ *
+ * Read-only: this tool can only run `_search`. Indexing goes through a separate path the
+ * user starts, so no model action can create, modify or delete an index.
+ *
+ * The mapping is fetched before querying rather than guessed. A free-text query against an
+ * index we did not design otherwise matches nothing useful, because the fields that exist
+ * and their types are unknowable from the query alone.
+ */
+export function createSearchOpensearchTool(options: SearchOpensearchOptions): Tool<SearchOpensearchParams> {
+  const describeIndexes =
+    options.availableIndexes !== undefined && options.availableIndexes.length > 0
+      ? ` Available indexes: ${options.availableIndexes.slice(0, 20).join(', ')}.`
+      : ''
+
+  return {
+    name: 'search_opensearch',
+    group: 'read',
+    description:
+      `Search the "${options.connectionLabel}" OpenSearch cluster for existing data — logs, ` +
+      'tickets, documentation, or anything else indexed there. Not for searching this ' +
+      `codebase; use search_files or search_codebase for that.` +
+      (options.defaultIndex !== undefined ? ` Defaults to the "${options.defaultIndex}" index.` : '') +
+      describeIndexes,
+    parametersSchema: paramsSchema,
+    async preview(params) {
+      const index = params.index ?? options.defaultIndex ?? '(no index selected)'
+      return {
+        kind: 'text' as const,
+        text: `Search ${options.connectionLabel} / ${index}\n\n${params.query}${
+          params.filters !== undefined ? `\n\nFilters: ${JSON.stringify(params.filters)}` : ''
+        }`,
+      }
+    },
+    async execute(params, context): Promise<ToolResult> {
+      const index = params.index ?? options.defaultIndex
+      if (index === undefined) {
+        return {
+          content:
+            'No index was given and this connection has no default. Name an index, or set a default in Settings → Search.',
+          isError: true,
+        }
+      }
+
+      try {
+        // Mapping first: it decides which fields are worth querying. A failure here is not
+        // fatal — the query still runs, just less precisely.
+        let mapping: Record<string, string> = {}
+        try {
+          mapping = await options.client.getMapping(index, context.signal)
+        } catch {
+          // Commonly a permissions issue on _mapping while _search is allowed.
+        }
+
+        const query = buildSearchQuery(params.query, {
+          mapping,
+          ...(params.filters !== undefined ? { filters: params.filters } : {}),
+          ...(params.after !== undefined ? { after: params.after } : {}),
+          ...(params.before !== undefined ? { before: params.before } : {}),
+        })
+
+        const result = await options.client.search(index, query, {
+          size: params.size ?? 10,
+          ...(context.signal !== undefined ? { signal: context.signal } : {}),
+        })
+
+        if (result.hits.length === 0) {
+          return {
+            content: `No matches in "${index}" for: ${params.query}${
+              Object.keys(mapping).length === 0 ? '\n\n(The index mapping could not be read, so the query may have been imprecise.)' : ''
+            }`,
+          }
+        }
+
+        const rendered = result.hits
+          .map((hit, position) => `[${position + 1}] score ${hit.score.toFixed(2)}  id=${hit.id}\n${summariseHit(hit.source)}`)
+          .join('\n\n---\n\n')
+
+        return {
+          content: [
+            `${result.hits.length} of ${result.total} matches in "${index}" (${result.tookMs}ms):`,
+            '',
+            rendered,
+          ].join('\n'),
+        }
+      } catch (error) {
+        return { content: error instanceof Error ? error.message : String(error), isError: true }
+      }
+    },
+  }
+}

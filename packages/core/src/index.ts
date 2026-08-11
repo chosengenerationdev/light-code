@@ -122,6 +122,18 @@ export {
   type ExpertAnswer,
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
+export {
+  OpenSearchClient,
+  OpenSearchError,
+  isSafeIndexName,
+  type OpenSearchConnection,
+  type IndexInfo,
+  type SearchHit,
+  type SearchResult,
+} from './rag/opensearch/client.js'
+export { buildSearchQuery, selectQueryFields, summariseHit } from './rag/opensearch/query.js'
+export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
+export { vectorStoreSchema, embedderConfigSchema, type VectorStoreConfig } from './config/schema.js'
 
 export {
   AlwaysApproveGate,
