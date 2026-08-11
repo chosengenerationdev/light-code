@@ -39,9 +39,28 @@ export const workspaceApprovalsSchema = z
 export type AutoApproveSettings = z.infer<typeof autoApproveSchema>
 export type WorkspaceApprovals = z.infer<typeof workspaceApprovalsSchema>
 
+/**
+ * The Claude CLI as a consulting expert (`ask_expert`).
+ *
+ * User-scope only along with everything else on invariant 5's list — `path` names an
+ * executable, and a workspace able to set it would run a program of its choosing the
+ * moment the panel opened. Same threat as `python.uvPath`.
+ */
+export const expertConfigSchema = z
+  .object({
+    /** Off unless explicitly enabled. Nothing is spawned or spent without this. */
+    enabled: z.boolean(),
+    /** Defaults to `claude` on PATH. An absolute path works for a non-standard install. */
+    path: z.string(),
+    /** Overrides the model the CLI would otherwise choose. */
+    model: z.string(),
+  })
+  .partial()
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
+    expert: expertConfigSchema,
     activeProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,

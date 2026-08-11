@@ -114,7 +114,14 @@ export {
 } from './context/compact.js'
 
 export { Conversation } from './agent/messages.js'
-export { buildSystemPrompt } from './agent/systemPrompt.js'
+export { buildSystemPrompt, type SystemPromptOptions } from './agent/systemPrompt.js'
+export {
+  detectClaudeCli,
+  consultExpert,
+  type ClaudeCliInfo,
+  type ExpertAnswer,
+} from './expert/claudeCli.js'
+export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
 
 export {
   AlwaysApproveGate,

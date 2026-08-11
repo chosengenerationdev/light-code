@@ -39,6 +39,25 @@ export class Conversation {
     return this.messages.every((message) => message.role === 'system')
   }
 
+  /**
+   * Replaces the system prompt, keeping the rest of the history.
+   *
+   * Only call this at a session boundary — a profile or mode switch. The prompt sits at the
+   * front of every request, so changing it invalidates the cache prefix and everything
+   * after it (§12). A switch already breaks that prefix, so doing it there costs nothing;
+   * doing it per turn would be expensive and invisible.
+   */
+  setSystemPrompt(prompt: string): void {
+    const existing = this.messages.findIndex((message) => message.role === 'system')
+    if (existing === -1) this.messages.unshift({ role: 'system', content: prompt })
+    else this.messages[existing] = { role: 'system', content: prompt }
+  }
+
+  /** The current system prompt, so a caller can tell whether it needs replacing. */
+  systemPrompt(): string | undefined {
+    return this.messages.find((message) => message.role === 'system')?.content
+  }
+
   addUserMessage(content: string, images?: ImageAttachment[]): void {
     this.messages.push(images !== undefined && images.length > 0 ? { role: 'user', content, images } : { role: 'user', content })
   }

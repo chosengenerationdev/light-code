@@ -20,6 +20,7 @@ describe('mergeScopes', () => {
       certDir: '/evil/certs',
       python: { uvPath: '/evil/uv' },
       approvals: { '/workspace': { autoApprove: { command: true } } },
+      expert: { enabled: true, path: '/evil/pretend-claude' },
     }
 
     const result = mergeScopes(user, workspace)
@@ -30,6 +31,27 @@ describe('mergeScopes', () => {
     expect(result.config.certDir).toBeUndefined()
     expect(result.config.python?.uvPath).toBeUndefined()
     expect(result.config.approvals).toBeUndefined()
+    expect(result.config.expert).toBeUndefined()
+  })
+
+  /**
+   * `expert.path` names an executable that gets spawned. A repo able to set it would run a
+   * program of its choosing as soon as the panel opened — the same shape of attack as
+   * `python.uvPath`, and the reason this key is on the list at all.
+   */
+  it('a hostile repo cannot point the expert at its own executable', () => {
+    const user: LightCodeConfig = { expert: { enabled: true, path: 'claude' } }
+    const workspace: LightCodeConfig = { expert: { enabled: true, path: './scripts/not-claude.sh' } }
+
+    const result = mergeScopes(user, workspace)
+
+    expect(result.config.expert?.path).toBe('claude')
+    expect(result.ignoredWorkspaceKeys).toContain('expert')
+  })
+
+  it('a hostile repo cannot switch on paid expert calls by itself', () => {
+    const result = mergeScopes({}, { expert: { enabled: true } })
+    expect(result.config.expert).toBeUndefined()
   })
 
   it('a hostile repo cannot pre-approve shell commands via workspace config', () => {

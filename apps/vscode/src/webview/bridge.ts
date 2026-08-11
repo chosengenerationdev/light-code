@@ -22,7 +22,9 @@ import {
   CONTROL_TOOLS,
   createAuthStrategy,
   createChatProvider,
+  createAskExpertTool,
   createDefaultToolRegistry,
+  detectClaudeCli,
   createReadToolResultTool,
   deriveTitle,
   findMode,
@@ -44,6 +46,7 @@ import {
   type AuthStrategyContext,
   type Auth,
   type Checkpoint,
+  type ClaudeCliInfo,
   type HostToUiMessage,
   type ImageAttachmentInput,
   type LightCodeConfig,
@@ -169,6 +172,26 @@ export function wireChatBridge(
   /** Certificates are re-read every request; without this the same warning would repeat. */
   const warnedExpiries = new Set<string>()
 
+  /**
+   * The Claude CLI expert, detected once per configured path. Spawning `claude --version`
+   * on every turn would be wasteful, and the answer only changes when the user installs it
+   * or edits the path.
+   */
+  let expertCli: ClaudeCliInfo | undefined
+  let expertCliPath: string | undefined
+
+  async function resolveExpert(config: LightCodeConfig): Promise<ClaudeCliInfo | undefined> {
+    // Nothing is spawned unless the user turned it on (§13's opt-in posture).
+    if (config.expert?.enabled !== true) return undefined
+    const configured = config.expert.path ?? 'claude'
+    if (expertCli === undefined || expertCliPath !== configured) {
+      expertCliPath = configured
+      expertCli = await detectClaudeCli(configured)
+      if (!expertCli.available) logger.warn('expert unavailable', expertCli.reason ?? '')
+    }
+    return expertCli.available ? expertCli : undefined
+  }
+
   let activeAbortController: AbortController | undefined
   /** The task's rollback point — the snapshot taken before its first edit. */
   let taskCheckpoint: Checkpoint | undefined
@@ -236,10 +259,15 @@ export function wireChatBridge(
    * `Tool`s by this point, so mode filtering and the approval gate apply to them with
    * no special-casing.
    */
-  function currentToolRegistry(): ToolRegistry {
+  function currentToolRegistry(expert?: { cli: ClaudeCliInfo; model?: string }): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
     for (const tool of mcp.enabledTools()) combined.register(tool)
+    // Registered only when the CLI is actually runnable, so the model is never told about
+    // a tool that would fail — the same rule mode filtering follows.
+    if (expert !== undefined) {
+      combined.register(createAskExpertTool({ cli: expert.cli, ...(expert.model !== undefined ? { model: expert.model } : {}) }))
+    }
     return combined
   }
 
@@ -467,6 +495,17 @@ export function wireChatBridge(
       // The wire adapter is chosen per profile; auth composes with any of them (§10).
       const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
       const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
+      const expertCliInfo = await resolveExpert(config)
+
+      // Rebuilt whenever the profile or expert availability changes, so the model can
+      // answer "which model are you?" accurately and knows whether ask_expert exists.
+      // A profile switch is a session boundary, so replacing the prefix here is free (§12).
+      const desiredPrompt = buildSystemPrompt(workspaceRoot, {
+        model: profile.model,
+        providerLabel: profile.label,
+        expertAvailable: expertCliInfo !== undefined,
+      })
+      if (conversation.systemPrompt() !== desiredPrompt) conversation.setSystemPrompt(desiredPrompt)
 
       // Lazy connect (§11): a configured-but-unused server costs nothing until a turn
       // actually needs its tools. Failures are per-server and surface in the MCP tab.
@@ -526,7 +565,11 @@ export function wireChatBridge(
         provider,
         conversation,
         messageText,
-        currentToolRegistry(),
+        currentToolRegistry(
+          expertCliInfo !== undefined
+            ? { cli: expertCliInfo, ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}) }
+            : undefined,
+        ),
         toolContext,
         {
           onContextUpdate: (breakdown, supersededCount, compactedCount) => {
@@ -830,6 +873,50 @@ export function wireChatBridge(
     } catch (error) {
       logger.warn('mention lookup failed', String(error))
       post({ type: 'mentionCandidates', query, paths: [] })
+    }
+  }
+
+  /**
+   * Reports the expert's state. Detection runs even when disabled, so the tab can say
+   * "found, not enabled" rather than leaving the user guessing whether the path is wrong.
+   */
+  async function postExpert(): Promise<void> {
+    const { config } = await configManager.load()
+    const configured = config.expert?.path ?? 'claude'
+    const detected = await detectClaudeCli(configured)
+    // Cache the probe so the next turn does not re-spawn it.
+    expertCli = detected
+    expertCliPath = configured
+
+    post({
+      type: 'expert',
+      enabled: config.expert?.enabled === true,
+      available: detected.available,
+      path: configured,
+      ...(detected.version !== undefined ? { version: detected.version } : {}),
+      ...(detected.reason !== undefined ? { reason: detected.reason } : {}),
+      ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
+    })
+  }
+
+  async function handleSetExpert(enabled: boolean, cliPath?: string, model?: string): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      await configManager.save('user', {
+        expert: {
+          ...config.expert,
+          enabled,
+          ...(cliPath !== undefined && cliPath.length > 0 ? { path: cliPath } : {}),
+          ...(model !== undefined && model.length > 0 ? { model } : { model: undefined }),
+        },
+      })
+      // Force re-detection: the path may have changed, and a stale probe would report the
+      // old binary as still present.
+      expertCli = undefined
+      expertCliPath = undefined
+      await postExpert()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -1138,6 +1225,10 @@ export function wireChatBridge(
       void updateMcpServer(message.name, (entry) => ({ ...entry, disabled: !message.enabled })).then(() => postMcp())
     } else if (message.type === 'setMcpToolPermission') {
       void handleSetToolPermission(message.server, message.tool, message.permission)
+    } else if (message.type === 'requestExpert') {
+      void postExpert()
+    } else if (message.type === 'setExpert') {
+      void handleSetExpert(message.enabled, message.path, message.model)
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
       // Capabilities travel with the profile list: switching profiles can change whether

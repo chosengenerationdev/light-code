@@ -15,6 +15,10 @@ export const USER_SCOPE_ONLY_KEYS = [
   // user-side: a repo that could ship its own pre-approvals could run shell commands
   // unprompted the moment you opened it.
   'approvals',
+  // `expert.path` names an executable. A workspace able to set it would run a program of
+  // its choosing as soon as the panel opened — the same threat as `python.uvPath`.
+  // `expert.enabled` is here too, so a repo cannot switch on paid API calls by itself.
+  'expert',
 ] as const
 
 export interface ScopeMergeResult {

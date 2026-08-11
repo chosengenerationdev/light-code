@@ -180,6 +180,8 @@ export type UiToHostMessage =
   | { type: 'setMcpServerEnabled'; name: string; enabled: boolean }
   | { type: 'setMcpToolPermission'; server: string; tool: string; permission: McpToolPermission }
   | { type: 'requestProfiles' }
+  | { type: 'requestExpert' }
+  | { type: 'setExpert'; enabled: boolean; path?: string; model?: string }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }
   | { type: 'deleteProfile'; id: string }
@@ -233,6 +235,17 @@ export type HostToUiMessage =
   | { type: 'mentionCandidates'; query: string; paths: string[] }
   /** Whether the active model accepts images, from the capability table (§9). */
   | { type: 'capabilities'; supportsVision: boolean; supportsTools: boolean; contextWindow: number }
+  /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
+  | {
+      type: 'expert'
+      enabled: boolean
+      available: boolean
+      path: string
+      version?: string
+      /** Why it cannot run, phrased for a human. */
+      reason?: string
+      model?: string
+    }
   /**
    * Replaces the whole transcript — sent when a task is reopened, and on panel load to
    * restore the task that was in progress. `entries` is empty for a new task.

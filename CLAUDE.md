@@ -481,6 +481,42 @@ embedding dependency is why the whole feature is opt-in and ships disabled.
 
 ---
 
+## 12b. The Claude CLI expert (0.2.0)
+
+A cheaper primary model can consult Claude through its CLI, via the `ask_expert` tool.
+User-requested, to get strong-model quality on hard problems without paying strong-model
+rates for routine work.
+
+**Read-only by construction, and this is the load-bearing decision.** Claude may `Read`,
+`Grep` and `Glob` the workspace so it gathers its own context; it may not edit or run
+anything (`--disallowedTools Bash,Write,Edit,…`). A second agent mutating the repository
+would sit entirely outside Light Code's approval gate, which is precisely what §8 and
+invariant 8 exist to prevent. It is also the cheaper design — an agentic Claude session
+costs many times a single consultation, and spending less is the whole point.
+
+The full-agent alternative (proxying Claude's own permission prompts into our approval UI
+via `--permission-prompt-tool`) was considered and rejected on both counts. **Do not
+implement it without an explicit decision**; tools Claude requests and is refused are
+reported in the tool result instead, so nothing is hidden.
+
+- The question goes on **stdin, never argv** — it is model-generated text, and §16 forbids
+  interpolating that into a command line. The Windows `.cmd` shim is invoked through
+  `cmd /c` with the prompt as a separate argument rather than `shell: true`.
+- **`expert` is user-scope only** (invariant 5). `expert.path` names an executable, so a
+  workspace able to set it would run a program of its choosing on panel open — the same
+  threat as `python.uvPath`. `enabled` is covered too, so a repo cannot switch on paid API
+  calls by itself.
+- Off by default. Nothing is spawned and nothing is spent until the user enables it.
+- Cost is surfaced per consultation, in the tool result and in the tab. A number nobody
+  sees cannot be managed.
+- Detection falls back to the npm prefix when the bare command is not on PATH. **This is an
+  observed failure, not defensive padding:** an editor started before `npm i -g` does not
+  see the new binary, so the user installs it and is still told it is missing.
+
+**Verified against the real CLI (v2.1.227)** on Windows: detection through the `.cmd` shim,
+a live consultation returning the expected answer, and the reported cost. Untested: the
+denied-tools path, and any non-Windows shim layout.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

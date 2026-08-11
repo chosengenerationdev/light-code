@@ -1,4 +1,4 @@
-import type { ApprovalDecision, ContextUsage, ImageAttachmentInput } from '@light-code/core/browser'
+import type { ApprovalDecision, ContextUsage, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import type { ReactElement } from 'react'
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
 import { Composer } from './Composer.js'
@@ -21,6 +21,10 @@ export interface ChatProps {
   supportsVision: boolean
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void
+  profiles: ProfileSummary[]
+  activeProfileId: string | undefined
+  onSelectProfile: (id: string) => void
+  expertEnabled: boolean
 }
 
 export function Chat(props: ChatProps): ReactElement {
@@ -64,6 +68,10 @@ export function Chat(props: ChatProps): ReactElement {
         supportsVision={props.supportsVision}
         mentionCandidates={props.mentionCandidates}
         onQueryMentions={props.onQueryMentions}
+        profiles={props.profiles}
+        activeProfileId={props.activeProfileId}
+        onSelectProfile={props.onSelectProfile}
+        expertEnabled={props.expertEnabled}
       />
     </div>
   )

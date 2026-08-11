@@ -1,7 +1,7 @@
-import type { ImageAttachmentInput } from '@light-code/core/browser'
+import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
 import { AttachIcon, SendIcon, StopIcon } from './icons.js'
-import { colors, fontFamily, iconButtonStyle } from './theme.js'
+import { badgeStyle, colors, fontFamily, iconButtonStyle } from './theme.js'
 
 export interface ComposerProps {
   isStreaming: boolean
@@ -12,6 +12,12 @@ export interface ComposerProps {
   /** Paths matching the current `@` query, supplied by the host. */
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void
+  /** Shown as a selector under the input, so the answering model is switchable in place. */
+  profiles: ProfileSummary[]
+  activeProfileId: string | undefined
+  onSelectProfile: (id: string) => void
+  /** Whether the Claude CLI expert is configured and runnable. */
+  expertEnabled: boolean
 }
 
 /** Beyond this the request usually fails on the provider side, so refuse it here instead. */
@@ -337,6 +343,43 @@ export function Composer(props: ComposerProps): ReactElement {
           </button>
         )}
       </div>
+
+      {/* Which model is about to answer, switchable without leaving the chat. Below the
+          input rather than in the header because it belongs to the message being sent. */}
+      {props.profiles.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px 8px' }}>
+          <select
+            aria-label="Provider profile"
+            title="Which provider answers the next message"
+            value={props.activeProfileId ?? ''}
+            disabled={props.isStreaming}
+            onChange={(event) => props.onSelectProfile(event.target.value)}
+            style={{
+              background: 'transparent',
+              color: colors.muted,
+              border: 'none',
+              fontFamily,
+              fontSize: 11,
+              cursor: props.isStreaming ? 'default' : 'pointer',
+              maxWidth: '60%',
+            }}
+          >
+            {props.profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.label} · {profile.model}
+              </option>
+            ))}
+          </select>
+          {props.expertEnabled && (
+            <span
+              title="A stronger expert model is available for hard problems"
+              style={{ ...badgeStyle(), marginLeft: 'auto' }}
+            >
+              expert
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

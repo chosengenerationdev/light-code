@@ -21,6 +21,7 @@ import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
 import { ModeSelector } from './ModeSelector.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
+import type { ExpertState } from './settings/ExpertTab.js'
 import { HistoryList } from './history/HistoryList.js'
 import { BackIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
@@ -63,6 +64,8 @@ export function App(props: AppProps): ReactElement {
   const [activeTaskId, setActiveTaskId] = useState<string | undefined>(undefined)
   const [usage, setUsage] = useState<ContextUsage | undefined>(undefined)
   const [supportsVision, setSupportsVision] = useState(false)
+  const [expertEnabled, setExpertEnabled] = useState(false)
+  const [expert, setExpert] = useState<ExpertState | undefined>(undefined)
   const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
 
   useEffect(() => {
@@ -152,6 +155,17 @@ export function App(props: AppProps): ReactElement {
         setMentionCandidates(message.paths)
       } else if (message.type === 'capabilities') {
         setSupportsVision(message.supportsVision)
+      } else if (message.type === 'expert') {
+        setExpert({
+          enabled: message.enabled,
+          available: message.available,
+          path: message.path,
+          ...(message.version !== undefined ? { version: message.version } : {}),
+          ...(message.reason !== undefined ? { reason: message.reason } : {}),
+          ...(message.model !== undefined ? { model: message.model } : {}),
+        })
+        // The composer badge means "usable", not merely "switched on".
+        setExpertEnabled(message.enabled && message.available)
       } else if (message.type === 'tasks') {
         setTasks(message.tasks)
         setActiveTaskId(message.activeTaskId)
@@ -173,6 +187,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSettings' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -264,6 +279,14 @@ export function App(props: AppProps): ReactElement {
     setModelsLoading(false)
     setTestResult(undefined)
     setTestRunning(false)
+  }
+  const saveExpert = (enabled: boolean, path: string, model: string): void => {
+    props.transport.post({
+      type: 'setExpert',
+      enabled,
+      ...(path.length > 0 ? { path } : {}),
+      ...(model.length > 0 ? { model } : {}),
+    } satisfies UiToHostMessage)
   }
   const saveMcp = (json: string): void => {
     props.transport.post({ type: 'saveMcpServers', json } satisfies UiToHostMessage)
@@ -390,6 +413,8 @@ export function App(props: AppProps): ReactElement {
             onSetMcpServerEnabled={setMcpServerEnabled}
             onSetMcpToolPermission={setMcpToolPermission}
             onConnectMcp={connectMcp}
+            expert={expert}
+            onSaveExpert={saveExpert}
           />
         ) : view === 'history' ? (
           <HistoryList
@@ -422,6 +447,10 @@ export function App(props: AppProps): ReactElement {
             supportsVision={supportsVision}
             mentionCandidates={mentionCandidates}
             onQueryMentions={queryMentions}
+            profiles={profiles}
+            activeProfileId={activeProfileId}
+            onSelectProfile={setActiveProfile}
+            expertEnabled={expertEnabled}
           />
         )}
       </div>
