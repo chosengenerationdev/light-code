@@ -561,6 +561,10 @@ export function wireChatBridge(
       // guaranteed, and this makes each message self-correcting rather than letting
       // one dropped delta permanently corrupt everything streamed after it.
       let cumulativeText = ''
+      let cumulativeReasoning = ''
+      // Sticky once the expert has been consulted, matching how a restored transcript is
+      // derived — so the live view and a reopened task mark the same work.
+      let expertInformed = false
       await runAgentTurn(
         provider,
         conversation,
@@ -578,18 +582,24 @@ export function wireChatBridge(
           onCompacted: (summarisedCount) => post({ type: 'compacted', summarisedCount }),
           onTextChunk: (chunk) => {
             cumulativeText += chunk
-            post({ type: 'textChunk', text: cumulativeText })
+            post({ type: 'textChunk', text: cumulativeText, ...(expertInformed ? { expertInformed } : {}) })
+          },
+          onReasoningChunk: (chunk) => {
+            cumulativeReasoning += chunk
+            post({ type: 'reasoningChunk', text: cumulativeReasoning })
           },
           onToolCall: (toolCall) => {
             // Each tool call starts a fresh assistant text block in the transcript.
             cumulativeText = ''
+            cumulativeReasoning = ''
+            if (toolCall.name === 'ask_expert') expertInformed = true
             if (CONTROL_TOOLS.has(toolCall.name)) return
             const summary: ToolCallSummary = {
               id: toolCall.id,
               name: toolCall.name,
               arguments: formatToolArguments(toolCall.arguments),
             }
-            post({ type: 'toolCall', toolCall: summary })
+            post({ type: 'toolCall', toolCall: summary, ...(expertInformed ? { expertInformed } : {}) })
           },
           onToolResult: (toolCall, result) => {
             // The control tools aren't work being done — they're the model addressing the
@@ -606,7 +616,7 @@ export function wireChatBridge(
               result: result.content,
               ...(result.isError === true ? { isError: true } : {}),
             }
-            post({ type: 'toolResult', toolCall: summary })
+            post({ type: 'toolResult', toolCall: summary, ...(expertInformed ? { expertInformed } : {}) })
           },
           onCheckpoint: (checkpoint) => {
             taskCheckpoint = checkpoint

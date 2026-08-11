@@ -1,6 +1,6 @@
 import { resolveModelCapabilities, type ModelCapabilityInput } from '@light-code/core/browser'
 import { type ReactElement } from 'react'
-import { colors, fieldErrorStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, fieldErrorStyle, labelStyle, optionStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 export interface ModelSelectProps {
   value: string
@@ -64,9 +64,9 @@ export function ModelSelect(props: ModelSelectProps): ReactElement {
           }}
           style={textFieldStyle()}
         >
-          <option value="">Choose from {props.models.length} available model(s)…</option>
+          <option value="" style={optionStyle()}>Choose from {props.models.length} available model(s)…</option>
           {props.models.map((id) => (
-            <option key={id} value={id}>
+            <option key={id} value={id} style={optionStyle()}>
               {id}
             </option>
           ))}

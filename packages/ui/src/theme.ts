@@ -83,6 +83,35 @@ export function textFieldStyle(): CSSProperties {
   }
 }
 
+/**
+ * Dropdowns need their own style, and `<option>` needs styling separately.
+ *
+ * A `<select>` renders its popup with the platform's native list, which on Windows and
+ * Linux is white regardless of what the control itself looks like. Styling only the select
+ * gives a correctly-dark closed control that flashes a white list when opened. Chromium —
+ * which is what a VS Code webview is — does honour `background`/`color` on `<option>`,
+ * so `optionStyle()` must be applied to every option for the popup to match the theme.
+ *
+ * (macOS draws the popup with the system appearance and ignores both; there is nothing to
+ * be done about that, and it follows the OS dark mode anyway.)
+ */
+export function selectStyle(compact = false): CSSProperties {
+  return {
+    background: colors.inputBackground,
+    color: colors.inputForeground,
+    border: `1px solid ${colors.inputBorder}`,
+    borderRadius: 2,
+    padding: compact ? '2px 4px' : '6px 8px',
+    fontFamily,
+    fontSize: compact ? 11 : 13,
+    cursor: 'pointer',
+  }
+}
+
+export function optionStyle(): CSSProperties {
+  return { background: colors.inputBackground, color: colors.inputForeground }
+}
+
 export function labelStyle(): CSSProperties {
   return {
     color: colors.muted,

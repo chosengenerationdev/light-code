@@ -1,6 +1,7 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '@light-code/core/browser'
+import { TrashIcon } from '../icons.js'
 import type { ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, secondaryButtonStyle } from '../theme.js'
+import { colors, fontFamily, iconButtonStyle, labelStyle } from '../theme.js'
 
 export interface ApprovalsTabProps {
   approvals: WorkspaceApprovals
@@ -59,8 +60,14 @@ function RevocableList(props: {
             }}
           >
             <code style={{ flex: 1, fontFamily: monospace, fontSize: 12, wordBreak: 'break-all' }}>{entry}</code>
-            <button type="button" style={secondaryButtonStyle()} onClick={() => props.onRevoke(entry)}>
-              Revoke
+            <button
+              type="button"
+              title="Revoke this permission"
+              aria-label="Revoke this permission"
+              style={{ ...iconButtonStyle('secondary'), color: colors.error }}
+              onClick={() => props.onRevoke(entry)}
+            >
+              <TrashIcon />
             </button>
           </div>
         ))

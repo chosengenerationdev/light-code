@@ -1,6 +1,6 @@
 import { BUILTIN_MODES, findMode } from '@light-code/core/browser'
 import type { ReactElement } from 'react'
-import { colors, fontFamily } from './theme.js'
+import { optionStyle, selectStyle } from './theme.js'
 
 export interface ModeSelectorProps {
   modeId: string
@@ -17,19 +17,10 @@ export function ModeSelector(props: ModeSelectorProps): ReactElement {
       disabled={props.disabled}
       title={mode.description}
       onChange={(event) => props.onChange(event.target.value)}
-      style={{
-        background: colors.inputBackground,
-        color: colors.inputForeground,
-        border: `1px solid ${colors.inputBorder}`,
-        borderRadius: 2,
-        padding: '2px 4px',
-        fontFamily,
-        fontSize: 11,
-        cursor: props.disabled ? 'default' : 'pointer',
-      }}
+      style={{ ...selectStyle(true), cursor: props.disabled ? 'default' : 'pointer' }}
     >
       {BUILTIN_MODES.map((option) => (
-        <option key={option.id} value={option.id}>
+        <option key={option.id} value={option.id} style={optionStyle()}>
           {option.name}
         </option>
       ))}

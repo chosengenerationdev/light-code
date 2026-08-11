@@ -240,8 +240,12 @@ async function* parseAnthropicStream(
           }
         } else if (eventType === 'content_block_delta') {
           const index = typeof parsed.index === 'number' ? parsed.index : 0
-          const delta = parsed.delta as { type?: string; text?: unknown; partial_json?: unknown } | undefined
-          if (delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
+          const delta = parsed.delta as
+            | { type?: string; text?: unknown; partial_json?: unknown; thinking?: unknown }
+            | undefined
+          if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
+            yield { type: 'reasoning', text: delta.thinking }
+          } else if (delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
             yield { type: 'text', text: delta.text }
           } else if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
             const accumulator = toolUses.get(index)

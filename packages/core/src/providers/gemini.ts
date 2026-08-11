@@ -211,9 +211,15 @@ async function* parseGeminiStream(
         if (!Array.isArray(parts)) continue
 
         for (const rawPart of parts) {
-          const part = rawPart as { text?: unknown; functionCall?: { name?: unknown; args?: unknown } }
+          const part = rawPart as {
+            text?: unknown
+            thought?: unknown
+            functionCall?: { name?: unknown; args?: unknown }
+          }
           if (typeof part.text === 'string' && part.text.length > 0) {
-            yield { type: 'text', text: part.text }
+            // Gemini marks a reasoning part with `thought: true` and puts the content in
+            // the ordinary `text` field, so the flag is the only thing distinguishing them.
+            yield part.thought === true ? { type: 'reasoning', text: part.text } : { type: 'text', text: part.text }
           }
           if (part.functionCall !== undefined && typeof part.functionCall.name === 'string') {
             // Gemini supplies no call id; everything upstream needs one to pair the result.

@@ -1,6 +1,6 @@
 import type { ApigeeSummary, CertSummary, ConnectionTlsInput } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
+import { colors, fontFamily, labelStyle, optionStyle, textFieldStyle } from '../theme.js'
 import { SecretField } from './SecretField.js'
 
 export type AuthType = 'none' | 'apiKey' | 'apigeeMtls'
@@ -128,9 +128,9 @@ export function AdvancedAuthSection(props: AdvancedAuthSectionProps): ReactEleme
           onChange={(event) => props.onAuthTypeChange(event.target.value as AuthType)}
           style={textFieldStyle()}
         >
-          <option value="apiKey">API key</option>
-          <option value="apigeeMtls">Mutual TLS + OAuth (Apigee)</option>
-          <option value="none">None</option>
+          <option value="apiKey" style={optionStyle()}>API key</option>
+          <option value="apigeeMtls" style={optionStyle()}>Mutual TLS + OAuth (Apigee)</option>
+          <option value="none" style={optionStyle()}>None</option>
         </select>
       </div>
 

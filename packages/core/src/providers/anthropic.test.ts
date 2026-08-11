@@ -280,3 +280,21 @@ describe('AnthropicProvider streaming', () => {
     expect(chunks.at(-1)).toEqual({ type: 'done' })
   })
 })
+
+describe('reasoning', () => {
+  /** Anthropic streams extended thinking as `thinking_delta` inside a content block. */
+  it('yields thinking deltas as reasoning, not as answer text', async () => {
+    const client = new FakeHttpClient(
+      sseStream([
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me check"}}\n\n',
+        'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done."}}\n\n',
+        'data: {"type":"message_stop"}\n\n',
+      ]),
+    )
+
+    const chunks = await collect(new AnthropicProvider(client, profile, new NoAuthStrategy()).streamChat([]))
+
+    expect(chunks.filter((c) => c.type === 'reasoning')).toEqual([{ type: 'reasoning', text: 'Let me check' }])
+    expect(chunks.filter((c) => c.type === 'text')).toEqual([{ type: 'text', text: 'Done.' }])
+  })
+})

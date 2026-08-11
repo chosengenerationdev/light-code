@@ -1,7 +1,7 @@
 import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
 import { AttachIcon, SendIcon, StopIcon } from './icons.js'
-import { badgeStyle, colors, fontFamily, iconButtonStyle } from './theme.js'
+import { badgeStyle, colors, fontFamily, iconButtonStyle, optionStyle, selectStyle } from './theme.js'
 
 export interface ComposerProps {
   isStreaming: boolean
@@ -57,6 +57,12 @@ export function Composer(props: ComposerProps): ReactElement {
   const [highlighted, setHighlighted] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  /** Grows the box to fit the text, capped, so the send button never drifts out of line. */
+  const resize = (element: HTMLTextAreaElement): void => {
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 200)}px`
+  }
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const showingMentions = mentionQuery !== undefined && props.mentionCandidates.length > 0
@@ -122,6 +128,9 @@ export function Composer(props: ComposerProps): ReactElement {
     if (trimmed.length === 0 && images.length === 0) return
     props.onSend(trimmed, images)
     setText('')
+    if (textareaRef.current !== null) {
+      textareaRef.current.style.height = 'auto'
+    }
     setImages([])
     setMentionQuery(undefined)
     setNotice(undefined)
@@ -244,7 +253,21 @@ export function Composer(props: ComposerProps): ReactElement {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', padding: 8 }}>
+      {/* One bordered box containing the textarea and its buttons, so the control reads as
+          a single field rather than an input with things bolted beside it. The border lives
+          here; the textarea itself is borderless and transparent. */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          alignItems: 'flex-end',
+          margin: 8,
+          padding: 4,
+          background: colors.inputBackground,
+          border: `1px solid ${colors.inputBorder}`,
+          borderRadius: 4,
+        }}
+      >
         <textarea
           ref={textareaRef}
           value={text}
@@ -254,6 +277,7 @@ export function Composer(props: ComposerProps): ReactElement {
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             setText(event.target.value)
             syncMentionQuery(event.target.value, event.target.selectionStart)
+            resize(event.target)
           }}
           onClick={(event) => syncMentionQuery(text, event.currentTarget.selectionStart)}
           onBlur={() => setMentionQuery(undefined)}
@@ -291,14 +315,21 @@ export function Composer(props: ComposerProps): ReactElement {
           }}
           style={{
             flex: 1,
-            resize: 'vertical',
-            background: colors.inputBackground,
+            resize: 'none',
+            background: 'transparent',
             color: colors.inputForeground,
-            border: `1px solid ${colors.inputBorder}`,
-            borderRadius: 2,
-            padding: '6px 8px',
+            border: 'none',
+            outline: 'none',
+            padding: '5px 6px',
+            margin: 0,
             fontFamily,
             fontSize: 13,
+            lineHeight: 1.45,
+            // Grows with the text up to a limit, instead of a fixed two rows that is too
+            // small for a paragraph and too tall for one line.
+            minHeight: 44,
+            maxHeight: 200,
+            overflowY: 'auto',
           }}
         />
 
@@ -355,17 +386,13 @@ export function Composer(props: ComposerProps): ReactElement {
             disabled={props.isStreaming}
             onChange={(event) => props.onSelectProfile(event.target.value)}
             style={{
-              background: 'transparent',
-              color: colors.muted,
-              border: 'none',
-              fontFamily,
-              fontSize: 11,
+              ...selectStyle(true),
               cursor: props.isStreaming ? 'default' : 'pointer',
               maxWidth: '60%',
             }}
           >
             {props.profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
+              <option key={profile.id} value={profile.id} style={optionStyle()}>
                 {profile.label} · {profile.model}
               </option>
             ))}

@@ -513,9 +513,23 @@ reported in the tool result instead, so nothing is hidden.
   observed failure, not defensive padding:** an editor started before `npm i -g` does not
   see the new binary, so the user installs it and is still told it is missing.
 
-**Verified against the real CLI (v2.1.227)** on Windows: detection through the `.cmd` shim,
-a live consultation returning the expected answer, and the reported cost. Untested: the
-denied-tools path, and any non-Windows shim layout.
+**What actually happens when the expert wants a forbidden tool** — measured against CLI
+2.1.227, because the answer was not what the code assumed:
+
+- **It is never offered the tool, so there is nothing to refuse.** Asked to run a shell
+  command it replies "I don't have a Bash tool available in this session" and adapts. Asked
+  to write a file: "Write is disabled for this session, in subagents as well as here" — the
+  restriction holds through subagents too.
+- **It does not prompt and does not hang.** The provoked cases returned in 9s and 34s
+  against a 120s timeout. This matters because a consultation runs inside another agent's
+  turn, where no one is present to answer a prompt.
+- **`permission_denials` came back empty** in every case, since nothing was
+  requested-and-refused. `deniedTools` is therefore usually empty; it is kept for the case
+  where a tool *is* offered and declined, not as the main reporting path.
+- Nothing was written to the probe workspace.
+
+**Also verified on Windows:** detection through the `.cmd` shim, a live consultation, and
+the reported cost. **Untested:** non-Windows shim layouts.
 
 ## 13. Python interop and skills (phase 9)
 

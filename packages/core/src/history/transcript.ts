@@ -38,6 +38,9 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
   }
 
   const entries: TranscriptEntry[] = []
+  // Sticky for the rest of the task: everything after a consultation was decided with its
+  // advice in context, so the mark reflects influence rather than adjacency.
+  let expertInformed = false
   for (const message of messages) {
     if (message.role === 'system' || message.role === 'tool') continue
 
@@ -47,7 +50,7 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
     }
 
     if (message.content.length > 0) {
-      entries.push({ kind: 'text', role: 'assistant', content: message.content })
+      entries.push({ kind: 'text', role: 'assistant', content: message.content, ...(expertInformed ? { expertInformed } : {}) })
     }
 
     for (const toolCall of message.toolCalls ?? []) {
@@ -59,8 +62,10 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
         continue
       }
 
+      if (toolCall.name === 'ask_expert') expertInformed = true
       entries.push({
         kind: 'tool',
+        ...(expertInformed ? { expertInformed: true } : {}),
         toolCall: {
           id: toolCall.id,
           name: toolCall.name,

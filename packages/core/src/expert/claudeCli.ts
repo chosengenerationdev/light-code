@@ -206,14 +206,22 @@ export async function consultExpert(
     '-p',
     '--output-format',
     'json',
-    // Read and search only. Anything that writes or executes is refused by the CLI itself,
-    // and the refusal comes back in `permission_denials` rather than hanging on a prompt.
+    // Read and search only.
+    //
+    // Verified against CLI 2.1.227: a disallowed tool is not *refused at call time*, it is
+    // **never offered**. Asked to run a shell command, Claude replies "I don't have a Bash
+    // tool available in this session" and adapts — it does not prompt, and it does not
+    // hang. Asked to write a file it reports "Write is disabled for this session, in
+    // subagents as well as here", so the restriction holds transitively.
+    //
+    // A consequence worth knowing: `permission_denials` came back **empty** in all of
+    // those cases, because nothing was requested-and-refused. `deniedTools` is therefore
+    // usually empty, and is kept for the case where a tool *is* offered but declined.
     '--allowedTools',
     ALLOWED_TOOLS.join(','),
     '--disallowedTools',
     'Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch',
-    // Never wait for a human: this runs inside another agent's turn, where there is no one
-    // to answer. A tool it cannot use is denied and reported.
+    // There is no terminal to prompt on inside another agent's turn, and nobody to answer.
     '--permission-mode',
     'default',
   ]

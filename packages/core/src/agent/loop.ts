@@ -14,6 +14,14 @@ import { truncateToolResult, type TruncationStore } from './truncate.js'
 
 export interface AgentTurnEvents {
   onTextChunk(text: string): void
+  /**
+   * The model's own reasoning, where the provider exposes it.
+   *
+   * Deliberately **not** added to the conversation: it is not part of the answer, and
+   * feeding a reasoning trace back as assistant content on the next turn both wastes
+   * context and confuses models that did not produce it in that form.
+   */
+  onReasoningChunk?(text: string): void
   onToolCall(toolCall: ToolCall): void
   onToolResult(toolCall: ToolCall, result: ToolResult): void
   onDone(): void
@@ -256,6 +264,8 @@ export async function runAgentTurn(
       if (chunk.type === 'text') {
         assistantText += chunk.text
         events.onTextChunk(chunk.text)
+      } else if (chunk.type === 'reasoning') {
+        events.onReasoningChunk?.(chunk.text)
       } else if (chunk.type === 'toolCall') {
         // "One tool call per assistant message" (CLAUDE.md §5) — ignore extras defensively.
         if (toolCall === undefined) toolCall = chunk.toolCall

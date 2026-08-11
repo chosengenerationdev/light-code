@@ -11,7 +11,7 @@ import {
   type WireFormat,
 } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
-import { colors, fieldErrorStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, fieldErrorStyle, labelStyle, optionStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { AdvancedAuthSection, type AuthType } from './AdvancedAuthSection.js'
 import { ModelSelect } from './ModelSelect.js'
 import { SecretField } from './SecretField.js'
@@ -137,11 +137,11 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
           Preset
         </label>
         <select id="lc-preset" defaultValue="" onChange={(event) => applyPreset(event.target.value)} style={textFieldStyle()}>
-          <option value="" disabled>
+          <option value="" disabled style={optionStyle()}>
             Choose a preset…
           </option>
           {providerPresets.map((preset) => (
-            <option key={preset.id} value={preset.id}>
+            <option key={preset.id} value={preset.id} style={optionStyle()}>
               {preset.label}
             </option>
           ))}

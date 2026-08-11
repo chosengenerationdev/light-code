@@ -34,9 +34,19 @@ type View = 'chat' | 'settings' | 'history'
 
 /** If the last message is still streaming, finalize it (drop the `pending` flag) in place. */
 function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
-  const last = messages[messages.length - 1]
-  if (last === undefined || last.kind !== 'text' || !last.pending) return messages
-  return [...messages.slice(0, -1), { kind: 'text', role: last.role, content: last.content }]
+  // Reasoning can still be pending anywhere in the list, not only at the end, because the
+  // answer for the same step is appended after it.
+  const settled = messages.map((message) =>
+    message.kind === 'reasoning' && message.pending === true
+      ? ({ kind: 'reasoning', content: message.content } satisfies DisplayMessage)
+      : message,
+  )
+  const last = settled[settled.length - 1]
+  if (last === undefined || last.kind !== 'text' || !last.pending) return settled
+  return [
+    ...settled.slice(0, -1),
+    { kind: 'text', role: last.role, content: last.content, ...(last.expertInformed === true ? { expertInformed: true } : {}) },
+  ]
 }
 
 export function App(props: AppProps): ReactElement {
@@ -78,20 +88,44 @@ export function App(props: AppProps): ReactElement {
         // there's no hand-off moment between "streaming" and "final" for a bug to hide in.
         setMessages((prev) => {
           const last = prev[prev.length - 1]
-          const updated: DisplayMessage = { kind: 'text', role: 'assistant', content: message.text, pending: true }
+          const updated: DisplayMessage = {
+            kind: 'text',
+            role: 'assistant',
+            content: message.text,
+            pending: true,
+            ...(message.expertInformed === true ? { expertInformed: true } : {}),
+          }
           if (last?.kind === 'text' && last.role === 'assistant' && last.pending) {
             return [...prev.slice(0, -1), updated]
           }
           return [...prev, updated]
         })
+      } else if (message.type === 'reasoningChunk') {
+        // Cumulative like textChunk, and updated in place so a long trace does not append
+        // a new block per delta. Reasoning precedes the answer for this step, so it lands
+        // before any pending assistant text rather than after it.
+        setMessages((prev) => {
+          const index = prev.findIndex((m) => m.kind === 'reasoning' && m.pending === true)
+          const updated: DisplayMessage = { kind: 'reasoning', content: message.text, pending: true }
+          if (index === -1) return [...prev, updated]
+          return [...prev.slice(0, index), updated, ...prev.slice(index + 1)]
+        })
       } else if (message.type === 'toolCall') {
-        setMessages((prev) => [...finalizePendingMessage(prev), { kind: 'tool', toolCall: message.toolCall }])
+        setMessages((prev) => [
+          ...finalizePendingMessage(prev),
+          { kind: 'tool', toolCall: message.toolCall, ...(message.expertInformed === true ? { expertInformed: true } : {}) },
+        ])
       } else if (message.type === 'toolResult') {
         // Replace the pending entry for this call rather than appending a second one.
         setMessages((prev) => {
+          const entry: DisplayMessage = {
+            kind: 'tool',
+            toolCall: message.toolCall,
+            ...(message.expertInformed === true ? { expertInformed: true } : {}),
+          }
           const index = prev.findIndex((m) => m.kind === 'tool' && m.toolCall.id === message.toolCall.id)
-          if (index === -1) return [...prev, { kind: 'tool', toolCall: message.toolCall }]
-          return [...prev.slice(0, index), { kind: 'tool', toolCall: message.toolCall }, ...prev.slice(index + 1)]
+          if (index === -1) return [...prev, entry]
+          return [...prev.slice(0, index), entry, ...prev.slice(index + 1)]
         })
       } else if (message.type === 'approvalRequest') {
         setMessages(finalizePendingMessage)

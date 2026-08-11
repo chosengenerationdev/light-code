@@ -168,6 +168,15 @@ export type ChatMessage =
 
 export type StreamChunk =
   | { type: 'text'; text: string }
+  /**
+   * The model's own reasoning, where the provider exposes it: DeepSeek and Qwen send
+   * `reasoning_content`, Anthropic sends `thinking` blocks.
+   *
+   * Kept separate from `text` rather than concatenated, because it is not part of the
+   * answer: it is shown differently, and it must not be fed back as assistant content on
+   * the next turn.
+   */
+  | { type: 'reasoning'; text: string }
   | { type: 'toolCall'; toolCall: ToolCall }
   | { type: 'done' }
   | { type: 'error'; error: string }

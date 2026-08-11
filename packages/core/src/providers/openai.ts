@@ -131,7 +131,7 @@ interface ToolCallAccumulator {
 }
 
 interface ParsedChoice {
-  delta: { content?: unknown; tool_calls?: unknown }
+  delta: { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown; reasoning?: unknown }
   finishReason: string | undefined
 }
 
@@ -140,7 +140,7 @@ function extractChoice(parsed: unknown): ParsedChoice | undefined {
   const choices = (parsed as { choices?: unknown }).choices
   if (!Array.isArray(choices) || choices.length === 0) return undefined
   const first = choices[0] as { delta?: unknown; finish_reason?: unknown } | undefined
-  const delta = (first?.delta ?? {}) as { content?: unknown; tool_calls?: unknown }
+  const delta = (first?.delta ?? {}) as ParsedChoice['delta']
   const finishReason = typeof first?.finish_reason === 'string' ? first.finish_reason : undefined
   return { delta, finishReason }
 }
@@ -203,6 +203,18 @@ async function* parseSseStream(
           const choice = extractChoice(parsed)
           if (choice === undefined) continue
 
+          // DeepSeek calls it `reasoning_content`; several OpenAI-compatible gateways
+          // (and vLLM) use `reasoning`. Accept both — the field name is the only
+          // difference, and guessing wrong just silently drops the trace.
+          const reasoning =
+            typeof choice.delta.reasoning_content === 'string'
+              ? choice.delta.reasoning_content
+              : typeof choice.delta.reasoning === 'string'
+                ? choice.delta.reasoning
+                : undefined
+          if (reasoning !== undefined && reasoning.length > 0) {
+            yield { type: 'reasoning', text: reasoning }
+          }
           if (typeof choice.delta.content === 'string' && choice.delta.content.length > 0) {
             yield { type: 'text', text: choice.delta.content }
           }

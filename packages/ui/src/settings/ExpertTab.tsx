@@ -1,6 +1,21 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, primaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, fontFamily, labelStyle, optionStyle, primaryButtonStyle, selectStyle, textFieldStyle } from '../theme.js'
 import { ScopeBadge } from './ScopeBadge.js'
+
+/** Sentinel for the free-text escape hatch, kept out of the value space. */
+const CUSTOM = '__custom__'
+
+/**
+ * Tier aliases rather than pinned ids: the CLI resolves `sonnet` to whatever the current
+ * Sonnet release is, so this list does not go stale every time a model ships. An empty
+ * value means "whatever the CLI is already configured to use", which is the right default.
+ */
+const EXPERT_MODELS = [
+  { value: '', label: "The CLI's own default" },
+  { value: 'opus', label: 'Opus — strongest, most expensive' },
+  { value: 'sonnet', label: 'Sonnet — balanced' },
+  { value: 'haiku', label: 'Haiku — fastest and cheapest' },
+] as const
 
 export interface ExpertState {
   enabled: boolean
@@ -112,16 +127,36 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         <label htmlFor="lc-expert-model" style={labelStyle()}>
           Model (optional)
         </label>
-        <input
+        <select
           id="lc-expert-model"
-          type="text"
-          value={model}
-          placeholder="whatever the CLI is configured to use"
-          onChange={(event) => setModel(event.target.value)}
-          style={textFieldStyle()}
-        />
+          value={EXPERT_MODELS.some((option) => option.value === model) ? model : CUSTOM}
+          onChange={(event) => setModel(event.target.value === CUSTOM ? '' : event.target.value)}
+          style={{ ...selectStyle(), width: '100%', marginBottom: 6 }}
+        >
+          {EXPERT_MODELS.map((option) => (
+            <option key={option.value} value={option.value} style={optionStyle()}>
+              {option.label}
+            </option>
+          ))}
+          <option value={CUSTOM} style={optionStyle()}>
+            Something else…
+          </option>
+        </select>
+
+        {/* Free text stays available whatever the list says — the CLI accepts ids this list
+            cannot know about, and §9's rule is that a dropdown never becomes the only way in. */}
+        {!EXPERT_MODELS.some((option) => option.value === model) && (
+          <input
+            type="text"
+            value={model}
+            placeholder="e.g. claude-sonnet-4-5-20250929"
+            onChange={(event) => setModel(event.target.value)}
+            style={textFieldStyle()}
+          />
+        )}
         <span style={{ color: colors.muted, fontSize: 11 }}>
-          A smaller model here makes consultations cheaper, at some cost to their quality.
+          Aliases track the newest release of that tier. A smaller model makes consultations
+          cheaper, at some cost to their quality.
         </span>
       </div>
 

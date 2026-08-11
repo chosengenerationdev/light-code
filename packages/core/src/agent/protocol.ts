@@ -97,8 +97,15 @@ export interface ProfileInput {
  * a reopened transcript looks identical to the one that was live.
  */
 export type TranscriptEntry =
-  | { kind: 'text'; role: 'user' | 'assistant'; content: string }
-  | { kind: 'tool'; toolCall: ToolCallSummary }
+  /**
+   * `expertInformed` marks work that followed a consultation: the model acted on advice
+   * rather than reasoning alone. Worth distinguishing, because it tells you which decisions
+   * to scrutinise differently — and which ones you paid for.
+   */
+  | { kind: 'text'; role: 'user' | 'assistant'; content: string; expertInformed?: boolean }
+  /** The model's reasoning for a step. Rendered collapsed — it is context, not the answer. */
+  | { kind: 'reasoning'; content: string }
+  | { kind: 'tool'; toolCall: ToolCallSummary; expertInformed?: boolean }
 
 /** Enough to render the history list without loading every transcript. */
 export interface TaskListEntry {
@@ -202,9 +209,11 @@ export type HostToUiMessage =
    * `postMessage` delivery isn't guaranteed — sending cumulative state makes each
    * message self-correcting, so one dropped message doesn't corrupt everything after it.
    */
-  | { type: 'textChunk'; text: string }
-  | { type: 'toolCall'; toolCall: ToolCallSummary }
-  | { type: 'toolResult'; toolCall: ToolCallSummary }
+  | { type: 'textChunk'; text: string; expertInformed?: boolean }
+  /** Cumulative reasoning for the current step, same self-correcting rule as `textChunk`. */
+  | { type: 'reasoningChunk'; text: string }
+  | { type: 'toolCall'; toolCall: ToolCallSummary; expertInformed?: boolean }
+  | { type: 'toolResult'; toolCall: ToolCallSummary; expertInformed?: boolean }
   /** Ground truth for the approval prompt — invariant 8. The UI renders only `preview`. */
   | { type: 'approvalRequest'; id: string; toolName: string; group: ToolGroup; preview: ToolPreview }
   /** A rollback point now exists; the UI can offer to undo back to it. */

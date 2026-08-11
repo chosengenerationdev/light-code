@@ -1,6 +1,7 @@
 import type { ProfileInput, ProfileSummary, TestConnectionStep } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { CheckIcon, CopyIcon, EditIcon, TrashIcon } from '../icons.js'
+import { colors, fontFamily, iconButtonStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
 import { ProviderForm, type ProviderFormValues } from './ProviderForm.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
@@ -118,20 +119,46 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
             <div style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>
               {profile.baseUrl} — {profile.model}
             </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {/* Icons with tooltips: the same four words repeat on every row, and the
+                actions are recognisable enough not to need spelling out each time. */}
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {!isActive && (
-                <button type="button" style={secondaryButtonStyle()} onClick={() => props.onSetActive(profile.id)}>
-                  Use
+                <button
+                  type="button"
+                  title="Use this profile"
+                  aria-label="Use this profile"
+                  style={iconButtonStyle('secondary')}
+                  onClick={() => props.onSetActive(profile.id)}
+                >
+                  <CheckIcon />
                 </button>
               )}
-              <button type="button" style={secondaryButtonStyle()} onClick={() => open({ mode: 'edit', profile })}>
-                Edit
+              <button
+                type="button"
+                title="Edit"
+                aria-label="Edit"
+                style={iconButtonStyle('secondary')}
+                onClick={() => open({ mode: 'edit', profile })}
+              >
+                <EditIcon />
               </button>
-              <button type="button" style={secondaryButtonStyle()} onClick={() => props.onDuplicate(profile.id)}>
-                Duplicate
+              <button
+                type="button"
+                title="Duplicate"
+                aria-label="Duplicate"
+                style={iconButtonStyle('secondary')}
+                onClick={() => props.onDuplicate(profile.id)}
+              >
+                <CopyIcon />
               </button>
-              <button type="button" style={secondaryButtonStyle()} onClick={() => props.onDelete(profile.id)}>
-                Delete
+              <button
+                type="button"
+                title="Delete"
+                aria-label="Delete"
+                style={{ ...iconButtonStyle('secondary'), color: colors.error }}
+                onClick={() => props.onDelete(profile.id)}
+              >
+                <TrashIcon />
               </button>
             </div>
           </div>

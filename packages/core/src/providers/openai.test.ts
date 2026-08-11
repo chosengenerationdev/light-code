@@ -215,3 +215,33 @@ describe('OpenAIProvider', () => {
     expect(parsed.messages[2]).toEqual({ role: 'tool', tool_call_id: 'call_1', content: 'file contents' })
   })
 })
+
+describe('reasoning', () => {
+  /** DeepSeek emits `reasoning_content`; it must not be concatenated into the answer. */
+  it('yields reasoning_content separately from content', async () => {
+    const client = new FakeHttpClient(() =>
+      okResponse(
+        streamFromChunks([
+          'data: {"choices":[{"delta":{"reasoning_content":"weighing options"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"The answer."}}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      ),
+    )
+
+    const chunks = await collect(new OpenAIProvider(client, profile, new NoAuthStrategy()).streamChat([]))
+
+    expect(chunks.filter((c) => c.type === 'reasoning')).toEqual([{ type: 'reasoning', text: 'weighing options' }])
+    expect(chunks.filter((c) => c.type === 'text')).toEqual([{ type: 'text', text: 'The answer.' }])
+  })
+
+  /** Several OpenAI-compatible servers use `reasoning` rather than `reasoning_content`. */
+  it('also accepts the bare `reasoning` field some gateways use', async () => {
+    const client = new FakeHttpClient(() =>
+      okResponse(streamFromChunks(['data: {"choices":[{"delta":{"reasoning":"hmm"}}]}\n\n', 'data: [DONE]\n\n'])),
+    )
+
+    const chunks = await collect(new OpenAIProvider(client, profile, new NoAuthStrategy()).streamChat([]))
+    expect(chunks.filter((c) => c.type === 'reasoning')).toEqual([{ type: 'reasoning', text: 'hmm' }])
+  })
+})
