@@ -753,9 +753,26 @@ Record the reason, not just the difference.
 
 Update this section every session.
 
-**Current phase:** Phase 8 (release) engineering complete; **not yet published**. Phases
-3–7 have still not been exercised in a real Extension Development Host — see
-`MANUAL_VERIFICATION.md`.
+**Current phase:** **Shipped.** 0.1.0 was published to the Visual Studio Marketplace on
+2026-08-09 (manual upload — the Azure DevOps org creation demanded an Azure subscription, so
+`VSCE_PAT` does not exist and the Release workflow has never run). 0.4.0 is built and
+verified, awaiting upload.
+
+Since release, driven by real use in a corporate deployment: 0.1.1 (VS Code floor lowered to
+1.84), 0.1.2 (CA file and skip-verify for any profile; Qwen/Gemma; inline capability
+overrides; screenshot paste), 0.2.0 (profile selector, Claude CLI expert, model
+self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer layout),
+0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
+0.4.0 (changelog).
+
+**Next:** Phase 8b — vector stores and semantic retrieval. See `IMPLEMENTATION_PLAN.md`;
+read its "prompt-cache constraint" section before starting, and CLAUDE.md §12's revision.
+
+**Still outstanding, and now the oldest debt in the project:** `MANUAL_VERIFICATION.md` has
+never been run. Session A is the security properties — deny actually blocking execution, the
+approval prompt showing ground truth, and the exact-match command allowlist. 0.4.0 adds two
+things that raise the stakes: a tool that spends money, and a checkbox that can disable TLS
+verification. Neither is covered by an automated test.
 
 **Phase 8 done — release engineering. It found a bug that would have shipped a dead
 extension:**
