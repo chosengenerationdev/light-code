@@ -580,137 +580,147 @@ config file by hand.
 
 ---
 
-## Phase 8b — Vector stores and semantic retrieval
+## Phase 8b — OpenSearch: query existing indexes, and build our own
 
-**Goal:** the model can search an indexed codebase, and search skill and tool documentation,
-against a user-configured vector database.
+**Goal:** the model can search the OpenSearch clusters the organisation already runs, and
+search an embedded index of this codebase.
 
-**Added 2026-08-09 at the user's request, reversing three recorded decisions** — §6's
-"no semantic/embedding codebase search", §12's "semantic retrieval over tool descriptions is
-out", and §18's row on both. The reasons those decisions were made are still written down;
-see CLAUDE.md §18 for what changed and why the user overrode them. Sequenced after release
-because none of it is needed for v1 and Phase 7's context management is the more urgent
-problem for long sessions.
+**Added 2026-08-09, refined 2026-08-11 after the user described the real deployment.**
+Reverses three recorded decisions — §6's "no semantic/embedding codebase search", §12's
+"semantic retrieval over tool descriptions is out", and §18's row on both. The reasoning
+behind each is preserved in those sections; see CLAUDE.md §18 for what changed.
 
-### The prompt-cache constraint, and how this design respects it
+### Two jobs, deliberately two tools
 
-§12's objection to retrieval over tool descriptions was never "retrieval is useless" — it
-was that **tool definitions sit at the front of the prompt, so varying them per turn
-invalidates the cache prefix and every message after it.** That is still true, so retrieval
-here is exposed as **tools the model calls**, not as dynamic tool definitions:
+The refinement that matters: there are **existing indexes we did not create** (logs, tickets,
+documentation) *and* **an index we build and own** (this codebase, embedded). These need
+different machinery and should not be forced into one tool.
 
-- `search_codebase` and `search_docs` are ordinary tools in the `read` group. Their results
-  arrive as tool results, mid-conversation, where they cost nothing at the prefix.
-- The set of *available* tools stays byte-stable for a whole session. If retrieval is ever
-  used to decide **which** tools load, that resolves at a mode or session boundary only —
-  exactly the carve-out §12 already allows.
+| | `search_opensearch` | `search_codebase` |
+|---|---|---|
+| Index | any, chosen by the user | ours, one per workspace |
+| Schema | discovered from the mapping | defined by us |
+| Query | BM25 / match / filter | k-NN over an embedded vector |
+| Needs an embedder | no | yes |
 
-This is the reconciliation that makes the feature safe to build. **Do not "improve" it into
-per-turn tool-definition selection** — that reintroduces precisely the cost §12 measured.
+Keeping them separate means keyword search works with **no embedder at all**, which is worth
+protecting: it is the half that has no per-file cost and sends no source code anywhere.
+
+### Named connections
+
+Different environments run different clusters, so connections are a list, not a singleton —
+the same shape as provider profiles, for the same reason.
+
+```jsonc
+{
+  "vectorStores": {
+    "corp-prod": {
+      "kind": "opensearch",
+      "url": "",                       // user-supplied; invariant 3
+      "usernameRef": "...",            // SecretStorage refs, never literals (§15)
+      "passwordRef": "...",
+      "defaultIndex": "confluence-docs",
+      "caFile": "",                    // same connection-trust block as a provider profile
+      "rejectUnauthorized": true
+    }
+  },
+  "activeVectorStoreId": "corp-prod",
+  "embedder": {
+    // Reuses an existing provider profile for auth, TLS and client certificates rather
+    // than duplicating them. A gateway that already works for chat already works here.
+    "profileId": "<provider profile id>",
+    "model": "text-embedding-3-large",
+    "dimensions": 1024                 // required to create the knn_vector mapping
+  }
+}
+```
+
+**Index discovery:** `GET /_cat/indices?format=json` populates a dropdown; `GET /{index}/_mapping`
+tells `search_opensearch` which fields exist so it can build a sensible query instead of
+guessing. Free-text entry stays available — §9's rule about dropdowns never being a hard
+dependency applies here too, and a cluster may refuse `_cat` to a low-privilege user.
+
+### Opt-in per session, which is also what §12 requires
+
+Search is **off unless a connection is selected for the session**. That is not only a
+preference: §12 requires tool definitions to stay byte-stable within a session, so the set of
+tools can only change at a session boundary. Selecting a connection *is* that boundary.
+
+A composer dropdown selects the connection, beside the profile selector. Changing it starts a
+new prefix, exactly as switching provider profiles does.
+
+**Do not make this a new mode.** §8 and §12 both say modes are the tool-profile mechanism and
+there must not be a second one. Search tools join the existing groups and are filtered out
+when no connection is selected — the same "withheld before definitions are built" rule that
+already governs every other tool.
 
 ### Build
 
 ```
 packages/core/src/rag/
-  types.ts        VectorStore: ensureCollection, upsert, query, deleteByFilter
-                  VectorDocument = { id, text, metadata, vector }
-  embedder.ts     Embedder interface + an OpenAI-compatible /embeddings client
-  chunk.ts        line-window chunking with overlap; symbol-aware is a later refinement
-  indexer.ts      walk -> chunk -> embed -> upsert, driven by a content-hash manifest
-  registry.ts     resolves which configured store backs which collection
-
-packages/core/src/rag/stores/
-  opensearch.ts   knn_vector mapping; REST; HTTP basic auth
-  qdrant.ts       REST; api-key header
-  chroma.ts       REST
+  types.ts              VectorStore, IndexInfo, SearchHit
+  embedder.ts           embeddings over an existing provider profile
+  opensearch/client.ts  REST over HttpClient: ping, listIndexes, getMapping,
+                        search, knnSearch, bulk, ensureIndex
+  opensearch/query.ts   mapping -> a query the model's terms can actually match
+  chunk.ts              line-window chunking with overlap
+  indexer.ts            walk -> chunk -> embed -> bulk, content-hash manifest
 
 packages/core/src/tools/
-  searchCodebase.ts   read group
-  searchDocs.ts       read group; skills + built-in and MCP tool documentation
+  searchOpensearch.ts   read group; any index, no embedder needed
+  searchCodebase.ts     read group; k-NN over our index
 
 packages/ui/src/settings/
-  IndexingTab.tsx     store definitions, per-collection assignment, Test Connection,
-                      index status and a manual reindex
+  SearchTab.tsx         connections, index dropdown, default index, Test Connection
 ```
 
-**Invariant 2 rules out the official clients.** `@opensearch-project/opensearch`,
-`@qdrant/js-client-rest`, and `chromadb` all carry their own HTTP stacks, and all outbound
-traffic goes through core's `HttpClient`. All three databases are plain REST, so these are
-thin hand-written clients — not a workaround, the required design.
+**Invariant 2 rules out `@opensearch-project/opensearch`** — it carries its own HTTP stack.
+OpenSearch is plain REST, so this is a thin hand-written client, the same call made for the
+provider adapters.
 
-### Config
+### Security
 
-Named stores, then a per-collection assignment, so one database can back several
-collections without repeating credentials:
-
-```jsonc
-{
-  "vectorStores": {
-    "corp-search": { "kind": "opensearch", "url": "", "usernameRef": "...", "passwordRef": "..." },
-    "local-qdrant": { "kind": "qdrant", "url": "", "apiKeyRef": "..." }
-  },
-  "embedder": { "baseUrl": "", "model": "", "apiKeyRef": "...", "dimensions": 1536 },
-  "collections": {
-    "codebase": { "store": "local-qdrant", "enabled": false },
-    "skills":   { "store": "corp-search",  "enabled": false },
-    "toolDocs": { "store": "corp-search",  "enabled": false }
-  }
-}
-```
-
-Defaults are **kinds, not endpoints** — Qdrant for `codebase`, OpenSearch for `skills` and
-`toolDocs`, as requested. Every URL ships empty; invariant 3 is unchanged. Everything ships
-`enabled: false`.
-
-### Security — read this before starting
-
-**Indexing sends the entire codebase to an embedding endpoint.** That is a larger egress
-than anything Light Code does today, and it punches a hole in §3's boundary statement, which
-promised the only hosts contacted are the model gateway and MCP servers. §3 is updated in
-the same commit as this phase.
-
-- **`vectorStores`, `embedder`, and `collections` are user-scope only (invariant 5).** A
-  workspace that could set `embedder.baseUrl` would exfiltrate every file you indexed to an
-  attacker's endpoint the moment you opened the repo. This is the same threat invariant 5
-  already closes for `profiles`, and it is sharper here because the payload is source code.
-  **`mcpServers` is deliberately *not* on that list; this is, and the difference is that an
-  MCP server still passes through the approval gate while indexing does not.**
-- **Indexing honours `.gitignore`, the tool deny list, and `certDir`.** Anything
-  `read_file` may not read must never be embedded — otherwise the deny list is bypassed by
-  a different route.
-- Store credentials and the embedder key are `SecretStorage` refs, never literals (§15).
-- The manifest and any cached vectors live in global storage, not the workspace — a cache,
-  and not something to commit.
-- **Opt-in, off by default**, with an explicit first-run confirmation naming the endpoint
-  the code will be sent to.
+- **`vectorStores`, `activeVectorStoreId` and `embedder` are user-scope only** (invariant 5).
+  A workspace able to set `embedder.profileId` or a cluster URL would exfiltrate whatever is
+  indexed. Sharper than the existing entries because the payload is source code.
+- **Indexing honours `.gitignore`, the tool deny list, and `certDir`.** Anything `read_file`
+  may not read must never be embedded, or the deny list is bypassed by another route.
+- **Credentials are `SecretStorage` refs.** Basic auth over anything but TLS is refused.
+- **Opt-in, and the first index confirms the destination**, naming the cluster and the
+  embedding endpoint the code will be sent to.
+- `search_opensearch` is **read-only**: no `_bulk`, no `_delete_by_query`, no index
+  creation from the tool path. Writes happen only through the indexer, which the user starts.
 
 ### Done when
 
-- A user can define stores, assign a collection to each, and Test Connection reports which
-  step failed (reach store → authenticate → embed a probe → query) — same shape as §10's
-- `search_codebase` returns ranked chunks with file paths and line ranges
-- `search_docs` returns skill and tool documentation, including MCP tool descriptions
-- Re-indexing after an edit updates only the changed files; deleting a file removes its
-  vectors
-- A file excluded by `.gitignore` or the deny list is never embedded
-- An unreachable store degrades to a clear tool error and the session continues — never a
-  blocked turn, the same "never a hard dependency" rule as the model dropdown (§9)
-- Tool definitions remain byte-stable across a session with retrieval enabled
+- Several connections can be defined, and switching between them in the composer works
+- The index dropdown lists real indexes, and free-text entry still works when `_cat` is denied
+- A default index per connection is honoured when the model names none
+- `search_opensearch` returns useful hits from an index we did not create
+- `search_codebase` finds a symbol by description rather than by name
+- Keyword search works with **no embedder configured at all**
+- A gitignored or deny-listed file is never embedded
+- An unreachable cluster degrades to a clear tool error; the session continues
+- Tool definitions stay byte-stable across a session with search enabled
 
 ### Verify
 
-Index this repository against a local Qdrant in Docker and a local OpenSearch, and confirm
-`search_codebase` finds a symbol by description rather than by name. Point the embedder at a
-local endpoint and confirm with a proxy that **no file content leaves for any other host**.
-Put a secret in a gitignored file and confirm it is never embedded. Then capture the request
-bodies for two consecutive turns and diff the tool-definition block — it must be identical.
+Against a real cluster: list indexes, query one nobody here created, and confirm the mapping
+actually shaped the query. Then index this repository and confirm `search_codebase` finds
+something by meaning. Put a secret in a gitignored file and confirm it is never embedded.
+Capture two consecutive turns and diff the tool-definition block — identical, or the prefix
+cache is broken.
 
 ### Not in this phase
 
-Reranking, hybrid keyword+vector fusion, symbol-aware chunking, multi-workspace shared
-indexes, or embedding the conversation history.
+Reranking, hybrid keyword+vector fusion, symbol-aware chunking, writing to any index other
+than our own, cross-workspace shared indexes, or embedding the conversation history.
+Qdrant and Chroma are **deferred** until OpenSearch is proven — the `VectorStore` interface
+keeps the seam, but building three backends before one is validated is how all three end up
+mediocre.
 
 ---
+
 
 ## Phase 9 — Python tools and skills
 
