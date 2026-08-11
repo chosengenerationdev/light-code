@@ -969,13 +969,26 @@ a task then being refused an edit until the file is re-read.
   `AdvancedAuthSection`. Selecting `apigeeMtls` removes the API key field entirely.
 - 223 unit tests pass (1 skipped: the symlink case, still needing symlink privilege).
 
-**Verified for real, without an Apigee gateway.** The user has no Apigee setup, so the whole
-path was driven against a **local HTTPS server that genuinely requires a client
+> **CONFIRMED AGAINST A REAL APIGEE GATEWAY (2026-08-11).** The user reports the mTLS +
+> client-credentials path working in their corporate environment. This closes the gap the
+> paragraph below describes — the design is no longer inferred from a substitute, it is
+> known to work end to end against a production gateway.
+>
+> Worth remembering *why* it worked first time: every gateway-specific field (`tokenUrl`,
+> `tokenPath`, `expiresInPath`, `tokenHeaderName`, `tokenHeaderPrefix`,
+> `fallbackExpirySeconds`) was made configurable with a working default rather than
+> hardcoded, precisely because nobody could test the real thing. The defaults held.
+>
+> Still unconfirmed over a long session: proactive refresh at the skew boundary and the
+> single 401 retry, both of which only fire after the first token expires.
+
+**Originally verified without an Apigee gateway.** At the time there was no Apigee setup, so
+the whole path was driven against a **local HTTPS server that genuinely requires a client
 certificate** (`requestCert: true, rejectUnauthorized: true`, CA/server/client certs minted
 with OpenSSL): real undici TLS stack, real handshake, real grant, real trust failures.
 14/14 checks pass — the server confirms it saw `CN=lc-test-client`, the issued token reaches
 the inference request, a mismatched key is rejected before any network call, and an
-untrusted CA produces a sentence naming the fix. **Still unverified:** this particular
+untrusted CA produces a sentence naming the fix. **Was unverified until 2026-08-11:** this particular
 gateway's own quirks (its token path, header name, expiry semantics) — all configurable,
 all defaulted.
 
