@@ -1,6 +1,6 @@
 import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
-import { AttachIcon, SendIcon, StopIcon } from './icons.js'
+import { AttachIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
 import { badgeStyle, colors, fontFamily, iconButtonStyle, optionStyle, selectStyle } from './theme.js'
 
 export interface ComposerProps {
@@ -377,8 +377,12 @@ export function Composer(props: ComposerProps): ReactElement {
 
       {/* Which model is about to answer, switchable without leaving the chat. Below the
           input rather than in the header because it belongs to the message being sent. */}
-      {props.profiles.length > 0 && (
+      {/* Rendered whenever there is anything to report. Previously the whole row hung off
+          `profiles.length > 0`, which hid the expert indicator too — so "is the expert
+          actually on?" was unanswerable without opening Settings. */}
+      {(props.profiles.length > 0 || props.expertEnabled) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px 8px' }}>
+          {props.profiles.length > 0 && (
           <select
             aria-label="Provider profile"
             title="Which provider answers the next message"
@@ -397,11 +401,13 @@ export function Composer(props: ComposerProps): ReactElement {
               </option>
             ))}
           </select>
+          )}
           {props.expertEnabled && (
             <span
-              title="A stronger expert model is available for hard problems"
-              style={{ ...badgeStyle(), marginLeft: 'auto' }}
+              title="Claude is available as an expert. Ask it directly — say “ask Claude …”."
+              style={{ ...badgeStyle(), marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
             >
+              <ExpertIcon size={11} />
               expert
             </span>
           )}

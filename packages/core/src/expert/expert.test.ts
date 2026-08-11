@@ -89,10 +89,25 @@ describe('system prompt', () => {
     // should not fail a test about meaning.
     const prompt = buildSystemPrompt('/repo', { expertAvailable: true }).replace(/\s+/g, ' ')
 
-    expect(prompt).toMatch(/costs the user real money/i)
-    expect(prompt).toMatch(/cannot see your workspace/i)
+    expect(prompt).toMatch(/costs real money/i)
+    expect(prompt).toMatch(/cannot see this conversation/i)
     // And that it stays responsible, so it does not transcribe advice unverified.
     expect(prompt).toMatch(/verify it against the actual code/i)
+  })
+
+  /**
+   * The bug this guards against, observed live: DeepSeek had `ask_expert` available, was
+   * asked "can you say hello to Claude?", and replied that it had "no way to communicate
+   * with other AI assistants". The frugality guidance had talked it out of a direct
+   * instruction, and it reported the choice as an inability.
+   */
+  it('makes an explicit user request override the be-frugal guidance', () => {
+    const prompt = buildSystemPrompt('/repo', { expertAvailable: true }).replace(/\s+/g, ' ')
+
+    expect(prompt).toMatch(/if the user asks you to consult it, do so/i)
+    expect(prompt).toMatch(/never tell the user you have no way to reach another model/i)
+    // And if it does decline, it must say it chose to, not that it could not.
+    expect(prompt).toMatch(/do not say you are unable to/i)
   })
 
   it('is stable for a given configuration, so the cache prefix survives', () => {
