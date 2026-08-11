@@ -32,6 +32,8 @@ export interface AgentTurnEvents {
   onContextUpdate?(breakdown: TokenBreakdown, supersededCount: number, compactedCount: number): void
   /** Fired when history was summarised, so the UI can say so rather than silently losing detail. */
   onCompacted?(summarisedCount: number): void
+  /** A queued message has entered the conversation; the UI moves it out of the queue. */
+  onQueuedMessageConsumed?(text: string): void
 }
 
 export interface RunAgentTurnOptions {
@@ -57,6 +59,14 @@ export interface RunAgentTurnOptions {
   compactionEnabled?: boolean
   /** Images attached to this user message. */
   images?: ImageAttachment[]
+  /**
+   * Pulls anything the user typed while this turn was running.
+   *
+   * Called at a **turn boundary inside the loop** — after a tool result has been recorded
+   * and before the next model call — never mid-tool-call. Returning an empty array is the
+   * normal case and costs nothing.
+   */
+  drainQueuedMessages?: () => string[]
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
@@ -312,6 +322,16 @@ export async function runAgentTurn(
         : result.content
     conversation.addToolResultMessage(toolCall.id, forModel)
     events.onToolResult(toolCall, result)
+
+    // Anything the user typed while this was running joins the conversation now, so the
+    // model sees it before deciding its next step rather than after it has finished.
+    // Here specifically: the tool result is recorded, so the call/result pair is intact and
+    // no provider sees an unanswered tool_use.
+    const queued = options.drainQueuedMessages?.() ?? []
+    for (const message of queued) {
+      conversation.addUserMessage(message)
+      events.onQueuedMessageConsumed?.(message)
+    }
 
     if (toolCall.name === 'attempt_completion' || toolCall.name === 'ask_followup_question') {
       events.onDone()

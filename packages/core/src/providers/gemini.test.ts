@@ -212,3 +212,28 @@ describe('GeminiProvider streaming', () => {
     expect((chunks[0] as { error: string }).error).toContain('400')
   })
 })
+
+describe('turn alternation', () => {
+  /**
+   * Draining several queued mid-turn messages appends them one after another, which would
+   * otherwise produce consecutive user turns. Gemini expects alternation just as Anthropic
+   * does, so they merge into one turn.
+   */
+  it('merges consecutive user messages into one turn', () => {
+    const { contents } = toGeminiContents([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'x', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'c1', content: 'r1' },
+      { role: 'user', content: 'one' },
+      { role: 'user', content: 'two' },
+    ])
+
+    for (let index = 1; index < contents.length; index += 1) {
+      expect([contents[index - 1]?.role, contents[index]?.role]).not.toEqual(['user', 'user'])
+    }
+    // And nothing is lost in the merge.
+    const serialised = JSON.stringify(contents)
+    expect(serialised).toContain('one')
+    expect(serialised).toContain('two')
+    expect(serialised).toContain('functionResponse')
+  })
+})

@@ -150,6 +150,17 @@ export function toAnthropicMessages(messages: readonly ChatMessage[]): Anthropic
       }
       // Text after images: the question usually refers to the picture above it.
       if (message.content.length > 0) blocks.push({ type: 'text', text: message.content })
+
+      // Any user message following another has to join it, not follow it. Anthropic
+      // requires strict user/assistant alternation, and a tool result is itself a *user*
+      // message — so both "text after a tool result" and "two queued messages in a row"
+      // would otherwise produce two user turns and a rejected request.
+      const previous = wireMessages[wireMessages.length - 1]
+      if (previous?.role === 'user' && Array.isArray(previous.content)) {
+        ;(previous.content as unknown[]).push(...blocks)
+        continue
+      }
+
       wireMessages.push({ role: 'user', content: blocks.length > 0 ? blocks : [{ type: 'text', text: '' }] })
       continue
     }

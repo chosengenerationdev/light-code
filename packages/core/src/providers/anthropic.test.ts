@@ -116,12 +116,41 @@ describe('toAnthropicMessages', () => {
     })
   })
 
-  it('does not merge a real user message into a preceding tool result', () => {
+  /**
+   * This test previously asserted the opposite — that a user message following a tool
+   * result stays separate — and that was wrong. Anthropic represents a tool result *as* a
+   * user message, so leaving them apart produces two user turns in a row and the request
+   * is rejected. It never showed up because nothing generated that sequence until queued
+   * mid-turn messages did.
+   */
+  it('merges a user message that follows a tool result into the same user turn', () => {
     const { wireMessages } = toAnthropicMessages([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'x', arguments: '{}' }] },
       { role: 'tool', toolCallId: 'c1', content: 'r1' },
       { role: 'user', content: 'now do this' },
     ])
+
     expect(wireMessages).toHaveLength(2)
+    expect(wireMessages[1]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'c1', content: 'r1' },
+        { type: 'text', text: 'now do this' },
+      ],
+    })
+  })
+
+  it('never produces two user turns in a row, whatever the message order', () => {
+    const { wireMessages } = toAnthropicMessages([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'x', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'c1', content: 'r1' },
+      { role: 'user', content: 'one' },
+      { role: 'user', content: 'two' },
+    ])
+
+    for (let index = 1; index < wireMessages.length; index += 1) {
+      expect([wireMessages[index - 1]?.role, wireMessages[index]?.role]).not.toEqual(['user', 'user'])
+    }
   })
 
   it('encodes images as base64 source blocks, before the text', () => {

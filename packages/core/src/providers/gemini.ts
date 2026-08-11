@@ -144,6 +144,15 @@ export function toGeminiContents(messages: readonly ChatMessage[]): GeminiPayloa
         parts.push({ inlineData: { mimeType: image.mediaType, data: image.data } })
       }
       if (message.content.length > 0) parts.push({ text: message.content })
+
+      // Same alternation rule as Anthropic: a functionResponse is a user turn, so text
+      // after one — or a second queued message — must join rather than follow.
+      const previous = contents[contents.length - 1]
+      if (previous?.role === 'user' && Array.isArray(previous.parts)) {
+        ;(previous.parts as unknown[]).push(...parts)
+        continue
+      }
+
       contents.push({ role: 'user', parts: parts.length > 0 ? parts : [{ text: '' }] })
       continue
     }

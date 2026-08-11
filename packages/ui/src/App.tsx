@@ -77,6 +77,7 @@ export function App(props: AppProps): ReactElement {
   const [expertEnabled, setExpertEnabled] = useState(false)
   const [expert, setExpert] = useState<ExpertState | undefined>(undefined)
   const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
+  const [queued, setQueued] = useState<string[]>([])
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -185,6 +186,12 @@ export function App(props: AppProps): ReactElement {
             content: `[${message.summarisedCount} earlier messages were summarised to stay within the context window. The full transcript is still saved.]`,
           },
         ])
+      } else if (message.type === 'queued') {
+        setQueued(message.messages)
+      } else if (message.type === 'queuedMessageConsumed') {
+        // Enters the transcript as an ordinary user turn — which is what it became in the
+        // conversation, so a reopened task renders it identically.
+        setMessages((prev) => [...finalizePendingMessage(prev), { kind: 'text', role: 'user', content: message.text }])
       } else if (message.type === 'mentionCandidates') {
         setMentionCandidates(message.paths)
       } else if (message.type === 'capabilities') {
@@ -233,6 +240,12 @@ export function App(props: AppProps): ReactElement {
   }
 
   const send = (text: string, images: ImageAttachmentInput[]): void => {
+    if (isStreaming) {
+      // Queued host-side: the loop consumes it mid-turn, and this webview can be destroyed
+      // and rebuilt at any moment, so it cannot be the one holding the queue.
+      props.transport.post({ type: 'queueMessage', text } satisfies UiToHostMessage)
+      return
+    }
     setError(undefined)
     // The transcript shows what the user typed, mentions unexpanded — the host attaches
     // the file contents on the way to the model, and echoing them here would bury the
@@ -243,6 +256,10 @@ export function App(props: AppProps): ReactElement {
     const outgoing: UiToHostMessage =
       images.length > 0 ? { type: 'sendMessage', text, images } : { type: 'sendMessage', text }
     props.transport.post(outgoing)
+  }
+
+  const unqueue = (index: number): void => {
+    props.transport.post({ type: 'unqueueMessage', index } satisfies UiToHostMessage)
   }
 
   const queryMentions = (query: string): void => {
@@ -485,6 +502,8 @@ export function App(props: AppProps): ReactElement {
             activeProfileId={activeProfileId}
             onSelectProfile={setActiveProfile}
             expertEnabled={expertEnabled}
+            queued={queued}
+            onUnqueue={unqueue}
           />
         )}
       </div>

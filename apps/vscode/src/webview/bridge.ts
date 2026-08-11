@@ -192,6 +192,17 @@ export function wireChatBridge(
     return expertCli.available ? expertCli : undefined
   }
 
+  /**
+   * Messages typed while a turn is running. Held host-side rather than in the webview
+   * because the loop consumes them mid-turn, and the webview can be destroyed and rebuilt
+   * at any moment (it is whenever the view is hidden).
+   */
+  let queuedMessages: string[] = []
+
+  function postQueued(): void {
+    post({ type: 'queued', messages: [...queuedMessages] })
+  }
+
   let activeAbortController: AbortController | undefined
   /** The task's rollback point — the snapshot taken before its first edit. */
   let taskCheckpoint: Checkpoint | undefined
@@ -538,6 +549,13 @@ export function wireChatBridge(
         // loop — swapping them mid-turn would break the prompt cache prefix (§12).
         mode: findMode(config.modeId),
         contextWindow: capabilities.contextWindow,
+        drainQueuedMessages: () => {
+          if (queuedMessages.length === 0) return []
+          const drained = queuedMessages
+          queuedMessages = []
+          postQueued()
+          return drained
+        },
       }
       // Silently dropping an image on a text-only model would look like the model ignoring
       // it; the composer already hides attachment, so this is the backstop.
@@ -580,6 +598,13 @@ export function wireChatBridge(
             post({ type: 'contextUsage', usage: { ...breakdown, supersededCount, compactedCount } })
           },
           onCompacted: (summarisedCount) => post({ type: 'compacted', summarisedCount }),
+          onQueuedMessageConsumed: (text) => {
+            // Shown as an ordinary user turn: that is exactly what it became in the
+            // conversation, and a restored transcript will render it the same way.
+            post({ type: 'queuedMessageConsumed', text })
+            // The assistant text that follows belongs to a new step.
+            cumulativeText = ''
+          },
           onTextChunk: (chunk) => {
             cumulativeText += chunk
             post({ type: 'textChunk', text: cumulativeText, ...(expertInformed ? { expertInformed } : {}) })
@@ -637,6 +662,15 @@ export function wireChatBridge(
       // failed halfway is exactly the one the user most wants to see again afterwards.
       await persistActiveTask()
       await postTasks()
+
+      // Whatever did not get folded in — a turn that ended before reaching a boundary —
+      // starts the next turn rather than being silently dropped.
+      if (queuedMessages.length > 0 && activeAbortController === undefined) {
+        const next = queuedMessages.join('\n\n')
+        queuedMessages = []
+        postQueued()
+        void handleSendMessage(next)
+      }
     }
   }
 
@@ -1190,7 +1224,17 @@ export function wireChatBridge(
       void handleSendMessage(message.text, message.images)
     } else if (message.type === 'requestMentionCandidates') {
       void handleMentionCandidates(message.query)
+    } else if (message.type === 'queueMessage') {
+      queuedMessages.push(message.text)
+      postQueued()
+    } else if (message.type === 'unqueueMessage') {
+      queuedMessages.splice(message.index, 1)
+      postQueued()
     } else if (message.type === 'cancel') {
+      // A cancelled turn discards the queue too: those messages were written for work that
+      // is no longer happening, and replaying them into a fresh turn would surprise.
+      queuedMessages = []
+      postQueued()
       activeAbortController?.abort()
       userGate.denyAll()
     } else if (message.type === 'approvalResponse') {

@@ -165,6 +165,10 @@ export type UiToHostMessage =
   /** Ask the host to resolve `@` mentions for autocomplete as the user types. */
   | { type: 'requestMentionCandidates'; query: string }
   | { type: 'cancel' }
+  /** Typed while a turn was running. Folded in at the next safe point in the loop. */
+  | { type: 'queueMessage'; text: string }
+  /** Removed before it was consumed. */
+  | { type: 'unqueueMessage'; index: number }
   | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
   /** Approve *and* remember, so this exact command / this tool stops prompting here. */
   | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' }
@@ -240,6 +244,10 @@ export type HostToUiMessage =
   | { type: 'contextUsage'; usage: ContextUsage }
   /** History was summarised; the UI says so rather than silently losing detail. */
   | { type: 'compacted'; summarisedCount: number }
+  /** The queue as the host holds it — the UI renders this rather than its own copy. */
+  | { type: 'queued'; messages: string[] }
+  /** A queued message entered the conversation; the UI shows it as an ordinary user turn. */
+  | { type: 'queuedMessageConsumed'; text: string }
   /** Workspace-relative paths matching an `@` query, for composer autocomplete. */
   | { type: 'mentionCandidates'; query: string; paths: string[] }
   /** Whether the active model accepts images, from the capability table (§9). */

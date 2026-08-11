@@ -18,6 +18,9 @@ export interface ComposerProps {
   onSelectProfile: (id: string) => void
   /** Whether the Claude CLI expert is configured and runnable. */
   expertEnabled: boolean
+  /** Messages typed during the current turn, waiting to be folded in. */
+  queued: string[]
+  onUnqueue: (index: number) => void
 }
 
 /** Beyond this the request usually fails on the provider side, so refuse it here instead. */
@@ -136,7 +139,9 @@ export function Composer(props: ComposerProps): ReactElement {
     setNotice(undefined)
   }
 
-  const canSend = (text.trim().length > 0 || images.length > 0) && !props.isStreaming
+  // Sending mid-turn queues rather than being refused. Waiting for a long turn to finish
+  // before you can even type the follow-up is the thing this exists to fix.
+  const canSend = text.trim().length > 0 || images.length > 0
 
   /**
    * Attaching is never blocked on the capability table.
@@ -207,6 +212,36 @@ export function Composer(props: ComposerProps): ReactElement {
         </div>
       )}
 
+      {props.queued.length > 0 && (
+        <div style={{ padding: '6px 10px 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {props.queued.map((message, index) => (
+            <div
+              key={`${index}-${message.slice(0, 24)}`}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+                fontSize: 11,
+                color: colors.muted,
+                borderLeft: `2px solid ${colors.focusBorder}`,
+                paddingLeft: 6,
+              }}
+            >
+              <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message}</span>
+              <button
+                type="button"
+                title="Remove from the queue"
+                aria-label="Remove from the queue"
+                onClick={() => props.onUnqueue(index)}
+                style={{ background: 'transparent', border: 'none', color: colors.muted, cursor: 'pointer', padding: 0 }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {images.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '6px 8px 0' }}>
           {images.map((image, index) => (
@@ -271,9 +306,8 @@ export function Composer(props: ComposerProps): ReactElement {
         <textarea
           ref={textareaRef}
           value={text}
-          disabled={props.isStreaming}
           rows={2}
-          placeholder="Message Light Code…  @ to attach a file"
+          placeholder={props.isStreaming ? "Add a message — it joins the current turn" : "Message Light Code…  @ to attach a file"}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             setText(event.target.value)
             syncMentionQuery(event.target.value, event.target.selectionStart)

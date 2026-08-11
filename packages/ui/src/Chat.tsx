@@ -25,6 +25,8 @@ export interface ChatProps {
   activeProfileId: string | undefined
   onSelectProfile: (id: string) => void
   expertEnabled: boolean
+  queued: string[]
+  onUnqueue: (index: number) => void
 }
 
 export function Chat(props: ChatProps): ReactElement {
@@ -72,6 +74,8 @@ export function Chat(props: ChatProps): ReactElement {
         activeProfileId={props.activeProfileId}
         onSelectProfile={props.onSelectProfile}
         expertEnabled={props.expertEnabled}
+        queued={props.queued}
+        onUnqueue={props.onUnqueue}
       />
     </div>
   )
