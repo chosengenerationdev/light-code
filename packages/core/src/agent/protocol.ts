@@ -279,6 +279,14 @@ export type UiToHostMessage =
   | { type: 'startIndexing' }
   | { type: 'cancelIndexing' }
   | { type: 'saveEmbedder'; profileId: string; model: string; dimensions: number }
+  /**
+   * Lists models for an already-saved profile.
+   *
+   * Separate from `requestModels`, which rebuilds a profile from an unsaved form. Here the
+   * profile is on disk with its credentials already resolved, and the UI could not
+   * reconstruct it anyway — secrets are write-only across this bridge (invariant 7).
+   */
+  | { type: 'requestEmbedderModels'; profileId: string }
   | { type: 'requestNetwork' }
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
   | { type: 'requestExpert' }
@@ -373,6 +381,9 @@ export type HostToUiMessage =
   /** The save reached disk. The form stays open until this arrives, so a failure keeps the typed values. */
   | { type: 'searchConnectionSaved'; id: string }
   | { type: 'network'; settings: NetworkSettingsSummary }
+  /** Kept apart from `models` so the provider form and this tab cannot overwrite each other. */
+  | { type: 'embedderModels'; models: string[]; warning?: string }
+  | { type: 'embedderSaved' }
   | { type: 'indexProgress'; progress: IndexProgress }
   /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */
   | { type: 'indexResult'; result?: IndexResult; error?: string }

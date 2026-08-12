@@ -17,6 +17,13 @@ export interface IndexingSectionProps {
   connectionLabel: string | undefined
   progress: IndexProgress | undefined
   lastResult: { result?: IndexResult; error?: string } | undefined
+  /** Catalogue for the chosen profile. Empty is normal — free text always works (§9). */
+  models: string[]
+  modelsWarning?: string | undefined
+  modelsLoading: boolean
+  /** Increments when the host confirms the save reached disk. */
+  savedTick: number
+  onRequestModels: (profileId: string) => void
   onSaveEmbedder: (profileId: string, model: string, dimensions: number) => void
   onStartIndexing: () => void
   onCancelIndexing: () => void
@@ -38,6 +45,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
   const [model, setModel] = useState('')
   const [dimensions, setDimensions] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   // Resynced rather than seeded once: the host's reply can arrive after this renders.
   useEffect(() => {
@@ -45,6 +53,24 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
     setModel(props.embedder?.model ?? '')
     setDimensions(props.embedder?.dimensions !== undefined ? String(props.embedder.dimensions) : '')
   }, [props.embedder])
+
+  /*
+   * Fetched on selection rather than behind a button. The user has already told us which
+   * profile to use, so making them press Refresh to discover what it offers is a step that
+   * exists only because it was easier to build.
+   */
+  useEffect(() => {
+    if (profileId.length > 0) props.onRequestModels(profileId)
+    // Deliberately keyed on the profile alone: refetching on every keystroke in the model
+    // field would hammer the gateway.
+  }, [profileId])
+
+  useEffect(() => {
+    if (props.savedTick === 0) return
+    setSaved(true)
+    const timer = setTimeout(() => setSaved(false), 3000)
+    return () => clearTimeout(timer)
+  }, [props.savedTick])
 
   const running = props.progress !== undefined && props.progress.phase !== 'done'
   const parsedDimensions = Number.parseInt(dimensions, 10)
@@ -91,6 +117,30 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
         <label htmlFor="lc-emb-model" style={labelStyle()}>
           Embedding model
         </label>
+        {/*
+          Dropdown *and* free text, always both (§9). A gateway that publishes no catalogue,
+          or publishes one that omits its embedding models, is common — so the list is a
+          convenience layered over the field, never a gate in front of it.
+        */}
+        {props.models.length > 0 && (
+          <select
+            aria-label="Available models"
+            value={props.models.includes(model) ? model : ''}
+            onChange={(event) => {
+              if (event.target.value.length > 0) setModel(event.target.value)
+            }}
+            style={{ ...selectStyle(), width: '100%', marginBottom: 4 }}
+          >
+            <option value="" style={optionStyle()}>
+              {`Choose from ${props.models.length} model(s)…`}
+            </option>
+            {props.models.map((candidate) => (
+              <option key={candidate} value={candidate} style={optionStyle()}>
+                {candidate}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           id="lc-emb-model"
           type="text"
@@ -101,7 +151,14 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           style={textFieldStyle()}
         />
         <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-          An embedding model, not a chat model. Ask your gateway which it exposes.
+          {profileId.length === 0
+            ? 'Choose a provider above to see what it offers.'
+            : props.modelsLoading
+              ? 'Fetching the model list…'
+              : props.models.length === 0
+                ? `No catalogue from this provider${props.modelsWarning !== undefined ? ` (${props.modelsWarning})` : ''} — type the model name.`
+                : 'Pick one, or type a name the list does not include.'}
+          {' '}An embedding model, not a chat model.
         </span>
       </div>
 
@@ -138,6 +195,20 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
         >
           Save embedder
         </button>
+        {/*
+          A disabled button that says nothing is indistinguishable from a broken one — which
+          is exactly how this was first reported. It now names the missing field.
+        */}
+        {!configured && (
+          <span style={{ fontSize: 11, color: colors.muted }}>
+            {profileId.length === 0
+              ? 'Choose a provider first.'
+              : model.trim().length === 0
+                ? 'Enter or pick an embedding model.'
+                : 'Enter the vector width.'}
+          </span>
+        )}
+        {configured && saved && <span style={{ fontSize: 11, color: colors.muted }}>Saved.</span>}
         {props.embedder?.indexedFiles !== undefined && props.embedder.indexedFiles > 0 && (
           <span style={{ fontSize: 11, color: colors.muted }}>
             {props.embedder.indexedFiles} file(s) indexed

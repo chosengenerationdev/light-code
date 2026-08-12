@@ -104,6 +104,10 @@ export function App(props: AppProps): ReactElement {
   const [embedder, setEmbedder] = useState<EmbedderState | undefined>(undefined)
   const [indexProgress, setIndexProgress] = useState<IndexProgress | undefined>(undefined)
   const [indexResult, setIndexResult] = useState<{ result?: IndexResult; error?: string } | undefined>(undefined)
+  const [embedderModels, setEmbedderModels] = useState<string[]>([])
+  const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
+  const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
+  const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -250,6 +254,12 @@ export function App(props: AppProps): ReactElement {
           ...(message.indexName !== undefined ? { indexName: message.indexName } : {}),
           indexedFiles: message.indexedFiles,
         })
+      } else if (message.type === 'embedderModels') {
+        setEmbedderModels(message.models)
+        setEmbedderModelsWarning(message.warning)
+        setEmbedderModelsLoading(false)
+      } else if (message.type === 'embedderSaved') {
+        setEmbedderSavedTick((tick) => tick + 1)
       } else if (message.type === 'indexProgress') {
         setIndexProgress(message.progress)
       } else if (message.type === 'indexResult') {
@@ -425,8 +435,22 @@ export function App(props: AppProps): ReactElement {
       connectionLabel: searchConnections.find((connection) => connection.id === activeSearchId)?.label,
       progress: indexProgress,
       lastResult: indexResult,
-      onSaveEmbedder: (profileId: string, model: string, dimensions: number) =>
-        props.transport.post({ type: 'saveEmbedder', profileId, model, dimensions } satisfies UiToHostMessage),
+      models: embedderModels,
+      modelsWarning: embedderModelsWarning,
+      modelsLoading: embedderModelsLoading,
+      savedTick: embedderSavedTick,
+      onRequestModels: (profileId: string) => {
+        // Cleared first so a stale catalogue from the previous profile is never shown
+        // against the new one.
+        setEmbedderModels([])
+        setEmbedderModelsWarning(undefined)
+        setEmbedderModelsLoading(true)
+        props.transport.post({ type: 'requestEmbedderModels', profileId } satisfies UiToHostMessage)
+      },
+      onSaveEmbedder: (profileId: string, model: string, dimensions: number) => {
+        setError(undefined)
+        props.transport.post({ type: 'saveEmbedder', profileId, model, dimensions } satisfies UiToHostMessage)
+      },
       onStartIndexing: () => {
         setIndexResult(undefined)
         props.transport.post({ type: 'startIndexing' } satisfies UiToHostMessage)

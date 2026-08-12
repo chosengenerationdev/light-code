@@ -1269,8 +1269,33 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       await configManager.save('user', { embedder: { profileId, model, dimensions } })
       const { config } = await configManager.load()
       await postEmbedder(config)
+      // Confirmed explicitly. The form resyncs to the same values it just sent, so without
+      // this a successful save is visually indistinguishable from nothing happening.
+      post({ type: 'embedderSaved' })
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /** Lists models for a saved profile, reusing its stored credentials and TLS. */
+  async function handleRequestEmbedderModels(profileId: string): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const profile = config.profiles?.find((candidate) => candidate.id === profileId)
+      if (profile === undefined) {
+        post({ type: 'embedderModels', models: [], warning: 'That profile no longer exists.' })
+        return
+      }
+      const result = await listModels(httpClient, profile, authStrategyFor(config, profile))
+      post({
+        type: 'embedderModels',
+        models: result.ids,
+        ...(result.warning !== undefined ? { warning: result.warning } : {}),
+      })
+    } catch (error) {
+      // Never fatal: a gateway that publishes no catalogue is normal, and free-text entry
+      // has to keep working regardless (§9).
+      post({ type: 'embedderModels', models: [], warning: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -1924,6 +1949,8 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       indexingAbort?.abort()
     } else if (message.type === 'saveEmbedder') {
       void handleSaveEmbedder(message.profileId, message.model, message.dimensions)
+    } else if (message.type === 'requestEmbedderModels') {
+      void handleRequestEmbedderModels(message.profileId)
     } else if (message.type === 'requestNetwork') {
       void postNetwork()
     } else if (message.type === 'saveNetwork') {
