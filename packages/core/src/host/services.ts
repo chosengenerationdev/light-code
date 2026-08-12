@@ -1,0 +1,83 @@
+import type { ConfigStore } from '../platform/config.js'
+import type { SecretStore } from '../platform/secrets.js'
+import type { Transport } from '../platform/transport.js'
+
+/**
+ * Everything the chat bridge needs from its host.
+ *
+ * The bridge itself — profiles, MCP, search, approvals, task history, the agent loop — is
+ * platform-agnostic and lives in core. What is *not* portable is narrow and collected here:
+ * a handful of UI affordances a webview cannot provide itself, plus the stores whose
+ * backing differs per host.
+ *
+ * This is §4's rule applied to the one piece that had grown around it. The bridge used to
+ * live in `apps/vscode` and import `vscode` directly, which meant a second host had to
+ * either fork 1,800 lines or move them. Moving them is the version where a bug gets fixed
+ * once.
+ */
+
+/** A file or folder chooser. Resolving `undefined` means the user cancelled. */
+export interface OpenDialogOptions {
+  kind: 'file' | 'folder'
+  /** Bare extensions, no dot. Advisory — a host without filtering may ignore them. */
+  extensions?: string[] | undefined
+  /** Where to start. Hosts that cannot honour it open wherever they like. */
+  defaultPath?: string | undefined
+}
+
+/**
+ * Host-provided UI and workspace queries.
+ *
+ * Every method must be safe to call when the host cannot honour it: a headless or
+ * browser-hosted server has no native file dialog, so `showOpenDialog` returns `undefined`
+ * and the user types the path instead. Nothing here may be load-bearing for correctness.
+ */
+export interface HostUi {
+  /** Transient, dismissable. Never used to report something the UI must act on. */
+  showInfo(message: string): void
+  showWarning(message: string): void
+  showOpenDialog(options: OpenDialogOptions): Promise<string | undefined>
+  showSaveDialog(options: { defaultName: string; extensions?: string[] | undefined }): Promise<string | undefined>
+  /**
+   * Workspace-relative paths matching a glob, for `@` autocomplete.
+   *
+   * A host with an editor's index should use it — VS Code's honours `files.exclude` for
+   * free. A plain filesystem walk is an acceptable substitute.
+   */
+  findFiles(pattern: string, limit: number): Promise<string[]>
+}
+
+/**
+ * Small persisted key-value store scoped to the current workspace *and* user.
+ *
+ * Only used for the active task id so far, and that use decides the scoping: a reload must
+ * reopen the conversation that was in progress rather than the most recent one, and on a
+ * shared server two people in the same workspace are not in the same conversation.
+ */
+export interface WorkspaceState {
+  get(key: string): string | undefined
+  set(key: string, value: string | undefined): Promise<void>
+}
+
+export interface HostServices {
+  workspaceState: WorkspaceState
+  transport: Transport
+  secrets: SecretStore
+  configStore: ConfigStore
+  ui: HostUi
+  /** Absolute path to the open folder, or undefined when none is. */
+  workspaceRoot: string | undefined
+  /** Per-user directory for tasks, spilled tool results and the user-scope config. */
+  storageDir: string
+  /**
+   * Absolute path to a ripgrep binary, or undefined to degrade `search_files` and
+   * `list_files` with a clear message.
+   *
+   * Supplied by the host and never resolved here: ripgrep ships one binary per platform,
+   * which is a platform concern, and a top-level import of `@vscode/ripgrep` from core once
+   * shipped a VSIX that could not activate at all (§19). Core must not know it exists.
+   */
+  ripgrepPath: string | undefined
+  /** Appends one line to wherever this host shows diagnostics. */
+  logSink: (line: string) => void
+}

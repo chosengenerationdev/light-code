@@ -1,13 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import {
-  taskSummary,
-  type Logger,
-  type Task,
-  type TaskStore,
-  type TaskSummary,
-  type TruncationStore,
-} from '@light-code/core'
+import type { TruncationStore } from '../../agent/truncate.js'
+import { taskSummary, type Task, type TaskStore, type TaskSummary } from '../../history/types.js'
+import type { Logger } from '../../logging/logger.js'
 
 const INDEX_FILE = 'index.json'
 

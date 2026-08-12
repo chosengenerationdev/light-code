@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises'
-import type { DirEntry, FileSystem, FileStat } from '@light-code/core'
+import type { DirEntry, FileSystem, FileStat } from '../filesystem.js'
 
 export class NodeFileSystem implements FileSystem {
   async readFile(path: string): Promise<string> {

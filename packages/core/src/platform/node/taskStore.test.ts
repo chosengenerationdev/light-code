@@ -2,7 +2,8 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Task, TruncationStore } from '@light-code/core'
+import type { TruncationStore } from '../../agent/truncate.js'
+import type { Task } from '../../history/types.js'
 import { JsonTaskStore } from './taskStore.js'
 
 class FakeTruncationStore implements TruncationStore {

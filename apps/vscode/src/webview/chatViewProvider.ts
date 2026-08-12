@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import * as vscode from 'vscode'
-import { wireChatBridge } from './bridge.js'
+import { wireChatBridge } from '@light-code/core'
+import { createVSCodeHostServices } from './hostServices.js'
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   constructor(
@@ -15,7 +16,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     webviewView.webview.html = renderHtml(webviewView.webview, this.context.extensionUri)
 
-    const bridge = wireChatBridge(webviewView.webview, this.context, this.outputChannel)
+    const bridge = wireChatBridge(createVSCodeHostServices(webviewView.webview, this.context, this.outputChannel))
     webviewView.onDidDispose(() => bridge.dispose())
   }
 }

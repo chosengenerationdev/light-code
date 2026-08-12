@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import * as vscode from 'vscode'
 import {
   ConfigManager,
+  type SecretStore,
   Conversation,
   DiskTruncationStore,
   FetchHttpClient,
@@ -73,15 +73,12 @@ import {
   type ToolExecutionContext,
   type UiToHostMessage,
   type WorkspaceApprovals,
-} from '@light-code/core'
+} from '../index.js'
 import { WebviewApprovalGate } from './approvalGate.js'
-import { NodeFileSystem } from '../platform/filesystem.js'
-import { NodeTerminal } from '../platform/terminal.js'
-import { VSCodeConfigStore } from '../platform/config.js'
-import { JsonTaskStore } from '../platform/taskStore.js'
-import { resolveRipgrepPath } from '../platform/ripgrep.js'
-import { VSCodeSecretStore } from '../platform/secrets.js'
-import { WebviewTransport } from '../platform/transport.js'
+import type { HostServices } from './services.js'
+import { NodeFileSystem } from '../platform/node/filesystem.js'
+import { NodeTerminal } from '../platform/node/terminal.js'
+import { JsonTaskStore } from '../platform/node/taskStore.js'
 
 /**
  * Secret keys are namespaced by profile so deleting a profile reliably deletes everything
@@ -113,7 +110,7 @@ function searchPasswordRefFor(id: string): string {
  * "Set — leave blank to keep" for a key that isn't there — leaving the user no way to
  * fix it from the UI. Still never sends the value itself (invariant 7).
  */
-async function toSummary(profile: ProviderProfile, secrets: VSCodeSecretStore): Promise<ProfileSummary> {
+async function toSummary(profile: ProviderProfile, secrets: SecretStore): Promise<ProfileSummary> {
   const summary: ProfileSummary = {
     id: profile.id,
     label: profile.label,
@@ -156,17 +153,17 @@ function stripEmpty<T extends object>(source: T): Partial<T> {
   return result as Partial<T>
 }
 
-/** Wires the webview's chat UI to the agent loop and the Providers settings screen. */
-export function wireChatBridge(
-  webview: vscode.Webview,
-  context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel,
-): vscode.Disposable {
-  const logger = new Logger({ level: 'debug', sink: (line) => outputChannel.appendLine(line) })
-  const transport = new WebviewTransport(webview, logger)
-  const secrets = new VSCodeSecretStore(context.secrets, logger)
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-  const configManager = new ConfigManager(new VSCodeConfigStore(context, workspaceRoot))
+/**
+ * Wires a chat UI to the agent loop and the settings screens.
+ *
+ * Host-agnostic: everything platform-specific arrives through `HostServices`. The VS Code
+ * extension and the Node server both call this, which is the whole point — a fix to the
+ * approval gate or the MCP tab reaches both without being written twice.
+ */
+export function wireChatBridge(services: HostServices): { dispose: () => void } {
+  const { transport, secrets, ui, workspaceRoot, storageDir, ripgrepPath } = services
+  const logger = new Logger({ level: 'debug', sink: services.logSink })
+  const configManager = new ConfigManager(services.configStore)
   const httpClient = new FetchHttpClient()
   const conversation = new Conversation(workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined)
 
@@ -176,9 +173,12 @@ export function wireChatBridge(
   // path, which cannot await a keychain lookup in the middle of writing a tool result.
   let cachedSecretValues: readonly string[] = []
   const truncationStore = new RecordingTruncationStore(
-    new DiskTruncationStore(path.join(context.globalStorageUri.fsPath, 'tool-results'), () => cachedSecretValues),
+    new DiskTruncationStore(path.join(storageDir, 'tool-results'), () => cachedSecretValues),
   )
-  const taskStore = new JsonTaskStore(context.globalStorageUri.fsPath, truncationStore, logger)
+  // Constructed here rather than injected: it needs the truncation store built just above,
+  // and the JSON-file layout is host-agnostic. Storage *location* is the host's decision;
+  // storage *format* is not.
+  const taskStore = new JsonTaskStore(storageDir, truncationStore, logger)
   const builtinTools = createDefaultToolRegistry()
   builtinTools.register(createReadToolResultTool(truncationStore))
 
@@ -186,9 +186,6 @@ export function wireChatBridge(
   // touching an existing file. Session-scoped, so it lives alongside the conversation.
   const readFiles = new Set<string>()
   const denylist = new PathDenylist()
-  // Resolved once: the answer cannot change within a session, and a missing binary should
-  // be reported to the log once rather than on every turn.
-  const ripgrepPath = resolveRipgrepPath(context.extensionPath, logger)
   /** Certificates are re-read every request; without this the same warning would repeat. */
   const warnedExpiries = new Set<string>()
 
@@ -236,12 +233,12 @@ export function wireChatBridge(
    * recent one — those differ the moment the user reopens an older task.
    */
   const ACTIVE_TASK_KEY = 'lightCode.activeTaskId'
-  let activeTaskId: string | undefined = context.workspaceState.get<string>(ACTIVE_TASK_KEY)
+  let activeTaskId: string | undefined = services.workspaceState.get(ACTIVE_TASK_KEY)
   let activeTaskCreatedAt = Date.now()
 
   async function setActiveTaskId(id: string | undefined): Promise<void> {
     activeTaskId = id
-    await context.workspaceState.update(ACTIVE_TASK_KEY, id)
+    await services.workspaceState.set(ACTIVE_TASK_KEY, id)
   }
 
   function post(message: HostToUiMessage): void {
@@ -345,7 +342,7 @@ export function wireChatBridge(
   // never lands inside the very tree it snapshots.
   const shadowGit =
     workspaceRoot !== undefined
-      ? new ShadowGit(workspaceRoot, path.join(context.globalStorageUri.fsPath, 'checkpoints', 'shadow.git'))
+      ? new ShadowGit(workspaceRoot, path.join(storageDir, 'checkpoints', 'shadow.git'))
       : undefined
 
   async function postProfiles(): Promise<void> {
@@ -402,7 +399,7 @@ export function wireChatBridge(
       onExpiryWarning: (warning) => {
         if (warnedExpiries.has(warning.message)) return
         warnedExpiries.add(warning.message)
-        void vscode.window.showWarningMessage(`Light Code: ${warning.message}`)
+        ui.showWarning(warning.message)
       },
     }
   }
@@ -969,9 +966,9 @@ export function wireChatBridge(
     }
     try {
       const pattern = query.length > 0 ? `**/*${query}*` : '**/*'
-      const found = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 30)
+      const found = await ui.findFiles(pattern, 30)
       const paths = found
-        .map((uri) => path.relative(workspaceRoot, uri.fsPath).split(path.sep).join('/'))
+        .map((absolute) => path.relative(workspaceRoot, absolute).split(path.sep).join('/'))
         .sort((a, b) => a.length - b.length)
       post({ type: 'mentionCandidates', query, paths })
     } catch (error) {
@@ -1292,13 +1289,10 @@ export function wireChatBridge(
   async function handleExportConfig(): Promise<void> {
     try {
       const { config } = await configManager.load()
-      const uri = await vscode.window.showSaveDialog({
-        filters: { JSON: ['json'] },
-        defaultUri: vscode.Uri.file('light-code-config.json'),
-      })
-      if (uri === undefined) return
-      await fs.writeFile(uri.fsPath, JSON.stringify(config, null, 2), 'utf8')
-      void vscode.window.showInformationMessage(`Light Code config exported to ${uri.fsPath}`)
+      const target = await ui.showSaveDialog({ defaultName: 'light-code-config.json', extensions: ['json'] })
+      if (target === undefined) return
+      await fs.writeFile(target, JSON.stringify(config, null, 2), 'utf8')
+      ui.showInfo(`Config exported to ${target}`)
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -1306,14 +1300,10 @@ export function wireChatBridge(
 
   async function handleImportConfig(): Promise<void> {
     try {
-      const uris = await vscode.window.showOpenDialog({
-        filters: { JSON: ['json'] },
-        canSelectMany: false,
-      })
-      const uri = uris?.[0]
-      if (uri === undefined) return
+      const source = await ui.showOpenDialog({ kind: 'file', extensions: ['json'] })
+      if (source === undefined) return
 
-      const raw = await fs.readFile(uri.fsPath, 'utf8')
+      const raw = await fs.readFile(source, 'utf8')
       const imported = parseConfig(raw) // throws ConfigValidationError with a readable message on bad input
 
       // Exports deliberately carry no secrets, so an imported profile's `apiKeyRef`
@@ -1333,10 +1323,10 @@ export function wireChatBridge(
       await configManager.save('user', { ...imported, profiles: reconciled })
       await postProfiles()
 
-      void vscode.window.showInformationMessage(
+      ui.showInfo(
         needKeys.length > 0
-          ? `Light Code config imported. Re-enter the API key for: ${needKeys.join(', ')} (exports never include secrets).`
-          : 'Light Code config imported.',
+          ? `Config imported. Re-enter the API key for: ${needKeys.join(', ')} (exports never include secrets).`
+          : 'Config imported.',
       )
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -1356,7 +1346,7 @@ export function wireChatBridge(
       conversation.addUserMessage('I rolled the workspace back to its state before your edits.')
       readFiles.clear()
       post({ type: 'rolledBack' })
-      void vscode.window.showInformationMessage('Light Code: workspace rolled back.')
+      ui.showInfo('Workspace rolled back.')
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -1608,18 +1598,16 @@ export function wireChatBridge(
    * sends nothing, so a dismissed dialog leaves the field exactly as it was.
    */
   async function handleBrowseForPath(purpose: string, kind: 'file' | 'folder', extensions?: string[]): Promise<void> {
-    const uris = await vscode.window.showOpenDialog({
-      canSelectFiles: kind === 'file',
-      canSelectFolders: kind === 'folder',
-      canSelectMany: false,
-      openLabel: 'Select',
+    const picked = await ui.showOpenDialog({
+      kind,
       // Opens where the user is already working rather than at some unrelated default.
-      ...(workspaceRoot !== undefined ? { defaultUri: vscode.Uri.file(workspaceRoot) } : {}),
-      ...(extensions !== undefined && extensions.length > 0 ? { filters: { Supported: extensions } } : {}),
+      ...(workspaceRoot !== undefined ? { defaultPath: workspaceRoot } : {}),
+      ...(extensions !== undefined && extensions.length > 0 ? { extensions } : {}),
     })
-    const picked = uris?.[0]
+    // A host without a native dialog returns undefined, same as a cancel. The field stays
+    // typeable either way, so there is nothing to report.
     if (picked === undefined) return
-    post({ type: 'pathPicked', purpose, path: picked.fsPath })
+    post({ type: 'pathPicked', purpose, path: picked })
   }
 
   async function handleDeleteMcpServer(name: string): Promise<void> {

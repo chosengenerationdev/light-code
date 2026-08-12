@@ -223,6 +223,12 @@ export type {
   SearchQueryLimits,
 } from './agent/protocol.js'
 
+export { wireChatBridge } from './host/bridge.js'
+export type { HostServices, HostUi, OpenDialogOptions, WorkspaceState } from './host/services.js'
+export { NodeFileSystem } from './platform/node/filesystem.js'
+export { NodeTerminal } from './platform/node/terminal.js'
+export { JsonTaskStore } from './platform/node/taskStore.js'
+
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'
 export { deriveTitle } from './history/titles.js'
 export { toTranscript, formatToolArguments, CONTROL_TOOLS } from './history/transcript.js'

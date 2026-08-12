@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import type { Terminal, TerminalProcess, TerminalRunOptions } from '@light-code/core'
+import type { Terminal, TerminalProcess, TerminalRunOptions } from '../terminal.js'
 
 class NodeTerminalProcess implements TerminalProcess {
   private readonly dataListeners: Array<(chunk: string) => void> = []
