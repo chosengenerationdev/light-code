@@ -8,14 +8,31 @@ a privilege model.** Read the second half before planning it.
 
 ## 1. Local, single user
 
-```bash
-npx light-code                  # current folder
-npx light-code --workspace D:\src\my-repo
-npx light-code --port 7100 --no-open
-```
-
 Starts a server on `127.0.0.1` and opens your browser. Same UI as the extension, same
 agent, same config format.
+
+**`npx light-code` does not work yet** — the package is not published to npm, so there is
+nothing for npx to fetch. From a clone:
+
+```bash
+pnpm install
+pnpm serve                                # current folder
+pnpm serve --workspace D:\src\my-repo
+pnpm serve --port 7100 --no-open
+```
+
+`pnpm serve` rebuilds the host and starts it.
+
+To get a `light-code` command on PATH without publishing, link it once:
+
+```bash
+pnpm --filter light-code link --global
+light-code --workspace D:\src\my-repo     # now works from anywhere
+```
+
+Once published, all of the above is `npx light-code`. The manifest is already set up for it
+— `bin`, `files`, and a shebang on the built entry point — so what is missing is the
+decision to publish, which should wait until the browser UI has had real use.
 
 ### How the session is protected
 
