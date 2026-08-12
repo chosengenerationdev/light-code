@@ -131,7 +131,17 @@ export {
   type SearchHit,
   type SearchResult,
 } from './rag/opensearch/client.js'
-export { buildSearchQuery, selectQueryFields, summariseHit } from './rag/opensearch/query.js'
+export {
+  buildSearchQuery,
+  selectQueryFields,
+  summariseHit,
+  checkIndexBreadth,
+  resolveQueryLimits,
+  DEFAULT_QUERY_LIMITS,
+  type QueryLimits,
+} from './rag/opensearch/query.js'
+export { OpenSearchIndexWriter, OWNED_INDEX_MARKER, type IndexedDocument } from './rag/opensearch/writer.js'
+export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
 export { vectorStoreSchema, embedderConfigSchema, type VectorStoreConfig } from './config/schema.js'
 

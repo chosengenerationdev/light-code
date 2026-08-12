@@ -541,6 +541,11 @@ export function App(props: AppProps): ReactElement {
             expertEnabled={expertEnabled}
             queued={queued}
             onUnqueue={unqueue}
+            searchConnections={searchConnections.map((connection) => ({ id: connection.id, label: connection.label }))}
+            activeSearchId={activeSearchId}
+            onSelectSearch={(id) =>
+              props.transport.post({ type: 'setActiveSearchConnection', id } satisfies UiToHostMessage)
+            }
           />
         )}
       </div>

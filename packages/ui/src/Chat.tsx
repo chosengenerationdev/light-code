@@ -28,6 +28,9 @@ export interface ChatProps {
   expertEnabled: boolean
   queued: string[]
   onUnqueue: (index: number) => void
+  searchConnections: { id: string; label: string }[]
+  activeSearchId: string | undefined
+  onSelectSearch: (id: string | undefined) => void
 }
 
 export function Chat(props: ChatProps): ReactElement {
@@ -99,6 +102,9 @@ export function Chat(props: ChatProps): ReactElement {
         expertEnabled={props.expertEnabled}
         queued={props.queued}
         onUnqueue={props.onUnqueue}
+        searchConnections={props.searchConnections}
+        activeSearchId={props.activeSearchId}
+        onSelectSearch={props.onSelectSearch}
       />
     </div>
   )

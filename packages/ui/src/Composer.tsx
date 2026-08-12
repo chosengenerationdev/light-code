@@ -21,6 +21,10 @@ export interface ComposerProps {
   /** Messages typed during the current turn, waiting to be folded in. */
   queued: string[]
   onUnqueue: (index: number) => void
+  /** OpenSearch connections, and which one this session may search. */
+  searchConnections: { id: string; label: string }[]
+  activeSearchId: string | undefined
+  onSelectSearch: (id: string | undefined) => void
 }
 
 /** Beyond this the request usually fails on the provider side, so refuse it here instead. */
@@ -435,6 +439,31 @@ export function Composer(props: ComposerProps): ReactElement {
               </option>
             ))}
           </select>
+          )}
+          {props.searchConnections.length > 0 && (
+            <select
+              aria-label="OpenSearch connection"
+              title="Which cluster this conversation may search. Change it between messages."
+              value={props.activeSearchId ?? ''}
+              disabled={props.isStreaming}
+              onChange={(event) => props.onSelectSearch(event.target.value.length > 0 ? event.target.value : undefined)}
+              style={{
+                ...selectStyle(true),
+                cursor: props.isStreaming ? 'default' : 'pointer',
+                maxWidth: '38%',
+              }}
+            >
+              {/* Off is a real choice, and the default one: no connection means the search
+                  tools are not offered at all. */}
+              <option value="" style={optionStyle()}>
+                No search
+              </option>
+              {props.searchConnections.map((connection) => (
+                <option key={connection.id} value={connection.id} style={optionStyle()}>
+                  🔍 {connection.label}
+                </option>
+              ))}
+            </select>
           )}
           {props.expertEnabled && (
             <span
