@@ -126,6 +126,16 @@ export interface SearchConnectionSummary {
   rejectUnauthorized?: boolean
   hasUsername: boolean
   hasPassword: boolean
+  limits?: SearchQueryLimits | undefined
+}
+
+/** Guard rails against a query that could hurt a production cluster. */
+export interface SearchQueryLimits {
+  maxHits?: number | undefined
+  timeoutSeconds?: number | undefined
+  terminateAfter?: number | undefined
+  maxIndexes?: number | undefined
+  defaultLookbackHours?: number | undefined
 }
 
 /** What a save carries. Empty credential fields mean "unchanged", as everywhere else. */
@@ -138,6 +148,7 @@ export interface SearchConnectionInput {
   rejectUnauthorized?: boolean
   username?: string
   password?: string
+  limits?: SearchQueryLimits | undefined
 }
 
 /** One line per step of load-certs → get-token → list-models (§10). */

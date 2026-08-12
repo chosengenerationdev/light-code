@@ -78,6 +78,36 @@ export const vectorStoreSchema = z.object({
    */
   caFile: z.string().optional(),
   rejectUnauthorized: z.boolean().optional(),
+  /**
+   * Guard rails for queries the model writes.
+   *
+   * These exist because the cluster is production and the query author is a language
+   * model. It cannot delete anything — the client has no write path — but a *read* can
+   * still hurt: a wildcard across every index, an unbounded scan of years of logs, or a
+   * hit count that forces a full traversal. Each default below is chosen to be safe on a
+   * large cluster rather than maximally capable, and every one is raiseable by the user
+   * who knows their own cluster.
+   */
+  limits: z
+    .object({
+      /** Documents returned. Hard-capped in the tool regardless of what the model asks. */
+      maxHits: z.number().int().min(1).max(100),
+      /** Per-shard time budget, sent as the query's own `timeout`. */
+      timeoutSeconds: z.number().int().min(1).max(120),
+      /** Stop examining documents per shard after this many. 0 disables. */
+      terminateAfter: z.number().int().min(0),
+      /** Refuse a wildcard pattern resolving to more indexes than this. 0 disables the check. */
+      maxIndexes: z.number().int().min(0),
+      /**
+       * When the index has a date field and the model set no range, restrict to this many
+       * hours. The single most effective protection for a log index, where the difference
+       * between a day and three years is the difference between instant and an outage.
+       * 0 disables, allowing unbounded scans.
+       */
+      defaultLookbackHours: z.number().int().min(0),
+    })
+    .partial()
+    .optional(),
 })
 export type VectorStoreConfig = z.infer<typeof vectorStoreSchema>
 

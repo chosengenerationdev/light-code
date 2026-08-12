@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../../platform/http.js'
 import { isSafeIndexName, OpenSearchClient, OpenSearchError } from './client.js'
-import { buildSearchQuery, selectQueryFields, summariseHit } from './query.js'
+import { buildSearchQuery, checkIndexBreadth, selectQueryFields, summariseHit } from './query.js'
 
 interface Recorded {
   url: string
@@ -62,7 +62,7 @@ describe('read-only enforcement', () => {
     await client.ping()
     await client.listIndexes()
     await client.getMapping('idx')
-    await client.search('idx', buildSearchQuery('anything'))
+    await client.search('idx', buildSearchQuery('anything').body)
 
     expect(calls).not.toHaveLength(0)
     for (const call of calls) {
@@ -222,40 +222,39 @@ describe('query building', () => {
    * searching. `multi_match` treats it as terms.
    */
   it('uses multi_match so punctuation in a question is not Lucene syntax', () => {
-    const query = JSON.stringify(buildSearchQuery('why did service:auth fail?', { mapping }))
+    const query = JSON.stringify(buildSearchQuery('why did service:auth fail?', { mapping }).body)
 
     expect(query).toContain('multi_match')
     expect(query).not.toContain('query_string')
   })
 
   it('includes keyword fields for a short token, but not for a sentence', () => {
-    const token = JSON.stringify(buildSearchQuery('ERROR', { mapping }))
-    const sentence = JSON.stringify(buildSearchQuery('why is the service failing today', { mapping }))
+    const token = JSON.stringify(buildSearchQuery('ERROR', { mapping }).body)
+    const sentence = JSON.stringify(buildSearchQuery('why is the service failing today', { mapping }).body)
 
     expect(token).toContain('level')
     expect(sentence).not.toContain('"level"')
   })
 
   it('applies filters as a non-scoring filter clause', () => {
-    const query = buildSearchQuery('boom', { mapping, filters: { level: 'ERROR' } }) as {
-      query: { bool: { filter?: unknown[] } }
-    }
-    expect(query.query.bool.filter).toEqual([{ term: { level: 'ERROR' } }])
+    const { body } = buildSearchQuery('boom', { mapping, filters: { level: 'ERROR' } })
+    const filter = (body as { query: { bool: { filter?: unknown[] } } }).query.bool.filter
+    expect(filter).toContainEqual({ term: { level: 'ERROR' } })
   })
 
   it('ranges over the first date field it finds', () => {
-    const query = JSON.stringify(buildSearchQuery('x', { mapping, after: '2026-08-01T00:00:00Z' }))
+    const query = JSON.stringify(buildSearchQuery('x', { mapping, after: '2026-08-01T00:00:00Z' }).body)
     expect(query).toContain('@timestamp')
     expect(query).toContain('2026-08-01')
   })
 
   it('falls back to a lenient wildcard when no mapping could be read', () => {
-    const query = JSON.stringify(buildSearchQuery('anything'))
+    const query = JSON.stringify(buildSearchQuery('anything').body)
     expect(query).toContain('"lenient":true')
   })
 
   it('matches everything for an empty query rather than producing an invalid one', () => {
-    expect(JSON.stringify(buildSearchQuery('   '))).toContain('match_all')
+    expect(JSON.stringify(buildSearchQuery('   ').body)).toContain('match_all')
   })
 })
 
@@ -268,5 +267,89 @@ describe('summariseHit', () => {
     expect(summary).not.toContain('missing')
     expect(summary).toContain('…')
     expect(summary.length).toBeLessThan(300)
+  })
+})
+
+describe('production guard rails', () => {
+  const mapping = { message: 'text', '@timestamp': 'date' }
+
+  /**
+   * The expensive read on a log cluster is an unbounded one. The model will not think to
+   * bound it, so a lookback is imposed when nothing else constrains the query.
+   */
+  it('bounds an unbounded query to a default lookback', () => {
+    const { body, guards } = buildSearchQuery('errors', { mapping })
+
+    expect(guards.lookbackHours).toBe(24)
+    expect(JSON.stringify(body)).toContain('now-24h')
+  })
+
+  it('leaves an explicitly bounded query alone', () => {
+    const { guards } = buildSearchQuery('errors', { mapping, after: '2026-01-01T00:00:00Z' })
+    expect(guards.lookbackHours).toBeUndefined()
+  })
+
+  it('does not invent a lookback for an index with no date field', () => {
+    expect(buildSearchQuery('x', { mapping: { message: 'text' } }).guards.lookbackHours).toBeUndefined()
+  })
+
+  it('sends a per-shard timeout and an early-termination cap', () => {
+    const { body } = buildSearchQuery('x', { mapping })
+    expect(body.timeout).toBe('10s')
+    expect(body.terminate_after).toBe(10_000)
+  })
+
+  /** Counting every match forces a full traversal; nobody needs the exact figure. */
+  it('bounds the hit count instead of computing an exact total', () => {
+    expect(buildSearchQuery('x', { mapping }).body.track_total_hits).toBe(1000)
+  })
+
+  it('honours raised limits from the connection', () => {
+    const { body, guards } = buildSearchQuery('x', {
+      mapping,
+      limits: { timeoutSeconds: 60, terminateAfter: 0, defaultLookbackHours: 0 },
+    })
+
+    expect(body.timeout).toBe('60s')
+    // 0 disables rather than meaning "immediately".
+    expect(body.terminate_after).toBeUndefined()
+    expect(guards.lookbackHours).toBeUndefined()
+  })
+})
+
+describe('index breadth', () => {
+  const known = ['app-logs-01', 'app-logs-02', 'app-logs-03', 'jira', 'confluence']
+
+  /** Fanning out across every shard of every index is the read most likely to hurt. */
+  it('refuses to search everything', () => {
+    expect(checkIndexBreadth('*', known).ok).toBe(false)
+    expect(checkIndexBreadth('_all', known).ok).toBe(false)
+  })
+
+  it('allows a pattern that stays within the limit', () => {
+    const result = checkIndexBreadth('app-logs-*', known, 5)
+    expect(result.ok).toBe(true)
+  })
+
+  it('refuses a pattern matching more indexes than allowed, and says how many', () => {
+    const result = checkIndexBreadth('app-logs-*', known, 2)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toContain('3 indexes')
+      expect(result.reason).toContain('limit of 2')
+    }
+  })
+
+  it('leaves an exact index name alone', () => {
+    expect(checkIndexBreadth('jira', known, 1).ok).toBe(true)
+  })
+
+  /** Blocking on a guess would be worse than allowing it; the other guards still apply. */
+  it('allows a pattern through when the index list could not be read', () => {
+    expect(checkIndexBreadth('app-*', [], 1).ok).toBe(true)
+  })
+
+  it('can be disabled by setting the limit to zero', () => {
+    expect(checkIndexBreadth('app-logs-*', known, 0).ok).toBe(true)
   })
 })

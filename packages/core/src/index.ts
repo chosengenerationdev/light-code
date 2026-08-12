@@ -195,6 +195,7 @@ export type {
   ConnectionTlsInput,
   SearchConnectionSummary,
   SearchConnectionInput,
+  SearchQueryLimits,
 } from './agent/protocol.js'
 
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'

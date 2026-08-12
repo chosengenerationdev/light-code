@@ -298,6 +298,7 @@ export function wireChatBridge(
           connectionLabel: search.store.label,
           ...(search.store.defaultIndex !== undefined ? { defaultIndex: search.store.defaultIndex } : {}),
           availableIndexes: search.indexes,
+          ...(search.store.limits !== undefined ? { limits: search.store.limits } : {}),
         }),
       )
     }
@@ -1056,6 +1057,7 @@ export function wireChatBridge(
         ...(store.defaultIndex !== undefined ? { defaultIndex: store.defaultIndex } : {}),
         ...(store.caFile !== undefined ? { caFile: store.caFile } : {}),
         ...(store.rejectUnauthorized !== undefined ? { rejectUnauthorized: store.rejectUnauthorized } : {}),
+        ...(store.limits !== undefined ? { limits: store.limits } : {}),
         // Booleans only — the values never cross the bridge (invariant 7).
         hasUsername: (await secrets.get(searchUserRefFor(id))) !== undefined,
         hasPassword: (await secrets.get(searchPasswordRefFor(id))) !== undefined,
@@ -1105,6 +1107,7 @@ export function wireChatBridge(
           : {}),
         ...(input.caFile !== undefined && input.caFile.trim().length > 0 ? { caFile: input.caFile.trim() } : {}),
         ...(input.rejectUnauthorized !== undefined ? { rejectUnauthorized: input.rejectUnauthorized } : {}),
+        ...(input.limits !== undefined ? { limits: input.limits } : {}),
       }
 
       await configManager.save('user', { vectorStores: { ...config.vectorStores, [id]: store } })

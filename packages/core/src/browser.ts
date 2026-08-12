@@ -38,6 +38,7 @@ export type {
   TestConnectionStep,
   SearchConnectionSummary,
   SearchConnectionInput,
+  SearchQueryLimits,
   TranscriptEntry,
   TaskListEntry,
   ContextUsage,

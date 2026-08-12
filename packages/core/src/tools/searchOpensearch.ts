@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { buildSearchQuery, summariseHit } from '../rag/opensearch/query.js'
+import {
+  buildSearchQuery,
+  checkIndexBreadth,
+  resolveQueryLimits,
+  summariseHit,
+  type QueryLimits,
+} from '../rag/opensearch/query.js'
 import type { OpenSearchClient } from '../rag/opensearch/client.js'
 import type { Tool, ToolResult } from './types.js'
 
@@ -12,7 +18,7 @@ const paramsSchema = z.object({
     .describe('Exact-match field filters, e.g. {"level":"ERROR"}. Only for fields you know exist.'),
   after: z.string().optional().describe('ISO timestamp; only documents newer than this.'),
   before: z.string().optional().describe('ISO timestamp; only documents older than this.'),
-  size: z.number().int().min(1).max(50).optional().describe('How many results. Default 10.'),
+  size: z.number().int().min(1).max(100).optional().describe('How many results. Capped by the connection limit.'),
 })
 export type SearchOpensearchParams = z.infer<typeof paramsSchema>
 
@@ -23,6 +29,8 @@ export interface SearchOpensearchOptions {
   defaultIndex?: string
   /** Index names the model may search. Empty means any. */
   availableIndexes?: string[]
+  /** Guard rails against a query that could hurt a production cluster. */
+  limits?: QueryLimits | undefined
 }
 
 /**
@@ -61,6 +69,7 @@ export function createSearchOpensearchTool(options: SearchOpensearchOptions): To
       }
     },
     async execute(params, context): Promise<ToolResult> {
+      const limits = resolveQueryLimits(options.limits)
       const index = params.index ?? options.defaultIndex
       if (index === undefined) {
         return {
@@ -80,15 +89,20 @@ export function createSearchOpensearchTool(options: SearchOpensearchOptions): To
           // Commonly a permissions issue on _mapping while _search is allowed.
         }
 
-        const query = buildSearchQuery(params.query, {
+        const breadth = checkIndexBreadth(index, options.availableIndexes ?? [], limits.maxIndexes)
+        if (!breadth.ok) return { content: breadth.reason, isError: true }
+
+        const { body, guards } = buildSearchQuery(params.query, {
+          limits,
           mapping,
           ...(params.filters !== undefined ? { filters: params.filters } : {}),
           ...(params.after !== undefined ? { after: params.after } : {}),
           ...(params.before !== undefined ? { before: params.before } : {}),
         })
 
-        const result = await options.client.search(index, query, {
-          size: params.size ?? 10,
+        const result = await options.client.search(index, body, {
+          // The model's request is a ceiling request, not a grant: the connection's cap wins.
+          size: Math.min(params.size ?? limits.maxHits, limits.maxHits),
           ...(context.signal !== undefined ? { signal: context.signal } : {}),
         })
 
@@ -104,9 +118,22 @@ export function createSearchOpensearchTool(options: SearchOpensearchOptions): To
           .map((hit, position) => `[${position + 1}] score ${hit.score.toFixed(2)}  id=${hit.id}\n${summariseHit(hit.source)}`)
           .join('\n\n---\n\n')
 
+        // Guards are reported, never silent. A document that exists but falls outside an
+        // imposed lookback would otherwise look like missing data rather than a bounded
+        // search, and the model would confidently tell the user it is not there.
+        const notes: string[] = []
+        if (guards.lookbackHours !== undefined) {
+          notes.push(
+            `Only the last ${guards.lookbackHours}h were searched, because no time range was given. ` +
+              'Ask for a specific range to look further back.',
+          )
+        }
+        if (result.total >= 1000) notes.push('The match count is capped at 1000; the real total may be higher.')
+
         return {
           content: [
-            `${result.hits.length} of ${result.total} matches in "${index}" (${result.tookMs}ms):`,
+            `${result.hits.length} of ${result.total >= 1000 ? '1000+' : result.total} matches in "${index}" (${result.tookMs}ms):`,
+            ...(notes.length > 0 ? notes.map((note) => `Note: ${note}`) : []),
             '',
             rendered,
           ].join('\n'),

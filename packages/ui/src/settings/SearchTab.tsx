@@ -1,4 +1,4 @@
-import type { SearchConnectionInput, SearchConnectionSummary } from '@light-code/core/browser'
+import type { SearchConnectionInput, SearchConnectionSummary, SearchQueryLimits } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { TrashIcon } from '../icons.js'
 import {
@@ -42,6 +42,39 @@ const BLANK: SearchConnectionSummary = {
   hasPassword: false,
 }
 
+/** A numeric limit with its default as the placeholder, so "unset" reads as the default. */
+function LimitRow(props: {
+  id: string
+  label: string
+  hint?: string
+  placeholder: string
+  value: number | undefined
+  onChange: (value: number | undefined) => void
+}): ReactElement {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      <label htmlFor={props.id} style={{ ...labelStyle(), marginBottom: 0, flex: 1 }}>
+        {props.label}
+        {props.hint !== undefined && (
+          <span style={{ display: 'block', fontSize: 10, opacity: 0.8 }}>{props.hint}</span>
+        )}
+      </label>
+      <input
+        id={props.id}
+        type="number"
+        min={0}
+        value={props.value ?? ''}
+        placeholder={props.placeholder}
+        onChange={(event) => {
+          const parsed = Number.parseInt(event.target.value, 10)
+          props.onChange(Number.isNaN(parsed) ? undefined : parsed)
+        }}
+        style={{ ...textFieldStyle(), width: 110, flex: 'none' }}
+      />
+    </div>
+  )
+}
+
 export function SearchTab(props: SearchTabProps): ReactElement {
   const [editing, setEditing] = useState<SearchConnectionSummary | undefined>(undefined)
   const [label, setLabel] = useState('')
@@ -51,6 +84,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
   const [skipVerify, setSkipVerify] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [limits, setLimits] = useState<SearchQueryLimits>({})
 
   // Resync when a different connection is opened, or when the host echoes a save back.
   useEffect(() => {
@@ -62,6 +96,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
     setSkipVerify(source.rejectUnauthorized === false)
     setUsername('')
     setPassword('')
+    setLimits(source.limits ?? {})
   }, [editing])
 
   const currentInput = (): SearchConnectionInput => ({
@@ -73,6 +108,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
     ...(skipVerify ? { rejectUnauthorized: false } : {}),
     ...(username.length > 0 ? { username } : {}),
     ...(password.length > 0 ? { password } : {}),
+    ...(Object.keys(limits).length > 0 ? { limits } : {}),
   })
 
   if (editing !== undefined) {
@@ -218,6 +254,54 @@ export function SearchTab(props: SearchTabProps): ReactElement {
             password. The CA file above is the safe fix.
           </p>
         )}
+
+        <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}`, marginBottom: 8 }}>
+          <strong style={{ fontSize: 12, color: colors.foreground }}>Query limits</strong>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '4px 0 8px' }}>
+            Guard rails on the queries the model writes. It cannot change anything in the
+            cluster — but a read can still be expensive, so these keep one bounded. Defaults
+            are chosen to be safe on a large cluster; raise them if you know yours can take it.
+          </p>
+        </div>
+
+        <LimitRow
+          id="lc-os-hits"
+          label="Maximum results"
+          placeholder="10"
+          value={limits.maxHits}
+          onChange={(value) => setLimits({ ...limits, maxHits: value })}
+        />
+        <LimitRow
+          id="lc-os-lookback"
+          label="Default lookback (hours)"
+          hint="Applied when the model gives no time range and the index has a date field. 0 allows unbounded scans."
+          placeholder="24"
+          value={limits.defaultLookbackHours}
+          onChange={(value) => setLimits({ ...limits, defaultLookbackHours: value })}
+        />
+        <LimitRow
+          id="lc-os-timeout"
+          label="Query timeout (seconds)"
+          placeholder="10"
+          value={limits.timeoutSeconds}
+          onChange={(value) => setLimits({ ...limits, timeoutSeconds: value })}
+        />
+        <LimitRow
+          id="lc-os-terminate"
+          label="Documents examined per shard"
+          hint="Stops a query early rather than letting it walk the whole index. 0 disables."
+          placeholder="10000"
+          value={limits.terminateAfter}
+          onChange={(value) => setLimits({ ...limits, terminateAfter: value })}
+        />
+        <LimitRow
+          id="lc-os-maxindexes"
+          label="Maximum indexes per query"
+          hint="Refuses a wildcard that fans out wider than this. 0 disables the check."
+          placeholder="5"
+          value={limits.maxIndexes}
+          onChange={(value) => setLimits({ ...limits, maxIndexes: value })}
+        />
 
         <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}`, marginBottom: 12 }}>
           <button type="button" style={secondaryButtonStyle()} onClick={() => props.onTest(currentInput())}>
