@@ -62,8 +62,11 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 4. **No telemetry, no update checks, no remote assets.** All webview assets are bundled
    locally. CI fails if built output contains an absolute external URL.
 5. **These config keys are user-scope only and are ignored if found in workspace config:**
-   the entire `profiles` list, `activeProfileId`, `certDir`, `python.uvPath`, `approvals`,
-   and — from Phase 8b — `vectorStores`, `embedder`, and `collections`.
+   the entire `profiles` list, `activeProfileId`, `certDir`, `tls`, `python.uvPath`,
+   `approvals`, and — from Phase 8b — `vectorStores`, `activeVectorStoreId`, and `embedder`.
+   `tls` is the global trust block: a workspace able to add a trusted root, or to switch
+   verification off, could intercept the gateway connection leaving nothing the user would
+   ever see.
    A hostile repo must not be able to repoint credentials or executables — this means a
    workspace can't inject a whole new profile (its own `baseUrl`/`auth`/`model`) any more
    than it could edit an existing one, and can't switch which profile is active. (Originally
@@ -367,6 +370,12 @@ off.
 User specifies a **directory** plus filenames; filenames resolve against it, absolute paths
 override it. Defaults `client.crt` / `client.key`. Support `pfx` as an alternative — corporate
 Windows PKI usually issues `.pfx`. Passphrase is a `SecretStorage` ref, never a literal.
+
+**Configured once, globally.** The top-level `tls` block (CA, client certificate, key, PFX,
+passphrase ref, `rejectUnauthorized`) applies to every connection — gateway, token endpoint,
+OpenSearch, embedder. Per-connection settings layer over it through the one resolver in
+`platform/connectionTls.ts`; see §19 for the three merge rules and why each is what it is.
+**Do not add a fifth place to configure a CA** — go through that resolver.
 
 - Validate **at config time**: files exist, parse, key matches cert, and report `notAfter`.
 - Warn at 30 and 7 days before expiry.
@@ -767,6 +776,31 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 
 **Next:** Phase 8b — vector stores and semantic retrieval. See `IMPLEMENTATION_PLAN.md`;
 read its "prompt-cache constraint" section before starting, and CLAUDE.md §12's revision.
+
+**TLS material is configured once, globally (added mid-Phase-8b, from the corporate
+deployment).** There were four places to put a CA — top-level `certDir`, a profile's `tls`,
+the Apigee auth block's `certs`, and an OpenSearch connection — which is not flexibility but
+three chances to miss one. A `tls` block now sits at the top level (user-scope only,
+invariant 5: a workspace able to add a trusted root could intercept the gateway
+undetectably), and `platform/connectionTls.ts` is the single resolver every connection goes
+through. Three merge rules, each chosen against a concrete failure:
+- **CAs accumulate.** A CA on one connection must not cost the user the corporate root that
+  makes every *other* connection work.
+- **Client identity is taken as a unit.** A connection naming its own `certFile` supplies
+  the whole pair, so it can never end up with one side's certificate and the other's key —
+  a handshake failure whose message points at neither file the user edited.
+- **`rejectUnauthorized` is most-specific-wins in both directions**, so a connection can
+  re-enable verification that was switched off globally. An override that only ever loosens
+  is not an override.
+
+**A client certificate is offered globally too, and that is a real decision, not a
+convenience.** It is a credential: presenting it identifies you to whatever you connect to.
+But a corporate machine genuinely has one machine certificate for all internal services, and
+every host here is one the user configured. So it applies by default, any connection can
+replace it, and `useGlobalClientCertificate: false` withholds it from one endpoint. Paths the
+resolver reads are reported back and join the tool deny list (invariant 6) — a globally
+configured key is exactly as readable as a per-profile one. Settings → **Network** is a new
+tab, and it also exposes `certDir`, which until now was hand-edit only.
 
 **Still outstanding, and now the oldest debt in the project:** `MANUAL_VERIFICATION.md` has
 never been run. Session A is the security properties — deny actually blocking execution, the

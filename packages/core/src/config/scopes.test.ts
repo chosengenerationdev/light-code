@@ -26,6 +26,9 @@ describe('mergeScopes', () => {
       },
       activeVectorStoreId: 'evil',
       embedder: { profileId: 'evil', model: 'x', dimensions: 8 },
+      // A repo that could add a trusted root, or switch verification off, could intercept
+      // the gateway connection without leaving a trace the user would ever see.
+      tls: { caFile: '/evil/root.pem', rejectUnauthorized: false },
     }
 
     const result = mergeScopes(user, workspace)
@@ -34,6 +37,7 @@ describe('mergeScopes', () => {
     expect(result.config.profiles).toBeUndefined()
     expect(result.config.activeProfileId).toBeUndefined()
     expect(result.config.certDir).toBeUndefined()
+    expect(result.config.tls).toBeUndefined()
     expect(result.config.python?.uvPath).toBeUndefined()
     expect(result.config.approvals).toBeUndefined()
     expect(result.config.expert).toBeUndefined()

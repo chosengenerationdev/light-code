@@ -25,6 +25,9 @@ export const USER_SCOPE_ONLY_KEYS = [
   'vectorStores',
   'activeVectorStoreId',
   'embedder',
+  // Adding a trusted root is how interception becomes undetectable, and turning off
+  // verification globally is worse. Neither belongs to a repository.
+  'tls',
 ] as const
 
 export interface ScopeMergeResult {

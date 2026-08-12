@@ -1,5 +1,4 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
+import { resolveConnectionTls, type TlsFileSettings } from '../../platform/connectionTls.js'
 import type { HttpClient, TlsOptions } from '../../platform/http.js'
 import type { SecretStore } from '../../platform/secrets.js'
 import type { Auth, AuthStrategy, ProviderProfile, WireFormat } from '../types.js'
@@ -23,6 +22,8 @@ export interface AuthStrategyContext {
   apiKeyHeaderPrefix?: string
   /** The profile's `tls` block: an extra CA, and whether to verify the server certificate. */
   connectionTls?: ProviderProfile['tls']
+  /** The global `tls` block, applied to every connection. */
+  globalTls?: TlsFileSettings
   /** Top-level user-scope `certDir`, used when the auth block does not name its own. */
   defaultCertDir?: string
   /** Used to enforce invariant 6. Omit when no folder is open. */
@@ -103,34 +104,29 @@ export function createConnectionTlsLoader(
   connection: ProviderProfile['tls'],
   context: AuthStrategyContext,
 ): (() => Promise<TlsOptions | undefined>) | undefined {
-  if (connection === undefined) return undefined
-  const { caFile, rejectUnauthorized } = connection
-  if (caFile === undefined && rejectUnauthorized !== false) return undefined
+  // Global settings alone are reason enough to build a loader, even with nothing set on
+  // the profile — reuse without touching each profile is the whole point of the block.
+  if (connection === undefined && context.globalTls === undefined) return undefined
 
   return async () => {
-    const tls: TlsOptions = {}
-    if (rejectUnauthorized === false) tls.rejectUnauthorized = false
-
-    if (caFile !== undefined && caFile.trim().length > 0) {
-      // Absolute wins; otherwise resolve against the user-scope certDir, matching how
-      // client certificate filenames already work (§10).
-      const resolved = path.isAbsolute(caFile)
-        ? caFile
-        : context.defaultCertDir !== undefined
-          ? path.join(context.defaultCertDir, caFile)
-          : caFile
-      try {
-        tls.ca = [await fs.readFile(resolved)]
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code
-        throw new AuthConfigError(
-          code === 'ENOENT'
-            ? `The CA certificate was not found at "${resolved}". Check the path in Settings → Advanced.`
-            : `Could not read the CA certificate at "${resolved}": ${error instanceof Error ? error.message : String(error)}`,
-        )
-      }
+    if (context.defaultCertDir !== undefined) {
+      assertCertDirOutsideWorkspace(context.defaultCertDir, context.workspaceRoot)
     }
-    return tls
+    const passphraseRef = connection?.passphraseRef ?? context.globalTls?.passphraseRef
+    const passphrase = passphraseRef !== undefined ? await context.secrets.get(passphraseRef) : undefined
+    if (passphraseRef !== undefined && passphrase === undefined) {
+      throw new AuthConfigError(
+        'The certificate passphrase is missing from secure storage. Re-enter it in Settings → Network.',
+      )
+    }
+
+    return resolveConnectionTls({
+      ...(context.globalTls !== undefined ? { global: context.globalTls } : {}),
+      ...(connection !== undefined ? { connection } : {}),
+      ...(context.defaultCertDir !== undefined ? { certDir: context.defaultCertDir } : {}),
+      ...(passphrase !== undefined ? { passphrase } : {}),
+      ...(context.onCertPaths !== undefined ? { onPaths: context.onCertPaths } : {}),
+    })
   }
 }
 
@@ -148,9 +144,12 @@ function withConnectionTls(
       const fromAuth = await strategy.tls?.()
       if (connection === undefined) return fromAuth
       if (fromAuth === undefined) return connection
-      // Client material from the auth strategy, trust settings from the profile. Both
-      // `ca` lists are merged rather than one replacing the other.
+      // The auth strategy's client material wins: an Apigee profile names its certificates
+      // explicitly, and that is more specific than anything inherited. Trust settings come
+      // from the connection, and the two `ca` lists merge rather than one replacing the
+      // other — the same accumulation rule `resolveConnectionTls` applies one level down.
       return {
+        ...connection,
         ...fromAuth,
         ...(connection.rejectUnauthorized === false ? { rejectUnauthorized: false } : {}),
         ...(connection.ca !== undefined || fromAuth.ca !== undefined

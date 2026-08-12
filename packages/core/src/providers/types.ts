@@ -10,6 +10,34 @@ export type WireFormat = z.infer<typeof wireFormatSchema>
  * resolve against `certDir`, absolute paths override it. `certDir` may be omitted here to
  * inherit the top-level user-scope `certDir`.
  */
+/**
+ * TLS material for one connection, or globally.
+ *
+ * One schema for both so a profile, an OpenSearch cluster and the global block cannot drift
+ * apart in what they accept. `platform/connectionTls.ts` owns how the two levels merge:
+ * CAs accumulate, client identity is taken as a unit, `rejectUnauthorized` is
+ * most-specific-wins.
+ */
+export const tlsSettingsSchema = z.object({
+  /** Absolute path, or relative to the user-scope `certDir`. PEM, may hold a chain. */
+  caFile: z.string().optional(),
+  /** Client certificate — supplied with `keyFile`, or replaced by `pfxFile`. */
+  certFile: z.string().optional(),
+  keyFile: z.string().optional(),
+  /** Corporate Windows PKI usually issues `.pfx`; supplied instead of certFile/keyFile. */
+  pfxFile: z.string().optional(),
+  /** A SecretStore reference for the key passphrase, never the passphrase itself (§15). */
+  passphraseRef: z.string().optional(),
+  /** `false` accepts any server certificate. See `TlsOptions.rejectUnauthorized`. */
+  rejectUnauthorized: z.boolean().optional(),
+  /**
+   * `false` presents no client certificate to this connection even when one is configured
+   * globally — for an endpoint that should not see your identity.
+   */
+  useGlobalClientCertificate: z.boolean().optional(),
+})
+export type TlsSettings = z.infer<typeof tlsSettingsSchema>
+
 export const certConfigSchema = z.object({
   certDir: z.string().min(1).optional(),
   certFile: z.string().optional(),
@@ -81,14 +109,7 @@ export const providerProfileSchema = z.object({
    * Safe to keep here rather than under a separate invariant-5 entry: the whole `profiles`
    * list is already user-scope only, so a workspace cannot switch verification off.
    */
-  tls: z
-    .object({
-      /** Absolute path, or relative to the user-scope `certDir`. PEM, may hold a chain. */
-      caFile: z.string().optional(),
-      /** `false` accepts any server certificate. See `TlsOptions.rejectUnauthorized`. */
-      rejectUnauthorized: z.boolean().optional(),
-    })
-    .optional(),
+  tls: tlsSettingsSchema.optional(),
   /**
    * Anthropic *requires* `max_tokens` — there is no "use the model default" — so this has
    * a working fallback in the adapter rather than being mandatory here.

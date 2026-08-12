@@ -35,6 +35,8 @@ export type {
   CertSummary,
   ModelCapabilityInput,
   ConnectionTlsInput,
+  NetworkSettingsInput,
+  NetworkSettingsSummary,
   TestConnectionStep,
   SearchConnectionSummary,
   SearchConnectionInput,

@@ -7,6 +7,7 @@ export type { ConfigStore, ConfigScope } from './platform/config.js'
 export type { Transport } from './platform/transport.js'
 export type { HttpClient, HttpRequestOptions, HttpResponse } from './platform/http.js'
 export { FetchHttpClient } from './platform/http.js'
+export { resolveConnectionTls, TlsConfigError, type TlsFileSettings, type ResolveTlsOptions } from './platform/connectionTls.js'
 
 export type { LightCodeConfig } from './config/schema.js'
 export { configSchema, parseConfig, ConfigValidationError } from './config/schema.js'
@@ -143,7 +144,7 @@ export {
 export { OpenSearchIndexWriter, OWNED_INDEX_MARKER, type IndexedDocument } from './rag/opensearch/writer.js'
 export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
-export { vectorStoreSchema, embedderConfigSchema, type VectorStoreConfig } from './config/schema.js'
+export { vectorStoreSchema, embedderConfigSchema, vectorStoreTls, type VectorStoreConfig } from './config/schema.js'
 
 export {
   AlwaysApproveGate,
@@ -203,6 +204,8 @@ export type {
   ContextUsage,
   ImageAttachmentInput,
   ConnectionTlsInput,
+  NetworkSettingsInput,
+  NetworkSettingsSummary,
   SearchConnectionSummary,
   SearchConnectionInput,
   SearchQueryLimits,

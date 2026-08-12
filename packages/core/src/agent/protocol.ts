@@ -46,8 +46,36 @@ export interface ModelCapabilityInput {
  */
 export interface ConnectionTlsInput {
   caFile?: string | undefined
+  /** Client certificate. Absent inherits whatever is set globally. */
+  certFile?: string | undefined
+  keyFile?: string | undefined
+  pfxFile?: string | undefined
   /** `false` means "accept any certificate". Absent means verify, which is the default. */
   rejectUnauthorized?: boolean | undefined
+  /** `false` withholds the global client certificate from this one connection. */
+  useGlobalClientCertificate?: boolean | undefined
+}
+
+/**
+ * The Network tab: TLS material every connection inherits, plus the directory relative
+ * filenames resolve against.
+ *
+ * Paths and booleans only. The key passphrase is a secret and travels write-only —
+ * `passphrase` carries a new value up, `hasPassphrase` reports back down (invariant 7).
+ */
+export interface NetworkSettingsInput {
+  certDir?: string | undefined
+  tls: ConnectionTlsInput
+  /** Absent leaves the stored passphrase untouched; empty string clears it. */
+  passphrase?: string | undefined
+}
+
+export interface NetworkSettingsSummary {
+  certDir?: string | undefined
+  tls: ConnectionTlsInput
+  hasPassphrase: boolean
+  /** Reported so the UI can say where relative filenames will resolve to. */
+  workspaceRoot?: string | undefined
 }
 
 /**
@@ -233,14 +261,8 @@ export type UiToHostMessage =
   /** Fetches the index list for a connection, saved or as currently typed. */
   | { type: 'requestSearchIndexes'; connection: SearchConnectionInput }
   | { type: 'testSearchConnection'; connection: SearchConnectionInput }
-  | { type: 'requestSearch' }
-  | { type: 'saveSearchConnection'; connection: SearchConnectionInput }
-  | { type: 'deleteSearchConnection'; id: string }
-  /** `undefined` turns search off for the session, withdrawing the tools. */
-  | { type: 'setActiveSearchConnection'; id: string | undefined }
-  /** Lists indexes for a connection, saved or as currently typed in the form. */
-  | { type: 'requestSearchIndexes'; connection: SearchConnectionInput }
-  | { type: 'testSearchConnection'; connection: SearchConnectionInput }
+  | { type: 'requestNetwork' }
+  | { type: 'saveNetwork'; settings: NetworkSettingsInput }
   | { type: 'requestExpert' }
   | { type: 'setExpert'; enabled: boolean; path?: string; model?: string }
   | { type: 'saveProfile'; profile: ProfileInput }
@@ -312,6 +334,7 @@ export type HostToUiMessage =
   /** `warning` with an empty list is normal: `_cat/indices` is often denied (§9). */
   | { type: 'searchIndexes'; indexes: { name: string; docsCount?: number; storeSize?: string }[]; warning?: string }
   | { type: 'searchTestResult'; ok: boolean; detail: string }
+  | { type: 'network'; settings: NetworkSettingsSummary }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
   | {
       type: 'expert'

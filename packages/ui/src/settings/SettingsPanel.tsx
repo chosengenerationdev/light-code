@@ -5,6 +5,7 @@ import { ApprovalsTab } from './ApprovalsTab.js'
 import { McpTab } from './McpTab.js'
 import { ExpertTab, type ExpertState } from './ExpertTab.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
+import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -24,9 +25,10 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   expert: ExpertState | undefined
   onSaveExpert: (enabled: boolean, path: string, model: string) => void
   search: SearchTabProps
+  network: NetworkTabProps
 }
 
-type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert'
+type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'providers', label: 'Providers' },
@@ -34,6 +36,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'mcp', label: 'MCP' },
   { id: 'search', label: 'Search' },
   { id: 'expert', label: 'Expert' },
+  { id: 'network', label: 'Network' },
 ]
 
 /**
@@ -96,6 +99,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           />
         ) : active === 'search' ? (
           <SearchTab {...props.search} />
+        ) : active === 'network' ? (
+          <NetworkTab {...props.network} />
         ) : active === 'expert' ? (
           <ExpertTab expert={props.expert} onSave={props.onSaveExpert} />
         ) : (

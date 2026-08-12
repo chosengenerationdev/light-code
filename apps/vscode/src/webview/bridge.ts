@@ -24,6 +24,8 @@ import {
   createChatProvider,
   createAskExpertTool,
   createSearchOpensearchTool,
+  resolveConnectionTls,
+  vectorStoreTls,
   OpenSearchClient,
   createDefaultToolRegistry,
   detectClaudeCli,
@@ -54,6 +56,7 @@ import {
   type HostToUiMessage,
   type ImageAttachmentInput,
   type LightCodeConfig,
+  type NetworkSettingsInput,
   type McpServersConfig,
   type McpToolPermission,
   type ProfileInput,
@@ -343,7 +346,7 @@ export function wireChatBridge(
   let cachedAuth: { key: string; strategy: AuthStrategy } | undefined
 
   function authStrategyFor(config: LightCodeConfig, profile: ProviderProfile): AuthStrategy {
-    const key = `${profile.id}|${profile.baseUrl}|${JSON.stringify(profile.auth)}|${config.certDir ?? ''}`
+    const key = `${profile.id}|${profile.baseUrl}|${JSON.stringify(profile.auth)}|${config.certDir ?? ''}|${JSON.stringify(config.tls ?? {})}`
     const cached = cachedAuth
     if (cached !== undefined && cached.key === key) return cached.strategy
 
@@ -365,6 +368,7 @@ export function wireChatBridge(
       baseUrl: profile.baseUrl,
       wireFormat: profile.wireFormat,
       ...(profile.tls !== undefined ? { connectionTls: profile.tls } : {}),
+      ...(config.tls !== undefined ? { globalTls: config.tls } : {}),
       ...(config.certDir !== undefined ? { defaultCertDir: config.certDir } : {}),
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       // Invariant 6: whatever the loader actually read becomes unreadable to file tools.
@@ -1010,18 +1014,23 @@ export function wireChatBridge(
     if (username !== undefined) connection.username = username
     if (password !== undefined) connection.password = password
 
-    if (store.caFile !== undefined || store.rejectUnauthorized === false) {
-      const tls: Record<string, unknown> = {}
-      if (store.rejectUnauthorized === false) tls.rejectUnauthorized = false
-      if (store.caFile !== undefined && store.caFile.trim().length > 0) {
-        const { config } = await configManager.load()
-        const resolved = path.isAbsolute(store.caFile)
-          ? store.caFile
-          : path.join(config.certDir ?? '', store.caFile)
-        tls.ca = [await fs.readFile(resolved)]
-      }
-      connection.tls = tls as NonNullable<OpenSearchConnection['tls']>
-    }
+    // Same resolver the gateway uses, so a corporate root set once in Settings → Network
+    // covers the cluster too, and a per-cluster CA adds to it rather than replacing it.
+    const { config } = await configManager.load()
+    const perStore = vectorStoreTls(store)
+    const passphraseRef = perStore?.passphraseRef ?? config.tls?.passphraseRef
+    const tls = await resolveConnectionTls({
+      ...(config.tls !== undefined ? { global: config.tls } : {}),
+      ...(perStore !== undefined ? { connection: perStore } : {}),
+      ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+      ...(passphraseRef !== undefined ? { passphrase: await secrets.get(passphraseRef) } : {}),
+      onPaths: (paths) => {
+        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch((error: unknown) => {
+          logger.warn('could not add cert path to the deny list', String(error))
+        })
+      },
+    })
+    if (tls !== undefined) connection.tls = tls as NonNullable<OpenSearchConnection['tls']>
     return new OpenSearchClient(httpClient, connection)
   }
 
@@ -1043,6 +1052,57 @@ export function wireChatBridge(
     } catch (error) {
       logger.warn('could not build the search client', String(error))
       return undefined
+    }
+  }
+
+  /** One SecretStorage key for the global key passphrase — there is only ever one. */
+  const GLOBAL_PASSPHRASE_REF = 'tls:global:passphrase'
+
+  async function postNetwork(): Promise<void> {
+    const { config } = await configManager.load()
+    // `passphraseRef` is dropped rather than sent: it is a pointer at a secret, and the UI
+    // only ever needs to know whether one exists (invariant 7).
+    const tls = { ...(config.tls ?? {}) }
+    delete tls.passphraseRef
+    post({
+      type: 'network',
+      settings: {
+        ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+        tls,
+        // The store, not config, decides this: the two can diverge, and only one of them
+        // actually holds the passphrase.
+        hasPassphrase: (await secrets.get(GLOBAL_PASSPHRASE_REF)) !== undefined,
+        ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+      },
+    })
+  }
+
+  async function handleSaveNetwork(input: NetworkSettingsInput): Promise<void> {
+    try {
+      const certDir = input.certDir?.trim()
+      if (certDir !== undefined && certDir.length > 0) {
+        // Invariant 6, checked at save time so the error names the field rather than
+        // surfacing later as a puzzling handshake failure.
+        assertCertDirOutsideWorkspace(certDir, workspaceRoot)
+      }
+
+      if (input.passphrase !== undefined) {
+        if (input.passphrase.length > 0) await secrets.set(GLOBAL_PASSPHRASE_REF, input.passphrase)
+        else await secrets.delete(GLOBAL_PASSPHRASE_REF)
+      }
+
+      const tls = stripEmpty(input.tls) as NonNullable<LightCodeConfig['tls']>
+      if ((await secrets.get(GLOBAL_PASSPHRASE_REF)) !== undefined) tls.passphraseRef = GLOBAL_PASSPHRASE_REF
+
+      await configManager.save('user', {
+        certDir: certDir !== undefined && certDir.length > 0 ? certDir : undefined,
+        tls,
+      })
+      // Trust material changed, so the cached strategy — and the token it holds — is stale.
+      cachedAuth = undefined
+      await postNetwork()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -1483,6 +1543,10 @@ export function wireChatBridge(
       void handleRequestSearchIndexes(message.connection)
     } else if (message.type === 'testSearchConnection') {
       void handleTestSearchConnection(message.connection)
+    } else if (message.type === 'requestNetwork') {
+      void postNetwork()
+    } else if (message.type === 'saveNetwork') {
+      void handleSaveNetwork(message.settings)
     } else if (message.type === 'requestExpert') {
       void postExpert()
     } else if (message.type === 'setExpert') {

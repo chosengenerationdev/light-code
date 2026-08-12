@@ -11,6 +11,7 @@ import {
   type SearchConnectionInput,
   type SearchConnectionSummary,
   type McpServerState,
+  type NetworkSettingsSummary,
   type McpToolPermission,
   type TestConnectionStep,
   type Transport,
@@ -79,6 +80,7 @@ export function App(props: AppProps): ReactElement {
   const [supportsVision, setSupportsVision] = useState(false)
   const [expertEnabled, setExpertEnabled] = useState(false)
   const [expert, setExpert] = useState<ExpertState | undefined>(undefined)
+  const [network, setNetwork] = useState<NetworkSettingsSummary | undefined>(undefined)
   const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
   const [queued, setQueued] = useState<string[]>([])
   const [searchConnections, setSearchConnections] = useState<SearchConnectionSummary[]>([])
@@ -212,6 +214,8 @@ export function App(props: AppProps): ReactElement {
         setMentionCandidates(message.paths)
       } else if (message.type === 'capabilities') {
         setSupportsVision(message.supportsVision)
+      } else if (message.type === 'network') {
+        setNetwork(message.settings)
       } else if (message.type === 'expert') {
         setExpert({
           enabled: message.enabled,
@@ -246,6 +250,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -503,6 +508,10 @@ export function App(props: AppProps): ReactElement {
             expert={expert}
             onSaveExpert={saveExpert}
             search={searchProps}
+            network={{
+              ...(network !== undefined ? { settings: network } : { settings: undefined }),
+              onSave: (settings) => props.transport.post({ type: 'saveNetwork', settings } satisfies UiToHostMessage),
+            }}
           />
         ) : view === 'history' ? (
           <HistoryList

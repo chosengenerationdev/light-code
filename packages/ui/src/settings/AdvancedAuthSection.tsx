@@ -295,10 +295,10 @@ export function AdvancedAuthSection(props: AdvancedAuthSectionProps): ReactEleme
 
       <TextRow
         id="lc-connection-ca"
-        label="CA certificate file"
+        label="Additional CA certificate"
         value={props.connectionTls.caFile}
         placeholder="C:\\certs\\corp-root.pem"
-        hint="PEM, may contain a chain. Added to the built-in roots, never replacing them. NODE_EXTRA_CA_CERTS also works."
+        hint="Only needed if this gateway uses a different root from the one in Settings → Network. Added to that one and to the built-in roots, never replacing either."
         onChange={(value) => props.onConnectionTlsChange({ ...props.connectionTls, caFile: value })}
       />
 

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { mcpServersSchema } from '../mcp/types.js'
-import { providerProfileSchema } from '../providers/types.js'
+import { providerProfileSchema, type TlsSettings, tlsSettingsSchema } from '../providers/types.js'
 
 /**
  * The whole config file, one schema shared by the UI and the file loader (§15) so a
@@ -73,8 +73,13 @@ export const vectorStoreSchema = z.object({
   /** Used when the model names no index. */
   defaultIndex: z.string().optional(),
   /**
-   * Connection trust, mirroring `ProviderProfile.tls` — a corporate cluster sits behind
-   * the same intercepting proxy the gateway does.
+   * Per-cluster TLS, layered over the global block. Usually empty: a corporate cluster sits
+   * behind the same intercepting proxy the gateway does, so the global CA already covers it.
+   */
+  tls: tlsSettingsSchema.optional(),
+  /**
+   * Superseded by `tls.caFile` / `tls.rejectUnauthorized`. Still read so configs written
+   * before the global block keep working; the loader folds them into `tls`.
    */
   caFile: z.string().optional(),
   rejectUnauthorized: z.boolean().optional(),
@@ -112,6 +117,20 @@ export const vectorStoreSchema = z.object({
 export type VectorStoreConfig = z.infer<typeof vectorStoreSchema>
 
 /**
+ * The cluster's TLS block, with the pre-global `caFile`/`rejectUnauthorized` fields folded
+ * in. Existing configs keep working without a migration step, and callers only ever see one
+ * shape — the alternative is every call site remembering to check both.
+ */
+export function vectorStoreTls(store: VectorStoreConfig): TlsSettings | undefined {
+  const merged: TlsSettings = {
+    ...(store.caFile !== undefined ? { caFile: store.caFile } : {}),
+    ...(store.rejectUnauthorized !== undefined ? { rejectUnauthorized: store.rejectUnauthorized } : {}),
+    ...(store.tls ?? {}),
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined
+}
+
+/**
  * Embeddings, borrowed from an existing provider profile.
  *
  * `profileId` rather than its own URL and credentials: the profile already carries a
@@ -128,9 +147,22 @@ export const embedderConfigSchema = z
   })
   .partial()
 
+/**
+ * TLS material applied to **every** outbound connection: the gateway, OpenSearch, the
+ * embedder, the Apigee token endpoint.
+ *
+ * An organisation typically has one intercepting root and one machine certificate, so
+ * configuring them once is the point. A connection may still add its own CA (they
+ * accumulate), supply a different client identity, or opt out of the global one — see
+ * `platform/connectionTls.ts`, which owns the merge rules.
+ */
+export const globalTlsSchema = tlsSettingsSchema
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
+    /** User-scope only: a workspace able to add a trusted root could enable interception. */
+    tls: globalTlsSchema,
     expert: expertConfigSchema,
     /**
      * User-scope only (invariant 5). A workspace able to name a cluster or repoint the

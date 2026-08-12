@@ -224,7 +224,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
 
         <div style={{ marginBottom: 10 }}>
           <label htmlFor="lc-os-ca" style={labelStyle()}>
-            CA certificate file
+            Additional CA certificate
           </label>
           <input
             id="lc-os-ca"
@@ -235,7 +235,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
             style={textFieldStyle()}
           />
           <span style={{ color: colors.muted, fontSize: 11 }}>
-            Relative names resolve against the global certDir. Added to the built-in roots.
+Usually blank — the CA in Settings → Network already covers this cluster. Anything set here is added to it.
           </span>
         </div>
 
