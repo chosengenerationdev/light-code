@@ -144,6 +144,17 @@ export {
 export { OpenSearchIndexWriter, OWNED_INDEX_MARKER, type IndexedDocument } from './rag/opensearch/writer.js'
 export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
+export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'
+export { chunkFile, looksLikeText, DEFAULT_CHUNK_OPTIONS, type Chunk, type ChunkOptions } from './rag/chunk.js'
+export {
+  indexWorkspace,
+  chunkSignatureFor,
+  IndexingCancelledError,
+  type IndexManifest,
+  type IndexProgress,
+  type IndexResult,
+  type IndexerOptions,
+} from './rag/indexer.js'
 export { vectorStoreSchema, embedderConfigSchema, vectorStoreTls, type VectorStoreConfig } from './config/schema.js'
 
 export {

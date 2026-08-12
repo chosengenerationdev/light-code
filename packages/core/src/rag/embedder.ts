@@ -54,6 +54,11 @@ export class Embedder {
     return this.config.dimensions
   }
 
+  /** Recorded in the index manifest: a different model makes every stored vector stale. */
+  get model(): string {
+    return this.config.model
+  }
+
   /** Embeds one text. Convenience over `embedBatch` for the query side. */
   async embed(text: string, signal?: AbortSignal): Promise<number[]> {
     const [vector] = await this.embedBatch([text], signal)
