@@ -205,6 +205,38 @@ export {
   type McpServerKind,
 } from './mcp/forms.js'
 
+export {
+  detectUv,
+  ensureVenv,
+  minimalPythonEnv,
+  venvPythonPath,
+  UvError,
+  type UvInfo,
+} from './python/uv.js'
+export {
+  PythonWorker,
+  PythonWorkerError,
+  type WorkerToolDescription,
+  type WorkerCallResult,
+  type PythonWorkerOptions,
+} from './python/worker.js'
+export {
+  loadRegistry,
+  approveTool,
+  forgetTool,
+  hashSource,
+  isValidToolName,
+  toolFileName,
+  describeIssue,
+  writeRegistryFile,
+  REGISTRY_FILE,
+  PYTHON_TOOL_PREFIX,
+  type RegisteredTool,
+  type RegistryFile,
+  type LoadedRegistry,
+  type ToolLoadIssue,
+} from './python/registry.js'
+
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
 export { toolsForMode } from './modes/resolve.js'
 export type { Mode } from './modes/types.js'
