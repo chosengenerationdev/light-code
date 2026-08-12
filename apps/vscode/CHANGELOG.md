@@ -1,5 +1,92 @@
 # light-code-vscode
 
+## 0.6.0
+
+### Minor Changes
+
+- Configure your CA and client certificate once, in Settings → Network.
+
+  Until now a corporate root had to be entered separately for each provider profile, each
+  search cluster, and again inside the Apigee block — three chances to miss one and get an
+  opaque "could not be verified" from whichever you forgot. There is now one **Network** tab
+  holding the CA, the client certificate and key (or a PFX bundle) and its passphrase, plus
+  the certificate directory that relative filenames resolve against — which was previously
+  only reachable by hand-editing the config file.
+
+  Everything outbound uses it: the gateway, the Apigee token endpoint, OpenSearch, and the
+  embedder.
+
+  Individual connections can still override, and the rules are deliberate:
+
+  - **An extra CA on a profile is added to the global one**, never a replacement — so
+    configuring one unusual gateway cannot cost you the root that makes everything else work.
+  - **A connection supplying its own client certificate supplies the key with it.** The two
+    are taken as a pair, so you can never end up presenting one certificate with another's
+    key.
+  - **A connection can re-enable certificate verification you switched off globally**, not
+    only disable it.
+
+  The global client certificate is presented to every connection that does not supply its
+  own. That is a genuine choice rather than a convenience — a certificate identifies you to
+  whatever you connect to — and it is the default because a corporate machine typically has
+  one certificate for all internal services. Set `useGlobalClientCertificate: false` on a
+  connection to withhold it from that endpoint.
+
+  Existing configs keep working unchanged; per-connection CA settings are read exactly as
+  before.
+
+- 60a53cc: Search OpenSearch indexes your organisation already runs.
+
+  Settings → Search takes multiple named connections, since different environments run
+  different clusters. Each has its own credentials, an optional default index, and its own
+  CA file or skip-verify setting for a cluster behind an intercepting proxy. Test Connection
+  reports the cluster name and version, and the index dropdown lists what is actually there —
+  with free-text entry always available, because `_cat/indices` is often denied to an account
+  that can still search perfectly well.
+
+  **Read-only, structurally.** The client the model uses exposes no write method at all, and
+  its one request helper refuses anything but `GET` and `POST` to `_search`. Nothing the model
+  does can create, change or delete anything in a cluster.
+
+  Search tools are offered only while a connection is active, so the tool set stays stable
+  within a session and search is off unless you turn it on.
+
+  Embedding-based codebase search is not in this release; this is the half that needs no
+  embedder and sends no source code anywhere.
+
+- 817cd17: Queue messages mid-turn, and a working indicator.
+
+  - **Type while it works.** Sending during a turn queues the message instead of being
+    refused. The queue is visible above the input and each entry can be removed before it is
+    used. The model picks them up at the next step boundary, so it sees them while still
+    working rather than after it has finished.
+  - **A working indicator.** Animated, with elapsed seconds once a reply takes more than a
+    few, and it names what is happening — "Thinking" versus "Running search_files". It gets
+    out of the way as soon as text starts streaming, since the words are their own evidence
+    of progress.
+
+  Also fixes two latent provider bugs the queue exposed: a user message following a tool
+  result, or two user messages in a row, produced consecutive user turns that Anthropic and
+  Gemini both reject. Both adapters now merge them.
+
+### Patch Changes
+
+- aa0f834: Guard rails so the model cannot run an expensive query against a production cluster.
+
+  It already could not change anything — the client has no write path — but a _read_ can
+  still hurt. Every query now carries a per-shard timeout, an early-termination cap, and a
+  bounded hit count instead of an exact total that forces a full traversal. An unbounded
+  query against an index with a date field is limited to the last 24 hours, and the tool
+  result says so, so a document outside that window reads as a bounded search rather than
+  missing data.
+
+  A wildcard matching more than five indexes is refused with the count, and `*` or `_all` is
+  refused outright. The model's requested result count is a ceiling request, not a grant: the
+  connection's cap wins.
+
+  All five limits are editable per connection in Settings → Search, since only you know what
+  your cluster can take.
+
 ## 0.4.0
 
 ### Minor Changes
