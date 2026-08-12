@@ -11,6 +11,7 @@ import {
   secondaryButtonStyle,
 } from '../theme.js'
 import { McpServerForm } from './McpServerForm.js'
+import type { BrowseRequest } from './PathField.js'
 
 export interface McpTabProps {
   servers: McpServerState[]
@@ -26,6 +27,8 @@ export interface McpTabProps {
   /** Result of the last interpreter probe. */
   pythonProbe: { interpreter?: string; venvDir?: string; detail: string } | undefined
   onDetectPython: (venvDir: string, script: string) => void
+  onBrowse: (request: BrowseRequest) => void
+  pickedPath: { purpose: string; path: string } | undefined
   onSave: (json: string) => void
   onSaveServer: (name: string, previousName: string | undefined, config: McpServerConfig) => void
   onDeleteServer: (name: string) => void
@@ -99,6 +102,7 @@ const STATUS_LABEL: Record<McpServerStatus, string> = {
 
 function ServerRow(props: {
   server: McpServerState
+  transport: string
   warnings: string[]
   onRestart: (name: string) => void
   onConnect: (name: string) => void
@@ -133,6 +137,13 @@ function ServerRow(props: {
         <span style={{ color: STATUS_COLOR[server.status], fontSize: 10 }}>●</span>
         <strong style={{ fontFamily: monospace, fontSize: 12 }}>{server.name}</strong>
         <span style={{ color: colors.muted, fontSize: 11 }}>
+          {/*
+            Inferred from the entry's shape, never stored — `command` is stdio, `url` is
+            HTTP (§11). Shown because it is the first thing anyone debugging a server wants
+            to know, and nothing else on this row reveals it.
+          */}
+          {props.transport}
+          {' · '}
           {STATUS_LABEL[server.status]}
           {server.status === 'ready' && ` · ${server.tools.length} tool${server.tools.length === 1 ? '' : 's'}`}
         </span>
@@ -295,6 +306,8 @@ export function McpTab(props: McpTabProps): ReactElement {
         saving={saving}
         probe={props.pythonProbe}
         onDetect={props.onDetectPython}
+        onBrowse={props.onBrowse}
+        pickedPath={props.pickedPath}
         onSave={(name, previousName, config) => {
           setSaving(true)
           props.onSaveServer(name, previousName, config)
@@ -319,6 +332,7 @@ export function McpTab(props: McpTabProps): ReactElement {
           <div key={server.name}>
             <ServerRow
               server={server}
+              transport={props.configs[server.name] !== undefined && 'url' in props.configs[server.name]! ? 'HTTP' : 'stdio'}
               warnings={props.warnings[server.name] ?? []}
               onRestart={props.onRestart}
               onConnect={props.onConnect}

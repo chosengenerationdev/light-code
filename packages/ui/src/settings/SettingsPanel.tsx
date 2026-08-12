@@ -13,6 +13,7 @@ import { McpTab } from './McpTab.js'
 import { ExpertTab, type ExpertState } from './ExpertTab.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
+import type { BrowseRequest } from './PathField.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -29,6 +30,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   mcpSavedTick: number
   mcpPythonProbe: { interpreter?: string; venvDir?: string; detail: string } | undefined
   onDetectPython: (venvDir: string, script: string) => void
+  onBrowse: (request: BrowseRequest) => void
+  pickedPath: { purpose: string; path: string } | undefined
   onSaveMcpServer: (name: string, previousName: string | undefined, config: McpServerConfig) => void
   onDeleteMcpServer: (name: string) => void
   onSaveMcp: (json: string) => void
@@ -39,7 +42,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   expert: ExpertState | undefined
   onSaveExpert: (enabled: boolean, path: string, model: string) => void
   search: SearchTabProps
-  network: NetworkTabProps
+  network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
 }
 
 type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network'
@@ -114,7 +117,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         ) : active === 'search' ? (
           <SearchTab {...props.search} />
         ) : active === 'network' ? (
-          <NetworkTab {...props.network} />
+          <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
         ) : active === 'expert' ? (
           <ExpertTab expert={props.expert} onSave={props.onSaveExpert} />
         ) : (
@@ -128,6 +131,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             savedTick={props.mcpSavedTick}
             pythonProbe={props.mcpPythonProbe}
             onDetectPython={props.onDetectPython}
+            onBrowse={props.onBrowse}
+            pickedPath={props.pickedPath}
             onSaveServer={props.onSaveMcpServer}
             onDeleteServer={props.onDeleteMcpServer}
             onSave={props.onSaveMcp}

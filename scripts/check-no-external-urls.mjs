@@ -45,6 +45,7 @@ const ALLOWED_HOSTS = new Map([
   ['gw.example.com', 'placeholder'],
   ['example.com', 'generic documentation example'],
   ['opensearch.internal', 'placeholder in the OpenSearch cluster URL field'],
+  ['mcp.internal', 'placeholder in the MCP server URL field'],
 
   // --- Identifiers that look like URLs but are names. Never dereferenced.
   ['json-schema.org', '$schema identifier'],

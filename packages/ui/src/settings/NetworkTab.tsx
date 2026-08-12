@@ -1,11 +1,14 @@
 import type { NetworkSettingsInput, NetworkSettingsSummary } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, primaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, fontFamily, primaryButtonStyle } from '../theme.js'
+import { PathField, type BrowseRequest } from './PathField.js'
 import { SecretField } from './SecretField.js'
 
 export interface NetworkTabProps {
   settings: NetworkSettingsSummary | undefined
   onSave: (settings: NetworkSettingsInput) => void
+  onBrowse: (request: BrowseRequest) => void
+  pickedPath: { purpose: string; path: string } | undefined
 }
 
 const hint: React.CSSProperties = {
@@ -23,22 +26,23 @@ function Field(props: {
   value: string
   placeholder: string
   hint?: string
+  browse?: BrowseRequest
+  onBrowse?: (request: BrowseRequest) => void
   onChange: (value: string) => void
 }): ReactElement {
   return (
-    <>
-      <label htmlFor={props.id} style={labelStyle()}>
-        {props.label}
-      </label>
-      <input
+    <div style={{ marginBottom: props.hint !== undefined ? 0 : 16 }}>
+      <PathField
         id={props.id}
+        label={props.label}
         value={props.value}
         placeholder={props.placeholder}
-        onChange={(event) => props.onChange(event.target.value)}
-        style={{ ...textFieldStyle(), marginBottom: props.hint !== undefined ? 4 : 16 }}
+        {...(props.browse !== undefined ? { browse: props.browse } : {})}
+        {...(props.onBrowse !== undefined ? { onBrowse: props.onBrowse } : {})}
+        onChange={props.onChange}
       />
       {props.hint !== undefined && <div style={hint}>{props.hint}</div>}
-    </>
+    </div>
   )
 }
 
@@ -76,6 +80,21 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
     setSaved(false)
   }, [settings])
 
+  // Keyed on `purpose` rather than focus: the native dialog takes focus while it is open,
+  // so there is nothing reliable to return to.
+  useEffect(() => {
+    const picked = props.pickedPath
+    if (picked === undefined) return
+    const setter = {
+      'net.certDir': setCertDir,
+      'net.caFile': setCaFile,
+      'net.certFile': setCertFile,
+      'net.keyFile': setKeyFile,
+      'net.pfxFile': setPfxFile,
+    }[picked.purpose]
+    setter?.(picked.path)
+  }, [props.pickedPath])
+
   const usingPfx = pfxFile.trim().length > 0
 
   function save(): void {
@@ -104,6 +123,8 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
 
       <Field
         id="net-certdir"
+        browse={{ purpose: 'net.certDir', kind: 'folder' }}
+        onBrowse={props.onBrowse}
         label="Certificate directory"
         value={certDir}
         placeholder="C:\Users\you\certs"
@@ -117,6 +138,8 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
 
       <Field
         id="net-ca"
+        browse={{ purpose: 'net.caFile', kind: 'file', extensions: ['pem','crt','cer','ca-bundle'] }}
+        onBrowse={props.onBrowse}
         label="CA certificate"
         value={caFile}
         placeholder="corporate-root.pem"
@@ -151,6 +174,8 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
 
       <Field
         id="net-pfx"
+        browse={{ purpose: 'net.pfxFile', kind: 'file', extensions: ['pfx','p12'] }}
+        onBrowse={props.onBrowse}
         label="PFX bundle"
         value={pfxFile}
         placeholder="client.pfx"
@@ -162,12 +187,16 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
         <>
           <Field
             id="net-cert"
+        browse={{ purpose: 'net.certFile', kind: 'file', extensions: ['crt','pem','cer'] }}
+        onBrowse={props.onBrowse}
             label="Certificate"
             value={certFile}
             placeholder="client.crt"
             onChange={setCertFile}
           />
-          <Field id="net-key" label="Private key" value={keyFile} placeholder="client.key" onChange={setKeyFile} />
+          <Field id="net-key"
+        browse={{ purpose: 'net.keyFile', kind: 'file', extensions: ['key','pem'] }}
+        onBrowse={props.onBrowse} label="Private key" value={keyFile} placeholder="client.key" onChange={setKeyFile} />
         </>
       )}
 

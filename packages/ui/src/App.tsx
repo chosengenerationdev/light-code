@@ -74,6 +74,7 @@ export function App(props: AppProps): ReactElement {
   const [mcpConfigs, setMcpConfigs] = useState<Record<string, McpServerConfig>>({})
   const [mcpPlatform, setMcpPlatform] = useState<McpPlatform>('posix')
   const [mcpSavedTick, setMcpSavedTick] = useState(0)
+  const [pickedPath, setPickedPath] = useState<{ purpose: string; path: string } | undefined>(undefined)
   const [pythonProbe, setPythonProbe] = useState<{ interpreter?: string; venvDir?: string; detail: string } | undefined>(
     undefined,
   )
@@ -225,6 +226,8 @@ export function App(props: AppProps): ReactElement {
         setMentionCandidates(message.paths)
       } else if (message.type === 'capabilities') {
         setSupportsVision(message.supportsVision)
+      } else if (message.type === 'pathPicked') {
+        setPickedPath({ purpose: message.purpose, path: message.path })
       } else if (message.type === 'pythonEnvProbe') {
         setPythonProbe({
           ...(message.interpreter !== undefined ? { interpreter: message.interpreter } : {}),
@@ -413,6 +416,11 @@ export function App(props: AppProps): ReactElement {
       config,
     } satisfies UiToHostMessage)
   }
+  const browseForPath = (request: { purpose: string; kind: 'file' | 'folder'; extensions?: string[] }): void => {
+    // Cleared first so picking the same path twice in a row still registers as a change.
+    setPickedPath(undefined)
+    props.transport.post({ type: 'browseForPath', ...request } satisfies UiToHostMessage)
+  }
   const detectPython = (venvDir: string, script: string): void => {
     props.transport.post({ type: 'probePythonEnv', venvDir, script } satisfies UiToHostMessage)
   }
@@ -577,6 +585,8 @@ export function App(props: AppProps): ReactElement {
             mcpSavedTick={mcpSavedTick}
             mcpPythonProbe={pythonProbe}
             onDetectPython={detectPython}
+            onBrowse={browseForPath}
+            pickedPath={pickedPath}
             onSaveMcpServer={saveMcpServer}
             onDeleteMcpServer={deleteMcpServer}
             onSaveMcp={saveMcp}

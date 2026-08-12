@@ -21,6 +21,7 @@ import {
   secondaryButtonStyle,
   textFieldStyle,
 } from '../theme.js'
+import { PathField, type BrowseRequest } from './PathField.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -34,15 +35,45 @@ export interface McpServerFormProps {
   /** Result of the last Detect, or undefined if it has not run for this form. */
   probe: { interpreter?: string; venvDir?: string; detail: string } | undefined
   onDetect: (venvDir: string, script: string) => void
+  /** Opens a native picker; the chosen path arrives back through `pickedPath`. */
+  onBrowse: (request: BrowseRequest) => void
+  /** The most recent picker result. Routed to a field by its `purpose`. */
+  pickedPath: { purpose: string; path: string } | undefined
   onSave: (name: string, previousName: string | undefined, config: McpServerConfig) => void
   onCancel: () => void
 }
 
-const KINDS: { value: McpServerKind; label: string; blurb: string }[] = [
-  { value: 'python', label: 'Python (venv)', blurb: 'A script run by the interpreter inside a virtualenv.' },
-  { value: 'npx', label: 'npm package', blurb: 'Fetched and run through npx.' },
-  { value: 'custom', label: 'Command', blurb: 'Any executable, with arguments you supply.' },
-  { value: 'http', label: 'HTTP', blurb: 'A server already running somewhere, reached over HTTP.' },
+/**
+ * The transport is never chosen directly, because the stored format does not record it:
+ * an entry with `command` is stdio and one with `url` is Streamable HTTP (§11). Inferring
+ * it is what lets a config from another client paste in unchanged. The blurbs name it
+ * anyway — it is the first thing anyone who has written one of these by hand looks for.
+ */
+const KINDS: { value: McpServerKind; label: string; transport: string; blurb: string }[] = [
+  {
+    value: 'python',
+    label: 'Python (venv)',
+    transport: 'stdio',
+    blurb: 'A script run by the interpreter inside a virtualenv. Light Code starts the process and talks to it over stdio.',
+  },
+  {
+    value: 'npx',
+    label: 'npm package',
+    transport: 'stdio',
+    blurb: 'Fetched and run through npx. Light Code starts the process and talks to it over stdio.',
+  },
+  {
+    value: 'custom',
+    label: 'Command',
+    transport: 'stdio',
+    blurb: 'Any executable, with arguments you supply. Light Code starts the process and talks to it over stdio.',
+  },
+  {
+    value: 'http',
+    label: 'HTTP',
+    transport: 'Streamable HTTP',
+    blurb: 'A server already running somewhere. Light Code connects to it rather than starting it.',
+  },
 ]
 
 function Field(props: {
@@ -176,6 +207,24 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
     }))
   }, [props.probe])
 
+  /*
+   * Routes a picker result to the field that asked for it. Keyed on `purpose` rather than
+   * "whichever field had focus", because the native dialog takes focus away while it is
+   * open and there is nothing reliable to come back to.
+   */
+  useEffect(() => {
+    const picked = props.pickedPath
+    if (picked === undefined) return
+    const field = ({
+      'mcp.script': 'script',
+      'mcp.venvDir': 'venvDir',
+      'mcp.interpreter': 'interpreter',
+      'mcp.cwd': 'cwd',
+    } as const)[picked.purpose]
+    if (field === undefined) return
+    setForm((current) => ({ ...current, [field]: picked.path }))
+  }, [props.pickedPath])
+
   const errors = validateMcpServerForm(name, form)
   const duplicate =
     name.trim() !== props.initialName && props.existingNames.includes(name.trim())
@@ -186,6 +235,7 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
   const show = (field: string): string | undefined => (submitted ? errors[field] : undefined)
 
   const patch = (changes: Partial<McpForm>): void => setForm({ ...form, ...changes })
+  const selectedKind = KINDS.find((kind) => kind.value === form.kind)
 
   // Rendered from the same function that builds what gets written, so the preview cannot
   // drift from the entry it is previewing.
@@ -219,7 +269,7 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
             <button
               key={kind.value}
               type="button"
-              title={kind.blurb}
+              title={`${kind.blurb} Transport: ${kind.transport}.`}
               onClick={() => patch({ kind: kind.value })}
               style={{
                 padding: '3px 10px',
@@ -238,57 +288,43 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
         })}
       </div>
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 12px' }}>
-        {KINDS.find((kind) => kind.value === form.kind)?.blurb}
+        {selectedKind?.blurb}
       </p>
 
       {form.kind === 'python' && (
         <>
-          <Field
+          <PathField
             id="lc-mcp-script"
             label="Server script"
             value={form.script}
-            mono
             placeholder={props.platform === 'win32' ? 'C:\\work\\my-server\\server.py' : '/home/me/my-server/server.py'}
-            hint="Your FastMCP entry point. Enter this first — the virtualenv beside it is found automatically."
+            hint="Your FastMCP entry point. Pick this first — the virtualenv beside it is found automatically."
+            browse={{ purpose: 'mcp.script', kind: 'file', extensions: ['py'] }}
+            onBrowse={props.onBrowse}
             {...(show('script') !== undefined ? { error: show('script') as string } : {})}
             onChange={(script) => patch({ script })}
           />
 
-          <div style={{ marginBottom: 4 }}>
-            <label htmlFor="lc-mcp-venv" style={labelStyle()}>
-              Virtualenv folder
-            </label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input
-                id="lc-mcp-venv"
-                type="text"
-                value={form.venvDir}
-                spellCheck={false}
-                placeholder={props.platform === 'win32' ? 'C:\\work\\my-server\\.venv' : '/home/me/my-server/.venv'}
-                onChange={(event) => patch({ venvDir: event.target.value })}
-                style={{
-                  ...textFieldStyle(),
-                  fontFamily: monospace,
-                  ...(show('venvDir') !== undefined ? { borderColor: colors.error } : {}),
-                }}
-              />
-              <button
-                type="button"
-                style={secondaryButtonStyle()}
-                title="Look on disk for the interpreter, or for a virtualenv beside the script"
-                onClick={() => props.onDetect(form.venvDir, form.script)}
-              >
-                Detect
-              </button>
-            </div>
-            {show('venvDir') !== undefined ? (
-              <span style={fieldErrorStyle()}>{show('venvDir')}</span>
-            ) : (
-              <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-                Leave blank and press Detect to search beside the script.
-              </span>
-            )}
-          </div>
+          <PathField
+            id="lc-mcp-venv"
+            label="Virtualenv folder"
+            value={form.venvDir}
+            placeholder={props.platform === 'win32' ? 'C:\\work\\my-server\\.venv' : '/home/me/my-server/.venv'}
+            hint="Leave blank and press Detect to search beside the script."
+            browse={{ purpose: 'mcp.venvDir', kind: 'folder' }}
+            onBrowse={props.onBrowse}
+            {...(show('venvDir') !== undefined ? { error: show('venvDir') as string } : {})}
+            onChange={(venvDir) => patch({ venvDir })}
+          >
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              title="Look on disk for the interpreter, or for a virtualenv beside the script"
+              onClick={() => props.onDetect(form.venvDir, form.script)}
+            >
+              Detect
+            </button>
+          </PathField>
 
           {props.probe !== undefined && (
             <div
@@ -302,11 +338,10 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
             </div>
           )}
 
-          <Field
+          <PathField
             id="lc-mcp-interpreter"
             label="Python interpreter"
             value={form.interpreter}
-            mono
             placeholder={
               form.venvDir.trim().length > 0
                 ? venvPython(form.venvDir.trim(), props.platform)
@@ -315,6 +350,8 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
                   : 'python3'
             }
             hint="Filled in by Detect. Override it for a conda environment, a system Python, or any layout detection does not recognise — this is the executable that actually runs."
+            browse={{ purpose: 'mcp.interpreter', kind: 'file' }}
+            onBrowse={props.onBrowse}
             onChange={(interpreter) => patch({ interpreter })}
           />
         </>
@@ -399,13 +436,14 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
             </span>
           </div>
 
-          <Field
+          <PathField
             id="lc-mcp-cwd"
             label="Working directory"
             value={form.cwd}
-            mono
             placeholder="Optional"
             hint="Where the process starts. Set it if your server reads files by relative path."
+            browse={{ purpose: 'mcp.cwd', kind: 'folder' }}
+            onBrowse={props.onBrowse}
             onChange={(cwd) => patch({ cwd })}
           />
 
@@ -420,7 +458,12 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
       )}
 
       <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle()}>{form.kind === 'http' ? 'Endpoint' : 'Will run'}</label>
+        <label style={labelStyle()}>
+          {form.kind === 'http' ? 'Connects to' : 'Will run'}
+          <span style={{ marginLeft: 6, fontWeight: 'normal', textTransform: 'none', opacity: 0.7 }}>
+            {selectedKind?.transport}
+          </span>
+        </label>
         <div
           style={{
             fontFamily: monospace,

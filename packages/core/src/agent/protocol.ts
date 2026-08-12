@@ -256,6 +256,12 @@ export type UiToHostMessage =
   | { type: 'deleteMcpServer'; name: string }
   /** Look on disk for the interpreter of a virtualenv, or for a venv beside a script. */
   | { type: 'probePythonEnv'; venvDir: string; script: string }
+  /**
+   * Open a native file or folder picker. `purpose` is opaque to the host and echoed back
+   * verbatim, so one dialog serves every path field in the settings UI without the host
+   * needing to know which form is open.
+   */
+  | { type: 'browseForPath'; purpose: string; kind: 'file' | 'folder'; extensions?: string[] }
   | { type: 'restartMcpServer'; name: string }
   | { type: 'connectMcpServer'; name: string }
   | { type: 'setMcpServerEnabled'; name: string; enabled: boolean }
@@ -322,6 +328,8 @@ export type HostToUiMessage =
    * why — the form still lets the path be typed in, so this never blocks configuring one.
    */
   | { type: 'pythonEnvProbe'; interpreter?: string; venvDir?: string; detail: string }
+  /** Nothing is sent when the dialog is cancelled — a dismissed picker changes no field. */
+  | { type: 'pathPicked'; purpose: string; path: string }
   | { type: 'mcpSaveError'; message: string }
   | { type: 'done' }
   | { type: 'error'; message: string }

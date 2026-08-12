@@ -1600,6 +1600,28 @@ export function wireChatBridge(
     }
   }
 
+  /**
+   * A native picker for any path field in settings.
+   *
+   * A webview cannot open one itself, and typing an absolute path from memory is both
+   * tedious and the most common way to end up with a server that will not start. Cancelling
+   * sends nothing, so a dismissed dialog leaves the field exactly as it was.
+   */
+  async function handleBrowseForPath(purpose: string, kind: 'file' | 'folder', extensions?: string[]): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: kind === 'file',
+      canSelectFolders: kind === 'folder',
+      canSelectMany: false,
+      openLabel: 'Select',
+      // Opens where the user is already working rather than at some unrelated default.
+      ...(workspaceRoot !== undefined ? { defaultUri: vscode.Uri.file(workspaceRoot) } : {}),
+      ...(extensions !== undefined && extensions.length > 0 ? { filters: { Supported: extensions } } : {}),
+    })
+    const picked = uris?.[0]
+    if (picked === undefined) return
+    post({ type: 'pathPicked', purpose, path: picked.fsPath })
+  }
+
   async function handleDeleteMcpServer(name: string): Promise<void> {
     try {
       const { config } = await configManager.load()
@@ -1681,6 +1703,8 @@ export function wireChatBridge(
       void handleSaveMcpServer(message.name, message.previousName, message.config)
     } else if (message.type === 'deleteMcpServer') {
       void handleDeleteMcpServer(message.name)
+    } else if (message.type === 'browseForPath') {
+      void handleBrowseForPath(message.purpose, message.kind, message.extensions)
     } else if (message.type === 'probePythonEnv') {
       void handleProbePythonEnv(message.venvDir, message.script)
     } else if (message.type === 'connectMcpServer') {

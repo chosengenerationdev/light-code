@@ -1,5 +1,65 @@
 # light-code-vscode
 
+## 0.7.0
+
+### Minor Changes
+
+- 8e37077: Add MCP servers from a form instead of hand-writing JSON.
+
+  Settings → MCP now has **Add server**, with fields per server type rather than a raw
+  `mcpServers` blob:
+
+  - **Python (venv)** — point at your FastMCP script and press **Detect**. Light Code looks on
+    disk for the interpreter, checking both `Scripts\python.exe` and `bin/python` regardless of
+    platform, and searching `.venv`, `venv`, `env` and `.env` beside the script and one level
+    up. What it finds lands in an ordinary editable **Python interpreter** field, so overriding
+    it for a conda environment or a system Python is just typing over it. That field is what
+    actually runs, so an unusual layout is never rewritten behind your back.
+  - **npm package** — the package name. `-y` is always passed, because without it `npx` waits
+    on a confirmation prompt that nothing inside an extension host can answer, and the server
+    appears to hang rather than to ask.
+  - **Command** and **HTTP** for anything else.
+
+  The transport is not something you pick — it follows the type, and the server list and form
+  both label it. A command is stdio; a URL is Streamable HTTP.
+
+  Every path field has a **Browse** button opening a native picker, here and in Settings →
+  Network: the script, the virtualenv folder, the interpreter, the working directory, and the
+  CA, certificate, key and PFX. Each stays typeable, since a UNC share or a path already on
+  the clipboard is not something a picker handles well.
+
+  Environment variables and headers get key/value rows, with the `${secret:NAME}` reference
+  form spelled out inline. Arguments are one per line, so a path containing a space needs no
+  quoting. The exact command line that will be spawned is shown as you type — the same
+  ground-truth principle as the approval prompt.
+
+  The JSON editor is still there, now behind **Edit as JSON**, and the stored format is
+  unchanged: a config pasted from another MCP client still works, and yours still pastes out.
+  Servers can also be renamed and deleted from the list.
+
+### Patch Changes
+
+- a232250: Fix OpenSearch settings appearing not to save, and explain truncated log results.
+
+  **A failed save looked exactly like a successful one.** The connection form closed the
+  instant Save was pressed, before the host had written anything, and any error was routed to
+  a banner that only the chat view rendered — so a rejected save closed the form, discarded
+  what you typed, and said nothing. Three fixes: errors now render in every view, the form
+  stays open until the host confirms the write reached disk, and the numeric limits show their
+  allowed range and flag an out-of-range value in place. The most likely trigger was raising
+  "Maximum results" past its ceiling of 100, which failed validation invisibly.
+
+  **Truncated log messages are now explained and adjustable.** Long field values were cut at
+  500 characters with a bare `…`, which reads as "the message ends here" — so the model
+  reported the logs as truncated without being able to say why or do anything about it. The
+  cut is now labelled with the full length, the result names which fields were affected and
+  what to do, and **Longest field value** in Settings → Search makes the limit configurable
+  (50–20,000). Worth raising for a log index whose messages carry stack traces: unlike the
+  overall result cap, this cut cannot be recovered with `read_tool_result`.
+
+  Every query limit also has a tooltip explaining what it protects against and what raising or
+  lowering it costs.
+
 ## 0.6.0
 
 ### Minor Changes
