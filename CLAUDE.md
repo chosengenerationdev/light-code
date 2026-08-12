@@ -42,8 +42,8 @@ packages/core      Agent loop, tools, providers, auth, MCP client, config, secre
                    Platform-agnostic. MUST NOT import `vscode`.
 packages/ui        React chat + settings UI. Talks over a Transport interface.
                    MUST NOT import VS Code webview APIs directly.
-apps/vscode        Thin host: activation, SecretStorage, terminal, webview plumbing.
-apps/host          (DEFERRED) Node server + browser UI. Do not create yet.
+apps/vscode        Thin host: activation, SecretStorage, webview plumbing, ripgrep. ~400 LOC.
+apps/host          Node server + browser UI. `npx light-code`. See §14.
 ```
 
 pnpm workspaces. No Turborepo — the repo is too small to justify it.
@@ -591,9 +591,34 @@ Markdown with frontmatter (`name`, `description`).
 
 ---
 
-## 14. Deferred: Node host and browser UI
+## 14. Node host and browser UI
 
-Not started until the extension ships. Fully specified here so it isn't redesigned.
+**Built (0.8.0).** `apps/host` — `npx light-code` starts a server on 127.0.0.1 and opens the
+browser over the same core, the same bridge and the same `packages/ui`. Every requirement
+below is implemented and verified against the running process, not merely reasoned about;
+`apps/host/src/security.test.ts` pins the checks and `docs/hosting.md` is the operator
+documentation.
+
+Two decisions worth not relitigating:
+- **SSE + POST, not a WebSocket.** A WS upgrade is *not* subject to CORS, so origin
+  enforcement has to be hand-written in the upgrade handler and a mistake there is silent.
+  Two ordinary HTTP requests get the browser's own rules for free. `EventSource` is unusable
+  because it cannot set an `Authorization` header — the token would have to travel in the
+  query string, which is exactly what the fragment handoff exists to avoid. A streamed
+  `fetch` can set headers, so that is what the client uses.
+- **Identity is a seam from day one.** `IdentityProvider` returns a `Principal`, and every
+  store is keyed by `Principal.id`, so config, secrets, task history and spilled tool
+  results are already per-user. Adding SSO changes who the principal is and nothing else.
+
+**Multi-user hosting is NOT safe yet, and the gap is not the code.** The agent runs shell
+commands and spawns MCP servers as **the service account**, so SSO buys attribution and
+storage isolation but *not* privilege isolation: on a shared server any user can have the
+agent read any file that account can reach, including another user's `secrets.json`. The
+real fix is one OS account or container per session, with the server as a supervisor. Until
+that exists, hosting is only appropriate where every user is already trusted with everything
+every other user can reach. `docs/hosting.md` states this in those terms; do not soften it.
+
+The original specification follows, kept because it is what was built against.
 
 `npx light-code` starts a local Node server and opens the system browser. Same core, same
 `packages/ui`, served over HTTP rather than loaded into a webview.
@@ -761,6 +786,15 @@ Record the reason, not just the difference.
 ## 19. Status
 
 Update this section every session.
+
+**`wireChatBridge` lives in `packages/core/src/host/`, not in a host.** It was in
+`apps/vscode` and imported `vscode` directly, which meant the Node host had to fork or move
+1,800 lines — the plan's own words: if the port needs changes in core, that is a bug in the
+Phase 1 interfaces. The coupling turned out to be 14 call sites, nearly all dialogs and
+toasts, now `HostUi`. **Its contract is that no method may be load-bearing:** a browser has
+no native picker, so `showOpenDialog` returns `undefined` — indistinguishable from a cancel —
+and every path field stays typeable. That is why the Browse buttons were built as an
+addition to the text input rather than a replacement for it.
 
 **Current phase:** **Shipped.** 0.1.0 was published to the Visual Studio Marketplace on
 2026-08-09 (manual upload — the Azure DevOps org creation demanded an Azure subscription, so
