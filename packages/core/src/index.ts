@@ -181,6 +181,18 @@ export {
   type StdioServerConfig,
   type HttpServerConfig,
 } from './mcp/types.js'
+export {
+  BLANK_MCP_FORM,
+  fromMcpServerForm,
+  toMcpServerForm,
+  validateMcpServerForm,
+  venvPython,
+  venvPythonCandidates,
+  VENV_DIR_NAMES,
+  type McpPlatform,
+  type McpServerForm,
+  type McpServerKind,
+} from './mcp/forms.js'
 
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
 export { toolsForMode } from './modes/resolve.js'

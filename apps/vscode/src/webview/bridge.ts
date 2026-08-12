@@ -34,6 +34,9 @@ import {
   findMode,
   listModels,
   mcpServersSchema,
+  venvPythonCandidates,
+  VENV_DIR_NAMES,
+  type McpServerConfig,
   namespacedToolName,
   parseConfig,
   redactTask,
@@ -273,13 +276,32 @@ export function wireChatBridge(
   const approvalGate = new PolicyApprovalGate(userGate, () => cachedApprovals)
 
   let mcpJson = '{\n  "mcpServers": {}\n}'
+  /**
+   * Mirrors what is on disk, so the form can edit one entry without reparsing the JSON.
+   * Set together with `mcpJson` through `setMcpServersState` — two representations of the
+   * same thing, kept in one place because that is exactly what drifts otherwise.
+   */
+  let mcpConfigs: McpServersConfig = {}
+
+  function setMcpServersState(servers: McpServersConfig): void {
+    mcpConfigs = servers
+    mcpJson = JSON.stringify({ mcpServers: servers }, null, 2)
+  }
+
   const mcp = new McpRegistry(secrets, { onStateChanged: () => postMcp() }, logger, () => cachedApprovals.allowedTools ?? [])
 
   function postMcp(): void {
     const servers = mcp.states_()
     const warnings: Record<string, string[]> = {}
     for (const server of servers) warnings[server.name] = mcp.warningsFor(server.name)
-    post({ type: 'mcp', servers, json: mcpJson, warnings })
+    post({
+      type: 'mcp',
+      servers,
+      json: mcpJson,
+      warnings,
+      configs: mcpConfigs,
+      platform: process.platform === 'win32' ? 'win32' : 'posix',
+    })
   }
 
   /**
@@ -315,7 +337,7 @@ export function wireChatBridge(
 
   async function syncMcpFromConfig(config: LightCodeConfig): Promise<void> {
     const servers: McpServersConfig = config.mcpServers ?? {}
-    mcpJson = JSON.stringify({ mcpServers: servers }, null, 2)
+    setMcpServersState(servers)
     await mcp.configure(servers)
   }
 
@@ -1389,7 +1411,7 @@ export function wireChatBridge(
 
     const next: McpServersConfig = { ...servers, [name]: change(existing) }
     await configManager.save('user', { mcpServers: next })
-    mcpJson = JSON.stringify({ mcpServers: next }, null, 2)
+    setMcpServersState(next)
     await mcp.configure(next)
   }
 
@@ -1453,7 +1475,7 @@ export function wireChatBridge(
     try {
       await configManager.save('user', { mcpServers: result.data })
       await mcp.configure(result.data)
-      mcpJson = JSON.stringify({ mcpServers: result.data }, null, 2)
+      setMcpServersState(result.data)
       postMcp()
       // Verify immediately rather than leaving the user to discover a typo the next time
       // they happen to use the server. Lazy connect is about startup cost, not about
@@ -1461,6 +1483,138 @@ export function wireChatBridge(
       await mcp.ensureConnected()
     } catch (error) {
       post({ type: 'mcpSaveError', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Saves one server from the form editor.
+   *
+   * Goes through the same `mcpServersSchema` the JSON editor and the file loader use, so a
+   * form save and a hand-edit fail identically (§15's single-schema rule). The form does its
+   * own field-level validation first; this is the backstop, not the only check.
+   */
+  async function handleSaveMcpServer(
+    name: string,
+    previousName: string | undefined,
+    config: McpServerConfig,
+  ): Promise<void> {
+    try {
+      const { config: loaded } = await configManager.load()
+      const servers = { ...(loaded.mcpServers ?? {}) }
+      // A rename is a delete plus an add. Done in this order so renaming to the same name
+      // is a plain update rather than a delete of the entry being written.
+      if (previousName !== undefined && previousName !== name) delete servers[previousName]
+      servers[name] = config
+
+      const result = mcpServersSchema.safeParse(servers)
+      if (!result.success) {
+        const detail = result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')
+        post({ type: 'mcpSaveError', message: detail })
+        return
+      }
+
+      await configManager.save('user', { mcpServers: result.data })
+      setMcpServersState(result.data)
+      await mcp.configure(result.data)
+      postMcp()
+      post({ type: 'mcpServerSaved', name })
+      // Verify now rather than leaving a typo to surface the next time something happens
+      // to need the server.
+      await mcp.ensureConnected()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Finds the interpreter for a Python MCP server by looking on disk.
+   *
+   * Deriving the path from the platform is a guess; checking is an answer. The layout
+   * follows whatever created the environment, not the machine reading it, so a venv built
+   * under WSL or copied from a share can sit in `bin/` on Windows — and the symptom of
+   * guessing wrong is ENOENT naming a path the user never typed.
+   *
+   * Falls back to looking for a conventional venv folder beside the script, which is where
+   * it is in almost every project. Purely advisory: the form always lets the interpreter be
+   * typed in, so a failure here narrows the work rather than blocking it.
+   */
+  async function handleProbePythonEnv(venvDir: string, script: string): Promise<void> {
+    const exists = async (candidate: string): Promise<boolean> => {
+      try {
+        return (await fs.stat(candidate)).isFile()
+      } catch {
+        return false
+      }
+    }
+
+    const search = async (dir: string): Promise<string | undefined> => {
+      for (const candidate of venvPythonCandidates(dir)) {
+        if (await exists(candidate)) return candidate
+      }
+      return undefined
+    }
+
+    try {
+      const named = venvDir.trim()
+      if (named.length > 0) {
+        const found = await search(named)
+        if (found !== undefined) {
+          post({ type: 'pythonEnvProbe', interpreter: found, venvDir: named, detail: `Found ${found}` })
+          return
+        }
+        post({
+          type: 'pythonEnvProbe',
+          detail: `No Python interpreter under "${named}". Check the path, or set the interpreter directly below.`,
+        })
+        return
+      }
+
+      const scriptPath = script.trim()
+      if (scriptPath.length === 0) {
+        post({ type: 'pythonEnvProbe', detail: 'Enter a virtualenv folder or a script path first.' })
+        return
+      }
+
+      // Walk up from the script: a venv sits beside the entry point, or one level up in a
+      // src/ layout. Two levels is enough for both and stops well short of scanning the disk.
+      let dir = path.dirname(path.resolve(scriptPath))
+      for (let depth = 0; depth < 3; depth++) {
+        for (const name of VENV_DIR_NAMES) {
+          const candidate = path.join(dir, name)
+          const found = await search(candidate)
+          if (found !== undefined) {
+            post({ type: 'pythonEnvProbe', interpreter: found, venvDir: candidate, detail: `Found ${found}` })
+            return
+          }
+        }
+        const parent = path.dirname(dir)
+        if (parent === dir) break
+        dir = parent
+      }
+      post({
+        type: 'pythonEnvProbe',
+        detail: `No ${VENV_DIR_NAMES.join(', ')} folder found near the script. Name the virtualenv folder, or set the interpreter directly.`,
+      })
+    } catch (error) {
+      post({ type: 'pythonEnvProbe', detail: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleDeleteMcpServer(name: string): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const servers = { ...(config.mcpServers ?? {}) }
+      if (servers[name] === undefined) return
+      delete servers[name]
+
+      await configManager.save('user', { mcpServers: servers })
+      setMcpServersState(servers)
+      // Closes the child process: a removed stdio server left running would keep its tools
+      // alive for the rest of the session.
+      await mcp.configure(servers)
+      postMcp()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -1523,6 +1677,12 @@ export function wireChatBridge(
       void handleRequestMcp()
     } else if (message.type === 'saveMcpServers') {
       void handleSaveMcpServers(message.json)
+    } else if (message.type === 'saveMcpServer') {
+      void handleSaveMcpServer(message.name, message.previousName, message.config)
+    } else if (message.type === 'deleteMcpServer') {
+      void handleDeleteMcpServer(message.name)
+    } else if (message.type === 'probePythonEnv') {
+      void handleProbePythonEnv(message.venvDir, message.script)
     } else if (message.type === 'connectMcpServer') {
       void mcp.connectServer(message.name)
     } else if (message.type === 'restartMcpServer') {

@@ -1,5 +1,6 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
-import type { McpServerState, McpToolPermission } from '../mcp/types.js'
+import type { McpPlatform } from '../mcp/forms.js'
+import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
@@ -250,6 +251,11 @@ export type UiToHostMessage =
   | { type: 'requestMcp' }
   /** The raw `mcpServers` JSON from the editor, validated host-side before saving. */
   | { type: 'saveMcpServers'; json: string }
+  /** One server from the form editor. A `previousName` that differs means a rename. */
+  | { type: 'saveMcpServer'; name: string; previousName?: string; config: McpServerConfig }
+  | { type: 'deleteMcpServer'; name: string }
+  /** Look on disk for the interpreter of a virtualenv, or for a venv beside a script. */
+  | { type: 'probePythonEnv'; venvDir: string; script: string }
   | { type: 'restartMcpServer'; name: string }
   | { type: 'connectMcpServer'; name: string }
   | { type: 'setMcpServerEnabled'; name: string; enabled: boolean }
@@ -299,7 +305,23 @@ export type HostToUiMessage =
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */
   | { type: 'settings'; modeId: string; approvals: WorkspaceApprovals }
   /** Server health plus the raw JSON the editor round-trips, and any spawn warnings. */
-  | { type: 'mcp'; servers: McpServerState[]; json: string; warnings: Record<string, string[]> }
+  | {
+      type: 'mcp'
+      servers: McpServerState[]
+      json: string
+      warnings: Record<string, string[]>
+      /** Each server's stored entry, so the form can edit it without reparsing the JSON. */
+      configs: Record<string, McpServerConfig>
+      /** Decides the virtualenv interpreter path the form derives. */
+      platform: McpPlatform
+    }
+  /** The write reached disk; the form closes on this rather than optimistically. */
+  | { type: 'mcpServerSaved'; name: string }
+  /**
+   * What the probe found. An absent `interpreter` means nothing was found and `detail` says
+   * why — the form still lets the path be typed in, so this never blocks configuring one.
+   */
+  | { type: 'pythonEnvProbe'; interpreter?: string; venvDir?: string; detail: string }
   | { type: 'mcpSaveError'; message: string }
   | { type: 'done' }
   | { type: 'error'; message: string }

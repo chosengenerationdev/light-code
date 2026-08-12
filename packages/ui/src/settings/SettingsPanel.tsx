@@ -1,4 +1,11 @@
-import type { ApprovableGroup, McpServerState, McpToolPermission, WorkspaceApprovals } from '@light-code/core/browser'
+import type {
+  ApprovableGroup,
+  McpPlatform,
+  McpServerConfig,
+  McpServerState,
+  McpToolPermission,
+  WorkspaceApprovals,
+} from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
 import { ApprovalsTab } from './ApprovalsTab.js'
@@ -17,6 +24,13 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   mcpJson: string
   mcpWarnings: Record<string, string[]>
   mcpSaveError: string | undefined
+  mcpConfigs: Record<string, McpServerConfig>
+  mcpPlatform: McpPlatform
+  mcpSavedTick: number
+  mcpPythonProbe: { interpreter?: string; venvDir?: string; detail: string } | undefined
+  onDetectPython: (venvDir: string, script: string) => void
+  onSaveMcpServer: (name: string, previousName: string | undefined, config: McpServerConfig) => void
+  onDeleteMcpServer: (name: string) => void
   onSaveMcp: (json: string) => void
   onRestartMcp: (name: string) => void
   onSetMcpServerEnabled: (name: string, enabled: boolean) => void
@@ -109,6 +123,13 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             json={props.mcpJson}
             warnings={props.mcpWarnings}
             saveError={props.mcpSaveError}
+            configs={props.mcpConfigs}
+            platform={props.mcpPlatform}
+            savedTick={props.mcpSavedTick}
+            pythonProbe={props.mcpPythonProbe}
+            onDetectPython={props.onDetectPython}
+            onSaveServer={props.onSaveMcpServer}
+            onDeleteServer={props.onDeleteMcpServer}
             onSave={props.onSaveMcp}
             onRestart={props.onRestartMcp}
             onSetServerEnabled={props.onSetMcpServerEnabled}

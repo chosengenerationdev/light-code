@@ -1,13 +1,34 @@
-import type { McpServerState, McpServerStatus, McpToolPermission } from '@light-code/core/browser'
+import type { McpPlatform, McpServerConfig, McpServerState, McpServerStatus, McpToolPermission } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fieldErrorStyle, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { TrashIcon } from '../icons.js'
+import {
+  colors,
+  fieldErrorStyle,
+  fontFamily,
+  iconButtonStyle,
+  labelStyle,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+} from '../theme.js'
+import { McpServerForm } from './McpServerForm.js'
 
 export interface McpTabProps {
   servers: McpServerState[]
   json: string
   warnings: Record<string, string[]>
   saveError: string | undefined
+  /** Each server as stored, so the form can edit one without reparsing the JSON. */
+  configs: Record<string, McpServerConfig>
+  /** Decides the virtualenv interpreter layout the form derives. */
+  platform: McpPlatform
+  /** Increments when the host confirms a save reached disk. */
+  savedTick: number
+  /** Result of the last interpreter probe. */
+  pythonProbe: { interpreter?: string; venvDir?: string; detail: string } | undefined
+  onDetectPython: (venvDir: string, script: string) => void
   onSave: (json: string) => void
+  onSaveServer: (name: string, previousName: string | undefined, config: McpServerConfig) => void
+  onDeleteServer: (name: string) => void
   onRestart: (name: string) => void
   onSetServerEnabled: (name: string, enabled: boolean) => void
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
@@ -83,6 +104,8 @@ function ServerRow(props: {
   onConnect: (name: string) => void
   onSetServerEnabled: (name: string, enabled: boolean) => void
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
+  onEdit: (name: string) => void
+  onDelete: (name: string) => void
 }): ReactElement {
   const { server } = props
   const [expanded, setExpanded] = useState(false)
@@ -135,6 +158,18 @@ function ServerRow(props: {
             Restart
           </button>
         )}
+        <button type="button" style={secondaryButtonStyle()} onClick={() => props.onEdit(server.name)}>
+          Edit
+        </button>
+        <button
+          type="button"
+          aria-label={`Delete ${server.name}`}
+          title="Remove this server"
+          style={iconButtonStyle('ghost')}
+          onClick={() => props.onDelete(server.name)}
+        >
+          <TrashIcon />
+        </button>
       </div>
 
       {server.error !== undefined && <div style={fieldErrorStyle()}>{server.error}</div>}
@@ -231,12 +266,43 @@ function ServerRow(props: {
 export function McpTab(props: McpTabProps): ReactElement {
   const [draft, setDraft] = useState(props.json)
   const [editing, setEditing] = useState(false)
+  /** `''` means a new server; `undefined` means the form is closed. */
+  const [formFor, setFormFor] = useState<string | undefined>(undefined)
+  const [confirmDelete, setConfirmDelete] = useState<string | undefined>(undefined)
+  const [saving, setSaving] = useState(false)
 
   // The host is the source of truth; resync when it sends new JSON (same prop-sync
   // pattern as the provider form — `useState`'s initial value applies only once).
   useEffect(() => {
     setDraft(props.json)
   }, [props.json])
+
+  // Closes only once the host confirms the write landed, so a rejected save keeps the
+  // form and its values rather than discarding both — same reasoning as the search form.
+  useEffect(() => {
+    if (!saving) return
+    setSaving(false)
+    setFormFor(undefined)
+  }, [props.savedTick])
+
+  if (formFor !== undefined) {
+    return (
+      <McpServerForm
+        initialName={formFor}
+        initialConfig={props.configs[formFor]}
+        existingNames={props.servers.map((server) => server.name)}
+        platform={props.platform}
+        saving={saving}
+        probe={props.pythonProbe}
+        onDetect={props.onDetectPython}
+        onSave={(name, previousName, config) => {
+          setSaving(true)
+          props.onSaveServer(name, previousName, config)
+        }}
+        onCancel={() => setFormFor(undefined)}
+      />
+    )
+  }
 
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily }}>
@@ -250,21 +316,50 @@ export function McpTab(props: McpTabProps): ReactElement {
         <p style={{ color: colors.muted, fontSize: 12 }}>No servers configured yet.</p>
       ) : (
         props.servers.map((server) => (
-          <ServerRow
-            key={server.name}
-            server={server}
-            warnings={props.warnings[server.name] ?? []}
-            onRestart={props.onRestart}
-            onConnect={props.onConnect}
-            onSetServerEnabled={props.onSetServerEnabled}
-            onSetToolPermission={props.onSetToolPermission}
-          />
+          <div key={server.name}>
+            <ServerRow
+              server={server}
+              warnings={props.warnings[server.name] ?? []}
+              onRestart={props.onRestart}
+              onConnect={props.onConnect}
+              onSetServerEnabled={props.onSetServerEnabled}
+              onSetToolPermission={props.onSetToolPermission}
+              onEdit={setFormFor}
+              onDelete={setConfirmDelete}
+            />
+            {confirmDelete === server.name && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 6px 22px', fontSize: 12 }}>
+                <span>Remove {server.name}?</span>
+                <button
+                  type="button"
+                  style={secondaryButtonStyle()}
+                  onClick={() => {
+                    props.onDeleteServer(server.name)
+                    setConfirmDelete(undefined)
+                  }}
+                >
+                  Remove
+                </button>
+                <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirmDelete(undefined)}>
+                  Keep
+                </button>
+              </div>
+            )}
+          </div>
         ))
       )}
 
-      <div style={{ marginTop: 16 }}>
-        <button type="button" style={secondaryButtonStyle()} onClick={() => setEditing(!editing)}>
-          {editing ? 'Hide configuration' : 'Edit configuration'}
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button type="button" style={primaryButtonStyle(false)} onClick={() => setFormFor('')}>
+          Add server
+        </button>
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          title="Edit every server as raw JSON — for pasting a config from another client"
+          onClick={() => setEditing(!editing)}
+        >
+          {editing ? 'Hide JSON' : 'Edit as JSON'}
         </button>
       </div>
 

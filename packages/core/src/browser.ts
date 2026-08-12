@@ -14,7 +14,28 @@ export type { ApprovalDecision } from './approval/types.js'
 export type { AutoApproveSettings, WorkspaceApprovals, ApprovableGroup } from './approval/policy.js'
 export type { Mode } from './modes/types.js'
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
-export type { McpServerState, McpServerStatus, McpServersConfig, McpToolState, McpToolPermission } from './mcp/types.js'
+export type {
+  McpServerConfig,
+  McpServerState,
+  McpServerStatus,
+  McpServersConfig,
+  McpToolState,
+  McpToolPermission,
+} from './mcp/types.js'
+// Value exports, so they must be browser-safe: forms.ts is pure string manipulation with
+// no node imports. See the Phase 2b note about what may cross into packages/ui.
+export {
+  BLANK_MCP_FORM,
+  fromMcpServerForm,
+  toMcpServerForm,
+  validateMcpServerForm,
+  venvPython,
+  venvPythonCandidates,
+  VENV_DIR_NAMES,
+  type McpPlatform,
+  type McpServerForm,
+  type McpServerKind,
+} from './mcp/forms.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export { validateProviderForm, type FieldError } from './config/validate.js'

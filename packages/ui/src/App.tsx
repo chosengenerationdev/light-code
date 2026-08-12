@@ -10,6 +10,8 @@ import {
   type TaskListEntry,
   type SearchConnectionInput,
   type SearchConnectionSummary,
+  type McpPlatform,
+  type McpServerConfig,
   type McpServerState,
   type NetworkSettingsSummary,
   type McpToolPermission,
@@ -69,6 +71,12 @@ export function App(props: AppProps): ReactElement {
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
   const [mcpSaveError, setMcpSaveError] = useState<string | undefined>(undefined)
+  const [mcpConfigs, setMcpConfigs] = useState<Record<string, McpServerConfig>>({})
+  const [mcpPlatform, setMcpPlatform] = useState<McpPlatform>('posix')
+  const [mcpSavedTick, setMcpSavedTick] = useState(0)
+  const [pythonProbe, setPythonProbe] = useState<{ interpreter?: string; venvDir?: string; detail: string } | undefined>(
+    undefined,
+  )
   const [models, setModels] = useState<string[]>([])
   const [modelsWarning, setModelsWarning] = useState<string | undefined>(undefined)
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -154,6 +162,8 @@ export function App(props: AppProps): ReactElement {
         setMcpServers(message.servers)
         setMcpJson(message.json)
         setMcpWarnings(message.warnings)
+        setMcpConfigs(message.configs)
+        setMcpPlatform(message.platform)
         setMcpSaveError(undefined)
       } else if (message.type === 'mcpSaveError') {
         setMcpSaveError(message.message)
@@ -215,6 +225,14 @@ export function App(props: AppProps): ReactElement {
         setMentionCandidates(message.paths)
       } else if (message.type === 'capabilities') {
         setSupportsVision(message.supportsVision)
+      } else if (message.type === 'pythonEnvProbe') {
+        setPythonProbe({
+          ...(message.interpreter !== undefined ? { interpreter: message.interpreter } : {}),
+          ...(message.venvDir !== undefined ? { venvDir: message.venvDir } : {}),
+          detail: message.detail,
+        })
+      } else if (message.type === 'mcpServerSaved') {
+        setMcpSavedTick((tick) => tick + 1)
       } else if (message.type === 'searchConnectionSaved') {
         setSearchSavedTick((tick) => tick + 1)
       } else if (message.type === 'network') {
@@ -386,6 +404,21 @@ export function App(props: AppProps): ReactElement {
       ...(model.length > 0 ? { model } : {}),
     } satisfies UiToHostMessage)
   }
+  const saveMcpServer = (name: string, previousName: string | undefined, config: McpServerConfig): void => {
+    setError(undefined)
+    props.transport.post({
+      type: 'saveMcpServer',
+      name,
+      ...(previousName !== undefined ? { previousName } : {}),
+      config,
+    } satisfies UiToHostMessage)
+  }
+  const detectPython = (venvDir: string, script: string): void => {
+    props.transport.post({ type: 'probePythonEnv', venvDir, script } satisfies UiToHostMessage)
+  }
+  const deleteMcpServer = (name: string): void => {
+    props.transport.post({ type: 'deleteMcpServer', name } satisfies UiToHostMessage)
+  }
   const saveMcp = (json: string): void => {
     props.transport.post({ type: 'saveMcpServers', json } satisfies UiToHostMessage)
   }
@@ -539,6 +572,13 @@ export function App(props: AppProps): ReactElement {
             mcpJson={mcpJson}
             mcpWarnings={mcpWarnings}
             mcpSaveError={mcpSaveError}
+            mcpConfigs={mcpConfigs}
+            mcpPlatform={mcpPlatform}
+            mcpSavedTick={mcpSavedTick}
+            mcpPythonProbe={pythonProbe}
+            onDetectPython={detectPython}
+            onSaveMcpServer={saveMcpServer}
+            onDeleteMcpServer={deleteMcpServer}
             onSaveMcp={saveMcp}
             onRestartMcp={restartMcp}
             onSetMcpServerEnabled={setMcpServerEnabled}
