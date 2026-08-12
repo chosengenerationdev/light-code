@@ -41,12 +41,6 @@ importers:
 
   apps/host:
     dependencies:
-      '@light-code/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@light-code/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(supports-color@7.2.0)(zod@4.4.3)
@@ -56,12 +50,6 @@ importers:
       env-paths:
         specifier: ^4.0.0
         version: 4.0.0
-      react:
-        specifier: ^19.2.8
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.2.8
-        version: 19.2.8(react@19.2.8)
       undici:
         specifier: ^8.10.0
         version: 8.10.0
@@ -69,6 +57,12 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@light-code/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@light-code/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
@@ -78,6 +72,12 @@ importers:
       esbuild:
         specifier: ^0.27.2
         version: 0.27.7
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
 
   apps/vscode:
     dependencies:

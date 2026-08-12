@@ -1,15 +1,16 @@
 {
-  "name": "light-code",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Light Code as a local server in your browser",
+  "name": "@chosengeneration/light-code",
+  "version": "0.1.0",
+  "description": "A minimal agentic coding assistant, served to your browser from a local Node server",
   "license": "MIT",
   "type": "module",
   "bin": {
     "light-code": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node ./esbuild.mjs",
@@ -17,19 +18,44 @@
     "start": "node ./dist/cli.js"
   },
   "dependencies": {
-    "@light-code/core": "workspace:*",
-    "@light-code/ui": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@vscode/ripgrep": "^1.18.0",
     "env-paths": "^4.0.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "undici": "^8.10.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@light-code/core": "workspace:*",
+    "@light-code/ui": "workspace:*",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "esbuild": "^0.27.2"
+    "esbuild": "^0.27.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "coding-assistant",
+    "llm",
+    "mcp",
+    "openai",
+    "anthropic",
+    "cli"
+  ],
+  "homepage": "https://github.com/chosengenerationdev/light-code#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chosengenerationdev/light-code.git",
+    "directory": "apps/host"
+  },
+  "bugs": {
+    "url": "https://github.com/chosengenerationdev/light-code/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

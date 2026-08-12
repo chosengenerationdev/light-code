@@ -43,7 +43,8 @@ packages/core      Agent loop, tools, providers, auth, MCP client, config, secre
 packages/ui        React chat + settings UI. Talks over a Transport interface.
                    MUST NOT import VS Code webview APIs directly.
 apps/vscode        Thin host: activation, SecretStorage, webview plumbing, ripgrep. ~400 LOC.
-apps/host          Node server + browser UI. `npx light-code`. See §14.
+apps/host          Node server + browser UI. Published as @chosengeneration/light-code.
+                   See §14.
 ```
 
 pnpm workspaces. No Turborepo — the repo is too small to justify it.
@@ -593,11 +594,22 @@ Markdown with frontmatter (`name`, `description`).
 
 ## 14. Node host and browser UI
 
-**Built (0.8.0).** `apps/host` — `npx light-code` starts a server on 127.0.0.1 and opens the
+**Built.** `apps/host` — `npx @chosengeneration/light-code` starts a server on 127.0.0.1 and opens the
 browser over the same core, the same bridge and the same `packages/ui`. Every requirement
 below is implemented and verified against the running process, not merely reasoned about;
 `apps/host/src/security.test.ts` pins the checks and `docs/hosting.md` is the operator
 documentation.
+
+**The npm name is scoped because `light-code` was already taken** by an unrelated package.
+The installed command is still `light-code`. Scoped packages default to restricted, so
+`publishConfig.access: "public"` is set — without it the first publish 402s asking for a
+paid plan, which reads as a billing problem rather than a missing flag.
+
+**`scripts/smoke-test-npm.mjs` is the VSIX smoke test's counterpart and exists for the same
+reason.** It packs the tarball, installs it into an empty directory with plain `npm`, and
+runs it. A workspace hoists every dependency and links every sibling, so `@light-code/core`
+listed as a `dependency` — it is bundled, and unpublished — would break every real install
+while passing every local check. Run `pnpm verify:npm` before publishing.
 
 Two decisions worth not relitigating:
 - **SSE + POST, not a WebSocket.** A WS upgrade is *not* subject to CORS, so origin

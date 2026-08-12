@@ -11,28 +11,37 @@ a privilege model.** Read the second half before planning it.
 Starts a server on `127.0.0.1` and opens your browser. Same UI as the extension, same
 agent, same config format.
 
-**`npx light-code` does not work yet** — the package is not published to npm, so there is
-nothing for npx to fetch. From a clone:
+```bash
+npx @chosengeneration/light-code                          # current folder
+npx @chosengeneration/light-code --workspace D:\src\repo
+npx @chosengeneration/light-code --port 7100 --no-open
+```
+
+The bare name `light-code` on npm belongs to an unrelated package, hence the scope. The
+installed command is still `light-code`.
+
+From a clone instead:
 
 ```bash
 pnpm install
-pnpm serve                                # current folder
 pnpm serve --workspace D:\src\my-repo
-pnpm serve --port 7100 --no-open
 ```
 
-`pnpm serve` rebuilds the host and starts it.
-
-To get a `light-code` command on PATH without publishing, link it once:
+### Before publishing a version
 
 ```bash
-pnpm --filter light-code link --global
-light-code --workspace D:\src\my-repo     # now works from anywhere
+pnpm verify:npm
+npm publish --access public   # from apps/host, after npm login
 ```
 
-Once published, all of the above is `npx light-code`. The manifest is already set up for it
-— `bin`, `files`, and a shebang on the built entry point — so what is missing is the
-decision to publish, which should wait until the browser UI has had real use.
+`verify:npm` runs lint, typecheck, tests and the build, then
+`scripts/smoke-test-npm.mjs`: it packs the tarball, installs it into an empty directory
+with plain `npm`, and runs it.
+
+That last step is not ceremony. A workspace has every dependency hoisted and every sibling
+package linked, so a bundled import or a missing `dependencies` entry stays invisible until
+somebody installs it fresh — which is exactly how a VSIX that could not activate at all
+once passed build, typecheck, test *and* package.
 
 ### How the session is protected
 
