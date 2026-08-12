@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Light Code</title>
+    <link rel="stylesheet" href="/client.css" />
+  </head>
+  <body>
+    <!--
+      The theme variables the UI styles against are supplied by VS Code in the extension.
+      In a browser there is no host to supply them, so client.css defines the same names.
+      That keeps packages/ui identical across both hosts rather than branching on it.
+    -->
+    <div id="status" role="status"></div>
+    <div id="root"></div>
+    <script src="/client.js"></script>
+  </body>
+</html>

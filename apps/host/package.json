@@ -1,0 +1,35 @@
+{
+  "name": "light-code",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Light Code as a local server in your browser",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "light-code": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ./esbuild.mjs",
+    "typecheck": "tsc -b tsconfig.json",
+    "start": "node ./dist/cli.js"
+  },
+  "dependencies": {
+    "@light-code/core": "workspace:*",
+    "@light-code/ui": "workspace:*",
+    "@vscode/ripgrep": "^1.18.0",
+    "env-paths": "^4.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "undici": "^8.10.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "esbuild": "^0.27.2"
+  }
+}

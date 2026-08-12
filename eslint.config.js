@@ -56,12 +56,38 @@ export default tseslint.config(
     },
   },
   {
-    // The sole exemption to invariant 2: HttpClient's own implementation.
+    // The sole exemption to invariant 2 for *outbound* traffic: HttpClient's own
+    // implementation.
     files: ['packages/core/src/platform/http.ts'],
     rules: {
       'no-restricted-globals': 'off',
       'no-restricted-imports': 'off',
     },
+  },
+  {
+    /*
+     * The Node host's listening socket. Invariant 2 governs egress — every request Light
+     * Code *makes* must go through HttpClient, so that TLS material, proxies and the
+     * no-default-endpoints rule are enforced in one place. A server socket is ingress:
+     * nothing in these files calls out, and the model gateway is still reached only
+     * through HttpClient.
+     */
+    files: ['apps/host/src/server.ts', 'apps/host/src/security.ts', 'apps/host/src/identity.ts', 'apps/host/src/security.test.ts'],
+    rules: { 'no-restricted-imports': 'off' },
+  },
+  {
+    /*
+     * The browser client's transport. This `fetch` talks to the page's own origin and
+     * nothing else — the CSP the server sends carries `connect-src 'self'`, so the browser
+     * refuses any other destination. It cannot go through HttpClient, which is a Node
+     * implementation over undici and does not exist in a browser bundle.
+     *
+     * Note this file is bundled into the *host's* client, never into the extension's
+     * webview.js, so `scripts/check-no-external-urls.mjs` still holds: that check bans
+     * network primitives in the webview bundle, and this is a different artifact.
+     */
+    files: ['apps/host/src/client/**/*.ts', 'apps/host/src/client/**/*.tsx'],
+    rules: { 'no-restricted-globals': 'off' },
   },
   eslintConfigPrettier,
 )
