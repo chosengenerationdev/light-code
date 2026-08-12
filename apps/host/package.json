@@ -8,7 +8,9 @@
     "light-code": "./dist/cli.js"
   },
   "files": [
-    "dist",
+    "dist/**/*.js",
+    "dist/**/*.html",
+    "dist/**/*.css",
     "README.md",
     "LICENSE"
   ],
