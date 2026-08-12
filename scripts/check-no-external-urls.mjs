@@ -44,6 +44,7 @@ const ALLOWED_HOSTS = new Map([
   ['gateway.example.com', 'placeholder in the Apigee token URL field'],
   ['gw.example.com', 'placeholder'],
   ['example.com', 'generic documentation example'],
+  ['opensearch.internal', 'placeholder in the OpenSearch cluster URL field'],
 
   // --- Identifiers that look like URLs but are names. Never dereferenced.
   ['json-schema.org', '$schema identifier'],

@@ -23,6 +23,8 @@ import {
   createAuthStrategy,
   createChatProvider,
   createAskExpertTool,
+  createSearchOpensearchTool,
+  OpenSearchClient,
   createDefaultToolRegistry,
   detectClaudeCli,
   createReadToolResultTool,
@@ -47,6 +49,8 @@ import {
   type Auth,
   type Checkpoint,
   type ClaudeCliInfo,
+  type OpenSearchConnection,
+  type VectorStoreConfig,
   type HostToUiMessage,
   type ImageAttachmentInput,
   type LightCodeConfig,
@@ -54,6 +58,8 @@ import {
   type McpToolPermission,
   type ProfileInput,
   type ProfileSummary,
+  type SearchConnectionInput,
+  type SearchConnectionSummary,
   type ProviderProfile,
   type RunAgentTurnOptions,
   type Task,
@@ -85,6 +91,14 @@ function certPassphraseRefFor(profileId: string): string {
   return `profile:${profileId}:certPassphrase`
 }
 const SECRET_REFS_PER_PROFILE = [apiKeyRefFor, clientSecretRefFor, certPassphraseRefFor]
+
+/** Cluster credentials, namespaced like a profile's so deleting one removes both (§15). */
+function searchUserRefFor(id: string): string {
+  return `search:${id}:username`
+}
+function searchPasswordRefFor(id: string): string {
+  return `search:${id}:password`
+}
 
 /**
  * `hasApiKey` reflects whether the secret **actually exists in the store**, not merely
@@ -270,10 +284,23 @@ export function wireChatBridge(
    * `Tool`s by this point, so mode filtering and the approval gate apply to them with
    * no special-casing.
    */
-  function currentToolRegistry(expert?: { cli: ClaudeCliInfo; model?: string }): ToolRegistry {
+  function currentToolRegistry(
+    expert?: { cli: ClaudeCliInfo; model?: string },
+    search?: { client: OpenSearchClient; store: VectorStoreConfig; indexes: string[] },
+  ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
     for (const tool of mcp.enabledTools()) combined.register(tool)
+    if (search !== undefined) {
+      combined.register(
+        createSearchOpensearchTool({
+          client: search.client,
+          connectionLabel: search.store.label,
+          ...(search.store.defaultIndex !== undefined ? { defaultIndex: search.store.defaultIndex } : {}),
+          availableIndexes: search.indexes,
+        }),
+      )
+    }
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
     if (expert !== undefined) {
@@ -507,6 +534,11 @@ export function wireChatBridge(
       const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
       const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
       const expertCliInfo = await resolveExpert(config)
+      const search = await resolveSearch(config)
+      // Listed once per turn so the tool description can name real indexes; a failure here
+      // only costs the model that hint, never the tool.
+      const searchIndexes =
+        search !== undefined ? await search.client.listIndexes().then((list) => list.map((i) => i.name)).catch(() => []) : []
 
       // Rebuilt whenever the profile or expert availability changes, so the model can
       // answer "which model are you?" accurately and knows whether ask_expert exists.
@@ -591,6 +623,7 @@ export function wireChatBridge(
           expertCliInfo !== undefined
             ? { cli: expertCliInfo, ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}) }
             : undefined,
+          search !== undefined ? { client: search.client, store: search.store, indexes: searchIndexes } : undefined,
         ),
         toolContext,
         {
@@ -964,6 +997,160 @@ export function wireChatBridge(
     }
   }
 
+  /**
+   * Builds a read-only client for a configured connection, resolving credentials from
+   * secure storage and the CA from disk at call time rather than caching either.
+   */
+  async function openSearchClientFor(store: VectorStoreConfig, id: string): Promise<OpenSearchClient> {
+    const connection: OpenSearchConnection = { url: store.url }
+
+    const username = store.usernameRef !== undefined ? await secrets.get(searchUserRefFor(id)) : undefined
+    const password = store.passwordRef !== undefined ? await secrets.get(searchPasswordRefFor(id)) : undefined
+    if (username !== undefined) connection.username = username
+    if (password !== undefined) connection.password = password
+
+    if (store.caFile !== undefined || store.rejectUnauthorized === false) {
+      const tls: Record<string, unknown> = {}
+      if (store.rejectUnauthorized === false) tls.rejectUnauthorized = false
+      if (store.caFile !== undefined && store.caFile.trim().length > 0) {
+        const { config } = await configManager.load()
+        const resolved = path.isAbsolute(store.caFile)
+          ? store.caFile
+          : path.join(config.certDir ?? '', store.caFile)
+        tls.ca = [await fs.readFile(resolved)]
+      }
+      connection.tls = tls as NonNullable<OpenSearchConnection['tls']>
+    }
+    return new OpenSearchClient(httpClient, connection)
+  }
+
+  /**
+   * The active connection for this session, or undefined when search is off.
+   *
+   * Search tools exist only when a connection is selected — §12 requires the tool set to be
+   * stable within a session, so selection is the boundary at which it may change.
+   */
+  async function resolveSearch(
+    config: LightCodeConfig,
+  ): Promise<{ client: OpenSearchClient; store: VectorStoreConfig; id: string } | undefined> {
+    const id = config.activeVectorStoreId
+    if (id === undefined) return undefined
+    const store = config.vectorStores?.[id]
+    if (store === undefined) return undefined
+    try {
+      return { client: await openSearchClientFor(store, id), store, id }
+    } catch (error) {
+      logger.warn('could not build the search client', String(error))
+      return undefined
+    }
+  }
+
+  async function postSearch(): Promise<void> {
+    const { config } = await configManager.load()
+    const connections: SearchConnectionSummary[] = []
+    for (const [id, store] of Object.entries(config.vectorStores ?? {})) {
+      connections.push({
+        id,
+        label: store.label,
+        url: store.url,
+        ...(store.defaultIndex !== undefined ? { defaultIndex: store.defaultIndex } : {}),
+        ...(store.caFile !== undefined ? { caFile: store.caFile } : {}),
+        ...(store.rejectUnauthorized !== undefined ? { rejectUnauthorized: store.rejectUnauthorized } : {}),
+        // Booleans only — the values never cross the bridge (invariant 7).
+        hasUsername: (await secrets.get(searchUserRefFor(id))) !== undefined,
+        hasPassword: (await secrets.get(searchPasswordRefFor(id))) !== undefined,
+      })
+    }
+    post({ type: 'search', connections, activeConnectionId: config.activeVectorStoreId })
+  }
+
+  /** Builds a client from unsaved form state, so Test and index listing work before saving. */
+  async function clientFromInput(input: SearchConnectionInput): Promise<OpenSearchClient> {
+    const id = input.id ?? '__unsaved__'
+    if (input.username !== undefined && input.username.length > 0) await secrets.set(searchUserRefFor(id), input.username)
+    if (input.password !== undefined && input.password.length > 0) await secrets.set(searchPasswordRefFor(id), input.password)
+
+    const store: VectorStoreConfig = {
+      kind: 'opensearch',
+      label: input.label.length > 0 ? input.label : 'Untitled',
+      url: input.url,
+      ...((await secrets.get(searchUserRefFor(id))) !== undefined ? { usernameRef: searchUserRefFor(id) } : {}),
+      ...((await secrets.get(searchPasswordRefFor(id))) !== undefined ? { passwordRef: searchPasswordRefFor(id) } : {}),
+      ...(input.caFile !== undefined && input.caFile.length > 0 ? { caFile: input.caFile } : {}),
+      ...(input.rejectUnauthorized !== undefined ? { rejectUnauthorized: input.rejectUnauthorized } : {}),
+    }
+    return openSearchClientFor(store, id)
+  }
+
+  async function handleSaveSearchConnection(input: SearchConnectionInput): Promise<void> {
+    try {
+      if (input.url.trim().length === 0) {
+        post({ type: 'error', message: 'Enter the cluster URL.' })
+        return
+      }
+      const { config } = await configManager.load()
+      const id = input.id ?? randomUUID()
+
+      if (input.username !== undefined && input.username.length > 0) await secrets.set(searchUserRefFor(id), input.username)
+      if (input.password !== undefined && input.password.length > 0) await secrets.set(searchPasswordRefFor(id), input.password)
+
+      const store: VectorStoreConfig = {
+        kind: 'opensearch',
+        label: input.label.trim().length > 0 ? input.label.trim() : 'OpenSearch',
+        url: input.url.trim(),
+        ...((await secrets.get(searchUserRefFor(id))) !== undefined ? { usernameRef: searchUserRefFor(id) } : {}),
+        ...((await secrets.get(searchPasswordRefFor(id))) !== undefined ? { passwordRef: searchPasswordRefFor(id) } : {}),
+        ...(input.defaultIndex !== undefined && input.defaultIndex.trim().length > 0
+          ? { defaultIndex: input.defaultIndex.trim() }
+          : {}),
+        ...(input.caFile !== undefined && input.caFile.trim().length > 0 ? { caFile: input.caFile.trim() } : {}),
+        ...(input.rejectUnauthorized !== undefined ? { rejectUnauthorized: input.rejectUnauthorized } : {}),
+      }
+
+      await configManager.save('user', { vectorStores: { ...config.vectorStores, [id]: store } })
+      await postSearch()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleDeleteSearchConnection(id: string): Promise<void> {
+    const { config } = await configManager.load()
+    const remaining = { ...config.vectorStores }
+    delete remaining[id]
+    await secrets.delete(searchUserRefFor(id))
+    await secrets.delete(searchPasswordRefFor(id))
+    await configManager.save('user', {
+      vectorStores: remaining,
+      ...(config.activeVectorStoreId === id ? { activeVectorStoreId: undefined } : {}),
+    })
+    await postSearch()
+  }
+
+  async function handleRequestSearchIndexes(input: SearchConnectionInput): Promise<void> {
+    try {
+      const indexes = await (await clientFromInput(input)).listIndexes()
+      post({ type: 'searchIndexes', indexes })
+    } catch (error) {
+      // Never fatal: `_cat` is often denied to a low-privilege account while `_search`
+      // is allowed, so free-text entry has to keep working (§9).
+      post({ type: 'searchIndexes', indexes: [], warning: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleTestSearchConnection(input: SearchConnectionInput): Promise<void> {
+    try {
+      const info = await (await clientFromInput(input)).ping()
+      post({
+        type: 'searchTestResult',
+        ok: true,
+        detail: `Connected to ${info.clusterName ?? 'the cluster'}${info.version !== undefined ? ` (OpenSearch ${info.version})` : ''}.`,
+      })
+    } catch (error) {
+      post({ type: 'searchTestResult', ok: false, detail: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   /** Tells the composer whether to offer image attachment for the active model (§9). */
   async function postCapabilities(): Promise<void> {
     try {
@@ -1279,6 +1466,20 @@ export function wireChatBridge(
       void updateMcpServer(message.name, (entry) => ({ ...entry, disabled: !message.enabled })).then(() => postMcp())
     } else if (message.type === 'setMcpToolPermission') {
       void handleSetToolPermission(message.server, message.tool, message.permission)
+    } else if (message.type === 'requestSearch') {
+      void postSearch()
+    } else if (message.type === 'saveSearchConnection') {
+      void handleSaveSearchConnection(message.connection)
+    } else if (message.type === 'deleteSearchConnection') {
+      void handleDeleteSearchConnection(message.id)
+    } else if (message.type === 'setActiveSearchConnection') {
+      void configManager
+        .save('user', { activeVectorStoreId: message.id })
+        .then(() => postSearch())
+    } else if (message.type === 'requestSearchIndexes') {
+      void handleRequestSearchIndexes(message.connection)
+    } else if (message.type === 'testSearchConnection') {
+      void handleTestSearchConnection(message.connection)
     } else if (message.type === 'requestExpert') {
       void postExpert()
     } else if (message.type === 'setExpert') {

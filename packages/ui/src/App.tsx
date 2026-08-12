@@ -8,6 +8,8 @@ import {
   type ContextUsage,
   type ImageAttachmentInput,
   type TaskListEntry,
+  type SearchConnectionInput,
+  type SearchConnectionSummary,
   type McpServerState,
   type McpToolPermission,
   type TestConnectionStep,
@@ -22,6 +24,7 @@ import type { DisplayMessage } from './MessageList.js'
 import { ModeSelector } from './ModeSelector.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
 import type { ExpertState } from './settings/ExpertTab.js'
+import type { SearchIndex } from './settings/SearchTab.js'
 import { HistoryList } from './history/HistoryList.js'
 import { BackIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
@@ -78,6 +81,11 @@ export function App(props: AppProps): ReactElement {
   const [expert, setExpert] = useState<ExpertState | undefined>(undefined)
   const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
   const [queued, setQueued] = useState<string[]>([])
+  const [searchConnections, setSearchConnections] = useState<SearchConnectionSummary[]>([])
+  const [activeSearchId, setActiveSearchId] = useState<string | undefined>(undefined)
+  const [searchIndexes, setSearchIndexes] = useState<SearchIndex[]>([])
+  const [searchIndexesWarning, setSearchIndexesWarning] = useState<string | undefined>(undefined)
+  const [searchTestResult, setSearchTestResult] = useState<{ ok: boolean; detail: string } | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -186,6 +194,14 @@ export function App(props: AppProps): ReactElement {
             content: `[${message.summarisedCount} earlier messages were summarised to stay within the context window. The full transcript is still saved.]`,
           },
         ])
+      } else if (message.type === 'search') {
+        setSearchConnections(message.connections)
+        setActiveSearchId(message.activeConnectionId)
+      } else if (message.type === 'searchIndexes') {
+        setSearchIndexes(message.indexes)
+        setSearchIndexesWarning(message.warning)
+      } else if (message.type === 'searchTestResult') {
+        setSearchTestResult({ ok: message.ok, detail: message.detail })
       } else if (message.type === 'queued') {
         setQueued(message.messages)
       } else if (message.type === 'queuedMessageConsumed') {
@@ -229,6 +245,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestSettings' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -331,6 +348,25 @@ export function App(props: AppProps): ReactElement {
     setTestResult(undefined)
     setTestRunning(false)
   }
+  const searchProps = {
+    connections: searchConnections,
+    activeConnectionId: activeSearchId,
+    indexes: searchIndexes,
+    ...(searchIndexesWarning !== undefined ? { indexesWarning: searchIndexesWarning } : {}),
+    ...(searchTestResult !== undefined ? { testResult: searchTestResult } : {}),
+    onSave: (connection: SearchConnectionInput) =>
+      props.transport.post({ type: 'saveSearchConnection', connection } satisfies UiToHostMessage),
+    onDelete: (id: string) => props.transport.post({ type: 'deleteSearchConnection', id } satisfies UiToHostMessage),
+    onSetActive: (id: string | undefined) =>
+      props.transport.post({ type: 'setActiveSearchConnection', id } satisfies UiToHostMessage),
+    onListIndexes: (connection: SearchConnectionInput) =>
+      props.transport.post({ type: 'requestSearchIndexes', connection } satisfies UiToHostMessage),
+    onTest: (connection: SearchConnectionInput) => {
+      setSearchTestResult(undefined)
+      props.transport.post({ type: 'testSearchConnection', connection } satisfies UiToHostMessage)
+    },
+  }
+
   const saveExpert = (enabled: boolean, path: string, model: string): void => {
     props.transport.post({
       type: 'setExpert',
@@ -466,6 +502,7 @@ export function App(props: AppProps): ReactElement {
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}
+            search={searchProps}
           />
         ) : view === 'history' ? (
           <HistoryList

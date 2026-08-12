@@ -116,6 +116,30 @@ export interface TaskListEntry {
   messageCount: number
 }
 
+/** A configured OpenSearch connection, as the UI sees it. Credentials never cross (§15). */
+export interface SearchConnectionSummary {
+  id: string
+  label: string
+  url: string
+  defaultIndex?: string
+  caFile?: string
+  rejectUnauthorized?: boolean
+  hasUsername: boolean
+  hasPassword: boolean
+}
+
+/** What a save carries. Empty credential fields mean "unchanged", as everywhere else. */
+export interface SearchConnectionInput {
+  id?: string
+  label: string
+  url: string
+  defaultIndex?: string
+  caFile?: string
+  rejectUnauthorized?: boolean
+  username?: string
+  password?: string
+}
+
 /** One line per step of load-certs → get-token → list-models (§10). */
 export interface TestConnectionStep {
   step: 'certificates' | 'token' | 'models'
@@ -191,6 +215,21 @@ export type UiToHostMessage =
   | { type: 'setMcpServerEnabled'; name: string; enabled: boolean }
   | { type: 'setMcpToolPermission'; server: string; tool: string; permission: McpToolPermission }
   | { type: 'requestProfiles' }
+  | { type: 'requestSearch' }
+  | { type: 'saveSearchConnection'; connection: SearchConnectionInput }
+  | { type: 'deleteSearchConnection'; id: string }
+  | { type: 'setActiveSearchConnection'; id: string | undefined }
+  /** Fetches the index list for a connection, saved or as currently typed. */
+  | { type: 'requestSearchIndexes'; connection: SearchConnectionInput }
+  | { type: 'testSearchConnection'; connection: SearchConnectionInput }
+  | { type: 'requestSearch' }
+  | { type: 'saveSearchConnection'; connection: SearchConnectionInput }
+  | { type: 'deleteSearchConnection'; id: string }
+  /** `undefined` turns search off for the session, withdrawing the tools. */
+  | { type: 'setActiveSearchConnection'; id: string | undefined }
+  /** Lists indexes for a connection, saved or as currently typed in the form. */
+  | { type: 'requestSearchIndexes'; connection: SearchConnectionInput }
+  | { type: 'testSearchConnection'; connection: SearchConnectionInput }
   | { type: 'requestExpert' }
   | { type: 'setExpert'; enabled: boolean; path?: string; model?: string }
   | { type: 'saveProfile'; profile: ProfileInput }
@@ -252,6 +291,16 @@ export type HostToUiMessage =
   | { type: 'mentionCandidates'; query: string; paths: string[] }
   /** Whether the active model accepts images, from the capability table (§9). */
   | { type: 'capabilities'; supportsVision: boolean; supportsTools: boolean; contextWindow: number }
+  /** Configured OpenSearch connections, and which one is live for this session. */
+  | {
+      type: 'search'
+      connections: SearchConnectionSummary[]
+      /** Undefined means search is off — the tools are not offered at all. */
+      activeConnectionId: string | undefined
+    }
+  /** `warning` with an empty list is normal: `_cat/indices` is often denied (§9). */
+  | { type: 'searchIndexes'; indexes: { name: string; docsCount?: number; storeSize?: string }[]; warning?: string }
+  | { type: 'searchTestResult'; ok: boolean; detail: string }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
   | {
       type: 'expert'

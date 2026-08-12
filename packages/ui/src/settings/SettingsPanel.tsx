@@ -4,6 +4,7 @@ import { colors, fontFamily } from '../theme.js'
 import { ApprovalsTab } from './ApprovalsTab.js'
 import { McpTab } from './McpTab.js'
 import { ExpertTab, type ExpertState } from './ExpertTab.js'
+import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -22,14 +23,16 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onConnectMcp: (name: string) => void
   expert: ExpertState | undefined
   onSaveExpert: (enabled: boolean, path: string, model: string) => void
+  search: SearchTabProps
 }
 
-type TabId = 'providers' | 'approvals' | 'mcp' | 'expert'
+type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'providers', label: 'Providers' },
   { id: 'approvals', label: 'Approvals' },
   { id: 'mcp', label: 'MCP' },
+  { id: 'search', label: 'Search' },
   { id: 'expert', label: 'Expert' },
 ]
 
@@ -91,6 +94,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRevokeTool={props.onRevokeTool}
             onRevokeCommand={props.onRevokeCommand}
           />
+        ) : active === 'search' ? (
+          <SearchTab {...props.search} />
         ) : active === 'expert' ? (
           <ExpertTab expert={props.expert} onSave={props.onSaveExpert} />
         ) : (

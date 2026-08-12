@@ -193,6 +193,8 @@ export type {
   ContextUsage,
   ImageAttachmentInput,
   ConnectionTlsInput,
+  SearchConnectionSummary,
+  SearchConnectionInput,
 } from './agent/protocol.js'
 
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'

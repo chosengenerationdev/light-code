@@ -36,6 +36,8 @@ export type {
   ModelCapabilityInput,
   ConnectionTlsInput,
   TestConnectionStep,
+  SearchConnectionSummary,
+  SearchConnectionInput,
   TranscriptEntry,
   TaskListEntry,
   ContextUsage,
