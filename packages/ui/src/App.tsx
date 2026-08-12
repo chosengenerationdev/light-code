@@ -7,6 +7,8 @@ import {
   type ApprovableGroup,
   type ContextUsage,
   type ImageAttachmentInput,
+  type IndexProgress,
+  type IndexResult,
   type TaskListEntry,
   type SearchConnectionInput,
   type SearchConnectionSummary,
@@ -28,6 +30,7 @@ import { ModeSelector } from './ModeSelector.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
 import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
+import type { EmbedderState } from './settings/IndexingSection.js'
 import { HistoryList } from './history/HistoryList.js'
 import { BackIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
@@ -98,6 +101,9 @@ export function App(props: AppProps): ReactElement {
   const [searchIndexesWarning, setSearchIndexesWarning] = useState<string | undefined>(undefined)
   const [searchTestResult, setSearchTestResult] = useState<{ ok: boolean; detail: string } | undefined>(undefined)
   const [searchSavedTick, setSearchSavedTick] = useState(0)
+  const [embedder, setEmbedder] = useState<EmbedderState | undefined>(undefined)
+  const [indexProgress, setIndexProgress] = useState<IndexProgress | undefined>(undefined)
+  const [indexResult, setIndexResult] = useState<{ result?: IndexResult; error?: string } | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -236,6 +242,22 @@ export function App(props: AppProps): ReactElement {
         })
       } else if (message.type === 'mcpServerSaved') {
         setMcpSavedTick((tick) => tick + 1)
+      } else if (message.type === 'embedder') {
+        setEmbedder({
+          ...(message.profileId !== undefined ? { profileId: message.profileId } : {}),
+          ...(message.model !== undefined ? { model: message.model } : {}),
+          ...(message.dimensions !== undefined ? { dimensions: message.dimensions } : {}),
+          ...(message.indexName !== undefined ? { indexName: message.indexName } : {}),
+          indexedFiles: message.indexedFiles,
+        })
+      } else if (message.type === 'indexProgress') {
+        setIndexProgress(message.progress)
+      } else if (message.type === 'indexResult') {
+        setIndexProgress(undefined)
+        setIndexResult({
+          ...(message.result !== undefined ? { result: message.result } : {}),
+          ...(message.error !== undefined ? { error: message.error } : {}),
+        })
       } else if (message.type === 'searchConnectionSaved') {
         setSearchSavedTick((tick) => tick + 1)
       } else if (message.type === 'network') {
@@ -396,6 +418,20 @@ export function App(props: AppProps): ReactElement {
     onTest: (connection: SearchConnectionInput) => {
       setSearchTestResult(undefined)
       props.transport.post({ type: 'testSearchConnection', connection } satisfies UiToHostMessage)
+    },
+    indexing: {
+      embedder,
+      profiles,
+      connectionLabel: searchConnections.find((connection) => connection.id === activeSearchId)?.label,
+      progress: indexProgress,
+      lastResult: indexResult,
+      onSaveEmbedder: (profileId: string, model: string, dimensions: number) =>
+        props.transport.post({ type: 'saveEmbedder', profileId, model, dimensions } satisfies UiToHostMessage),
+      onStartIndexing: () => {
+        setIndexResult(undefined)
+        props.transport.post({ type: 'startIndexing' } satisfies UiToHostMessage)
+      },
+      onCancelIndexing: () => props.transport.post({ type: 'cancelIndexing' } satisfies UiToHostMessage),
     },
   }
 

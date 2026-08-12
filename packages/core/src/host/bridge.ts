@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -24,9 +25,16 @@ import {
   createChatProvider,
   createAskExpertTool,
   createSearchOpensearchTool,
+  createSearchCodebaseTool,
+  Embedder,
+  indexWorkspace,
+  chunkSignatureFor,
+  type IndexManifest,
+  type IndexProgress,
   resolveConnectionTls,
   vectorStoreTls,
   OpenSearchClient,
+  OpenSearchIndexWriter,
   createDefaultToolRegistry,
   detectClaudeCli,
   createReadToolResultTool,
@@ -309,6 +317,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   function currentToolRegistry(
     expert?: { cli: ClaudeCliInfo; model?: string },
     search?: { client: OpenSearchClient; store: VectorStoreConfig; indexes: string[] },
+    codebase?: { client: OpenSearchClient; embedder: Embedder; index: string; connectionLabel: string },
   ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
@@ -323,6 +332,14 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
           ...(search.store.limits !== undefined ? { limits: search.store.limits } : {}),
         }),
       )
+    }
+    /*
+     * Offered only when an index could actually be searched: a connection, an embedder, and
+     * an index name. Registering it without them would advertise a tool that always errors,
+     * and the model would keep reaching for it instead of using search_files.
+     */
+    if (codebase !== undefined) {
+      combined.register(createSearchCodebaseTool(codebase))
     }
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
@@ -559,6 +576,8 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
       const expertCliInfo = await resolveExpert(config)
       const search = await resolveSearch(config)
+      const embedder = await resolveEmbedder(config)
+      const codebaseIndex = codebaseIndexName()
       // Listed once per turn so the tool description can name real indexes; a failure here
       // only costs the model that hint, never the tool.
       const searchIndexes =
@@ -648,6 +667,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
             ? { cli: expertCliInfo, ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}) }
             : undefined,
           search !== undefined ? { client: search.client, store: search.store, indexes: searchIndexes } : undefined,
+          /*
+           * Only when all three exist. Resolved once per turn like everything else feeding
+           * the prefix, so the tool block stays byte-stable for the whole loop (§12).
+           */
+          search !== undefined && embedder !== undefined && codebaseIndex !== undefined
+            ? { client: search.client, embedder, index: codebaseIndex, connectionLabel: search.store.label }
+            : undefined,
         ),
         toolContext,
         {
@@ -1025,7 +1051,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    * Builds a read-only client for a configured connection, resolving credentials from
    * secure storage and the CA from disk at call time rather than caching either.
    */
-  async function openSearchClientFor(store: VectorStoreConfig, id: string): Promise<OpenSearchClient> {
+  async function openSearchConnectionFor(store: VectorStoreConfig, id: string): Promise<OpenSearchConnection> {
     const connection: OpenSearchConnection = { url: store.url }
 
     const username = store.usernameRef !== undefined ? await secrets.get(searchUserRefFor(id)) : undefined
@@ -1050,7 +1076,11 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       },
     })
     if (tls !== undefined) connection.tls = tls as NonNullable<OpenSearchConnection['tls']>
-    return new OpenSearchClient(httpClient, connection)
+    return connection
+  }
+
+  async function openSearchClientFor(store: VectorStoreConfig, id: string): Promise<OpenSearchClient> {
+    return new OpenSearchClient(httpClient, await openSearchConnectionFor(store, id))
   }
 
   /**
@@ -1071,6 +1101,176 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     } catch (error) {
       logger.warn('could not build the search client', String(error))
       return undefined
+    }
+  }
+
+  /** The index Light Code writes this workspace into. Derived, never model-supplied. */
+  function codebaseIndexName(): string | undefined {
+    if (workspaceRoot === undefined) return undefined
+    // Derived from the workspace path so two projects on one cluster do not collide, and
+    // so the same project reindexes into the same place. Hashed because an index name
+    // cannot contain most path characters.
+    const digest = createHash('sha256').update(path.resolve(workspaceRoot).toLowerCase()).digest('hex').slice(0, 16)
+    return `light-code-${digest}`
+  }
+
+  /**
+   * The embedder, built over an existing provider profile.
+   *
+   * A profile already carries a working base URL, auth strategy, client certificate and CA.
+   * Duplicating that would mean two places to get mutual TLS right instead of one.
+   */
+  async function resolveEmbedder(config: LightCodeConfig): Promise<Embedder | undefined> {
+    const settings = config.embedder
+    if (settings?.profileId === undefined || settings.model === undefined || settings.dimensions === undefined) {
+      return undefined
+    }
+    const profile = config.profiles?.find((candidate) => candidate.id === settings.profileId)
+    if (profile === undefined) {
+      logger.warn(`embedder points at profile "${settings.profileId}", which no longer exists`)
+      return undefined
+    }
+    return new Embedder(httpClient, {
+      profile,
+      auth: authStrategyFor(config, profile),
+      model: settings.model,
+      dimensions: settings.dimensions,
+    })
+  }
+
+  /**
+   * Files git would not ignore, as a lookup set.
+   *
+   * `rg --files` rather than a hand-written `.gitignore` parser: ripgrep is already here,
+   * and gitignore semantics — negation, `**`, anchoring, nested ignore files — are much
+   * easier to get subtly wrong than to delegate. Returning `undefined` means "no ignore
+   * information", and the indexer then relies on its own skip list alone.
+   */
+  async function ignoredFilesPredicate(): Promise<((relative: string) => boolean) | undefined> {
+    if (workspaceRoot === undefined || ripgrepPath === undefined) return undefined
+    try {
+      const listed = await new Promise<string>((resolve, reject) => {
+        const child = spawn(ripgrepPath, ['--files', '--hidden', '--glob', '!.git'], { cwd: workspaceRoot })
+        let out = ''
+        child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')))
+        child.on('error', reject)
+        // ripgrep exits 1 when it lists nothing, which is not an error here.
+        child.on('close', () => resolve(out))
+      })
+      const allowed = new Set(
+        listed
+          .split(/\r?\n/)
+          .filter((line) => line.length > 0)
+          .map((line) => line.split(/[\\/]/).join('/')),
+      )
+      if (allowed.size === 0) return undefined
+      // Directories are never reported as ignored: pruning them here would need the same
+      // gitignore semantics this delegation exists to avoid. The per-file check is enough.
+      return (relative) => !relative.endsWith('/') && !allowed.has(relative)
+    } catch (error) {
+      logger.warn('could not list files with ripgrep; indexing will use its own skip list only', String(error))
+      return undefined
+    }
+  }
+
+  let indexingAbort: AbortController | undefined
+
+  async function handleStartIndexing(): Promise<void> {
+    if (indexingAbort !== undefined) {
+      post({ type: 'error', message: 'Indexing is already running.' })
+      return
+    }
+    const { config } = await configManager.load()
+    const index = codebaseIndexName()
+    const search = await resolveSearch(config)
+    const embedder = await resolveEmbedder(config)
+
+    if (index === undefined || workspaceRoot === undefined) {
+      post({ type: 'error', message: 'Open a folder before indexing.' })
+      return
+    }
+    const root = workspaceRoot
+    if (search === undefined) {
+      post({ type: 'error', message: 'Choose a search connection in Settings → Search first.' })
+      return
+    }
+    if (embedder === undefined) {
+      post({ type: 'error', message: 'Configure an embedding model in Settings → Search first.' })
+      return
+    }
+
+    indexingAbort = new AbortController()
+    const manifestPath = path.join(storageDir, 'index-manifests', `${index}.json`)
+    try {
+      const manifest = await loadIndexManifest(manifestPath, embedder)
+      const isIgnored = await ignoredFilesPredicate()
+
+      const result = await indexWorkspace({
+        workspaceRoot: root,
+        index,
+        embedder,
+        writer: new OpenSearchIndexWriter(httpClient, await openSearchConnectionFor(search.store, search.id)),
+        denylist,
+        manifest,
+        saveManifest: async (next) => {
+          await fs.mkdir(path.dirname(manifestPath), { recursive: true })
+          await fs.writeFile(manifestPath, JSON.stringify(next), 'utf8')
+        },
+        ...(isIgnored !== undefined ? { isIgnored } : {}),
+        onProgress: (progress: IndexProgress) => post({ type: 'indexProgress', progress }),
+        signal: indexingAbort.signal,
+      })
+      post({ type: 'indexResult', result })
+    } catch (error) {
+      post({
+        type: 'indexResult',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      indexingAbort = undefined
+    }
+  }
+
+  async function loadIndexManifest(manifestPath: string, embedder: Embedder): Promise<IndexManifest> {
+    try {
+      return JSON.parse(await fs.readFile(manifestPath, 'utf8')) as IndexManifest
+    } catch {
+      // Missing or unreadable both mean "index everything", which is correct and safe —
+      // the worst case is re-embedding work that was already done.
+      return { model: embedder.model, dimensions: embedder.dimensions, chunkSignature: chunkSignatureFor(undefined), files: {} }
+    }
+  }
+
+  async function postEmbedder(config: LightCodeConfig): Promise<void> {
+    const index = codebaseIndexName()
+    let indexedFiles = 0
+    if (index !== undefined) {
+      try {
+        const manifest = JSON.parse(
+          await fs.readFile(path.join(storageDir, 'index-manifests', `${index}.json`), 'utf8'),
+        ) as IndexManifest
+        indexedFiles = Object.keys(manifest.files ?? {}).length
+      } catch {
+        // No manifest yet means nothing has been indexed, which is the honest zero.
+      }
+    }
+    post({
+      type: 'embedder',
+      ...(config.embedder?.profileId !== undefined ? { profileId: config.embedder.profileId } : {}),
+      ...(config.embedder?.model !== undefined ? { model: config.embedder.model } : {}),
+      ...(config.embedder?.dimensions !== undefined ? { dimensions: config.embedder.dimensions } : {}),
+      ...(index !== undefined ? { indexName: index } : {}),
+      indexedFiles,
+    })
+  }
+
+  async function handleSaveEmbedder(profileId: string, model: string, dimensions: number): Promise<void> {
+    try {
+      await configManager.save('user', { embedder: { profileId, model, dimensions } })
+      const { config } = await configManager.load()
+      await postEmbedder(config)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -1143,6 +1343,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       })
     }
     post({ type: 'search', connections, activeConnectionId: config.activeVectorStoreId })
+    await postEmbedder(config)
   }
 
   /** Builds a client from unsaved form state, so Test and index listing work before saving. */
@@ -1717,6 +1918,12 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleRequestSearchIndexes(message.connection)
     } else if (message.type === 'testSearchConnection') {
       void handleTestSearchConnection(message.connection)
+    } else if (message.type === 'startIndexing') {
+      void handleStartIndexing()
+    } else if (message.type === 'cancelIndexing') {
+      indexingAbort?.abort()
+    } else if (message.type === 'saveEmbedder') {
+      void handleSaveEmbedder(message.profileId, message.model, message.dimensions)
     } else if (message.type === 'requestNetwork') {
       void postNetwork()
     } else if (message.type === 'saveNetwork') {

@@ -67,3 +67,6 @@ export type {
   ContextUsage,
   ImageAttachmentInput,
 } from './agent/protocol.js'
+
+// Type-only, so nothing from indexer.ts (which imports node:fs) reaches the bundle.
+export type { IndexProgress, IndexResult } from './rag/indexer.js'

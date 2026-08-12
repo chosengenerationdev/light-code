@@ -1,5 +1,6 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
 import type { McpPlatform } from '../mcp/forms.js'
+import type { IndexProgress, IndexResult } from '../rag/indexer.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
 import type { WireFormat } from '../providers/types.js'
@@ -274,6 +275,10 @@ export type UiToHostMessage =
   /** Fetches the index list for a connection, saved or as currently typed. */
   | { type: 'requestSearchIndexes'; connection: SearchConnectionInput }
   | { type: 'testSearchConnection'; connection: SearchConnectionInput }
+  /** Indexing is user-started, never model-started: it is the largest egress in the product. */
+  | { type: 'startIndexing' }
+  | { type: 'cancelIndexing' }
+  | { type: 'saveEmbedder'; profileId: string; model: string; dimensions: number }
   | { type: 'requestNetwork' }
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
   | { type: 'requestExpert' }
@@ -368,6 +373,19 @@ export type HostToUiMessage =
   /** The save reached disk. The form stays open until this arrives, so a failure keeps the typed values. */
   | { type: 'searchConnectionSaved'; id: string }
   | { type: 'network'; settings: NetworkSettingsSummary }
+  | { type: 'indexProgress'; progress: IndexProgress }
+  /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */
+  | { type: 'indexResult'; result?: IndexResult; error?: string }
+  /** Embedder settings plus what the index currently holds, for Settings → Search. */
+  | {
+      type: 'embedder'
+      profileId?: string
+      model?: string
+      dimensions?: number
+      /** Undefined when no folder is open, so the UI can say why indexing is unavailable. */
+      indexName?: string
+      indexedFiles: number
+    }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
   | {
       type: 'expert'

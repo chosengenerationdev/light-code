@@ -12,6 +12,7 @@ import {
   selectStyle,
   textFieldStyle,
 } from '../theme.js'
+import { IndexingSection, type IndexingSectionProps } from './IndexingSection.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { SecretField } from './SecretField.js'
 
@@ -34,6 +35,8 @@ export interface SearchTabProps {
   onSetActive: (id: string | undefined) => void
   onListIndexes: (connection: SearchConnectionInput) => void
   onTest: (connection: SearchConnectionInput) => void
+  /** Codebase indexing, rendered under the connection list. */
+  indexing: IndexingSectionProps
 }
 
 const BLANK: SearchConnectionSummary = {
@@ -550,6 +553,8 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
         Search tools are offered only while a connection is active. Switching starts a fresh
         prompt, so change it between messages rather than mid-reply.
       </p>
+
+      <IndexingSection {...props.indexing} />
     </div>
   )
 }
