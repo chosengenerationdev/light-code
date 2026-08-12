@@ -8,14 +8,14 @@ const policy: OriginPolicy = {
   allowedOrigins: ['http://127.0.0.1:7777'],
 }
 
-function request(headers: Record<string, string>): IncomingMessage {
-  return { headers } as unknown as IncomingMessage
+function request(headers: Record<string, string>, method = 'GET'): IncomingMessage {
+  return { headers, method } as unknown as IncomingMessage
 }
 
 describe('checkRequest', () => {
   it('accepts a same-origin API request', () => {
     const rejected = checkRequest(
-      request({ host: '127.0.0.1:7777', origin: 'http://127.0.0.1:7777' }),
+      request({ host: '127.0.0.1:7777', origin: 'http://127.0.0.1:7777' }, 'POST'),
       policy,
       { requireOrigin: true },
     )
@@ -23,10 +23,53 @@ describe('checkRequest', () => {
   })
 
   /**
+   * The regression that broke the browser client with a 403 while every curl test passed.
+   *
+   * Browsers send `Origin` on all cross-origin requests, but on same-origin requests only
+   * when the method is unsafe. The page's own `GET /api/events` therefore has no Origin at
+   * all, and demanding one rejected the event stream. curl could not catch it because curl
+   * sends exactly the headers it is told to — the test was asserting my assumption rather
+   * than the browser's behaviour.
+   */
+  it('accepts a same-origin GET that carries no Origin, as browsers actually send it', () => {
+    const rejected = checkRequest(
+      request({ host: '127.0.0.1:7777', 'sec-fetch-site': 'same-origin' }),
+      policy,
+      { requireOrigin: true },
+    )
+    expect(rejected).toBeUndefined()
+  })
+
+  /** Sec-Fetch-Site cannot be forged by a page, so it still catches a cross-site GET. */
+  it('refuses a cross-site GET even though it carries no Origin', () => {
+    const rejected = checkRequest(
+      request({ host: '127.0.0.1:7777', 'sec-fetch-site': 'cross-site' }),
+      policy,
+      { requireOrigin: true },
+    )
+    expect(rejected?.status).toBe(403)
+  })
+
+  it('still demands an Origin on an unsafe method, which browsers always send', () => {
+    const rejected = checkRequest(request({ host: '127.0.0.1:7777' }, 'POST'), policy, { requireOrigin: true })
+    expect(rejected?.status).toBe(403)
+  })
+
+  /**
    * CSRF. Any page the user has open can POST to loopback; it cannot read the reply, but a
    * request that runs a shell command has already done its damage on the way in.
    */
   it('refuses a foreign origin', () => {
+    const rejected = checkRequest(
+      request({ host: '127.0.0.1:7777', origin: 'https://evil.example' }, 'POST'),
+      policy,
+      { requireOrigin: true },
+    )
+    expect(rejected?.status).toBe(403)
+  })
+
+  /** A foreign origin is refused on a GET too, where the Origin requirement is relaxed. */
+  it('refuses a foreign origin on a safe method as well', () => {
     const rejected = checkRequest(
       request({ host: '127.0.0.1:7777', origin: 'https://evil.example' }),
       policy,
@@ -42,16 +85,11 @@ describe('checkRequest', () => {
    */
   it('refuses a Host this server never bound, even with a matching Origin', () => {
     const rejected = checkRequest(
-      request({ host: 'evil.example:7777', origin: 'http://evil.example:7777' }),
+      request({ host: 'evil.example:7777', origin: 'http://evil.example:7777' }, 'POST'),
       policy,
       { requireOrigin: true },
     )
     expect(rejected?.status).toBe(421)
-  })
-
-  it('refuses an API request with no Origin at all', () => {
-    const rejected = checkRequest(request({ host: '127.0.0.1:7777' }), policy, { requireOrigin: true })
-    expect(rejected?.status).toBe(403)
   })
 
   /** A top-level navigation sends no Origin, which is how the page itself gets fetched. */

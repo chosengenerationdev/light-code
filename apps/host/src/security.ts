@@ -21,8 +21,11 @@ export interface RejectedRequest {
   reason: string
 }
 
+/** Methods a browser treats as non-mutating, and for which it omits `Origin`. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
 /**
- * Checks `Origin` and `Host` on every request.
+ * Checks `Host` and `Origin` on every request.
  *
  * Both, for different attacks, and neither substitutes for the other:
  *
@@ -33,8 +36,20 @@ export interface RejectedRequest {
  *   What gives it away is that the browser sends `Host: evil.example:53421` rather than
  *   the loopback address this server is reachable at.
  *
- * A missing `Origin` is allowed only for same-origin navigations, which is how the browser
- * fetches the page itself; the API paths demand one.
+ * **A same-origin GET carries no `Origin` header at all.** Browsers send it on every
+ * cross-origin request, but for same-origin requests only when the method is unsafe. So
+ * demanding one on every API path rejects the page's own event stream — which is exactly
+ * what happened, and what a curl test could not catch because curl sends whatever it is
+ * told to.
+ *
+ * The layering that replaces it:
+ * - An `Origin` that *is* present must be allowed, whatever the method. That is the CSRF
+ *   case, and it is the only case where a browser sends one cross-origin.
+ * - `Sec-Fetch-Site` is checked when present. Every current browser sends it and a page
+ *   cannot forge it, so `cross-site` is refused even on a GET.
+ * - An unsafe method must carry an `Origin`, since a browser always sends one there.
+ * - Every `/api/` route additionally requires the bearer token, which a foreign page has
+ *   no way to obtain — it lives in this origin's `sessionStorage`.
  */
 export function checkRequest(
   request: IncomingMessage,
@@ -50,12 +65,21 @@ export function checkRequest(
   }
 
   const origin = request.headers.origin
-  if (origin === undefined) {
-    // A same-origin GET navigation sends no Origin. Anything that acts must have one.
-    return options.requireOrigin ? { status: 403, reason: 'Missing Origin header.' } : undefined
-  }
-  if (!policy.allowedOrigins.includes(origin.toLowerCase())) {
+  if (origin !== undefined && !policy.allowedOrigins.includes(origin.toLowerCase())) {
     return { status: 403, reason: `Origin "${origin}" is not allowed.` }
+  }
+
+  // `none` is a user-typed address or a bookmark; `same-origin` is this page's own fetch.
+  // Absent means an older browser or a non-browser client, where the bearer token carries
+  // the weight instead.
+  const fetchSite = request.headers['sec-fetch-site']
+  if (typeof fetchSite === 'string' && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+    return { status: 403, reason: `Cross-site request (Sec-Fetch-Site: ${fetchSite}) is not allowed.` }
+  }
+
+  const method = (request.method ?? 'GET').toUpperCase()
+  if (options.requireOrigin && !SAFE_METHODS.has(method) && origin === undefined) {
+    return { status: 403, reason: `Missing Origin header on a ${method}.` }
   }
   return undefined
 }
