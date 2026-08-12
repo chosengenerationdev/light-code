@@ -268,6 +268,26 @@ describe('summariseHit', () => {
     expect(summary).toContain('…')
     expect(summary.length).toBeLessThan(300)
   })
+
+  /**
+   * A bare ellipsis reads as "the message ends here". The model then reports a truncation
+   * it cannot undo — this clip never reaches disk, so there is no `read_tool_result` handle
+   * for it — instead of narrowing the query, which is the actual fix available to it.
+   */
+  it('says how much was cut, and reports the field so the tool can explain the fix', () => {
+    const clipped: string[] = []
+    const summary = summariseHit({ message: 'x'.repeat(900) }, 100, (field) => clipped.push(field))
+
+    expect(summary).toContain('[clipped, 900 chars total]')
+    expect(clipped).toEqual(['message'])
+  })
+
+  it('does not report a clip for a value that fits', () => {
+    const clipped: string[] = []
+    summariseHit({ level: 'ERROR' }, 100, (field) => clipped.push(field))
+
+    expect(clipped).toEqual([])
+  })
 })
 
 describe('production guard rails', () => {

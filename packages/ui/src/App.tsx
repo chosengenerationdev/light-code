@@ -88,6 +88,7 @@ export function App(props: AppProps): ReactElement {
   const [searchIndexes, setSearchIndexes] = useState<SearchIndex[]>([])
   const [searchIndexesWarning, setSearchIndexesWarning] = useState<string | undefined>(undefined)
   const [searchTestResult, setSearchTestResult] = useState<{ ok: boolean; detail: string } | undefined>(undefined)
+  const [searchSavedTick, setSearchSavedTick] = useState(0)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -214,6 +215,8 @@ export function App(props: AppProps): ReactElement {
         setMentionCandidates(message.paths)
       } else if (message.type === 'capabilities') {
         setSupportsVision(message.supportsVision)
+      } else if (message.type === 'searchConnectionSaved') {
+        setSearchSavedTick((tick) => tick + 1)
       } else if (message.type === 'network') {
         setNetwork(message.settings)
       } else if (message.type === 'expert') {
@@ -359,8 +362,11 @@ export function App(props: AppProps): ReactElement {
     indexes: searchIndexes,
     ...(searchIndexesWarning !== undefined ? { indexesWarning: searchIndexesWarning } : {}),
     ...(searchTestResult !== undefined ? { testResult: searchTestResult } : {}),
-    onSave: (connection: SearchConnectionInput) =>
-      props.transport.post({ type: 'saveSearchConnection', connection } satisfies UiToHostMessage),
+    savedTick: searchSavedTick,
+    onSave: (connection: SearchConnectionInput) => {
+      setError(undefined)
+      props.transport.post({ type: 'saveSearchConnection', connection } satisfies UiToHostMessage)
+    },
     onDelete: (id: string) => props.transport.post({ type: 'deleteSearchConnection', id } satisfies UiToHostMessage),
     onSetActive: (id: string | undefined) =>
       props.transport.post({ type: 'setActiveSearchConnection', id } satisfies UiToHostMessage),
@@ -473,6 +479,39 @@ export function App(props: AppProps): ReactElement {
           </button>
         )}
       </div>
+      {/*
+        Errors are rendered here, outside the view switch, because they can arrive while any
+        view is open. They used to be shown only inside `Chat`, so a failed save in Settings
+        set the state and displayed nothing at all — the form simply closed and the change
+        was gone, with the explanation sitting in a variable nobody rendered.
+      */}
+      {error !== undefined && view !== 'chat' && (
+        <div
+          role="alert"
+          style={{
+            margin: '8px 12px 0',
+            padding: '8px 10px',
+            fontSize: 12,
+            borderRadius: 4,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            color: 'var(--vscode-inputValidation-errorForeground, var(--vscode-foreground))',
+            background: 'var(--vscode-inputValidation-errorBackground, transparent)',
+            border: '1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground))',
+          }}
+        >
+          <span style={{ flex: 1 }}>{error}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setError(undefined)}
+            style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {view === 'settings' ? (
           <SettingsPanel

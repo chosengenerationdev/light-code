@@ -110,6 +110,12 @@ export const vectorStoreSchema = z.object({
        * 0 disables, allowing unbounded scans.
        */
       defaultLookbackHours: z.number().int().min(0),
+      /**
+       * Longest single field value kept in a hit. Unlike the whole-result cap, this clip
+       * cannot be undone with `read_tool_result` — the text never left the tool — so a log
+       * index whose messages carry stack traces usually wants it raised.
+       */
+      maxFieldChars: z.number().int().min(50).max(20_000),
     })
     .partial()
     .optional(),

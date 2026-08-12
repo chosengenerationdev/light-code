@@ -27,6 +27,8 @@ export interface SearchTabProps {
   indexes: SearchIndex[]
   indexesWarning?: string
   testResult?: { ok: boolean; detail: string }
+  /** Increments each time the host confirms a save actually reached disk. */
+  savedTick: number
   onSave: (connection: SearchConnectionInput) => void
   onDelete: (id: string) => void
   onSetActive: (id: string | undefined) => void
@@ -42,38 +44,82 @@ const BLANK: SearchConnectionSummary = {
   hasPassword: false,
 }
 
-/** A numeric limit with its default as the placeholder, so "unset" reads as the default. */
+/**
+ * A numeric limit with its default as the placeholder, so "unset" reads as the default.
+ *
+ * `min`/`max` mirror the config schema exactly. They are shown and checked here because the
+ * schema is the last line of defence, not the first: a value outside the range failed
+ * validation host-side, and the whole save was rejected — which is indistinguishable from
+ * "the button does nothing" if you were simply trying to raise the result count past 100.
+ */
 function LimitRow(props: {
   id: string
   label: string
+  /** The full explanation: what it does, and what going too low or too high costs you. */
+  tooltip: string
   hint?: string
   placeholder: string
+  min: number
+  /** Omitted where the schema imposes no upper bound. */
+  max?: number
   value: number | undefined
   onChange: (value: number | undefined) => void
 }): ReactElement {
+  const invalid =
+    props.value !== undefined && (props.value < props.min || (props.max !== undefined && props.value > props.max))
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-      <label htmlFor={props.id} style={{ ...labelStyle(), marginBottom: 0, flex: 1 }}>
-        {props.label}
-        {props.hint !== undefined && (
-          <span style={{ display: 'block', fontSize: 10, opacity: 0.8 }}>{props.hint}</span>
-        )}
-      </label>
-      <input
-        id={props.id}
-        type="number"
-        min={0}
-        value={props.value ?? ''}
-        placeholder={props.placeholder}
-        onChange={(event) => {
-          const parsed = Number.parseInt(event.target.value, 10)
-          props.onChange(Number.isNaN(parsed) ? undefined : parsed)
-        }}
-        style={{ ...textFieldStyle(), width: 110, flex: 'none' }}
-      />
+    <div style={{ marginBottom: 8 }} title={props.tooltip}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label htmlFor={props.id} style={{ ...labelStyle(), marginBottom: 0, flex: 1 }}>
+          {props.label}
+          <span
+            aria-hidden="true"
+            style={{ marginLeft: 4, opacity: 0.6, cursor: 'help', fontSize: 10, border: `1px solid ${colors.border}`, borderRadius: '50%', padding: '0 4px' }}
+          >
+            ?
+          </span>
+          <span style={{ display: 'block', fontSize: 10, opacity: 0.8 }}>
+            {props.hint !== undefined ? `${props.hint} ` : ''}
+            {props.max !== undefined ? `Allowed: ${props.min}–${props.max}.` : `Minimum ${props.min}.`}
+          </span>
+        </label>
+        <input
+          id={props.id}
+          type="number"
+          min={props.min}
+          {...(props.max !== undefined ? { max: props.max } : {})}
+          value={props.value ?? ''}
+          placeholder={props.placeholder}
+          onChange={(event) => {
+            const parsed = Number.parseInt(event.target.value, 10)
+            props.onChange(Number.isNaN(parsed) ? undefined : parsed)
+          }}
+          style={{
+            ...textFieldStyle(),
+            width: 110,
+            flex: 'none',
+            ...(invalid ? { borderColor: 'var(--vscode-inputValidation-errorBorder, red)' } : {}),
+          }}
+        />
+      </div>
+      {invalid && (
+        <div style={{ fontSize: 11, color: 'var(--vscode-errorForeground, red)', textAlign: 'right' }}>
+          {props.max !== undefined ? `Must be between ${props.min} and ${props.max}.` : `Must be at least ${props.min}.`}
+        </div>
+      )}
     </div>
   )
 }
+
+/** Mirrors `vectorStoreSchema.limits`. Kept adjacent so the two are edited together. */
+const LIMIT_RANGES = {
+  maxHits: { min: 1, max: 100 },
+  timeoutSeconds: { min: 1, max: 120 },
+  terminateAfter: { min: 0 },
+  maxIndexes: { min: 0 },
+  defaultLookbackHours: { min: 0 },
+  maxFieldChars: { min: 50, max: 20_000 },
+} as const
 
 export function SearchTab(props: SearchTabProps): ReactElement {
   const [editing, setEditing] = useState<SearchConnectionSummary | undefined>(undefined)
@@ -85,6 +131,22 @@ export function SearchTab(props: SearchTabProps): ReactElement {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [limits, setLimits] = useState<SearchQueryLimits>({})
+  const [saving, setSaving] = useState(false)
+
+  /*
+   * The form used to close the instant Save was clicked, before the host had written
+   * anything. A save that failed validation therefore looked exactly like one that
+   * succeeded — the form closed, the values were gone, and the error went to a banner the
+   * settings view did not render. It now closes only when the host confirms the write.
+   */
+  useEffect(() => {
+    if (!saving) return
+    setSaving(false)
+    setEditing(undefined)
+    // Deliberately keyed on `savedTick` alone — a counter rather than a boolean, so two
+    // saves in a row both fire. Including `saving` would close the form the moment Save
+    // was pressed, which is the behaviour this replaces.
+  }, [props.savedTick])
 
   // Resync when a different connection is opened, or when the host echoes a save back.
   useEffect(() => {
@@ -266,38 +328,113 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
 
         <LimitRow
           id="lc-os-hits"
+          {...LIMIT_RANGES.maxHits}
           label="Maximum results"
+          hint="Documents returned per search."
+          tooltip={
+            'How many documents one search returns.\n\n' +
+            'The tool caps the model here no matter how many it asks for. Every hit spends ' +
+            'context, so a high value crowds out the rest of the conversation and can push ' +
+            'the result past the overall size cap, after which the model has to re-read it ' +
+            'in pieces.\n\n' +
+            'Raise it when the model keeps saying it found too few matches to judge. Lower ' +
+            'it when replies are slow or the context bar fills up quickly.\n\n' +
+            'Default 10.'
+          }
           placeholder="10"
           value={limits.maxHits}
           onChange={(value) => setLimits({ ...limits, maxHits: value })}
         />
         <LimitRow
           id="lc-os-lookback"
+          {...LIMIT_RANGES.defaultLookbackHours}
           label="Default lookback (hours)"
-          hint="Applied when the model gives no time range and the index has a date field. 0 allows unbounded scans."
+          hint="Time window used when the model asks for none."
+          tooltip={
+            'A time window applied automatically when the model gives no date range and the ' +
+            'index has a date field.\n\n' +
+            'This is the single most effective protection for a log index: on years of data, ' +
+            'the difference between searching a day and searching everything is the ' +
+            'difference between instant and a cluster in trouble. The model is always told ' +
+            'the window was applied, so it can ask for a wider one deliberately.\n\n' +
+            'Set 0 to allow unbounded scans — only sensible on a small index.\n\n' +
+            'Default 24 hours.'
+          }
           placeholder="24"
           value={limits.defaultLookbackHours}
           onChange={(value) => setLimits({ ...limits, defaultLookbackHours: value })}
         />
         <LimitRow
+          id="lc-os-fieldchars"
+          {...LIMIT_RANGES.maxFieldChars}
+          label="Longest field value"
+          hint="Characters kept from one field of one document."
+          tooltip={
+            'How much of a single field is kept before it is cut short.\n\n' +
+            'This is the limit to raise if the model keeps reporting that log messages are ' +
+            'truncated. A stack trace runs to several thousand characters and the default ' +
+            'keeps 500 of them.\n\n' +
+            'Unlike the overall result cap, this cut cannot be undone — the text never ' +
+            'leaves the tool, so there is nothing to re-read. It is reported in the result ' +
+            'rather than hidden, so a clipped trace never reads as a short one.\n\n' +
+            'Default 500 characters.'
+          }
+          placeholder="500"
+          value={limits.maxFieldChars}
+          onChange={(value) => setLimits({ ...limits, maxFieldChars: value })}
+        />
+        <LimitRow
           id="lc-os-timeout"
+          {...LIMIT_RANGES.timeoutSeconds}
           label="Query timeout (seconds)"
+          hint="Per-shard time budget sent with the query."
+          tooltip={
+            'How long each shard may spend on one search, sent to OpenSearch as the ' +
+            "query's own timeout.\n\n" +
+            'On expiry the cluster returns whatever it has found so far rather than ' +
+            'failing, so a slow query degrades into a partial answer instead of hanging the ' +
+            'conversation.\n\n' +
+            'Raise it for a large or heavily loaded cluster where legitimate searches are ' +
+            'genuinely slow.\n\n' +
+            'Default 10 seconds.'
+          }
           placeholder="10"
           value={limits.timeoutSeconds}
           onChange={(value) => setLimits({ ...limits, timeoutSeconds: value })}
         />
         <LimitRow
           id="lc-os-terminate"
+          {...LIMIT_RANGES.terminateAfter}
           label="Documents examined per shard"
-          hint="Stops a query early rather than letting it walk the whole index. 0 disables."
+          hint="Stops a query early instead of walking the whole index."
+          tooltip={
+            'How many documents each shard may inspect before it stops looking.\n\n' +
+            'A timeout limits how long a query runs; this limits how much work it does. ' +
+            'It is what stops a badly-targeted search from walking an entire index and ' +
+            'evicting everything else from the cluster cache.\n\n' +
+            'The trade-off: a rare match sitting past this point will not be found, and the ' +
+            'result will honestly say the count is capped rather than claim there were none.\n\n' +
+            'Set 0 to disable. Default 10,000.'
+          }
           placeholder="10000"
           value={limits.terminateAfter}
           onChange={(value) => setLimits({ ...limits, terminateAfter: value })}
         />
         <LimitRow
           id="lc-os-maxindexes"
+          {...LIMIT_RANGES.maxIndexes}
           label="Maximum indexes per query"
-          hint="Refuses a wildcard that fans out wider than this. 0 disables the check."
+          hint="Refuses a wildcard that fans out wider than this."
+          tooltip={
+            'How many indexes one search may span.\n\n' +
+            'A pattern like `logs-*` can resolve to hundreds of daily indexes, and querying ' +
+            'them together is one of the easiest ways to overload a cluster by accident. ' +
+            'A pattern matching more than this is refused before it is sent, and the model ' +
+            'is told to narrow it.\n\n' +
+            'Raise it if you routinely search a wide date range of daily indexes. Set 0 to ' +
+            'disable the check.\n\n' +
+            'Default 5.'
+          }
           placeholder="5"
           value={limits.maxIndexes}
           onChange={(value) => setLimits({ ...limits, maxIndexes: value })}
@@ -320,13 +457,13 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
             type="button"
             style={primaryButtonStyle(false)}
             onClick={() => {
+              setSaving(true)
               props.onSave(currentInput())
-              setEditing(undefined)
             }}
           >
             Save
@@ -334,6 +471,7 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
           <button type="button" style={secondaryButtonStyle()} onClick={() => setEditing(undefined)}>
             Cancel
           </button>
+          {saving && <span style={{ fontSize: 11, color: colors.muted }}>Saving…</span>}
         </div>
       </div>
     )

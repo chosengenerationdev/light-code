@@ -164,6 +164,7 @@ export interface SearchQueryLimits {
   terminateAfter?: number | undefined
   maxIndexes?: number | undefined
   defaultLookbackHours?: number | undefined
+  maxFieldChars?: number | undefined
 }
 
 /** What a save carries. Empty credential fields mean "unchanged", as everywhere else. */
@@ -334,6 +335,8 @@ export type HostToUiMessage =
   /** `warning` with an empty list is normal: `_cat/indices` is often denied (§9). */
   | { type: 'searchIndexes'; indexes: { name: string; docsCount?: number; storeSize?: string }[]; warning?: string }
   | { type: 'searchTestResult'; ok: boolean; detail: string }
+  /** The save reached disk. The form stays open until this arrives, so a failure keeps the typed values. */
+  | { type: 'searchConnectionSaved'; id: string }
   | { type: 'network'; settings: NetworkSettingsSummary }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
   | {

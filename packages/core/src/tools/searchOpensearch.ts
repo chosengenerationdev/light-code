@@ -114,8 +114,13 @@ export function createSearchOpensearchTool(options: SearchOpensearchOptions): To
           }
         }
 
+        const clipped = new Set<string>()
         const rendered = result.hits
-          .map((hit, position) => `[${position + 1}] score ${hit.score.toFixed(2)}  id=${hit.id}\n${summariseHit(hit.source)}`)
+          .map(
+            (hit, position) =>
+              `[${position + 1}] score ${hit.score.toFixed(2)}  id=${hit.id}\n` +
+              summariseHit(hit.source, limits.maxFieldChars, (field) => clipped.add(field)),
+          )
           .join('\n\n---\n\n')
 
         // Guards are reported, never silent. A document that exists but falls outside an
@@ -129,6 +134,16 @@ export function createSearchOpensearchTool(options: SearchOpensearchOptions): To
           )
         }
         if (result.total >= 1000) notes.push('The match count is capped at 1000; the real total may be higher.')
+        if (clipped.size > 0) {
+          // Says what to do about it. Without this the model reports "the logs are
+          // truncated" to the user, which is true but useless — the fix is a narrower
+          // query, or the user raising the limit, and only one of those is the model's.
+          notes.push(
+            `These fields were clipped at ${limits.maxFieldChars} characters: ${[...clipped].join(', ')}. ` +
+              'Narrow the query to fewer hits to see more of each, or ask the user to raise ' +
+              '"Longest field value" in Settings → Search.',
+          )
+        }
 
         return {
           content: [

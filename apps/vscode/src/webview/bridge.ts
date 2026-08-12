@@ -1172,6 +1172,8 @@ export function wireChatBridge(
 
       await configManager.save('user', { vectorStores: { ...config.vectorStores, [id]: store } })
       await postSearch()
+      // Only after the write succeeded: the form uses this to decide it can close.
+      post({ type: 'searchConnectionSaved', id })
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }

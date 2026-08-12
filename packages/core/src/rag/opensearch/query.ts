@@ -70,6 +70,13 @@ export const DEFAULT_QUERY_LIMITS = {
   terminateAfter: 10_000,
   maxIndexes: 5,
   defaultLookbackHours: 24,
+  /**
+   * Per *field* clip inside a hit. Separate from the whole-result cap the agent loop
+   * applies: that one spills to disk and hands the model a re-read handle, whereas this
+   * clip is unrecoverable, so it is the one worth raising for a log index whose messages
+   * carry stack traces.
+   */
+  maxFieldChars: 500,
 } as const
 
 export type ResolvedQueryLimits = { -readonly [K in keyof typeof DEFAULT_QUERY_LIMITS]: number }
@@ -95,6 +102,7 @@ export interface QueryLimits {
   terminateAfter?: number | undefined
   maxIndexes?: number | undefined
   defaultLookbackHours?: number | undefined
+  maxFieldChars?: number | undefined
 }
 
 export interface BuildQueryOptions {
@@ -249,12 +257,24 @@ function escapeRegExp(value: string): string {
  * burns the context window on noise the model did not ask for and cannot use, so long
  * values are clipped and empty ones dropped.
  */
-export function summariseHit(source: Record<string, unknown>, maxFieldChars = 500): string {
+export function summariseHit(
+  source: Record<string, unknown>,
+  maxFieldChars: number = DEFAULT_QUERY_LIMITS.maxFieldChars,
+  onClip?: (field: string, fullLength: number) => void,
+): string {
   const parts: string[] = []
   for (const [field, value] of Object.entries(source)) {
     if (value === null || value === undefined || value === '') continue
     const rendered = typeof value === 'string' ? value : JSON.stringify(value)
-    parts.push(`${field}: ${rendered.length > maxFieldChars ? `${rendered.slice(0, maxFieldChars)}…` : rendered}`)
+    if (rendered.length > maxFieldChars) {
+      // Named, not a bare ellipsis. A clipped stack trace looks like a short one, and the
+      // model cannot tell "the log says this" from "the log says this and 8KB more" —
+      // which is how it ends up reporting a truncation it has no way to undo.
+      onClip?.(field, rendered.length)
+      parts.push(`${field}: ${rendered.slice(0, maxFieldChars)}… [clipped, ${rendered.length} chars total]`)
+    } else {
+      parts.push(`${field}: ${rendered}`)
+    }
   }
   return parts.join('\n')
 }
