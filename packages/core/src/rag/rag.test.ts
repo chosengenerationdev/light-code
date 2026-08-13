@@ -91,6 +91,34 @@ describe('Embedder', () => {
     await expect(embedder.embed('x')).rejects.toThrow(/4-dimensional.*configured for 1024/s)
   })
 
+  /**
+   * The bug a real cluster found. `JSON.stringify([1, NaN, 3])` is `[1,null,3]`, so one bad
+   * float reaches OpenSearch as a null and the whole document is rejected with "failed to
+   * parse field [vector] of type [knn_vector] ... preview of field's value: null" — a message
+   * about the mapping, when the mapping is fine. Checking `Array.isArray` and length was not
+   * enough; the elements have to be numbers.
+   */
+  it('refuses a vector containing NaN, which would serialise to null', async () => {
+    const { client } = http(() => ({ payload: { data: [{ index: 0, embedding: [0.1, Number.NaN, 0.3] }] } }))
+    const embedder = new Embedder(client, { profile, auth: new NoAuthStrategy(), model: 'e', dimensions: 3 })
+
+    await expect(embedder.embed('x')).rejects.toThrow(/NaN at position 1/)
+  })
+
+  it('refuses a vector containing null', async () => {
+    const { client } = http(() => ({ payload: { data: [{ index: 0, embedding: [0.1, null, 0.3] }] } }))
+    const embedder = new Embedder(client, { profile, auth: new NoAuthStrategy(), model: 'e', dimensions: 3 })
+
+    await expect(embedder.embed('x')).rejects.toThrow(/position 1/)
+  })
+
+  it('refuses Infinity, which serialises to null just as quietly', async () => {
+    const { client } = http(() => ({ payload: { data: [{ index: 0, embedding: [1, 2, Number.POSITIVE_INFINITY] }] } }))
+    const embedder = new Embedder(client, { profile, auth: new NoAuthStrategy(), model: 'e', dimensions: 3 })
+
+    await expect(embedder.embed('x')).rejects.toThrow(/position 2/)
+  })
+
   it('batches a large input rather than sending one enormous request', async () => {
     const { client, calls } = http((_url, _method, body) => {
       const input = (JSON.parse(body ?? '{}') as { input: string[] }).input
@@ -161,6 +189,44 @@ describe('OpenSearchIndexWriter ownership', () => {
     const bulk = calls.find((call) => call.url.endsWith('/_bulk'))
     expect(bulk).toBeDefined()
     expect(String(bulk?.body)).toContain('"_id":"1"')
+  })
+
+  /**
+   * A vector field's width is fixed at creation. Switching embedding model without switching
+   * index means every write fails with a mapping error that never mentions the real cause.
+   */
+  it('refuses an existing index whose vector width does not match', async () => {
+    const { client } = http((url) =>
+      url.includes('_mapping')
+        ? {
+            payload: {
+              idx: {
+                mappings: { _meta: { createdBy: OWNED_INDEX_MARKER }, properties: { vector: { dimension: 768 } } },
+              },
+            },
+          }
+        : { payload: {} },
+    )
+
+    await expect(new OpenSearchIndexWriter(client, connection).ensureIndex('idx', 1536)).rejects.toThrow(
+      /stores 768-dimensional vectors.*produces 1536/s,
+    )
+  })
+
+  it('accepts an existing index whose width matches', async () => {
+    const { client } = http((url) =>
+      url.includes('_mapping')
+        ? {
+            payload: {
+              idx: {
+                mappings: { _meta: { createdBy: OWNED_INDEX_MARKER }, properties: { vector: { dimension: 1536 } } },
+              },
+            },
+          }
+        : { payload: {} },
+    )
+
+    await expect(new OpenSearchIndexWriter(client, connection).ensureIndex('idx', 1536)).resolves.toBeUndefined()
   })
 
   it('refuses a wildcard as a write target', async () => {

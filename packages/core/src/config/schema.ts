@@ -184,6 +184,15 @@ export const embedderConfigSchema = z
     model: z.string().min(1),
     /** Required to create the `knn_vector` mapping — OpenSearch needs a fixed dimension. */
     dimensions: z.number().int().positive(),
+    /**
+     * The index this workspace is written to. Unset derives one from the workspace path,
+     * which is collision-free but unreadable — and on a shared cluster the person looking at
+     * the index list has no way to tell whose `light-code-a3f2…` it is.
+     *
+     * Also the escape hatch for a width change: a vector field's dimension is fixed at
+     * creation, so switching embedding model means a new index, and naming it is how.
+     */
+    indexName: z.string().min(1),
   })
   .partial()
 

@@ -254,6 +254,7 @@ export function App(props: AppProps): ReactElement {
           ...(message.model !== undefined ? { model: message.model } : {}),
           ...(message.dimensions !== undefined ? { dimensions: message.dimensions } : {}),
           ...(message.indexName !== undefined ? { indexName: message.indexName } : {}),
+          ...(message.indexNameIsCustom !== undefined ? { indexNameIsCustom: message.indexNameIsCustom } : {}),
           indexedFiles: message.indexedFiles,
         })
       } else if (message.type === 'python') {
@@ -452,9 +453,15 @@ export function App(props: AppProps): ReactElement {
         setEmbedderModelsLoading(true)
         props.transport.post({ type: 'requestEmbedderModels', profileId } satisfies UiToHostMessage)
       },
-      onSaveEmbedder: (profileId: string, model: string, dimensions: number) => {
+      onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string) => {
         setError(undefined)
-        props.transport.post({ type: 'saveEmbedder', profileId, model, dimensions } satisfies UiToHostMessage)
+        props.transport.post({
+          type: 'saveEmbedder',
+          profileId,
+          model,
+          dimensions,
+          ...(indexName.length > 0 ? { indexName } : {}),
+        } satisfies UiToHostMessage)
       },
       onStartIndexing: () => {
         setIndexResult(undefined)

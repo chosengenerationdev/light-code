@@ -119,6 +119,21 @@ export class OpenSearchIndexWriter {
 
     if (await this.exists(index, signal)) {
       await this.assertOwned(index, signal)
+      /*
+       * An existing index keeps the width it was created with — a mapping cannot be altered.
+       * Left unchecked, switching to a model of a different width means every single write
+       * fails with a mapping error that never mentions the real cause, which is that this
+       * index belongs to the previous model.
+       */
+      const existing = await this.vectorDimension(index, signal)
+      if (existing !== undefined && existing !== dimensions) {
+        throw new OpenSearchError(
+          `Index "${index}" stores ${existing}-dimensional vectors, but the configured embedding ` +
+            `model produces ${dimensions}. A vector field's width is fixed when the index is created. ` +
+            'Either set the width back in Settings → Search, or use a different index name so a new ' +
+            'one is created for this model.',
+        )
+      }
       return
     }
 
@@ -141,6 +156,26 @@ export class OpenSearchIndexWriter {
       },
       signal,
     )
+  }
+
+  /** The width an existing index was created with, or undefined if it cannot be read. */
+  private async vectorDimension(index: string, signal?: AbortSignal): Promise<number | undefined> {
+    try {
+      const body = await this.request<Record<string, unknown>>(
+        `/${encodeURIComponent(index)}/_mapping`,
+        'GET',
+        undefined,
+        signal,
+      )
+      const mappings = (body[index] as { mappings?: unknown } | undefined)?.mappings as
+        | { properties?: { vector?: { dimension?: unknown } } }
+        | undefined
+      const dimension = mappings?.properties?.vector?.dimension
+      return typeof dimension === 'number' ? dimension : undefined
+    } catch {
+      // Unreadable mapping is not worth failing over — the write will report its own error.
+      return undefined
+    }
   }
 
   /**

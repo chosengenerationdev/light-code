@@ -7,6 +7,7 @@ export interface EmbedderState {
   model?: string
   dimensions?: number
   indexName?: string
+  indexNameIsCustom?: boolean
   indexedFiles: number
 }
 
@@ -24,7 +25,7 @@ export interface IndexingSectionProps {
   /** Increments when the host confirms the save reached disk. */
   savedTick: number
   onRequestModels: (profileId: string) => void
-  onSaveEmbedder: (profileId: string, model: string, dimensions: number) => void
+  onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string) => void
   onStartIndexing: () => void
   onCancelIndexing: () => void
 }
@@ -44,6 +45,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
   const [profileId, setProfileId] = useState('')
   const [model, setModel] = useState('')
   const [dimensions, setDimensions] = useState('')
+  const [indexName, setIndexName] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -52,6 +54,8 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
     setProfileId(props.embedder?.profileId ?? '')
     setModel(props.embedder?.model ?? '')
     setDimensions(props.embedder?.dimensions !== undefined ? String(props.embedder.dimensions) : '')
+    // Only a *chosen* name populates the field; a derived one stays as the placeholder.
+    setIndexName(props.embedder?.indexNameIsCustom === true ? (props.embedder.indexName ?? '') : '')
   }, [props.embedder])
 
   /*
@@ -186,12 +190,33 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
         </span>
       </div>
 
+      <div style={{ marginBottom: 10 }}>
+        <label htmlFor="lc-emb-index" style={labelStyle()}>
+          Index name
+        </label>
+        <input
+          id="lc-emb-index"
+          type="text"
+          value={indexName}
+          spellCheck={false}
+          placeholder={props.embedder?.indexName ?? 'derived from the workspace path'}
+          onChange={(event) => setIndexName(event.target.value)}
+          style={textFieldStyle()}
+        />
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+          Leave blank and one is derived from this folder&apos;s path — collision-free, but nobody
+          looking at the cluster can tell whose it is. Name it if you share a cluster. Also how you
+          move to a new index after changing the embedding model: a vector field&apos;s width is fixed
+          when the index is created, so a different width needs a different index.
+        </span>
+      </div>
+
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
         <button
           type="button"
           style={secondaryButtonStyle()}
           disabled={!configured}
-          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions)}
+          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim())}
         >
           Save embedder
         </button>

@@ -135,6 +135,24 @@ export class Embedder {
       if (entry.embedding === undefined) {
         throw new EmbedderError(`The embedding endpoint returned no vector for input ${position}.`)
       }
+      /*
+       * Every element must be a finite number, not merely present.
+       *
+       * `JSON.stringify([1, NaN, 3])` yields `[1,null,3]`, so a single NaN — or a null the
+       * endpoint returned inside the array — reaches OpenSearch as a null and is rejected
+       * with "failed to parse field [vector] of type [knn_vector] ... preview of field's
+       * value: null". That message points at the mapping, which is the wrong place to look,
+       * and the actual culprit is one bad float among a thousand good ones.
+       */
+      const badAt = entry.embedding.findIndex((value) => typeof value !== 'number' || !Number.isFinite(value))
+      if (badAt !== -1) {
+        throw new EmbedderError(
+          `"${this.config.model}" returned a vector containing ${String(entry.embedding[badAt])} at position ${badAt}. ` +
+            'A non-numeric value becomes null once serialised and the index rejects the whole document. ' +
+            'This usually means the embedding endpoint failed for that input rather than erroring outright — ' +
+            'check the gateway logs for the batch it was in.',
+        )
+      }
       if (entry.embedding.length !== this.config.dimensions) {
         // Caught here rather than at write time: OpenSearch rejects a wrong-width vector
         // with a message about the mapping, which sends people to the wrong problem.

@@ -620,7 +620,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       const expertCliInfo = await resolveExpert(config)
       const search = await resolveSearch(config)
       const embedder = await resolveEmbedder(config)
-      const codebaseIndex = codebaseIndexName()
+      const codebaseIndex = codebaseIndexName(config)
       // Listed once per turn so the tool description can name real indexes; a failure here
       // only costs the model that hint, never the tool.
       const searchIndexes =
@@ -1159,8 +1159,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     }
   }
 
-  /** The index Light Code writes this workspace into. Derived, never model-supplied. */
-  function codebaseIndexName(): string | undefined {
+  /** The index Light Code writes this workspace into. User-set or derived; never model-supplied. */
+  function codebaseIndexName(config?: LightCodeConfig): string | undefined {
+    const chosen = config?.embedder?.indexName?.trim()
+    if (chosen !== undefined && chosen.length > 0) return chosen
     if (workspaceRoot === undefined) return undefined
     // Derived from the workspace path so two projects on one cluster do not collide, and
     // so the same project reindexes into the same place. Hashed because an index name
@@ -1236,7 +1238,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       return
     }
     const { config } = await configManager.load()
-    const index = codebaseIndexName()
+    const index = codebaseIndexName(config)
     const search = await resolveSearch(config)
     const embedder = await resolveEmbedder(config)
 
@@ -1322,7 +1324,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   }
 
   async function postEmbedder(config: LightCodeConfig): Promise<void> {
-    const index = codebaseIndexName()
+    const index = codebaseIndexName(config)
     let indexedFiles = 0
     if (index !== undefined) {
       try {
@@ -1344,9 +1346,21 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     })
   }
 
-  async function handleSaveEmbedder(profileId: string, model: string, dimensions: number): Promise<void> {
+  async function handleSaveEmbedder(
+    profileId: string,
+    model: string,
+    dimensions: number,
+    indexName?: string,
+  ): Promise<void> {
     try {
-      await configManager.save('user', { embedder: { profileId, model, dimensions } })
+      await configManager.save('user', {
+        embedder: {
+          profileId,
+          model,
+          dimensions,
+          ...(indexName !== undefined && indexName.trim().length > 0 ? { indexName: indexName.trim() } : {}),
+        },
+      })
       const { config } = await configManager.load()
       await postEmbedder(config)
       // Confirmed explicitly. The form resyncs to the same values it just sent, so without
@@ -2028,7 +2042,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     } else if (message.type === 'cancelIndexing') {
       indexingAbort?.abort()
     } else if (message.type === 'saveEmbedder') {
-      void handleSaveEmbedder(message.profileId, message.model, message.dimensions)
+      void handleSaveEmbedder(message.profileId, message.model, message.dimensions, message.indexName)
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
     } else if (message.type === 'requestPython') {

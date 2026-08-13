@@ -279,7 +279,7 @@ export type UiToHostMessage =
   /** Indexing is user-started, never model-started: it is the largest egress in the product. */
   | { type: 'startIndexing' }
   | { type: 'cancelIndexing' }
-  | { type: 'saveEmbedder'; profileId: string; model: string; dimensions: number }
+  | { type: 'saveEmbedder'; profileId: string; model: string; dimensions: number; indexName?: string }
   /**
    * Lists models for an already-saved profile.
    *
@@ -406,6 +406,8 @@ export type HostToUiMessage =
       dimensions?: number
       /** Undefined when no folder is open, so the UI can say why indexing is unavailable. */
       indexName?: string
+      /** False means it was derived from the workspace path rather than chosen. */
+      indexNameIsCustom?: boolean
       indexedFiles: number
     }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
