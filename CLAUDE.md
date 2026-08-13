@@ -808,10 +808,18 @@ no native picker, so `showOpenDialog` returns `undefined` — indistinguishable 
 and every path field stays typeable. That is why the Browse buttons were built as an
 addition to the text input rather than a replacement for it.
 
-**Current phase:** **Shipped.** 0.1.0 was published to the Visual Studio Marketplace on
-2026-08-09 (manual upload — the Azure DevOps org creation demanded an Azure subscription, so
-`VSCE_PAT` does not exist and the Release workflow has never run). 0.4.0 is built and
-verified, awaiting upload.
+**Current phase:** **Shipped.** Published to the Visual Studio Marketplace by manual upload —
+the Azure DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and
+the Release workflow has never run. **0.8.1 was live as of 2026-08-12; 0.10.0 was uploaded on
+2026-08-13 and had not yet appeared in the gallery.**
+
+Also on npm: `@chosengeneration/light-code` (the Node host, §14), published 2026-08-12.
+The bare name `light-code` belongs to an unrelated package, hence the scope.
+
+**Check the gallery rather than this file before claiming a published version** — the query is
+`POST https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery` with
+`filterType 7` and the extension id. This paragraph was stale for several versions and got
+repeated as fact.
 
 Since release, driven by real use in a corporate deployment: 0.1.1 (VS Code floor lowered to
 1.84), 0.1.2 (CA file and skip-verify for any profile; Qwen/Gemma; inline capability
