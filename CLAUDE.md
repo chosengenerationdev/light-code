@@ -875,6 +875,36 @@ shared venv, a persistent JSON-RPC worker, the hash-pinned registry, `create_pyt
 prompt, bodies via `read_file`). And **the Python tab has never been opened in a real
 Extension Host** — the whole path was driven from a script.
 
+**Phase 9 complete (0.10.0): Python tools and skills.** On top of the worker and registry:
+create/update/delete tools, the Python tab, project-venv reuse, PEP 723 dependency
+installation, and skills.
+- **The project's own virtualenv is preferred over creating one**, detected from `pyvenv.cfg`
+  (`uv =` marks a uv-created env). That is where a team's *internal libraries already live*;
+  a private venv is empty, and a tool importing a company package would fail in a way that
+  looks like a Light Code bug rather than a missing install. The tradeoff — tool dependencies
+  install into the user's project — is stated in the tab, not hidden.
+- **PEP 723 dependencies were declared but never installed.** The model was told to write them
+  and nothing acted on it, so a tool needing a library died on an `ImportError` from inside
+  the worker. They now install *before* validation, so the failure names the package and the
+  index. `python.indexUrl` points at an internal mirror; `offline` refuses the network.
+- **Skills are the answer to "teach it about our internal libraries".** Markdown in
+  `.lightcode/skills/`, only name+description in the prompt, bodies via `read_file` — no
+  `load_skill` tool, exactly as §13 says. The *maintaining* half is prompt guidance: offer
+  when the user explains something durable, ask first, check the list before duplicating, and
+  offer to correct a skill when something contradicts it, because a stale skill is worse than
+  a missing one.
+- Skills load once per turn before the prompt is built and are then fixed, like tool
+  definitions and for the same cache reason (§12). Load order is sorted for that reason too.
+
+**Vector-store backends: sequencing decided 2026-08-13.** The user reconfirmed wanting Qdrant
+and Chroma as alternatives to OpenSearch, for codebase indexing *and* potentially for skills.
+Agreed order: **verify OpenSearch against a real cluster first, then build the `VectorStore`
+seam and Qdrant, then decide about skills.** This is the plan's own argument — three backends
+built before one is validated is how all three end up mediocre.
+**Note the seam does not exist yet.** The plan assumed a `VectorStore` interface was keeping
+the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSchema.kind` is
+`z.literal('opensearch')`. Adding Qdrant therefore starts with extracting that abstraction.
+
 **Still outstanding, and now the oldest debt in the project:** `MANUAL_VERIFICATION.md` has
 never been run. Session A is the security properties — deny actually blocking execution, the
 approval prompt showing ground truth, and the exact-match command allowlist. 0.4.0 adds two
