@@ -3,6 +3,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { confine } from '../fs/confine.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
+import { describeInstallFailure, parseInlineDependencies } from './deps.js'
 import { approveTool, forgetTool, isValidToolName, toolFileName } from './registry.js'
 import type { PythonWorker, WorkerToolDescription } from './worker.js'
 
@@ -28,6 +29,12 @@ import type { PythonWorker, WorkerToolDescription } from './worker.js'
 export interface PythonToolContext {
   toolsDir: string
   worker: PythonWorker
+  /**
+   * Installs a tool's PEP 723 dependencies. Absent means dependency installation is
+   * unavailable, and a tool declaring any is rejected with that said plainly rather than
+   * failing later on an ImportError nobody can trace back to here.
+   */
+  installDeps?: ((packages: readonly string[]) => Promise<{ installed: string[]; error?: string }>) | undefined
   /**
    * Reloads the registry after a successful create/update/delete. Awaited, so `status()`
    * is accurate the moment the tool returns rather than a tick later.
@@ -123,17 +130,46 @@ function makeWriteTool(
         await fs.mkdir(context.toolsDir, { recursive: true })
         await fs.writeFile(filePath, params.source, 'utf8')
 
+        /*
+         * Puts the file back as it was. Leaving a broken or unapproved .py behind would sit
+         * in the workspace and be reported as an issue on every load — noise from a mistake
+         * the model already knows about and can fix.
+         */
+        const restore = async (): Promise<void> => {
+          if (before.length > 0) await fs.writeFile(filePath, before, 'utf8')
+          else await fs.rm(filePath, { force: true })
+        }
+
+        /*
+         * Dependencies first. The validation step imports the module, so a declared package
+         * that is not installed surfaces as an ImportError from deep inside the worker —
+         * technically accurate and completely unhelpful. Installing first means the failure,
+         * when it comes, names the package and the index it was looked for on.
+         */
+        const declared = parseInlineDependencies(params.source)
+        if (declared.length > 0) {
+          if (context.installDeps === undefined) {
+            await restore()
+            return {
+              content:
+                `This tool declares dependencies (${declared.join(', ')}) but dependency installation is ` +
+                'not available — uv could not be found. Rewrite it using only the standard library, ' +
+                'or ask the user to configure uv in Settings → Python.',
+              isError: true,
+            }
+          }
+          const install = await context.installDeps(declared)
+          if (install.error !== undefined) {
+            await restore()
+            return { content: describeInstallFailure(install), isError: true }
+          }
+        }
+
         let described: WorkerToolDescription
         try {
           described = await context.worker.validate(params.name, filePath)
         } catch (error) {
-          /*
-           * Rolled back on failure. Leaving a broken file behind would mean an unapproved
-           * .py sitting in the workspace, which the registry then reports as an issue on
-           * every load — noise caused by a mistake the model already knows about.
-           */
-          if (before.length > 0) await fs.writeFile(filePath, before, 'utf8')
-          else await fs.rm(filePath, { force: true })
+          await restore()
 
           const message = error instanceof Error ? error.message : String(error)
           const traceback = (error as { traceback?: string }).traceback

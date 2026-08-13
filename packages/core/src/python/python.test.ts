@@ -185,3 +185,90 @@ describe('the inlined worker source', () => {
     expect(PYTHON_WORKER_SOURCE.trimEnd().endsWith('main()')).toBe(true)
   })
 })
+
+describe('parseInlineDependencies', () => {
+  it('reads a PEP 723 block', async () => {
+    const { parseInlineDependencies } = await import('./deps.js')
+    const source = '# /// script\n# dependencies = ["httpx", "rich>=13"]\n# ///\n\ndef run(): pass\n'
+    expect(parseInlineDependencies(source)).toEqual(['httpx', 'rich>=13'])
+  })
+
+  it('handles a multi-line array and ignores other keys', async () => {
+    const { parseInlineDependencies } = await import('./deps.js')
+    const source = [
+      '# /// script',
+      '# requires-python = ">=3.11"',
+      '# dependencies = [',
+      '#   "acme-internal-sdk>=2.1",',
+      '#   "pandas",',
+      '# ]',
+      '# ///',
+      'def run(): pass',
+    ].join('\n')
+    expect(parseInlineDependencies(source)).toEqual(['acme-internal-sdk>=2.1', 'pandas'])
+  })
+
+  /** The common case by far — most tools need only the standard library. */
+  it('returns nothing when there is no block', async () => {
+    const { parseInlineDependencies } = await import('./deps.js')
+    expect(parseInlineDependencies('def run(): pass\n')).toEqual([])
+    expect(parseInlineDependencies('# /// script\n# requires-python = ">=3.11"\n# ///\n')).toEqual([])
+  })
+})
+
+describe('discoverWorkspaceVenv', () => {
+  let root: string
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-venv-'))
+  })
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  /** Windows layout, since that is where the interpreter path differs and gets missed. */
+  const makeVenv = async (name: string, config: string): Promise<void> => {
+    const dir = path.join(root, name)
+    const binDir = path.join(dir, process.platform === 'win32' ? 'Scripts' : 'bin')
+    await fs.mkdir(binDir, { recursive: true })
+    await fs.writeFile(path.join(binDir, process.platform === 'win32' ? 'python.exe' : 'python'), '')
+    await fs.writeFile(path.join(dir, 'pyvenv.cfg'), config, 'utf8')
+  }
+
+  it('finds a uv-managed venv and says so', async () => {
+    const { discoverWorkspaceVenv } = await import('./uv.js')
+    await makeVenv('.venv', 'home = /usr\nuv = 0.11.29\nversion = 3.13.3\n')
+
+    const found = await discoverWorkspaceVenv(root)
+    expect(found?.path).toBe(path.join(root, '.venv'))
+    expect(found?.uvManaged).toBe(true)
+    expect(found?.pythonVersion).toBe('3.13.3')
+  })
+
+  /** Still usable — uv installs into it via --python — just not uv-created. */
+  it('finds a plain venv and reports it as not uv-managed', async () => {
+    const { discoverWorkspaceVenv } = await import('./uv.js')
+    await makeVenv('.venv', 'home = /usr\nversion = 3.12.1\n')
+
+    expect((await discoverWorkspaceVenv(root))?.uvManaged).toBe(false)
+  })
+
+  it('prefers .venv over venv when both exist', async () => {
+    const { discoverWorkspaceVenv } = await import('./uv.js')
+    await makeVenv('venv', 'home = /usr\n')
+    await makeVenv('.venv', 'home = /usr\n')
+
+    expect((await discoverWorkspaceVenv(root))?.path).toBe(path.join(root, '.venv'))
+  })
+
+  it('ignores a directory that has no interpreter in it', async () => {
+    const { discoverWorkspaceVenv } = await import('./uv.js')
+    await fs.mkdir(path.join(root, '.venv'), { recursive: true })
+
+    expect(await discoverWorkspaceVenv(root)).toBeUndefined()
+  })
+
+  it('returns nothing when the project has no venv', async () => {
+    const { discoverWorkspaceVenv } = await import('./uv.js')
+    expect(await discoverWorkspaceVenv(root)).toBeUndefined()
+  })
+})

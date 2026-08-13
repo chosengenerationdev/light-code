@@ -9,7 +9,14 @@ import {
   createDeletePythonTool,
   createUpdatePythonTool,
 } from './tools.js'
-import { detectUv, ensureVenv, minimalPythonEnv, venvPythonPath, type UvInfo } from './uv.js'
+import { installDependencies } from './deps.js'
+import {
+  detectUv,
+  discoverWorkspaceVenv,
+  ensureVenv,
+  minimalPythonEnv,
+  type UvInfo,
+} from './uv.js'
 import { PythonWorker } from './worker.js'
 import { PYTHON_WORKER_SOURCE } from './workerSource.js'
 
@@ -30,6 +37,12 @@ export interface PythonStatus {
   uv?: UvInfo | undefined
   toolsDir: string
   venvPath: string
+  /**
+   * Which environment is in use and why. Surfaced because "where did my dependency go?" is
+   * otherwise unanswerable — reusing the project venv means installs land in *their* project.
+   */
+  venvSource: 'workspace' | 'configured' | 'created' | 'none'
+  venvIsUvManaged: boolean
   ready: boolean
   /** Why it is not ready, phrased for a human. */
   detail: string
@@ -55,6 +68,12 @@ export class PythonManager {
   private enabled = false
   private toolsDir = ''
   private venvPath = ''
+  private venvSource: PythonStatus['venvSource'] = 'none'
+  private venvIsUvManaged = false
+  private interpreter = ''
+  private indexUrl: string | undefined
+  private extraIndexUrls: string[] = []
+  private offline = false
   private timeoutMs = 30_000
 
   constructor(private readonly options: PythonManagerOptions) {}
@@ -71,6 +90,9 @@ export class PythonManager {
     toolsDir?: string | undefined
     venvPath?: string | undefined
     timeoutSeconds?: number | undefined
+    indexUrl?: string | undefined
+    extraIndexUrls?: string[] | undefined
+    offline?: boolean | undefined
   }): Promise<void> {
     const enabled = config.dynamicTools === 'on'
     if (!enabled) {
@@ -94,8 +116,9 @@ export class PythonManager {
     // Inside the workspace by default, deliberately: changes land in git and get reviewed,
     // which is the main real mitigation available (§13).
     this.toolsDir = config.toolsDir ?? path.join(this.options.workspaceRoot, '.lightcode', 'tools')
-    // Outside it, so the venv is never indexed, committed or read by a file tool.
-    this.venvPath = config.venvPath ?? path.join(this.options.storageDir, 'python-venv')
+    this.indexUrl = config.indexUrl
+    this.extraIndexUrls = config.extraIndexUrls ?? []
+    this.offline = config.offline === true
 
     if (this.uv === undefined) this.uv = await detectUv(config.uvPath)
     if (this.uv === undefined) {
@@ -106,10 +129,41 @@ export class PythonManager {
 
     try {
       const env = minimalPythonEnv()
-      await ensureVenv({ uv: this.uv, venvDir: this.venvPath, env })
+
+      /*
+       * Prefer an environment the project already has. That is where the user's internal
+       * libraries are installed, and a private venv would be empty — a tool importing an
+       * internal package would then fail in a way that looks like a bug in Light Code
+       * rather than a missing install.
+       *
+       * Order: an explicitly configured path wins, then the workspace's own venv, then one
+       * of ours as the fallback.
+       */
+      let interpreter: string
+      if (config.venvPath !== undefined && config.venvPath.trim().length > 0) {
+        this.venvPath = config.venvPath.trim()
+        this.venvSource = 'configured'
+        interpreter = await ensureVenv({ uv: this.uv, venvDir: this.venvPath, env })
+      } else {
+        const discovered = await discoverWorkspaceVenv(this.options.workspaceRoot)
+        if (discovered !== undefined) {
+          this.venvPath = discovered.path
+          this.venvSource = 'workspace'
+          this.venvIsUvManaged = discovered.uvManaged
+          interpreter = discovered.interpreter
+        } else {
+          // Outside the workspace, so ours is never indexed, committed or read by a tool.
+          this.venvPath = path.join(this.options.storageDir, 'python-venv')
+          this.venvSource = 'created'
+          this.venvIsUvManaged = true
+          interpreter = await ensureVenv({ uv: this.uv, venvDir: this.venvPath, env })
+        }
+      }
+      this.interpreter = interpreter
+
       const workerScript = await this.writeWorkerScript()
       this.worker ??= new PythonWorker({
-        pythonPath: venvPythonPath(this.venvPath),
+        pythonPath: interpreter,
         workerScript,
         cwd: this.options.workspaceRoot,
         env,
@@ -118,7 +172,13 @@ export class PythonManager {
       })
       await this.refresh()
       this.ready = true
-      this.detail = `Ready — uv ${this.uv.version}.`
+      this.detail =
+        this.venvSource === 'workspace'
+          ? `Ready — using this project's virtualenv${this.venvIsUvManaged ? ' (uv-managed)' : ''}. ` +
+            'Tool dependencies install into it.'
+          : this.venvSource === 'configured'
+            ? `Ready — using the configured virtualenv. uv ${this.uv.version}.`
+            : `Ready — created a private virtualenv. uv ${this.uv.version}.`
     } catch (error) {
       this.ready = false
       this.detail = error instanceof Error ? error.message : String(error)
@@ -162,7 +222,26 @@ export class PythonManager {
   tools(): Tool<never>[] {
     if (!this.enabled || !this.ready || this.worker === undefined) return []
     const worker = this.worker
-    const context = { toolsDir: this.toolsDir, worker, onChanged: () => this.refresh() }
+    const uv = this.uv
+    const context = {
+      toolsDir: this.toolsDir,
+      worker,
+      onChanged: () => this.refresh(),
+      ...(uv !== undefined
+        ? {
+            installDeps: (packages: readonly string[]) =>
+              installDependencies({
+                uv,
+                pythonPath: this.interpreter,
+                packages,
+                ...(this.indexUrl !== undefined ? { indexUrl: this.indexUrl } : {}),
+                extraIndexUrls: this.extraIndexUrls,
+                offline: this.offline,
+                env: minimalPythonEnv(),
+              }),
+          }
+        : {}),
+    }
 
     return [
       createCreatePythonTool(context),
@@ -178,6 +257,8 @@ export class PythonManager {
       uv: this.uv,
       toolsDir: this.toolsDir,
       venvPath: this.venvPath,
+      venvSource: this.venvSource,
+      venvIsUvManaged: this.venvIsUvManaged,
       ready: this.ready,
       detail: this.detail,
       tools: this.registered.map((tool) => ({

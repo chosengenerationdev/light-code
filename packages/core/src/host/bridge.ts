@@ -1261,17 +1261,15 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     post({ type: 'python', status: python.status() })
   }
 
-  async function handleSetPython(
-    dynamicTools: 'off' | 'on',
-    uvPath?: string,
-    timeoutSeconds?: number,
-  ): Promise<void> {
+  async function handleSetPython(input: Extract<UiToHostMessage, { type: 'setPython' }>): Promise<void> {
     try {
       await configManager.save('user', {
         python: {
-          dynamicTools,
-          ...(uvPath !== undefined && uvPath.length > 0 ? { uvPath } : {}),
-          ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+          dynamicTools: input.dynamicTools,
+          ...(input.uvPath !== undefined && input.uvPath.length > 0 ? { uvPath: input.uvPath } : {}),
+          ...(input.timeoutSeconds !== undefined ? { timeoutSeconds: input.timeoutSeconds } : {}),
+          ...(input.indexUrl !== undefined && input.indexUrl.length > 0 ? { indexUrl: input.indexUrl } : {}),
+          ...(input.offline !== undefined ? { offline: input.offline } : {}),
         },
       })
       const { config } = await configManager.load()
@@ -1997,7 +1995,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     } else if (message.type === 'requestPython') {
       void postPython()
     } else if (message.type === 'setPython') {
-      void handleSetPython(message.dynamicTools, message.uvPath, message.timeoutSeconds)
+      void handleSetPython(message)
     } else if (message.type === 'requestNetwork') {
       void postNetwork()
     } else if (message.type === 'saveNetwork') {

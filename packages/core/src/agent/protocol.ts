@@ -289,7 +289,14 @@ export type UiToHostMessage =
    */
   | { type: 'requestEmbedderModels'; profileId: string }
   | { type: 'requestPython' }
-  | { type: 'setPython'; dynamicTools: 'off' | 'on'; uvPath?: string; timeoutSeconds?: number }
+  | {
+      type: 'setPython'
+      dynamicTools: 'off' | 'on'
+      uvPath?: string
+      timeoutSeconds?: number
+      indexUrl?: string
+      offline?: boolean
+    }
   | { type: 'requestNetwork' }
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
   | { type: 'requestExpert' }

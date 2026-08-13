@@ -28,8 +28,21 @@ export const pythonConfigSchema = z
      * land in git and get code-reviewed, which is the main real mitigation available (§13).
      */
     toolsDir: z.string(),
-    /** Shared virtualenv. Outside the workspace, so it is never indexed or committed. */
+    /**
+     * Overrides environment selection. Left unset, the workspace's own `.venv` is preferred
+     * — that is where a project's internal libraries already live — and a private one under
+     * user storage is the fallback.
+     */
     venvPath: z.string(),
+    /**
+     * Package index for tool dependencies. §3 treats `uv` resolving PyPI as *our* egress
+     * rather than the user's, so pointing it at an internal mirror is the expected
+     * corporate configuration, not an edge case.
+     */
+    indexUrl: z.string(),
+    extraIndexUrls: z.array(z.string()),
+    /** Refuses the network entirely; only already-cached packages resolve. */
+    offline: z.boolean(),
     /** Per-call budget in seconds. A tool that hangs must not hang the turn. */
     timeoutSeconds: z.number().int().min(1).max(600),
   })

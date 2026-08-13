@@ -664,12 +664,16 @@ export function App(props: AppProps): ReactElement {
             search={searchProps}
             python={{
               status: pythonStatus,
-              onSave: (dynamicTools, uvPath, timeoutSeconds) =>
+              onBrowse: browseForPath,
+              pickedPath,
+              onSave: (settings) =>
                 props.transport.post({
                   type: 'setPython',
-                  dynamicTools,
-                  ...(uvPath.length > 0 ? { uvPath } : {}),
-                  timeoutSeconds,
+                  dynamicTools: settings.dynamicTools,
+                  ...(settings.uvPath.length > 0 ? { uvPath: settings.uvPath } : {}),
+                  timeoutSeconds: settings.timeoutSeconds,
+                  ...(settings.indexUrl.length > 0 ? { indexUrl: settings.indexUrl } : {}),
+                  offline: settings.offline,
                 } satisfies UiToHostMessage),
             }}
             network={{

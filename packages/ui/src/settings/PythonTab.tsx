@@ -1,12 +1,21 @@
 import type { PythonStatus } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily, labelStyle, primaryButtonStyle, textFieldStyle } from '../theme.js'
+import { PathField, type BrowseRequest } from './PathField.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
 export interface PythonTabProps {
   status: PythonStatus | undefined
-  onSave: (dynamicTools: 'off' | 'on', uvPath: string, timeoutSeconds: number) => void
+  onBrowse: (request: BrowseRequest) => void
+  pickedPath: { purpose: string; path: string } | undefined
+  onSave: (settings: {
+    dynamicTools: 'off' | 'on'
+    uvPath: string
+    timeoutSeconds: number
+    indexUrl: string
+    offline: boolean
+  }) => void
 }
 
 /**
@@ -22,6 +31,14 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   const [enabled, setEnabled] = useState(false)
   const [uvPath, setUvPath] = useState('')
   const [timeout, setTimeoutSeconds] = useState('30')
+  const [indexUrl, setIndexUrl] = useState('')
+  const [offline, setOffline] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  // Routed by purpose, not by focus: the native dialog takes focus while it is open.
+  useEffect(() => {
+    if (props.pickedPath?.purpose === 'python.uvPath') setUvPath(props.pickedPath.path)
+  }, [props.pickedPath])
 
   // Resynced from the host rather than seeded once — its reply can arrive after mount.
   useEffect(() => {
@@ -69,25 +86,40 @@ export function PythonTab(props: PythonTabProps): ReactElement {
 
       {enabled && (
         <>
+          <PathField
+            id="lc-py-uv"
+            label="Path to uv"
+            value={uvPath}
+            placeholder={status?.uv?.path ?? 'uv (found on PATH)'}
+            hint="Leave blank to use uv from PATH. uv is used because it reads a tool's inline dependency block natively, so the tool file is the only place its dependencies are declared."
+            browse={{ purpose: 'python.uvPath', kind: 'file' }}
+            onBrowse={props.onBrowse}
+            onChange={setUvPath}
+          />
+
           <div style={{ marginBottom: 10 }}>
-            <label htmlFor="lc-py-uv" style={labelStyle()}>
-              Path to uv
+            <label htmlFor="lc-py-index" style={labelStyle()}>
+              Package index
             </label>
             <input
-              id="lc-py-uv"
+              id="lc-py-index"
               type="text"
-              value={uvPath}
+              value={indexUrl}
               spellCheck={false}
-              placeholder={status?.uv?.path ?? 'uv (found on PATH)'}
-              onChange={(event) => setUvPath(event.target.value)}
+              placeholder="https://artifactory.corp/api/pypi/pypi/simple"
+              onChange={(event) => setIndexUrl(event.target.value)}
               style={{ ...textFieldStyle(), fontFamily: monospace }}
             />
             <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-              Leave blank to use <code style={{ fontFamily: monospace }}>uv</code> from PATH. uv is
-              used because it reads a tool&apos;s inline dependency block natively, so a tool file
-              is the only place its dependencies are declared.
+              Where a tool&apos;s declared dependencies are fetched from. Point this at your internal
+              mirror to make company packages installable — and to avoid reaching public PyPI at all.
             </span>
           </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={offline} onChange={(event) => setOffline(event.target.checked)} />
+            <span style={{ fontSize: 12 }}>Offline — never fetch a package, use only what is already installed</span>
+          </label>
 
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="lc-py-timeout" style={labelStyle()}>
@@ -116,11 +148,19 @@ export function PythonTab(props: PythonTabProps): ReactElement {
           style={primaryButtonStyle(false)}
           onClick={() => {
             const parsed = Number.parseInt(timeout, 10)
-            props.onSave(enabled ? 'on' : 'off', uvPath.trim(), Number.isFinite(parsed) ? parsed : 30)
+            props.onSave({
+              dynamicTools: enabled ? 'on' : 'off',
+              uvPath: uvPath.trim(),
+              timeoutSeconds: Number.isFinite(parsed) ? parsed : 30,
+              indexUrl: indexUrl.trim(),
+              offline,
+            })
+            setSaved(true)
           }}
         >
           Save
         </button>
+        {saved && <span style={{ fontSize: 11, color: colors.muted }}>Saved.</span>}
       </div>
 
       {status !== undefined && (
@@ -139,7 +179,16 @@ export function PythonTab(props: PythonTabProps): ReactElement {
           {status.enabled && (
             <div style={{ fontSize: 11, color: colors.muted, marginTop: 6, fontFamily: monospace }}>
               <div>tools: {status.toolsDir || '—'}</div>
-              <div>venv: {status.venvPath || '—'}</div>
+              <div>
+                venv: {status.venvPath || '—'}{' '}
+                {status.venvSource === 'workspace'
+                  ? `(this project's${status.venvIsUvManaged ? ', uv-managed' : ''})`
+                  : status.venvSource === 'configured'
+                    ? '(configured)'
+                    : status.venvSource === 'created'
+                      ? '(created by Light Code)'
+                      : ''}
+              </div>
             </div>
           )}
 

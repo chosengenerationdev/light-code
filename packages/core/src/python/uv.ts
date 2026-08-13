@@ -150,3 +150,58 @@ export function minimalPythonEnv(extra: Record<string, string> = {}): NodeJS.Pro
   env.PYTHONDONTWRITEBYTECODE = '1'
   return { ...env, ...extra }
 }
+
+/** Folder names conventionally holding a virtualenv, in the order they are preferred. */
+export const WORKSPACE_VENV_NAMES = ['.venv', 'venv', '.env', 'env'] as const
+
+export interface DiscoveredVenv {
+  /** The virtualenv root. */
+  path: string
+  interpreter: string
+  /** `uv` records itself in `pyvenv.cfg`; anything else was made by `python -m venv` or poetry. */
+  uvManaged: boolean
+  pythonVersion?: string | undefined
+}
+
+/**
+ * Finds a virtualenv the project already has.
+ *
+ * Strongly preferred over creating our own, because the project's environment is where the
+ * user's **internal libraries are already installed**. A private venv would be empty, and a
+ * tool importing an internal package would fail for a reason that looks like a bug in Light
+ * Code rather than a missing install.
+ *
+ * The tradeoff is real and the UI states it: reusing the project venv means a tool's declared
+ * dependencies are installed *into the project's environment*, not a sandbox of ours.
+ */
+export async function discoverWorkspaceVenv(workspaceRoot: string): Promise<DiscoveredVenv | undefined> {
+  for (const name of WORKSPACE_VENV_NAMES) {
+    const candidate = path.join(workspaceRoot, name)
+    const interpreter = venvPythonPath(candidate)
+    try {
+      await fs.stat(interpreter)
+    } catch {
+      continue
+    }
+
+    // `pyvenv.cfg` is written by every venv creator. uv adds a `uv = <version>` key, which
+    // is the only reliable marker that this environment is one uv can manage cleanly.
+    let uvManaged = false
+    let pythonVersion: string | undefined
+    try {
+      const config = await fs.readFile(path.join(candidate, 'pyvenv.cfg'), 'utf8')
+      uvManaged = /^\s*uv\s*=/m.test(config)
+      pythonVersion = /^\s*version(?:_info)?\s*=\s*(.+)$/m.exec(config)?.[1]?.trim()
+    } catch {
+      // A venv without pyvenv.cfg is unusual but still usable; it is simply not uv-managed.
+    }
+
+    return {
+      path: candidate,
+      interpreter,
+      uvManaged,
+      ...(pythonVersion !== undefined ? { pythonVersion } : {}),
+    }
+  }
+  return undefined
+}
