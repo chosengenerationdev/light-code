@@ -26,6 +26,7 @@ import {
   createAskExpertTool,
   createSearchOpensearchTool,
   createSearchCodebaseTool,
+  PythonManager,
   Embedder,
   indexWorkspace,
   chunkSignatureFor,
@@ -187,6 +188,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   // and the JSON-file layout is host-agnostic. Storage *location* is the host's decision;
   // storage *format* is not.
   const taskStore = new JsonTaskStore(storageDir, truncationStore, logger)
+  /*
+   * Owns uv, the venv and the worker. Constructed unconditionally but inert until config
+   * turns it on — §13 requires the feature not to exist until someone enables it, and an
+   * inert object is easier to reason about than a conditionally-undefined one.
+   */
+  const python = new PythonManager({ workspaceRoot, storageDir, logger })
+
   const builtinTools = createDefaultToolRegistry()
   builtinTools.register(createReadToolResultTool(truncationStore))
 
@@ -322,6 +330,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
     for (const tool of mcp.enabledTools()) combined.register(tool)
+    /*
+     * Python tools are adapted into the ordinary Tool interface, exactly as MCP tools are.
+     * That is the design choice that matters: the loop, the approval gate and mode filtering
+     * treat py__* like execute_command, with no special-casing upstream — so a model-authored
+     * tool is approval-gated for free.
+     */
+    for (const tool of python.tools()) combined.register(tool)
     if (search !== undefined) {
       combined.register(
         createSearchOpensearchTool({
@@ -597,6 +612,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       // actually needs its tools. Failures are per-server and surface in the MCP tab.
       await syncMcpFromConfig(config)
       await mcp.ensureConnected()
+      await python.configure(config.python ?? {})
 
       const toolContext: ToolExecutionContext = {
         fs: new NodeFileSystem(),
@@ -1238,6 +1254,33 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       // Missing or unreadable both mean "index everything", which is correct and safe —
       // the worst case is re-embedding work that was already done.
       return { model: embedder.model, dimensions: embedder.dimensions, chunkSignature: chunkSignatureFor(undefined), files: {} }
+    }
+  }
+
+  async function postPython(): Promise<void> {
+    post({ type: 'python', status: python.status() })
+  }
+
+  async function handleSetPython(
+    dynamicTools: 'off' | 'on',
+    uvPath?: string,
+    timeoutSeconds?: number,
+  ): Promise<void> {
+    try {
+      await configManager.save('user', {
+        python: {
+          dynamicTools,
+          ...(uvPath !== undefined && uvPath.length > 0 ? { uvPath } : {}),
+          ...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+        },
+      })
+      const { config } = await configManager.load()
+      // Applied immediately rather than at the next turn: switching it on should show the
+      // environment coming up, not sit silent until the user happens to send a message.
+      await python.configure(config.python ?? {})
+      await postPython()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -1951,6 +1994,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleSaveEmbedder(message.profileId, message.model, message.dimensions)
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
+    } else if (message.type === 'requestPython') {
+      void postPython()
+    } else if (message.type === 'setPython') {
+      void handleSetPython(message.dynamicTools, message.uvPath, message.timeoutSeconds)
     } else if (message.type === 'requestNetwork') {
       void postNetwork()
     } else if (message.type === 'saveNetwork') {
@@ -2018,6 +2065,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       userGate.denyAll()
       // stdio servers are child processes — not closing them leaks one per panel open.
       void mcp.closeAll()
+      // Same reasoning for the Python interpreter, and it kills the whole tree so a tool
+      // that spawned a subprocess does not outlive the session (§16).
+      void python.dispose()
       unsubscribe()
     },
   }

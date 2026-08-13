@@ -220,6 +220,14 @@ export {
   type WorkerCallResult,
   type PythonWorkerOptions,
 } from './python/worker.js'
+export { PythonManager, type PythonStatus, type PythonManagerOptions } from './python/manager.js'
+export {
+  createCreatePythonTool,
+  createUpdatePythonTool,
+  createDeletePythonTool,
+  adaptPythonTool,
+  type PythonToolContext,
+} from './python/tools.js'
 export {
   loadRegistry,
   approveTool,

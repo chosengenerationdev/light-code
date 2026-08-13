@@ -1,6 +1,7 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
 import type { McpPlatform } from '../mcp/forms.js'
 import type { IndexProgress, IndexResult } from '../rag/indexer.js'
+import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
 import type { WireFormat } from '../providers/types.js'
@@ -287,6 +288,8 @@ export type UiToHostMessage =
    * reconstruct it anyway — secrets are write-only across this bridge (invariant 7).
    */
   | { type: 'requestEmbedderModels'; profileId: string }
+  | { type: 'requestPython' }
+  | { type: 'setPython'; dynamicTools: 'off' | 'on'; uvPath?: string; timeoutSeconds?: number }
   | { type: 'requestNetwork' }
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
   | { type: 'requestExpert' }
@@ -381,6 +384,7 @@ export type HostToUiMessage =
   /** The save reached disk. The form stays open until this arrives, so a failure keeps the typed values. */
   | { type: 'searchConnectionSaved'; id: string }
   | { type: 'network'; settings: NetworkSettingsSummary }
+  | { type: 'python'; status: PythonStatus }
   /** Kept apart from `models` so the provider form and this tab cannot overwrite each other. */
   | { type: 'embedderModels'; models: string[]; warning?: string }
   | { type: 'embedderSaved' }

@@ -70,3 +70,4 @@ export type {
 
 // Type-only, so nothing from indexer.ts (which imports node:fs) reaches the bundle.
 export type { IndexProgress, IndexResult } from './rag/indexer.js'
+export type { PythonStatus } from './python/manager.js'

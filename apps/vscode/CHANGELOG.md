@@ -1,5 +1,29 @@
 # light-code-vscode
 
+## 0.9.0
+
+### Minor Changes
+
+- The model can write its own Python tools (Settings → Python, off by default).
+
+  Ask it to write a tool and it produces a Python file with a `run` function; the parameter
+  schema and description are derived from the type hints and docstring, so there is no
+  metadata to keep in sync. Once approved it becomes `py__your_tool`, callable from your next
+  message onward.
+
+  **You approve the source, not just the call.** Every create and update shows the full diff of
+  the actual file first — and the approval is pinned to a hash of exactly those bytes, so a
+  file changed afterwards, by anything, is refused and reported rather than loaded. A `.py`
+  appearing in the tools directory that was never approved does not load either, which matters
+  because that directory is inside your workspace and a cloned repo could contain one.
+
+  Tools live in `.lightcode/tools/` so they land in git and get reviewed like any other code.
+  The shared virtualenv is created by `uv`, outside the workspace. Provider API keys are never
+  passed into the Python environment — a test plants five key-shaped variables and asserts none
+  survive. A tool that hangs is stopped at its timeout and its whole process tree killed.
+
+  There is no sandbox: a tool runs with your privileges, exactly as a shell command does.
+
 ## 0.8.1
 
 ### Patch Changes

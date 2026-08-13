@@ -16,6 +16,7 @@ import {
   type McpServerConfig,
   type McpServerState,
   type NetworkSettingsSummary,
+  type PythonStatus,
   type McpToolPermission,
   type TestConnectionStep,
   type Transport,
@@ -108,6 +109,7 @@ export function App(props: AppProps): ReactElement {
   const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
   const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
+  const [pythonStatus, setPythonStatus] = useState<PythonStatus | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -254,6 +256,8 @@ export function App(props: AppProps): ReactElement {
           ...(message.indexName !== undefined ? { indexName: message.indexName } : {}),
           indexedFiles: message.indexedFiles,
         })
+      } else if (message.type === 'python') {
+        setPythonStatus(message.status)
       } else if (message.type === 'embedderModels') {
         setEmbedderModels(message.models)
         setEmbedderModelsWarning(message.warning)
@@ -307,6 +311,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestPython' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -657,6 +662,16 @@ export function App(props: AppProps): ReactElement {
             expert={expert}
             onSaveExpert={saveExpert}
             search={searchProps}
+            python={{
+              status: pythonStatus,
+              onSave: (dynamicTools, uvPath, timeoutSeconds) =>
+                props.transport.post({
+                  type: 'setPython',
+                  dynamicTools,
+                  ...(uvPath.length > 0 ? { uvPath } : {}),
+                  timeoutSeconds,
+                } satisfies UiToHostMessage),
+            }}
             network={{
               ...(network !== undefined ? { settings: network } : { settings: undefined }),
               onSave: (settings) => props.transport.post({ type: 'saveNetwork', settings } satisfies UiToHostMessage),

@@ -4,13 +4,34 @@ import { providerProfileSchema, type TlsSettings, tlsSettingsSchema } from '../p
 
 /**
  * The whole config file, one schema shared by the UI and the file loader (§15) so a
- * hand-edited file and a UI save fail identically. Only the shape needed so far
- * (Phase 2) is modelled; MCP servers, approvals, etc. extend this in later phases
- * without redesigning it.
+ * hand-edited file and a UI save fail identically.
+ */
+
+/**
+ * Model-authored Python tools (§13).
+ *
+ * User-scope only (invariant 5): `uvPath`, `toolsDir` and `venvPath` all name places a
+ * program is found or run from, so a workspace able to set them would execute code of its
+ * choosing the moment the panel opened.
  */
 export const pythonConfigSchema = z
   .object({
+    /**
+     * Off by default and explicitly three-state. This is the sharpest surface in the
+     * product — it makes the *body* of a tool model-authored, not just the call — so the
+     * feature does not exist until someone turns it on.
+     */
+    dynamicTools: z.enum(['off', 'on']),
     uvPath: z.string(),
+    /**
+     * Defaults to `.lightcode/tools/` **inside the workspace**, deliberately. Changes then
+     * land in git and get code-reviewed, which is the main real mitigation available (§13).
+     */
+    toolsDir: z.string(),
+    /** Shared virtualenv. Outside the workspace, so it is never indexed or committed. */
+    venvPath: z.string(),
+    /** Per-call budget in seconds. A tool that hangs must not hang the turn. */
+    timeoutSeconds: z.number().int().min(1).max(600),
   })
   .partial()
 

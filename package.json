@@ -25,7 +25,8 @@
     "package:universal": "node scripts/fetch-ripgrep.mjs && pnpm --filter light-code-vscode exec node ./esbuild.mjs --target=universal && pnpm --filter light-code-vscode exec vsce package --no-dependencies",
     "serve": "pnpm --filter @chosengeneration/light-code run build && node apps/host/dist/cli.js",
     "smoke:npm": "node scripts/smoke-test-npm.mjs",
-    "verify:npm": "pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @chosengeneration/light-code run build && pnpm smoke:npm"
+    "verify:npm": "pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @chosengeneration/light-code run build && pnpm smoke:npm",
+    "generate:worker": "node scripts/generate-python-worker.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",

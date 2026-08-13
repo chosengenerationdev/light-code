@@ -13,6 +13,7 @@ import { McpTab } from './McpTab.js'
 import { ExpertTab, type ExpertState } from './ExpertTab.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
+import { PythonTab, type PythonTabProps } from './PythonTab.js'
 import type { BrowseRequest } from './PathField.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 
@@ -43,9 +44,10 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSaveExpert: (enabled: boolean, path: string, model: string) => void
   search: SearchTabProps
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
+  python: PythonTabProps
 }
 
-type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network'
+type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network' | 'python'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'providers', label: 'Providers' },
@@ -54,6 +56,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'search', label: 'Search' },
   { id: 'expert', label: 'Expert' },
   { id: 'network', label: 'Network' },
+  { id: 'python', label: 'Python' },
 ]
 
 /**
@@ -116,6 +119,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           />
         ) : active === 'search' ? (
           <SearchTab {...props.search} />
+        ) : active === 'python' ? (
+          <PythonTab {...props.python} />
         ) : active === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
         ) : active === 'expert' ? (

@@ -848,6 +848,33 @@ resolver reads are reported back and join the tool deny list (invariant 6) — a
 configured key is exactly as readable as a per-profile one. Settings → **Network** is a new
 tab, and it also exposes `certDir`, which until now was hand-edit only.
 
+**Phase 9 part one done — Python tools are wired and visible (0.8.2).** `uv` detection, a
+shared venv, a persistent JSON-RPC worker, the hash-pinned registry, `create_python_tool` /
+`update_python_tool` / `delete_python_tool`, and a Python tab. Off by default.
+- **The registry is the security boundary, not the approval prompt.** Approval records a hash
+  of the exact source shown in the diff; a file whose hash no longer matches is refused and
+  reported. A `.py` with no registry entry never loads at all — the tools directory is inside
+  the workspace so changes get code-reviewed, which also means a cloned repo can contain one.
+- **A created tool becomes callable on the *next* message, not later in the same turn**, and
+  the success message says so. Tool definitions must stay byte-stable for a whole turn or the
+  prompt-cache prefix dies (§12) — so the alternative was not "available sooner", it was
+  "cache invalidated on every tool creation".
+- **The worker source is inlined into the bundle** and written to disk at runtime.
+  `scripts/generate-python-worker.mjs` generates it from `worker/main.py`, and a test fails if
+  they drift. esbuild does not copy `.py`, and resolving a path relative to the bundle is
+  exactly what shipped a dead VSIX once.
+- Verified against real Python 3.13 and uv 0.11 end to end: create → approve → call → edit
+  outside → refused. Also: syntax error returns a traceback and rolls the file back, a hang is
+  killed at its budget with no orphan interpreter, and `minimalPythonEnv` is an allowlist that
+  a test proves excludes five planted key-shaped variables.
+- **`confine` takes (requestedPath, root), and the path must be absolute.** Passing a bare
+  filename resolved it against the process CWD — caught only by running it, since the unit
+  tests covered the registry rather than the tool wrapper.
+
+**Not built yet in Phase 9:** skills (markdown with frontmatter, name+description into the
+prompt, bodies via `read_file`). And **the Python tab has never been opened in a real
+Extension Host** — the whole path was driven from a script.
+
 **Still outstanding, and now the oldest debt in the project:** `MANUAL_VERIFICATION.md` has
 never been run. Session A is the security properties — deny actually blocking execution, the
 approval prompt showing ground truth, and the exact-match command allowlist. 0.4.0 adds two

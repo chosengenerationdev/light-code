@@ -10,7 +10,9 @@ export const USER_SCOPE_ONLY_KEYS = [
   'profiles',
   'activeProfileId',
   'certDir',
-  'python.uvPath',
+  // The whole block, not just uvPath: toolsDir and venvPath also name where code is found
+  // and run from, and dynamicTools decides whether model-authored code runs at all.
+  'python',
   // Added in Phase 4. Auto-approve settings are per-workspace in behaviour but stored
   // user-side: a repo that could ship its own pre-approvals could run shell commands
   // unprompted the moment you opened it.

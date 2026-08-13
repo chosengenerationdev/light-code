@@ -166,3 +166,22 @@ describe('loadRegistry', () => {
     expect(loaded).toEqual({ tools: [], issues: [] })
   })
 })
+
+describe('the inlined worker source', () => {
+  /**
+   * `main.py` is the source of truth and `workerSource.ts` is generated from it. Without
+   * this check a forgotten `pnpm generate:worker` ships a stale worker, and the symptom
+   * would be a Python-side bug that is already fixed in the file you are reading.
+   */
+  it('matches worker/main.py exactly', async () => {
+    const { PYTHON_WORKER_SOURCE } = await import('./workerSource.js')
+    const onDisk = await fs.readFile(new URL('./worker/main.py', import.meta.url), 'utf8')
+    expect(PYTHON_WORKER_SOURCE).toBe(onDisk)
+  })
+
+  it('is a complete script, not a truncated one', async () => {
+    const { PYTHON_WORKER_SOURCE } = await import('./workerSource.js')
+    expect(PYTHON_WORKER_SOURCE).toContain('def main()')
+    expect(PYTHON_WORKER_SOURCE.trimEnd().endsWith('main()')).toBe(true)
+  })
+})
