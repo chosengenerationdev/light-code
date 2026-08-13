@@ -1,5 +1,51 @@
 # light-code-vscode
 
+## 0.10.0
+
+### Minor Changes
+
+- b97db9c: Python tools now use your project's virtualenv and can install dependencies.
+
+  **It finds the venv you already have.** If the workspace contains `.venv`, `venv`, `.env` or
+  `env` with a working interpreter, that is what tools run in — and the tab says so, including
+  whether uv created it. That matters because your project's environment is where your internal
+  libraries are already installed; a private one would be empty, and a tool importing a company
+  package would fail in a way that looks like a bug rather than a missing install. A private
+  venv is still created if the project has none, and `python.venvPath` overrides both.
+
+  The tradeoff is stated in the tab rather than hidden: reusing the project venv means a tool's
+  dependencies are installed _into your project's environment_.
+
+  **PEP 723 dependencies actually install now.** Previously the model was told to declare them
+  and nothing ever installed them, so a tool needing a library failed on an `ImportError` that
+  pointed nowhere useful. Dependencies are installed before validation, so a failure names the
+  package and the index it was looked for on, and the model is told not to retry unchanged.
+
+  **Package index is configurable** — point it at your internal mirror to make company packages
+  installable and avoid reaching public PyPI at all. There is also an offline switch that
+  refuses the network entirely.
+
+  The path to `uv` now has a Browse button.
+
+- 5b8cdec: Teach it once and it keeps the note: skills.
+
+  Explain an internal library, a house convention, or a gotcha specific to your codebase, and
+  the model now offers to record it as a **skill** — a markdown file in
+  `.lightcode/skills/`. Next conversation it already knows, and when it later learns something
+  that contradicts a skill it offers to update that one rather than writing a near-duplicate.
+
+  **Only the one-line description enters the prompt.** Bodies are read on demand with the
+  ordinary `read_file`, so a skill costs a handful of tokens whether it is three lines or three
+  hundred — write as much detail as the subject deserves: package names, import paths,
+  signatures, a worked example.
+
+  It asks before writing, and the approval shows the exact markdown, because a skill is prose
+  the model injects into its own future context. They live in your workspace as plain files, so
+  they land in git and get reviewed like anything else.
+
+  Particularly useful with Python tools: describe your internal SDKs once, and tools it writes
+  afterwards use them properly instead of reaching for whatever it knows from training.
+
 ## 0.9.0
 
 ### Minor Changes
