@@ -220,6 +220,18 @@ export {
   type WorkerCallResult,
   type PythonWorkerOptions,
 } from './python/worker.js'
+export {
+  loadSkills,
+  renderSkillsForPrompt,
+  parseFrontmatter,
+  renderSkill,
+  isValidSkillName,
+  skillFileName,
+  type Skill,
+  type LoadedSkills,
+} from './skills/index.js'
+export { createWriteSkillTool, createDeleteSkillTool, type SkillToolContext } from './skills/tools.js'
+
 export { PythonManager, type PythonStatus, type PythonManagerOptions } from './python/manager.js'
 export {
   createCreatePythonTool,

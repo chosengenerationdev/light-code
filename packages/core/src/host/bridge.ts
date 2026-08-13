@@ -27,6 +27,11 @@ import {
   createSearchOpensearchTool,
   createSearchCodebaseTool,
   PythonManager,
+  createWriteSkillTool,
+  createDeleteSkillTool,
+  loadSkills,
+  renderSkillsForPrompt,
+  type Skill,
   Embedder,
   indexWorkspace,
   chunkSignatureFor,
@@ -195,6 +200,22 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    */
   const python = new PythonManager({ workspaceRoot, storageDir, logger })
 
+  /**
+   * Skills, reloaded per turn.
+   *
+   * In the workspace beside the tools, for the same reason: a skill is prose the model
+   * injects into its own future context, and plain markdown in git is the main thing
+   * standing between that and an unreviewed instruction (§13).
+   */
+  const skillsDir = workspaceRoot !== undefined ? path.join(workspaceRoot, '.lightcode', 'skills') : undefined
+  let skills: Skill[] = []
+  const refreshSkills = async (): Promise<void> => {
+    if (skillsDir === undefined) return
+    const loaded = await loadSkills(skillsDir)
+    skills = loaded.skills
+    for (const issue of loaded.issues) logger.warn(`skill ${issue.filePath}: ${issue.detail}`)
+  }
+
   const builtinTools = createDefaultToolRegistry()
   builtinTools.register(createReadToolResultTool(truncationStore))
 
@@ -337,6 +358,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
      * tool is approval-gated for free.
      */
     for (const tool of python.tools()) combined.register(tool)
+    // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
+    // a skill is markdown, so the only prerequisite is somewhere to put it.
+    if (skillsDir !== undefined) {
+      const context = { skillsDir, onChanged: refreshSkills }
+      combined.register(createWriteSkillTool(context))
+      combined.register(createDeleteSkillTool(context))
+    }
     if (search !== undefined) {
       combined.register(
         createSearchOpensearchTool({
@@ -601,10 +629,21 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       // Rebuilt whenever the profile or expert availability changes, so the model can
       // answer "which model are you?" accurately and knows whether ask_expert exists.
       // A profile switch is a session boundary, so replacing the prefix here is free (§12).
+      /*
+       * Skills are loaded before the prompt is built and then left alone for the whole turn.
+       * They sit at the front of the prompt, so a mid-turn change would invalidate the cache
+       * prefix and everything after it — the same rule tool definitions follow (§12). A skill
+       * written during a turn therefore appears at the next one, which is what write_skill
+       * tells the model.
+       */
+      await refreshSkills()
+
       const desiredPrompt = buildSystemPrompt(workspaceRoot, {
         model: profile.model,
         providerLabel: profile.label,
         expertAvailable: expertCliInfo !== undefined,
+        skills: renderSkillsForPrompt(skills),
+        canWriteSkills: skillsDir !== undefined,
       })
       if (conversation.systemPrompt() !== desiredPrompt) conversation.setSystemPrompt(desiredPrompt)
 

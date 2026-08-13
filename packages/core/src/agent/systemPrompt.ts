@@ -5,6 +5,13 @@ export interface SystemPromptOptions {
   providerLabel?: string
   /** Set when the Claude CLI expert is available, so `ask_expert` is explained. */
   expertAvailable?: boolean
+  /**
+   * Name + description + path per skill. Bodies are deliberately absent — they are read on
+   * demand with `read_file`, so a skill costs a few tokens whether it is short or enormous.
+   */
+  skills?: string
+  /** Set when `write_skill` is offered, so the model knows it can record what it learns. */
+  canWriteSkills?: boolean
 }
 
 /**
@@ -56,6 +63,31 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
     '- When the task is complete, call attempt_completion with a summary of what you did.',
     '- If you need information only the user can provide, call ask_followup_question.',
   )
+
+  if (options.skills !== undefined && options.skills.length > 0) {
+    lines.push('', options.skills)
+  }
+
+  if (options.canWriteSkills === true) {
+    lines.push(
+      '',
+      'Recording what you learn:',
+      '- When the user explains something durable about their environment — an internal',
+      '  library and how to use it, a house convention, the shape of an in-house API, a',
+      '  gotcha specific to this codebase — offer to record it with write_skill. Ask first;',
+      '  do not write one unprompted.',
+      '- "Durable" means it would be true again next week and useful to a future',
+      '  conversation. A one-off instruction for the current task is not a skill.',
+      '- Before writing a new skill, check the list above: if one already covers the',
+      '  subject, read it and update that instead of creating a near-duplicate.',
+      '- When you learn something *corrects* an existing skill, say so and offer to update',
+      '  it. A stale skill is worse than a missing one, because it is trusted.',
+      '- Write for a reader who has none of this conversation: name the package, the import',
+      '  path, the function, and show a short example. Avoid "as discussed" and "the usual".',
+      '- The description line is the only part always in context, so make it say what',
+      '  subject the skill covers — it is a trigger for reading, not a summary.',
+    )
+  }
 
   if (options.expertAvailable === true) {
     lines.push(
