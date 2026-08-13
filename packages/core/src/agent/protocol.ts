@@ -248,6 +248,7 @@ export type UiToHostMessage =
   | { type: 'newTask' }
   | { type: 'setMode'; modeId: string }
   | { type: 'setAutoApprove'; group: ApprovableGroup; enabled: boolean }
+  | { type: 'setMaxIterations'; value: number }
   | { type: 'revokeAllowedTool'; toolName: string }
   | { type: 'revokeAllowedCommand'; command: string }
   | { type: 'requestMcp' }
@@ -332,7 +333,7 @@ export type HostToUiMessage =
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */
-  | { type: 'settings'; modeId: string; approvals: WorkspaceApprovals }
+  | { type: 'settings'; modeId: string; approvals: WorkspaceApprovals; maxIterations: number }
   /** Server health plus the raw JSON the editor round-trips, and any spawn warnings. */
   | {
       type: 'mcp'

@@ -233,6 +233,12 @@ export const configSchema = z
     /** Active mode id; falls back to Code when absent or unrecognised. */
     modeId: z.string(),
     /**
+     * Tool calls allowed in one turn before the loop stops (§5). The cap exists so a model
+     * looping on a failing edit stops costing money, not to limit legitimate work — nothing
+     * is lost when it trips, since sending another message resumes with the full transcript.
+     */
+    maxIterations: z.number().int().min(1).max(500),
+    /**
      * Standard `mcpServers` shape so configs paste in from other clients unmodified (§11).
      * Global and workspace scopes both allowed — workspace wins — because an MCP server
      * is often project-specific. Note this is *deliberately not* on invariant 5's list:

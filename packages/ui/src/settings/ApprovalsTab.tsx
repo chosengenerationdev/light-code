@@ -1,13 +1,16 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '@light-code/core/browser'
 import { TrashIcon } from '../icons.js'
 import type { ReactElement } from 'react'
-import { colors, fontFamily, iconButtonStyle, labelStyle } from '../theme.js'
+import { useEffect, useState } from 'react'
+import { colors, fontFamily, iconButtonStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 export interface ApprovalsTabProps {
   approvals: WorkspaceApprovals
   onSetAutoApprove: (group: ApprovableGroup, enabled: boolean) => void
   onRevokeTool: (toolName: string) => void
   onRevokeCommand: (command: string) => void
+  maxIterations: number
+  onSetMaxIterations: (value: number) => void
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -78,6 +81,13 @@ function RevocableList(props: {
 
 export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
   const auto = props.approvals.autoApprove ?? {}
+  const [steps, setSteps] = useState(String(props.maxIterations))
+
+  // Resynced from the host, which is authoritative — the reply can arrive after mount.
+  useEffect(() => setSteps(String(props.maxIterations)), [props.maxIterations])
+
+  const parsedSteps = Number.parseInt(steps, 10)
+  const stepsValid = Number.isFinite(parsedSteps) && parsedSteps >= 1 && parsedSteps <= 500
 
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily }}>
@@ -85,6 +95,38 @@ export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
       <p style={{ color: colors.muted, fontSize: 11, marginTop: 0, marginBottom: 12 }}>
         These apply to this workspace only, and are stored outside it — a repository cannot grant itself permissions.
       </p>
+
+      <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${colors.border}` }}>
+        <label htmlFor="lc-max-steps" style={labelStyle()}>
+          Maximum steps per message
+        </label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            id="lc-max-steps"
+            type="number"
+            min={1}
+            max={500}
+            value={steps}
+            onChange={(event) => setSteps(event.target.value)}
+            style={{ ...textFieldStyle(), width: 110, flex: 'none' }}
+          />
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            disabled={!stepsValid || parsedSteps === props.maxIterations}
+            onClick={() => props.onSetMaxIterations(parsedSteps)}
+          >
+            Save
+          </button>
+          {!stepsValid && <span style={{ fontSize: 11, color: colors.error }}>Must be between 1 and 500.</span>}
+        </div>
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
+          How many tool calls the assistant may make in reply to one message. The limit exists so a
+          model looping on a failing edit stops costing money — not to cut short real work. Hitting
+          it loses nothing: send another message and it carries on. Raise it for long refactors;
+          lower it if you want to stay closer to what it is doing.
+        </span>
+      </div>
 
       <label style={labelStyle()}>Skip the prompt for…</label>
       {CATEGORIES.map((category) => (

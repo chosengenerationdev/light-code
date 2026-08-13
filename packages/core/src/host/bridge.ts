@@ -289,12 +289,15 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   const approvalsKey = workspaceRoot ?? '__no_workspace__'
   // Cached so the policy gate can answer synchronously mid-turn without re-reading config.
   let cachedApprovals: WorkspaceApprovals = {}
+  /** Mirrors config so the loop and the settings message agree without re-reading. */
+  let cachedMaxIterations = 25
   let cachedModeId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
     const { config } = await configManager.load()
     cachedApprovals = config.approvals?.[approvalsKey] ?? {}
     cachedModeId = config.modeId
+    cachedMaxIterations = config.maxIterations ?? 25
     return config
   }
 
@@ -302,7 +305,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     const { config } = await configManager.load()
     await configManager.save('user', { approvals: { ...config.approvals, [approvalsKey]: next } })
     cachedApprovals = next
-    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: next })
+    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: next, maxIterations: cachedMaxIterations })
   }
 
   const userGate = new WebviewApprovalGate(post)
@@ -679,6 +682,8 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
         // loop — swapping them mid-turn would break the prompt cache prefix (§12).
         mode: findMode(config.modeId),
         contextWindow: capabilities.contextWindow,
+        // CLAUDE.md §5 has called this configurable since Phase 0; until now it was not.
+        maxIterations: cachedMaxIterations,
         drainQueuedMessages: () => {
           if (queuedMessages.length === 0) return []
           const drained = queuedMessages
@@ -1674,7 +1679,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
 
   async function postSettings(): Promise<void> {
     await loadSettings()
-    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: cachedApprovals })
+    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: cachedApprovals, maxIterations: cachedMaxIterations })
   }
 
   /** Approve now, and remember it for this workspace. */
@@ -1991,6 +1996,11 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void startNewTask()
     } else if (message.type === 'setMode') {
       void handleSetMode(message.modeId)
+    } else if (message.type === 'setMaxIterations') {
+      void configManager
+        .save('user', { maxIterations: message.value })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setAutoApprove') {
       void handleSetAutoApprove(message.group, message.enabled)
     } else if (message.type === 'revokeAllowedTool') {

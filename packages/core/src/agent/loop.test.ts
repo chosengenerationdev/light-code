@@ -165,7 +165,7 @@ describe('runAgentTurn — iteration cap', () => {
 
     expect(provider.receivedMessages).toHaveLength(3)
     expect(log.error).toHaveLength(1)
-    expect(log.error[0]).toContain('maximum of 3 steps')
+    expect(log.error[0]).toMatch(/after 3 steps/)
   })
 })
 
@@ -208,7 +208,7 @@ describe('runAgentTurn — consecutive-mistake tracking', () => {
 
     // Ran to the iteration cap rather than stopping early on consecutive mistakes.
     expect(provider.receivedMessages).toHaveLength(8)
-    expect(log.error[0]).toContain('maximum of 8 steps')
+    expect(log.error[0]).toMatch(/after 8 steps/)
   })
 })
 

@@ -352,5 +352,14 @@ export async function runAgentTurn(
     }
   }
 
-  events.onError(`Stopped after reaching the maximum of ${maxIterations} steps.`)
+  /*
+   * Deliberately says the work survives. The cap exists to stop a model looping on a failing
+   * edit, and hitting it during legitimate long work reads as a crash unless the message
+   * says otherwise — the transcript is intact and another message resumes from here.
+   */
+  events.onError(
+    `Stopped after ${maxIterations} steps in one turn. Nothing is lost — send another message ` +
+      `(for example "continue") to carry on from here. Raise the limit in Settings → Approvals ` +
+      'if this task legitimately needs more.',
+  )
 }

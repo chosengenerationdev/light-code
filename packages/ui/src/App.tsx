@@ -71,6 +71,7 @@ export function App(props: AppProps): ReactElement {
   const [canRollback, setCanRollback] = useState(false)
   const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID)
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
+  const [maxIterations, setMaxIterations] = useState(25)
   const [mcpServers, setMcpServers] = useState<McpServerState[]>([])
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
@@ -171,6 +172,7 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
         setApprovals(message.approvals)
+        setMaxIterations(message.maxIterations)
       } else if (message.type === 'mcp') {
         setMcpServers(message.servers)
         setMcpJson(message.json)
@@ -648,6 +650,10 @@ export function App(props: AppProps): ReactElement {
             onSetAutoApprove={setAutoApprove}
             onRevokeTool={revokeTool}
             onRevokeCommand={revokeCommand}
+            maxIterations={maxIterations}
+            onSetMaxIterations={(value) =>
+              props.transport.post({ type: 'setMaxIterations', value } satisfies UiToHostMessage)
+            }
             mcpServers={mcpServers}
             mcpJson={mcpJson}
             mcpWarnings={mcpWarnings}

@@ -22,6 +22,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetAutoApprove: (group: ApprovableGroup, enabled: boolean) => void
   onRevokeTool: (toolName: string) => void
   onRevokeCommand: (command: string) => void
+  maxIterations: number
+  onSetMaxIterations: (value: number) => void
   mcpServers: McpServerState[]
   mcpJson: string
   mcpWarnings: Record<string, string[]>
@@ -116,6 +118,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onSetAutoApprove={props.onSetAutoApprove}
             onRevokeTool={props.onRevokeTool}
             onRevokeCommand={props.onRevokeCommand}
+            maxIterations={props.maxIterations}
+            onSetMaxIterations={props.onSetMaxIterations}
           />
         ) : active === 'search' ? (
           <SearchTab {...props.search} />
