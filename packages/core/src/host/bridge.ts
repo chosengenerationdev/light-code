@@ -264,6 +264,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       ...(skillsDir !== undefined ? { skillsDir } : {}),
       extraDirs: extraSkillDirs,
     })
+    // Skills are part of the corpus, so a written, deleted or relocated one makes the index
+    // stale. Debounced and fingerprinted, so the usual case costs nothing.
+    scheduleDocsReindex('skills changed')
   }
 
   async function handleDeleteSkillFile(name: string): Promise<void> {
@@ -462,7 +465,20 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     mcpJson = JSON.stringify({ mcpServers: servers }, null, 2)
   }
 
-  const mcp = new McpRegistry(secrets, { onStateChanged: () => postMcp() }, logger, () => cachedApprovals.allowedTools ?? [])
+  const mcp = new McpRegistry(
+    secrets,
+    {
+      onStateChanged: () => {
+        postMcp()
+        // Fires on connect, disconnect and tools/list_changed — every way the MCP half of
+        // the corpus can change. Opening the panel fires several at once, which is what the
+        // debounce is for.
+        scheduleDocsReindex('MCP tools changed')
+      },
+    },
+    logger,
+    () => cachedApprovals.allowedTools ?? [],
+  )
 
   function postMcp(): void {
     const servers = mcp.states_()
@@ -1548,24 +1564,51 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    * manifest, no incremental diffing and no progress reporting. It simply replaces the
    * collection's contents.
    */
-  async function handleIndexDocs(): Promise<void> {
+  /**
+   * The fingerprint of the corpus that was last written, kept beside the codebase manifests.
+   *
+   * Auto-reindexing without this would re-embed the whole catalogue every time an MCP server
+   * reconnected, which happens on every panel open. Hashing what *would* be written and
+   * comparing is far cheaper than embedding it — and the embedder model is part of the hash,
+   * because changing model makes every stored vector incomparable with new ones.
+   */
+  function docsFingerprintPath(index: string): string {
+    return path.join(storageDir, 'index-manifests', `${index}.docs.json`)
+  }
+
+  async function readDocsFingerprint(index: string): Promise<string | undefined> {
+    try {
+      const raw = JSON.parse(await fs.readFile(docsFingerprintPath(index), 'utf8')) as { fingerprint?: unknown }
+      return typeof raw.fingerprint === 'string' ? raw.fingerprint : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  interface DocsIndexOutcome {
+    indexed?: number
+    index?: string
+    error?: string
+    /** True when the corpus was already up to date and nothing was embedded. */
+    unchanged?: boolean
+  }
+
+  /**
+   * Writes the tool and skill documentation corpus into its collection.
+   *
+   * `force` is what separates the button from the automatic path: pressing Index
+   * documentation should visibly do something even when nothing has changed, whereas the
+   * automatic trigger must cost nothing when the catalogue is the same as last time.
+   */
+  async function indexDocs(options: { force: boolean }): Promise<DocsIndexOutcome> {
     const { config } = await configManager.load()
     const index = docsIndexName(config)
     const search = await resolveSearch(config)
     const embedder = await resolveEmbedder(config)
 
-    if (index === undefined) {
-      post({ type: 'docsIndexed', error: 'Open a folder first — the documentation index is named after it.' })
-      return
-    }
-    if (search === undefined) {
-      post({ type: 'docsIndexed', error: 'Choose a search connection in Settings → Search first.' })
-      return
-    }
-    if (embedder === undefined) {
-      post({ type: 'docsIndexed', error: 'Configure an embedding model in Settings → Search first.' })
-      return
-    }
+    if (index === undefined) return { error: 'Open a folder first — the documentation index is named after it.' }
+    if (search === undefined) return { error: 'Choose a search connection in Settings → Search first.' }
+    if (embedder === undefined) return { error: 'Configure an embedding model in Settings → Search first.' }
 
     try {
       /*
@@ -1576,10 +1619,16 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       const registry = currentToolRegistry(undefined, undefined, undefined, undefined, true)
       const entries = buildDocCorpus({ dispatchOnlyTools: registry.dispatchOnlyList(), skills })
 
-      if (entries.length === 0) {
-        post({ type: 'docsIndexed', indexed: 0, index })
-        return
+      const fingerprint = createHash('sha256')
+        .update(`${embedder.model}:${String(embedder.dimensions)}`)
+        .update(entries.map((entry) => `${entry.id}\u0000${entry.text}`).join('\u0001'))
+        .digest('hex')
+
+      if (!options.force && fingerprint === (await readDocsFingerprint(index))) {
+        return { unchanged: true, index, indexed: entries.length }
       }
+
+      if (entries.length === 0) return { indexed: 0, index }
 
       const writer = createVectorIndexWriter(
         httpClient,
@@ -1607,10 +1656,81 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       if (stale.length > 0) await writer.deleteByPaths(index, stale)
       await writer.upsert(index, documents)
 
-      post({ type: 'docsIndexed', indexed: documents.length, index })
+      /*
+       * Written only after the store accepted everything. A fingerprint saved before the
+       * write would make a failed run look successful, and nothing would retry it.
+       */
+      await fs.mkdir(path.dirname(docsFingerprintPath(index)), { recursive: true })
+      await fs.writeFile(
+        docsFingerprintPath(index),
+        JSON.stringify({ fingerprint, indexedAt: Date.now(), count: documents.length }),
+        'utf8',
+      )
+
+      return { indexed: documents.length, index }
     } catch (error) {
-      post({ type: 'docsIndexed', error: error instanceof Error ? error.message : String(error) })
+      return { error: error instanceof Error ? error.message : String(error) }
     }
+  }
+
+  async function handleIndexDocs(): Promise<void> {
+    const outcome = await indexDocs({ force: true })
+    post({
+      type: 'docsIndexed',
+      ...(outcome.indexed !== undefined ? { indexed: outcome.indexed } : {}),
+      ...(outcome.index !== undefined ? { index: outcome.index } : {}),
+      ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+    })
+  }
+
+  let docsReindexTimer: ReturnType<typeof setTimeout> | undefined
+  let docsReindexRunning = false
+
+  /**
+   * Reindexes the documentation after the catalogue changes, without being asked.
+   *
+   * **Debounced, because the triggers arrive in bursts.** Opening the panel connects every
+   * MCP server and each one fires a state change; a skill written by the model fires another.
+   * A few seconds of quiet coalesces those into a single run.
+   *
+   * Silent by design. This is background upkeep, and a notification every time a server
+   * reconnected would be worse than the staleness it fixes — the fingerprint means the common
+   * case does no work at all. Failures are logged rather than surfaced, and the next trigger
+   * retries because the fingerprint is only written on success.
+   */
+  function scheduleDocsReindex(reason: string): void {
+    if (docsReindexTimer !== undefined) clearTimeout(docsReindexTimer)
+    docsReindexTimer = setTimeout(() => {
+      docsReindexTimer = undefined
+      if (docsReindexRunning) {
+        // A run is already in flight. Queue behind it rather than embedding the same corpus
+        // twice concurrently and racing over which result lands last.
+        scheduleDocsReindex(reason)
+        return
+      }
+      docsReindexRunning = true
+      void (async () => {
+        try {
+          const { config } = await configManager.load()
+          // Only worth doing when the schemas are actually hidden — with the dispatcher off
+          // nothing consults this index, so indexing would be pure cost.
+          if (config.retrieval?.dispatcher !== true) return
+          const outcome = await indexDocs({ force: false })
+          if (outcome.error !== undefined) {
+            logger.warn(`documentation reindex failed (${reason}): ${outcome.error}`)
+          } else if (outcome.unchanged !== true) {
+            logger.info(`documentation reindexed (${reason}): ${String(outcome.indexed ?? 0)} entries`)
+            post({
+              type: 'docsIndexed',
+              ...(outcome.indexed !== undefined ? { indexed: outcome.indexed } : {}),
+              ...(outcome.index !== undefined ? { index: outcome.index } : {}),
+            })
+          }
+        } finally {
+          docsReindexRunning = false
+        }
+      })()
+    }, 3_000)
   }
 
   async function handleStartIndexing(): Promise<void> {
@@ -1683,6 +1803,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
 
   async function postPython(): Promise<void> {
     post({ type: 'python', status: python.status() })
+    // Python tools are part of the corpus, and this fires whenever the registry reloads —
+    // a tool created, updated, deleted, or the folder pointed somewhere else.
+    scheduleDocsReindex('Python tools changed')
   }
 
   async function handleSetPython(input: Extract<UiToHostMessage, { type: 'setPython' }>): Promise<void> {
@@ -2460,7 +2583,12 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     } else if (message.type === 'setDispatcher') {
       void configManager
         .save('user', { retrieval: { dispatcher: message.enabled } })
-        .then(() => postDispatcher())
+        .then(() => {
+          void postDispatcher()
+          // Switching it on is the moment the index starts being consulted, and it may never
+          // have been built. Off needs nothing — the index simply stops being read.
+          if (message.enabled) scheduleDocsReindex('dispatcher enabled')
+        })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'startIndexing') {
       void handleStartIndexing()
@@ -2558,6 +2686,8 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       // Same reasoning for the Python interpreter, and it kills the whole tree so a tool
       // that spawned a subprocess does not outlive the session (§16).
       void python.dispose()
+      // A pending reindex would otherwise fire after teardown and post to a dead webview.
+      if (docsReindexTimer !== undefined) clearTimeout(docsReindexTimer)
       unsubscribe()
     },
   }
