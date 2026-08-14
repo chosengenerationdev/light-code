@@ -26,6 +26,8 @@ import {
   createAskExpertTool,
   createSearchOpensearchTool,
   createSearchCodebaseTool,
+  createSearchDocsTool,
+  createCallToolTool,
   PythonManager,
   createWriteSkillTool,
   createDeleteSkillTool,
@@ -48,6 +50,7 @@ import {
   createDefaultToolRegistry,
   detectClaudeCli,
   buildExpertBriefing,
+  buildDocCorpus,
   createReadToolResultTool,
   deriveTitle,
   findMode,
@@ -433,17 +436,34 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     expert?: { cli: ClaudeCliInfo; model?: string },
     search?: { client: OpenSearchClient; store: VectorStoreConfig; indexes: string[] },
     codebase?: { searcher: VectorSearcher; embedder: Embedder; index: string; connectionLabel: string },
+    /** Retrieval for `search_docs`, when a store, an embedder and an indexed corpus exist. */
+    docs?: { searcher: VectorSearcher; embedder: Embedder; index: string },
+    /**
+     * Hides MCP and Python schemas from the prompt, reachable through `call_tool` instead
+     * (§12). Resolved once per turn like the mode, so the tool block stays byte-stable.
+     */
+    dispatcher = false,
   ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
-    for (const tool of mcp.enabledTools()) combined.register(tool)
+    /*
+     * MCP and Python tools are the whole reason the dispatcher exists: a few servers can
+     * contribute forty tools each, and their schemas sit at the front of every request.
+     * Built-ins stay advertised — there are nine, the model needs them constantly, and
+     * making it search for `read_file` would be absurd.
+     *
+     * `dispatchOnly` withholds the *advertisement*, never the capability: the mode filter and
+     * the approval gate still apply exactly as before, because the loop unwraps `call_tool`
+     * before either of them runs.
+     */
+    for (const tool of mcp.enabledTools()) combined.register(tool, { dispatchOnly: dispatcher })
     /*
      * Python tools are adapted into the ordinary Tool interface, exactly as MCP tools are.
      * That is the design choice that matters: the loop, the approval gate and mode filtering
      * treat py__* like execute_command, with no special-casing upstream — so a model-authored
      * tool is approval-gated for free.
      */
-    for (const tool of python.tools()) combined.register(tool)
+    for (const tool of python.tools()) combined.register(tool, { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
     if (skillsDir !== undefined) {
@@ -469,6 +489,24 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
      */
     if (codebase !== undefined) {
       combined.register(createSearchCodebaseTool(codebase))
+    }
+    /*
+     * `search_docs` is registered whenever the dispatcher is on, with or without a vector
+     * store. Without one it matches names and descriptions from the live registry instead of
+     * by meaning — and that fallback is load-bearing, not a nicety: hiding every MCP tool
+     * behind a `search_docs` that did not exist would make them all permanently unreachable.
+     */
+    if (dispatcher) {
+      combined.register(createCallToolTool())
+      combined.register(
+        createSearchDocsTool({
+          // Resolved per call, so a tool registered later in this same function is still
+          // found, and so a schema is never served from a snapshot.
+          listTools: () => combined.list(),
+          listSkills: () => skills,
+          ...(docs !== undefined ? { retrieval: docs } : {}),
+        }),
+      )
     }
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
@@ -740,6 +778,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       const search = await resolveSearch(config)
       const embedder = await resolveEmbedder(config)
       const codebaseIndex = codebaseIndexName(config)
+      const docsIndex = docsIndexName(config)
       // Listed once per turn so the tool description can name real indexes; a failure here
       // only costs the model that hint, never the tool.
       const searchIndexes =
@@ -870,6 +909,16 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
           search !== undefined && embedder !== undefined && codebaseIndex !== undefined
             ? { searcher: search.searcher, embedder, index: codebaseIndex, connectionLabel: search.store.label }
             : undefined,
+          /*
+           * Retrieval for `search_docs`. Absent leaves it matching lexically over the live
+           * registry, which is deliberately still useful — the dispatcher must not depend on
+           * a vector store existing, or turning it on without one would hide every MCP tool
+           * behind a search that could never find them.
+           */
+          search !== undefined && embedder !== undefined && docsIndex !== undefined
+            ? { searcher: search.searcher, embedder, index: docsIndex }
+            : undefined,
+          config.retrieval?.dispatcher === true,
         ),
         toolContext,
         {
@@ -1336,6 +1385,21 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   }
 
   /**
+   * Where the tool and skill documentation corpus lives.
+   *
+   * Derived from the codebase index name rather than configured separately, so enabling
+   * retrieval does not require the user to invent and type a second collection name. It is a
+   * *separate* collection because the two corpora have different lifetimes: code changes on
+   * every edit, the tool catalogue only when a server or skill is added.
+   */
+  function docsIndexName(config?: LightCodeConfig): string | undefined {
+    const chosen = config?.retrieval?.docsIndex?.trim()
+    if (chosen !== undefined && chosen.length > 0) return chosen
+    const base = codebaseIndexName(config)
+    return base === undefined ? undefined : `${base}-docs`
+  }
+
+  /**
    * The embedder, built over an existing provider profile.
    *
    * A profile already carries a working base URL, auth strategy, client certificate and CA.
@@ -1395,6 +1459,123 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   }
 
   let indexingAbort: AbortController | undefined
+
+  /**
+   * Reports the dispatcher's state to the UI, including how many tools it is actually hiding.
+   *
+   * The count is the useful part: the setting is only worth having when the catalogue is big
+   * enough to crowd the prompt, and "hides 2 tools" tells the user to leave it off far better
+   * than any explanatory paragraph.
+   */
+  async function postDispatcher(): Promise<void> {
+    const { config } = await configManager.load()
+    const enabled = config.retrieval?.dispatcher === true
+    // Counted with the dispatcher forced on, so the number answers "how many *would* be
+    // hidden" while it is still switched off.
+    const hidden = currentToolRegistry(undefined, undefined, undefined, undefined, true).dispatchOnlyList().length
+    const index = docsIndexName(config)
+    post({
+      type: 'dispatcher',
+      enabled,
+      hiddenTools: hidden,
+      ...(index !== undefined ? { docsIndex: index } : {}),
+    })
+  }
+
+  /**
+   * Indexes the tool and skill documentation so `search_docs` can match by meaning.
+   *
+   * Separate from `handleStartIndexing` despite the similarity, because the two corpora have
+   * nothing in common but the machinery: this one walks no files, respects no gitignore, and
+   * changes when a server or skill is added rather than when code is edited. Folding them
+   * together would mean re-embedding the whole workspace to pick up one new MCP tool.
+   *
+   * Small enough to write in one pass — a few hundred documents at most — so there is no
+   * manifest, no incremental diffing and no progress reporting. It simply replaces the
+   * collection's contents.
+   */
+  async function handleIndexDocs(): Promise<void> {
+    const { config } = await configManager.load()
+    const index = docsIndexName(config)
+    const search = await resolveSearch(config)
+    const embedder = await resolveEmbedder(config)
+
+    if (index === undefined) {
+      post({ type: 'docsIndexed', error: 'Open a folder first — the documentation index is named after it.' })
+      return
+    }
+    if (search === undefined) {
+      post({ type: 'docsIndexed', error: 'Choose a search connection in Settings → Search first.' })
+      return
+    }
+    if (embedder === undefined) {
+      post({ type: 'docsIndexed', error: 'Configure an embedding model in Settings → Search first.' })
+      return
+    }
+
+    try {
+      /*
+       * Built with the dispatcher forced on, whatever the current setting. Otherwise nothing
+       * would be dispatch-only at this moment and the corpus would come out empty — indexing
+       * has to describe the catalogue as it will be *used*, not as it happens to be right now.
+       */
+      const registry = currentToolRegistry(undefined, undefined, undefined, undefined, true)
+      const entries = buildDocCorpus({ dispatchOnlyTools: registry.dispatchOnlyList(), skills })
+
+      if (entries.length === 0) {
+        post({ type: 'docsIndexed', indexed: 0, index })
+        return
+      }
+
+      const writer = createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await openSearchConnectionFor(search.store, search.id),
+      )
+      await writer.ensureCollection(index, embedder.dimensions)
+
+      const vectors = await embedder.embedBatch(entries.map((entry) => entry.text))
+      const documents = entries.flatMap((entry, position) => {
+        const vector = vectors[position]
+        if (vector === undefined) return []
+        // `path` carries the qualified id — see rag/toolDocs.ts for why that field is reused
+        // rather than adding a second collection shape across every backend.
+        return [{ id: entry.id, text: entry.text, path: entry.id, startLine: 1, endLine: 1, vector }]
+      })
+
+      /*
+       * Entries that vanished — a server removed, a skill deleted — are deleted first.
+       * Upserting alone would leave them matchable forever, and `search_docs` would keep
+       * offering a tool the junior cannot call.
+       */
+      const stale = await staleDocPaths(index, search, documents)
+      if (stale.length > 0) await writer.deleteByPaths(index, stale)
+      await writer.upsert(index, documents)
+
+      post({ type: 'docsIndexed', indexed: documents.length, index })
+    } catch (error) {
+      post({ type: 'docsIndexed', error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /** Ids currently in the collection that the fresh corpus no longer contains. */
+  async function staleDocPaths(
+    index: string,
+    search: { searcher: VectorSearcher; opensearch?: OpenSearchClient },
+    fresh: readonly { id: string }[],
+  ): Promise<string[]> {
+    if (search.opensearch === undefined) return []
+    try {
+      const existing = await search.opensearch.search(index, { _source: { includes: ['path'] } }, { size: 1000 })
+      const keep = new Set(fresh.map((document) => document.id))
+      return existing.hits
+        .map((hit) => (hit.source as { path?: unknown }).path)
+        .filter((value): value is string => typeof value === 'string' && !keep.has(value))
+    } catch {
+      // A missing collection is the normal first-run case, not an error worth failing over.
+      return []
+    }
+  }
 
   async function handleStartIndexing(): Promise<void> {
     if (indexingAbort !== undefined) {
@@ -2219,6 +2400,8 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleSetToolPermission(message.server, message.tool, message.permission)
     } else if (message.type === 'requestSearch') {
       void postSearch()
+      // The dispatcher lives on the Search tab, so its state ships with the same request.
+      void postDispatcher()
     } else if (message.type === 'saveSearchConnection') {
       void handleSaveSearchConnection(message.connection)
     } else if (message.type === 'deleteSearchConnection') {
@@ -2231,6 +2414,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleRequestSearchIndexes(message.connection)
     } else if (message.type === 'testSearchConnection') {
       void handleTestSearchConnection(message.connection)
+    } else if (message.type === 'indexDocs') {
+      void handleIndexDocs()
+    } else if (message.type === 'setDispatcher') {
+      void configManager
+        .save('user', { retrieval: { dispatcher: message.enabled } })
+        .then(() => postDispatcher())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'startIndexing') {
       void handleStartIndexing()
     } else if (message.type === 'cancelIndexing') {

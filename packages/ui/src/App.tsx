@@ -76,6 +76,14 @@ export function App(props: AppProps): ReactElement {
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   const [expertSpend, setExpertSpend] = useState({ usd: 0, consultations: 0, unpriced: 0 })
+  const [dispatcher, setDispatcher] = useState<{ enabled: boolean; hiddenTools: number; docsIndex?: string }>({
+    enabled: false,
+    hiddenTools: 0,
+  })
+  const [docsIndexing, setDocsIndexing] = useState(false)
+  const [docsResult, setDocsResult] = useState<{ indexed?: number; index?: string; error?: string } | undefined>(
+    undefined,
+  )
   const [mcpServers, setMcpServers] = useState<McpServerState[]>([])
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
@@ -260,6 +268,19 @@ export function App(props: AppProps): ReactElement {
           ...(message.interpreter !== undefined ? { interpreter: message.interpreter } : {}),
           ...(message.venvDir !== undefined ? { venvDir: message.venvDir } : {}),
           detail: message.detail,
+        })
+      } else if (message.type === 'dispatcher') {
+        setDispatcher({
+          enabled: message.enabled,
+          hiddenTools: message.hiddenTools,
+          ...(message.docsIndex !== undefined ? { docsIndex: message.docsIndex } : {}),
+        })
+      } else if (message.type === 'docsIndexed') {
+        setDocsIndexing(false)
+        setDocsResult({
+          ...(message.indexed !== undefined ? { indexed: message.indexed } : {}),
+          ...(message.index !== undefined ? { index: message.index } : {}),
+          ...(message.error !== undefined ? { error: message.error } : {}),
         })
       } else if (message.type === 'expertSpend') {
         setExpertSpend({ usd: message.usd, consultations: message.consultations, unpriced: message.unpriced })
@@ -490,6 +511,24 @@ export function App(props: AppProps): ReactElement {
         props.transport.post({ type: 'startIndexing' } satisfies UiToHostMessage)
       },
       onCancelIndexing: () => props.transport.post({ type: 'cancelIndexing' } satisfies UiToHostMessage),
+    },
+    dispatcher: {
+      enabled: dispatcher.enabled,
+      hiddenTools: dispatcher.hiddenTools,
+      ...(dispatcher.docsIndex !== undefined ? { docsIndex: dispatcher.docsIndex } : {}),
+      indexing: docsIndexing,
+      ...(docsResult !== undefined ? { result: docsResult } : {}),
+      // Semantic matching needs both a place to put vectors and something to make them with.
+      retrievalReady: activeSearchId !== undefined && embedder?.model !== undefined,
+      onToggle: (enabled: boolean) => {
+        setDispatcher((current) => ({ ...current, enabled }))
+        props.transport.post({ type: 'setDispatcher', enabled } satisfies UiToHostMessage)
+      },
+      onIndexDocs: () => {
+        setDocsResult(undefined)
+        setDocsIndexing(true)
+        props.transport.post({ type: 'indexDocs' } satisfies UiToHostMessage)
+      },
     },
   }
 

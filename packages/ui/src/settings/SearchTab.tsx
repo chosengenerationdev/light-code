@@ -12,6 +12,7 @@ import {
 } from '../theme.js'
 import { Select } from '../Select.js'
 import { IndexingSection, type IndexingSectionProps } from './IndexingSection.js'
+import { DispatcherSection, type DispatcherSectionProps } from './DispatcherSection.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { SecretField } from './SecretField.js'
 
@@ -36,6 +37,8 @@ export interface SearchTabProps {
   onTest: (connection: SearchConnectionInput) => void
   /** Codebase indexing, rendered under the connection list. */
   indexing: IndexingSectionProps
+  /** Keeping tool schemas out of the prompt — same tab, since it is the other retrieval path. */
+  dispatcher: DispatcherSectionProps
 }
 
 const BLANK: SearchConnectionSummary = {
@@ -556,6 +559,7 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
       </p>
 
       <IndexingSection {...props.indexing} />
+      <DispatcherSection {...props.dispatcher} />
     </div>
   )
 }

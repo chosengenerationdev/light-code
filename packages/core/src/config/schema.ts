@@ -183,6 +183,34 @@ export function vectorStoreTls(store: VectorStoreConfig): TlsSettings | undefine
 }
 
 /**
+ * Keeping tool schemas out of the prompt, and finding them again on demand (§12).
+ *
+ * User-scope only (invariant 5) for the same reason as `embedder`: `docsIndex` names a
+ * collection that the contents of your tool and skill documentation get written to, and a
+ * workspace able to redirect it would choose where that goes.
+ */
+export const retrievalConfigSchema = z
+  .object({
+    /**
+     * Off by default, and that is a real default rather than caution.
+     *
+     * The dispatcher trades a smaller prompt for less reliable tool calls: models are
+     * measurably better at native tool-calling than at naming a tool inside `call_tool`.
+     * It earns its place when a large MCP catalogue genuinely dominates the context window,
+     * which is a minority of installs.
+     */
+    dispatcher: z.boolean(),
+    /**
+     * Where the documentation corpus is indexed. Absent means `search_docs` still works,
+     * matching names and descriptions from the live registry instead of by meaning — see
+     * `tools/searchDocs.ts` for why that fallback is load-bearing rather than a nicety.
+     */
+    docsIndex: z.string(),
+  })
+  .partial()
+export type RetrievalConfig = z.infer<typeof retrievalConfigSchema>
+
+/**
  * Embeddings, borrowed from an existing provider profile.
  *
  * `profileId` rather than its own URL and credentials: the profile already carries a
@@ -233,6 +261,7 @@ export const configSchema = z
     vectorStores: z.record(z.string(), vectorStoreSchema),
     activeVectorStoreId: z.string(),
     embedder: embedderConfigSchema,
+    retrieval: retrievalConfigSchema,
     activeProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,

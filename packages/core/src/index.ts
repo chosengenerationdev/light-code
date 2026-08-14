@@ -166,7 +166,14 @@ export {
   type IndexResult,
   type IndexerOptions,
 } from './rag/indexer.js'
-export { vectorStoreSchema, embedderConfigSchema, vectorStoreTls, type VectorStoreConfig } from './config/schema.js'
+export {
+  vectorStoreSchema,
+  embedderConfigSchema,
+  retrievalConfigSchema,
+  vectorStoreTls,
+  type VectorStoreConfig,
+  type RetrievalConfig,
+} from './config/schema.js'
 
 export {
   AlwaysApproveGate,

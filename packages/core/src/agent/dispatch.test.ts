@@ -336,3 +336,86 @@ describe('call_tool unwrapping', () => {
     expect(results[0]?.content).toBe('read_file executed')
   })
 })
+
+/**
+ * The wiring the bridge performs, asserted on the registry directly.
+ *
+ * `bridge.ts` needs a whole host to construct, so these mirror what it does — register
+ * built-ins plainly and MCP/Python tools with `dispatchOnly` — and pin the properties that
+ * would silently break if that call site changed.
+ */
+describe('dispatcher wiring', () => {
+  function wire(dispatcherOn: boolean): ToolRegistry {
+    const registry = new ToolRegistry()
+    for (const name of ['read_file', 'apply_diff', 'execute_command']) {
+      registry.register(spyTool(name, 'read'))
+    }
+    for (const name of ['filesystem__read', 'github__pr', 'py__report']) {
+      registry.register(spyTool(name, 'read'), { dispatchOnly: dispatcherOn })
+    }
+    if (dispatcherOn) registry.register(createCallToolTool())
+    return registry
+  }
+
+  /**
+   * Built-ins stay advertised. There are nine, the model reaches for them constantly, and
+   * making it search for `read_file` would be absurd — the dispatcher exists for catalogues
+   * that scale, not for the fixed core.
+   */
+  it('hides MCP and Python tools but keeps the built-ins listed', () => {
+    const on = wire(true)
+    const listed = on.promptList().map((tool) => tool.name)
+
+    expect(listed).toContain('read_file')
+    expect(listed).toContain('apply_diff')
+    expect(listed).toContain('call_tool')
+    expect(listed).not.toContain('filesystem__read')
+    expect(listed).not.toContain('py__report')
+  })
+
+  it('changes nothing at all when switched off', () => {
+    const off = wire(false)
+    expect(off.dispatchOnlyList()).toEqual([])
+    expect(off.promptList().map((tool) => tool.name)).toContain('filesystem__read')
+    expect(off.get('call_tool')).toBeUndefined()
+  })
+
+  /** Hidden is not withheld: the capability is unchanged, only the advertisement. */
+  it('leaves every hidden tool resolvable by name', () => {
+    const on = wire(true)
+    for (const name of ['filesystem__read', 'github__pr', 'py__report']) {
+      expect(on.get(name), name).toBeDefined()
+    }
+  })
+
+  function catalogue(size: number, dispatcherOn: boolean): ToolRegistry {
+    const registry = new ToolRegistry()
+    registry.register(spyTool('read_file', 'read'))
+    for (let index = 0; index < size; index++) {
+      registry.register(spyTool(`srv__tool_${index}`, 'read'), { dispatchOnly: dispatcherOn })
+    }
+    if (dispatcherOn) registry.register(createCallToolTool())
+    return registry
+  }
+
+  const promptSize = (registry: ToolRegistry): number =>
+    JSON.stringify(toToolDefinitions(toolsForMode(registry, CODE_MODE))).length
+
+  it('shrinks the prompt substantially on a large catalogue', () => {
+    expect(promptSize(catalogue(40, true))).toBeLessThan(promptSize(catalogue(40, false)) / 2)
+  })
+
+  /**
+   * **The tradeoff, asserted rather than described.** `call_tool` carries a long description
+   * of its own, so below roughly a dozen tools it costs more prompt than it saves — on top of
+   * models being measurably worse at naming a tool inside a dispatcher than at calling one
+   * listed directly.
+   *
+   * This is why the setting ships off, and why the Search tab shows the hidden-tool count and
+   * says plainly when the number is too low to bother. Discovered by this test failing at
+   * three tools, which is a better argument than any paragraph.
+   */
+  it('costs more than it saves on a small one', () => {
+    expect(promptSize(catalogue(3, true))).toBeGreaterThan(promptSize(catalogue(3, false)))
+  })
+})

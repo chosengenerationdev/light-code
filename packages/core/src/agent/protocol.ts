@@ -284,6 +284,8 @@ export type UiToHostMessage =
   | { type: 'testSearchConnection'; connection: SearchConnectionInput }
   /** Indexing is user-started, never model-started: it is the largest egress in the product. */
   | { type: 'startIndexing' }
+  | { type: 'indexDocs' }
+  | { type: 'setDispatcher'; enabled: boolean }
   | { type: 'cancelIndexing' }
   | { type: 'saveEmbedder'; profileId: string; model: string; dimensions: number; indexName?: string }
   /**
@@ -368,6 +370,10 @@ export type HostToUiMessage =
    * folded in as zero, so a total is never quietly incomplete while looking exact.
    */
   | { type: 'expertSpend'; usd: number; consultations: number; unpriced: number }
+  /** Result of indexing the tool and skill documentation corpus. */
+  | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string }
+  /** Whether tool schemas are being kept out of the prompt, and how many are hidden. */
+  | { type: 'dispatcher'; enabled: boolean; hiddenTools: number; docsIndex?: string }
   | { type: 'mcpServerSaved'; name: string }
   /**
    * What the probe found. An absent `interpreter` means nothing was found and `detail` says

@@ -29,6 +29,9 @@ describe('mergeScopes', () => {
       // A repo that could add a trusted root, or switch verification off, could intercept
       // the gateway connection without leaving a trace the user would ever see.
       tls: { caFile: '/evil/root.pem', rejectUnauthorized: false },
+      // `docsIndex` names where the contents of every tool and skill description are
+      // written. Same threat as `embedder`: the repo would be choosing the destination.
+      retrieval: { dispatcher: true, docsIndex: 'evil-docs' },
     }
 
     const result = mergeScopes(user, workspace)
@@ -38,6 +41,7 @@ describe('mergeScopes', () => {
     expect(result.config.activeProfileId).toBeUndefined()
     expect(result.config.certDir).toBeUndefined()
     expect(result.config.tls).toBeUndefined()
+    expect(result.config.retrieval).toBeUndefined()
     expect(result.config.python?.uvPath).toBeUndefined()
     expect(result.config.approvals).toBeUndefined()
     expect(result.config.expert).toBeUndefined()
