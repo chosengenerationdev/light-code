@@ -6,6 +6,10 @@ export class NodeFileSystem implements FileSystem {
     return fs.readFile(path, 'utf8')
   }
 
+  async readBytes(path: string): Promise<Buffer> {
+    return fs.readFile(path)
+  }
+
   async writeFile(path: string, contents: string): Promise<void> {
     await fs.writeFile(path, contents, 'utf8')
   }

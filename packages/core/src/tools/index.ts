@@ -4,6 +4,7 @@ import { attemptCompletionTool } from './attemptCompletion.js'
 import { executeCommandTool } from './executeCommand.js'
 import { listFilesTool } from './listFiles.js'
 import { readFileTool } from './readFile.js'
+import { readDocumentTool } from './readDocument.js'
 import { ToolRegistry } from './registry.js'
 import { searchFilesTool } from './searchFiles.js'
 import { writeToFileTool } from './writeToFile.js'
@@ -11,6 +12,7 @@ import { writeToFileTool } from './writeToFile.js'
 export * from './types.js'
 export { ToolRegistry } from './registry.js'
 export { readFileTool } from './readFile.js'
+export { readDocumentTool, type ReadDocumentParams } from './readDocument.js'
 export { listFilesTool } from './listFiles.js'
 export { searchFilesTool } from './searchFiles.js'
 export { writeToFileTool } from './writeToFile.js'
@@ -27,6 +29,7 @@ export { createReadToolResultTool } from './readToolResult.js'
 export function createDefaultToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry()
   registry.register(readFileTool)
+  registry.register(readDocumentTool)
   registry.register(listFilesTool)
   registry.register(searchFilesTool)
   registry.register(writeToFileTool)

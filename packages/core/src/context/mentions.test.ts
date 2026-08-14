@@ -10,6 +10,9 @@ class RealFileSystem implements FileSystem {
   async readFile(target: string): Promise<string> {
     return fs.readFile(target, 'utf8')
   }
+  async readBytes(target: string): Promise<Buffer> {
+    return fs.readFile(target)
+  }
   async writeFile(target: string, contents: string): Promise<void> {
     await fs.writeFile(target, contents, 'utf8')
   }
