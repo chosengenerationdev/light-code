@@ -1,5 +1,35 @@
 # light-code-vscode
 
+## 0.13.0
+
+### Minor Changes
+
+- Junior mode: a cheap model does the work, Claude does the thinking.
+
+  Pick **Junior** in the mode selector and your ordinary model becomes the hands — reading,
+  editing, running commands — while the Claude CLI expert supplies the plan. It is meant for the
+  case where the everyday model is free or nearly free and Claude is the scarce resource.
+
+  **Consultations in a task now continue one conversation.** This is the change that makes the
+  mode worth having. Measured against CLI 2.1.227: a cold consultation pays 18,643 tokens of
+  cache creation just to establish Claude Code's own prompt — $0.187 to reply "OK" — while
+  resuming that session reads the same cache for $0.0099. Nineteen times cheaper, and the expert
+  still remembers the code and the plan, so a follow-up is "step 3 failed with this error"
+  instead of the whole story again.
+
+  **The expert is told what you have, by name.** It runs in its own process with only Read, Grep
+  and Glob: it cannot call an MCP tool, a Python tool, or search the documentation index, and
+  without being told it would plan as though the junior were a bare shell. It now receives an
+  inventory of every tool and skill — names and one-line summaries, never JSON schemas, and only
+  once per session. When it needs exact arguments it asks the junior to look them up.
+
+  **What the expert costs is now visible while you spend it**, above the token bar: the total and
+  consultation count for the current task, resetting when you start a new one. Failed
+  consultations are counted too, since one that errored partway can still have cost money.
+
+  Junior mode is disabled in the picker unless the Claude CLI is configured — without an expert
+  it would be an ordinary Code session whose instructions refer to something that is not there.
+
 ## 0.12.0
 
 ### Minor Changes
