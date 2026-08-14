@@ -913,6 +913,45 @@ built before one is validated is how all three end up mediocre.
 the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSchema.kind` is
 `z.literal('opensearch')`. Adding Qdrant therefore starts with extracting that abstraction.
 
+---
+
+## SESSION HANDOVER — written 2026-08-14, read this first
+
+**Where things are.** `main` is clean at `d90f15a`; everything is committed and pushed except
+this handover. Latest built artifact is `light-code-vscode-0.11.0.vsix`; the Skills tab landed
+after it, so the next package will be 0.12.0. The marketplace listing was on **0.8.1** at last
+check and 0.10.0 was uploaded on 2026-08-13 but had not appeared — **query the gallery, do not
+trust this paragraph** (trap: two claims in these notes were stale for months).
+
+**Blocked on the user — do not start these without their input:**
+1. **Verify OpenSearch indexing against their real cluster.** 0.10.1 fixed two bugs their
+   cluster found (non-finite floats serialising to `null`; vector width fixed at index
+   creation). Nothing here has ever run against a real cluster.
+2. **Open the Python tab and the Skills tab in a real Extension Host.** Phase 9 and the Skills
+   tab were driven entirely from scripts. Most likely place for a bug.
+
+**Agreed next build, in this order — decided 2026-08-13, do not re-litigate:**
+1. *After* OpenSearch is verified: extract a `VectorStore` interface, then add **Qdrant**.
+   Note the seam does **not** exist — `rag/opensearch/*` is concrete and
+   `vectorStoreSchema.kind` is `z.literal('opensearch')`, so this starts with the refactor.
+2. Then Chroma, if still wanted.
+3. Then decide whether skills should move into a vector store (`search_docs`). **Not** by
+   varying tool definitions per turn — §12 forbids that specifically.
+
+**Known and unfixed:** the user reported a turn that ended silently ("nothing happened, I had
+to send another message"). The obvious cause is ruled out — a turn with no text and no tool
+call already emits an explicit error. Undiagnosed for want of a transcript. If it recurs, the
+`Light Code` output channel has the turn log.
+
+**Do not build** Phase 9b (scheduled prompts) without an explicit decision; see below.
+
+**A rule earned twice this week:** before repeating any claim about the running system —
+especially from this file — check it. Grep for the config key, query the registry, run the
+command. The step cap was documented as configurable since Phase 0 and nothing passed it; the
+published-version note was wrong for eight releases and was repeated to the user as fact.
+
+---
+
 **Still outstanding, and now the oldest debt in the project:** `MANUAL_VERIFICATION.md` has
 never been run. Session A is the security properties — deny actually blocking execution, the
 approval prompt showing ground truth, and the exact-match command allowlist. 0.4.0 adds two
