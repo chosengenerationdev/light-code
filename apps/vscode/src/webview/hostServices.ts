@@ -13,7 +13,7 @@ import { WebviewTransport } from '../platform/transport.js'
  * whether that split is holding.
  */
 export function createVSCodeHostServices(
-  webview: vscode.Webview,
+  transport: WebviewTransport,
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
 ): HostServices {
@@ -85,7 +85,7 @@ export function createVSCodeHostServices(
   }
 
   return {
-    transport: new WebviewTransport(webview, logger),
+    transport,
     secrets: new VSCodeSecretStore(context.secrets, logger),
     configStore: new VSCodeConfigStore(context, workspaceRoot),
     workspaceState: {

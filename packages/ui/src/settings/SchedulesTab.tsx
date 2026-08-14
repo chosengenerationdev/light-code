@@ -38,6 +38,11 @@ export interface SchedulesTabProps {
   onQueryMentions: (query: string) => void
   /** Opens a past run's transcript in an editor tab, where a long one is actually readable. */
   onOpenRun: (taskId: string, title: string) => void
+  /** Whether the timer is alive, and when it last checked. */
+  scheduler?: { running: boolean; lastTickAt?: number } | undefined
+  onRestartScheduler: () => void
+  /** Omitting the id clears every schedule's runs. */
+  onClearRuns: (id?: string) => void
 }
 
 const GROUP_LABELS: Record<string, string> = {
@@ -109,6 +114,43 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
         Schedules only fire while VS Code is open. One that came due while it was closed runs
         shortly after you next open it, once — not repeatedly to catch up.
       </p>
+
+      {/*
+        The scheduler's own state, shown rather than assumed.
+        A schedule that quietly never fires looks identical to one that is not due yet, which
+        is precisely how the last failure went unnoticed. The last-checked time is the tell.
+      */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+          padding: '6px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          border: `1px solid ${props.scheduler?.running === false ? colors.error : colors.border}`,
+          color: props.scheduler?.running === false ? colors.error : colors.muted,
+        }}
+      >
+        <span>
+          {props.scheduler?.running === false
+            ? 'The scheduler is not running — nothing will fire.'
+            : `Scheduler running${
+                props.scheduler?.lastTickAt === undefined
+                  ? ' — first check within a minute'
+                  : `, last checked ${new Date(props.scheduler.lastTickAt).toLocaleTimeString()}`
+              }`}
+        </span>
+        <button
+          type="button"
+          style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
+          title="Stop and start the timer. Safe at any time; a run already in progress is unaffected."
+          onClick={props.onRestartScheduler}
+        >
+          Restart
+        </button>
+      </div>
 
       {props.schedules.length === 0 ? (
         <p style={{ color: colors.muted, fontSize: 12, marginTop: 14 }}>None yet.</p>
@@ -214,6 +256,16 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
                   {(schedule.runs ?? []).length} run{(schedule.runs ?? []).length === 1 ? '' : 's'}
                 </button>
               )}
+              {expanded === schedule.id && (schedule.runs ?? []).length > 0 && (
+                <button
+                  type="button"
+                  style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 18 }}
+                  title="Forget this schedule's runs. The transcripts themselves stay in History."
+                  onClick={() => props.onClearRuns(schedule.id)}
+                >
+                  Clear these runs
+                </button>
+              )}
 
               {expanded === schedule.id &&
                 (schedule.runs ?? []).map((run, index) => (
@@ -273,9 +325,21 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
         </div>
       )}
 
-      <button type="button" style={{ ...primaryButtonStyle(false), marginTop: 14 }} onClick={() => setEditing(blank())}>
-        New schedule
-      </button>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 14 }}>
+        <button type="button" style={primaryButtonStyle(false)} onClick={() => setEditing(blank())}>
+          New schedule
+        </button>
+        {props.schedules.some((schedule) => (schedule.runs ?? []).length > 0) && (
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            title="Forget every schedule's run history. The transcripts stay in History and are deleted from there."
+            onClick={() => props.onClearRuns()}
+          >
+            Clear all run logs
+          </button>
+        )}
+      </div>
     </div>
   )
 }

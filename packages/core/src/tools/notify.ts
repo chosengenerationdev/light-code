@@ -3,13 +3,33 @@ import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
   message: z.string().min(1).describe('One short sentence. It is read out of context, in a notification.'),
-  level: z.enum(['info', 'warning']).optional().describe('Use warning only when something needs a person.'),
+  level: z
+    .enum(['info', 'warning'])
+    .optional()
+    .describe(
+      'Use warning only when something needs a person. A warning stays on screen until it is ' +
+        'dismissed; an info notification fades after a few seconds.',
+    ),
+  details: z
+    .string()
+    .optional()
+    .describe(
+      'Optional Markdown — tables, lists, headings, code. Opened in an editor tab when the user ' +
+        'clicks the notification. Put the report here and keep `message` to one line: a ' +
+        'notification itself is plain text and cannot show formatting.',
+    ),
 })
 export type NotifyParams = z.infer<typeof paramsSchema>
 
 export interface NotifyOptions {
-  /** Raises the notification. The host owns how — a toast in VS Code, stderr elsewhere. */
-  notify: (message: string, level: 'info' | 'warning') => void
+  /**
+   * Raises the notification. The host owns how — a toast in VS Code, stderr elsewhere.
+   *
+   * `details` is Markdown for the host to show somewhere a document can be read. The
+   * notification itself cannot render it: a VS Code toast is a plain string with buttons, so a
+   * table or a coloured cell has to live in a document the toast offers to open.
+   */
+  notify: (message: string, level: 'info' | 'warning', details?: string) => void
 }
 
 /**
@@ -39,14 +59,21 @@ export function createNotifyTool(options: NotifyOptions): Tool<NotifyParams> {
      */
     description:
       'Raise a notification the user will see even when the Light Code panel is closed. ' +
+      'The notification is one line of plain text; put any report, table or listing in `details` ' +
+      'as Markdown and it becomes a document they can open from it. ' +
       'If the user asks you to notify them, or to test notifications, do it — that is a direct ' +
       'instruction. On your own initiative use it only from a scheduled run reporting something ' +
       'that needs attention; in an ordinary conversation they are already reading your reply.',
     parametersSchema: paramsSchema,
 
     async execute(params): Promise<ToolResult> {
-      options.notify(params.message, params.level ?? 'info')
-      return { content: `Notified the user: ${params.message}` }
+      options.notify(params.message, params.level ?? 'info', params.details)
+      return {
+        content:
+          params.details === undefined
+            ? `Notified the user: ${params.message}`
+            : `Notified the user: ${params.message} (with a report they can open)`,
+      }
     },
   }
 }

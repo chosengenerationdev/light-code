@@ -135,6 +135,9 @@ export function App(props: AppProps): ReactElement {
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
+  const [schedulerState, setSchedulerState] = useState<{ running: boolean; lastTickAt?: number } | undefined>(
+    undefined,
+  )
   const [runningScheduleId, setRunningScheduleId] = useState<string | undefined>(undefined)
   const [skillExtraDirs, setSkillExtraDirs] = useState<string[]>([])
   // What the user typed, not the resolved absolute path — the field must round-trip a
@@ -197,6 +200,7 @@ export function App(props: AppProps): ReactElement {
           toolName: message.toolName,
           group: message.group,
           preview: message.preview,
+          ...(message.alwaysScope === undefined ? {} : { alwaysScope: message.alwaysScope }),
         })
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
@@ -288,6 +292,7 @@ export function App(props: AppProps): ReactElement {
         setSchedules(message.schedules)
         setScheduleTools(message.tools)
         setRunningScheduleId(message.runningId)
+        setSchedulerState(message.scheduler)
       } else if (message.type === 'searchLog') {
         setSearchLog(message.entries)
       } else if (message.type === 'searchProbe') {
@@ -435,7 +440,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'approvalResponse', id, decision } satisfies UiToHostMessage)
   }
 
-  const alwaysAllow = (id: string, scope: 'tool' | 'command'): void => {
+  const alwaysAllow = (id: string, scope: 'tool' | 'command' | 'folder'): void => {
     setPendingApproval(undefined)
     props.transport.post({ type: 'approvalResponseAlways', id, scope } satisfies UiToHostMessage)
   }
@@ -822,6 +827,13 @@ export function App(props: AppProps): ReactElement {
               onQueryMentions: queryMentions,
               onOpenRun: (taskId: string, title: string) =>
                 props.transport.post({ type: 'openScheduleRun', taskId, title } satisfies UiToHostMessage),
+              scheduler: schedulerState,
+              onRestartScheduler: () => props.transport.post({ type: 'restartScheduler' } satisfies UiToHostMessage),
+              onClearRuns: (id) =>
+                props.transport.post({
+                  type: 'clearScheduleRuns',
+                  ...(id === undefined ? {} : { id }),
+                } satisfies UiToHostMessage),
             }}
             python={{
               status: pythonStatus,

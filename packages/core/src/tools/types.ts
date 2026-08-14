@@ -40,6 +40,18 @@ export interface ToolExecutionContext {
    */
   readRoots?: string[]
   /**
+   * Asks the user whether a path outside every allowed root may be read.
+   *
+   * Pre-registering every share before the assistant can look at anything is a lot of friction
+   * for a permission the user is perfectly able to grant when it is actually needed — and the
+   * prompt is *better* evidence than the setting, because it names the real resolved path
+   * rather than blessing a whole tree in advance (invariant 8).
+   *
+   * Absent means refuse, which is what an unattended scheduled run gets: there is nobody to
+   * ask, so a run cannot widen its own filesystem access.
+   */
+  requestPathAccess?: (realPath: string) => Promise<boolean>
+  /**
    * Absolute path to the `rg` executable, supplied by the host.
    *
    * Core deliberately does **not** import `@vscode/ripgrep`. That package resolves a

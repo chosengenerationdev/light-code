@@ -48,6 +48,8 @@ function render(schedules: Schedule[] = [], saved: Schedule[] = []): void {
         mentionCandidates={[]}
         onQueryMentions={() => {}}
         onOpenRun={() => {}}
+        onRestartScheduler={() => {}}
+        onClearRuns={() => {}}
       />,
     ),
   )

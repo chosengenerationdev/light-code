@@ -1,5 +1,38 @@
 # light-code-vscode
 
+## 0.22.0
+
+### Minor Changes
+
+- Schedules now actually fire, and folders can be approved from the chat.
+
+  **The scheduler no longer dies with the panel.** Everything Light Code runs lived inside the
+  chat view, so closing it — or simply never opening it after starting VS Code — took the
+  schedule timer with it. That is why a schedule could sit there looking armed while nothing
+  ran, yet Run Now worked: Run Now is only reachable from the panel that was keeping the timer
+  alive. Light Code now loads with the window and keeps one scheduler for its lifetime; the
+  chat view attaches to it and asks for the transcript back. Nothing is started until it is
+  needed — the poller reads config and only builds the rest when a schedule is genuinely due.
+
+  **The Schedules tab shows the scheduler's own state**, including when it last checked, with a
+  Restart button. A schedule that quietly never fires used to look exactly like one that was not
+  due yet.
+
+  **Run logs can be cleared**, per schedule or all at once.
+
+  **Notifications can carry a report.** A VS Code notification is one line of plain text — it
+  cannot render a table or a colour, whoever sends it. So `notify` now takes an optional
+  Markdown `details`, and the notification offers to open it as a document: tables, headings and
+  code all render there. A warning-level notification also stays on screen until dismissed,
+  where an info one fades.
+
+  **Reading a file outside the workspace can be approved in the chat.** Rather than registering
+  every share in Settings first, the assistant asks when it needs one, showing the resolved path.
+  Allow it once, or allow the whole folder — which adds it to Settings → Approvals, where it can
+  be removed. Certificates and keys on the deny list are never offered, writes are never offered,
+  and a scheduled run is refused outright: nobody is there to answer, so an unattended run cannot
+  widen its own access.
+
 ## 0.21.0
 
 ### Minor Changes

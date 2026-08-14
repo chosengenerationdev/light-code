@@ -19,7 +19,7 @@ export interface ChatProps {
   onSend: (text: string, images: ImageAttachmentInput[]) => void
   onCancel: () => void
   onDecideApproval: (id: string, decision: ApprovalDecision) => void
-  onAlwaysAllow: (id: string, scope: 'tool' | 'command') => void
+  onAlwaysAllow: (id: string, scope: 'tool' | 'command' | 'folder') => void
   onRollback: () => void
   usage: ContextUsage | undefined
   expertSpend: { usd: number; consultations: number; unpriced: number }

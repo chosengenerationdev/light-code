@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { confineToAny, PathConfinementError } from '../fs/confine.js'
+import { confineToAny, PathConfinementError, realpathAllowingMissing } from '../fs/confine.js'
 import type { ToolExecutionContext } from './types.js'
 
 export type ResolvedToolPath = { ok: true; realPath: string } | { ok: false; message: string }
@@ -30,10 +30,30 @@ export async function resolveToolPath(
   try {
     realPath = await confineToAny(absolute, roots)
   } catch (error) {
-    if (error instanceof PathConfinementError) {
-      return { ok: false, message: error.message }
+    if (!(error instanceof PathConfinementError)) throw error
+
+    /*
+     * Outside every allowed root. Rather than refusing outright, ask — but only for a read,
+     * and only when there is someone to ask.
+     */
+    const denied = { ok: false as const, message: error.message }
+    if (options.write === true || context.requestPathAccess === undefined) return denied
+
+    const outside = await realpathAllowingMissing(absolute)
+
+    /*
+     * The deny list is checked *before* asking, and that ordering is the point: a key or
+     * certificate must not be something the user can be talked into approving. Invariant 6 is
+     * absolute, not a default.
+     */
+    if (await context.denylist.isDenied(outside)) {
+      return { ok: false, message: `Access to "${requestedPath}" is denied.` }
     }
-    throw error
+
+    if (!(await context.requestPathAccess(outside))) {
+      return { ok: false, message: `The user declined access to "${requestedPath}".` }
+    }
+    return { ok: true, realPath: outside }
   }
 
   if (await context.denylist.isDenied(realPath)) {

@@ -362,7 +362,7 @@ export type {
   SearchQueryLimits,
 } from './agent/protocol.js'
 
-export { wireChatBridge } from './host/bridge.js'
+export { wireChatBridge, type ChatBridge } from './host/bridge.js'
 export type { HostServices, HostUi, OpenDialogOptions, WorkspaceState } from './host/services.js'
 export { NodeFileSystem } from './platform/node/filesystem.js'
 export { NodeTerminal } from './platform/node/terminal.js'

@@ -247,7 +247,7 @@ export type UiToHostMessage =
   | { type: 'unqueueMessage'; index: number }
   | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
   /** Approve *and* remember, so this exact command / this tool stops prompting here. */
-  | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' }
+  | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' | 'folder' }
   | { type: 'rollback' }
   | { type: 'requestSettings' }
   | { type: 'requestTasks' }
@@ -324,6 +324,10 @@ export type UiToHostMessage =
   | { type: 'deleteSchedule'; id: string }
   | { type: 'setScheduleEnabled'; id: string; enabled: boolean }
   | { type: 'runScheduleNow'; id: string }
+  /** Restarts the timer by hand, for when it is reported as stopped. */
+  | { type: 'restartScheduler' }
+  /** Clears a schedule's remembered runs. Omit `id` to clear every schedule's. */
+  | { type: 'clearScheduleRuns'; id?: string }
   /** Opens a past run's transcript in an editor tab rather than the sidebar. */
   | { type: 'openScheduleRun'; taskId: string; title: string }
   /** The user removing one directly. The model's own delete goes through the approval gate. */
@@ -371,7 +375,14 @@ export type HostToUiMessage =
   | { type: 'toolCall'; toolCall: ToolCallSummary; expertInformed?: boolean }
   | { type: 'toolResult'; toolCall: ToolCallSummary; expertInformed?: boolean }
   /** Ground truth for the approval prompt — invariant 8. The UI renders only `preview`. */
-  | { type: 'approvalRequest'; id: string; toolName: string; group: ToolGroup; preview: ToolPreview }
+  | {
+      type: 'approvalRequest'
+      id: string
+      toolName: string
+      group: ToolGroup
+      preview: ToolPreview
+      alwaysScope?: 'folder'
+    }
   /** A rollback point now exists; the UI can offer to undo back to it. */
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
@@ -408,7 +419,20 @@ export type HostToUiMessage =
   /** Every search the model ran this session, newest first. */
   | { type: 'searchLog'; entries: SearchLogEntry[] }
   /** Schedules plus every tool that currently exists, so the picker can list them all. */
-  | { type: 'schedules'; schedules: Schedule[]; tools: ScheduleToolInfo[]; runningId?: string }
+  | {
+      type: 'schedules'
+      schedules: Schedule[]
+      tools: ScheduleToolInfo[]
+      runningId?: string
+      /**
+       * Whether the timer is ticking, and when it last did.
+       *
+       * Shown because the failure being diagnosed here was invisible: schedules sat in the
+       * list looking armed while nothing was checking them. A last-checked time is the one
+       * piece of evidence that distinguishes "not due yet" from "not running".
+       */
+      scheduler: { running: boolean; lastTickAt?: number }
+    }
   /** Result of a hand-run query. `text` is what the model would have been given. */
   | { type: 'searchProbe'; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */

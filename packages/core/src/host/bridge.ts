@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+
+import { normalizeForComparison } from '../fs/confine.js'
 import {
   ConfigManager,
   type SecretStore,
@@ -193,7 +195,16 @@ function stripEmpty<T extends object>(source: T): Partial<T> {
  * extension and the Node server both call this, which is the whole point — a fix to the
  * approval gate or the MCP tab reaches both without being written twice.
  */
-export function wireChatBridge(services: HostServices): { dispose: () => void } {
+/**
+ * A live bridge. Outlives any one view, so a host can rebuild its UI without rebuilding this.
+ */
+export interface ChatBridge {
+  /** Re-pushes state a freshly created view could not have received. */
+  resync: () => void
+  dispose: () => void
+}
+
+export function wireChatBridge(services: HostServices): ChatBridge {
   const { transport, secrets, ui, workspaceRoot, storageDir, ripgrepPath } = services
   const logger = new Logger({ level: 'debug', sink: services.logSink })
   const configManager = new ConfigManager(services.configStore)
@@ -404,6 +415,59 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   let cachedReadRoots: string[] = []
 
   /**
+   * Paths approved for this session only.
+   *
+   * "Allow once" means once per session, not once per call. A model reading the same log twice
+   * would otherwise prompt twice, and a user clicking through repeats stops reading them —
+   * which is how an approval prompt becomes a rubber stamp.
+   */
+  const sessionPathGrants = new Set<string>()
+
+  /**
+   * Asks whether a path outside every allowed root may be read.
+   *
+   * Goes through the same gate as a tool approval, so the prompt, the denial path and "always
+   * allow" all behave as they do everywhere else. The preview shows the **resolved** path,
+   * which is the ground truth invariant 8 asks for — the model's argument may be relative, or
+   * a symlink pointing somewhere else entirely.
+   */
+  async function requestPathAccess(realPath: string): Promise<boolean> {
+    const key = normalizeForComparison(realPath)
+    if (sessionPathGrants.has(key)) return true
+
+    const id = `path-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`
+    pendingPathApprovals.set(id, realPath)
+    try {
+      const decision = await userGate.requestApproval({
+        id,
+        // Named as what it is rather than as a tool: the user is granting access to a place,
+        // and calling it `read_file` would make "always allow" read as something much wider.
+        toolName: 'read a file outside the workspace',
+        group: 'read',
+        alwaysScope: 'folder',
+        preview: {
+          kind: 'text',
+          text: [
+            'The assistant wants to read a file outside this workspace:',
+            '',
+            realPath,
+            '',
+            'Allow reads only — it cannot write here whatever you choose.',
+          ].join('\n'),
+        },
+      })
+      if (decision !== 'approve') return false
+      sessionPathGrants.add(key)
+      return true
+    } finally {
+      pendingPathApprovals.delete(id)
+    }
+  }
+
+  /** Which approval ids are path requests, so "always allow" knows to remember a folder. */
+  const pendingPathApprovals = new Map<string, string>()
+
+  /**
    * What the expert has cost since this task was opened.
    *
    * Scoped to the task rather than persisted, and the UI says so. Reconstructing a resumed
@@ -577,7 +641,19 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
      */
     combined.register(
       createNotifyTool({
-        notify: (message, level) => {
+        notify: (message, level, details) => {
+          /*
+           * A report goes to a document, because the toast cannot hold one. VS Code
+           * notifications are a plain string plus buttons — no Markdown, no table, no colour —
+           * so "rich notification" has to mean "a notification that opens something rich".
+           */
+          if (details !== undefined) {
+            void (async () => {
+              const open = await ui.showActionMessage(message, 'Open report', level)
+              if (open) await ui.openDocument({ title: message, content: details })
+            })()
+            return
+          }
           /*
            * From a scheduled run the notification is the only thing the user will see, so it
            * carries a way into the transcript. Captured at call time rather than at
@@ -1000,6 +1076,11 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
         denylist,
         readFiles,
         readRoots: cachedReadRoots,
+        /*
+         * Omitted for a scheduled run: there is nobody to answer, and a run that could grant
+         * itself new filesystem access would defeat the point of its allowlist.
+         */
+        ...(schedule === undefined ? { requestPathAccess } : {}),
         signal: activeAbortController.signal,
         // Supplied by the host, not imported by core: the binary is platform-specific and
         // lives in the VSIX, so resolving it is a host concern (§4).
@@ -2393,9 +2474,29 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   }
 
   /** Approve now, and remember it for this workspace. */
-  async function handleAlwaysAllow(id: string, scope: 'tool' | 'command'): Promise<void> {
+  async function handleAlwaysAllow(id: string, scope: 'tool' | 'command' | 'folder'): Promise<void> {
     const request = userGate.getRequest(id)
+    const pathRequest = pendingPathApprovals.get(id)
     userGate.resolve(id, 'approve')
+
+    /*
+     * A path grant remembers the *containing folder*, not the file. "Always allow this one log
+     * file" is almost never what someone means, and a folder is what the readRoots list is
+     * made of — remembering a file would add an entry that matches nothing else in it.
+     */
+    if (pathRequest !== undefined) {
+      const folder = path.dirname(pathRequest)
+      sessionPathGrants.add(normalizeForComparison(pathRequest))
+      if (scope === 'folder' && !cachedReadRoots.includes(folder)) {
+        const { config } = await configManager.load()
+        await configManager.save('user', {
+          filesystem: { readRoots: [...(config.filesystem?.readRoots ?? []), folder] },
+        })
+        await postSettings()
+      }
+      return
+    }
+
     if (request === undefined) return
 
     if (scope === 'command' && request.preview.kind === 'command') {
@@ -2822,6 +2923,16 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleDeleteSchedule(message.id)
     } else if (message.type === 'setScheduleEnabled') {
       void handleSetScheduleEnabled(message.id, message.enabled)
+    } else if (message.type === 'restartScheduler') {
+      if (scheduleTimer !== undefined) {
+        clearInterval(scheduleTimer)
+        scheduleTimer = undefined
+      }
+      startScheduleTimer()
+      logger.info('schedule timer restarted by the user')
+      void postSchedules()
+    } else if (message.type === 'clearScheduleRuns') {
+      void handleClearScheduleRuns(message.id)
     } else if (message.type === 'openScheduleRun') {
       void openRunTranscript(message.taskId, message.title)
     } else if (message.type === 'runScheduleNow') {
@@ -2973,6 +3084,8 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    */
   let runningScheduleId: string | undefined
   let scheduleTimer: ReturnType<typeof setInterval> | undefined
+  /** When the timer last ran, so a stopped scheduler is visible rather than guessed at. */
+  let lastScheduleTickAt: number | undefined
 
   /** Every tool that exists, for the picker. Built with everything on so nothing is hidden. */
   function allToolsForPicker(): { name: string; description: string; group: string }[] {
@@ -2994,6 +3107,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       schedules: Object.values(schedules).sort((a, b) => a.name.localeCompare(b.name)),
       tools: allToolsForPicker(),
       ...(runningScheduleId !== undefined ? { runningId: runningScheduleId } : {}),
+      scheduler: {
+        running: scheduleTimer !== undefined,
+        ...(lastScheduleTickAt === undefined ? {} : { lastTickAt: lastScheduleTickAt }),
+      },
     })
   }
 
@@ -3119,6 +3236,31 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     }
   }
 
+  /**
+   * Forgets remembered runs.
+   *
+   * `lastResult`/`lastSummary` go with them: leaving a summary behind after clearing the log
+   * it came from would show a result with nothing to open, which reads as a bug rather than
+   * as an empty list.
+   */
+  async function handleClearScheduleRuns(id: string | undefined): Promise<void> {
+    const schedules = await loadSchedules()
+    const next: Record<string, Schedule> = {}
+    for (const [key, schedule] of Object.entries(schedules)) {
+      if (id !== undefined && key !== id) {
+        next[key] = schedule
+        continue
+      }
+      const cleared = { ...schedule }
+      delete cleared.runs
+      delete cleared.lastResult
+      delete cleared.lastSummary
+      delete cleared.lastTaskId
+      next[key] = cleared
+    }
+    await saveSchedules(next)
+  }
+
   /** The final assistant message, for the schedule list and any notification. */
   function lastAssistantSummary(): string {
     const messages = conversation.toArray()
@@ -3142,6 +3284,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     if (scheduleTimer !== undefined) return
     scheduleTimer = setInterval(() => {
       void (async () => {
+        // Recorded before the early return so the UI can tell a busy scheduler from a dead
+        // one — both look identical from the outside otherwise.
+        lastScheduleTickAt = Date.now()
         if (runningScheduleId !== undefined) return
         const now = Date.now()
         const schedules = await loadSchedules()
@@ -3172,7 +3317,14 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
             return
           }
         }
-      })()
+      })().catch((error: unknown) => {
+        /*
+         * An unhandled rejection here would be reported nowhere and the interval would keep
+         * firing blind. Logged so a failing tick is diagnosable from the output channel
+         * rather than inferred from schedules that never run.
+         */
+        logger.warn(`schedule tick failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
     }, 60_000)
   }
 
@@ -3184,6 +3336,35 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   startScheduleTimer()
 
   return {
+    /**
+     * Re-sends what a freshly created view cannot know.
+     *
+     * Everything else the UI needs it asks for on mount, but the transcript is pushed rather
+     * than pulled — so without this, reopening the panel would show an empty chat while the
+     * conversation was still very much alive in the bridge.
+     */
+    resync: () => {
+      void (async () => {
+        try {
+          /*
+           * A live conversation is posted as it stands rather than reloaded from disk: the
+           * store is only written at the end of a turn, so reloading mid-turn — during a
+           * scheduled run, say — would replace what is happening with what happened last.
+           */
+          const live = conversation.toArray()
+          if (live.length > 0) {
+            post({ type: 'taskRestored', taskId: activeTaskId, entries: toTranscript(live) })
+          } else {
+            await restoreActiveTaskOnLoad()
+          }
+          await postTasks()
+          await postSettings()
+          await postSchedules()
+        } catch (error) {
+          logger.warn(`Could not resync the view: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      })()
+    },
     dispose: () => {
       // Disposing while a turn awaits approval would otherwise leak a pending promise.
       userGate.denyAll()

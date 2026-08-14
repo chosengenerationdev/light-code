@@ -9,13 +9,15 @@ export interface PendingApproval {
   toolName: string
   group: ToolGroup
   preview: ToolPreview
+  /** `folder` means "always" grants a directory, not the tool. See `ApprovalRequest`. */
+  alwaysScope?: 'folder'
 }
 
 export interface ApprovalPromptProps {
   approval: PendingApproval
   onDecide: (id: string, decision: ApprovalDecision) => void
   /** Approve now *and* remember, scoped to this workspace. */
-  onAlwaysAllow: (id: string, scope: 'tool' | 'command') => void
+  onAlwaysAllow: (id: string, scope: 'tool' | 'command' | 'folder') => void
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -138,7 +140,16 @@ export function ApprovalPrompt(props: ApprovalPromptProps): ReactElement {
           * that command for the rest of the workspace's life. Invariant 8 exists so this
           * surface tells the truth; a wordless button would undo that for tidiness.
           */}
-        {approval.preview.kind === 'command' ? (
+        {approval.alwaysScope === 'folder' ? (
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            title="Always allow reads from the folder this file is in. Added to Settings -> Approvals -> Folders, where you can remove it."
+            onClick={() => props.onAlwaysAllow(approval.id, 'folder')}
+          >
+            Always allow this folder
+          </button>
+        ) : approval.preview.kind === 'command' ? (
           <button
             type="button"
             style={secondaryButtonStyle()}

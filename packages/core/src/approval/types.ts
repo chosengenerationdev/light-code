@@ -7,6 +7,15 @@ export interface ApprovalRequest {
   group: ToolGroup
   /** Ground truth only — see `ToolPreview` and invariant 8. */
   preview: ToolPreview
+  /**
+   * What a standing grant would cover, when it is not the tool itself.
+   *
+   * `folder` is a request to read outside the workspace: "always" remembers the containing
+   * directory, not the tool, so the button has to say so. Getting this wrong would offer
+   * "always allow read_file" for what is actually "always read this share" — a much larger
+   * grant than the words describe, which is the failure invariant 8 exists to prevent.
+   */
+  alwaysScope?: 'folder'
 }
 
 export type ApprovalDecision = 'approve' | 'deny'

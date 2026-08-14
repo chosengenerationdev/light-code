@@ -29,6 +29,7 @@ export class WebviewApprovalGate implements ApprovalGate {
         toolName: request.toolName,
         group: request.group,
         preview: request.preview,
+        ...(request.alwaysScope === undefined ? {} : { alwaysScope: request.alwaysScope }),
       })
     })
   }

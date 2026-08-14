@@ -1,12 +1,13 @@
 import crypto from 'node:crypto'
 import * as vscode from 'vscode'
-import { wireChatBridge } from '@light-code/core'
-import { createVSCodeHostServices } from './hostServices.js'
+import type { WebviewTransport } from '../platform/transport.js'
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly outputChannel: vscode.OutputChannel,
+    private readonly transport: WebviewTransport,
+    /** Creates the bridge if this is the first thing to need it. Returns it either way. */
+    private readonly ensureBridge: () => { resync: () => void },
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -16,8 +17,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     webviewView.webview.html = renderHtml(webviewView.webview, this.context.extensionUri)
 
-    const bridge = wireChatBridge(createVSCodeHostServices(webviewView.webview, this.context, this.outputChannel))
-    webviewView.onDidDispose(() => bridge.dispose())
+    /*
+     * The view attaches to the bridge rather than owning it.
+     *
+     * Owning it meant the schedule timer died with the panel — see `WebviewTransport`. The
+     * bridge now lives as long as the extension does, so a torn-down view detaches and a new
+     * one attaches and asks for the transcript back.
+     */
+    this.transport.attach(webviewView.webview)
+    const bridge = this.ensureBridge()
+    bridge.resync()
+
+    webviewView.onDidDispose(() => this.transport.detach())
   }
 }
 
