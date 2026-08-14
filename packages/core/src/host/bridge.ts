@@ -1546,34 +1546,16 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       /*
        * Entries that vanished — a server removed, a skill deleted — are deleted first.
        * Upserting alone would leave them matchable forever, and `search_docs` would keep
-       * offering a tool the junior cannot call.
+       * offering a tool the model cannot call.
        */
-      const stale = await staleDocPaths(index, search, documents)
+      const keep = new Set(documents.map((document) => document.id))
+      const stale = (await writer.listPaths(index)).filter((existing) => !keep.has(existing))
       if (stale.length > 0) await writer.deleteByPaths(index, stale)
       await writer.upsert(index, documents)
 
       post({ type: 'docsIndexed', indexed: documents.length, index })
     } catch (error) {
       post({ type: 'docsIndexed', error: error instanceof Error ? error.message : String(error) })
-    }
-  }
-
-  /** Ids currently in the collection that the fresh corpus no longer contains. */
-  async function staleDocPaths(
-    index: string,
-    search: { searcher: VectorSearcher; opensearch?: OpenSearchClient },
-    fresh: readonly { id: string }[],
-  ): Promise<string[]> {
-    if (search.opensearch === undefined) return []
-    try {
-      const existing = await search.opensearch.search(index, { _source: { includes: ['path'] } }, { size: 1000 })
-      const keep = new Set(fresh.map((document) => document.id))
-      return existing.hits
-        .map((hit) => (hit.source as { path?: unknown }).path)
-        .filter((value): value is string => typeof value === 'string' && !keep.has(value))
-    } catch {
-      // A missing collection is the normal first-run case, not an error worth failing over.
-      return []
     }
   }
 

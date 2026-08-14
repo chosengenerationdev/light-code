@@ -221,6 +221,39 @@ export class OpenSearchIndexWriter implements VectorIndexWriter {
   }
 
   /**
+   * The distinct `path` values stored in the index.
+   *
+   * `_source` is narrowed to `path` alone: the documents carry their full text and a vector,
+   * and pulling those back to enumerate names would move megabytes to answer a question about
+   * a few hundred strings.
+   *
+   * A missing index yields an empty list rather than throwing — reconciling a collection that
+   * has not been created yet is the first-run case, and every path is new by definition.
+   */
+  async listPaths(index: string, options: { limit?: number; signal?: AbortSignal } = {}): Promise<string[]> {
+    if (!isSafeIndexName(index)) throw new OpenSearchError(`"${index}" is not a valid index name.`)
+
+    const size = options.limit ?? 1_000
+    try {
+      const body = await this.request<{ hits?: { hits?: unknown[] } }>(
+        `/${encodeURIComponent(index)}/_search`,
+        'POST',
+        { size, _source: { includes: ['path'] }, query: { match_all: {} } },
+        options.signal,
+      )
+      const paths = new Set<string>()
+      for (const raw of body.hits?.hits ?? []) {
+        const value = (raw as { _source?: { path?: unknown } })._source?.path
+        if (typeof value === 'string' && value.length > 0) paths.add(value)
+      }
+      return [...paths]
+    } catch (error) {
+      if (error instanceof OpenSearchError && error.status === 404) return []
+      throw error
+    }
+  }
+
+  /**
    * Removes the chunks of files that no longer exist, so a deleted file stops appearing in
    * results. Scoped to our own index by `assertOwned`.
    */

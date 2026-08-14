@@ -241,3 +241,62 @@ describe('search_codebase over the seam', () => {
     expect(await tool.execute({ query: 'anything' }, noContext)).toMatchObject({ isError: true, content: 'cluster unreachable' })
   })
 })
+
+/**
+ * Reconciling a collection against a freshly-built corpus.
+ *
+ * This is on the writer rather than the searcher on purpose: it is the writer that removes
+ * what has gone, and the searcher is the object handed to tools, which have no business
+ * enumerating an index.
+ */
+describe('OpenSearchIndexWriter.listPaths', () => {
+  const stored = {
+    hits: {
+      hits: [
+        { _source: { path: 'tool:s3__get_object' } },
+        { _source: { path: 'skill:deployment' } },
+        // Two chunks of one file share a path; callers want the distinct set.
+        { _source: { path: 'skill:deployment' } },
+      ],
+    },
+  }
+
+  it('returns the distinct paths, asking only for that field', async () => {
+    const { http, calls } = recordingHttp(() => stored)
+    const paths = await new OpenSearchIndexWriter(http, connection).listPaths('lc-docs')
+
+    expect(paths.sort()).toEqual(['skill:deployment', 'tool:s3__get_object'])
+    const body = calls[0]?.body as { _source?: { includes?: string[] }; size?: number }
+    // Documents carry their full text and a vector; pulling those back to enumerate names
+    // would move megabytes to answer a question about a few hundred strings.
+    expect(body._source?.includes).toEqual(['path'])
+    expect(body.size).toBe(1_000)
+  })
+
+  it('honours a caller-supplied cap', async () => {
+    const { http, calls } = recordingHttp(() => stored)
+    await new OpenSearchIndexWriter(http, connection).listPaths('lc-docs', { limit: 25 })
+    expect((calls[0]?.body as { size?: number }).size).toBe(25)
+  })
+
+  /** First run: the collection does not exist yet, and every path is new by definition. */
+  it('treats a missing collection as empty rather than an error', async () => {
+    const http: HttpClient = {
+      async request(): Promise<HttpResponse> {
+        return {
+          status: 404,
+          headers: {},
+          text: async () => 'index_not_found_exception',
+          json: async <T>() => ({}) as T,
+          body: null,
+        }
+      },
+    }
+    await expect(new OpenSearchIndexWriter(http, connection).listPaths('absent')).resolves.toEqual([])
+  })
+
+  it('rejects an unsafe collection name before it becomes a path segment', async () => {
+    const { http } = recordingHttp(() => stored)
+    await expect(new OpenSearchIndexWriter(http, connection).listPaths('../evil')).rejects.toThrow(/not a valid index name/i)
+  })
+})

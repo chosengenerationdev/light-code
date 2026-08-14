@@ -66,6 +66,7 @@ describe('indexWorkspace', () => {
   let root: string
   let written: VectorDocument[]
   let deleted: string[]
+  let listPathsCalls = 0
   let manifest: IndexManifest
 
   const embedder = {
@@ -85,6 +86,12 @@ describe('indexWorkspace', () => {
     },
     deleteByPaths: async (_collection: string, paths: readonly string[]) => {
       deleted.push(...paths)
+    },
+    // The workspace indexer diffs against its manifest and never calls this; the docs corpus
+    // has no manifest and does. Present to satisfy the interface, and asserted unused below.
+    listPaths: async () => {
+      listPathsCalls += 1
+      return []
     },
   }
 
@@ -120,6 +127,17 @@ describe('indexWorkspace', () => {
     fs
       .mkdir(path.dirname(path.join(root, relative)), { recursive: true })
       .then(() => fs.writeFile(path.join(root, relative), content, 'utf8'))
+
+  /**
+   * The workspace indexer has a manifest and diffs against it locally. Enumerating the whole
+   * collection every run would be a needless round trip over a corpus that can be enormous —
+   * only the documentation corpus, which has no manifest, needs to ask.
+   */
+  it('never enumerates the collection, because the manifest already says what is there', async () => {
+    await write('src/app.ts', 'code')
+    await run()
+    expect(listPathsCalls).toBe(0)
+  })
 
   it('indexes source files and records where each chunk came from', async () => {
     await write('src/app.ts', 'export function hello() { return 1 }')

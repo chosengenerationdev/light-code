@@ -107,6 +107,24 @@ export interface VectorIndexWriter {
   upsert(collection: string, documents: readonly VectorDocument[], signal?: AbortSignal): Promise<void>
   /** Removes the chunks of files that no longer exist. */
   deleteByPaths(collection: string, paths: readonly string[], signal?: AbortSignal): Promise<void>
+  /**
+   * The distinct `path` values currently stored, so a caller can work out what has gone.
+   *
+   * **On the writer rather than the searcher, deliberately.** Reconciling a collection against
+   * a fresh corpus is the writer's job, and the searcher is the object handed to tools — it
+   * stays as small as possible. A tool has no business enumerating an index.
+   *
+   * Needed because the documentation corpus has no manifest: the workspace indexer tracks
+   * what it wrote last time and can diff locally, but the tool and skill corpus is rebuilt
+   * wholesale each run, so the only way to know a tool has disappeared is to ask. Returning
+   * an empty array for a collection that does not exist yet is correct — that is the ordinary
+   * first-run case, not an error.
+   *
+   * `limit` is a safety cap rather than pagination. The corpora this reconciles are hundreds
+   * of entries, not millions; a backend that truncates should not pretend otherwise, so an
+   * implementation must cap rather than silently return a partial answer as if complete.
+   */
+  listPaths(collection: string, options?: { limit?: number; signal?: AbortSignal }): Promise<string[]>
 }
 
 /**
