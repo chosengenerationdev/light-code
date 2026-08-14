@@ -1,6 +1,7 @@
 import type { ToolCallSummary, TranscriptEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { AgentIcon, CheckIcon, ChevronIcon, CrossIcon, ExpertIcon, SpinnerIcon, UserIcon } from './icons.js'
+import { MarkdownView } from './MarkdownView.js'
 import { colors, fontFamily } from './theme.js'
 
 /**
@@ -88,7 +89,11 @@ function TextBlock(props: {
           // The squared-off corner points at the speaker — the tail, without drawing one.
           borderRadius: isAssistant ? '14px 14px 14px 4px' : '14px 14px 4px 14px',
           boxShadow: isAssistant ? 'none' : `0 1px 8px ${colors.accentRing}`,
-          whiteSpace: 'pre-wrap',
+          /*
+           * Only the user's side keeps `pre-wrap`. An assistant reply is rendered markdown, and
+           * each block sets its own spacing — leaving it here would double every blank line.
+           */
+          ...(isAssistant ? {} : { whiteSpace: 'pre-wrap' as const }),
           wordBreak: 'break-word',
           fontFamily,
         }}
@@ -118,7 +123,14 @@ function TextBlock(props: {
             informed by expert
           </span>
         )}
-        {props.content}
+        {/*
+          * Rendered for the assistant, left alone for you.
+          *
+          * Formatting what the user typed would be surprising: they can see their own message
+          * and did not ask for their asterisks to disappear. The model, on the other hand,
+          * writes markdown whether or not anything renders it.
+          */}
+        {isAssistant ? <MarkdownView text={props.content} /> : props.content}
       </div>
     </div>
   )

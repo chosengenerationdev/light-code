@@ -1,5 +1,24 @@
 # light-code-vscode
 
+## 0.20.0
+
+### Minor Changes
+
+- Replies are rendered as markdown.
+
+  Code blocks, inline code, headings, lists, tables, quotes, links, bold and italic now display
+  properly instead of arriving as raw asterisks and backticks. **Code blocks get a copy button**,
+  which is the thing most often wanted out of a reply and the most awkward to select by hand in a
+  narrow panel.
+
+  Rendered without a markdown library, and without turning anything into HTML. The parser
+  produces elements directly, so a reply containing markup shows those characters rather than
+  being interpreted — a stronger guarantee than sanitising afterwards, and it adds nothing to the
+  download.
+
+  Your own messages are left exactly as typed. You can see what you wrote, and having your
+  asterisks silently vanish would be surprising.
+
 ## 0.19.1
 
 ### Patch Changes
