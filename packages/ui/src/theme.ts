@@ -109,7 +109,7 @@ export function textFieldStyle(): CSSProperties {
     background: colors.inputBackground,
     color: colors.inputForeground,
     border: `1px solid ${colors.inputBorder}`,
-    borderRadius: 2,
+    borderRadius: 6,
     padding: '6px 8px',
     fontFamily,
     fontSize: 13,
@@ -127,16 +127,21 @@ export function textFieldStyle(): CSSProperties {
  * which is what a VS Code webview is — does honour `background`/`color` on `<option>`,
  * so `optionStyle()` must be applied to every option for the popup to match the theme.
  *
- * (macOS draws the popup with the system appearance and ignores both; there is nothing to
- * be done about that, and it follows the OS dark mode anyway.)
+ * The *highlighted* row is a third problem again: Chromium paints it with the system
+ * highlight colour on top of the option's own background, and ignores `background-color` on
+ * `option:checked`. `styles.ts` tints it with a flooding inset box-shadow, which is the one
+ * declaration Chromium honours there.
+ *
+ * (macOS draws the popup with the system appearance and ignores all of it; there is nothing
+ * to be done about that, and it follows the OS dark mode anyway.)
  */
 export function selectStyle(compact = false): CSSProperties {
   return {
     background: colors.inputBackground,
     color: colors.inputForeground,
     border: `1px solid ${colors.inputBorder}`,
-    borderRadius: 2,
-    padding: compact ? '2px 4px' : '6px 8px',
+    borderRadius: 6,
+    padding: compact ? '2px 6px' : '6px 8px',
     fontFamily,
     fontSize: compact ? 11 : 13,
     cursor: 'pointer',
@@ -161,7 +166,7 @@ export function secondaryButtonStyle(): CSSProperties {
     background: colors.secondaryButtonBackground,
     color: colors.secondaryButtonForeground,
     border: `1px solid ${colors.border}`,
-    borderRadius: 2,
+    borderRadius: 6,
     padding: '4px 10px',
     cursor: 'pointer',
     fontFamily,

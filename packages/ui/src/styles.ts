@@ -225,6 +225,53 @@ select:focus {
 }
 ::selection { background: var(--lc-accent-a35); }
 
+/* ---- native form controls ----
+ *
+ * Checkboxes, radios and range thumbs are drawn by the user agent, not from CSS boxes, so
+ * none of the rules above reach them and neither do the --vscode-* variables. They were
+ * rendering in Chromium's default blue against a purple UI.
+ *
+ * "accent-color" is the one property the UA honours for that internal painting. Set on the
+ * root so it cascades to every control in the product, including ones not written yet.
+ */
+:root {
+  accent-color: var(--lc-accent);
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  /* The UA default is ~13px and cramped beside 13px label text. */
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * The dropdown popup's highlight.
+ *
+ * "optionStyle()" already sets each option's background inline, which fixes the white list
+ * on Windows and Linux — but the *selected* row is painted with the system highlight colour
+ * (blue) on top of that, and Chromium ignores "background-color" on "option:checked". A
+ * flooding inset box-shadow is the one declaration it does honour, so that is what tints it.
+ *
+ * macOS draws the popup with the system appearance and ignores all of this; nothing can be
+ * done there, and it already follows the OS dark mode.
+ */
+option:checked,
+option[selected] {
+  box-shadow: 0 0 10px 100px var(--lc-accent) inset;
+  color: var(--lc-accent-contrast) !important;
+}
+option:hover {
+  box-shadow: 0 0 10px 100px var(--lc-accent-a35) inset;
+}
+
 /* ---- message entry ---- */
 
 /*

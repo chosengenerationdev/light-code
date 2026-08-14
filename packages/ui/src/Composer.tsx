@@ -203,9 +203,11 @@ export function Composer(props: ComposerProps): ReactElement {
                 width: '100%',
                 textAlign: 'left',
                 padding: '4px 12px',
-                background: index === highlighted ? colors.assistantBubble : 'transparent',
+                // Keyboard selection is a selection, so it gets the accent like every
+                // other one — the neutral bubble colour read as "slightly different row".
+                background: index === highlighted ? colors.accent : 'transparent',
                 border: 'none',
-                color: colors.foreground,
+                color: index === highlighted ? colors.accentContrast : colors.foreground,
                 cursor: 'pointer',
                 fontFamily,
                 fontSize: 12,
