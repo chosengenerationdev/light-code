@@ -1004,13 +1004,24 @@ pending the changeset in `.changeset/`). Marketplace was on 0.11.0 at last check
   would also need a second approval-hash store outside `.registry.json`, which is the
   two-stores-that-diverge problem §15 warns about, on the sharpest surface in the project.
 
-### Still true, and still the biggest risk
+### Components can be render-tested now — use it
 
-**Most of the UI has never been rendered.** The theme, the custom `Select`, Junior mode, the
-cost meter, the dispatcher section and the search panel have all shipped without the webview
-being painted once here. There is no DOM test environment (`environment: 'node'`, glob
-`*.test.ts`), so **no component in this repo has ever been render-tested** — which is why the
-dropdown fix had to be made twice.
+**There is a DOM environment as of 2026-08-14.** One dev dependency (`jsdom`), opted into per
+file with `// @vitest-environment jsdom`, so the six hundred node tests do not pay for it. The
+vitest glob also now matches `*.test.tsx`, which it did not before — a component test could not
+have run even if someone had written one, which is a large part of why none existed.
+
+`packages/ui/src/Select.test.tsx` is the first, rendered with `react-dom/client` and React's own
+`act` rather than a testing library — one dependency buys the capability, and what is worth
+pinning here is events on real DOM nodes. **Write one for any component with behaviour.** The
+scroll-close bug that reached the office is now covered, and verified non-vacuous by reverting
+the fix and watching it fail.
+
+jsdom has no layout, so `scrollIntoView` does not exist on its elements. Stub it in the test
+rather than guarding the call in shipping code — every real browser has it.
+
+**Still unrendered in a real Extension Host:** the theme, Junior mode, the cost meter, the
+dispatcher section and the search panel. A jsdom test proves behaviour, not appearance.
 
 ### Not built
 
