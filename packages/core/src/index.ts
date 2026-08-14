@@ -159,6 +159,24 @@ export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'
 export {
+  scheduleSchema,
+  schedulesSchema,
+  scheduleTriggerSchema,
+  riskyGroupsIn,
+  ALWAYS_AVAILABLE_TO_SCHEDULES,
+  type Schedule,
+  type Schedules,
+  type ScheduleTrigger,
+} from './schedule/types.js'
+export { nextFireTime, describeTrigger, describeNextRun } from './schedule/timing.js'
+export {
+  filterToolsForSchedule,
+  registryForSchedule,
+  ScheduledApprovalGate,
+  scheduledRunGuidance,
+} from './schedule/runner.js'
+export { createNotifyTool, type NotifyParams, type NotifyOptions } from './tools/notify.js'
+export {
   extractDocument,
   extractDocx,
   extractXlsx,

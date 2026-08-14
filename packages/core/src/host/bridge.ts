@@ -53,6 +53,13 @@ import {
   detectClaudeCli,
   buildExpertBriefing,
   buildDocCorpus,
+  createNotifyTool,
+  registryForSchedule,
+  filterToolsForSchedule,
+  ScheduledApprovalGate,
+  scheduledRunGuidance,
+  nextFireTime,
+  type Schedule,
   createReadToolResultTool,
   deriveTitle,
   findMode,
@@ -550,6 +557,19 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     for (const tool of python.tools()) combined.register(tool, { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
+    /*
+     * Registered always, not only for schedules. An interactive session rarely needs it — the
+     * user is already reading the reply — and the description says so; but a scheduled run is
+     * built from this same registry, and a run that could not report would be pointless.
+     */
+    combined.register(
+      createNotifyTool({
+        notify: (message, level) => {
+          if (level === 'warning') ui.showWarning(message)
+          else ui.showInfo(message)
+        },
+      }),
+    )
     if (skillsDir !== undefined) {
       const context = { skillsDir, onChanged: refreshSkills }
       combined.register(createWriteSkillTool(context))
@@ -839,7 +859,19 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
   }
 
-  async function handleSendMessage(text: string, images?: ImageAttachmentInput[]): Promise<void> {
+  async function handleSendMessage(
+    text: string,
+    images?: ImageAttachmentInput[],
+    /**
+     * Set when this turn is an unattended scheduled run.
+     *
+     * Threaded through the ordinary path rather than duplicated: a second turn
+     * implementation would drift from this one, and the drift would be in the half nobody
+     * watches run. What changes is the registry, the approval gate and a paragraph of
+     * guidance — everything else about a scheduled turn is an ordinary turn.
+     */
+    schedule?: Schedule,
+  ): Promise<void> {
     if (workspaceRoot === undefined) {
       post({ type: 'error', message: 'Open a folder in VS Code before using Light Code — tools need a workspace root.' })
       return
@@ -893,6 +925,20 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
        */
       const activeMode = findMode(config.modeId)
 
+      /*
+       * Computed from the *full* registry so the run is told the names it actually has, and
+       * before the prompt is built because it lands in the cached prefix like everything else.
+       */
+      const scheduledGuidance =
+        schedule === undefined
+          ? undefined
+          : scheduledRunGuidance(
+              schedule,
+              filterToolsForSchedule(currentToolRegistry(undefined, undefined, undefined, undefined, false).list(), schedule)
+                .map((tool) => tool.name)
+                .filter((name) => name !== 'attempt_completion'),
+            )
+
       const desiredPrompt = buildSystemPrompt(workspaceRoot, {
         model: profile.model,
         providerLabel: profile.label,
@@ -905,9 +951,14 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
          * disables the mode in that case, but config can still name it, so it is checked
          * here too.
          */
-        ...(activeMode.guidance !== undefined && (activeMode.requiresExpert !== true || expertCliInfo !== undefined)
-          ? { modeGuidance: activeMode.guidance }
-          : {}),
+        ...(() => {
+          const parts: string[] = []
+          if (activeMode.guidance !== undefined && (activeMode.requiresExpert !== true || expertCliInfo !== undefined)) {
+            parts.push(activeMode.guidance)
+          }
+          if (scheduledGuidance !== undefined) parts.push(scheduledGuidance)
+          return parts.length > 0 ? { modeGuidance: parts.join('\n\n') } : {}
+        })(),
       })
       if (conversation.systemPrompt() !== desiredPrompt) conversation.setSystemPrompt(desiredPrompt)
 
@@ -979,11 +1030,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       // Sticky once the expert has been consulted, matching how a restored transcript is
       // derived — so the live view and a reopened task mark the same work.
       let expertInformed = false
-      await runAgentTurn(
-        provider,
-        conversation,
-        messageText,
-        currentToolRegistry(
+      const fullRegistry = currentToolRegistry(
           expertCliInfo !== undefined
             ? { cli: expertCliInfo, ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}) }
             : undefined,
@@ -1007,7 +1054,24 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
             ? { searcher: search.searcher, embedder, index: docsIndex }
             : undefined,
           config.retrieval?.dispatcher === true,
-        ),
+      )
+
+      /*
+       * The security boundary for an unattended run is the *registry*, not the approval gate.
+       * A tool the schedule did not name is never registered, so it never reaches the system
+       * prompt and the model is never told it exists — the same layering §11 uses for disabled
+       * MCP tools. The gate below is a second line of defence, not the first.
+       */
+      const turnRegistry = schedule !== undefined ? registryForSchedule(fullRegistry.list(), schedule) : fullRegistry
+      if (schedule !== undefined) {
+        turnOptions.approvalGate = new ScheduledApprovalGate(schedule)
+      }
+
+      await runAgentTurn(
+        provider,
+        conversation,
+        messageText,
+        turnRegistry,
         toolContext,
         {
           onContextUpdate: (breakdown, supersededCount, compactedCount) => {
@@ -2716,6 +2780,16 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       )
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
+    } else if (message.type === 'requestSchedules') {
+      void postSchedules()
+    } else if (message.type === 'saveSchedule') {
+      void handleSaveSchedule(message.schedule)
+    } else if (message.type === 'deleteSchedule') {
+      void handleDeleteSchedule(message.id)
+    } else if (message.type === 'setScheduleEnabled') {
+      void handleSetScheduleEnabled(message.id, message.enabled)
+    } else if (message.type === 'runScheduleNow') {
+      void runSchedule(message.id, 'manual')
     } else if (message.type === 'requestSkills') {
       void postSkills()
     } else if (message.type === 'saveSkillDirs') {
@@ -2795,6 +2869,180 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     }
   })()
 
+
+  // ------------------------------------------------------------------ schedules (§9b)
+
+  /**
+   * The schedule currently running, so two cannot overlap.
+   *
+   * A run that overruns its next fire time must not start a second concurrent one: they would
+   * share the conversation and the task store and interleave into nonsense. The later fire is
+   * skipped rather than queued — a missed reminder is better than two tangled ones.
+   */
+  let runningScheduleId: string | undefined
+  let scheduleTimer: ReturnType<typeof setInterval> | undefined
+
+  /** Every tool that exists, for the picker. Built with everything on so nothing is hidden. */
+  function allToolsForPicker(): { name: string; description: string; group: string }[] {
+    return currentToolRegistry(undefined, undefined, undefined, undefined, false)
+      .list()
+      .map((tool) => ({ name: tool.name, description: tool.description, group: tool.group }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  async function loadSchedules(): Promise<Record<string, Schedule>> {
+    const { config } = await configManager.load()
+    return config.schedules ?? {}
+  }
+
+  async function postSchedules(): Promise<void> {
+    const schedules = await loadSchedules()
+    post({
+      type: 'schedules',
+      schedules: Object.values(schedules).sort((a, b) => a.name.localeCompare(b.name)),
+      tools: allToolsForPicker(),
+      ...(runningScheduleId !== undefined ? { runningId: runningScheduleId } : {}),
+    })
+  }
+
+  async function saveSchedules(next: Record<string, Schedule>): Promise<void> {
+    await configManager.save('user', { schedules: next })
+    await postSchedules()
+  }
+
+  async function handleSaveSchedule(schedule: Schedule): Promise<void> {
+    try {
+      const schedules = await loadSchedules()
+      // A blank id means "new". Generated here rather than in the UI so two panels cannot
+      // mint the same one.
+      const id = schedule.id.length > 0 ? schedule.id : createHash('sha256').update(`${schedule.name}:${String(Date.now())}`).digest('hex').slice(0, 12)
+      await saveSchedules({ ...schedules, [id]: { ...schedule, id } })
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleDeleteSchedule(id: string): Promise<void> {
+    const schedules = await loadSchedules()
+    const next = { ...schedules }
+    delete next[id]
+    await saveSchedules(next)
+  }
+
+  async function handleSetScheduleEnabled(id: string, enabled: boolean): Promise<void> {
+    const schedules = await loadSchedules()
+    const existing = schedules[id]
+    if (existing === undefined) return
+    /*
+     * Re-enabling resets the interval clock. Otherwise a schedule paused for a week is
+     * instantly overdue the moment it comes back, which is never what pausing meant.
+     */
+    await saveSchedules({ ...schedules, [id]: { ...existing, enabled, ...(enabled ? { lastRunAt: Date.now() } : {}) } })
+  }
+
+  /**
+   * Runs one schedule in its own task.
+   *
+   * A fresh task per run, so each is separately reviewable in history and no run inherits the
+   * context of the last — a scheduled job accumulating a month of its own transcripts would
+   * cost more every day and eventually stop fitting.
+   */
+  async function runSchedule(id: string, reason: 'due' | 'manual'): Promise<void> {
+    if (runningScheduleId !== undefined) {
+      logger.warn(`schedule ${id} skipped: "${runningScheduleId}" is still running`)
+      return
+    }
+
+    const schedules = await loadSchedules()
+    const schedule = schedules[id]
+    if (schedule === undefined) return
+
+    runningScheduleId = id
+    void postSchedules()
+
+    const startedAt = Date.now()
+    let result: 'ok' | 'error' = 'ok'
+    let summary = ''
+
+    try {
+      await startNewTask()
+      logger.info(`running schedule "${schedule.name}" (${reason})`)
+      await handleSendMessage(schedule.prompt, undefined, schedule)
+      summary = lastAssistantSummary()
+    } catch (error) {
+      result = 'error'
+      summary = error instanceof Error ? error.message : String(error)
+      /*
+       * Surfaced, not swallowed. An unattended failure nobody sees is the worst outcome here —
+       * the schedule looks like it is working right up until someone needs its output.
+       */
+      ui.showWarning(`Scheduled run "${schedule.name}" failed: ${summary}`)
+    } finally {
+      runningScheduleId = undefined
+      const latest = await loadSchedules()
+      const current = latest[id]
+      if (current !== undefined) {
+        await saveSchedules({
+          ...latest,
+          [id]: {
+            ...current,
+            lastRunAt: startedAt,
+            lastResult: result,
+            ...(summary.length > 0 ? { lastSummary: summary.slice(0, 300) } : {}),
+            ...(activeTaskId !== undefined ? { lastTaskId: activeTaskId } : {}),
+          },
+        })
+      } else {
+        await postSchedules()
+      }
+    }
+  }
+
+  /** The final assistant message, for the schedule list and any notification. */
+  function lastAssistantSummary(): string {
+    const messages = conversation.toArray()
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index]
+      if (message?.role === 'assistant' && typeof message.content === 'string' && message.content.trim().length > 0) {
+        return message.content.trim()
+      }
+    }
+    return ''
+  }
+
+  /**
+   * Checks once a minute rather than setting a timer per schedule.
+   *
+   * One timer cannot drift out of sync with the config, cannot leak when a schedule is
+   * deleted, and does not need rebuilding on every edit. A minute is also the finest interval
+   * the schema allows, so nothing is lost.
+   */
+  function startScheduleTimer(): void {
+    if (scheduleTimer !== undefined) return
+    scheduleTimer = setInterval(() => {
+      void (async () => {
+        if (runningScheduleId !== undefined) return
+        const now = Date.now()
+        for (const schedule of Object.values(await loadSchedules())) {
+          if (!schedule.enabled) continue
+          if (nextFireTime(schedule, now) <= now) {
+            await runSchedule(schedule.id, 'due')
+            // One per tick: a second would have to wait for the first anyway, and it will be
+            // due again on the next pass.
+            return
+          }
+        }
+      })()
+    }, 60_000)
+  }
+
+  /*
+   * Started once, at construction. Schedules only fire while VS Code is open — there is no
+   * background service — and the Schedules tab says so rather than letting someone believe a
+   * nightly job runs on a closed laptop.
+   */
+  startScheduleTimer()
+
   return {
     dispose: () => {
       // Disposing while a turn awaits approval would otherwise leak a pending promise.
@@ -2806,6 +3054,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void python.dispose()
       // A pending reindex would otherwise fire after teardown and post to a dead webview.
       if (docsReindexTimer !== undefined) clearTimeout(docsReindexTimer)
+      if (scheduleTimer !== undefined) clearInterval(scheduleTimer)
       unsubscribe()
     },
   }

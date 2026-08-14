@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { mcpServersSchema } from '../mcp/types.js'
+import { schedulesSchema } from '../schedule/types.js'
 import { providerProfileSchema, type TlsSettings, tlsSettingsSchema } from '../providers/types.js'
 
 /**
@@ -309,6 +310,15 @@ export const configSchema = z
     embedder: embedderConfigSchema,
     retrieval: retrievalConfigSchema,
     skills: skillsConfigSchema,
+    /**
+     * Prompts that run unattended (§9b).
+     *
+     * **User-scope only** (invariant 5), and this is the sharpest entry on that list after
+     * `python`. A schedule names tools that run with nobody watching, so a workspace able to
+     * add one would execute tools of its choosing the moment the panel opened — the same
+     * threat as `expert.path`, with a wider blast radius.
+     */
+    schedules: schedulesSchema,
     activeProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,

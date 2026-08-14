@@ -15,9 +15,22 @@ import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
 import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
+import { SchedulesTab, type SchedulesTabProps } from './SchedulesTab.js'
 import type { BrowseRequest } from './PathField.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 import { AppearanceSection } from './AppearanceSection.js'
+import {
+  BookIcon,
+  ClockIcon,
+  ExpertIcon,
+  GlobeIcon,
+  PaletteIcon,
+  ProviderIcon,
+  SearchIcon,
+  ServerIcon,
+  ShieldIcon,
+  TerminalIcon,
+} from '../icons.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
   approvals: WorkspaceApprovals
@@ -54,20 +67,42 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
   python: PythonTabProps
   skills: SkillsTabProps
+  schedules: SchedulesTabProps
 }
 
-type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network' | 'python' | 'skills' | 'appearance'
+type TabId =
+  | 'providers'
+  | 'approvals'
+  | 'mcp'
+  | 'search'
+  | 'expert'
+  | 'network'
+  | 'python'
+  | 'skills'
+  | 'schedules'
+  | 'appearance'
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'providers', label: 'Providers' },
-  { id: 'approvals', label: 'Approvals' },
-  { id: 'mcp', label: 'MCP' },
-  { id: 'search', label: 'Search' },
-  { id: 'expert', label: 'Expert' },
-  { id: 'network', label: 'Network' },
-  { id: 'python', label: 'Python' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'appearance', label: 'Appearance' },
+/**
+ * Icons rather than words, with the **active tab keeping its label**.
+ *
+ * Nine labelled tabs already overflowed a sidebar and grew a horizontal scrollbar, which is the
+ * worst of both: it hides tabs *and* takes vertical space. Icons alone fit, but ten unlabelled
+ * glyphs is a memory test — "was Approvals the shield or the lock?" — so the selected one
+ * expands to name itself. You can always see where you are, and the row still fits.
+ *
+ * Every icon keeps its label as a tooltip, so nothing is discoverable only by clicking.
+ */
+const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => ReactElement }[] = [
+  { id: 'providers', label: 'Providers', Icon: ProviderIcon },
+  { id: 'approvals', label: 'Approvals', Icon: ShieldIcon },
+  { id: 'mcp', label: 'MCP', Icon: ServerIcon },
+  { id: 'search', label: 'Search', Icon: SearchIcon },
+  { id: 'expert', label: 'Expert', Icon: ExpertIcon },
+  { id: 'schedules', label: 'Schedules', Icon: ClockIcon },
+  { id: 'python', label: 'Python', Icon: TerminalIcon },
+  { id: 'skills', label: 'Skills', Icon: BookIcon },
+  { id: 'network', label: 'Network', Icon: GlobeIcon },
+  { id: 'appearance', label: 'Appearance', Icon: PaletteIcon },
 ]
 
 /**
@@ -85,30 +120,41 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         className="lc-scroll"
         style={{ display: 'flex', borderBottom: `1px solid ${colors.border}`, flexShrink: 0, overflowX: 'auto' }}
       >
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            // Drives the underline in styles.ts, which scales from the centre so switching
-            // tabs slides rather than blinks.
-            aria-selected={active === tab.id}
-            className="lc-tab"
-            onClick={() => setActive(tab.id)}
-            style={{
-              padding: '8px 12px',
-              fontFamily,
-              fontSize: 12,
-              background: 'transparent',
-              color: active === tab.id ? colors.foreground : colors.muted,
-              border: 'none',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {TABS.map((tab) => {
+          const selected = active === tab.id
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              // Drives the underline in styles.ts, which scales from the centre so switching
+              // tabs slides rather than blinks.
+              aria-selected={selected}
+              className="lc-tab"
+              // The label is always reachable, even when only the icon is drawn.
+              title={tab.label}
+              aria-label={tab.label}
+              onClick={() => setActive(tab.id)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: selected ? '8px 10px' : '8px 8px',
+                fontFamily,
+                fontSize: 12,
+                background: 'transparent',
+                color: selected ? colors.accent : colors.muted,
+                border: 'none',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              <tab.Icon size={15} />
+              {selected && <span>{tab.label}</span>}
+            </button>
+          )
+        })}
       </div>
       {/* Keyed on the tab so a switch re-mounts and replays the entry animation. */}
       <div key={active} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -151,6 +197,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           />
         ) : active === 'search' ? (
           <SearchTab {...props.search} />
+        ) : active === 'schedules' ? (
+          <SchedulesTab {...props.schedules} />
         ) : active === 'skills' ? (
           <SkillsTab {...props.skills} />
         ) : active === 'python' ? (

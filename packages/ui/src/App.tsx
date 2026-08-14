@@ -13,6 +13,8 @@ import {
   type SearchConnectionInput,
   type SearchConnectionSummary,
   type SearchLogEntry,
+  type Schedule,
+  type ScheduleToolInfo,
   type McpPlatform,
   type McpServerConfig,
   type McpServerState,
@@ -130,6 +132,9 @@ export function App(props: AppProps): ReactElement {
   const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>([])
   const [skillIssues, setSkillIssues] = useState<{ filePath: string; detail: string }[]>([])
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
+  const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
+  const [runningScheduleId, setRunningScheduleId] = useState<string | undefined>(undefined)
   const [skillExtraDirs, setSkillExtraDirs] = useState<string[]>([])
   // What the user typed, not the resolved absolute path — the field must round-trip a
   // relative entry as the relative entry, or saving would silently rewrite it.
@@ -277,6 +282,10 @@ export function App(props: AppProps): ReactElement {
           ...(message.venvDir !== undefined ? { venvDir: message.venvDir } : {}),
           detail: message.detail,
         })
+      } else if (message.type === 'schedules') {
+        setSchedules(message.schedules)
+        setScheduleTools(message.tools)
+        setRunningScheduleId(message.runningId)
       } else if (message.type === 'searchLog') {
         setSearchLog(message.entries)
       } else if (message.type === 'searchProbe') {
@@ -376,6 +385,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestPython' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -793,6 +803,16 @@ export function App(props: AppProps): ReactElement {
                 setSkillConfiguredDir(dir)
                 props.transport.post({ type: 'saveSkillDirs', dir, paths } satisfies UiToHostMessage)
               },
+            }}
+            schedules={{
+              schedules,
+              tools: scheduleTools,
+              runningId: runningScheduleId,
+              onSave: (schedule) => props.transport.post({ type: 'saveSchedule', schedule } satisfies UiToHostMessage),
+              onDelete: (id) => props.transport.post({ type: 'deleteSchedule', id } satisfies UiToHostMessage),
+              onToggle: (id, enabled) =>
+                props.transport.post({ type: 'setScheduleEnabled', id, enabled } satisfies UiToHostMessage),
+              onRunNow: (id) => props.transport.post({ type: 'runScheduleNow', id } satisfies UiToHostMessage),
             }}
             python={{
               status: pythonStatus,

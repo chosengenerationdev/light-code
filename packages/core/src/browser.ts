@@ -72,4 +72,13 @@ export type {
 export type { IndexProgress, IndexResult } from './rag/indexer.js'
 // Type-only: SearchLog itself is host state, but the entries cross the bridge.
 export type { SearchLogEntry, SearchLogSource } from './rag/searchLog.js'
+/*
+ * Schedules. `timing.ts` and the `riskyGroupsIn` helper are pure date and array work with no
+ * platform dependency, so the settings tab can compute "next run" and the risk warning
+ * itself rather than round-tripping to the host for a countdown that ticks every 30 seconds.
+ */
+export type { Schedule, ScheduleTrigger, Schedules } from './schedule/types.js'
+export { riskyGroupsIn } from './schedule/types.js'
+export { describeTrigger, describeNextRun, nextFireTime } from './schedule/timing.js'
+export type { ScheduleToolInfo } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'

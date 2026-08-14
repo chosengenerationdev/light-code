@@ -38,6 +38,9 @@ export const USER_SCOPE_ONLY_KEYS = [
   // where that happens is the user's call. `.lightcode/skills/` is always read regardless, so
   // a project loses nothing.
   'skills',
+  // A schedule runs tools with nobody watching. A repository able to add one would execute
+  // code of its choosing the moment the panel opened.
+  'schedules',
 ] as const
 
 export interface ScopeMergeResult {

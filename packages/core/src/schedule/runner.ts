@@ -1,0 +1,101 @@
+import type { ApprovalDecision, ApprovalGate, ApprovalRequest } from '../approval/types.js'
+import { ToolRegistry } from '../tools/registry.js'
+import type { Tool } from '../tools/types.js'
+import { ALWAYS_AVAILABLE_TO_SCHEDULES, type Schedule } from './types.js'
+
+/**
+ * What an unattended run is allowed to do.
+ *
+ * ## The registry is the boundary, not the approval gate
+ *
+ * A scheduled run has nobody to approve anything. The tempting shape — run normally but
+ * auto-approve — is precisely the hole §8 exists to prevent, and one prompt injection turns it
+ * into arbitrary execution.
+ *
+ * So the restriction is applied by **building a smaller registry**: a tool the schedule did not
+ * name is not registered, which means it never reaches the system prompt and the model is never
+ * told it exists. Then the loop's own mode check refuses it a second time if a stale transcript
+ * references it. The same layering §11 uses for disabled MCP tools, for the same reason —
+ * withholding a capability beats refusing it at call time.
+ *
+ * `filterToolsForSchedule` is exported and tested directly, because "a scheduled run cannot use
+ * a tool outside its allowlist" is the security property of this whole phase and the plan asks
+ * for it to be verified by a test rather than by inspection.
+ */
+
+/**
+ * The tools a schedule may use: exactly those named, plus the control tools.
+ *
+ * An **allowlist**, so installing a new MCP server never silently widens an existing schedule.
+ * `ask_followup_question` is dropped even if named — there is nobody to answer it, and a run
+ * that asked would wait for a reply that never arrives.
+ */
+export function filterToolsForSchedule(all: readonly Tool[], schedule: Pick<Schedule, 'allowedTools'>): Tool[] {
+  const named = new Set(schedule.allowedTools)
+  const always = new Set<string>(ALWAYS_AVAILABLE_TO_SCHEDULES)
+
+  return all.filter((tool) => {
+    if (tool.name === 'ask_followup_question') return false
+    if (always.has(tool.name)) return true
+    return named.has(tool.name)
+  })
+}
+
+export function registryForSchedule(all: readonly Tool[], schedule: Pick<Schedule, 'allowedTools'>): ToolRegistry {
+  const registry = new ToolRegistry()
+  for (const tool of filterToolsForSchedule(all, schedule)) registry.register(tool)
+  return registry
+}
+
+/**
+ * Approves what the schedule named, and nothing else.
+ *
+ * A second line of defence rather than the primary one: a tool outside the allowlist is not
+ * registered at all, so this should never see one. If it somehow does — a future refactor
+ * registering tools by another route — the run must stop rather than proceed unsupervised.
+ *
+ * It denies rather than throwing, because a denial is fed back to the model as a tool result
+ * and the run continues to a sensible conclusion, whereas an exception would abort the task
+ * mid-way and leave a half-finished session with no explanation in it.
+ */
+export class ScheduledApprovalGate implements ApprovalGate {
+  public readonly refused: string[] = []
+
+  constructor(private readonly schedule: Pick<Schedule, 'allowedTools'>) {}
+
+  async requestApproval(request: ApprovalRequest): Promise<ApprovalDecision> {
+    const permitted =
+      this.schedule.allowedTools.includes(request.toolName) ||
+      (ALWAYS_AVAILABLE_TO_SCHEDULES as readonly string[]).includes(request.toolName)
+
+    if (permitted) return 'approve'
+    this.refused.push(request.toolName)
+    return 'deny'
+  }
+}
+
+/**
+ * The prompt an unattended run is given, on top of the ordinary system prompt.
+ *
+ * Two things it must know and cannot work out: that nobody will answer a question, and that
+ * its tools are deliberately narrowed. Without the second it reads a missing tool as a broken
+ * installation and spends the run trying to work around it.
+ */
+export function scheduledRunGuidance(schedule: Schedule, toolNames: readonly string[]): string {
+  return [
+    '# This is a scheduled run',
+    '',
+    `You are running unattended as the schedule "${schedule.name}". Nobody is watching, and`,
+    'nobody can answer a question — do not ask one, and do not wait for confirmation.',
+    '',
+    toolNames.length > 0
+      ? `You may use only these tools: ${toolNames.join(', ')}.`
+      : 'You have no tools beyond finishing: answer from what you are given.',
+    'That is deliberate, not a fault. Anything else was withheld for this run because it',
+    'happens without supervision. If the task genuinely cannot be done within them, say so',
+    'in your final answer rather than attempting a workaround.',
+    '',
+    'Finish with attempt_completion. Keep the answer short: it will be read later, out of',
+    'context, possibly as a notification.',
+  ].join('\n')
+}

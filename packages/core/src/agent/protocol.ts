@@ -2,6 +2,7 @@ import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
 import type { McpPlatform } from '../mcp/forms.js'
 import type { IndexProgress, IndexResult } from '../rag/indexer.js'
 import type { SearchLogEntry } from '../rag/searchLog.js'
+import type { Schedule } from '../schedule/types.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
@@ -201,6 +202,13 @@ export interface ToolCallSummary {
   isError?: boolean
 }
 
+/** One tool as the schedule picker sees it: enough to list and group, nothing more. */
+export interface ScheduleToolInfo {
+  name: string
+  description: string
+  group: string
+}
+
 /** Shared by packages/ui and apps/vscode so both sides agree on the wire shape. */
 /** An image the user attached in the composer. Base64, no `data:` prefix. */
 export interface ImageAttachmentInput {
@@ -309,6 +317,11 @@ export type UiToHostMessage =
    */
   | { type: 'requestEmbedderModels'; profileId: string }
   | { type: 'requestSkills' }
+  | { type: 'requestSchedules' }
+  | { type: 'saveSchedule'; schedule: Schedule }
+  | { type: 'deleteSchedule'; id: string }
+  | { type: 'setScheduleEnabled'; id: string; enabled: boolean }
+  | { type: 'runScheduleNow'; id: string }
   /** The user removing one directly. The model's own delete goes through the approval gate. */
   | { type: 'deleteSkillFile'; name: string }
   /** Replaces the whole skills folder configuration. Empty `dir` restores the default. */
@@ -388,6 +401,8 @@ export type HostToUiMessage =
   | { type: 'expertSpend'; usd: number; consultations: number; unpriced: number }
   /** Every search the model ran this session, newest first. */
   | { type: 'searchLog'; entries: SearchLogEntry[] }
+  /** Schedules plus every tool that currently exists, so the picker can list them all. */
+  | { type: 'schedules'; schedules: Schedule[]; tools: ScheduleToolInfo[]; runningId?: string }
   /** Result of a hand-run query. `text` is what the model would have been given. */
   | { type: 'searchProbe'; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */

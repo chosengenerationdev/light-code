@@ -277,3 +277,108 @@ export function PaletteIcon({ size = 16 }: IconProps): ReactElement {
     </svg>
   )
 }
+
+/* ---- settings tab icons ----
+ * One per section. Drawn at 16px on a 16-unit grid so strokes land on whole pixels rather
+ * than blurring, which at this size is the difference between a glyph and a smudge.
+ */
+
+/** Providers — a plug, for "where the model comes from". */
+export function ProviderIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <path d="M5 2v3M11 2v3" />
+      <path d="M3.5 5h9v2.5a4.5 4.5 0 0 1-9 0Z" strokeLinejoin="round" />
+      <path d="M8 12v2.5" />
+    </svg>
+  )
+}
+
+/** Approvals — a shield, for permission. */
+export function ShieldIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 1.8 13 3.6v4.1c0 3-2.1 5.5-5 6.5-2.9-1-5-3.5-5-6.5V3.6Z" />
+      <path d="M5.8 8 7.4 9.6 10.4 6.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** MCP — connected blocks, for external servers. */
+export function ServerIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2.2" y="2.2" width="4.6" height="4.6" rx="1" />
+      <rect x="9.2" y="9.2" width="4.6" height="4.6" rx="1" />
+      <path d="M6.8 4.5h3.2a1.5 1.5 0 0 1 1.5 1.5v3.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function SearchIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.2" />
+      <path d="M10.2 10.2 14 14" />
+    </svg>
+  )
+}
+
+/** Network — a globe, for connection trust and certificates. */
+export function GlobeIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M2 8h12M8 2c1.8 2 1.8 10 0 12M8 2c-1.8 2-1.8 10 0 12" />
+    </svg>
+  )
+}
+
+/** Python tools — a terminal prompt, for "code that runs". */
+export function TerminalIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.4" />
+      <path d="M4.6 6.2 6.8 8l-2.2 1.8M8.6 10.2h3" />
+    </svg>
+  )
+}
+
+/** Skills — a book, for written-down knowledge. */
+export function BookIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 3.2c1.8-.9 3.7-.9 5.5 0v9.6c-1.8-.9-3.7-.9-5.5 0Z" />
+      <path d="M13.5 3.2c-1.8-.9-3.7-.9-5.5 0v9.6c1.8-.9 3.7-.9 5.5 0Z" />
+    </svg>
+  )
+}
+
+/** Schedules — a clock. */
+export function ClockIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 4.4V8l2.4 1.6" />
+    </svg>
+  )
+}
+
+/** Run a schedule now, rather than waiting for its next fire. */
+export function PlayIcon({ size = 14 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <path d="M4.5 2.8 13 8l-8.5 5.2Z" />
+    </svg>
+  )
+}
+
+/** Pause a schedule without deleting it or its history. */
+export function PauseIcon({ size = 14 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <rect x="4" y="3" width="3" height="10" rx="1" />
+      <rect x="9" y="3" width="3" height="10" rx="1" />
+    </svg>
+  )
+}
