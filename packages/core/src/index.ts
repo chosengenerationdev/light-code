@@ -97,6 +97,8 @@ export {
   type ReportedUsage,
 } from './context/budget.js'
 export { dropSupersededReads, type SupersedeResult } from './context/supersede.js'
+export { dropEvictedDocs, EVICTED_MARKER, FORGET_DOCS_TOOL, type EvictionResult } from './context/evict.js'
+export { createForgetDocsTool, type ForgetDocsParams } from './tools/forgetDocs.js'
 export {
   parseMentions,
   resolveMentions,

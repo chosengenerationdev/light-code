@@ -28,6 +28,7 @@ import {
   createSearchCodebaseTool,
   createSearchDocsTool,
   createCallToolTool,
+  createForgetDocsTool,
   PythonManager,
   createWriteSkillTool,
   createDeleteSkillTool,
@@ -498,6 +499,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
      */
     if (dispatcher) {
       combined.register(createCallToolTool())
+      // Registered with search_docs, never without it: releasing documentation only makes
+      // sense where documentation is being retrieved.
+      combined.register(createForgetDocsTool())
       combined.register(
         createSearchDocsTool({
           // Resolved per call, so a tool registered later in this same function is still

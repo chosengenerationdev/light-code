@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.14.0
+
+### Minor Changes
+
+- Keep tool schemas out of the prompt, and let the model drop what it has finished with.
+
+  A few MCP servers can contribute forty tools each, and every one of their schemas sits at the
+  front of every request. Settings → **Search** now has a switch that stops listing them: the
+  model finds a tool with `search_docs` and runs it through `call_tool` instead. You still
+  approve everything exactly as before — the approval prompt names the real tool, never the
+  dispatcher.
+
+  **It is off by default, and the setting tells you whether it is worth turning on.** The switch
+  shows how many tools it would actually hide, because that number is the decision. `call_tool`
+  carries a description of its own, so below roughly a dozen tools it costs more prompt than it
+  saves — and models call a listed tool more reliably than one named through a dispatcher. At
+  forty tools it halves the prompt; at three it makes it bigger. Both directions are covered by
+  tests.
+
+  **`forget_docs` releases documentation once it has been used.** A schema is the most verbose
+  thing in a conversation and the shortest-lived: after the call is made, it is dead weight that
+  every later request pays for. The model can now drop everything it looked up, and search again
+  if it needs something back. Anything retrieved _after_ the release is kept, so this can never
+  delete a schema that is about to be used.
+
+  Searching works with or without a vector store. With one, matching is by meaning — press
+  **Index documentation** to build it. Without one, `search_docs` matches names and descriptions
+  from the live tool list, so hiding a tool never makes it unreachable.
+
 ## 0.13.0
 
 ### Minor Changes

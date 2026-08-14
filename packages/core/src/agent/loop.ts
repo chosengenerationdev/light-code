@@ -3,6 +3,7 @@ import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
 import { computeBreakdown, type TokenBreakdown } from '../context/budget.js'
 import { compactHistory, isSummaryMessage, shouldCompact, type CompactionOptions } from '../context/compact.js'
 import { dropSupersededReads } from '../context/supersede.js'
+import { dropEvictedDocs } from '../context/evict.js'
 import { CODE_MODE } from '../modes/builtin.js'
 import { toolsForMode } from '../modes/resolve.js'
 import type { Mode } from '../modes/types.js'
@@ -109,10 +110,22 @@ async function prepareModelMessages(
   }
 
   const superseded = dropSupersededReads(messages)
-  const breakdown = computeBreakdown(superseded.messages, tools, contextWindow)
-  events.onContextUpdate?.(breakdown, superseded.supersededCount, conversation.compactedCount())
+  /*
+   * Eviction runs after superseding, and the order is irrelevant to the result — both replace
+   * a tool message's content in place and neither reads the other's output. Kept in this order
+   * because superseding is the cheaper, always-on pass.
+   */
+  const evicted = dropEvictedDocs(superseded.messages)
+  const breakdown = computeBreakdown(evicted.messages, tools, contextWindow)
+  // Reported as one number: the UI's question is "how much was dropped", and splitting
+  // "superseded" from "released" would be a distinction the reader cannot act on.
+  events.onContextUpdate?.(
+    breakdown,
+    superseded.supersededCount + evicted.evictedCount,
+    conversation.compactedCount(),
+  )
 
-  return superseded.messages
+  return evicted.messages
 }
 
 type PreparedCall =
