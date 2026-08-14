@@ -43,6 +43,8 @@ export interface SchedulesTabProps {
   onRestartScheduler: () => void
   /** Omitting the id clears every schedule's runs. */
   onClearRuns: (id?: string) => void
+  /** Removes one run, identified by when it started. */
+  onDeleteRun: (id: string, at: number) => void
 }
 
 const GROUP_LABELS: Record<string, string> = {
@@ -318,6 +320,20 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
                         Log
                       </button>
                     )}
+                    <button
+                      type="button"
+                      style={{
+                        ...secondaryButtonStyle(),
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        ...(run.taskId === undefined ? { marginLeft: 'auto' } : {}),
+                      }}
+                      title="Remove this run from the log"
+                      aria-label="Delete this run"
+                      onClick={() => props.onDeleteRun(schedule.id, run.at)}
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))}
             </div>

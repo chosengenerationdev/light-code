@@ -50,6 +50,7 @@ function render(schedules: Schedule[] = [], saved: Schedule[] = []): void {
         onOpenRun={() => {}}
         onRestartScheduler={() => {}}
         onClearRuns={() => {}}
+        onDeleteRun={() => {}}
       />,
     ),
   )

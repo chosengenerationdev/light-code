@@ -411,9 +411,36 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await services.workspaceState.set(ACTIVE_TASK_KEY, id)
   }
 
+  /**
+   * Message types a background run may still send.
+   *
+   * Everything else is chat: transcript entries, streamed text, token counts, approval
+   * prompts. A scheduled run that emitted those would overwrite whatever conversation the
+   * user is looking at, which is precisely what running it in the background has to prevent.
+   * An allowlist rather than a block list, so a message type added later is silent by default
+   * rather than leaking into the chat until someone notices.
+   */
+  const BACKGROUND_SAFE_MESSAGES = new Set<HostToUiMessage['type']>(['schedules', 'tasks'])
+
   function post(message: HostToUiMessage): void {
+    if (backgroundRun && !BACKGROUND_SAFE_MESSAGES.has(message.type)) return
     transport.post(message)
   }
+
+  /** True while a scheduled run is using the conversation, so the UI is not written to. */
+  let backgroundRun = false
+
+  /**
+   * True while the *user's* turn is in flight.
+   *
+   * Distinct from `activeAbortController`, which a scheduled turn also sets. A schedule must
+   * not start on top of someone who is mid-conversation, and this is the only thing that can
+   * tell the two apart.
+   */
+  let userTurnRunning = false
+
+  /** Set while a scheduled run is in flight, so a user message can wait for it rather than interleave. */
+  let scheduledRunInFlight: Promise<void> | undefined
 
   /**
    * Approvals are keyed by workspace path but stored user-side (invariant 5) — a repo
@@ -1959,6 +1986,45 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Empties the documentation index.
+   *
+   * Done with the writer's own `listPaths` + `deleteByPaths` rather than a new drop-collection
+   * method: every backend already has to support both for stale-entry reconciliation, so this
+   * needs nothing added to `VectorIndexWriter` and works the same on whatever is configured.
+   * The collection is left in place — deleting it would take its mapping and vector width
+   * with it, and the next index would have to guess them again.
+   *
+   * The fingerprint file goes too. Without that the automatic reindex would compare the corpus
+   * against a hash that still matches, decide nothing had changed, and leave the index empty
+   * indefinitely.
+   */
+  async function handleClearDocsIndex(): Promise<void> {
+    const { config } = await configManager.load()
+    const index = docsIndexName(config)
+    const search = await resolveSearch(config)
+
+    if (index === undefined || search === undefined) {
+      post({ type: 'docsIndexed', error: 'Choose a search connection in Settings → Search first.' })
+      return
+    }
+
+    try {
+      const writer = createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await openSearchConnectionFor(search.store, search.id),
+      )
+      const existing = await writer.listPaths(index)
+      if (existing.length > 0) await writer.deleteByPaths(index, existing)
+      await fs.rm(docsFingerprintPath(index), { force: true })
+      post({ type: 'docsIndexed', indexed: 0, index })
+      logger.info(`cleared ${String(existing.length)} documentation entries from "${index}"`)
+    } catch (error) {
+      post({ type: 'docsIndexed', error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleIndexDocs(): Promise<void> {
     const outcome = await indexDocs({ force: true })
     post({
@@ -2796,7 +2862,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         logger.warn('Ignoring sendMessage: a turn is already in progress.')
         return
       }
-      void handleSendMessage(message.text, message.images)
+      void (async () => {
+        /*
+         * Wait rather than refuse. A scheduled run holds the conversation for a few seconds;
+         * rejecting the user's message for that window would look like the composer had
+         * swallowed it, and interleaving the two would corrupt both transcripts.
+         */
+        if (scheduledRunInFlight !== undefined) {
+          logger.info('holding the message until the scheduled run finishes')
+          await scheduledRunInFlight
+        }
+        userTurnRunning = true
+        try {
+          await handleSendMessage(message.text, message.images)
+        } finally {
+          userTurnRunning = false
+        }
+      })()
     } else if (message.type === 'requestMentionCandidates') {
       void handleMentionCandidates(message.query)
     } else if (message.type === 'queueMessage') {
@@ -2908,6 +2990,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleRequestSearchIndexes(message.connection)
     } else if (message.type === 'testSearchConnection') {
       void handleTestSearchConnection(message.connection)
+    } else if (message.type === 'clearDocsIndex') {
+      void handleClearDocsIndex()
     } else if (message.type === 'indexDocs') {
       void handleIndexDocs()
     } else if (message.type === 'runSearchProbe') {
@@ -2950,6 +3034,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       restartScheduleTimer()
       logger.info('schedule timer restarted by the user')
       void postSchedules()
+    } else if (message.type === 'deleteScheduleRun') {
+      void handleDeleteScheduleRun(message.id, message.at)
     } else if (message.type === 'clearScheduleRuns') {
       void handleClearScheduleRuns(message.id)
     } else if (message.type === 'openScheduleRun') {
@@ -3186,9 +3272,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * context of the last — a scheduled job accumulating a month of its own transcripts would
    * cost more every day and eventually stop fitting.
    */
+  /**
+   * Publishes the in-flight run so a user message can wait on it instead of interleaving.
+   *
+   * A separate wrapper because the body has early returns, and a promise recorded only on the
+   * paths that actually run would leave a window where a send saw nothing to wait for.
+   */
   async function runSchedule(id: string, reason: 'due' | 'manual'): Promise<void> {
+    const run = runScheduleInner(id, reason)
+    scheduledRunInFlight = run
+    try {
+      await run
+    } finally {
+      scheduledRunInFlight = undefined
+    }
+  }
+
+  async function runScheduleInner(id: string, reason: 'due' | 'manual'): Promise<void> {
     if (runningScheduleId !== undefined) {
       logger.warn(`schedule ${id} skipped: "${runningScheduleId}" is still running`)
+      return
+    }
+    if (userTurnRunning) {
+      // Deferred, not dropped: it stays due and the next tick picks it up. Interrupting
+      // someone mid-conversation to run a background job is never the right trade.
+      logger.info(`schedule ${id} deferred: the user is mid-turn`)
       return
     }
 
@@ -3199,6 +3307,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     runningScheduleId = id
     runStartedAt = Date.now()
     void postSchedules()
+
+    /*
+     * The user's conversation is put aside for the duration and handed back afterwards.
+     *
+     * A scheduled run used to call `startNewTask()`, which resets the one shared conversation
+     * — so a job firing while someone was chatting wiped their transcript out from under
+     * them. Snapshotting is enough because `Conversation` is restorable by value, and it
+     * keeps the run on the ordinary turn path rather than forking a second implementation
+     * that would drift (the same reasoning as threading `schedule` through in the first place).
+     */
+    const saved = {
+      messages: conversation.toArray(),
+      taskId: activeTaskId,
+      createdAt: activeTaskCreatedAt,
+      handles: truncationStore.spilledHandles(),
+      readFiles: [...readFiles],
+      checkpoint: taskCheckpoint,
+    }
+    backgroundRun = true
 
     const startedAt = Date.now()
     let result: 'ok' | 'error' = 'ok'
@@ -3223,6 +3350,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ui.showWarning(`Scheduled run "${schedule.name}" failed: ${summary}`)
       }
     } finally {
+      const ranAsTask = activeTaskId
+
+      /*
+       * Restored before anything else awaits, so a user message arriving the instant the run
+       * ends finds their own conversation rather than the job's.
+       */
+      conversation.restore(saved.messages)
+      activeTaskCreatedAt = saved.createdAt
+      truncationStore.startTask(saved.handles)
+      readFiles.clear()
+      for (const file of saved.readFiles) readFiles.add(file)
+      taskCheckpoint = saved.checkpoint
+      backgroundRun = false
+      await setActiveTaskId(saved.taskId)
+
       runningScheduleId = undefined
       runStartedAt = undefined
       const latest = await loadSchedules()
@@ -3238,7 +3380,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             lastRunAt: startedAt,
             lastResult: result,
             ...(summary.length > 0 ? { lastSummary: summary.slice(0, 300) } : {}),
-            ...(activeTaskId !== undefined ? { lastTaskId: activeTaskId } : {}),
+            ...(ranAsTask !== undefined ? { lastTaskId: ranAsTask } : {}),
             // Newest first, and capped — this lives in the config file, so an unbounded log
             // would grow forever and be rewritten on every run.
             runs: [
@@ -3247,7 +3389,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 result,
                 durationMs: Date.now() - startedAt,
                 ...(summary.length > 0 ? { summary: summary.slice(0, 300) } : {}),
-                ...(activeTaskId !== undefined ? { taskId: activeTaskId } : {}),
+                ...(ranAsTask !== undefined ? { taskId: ranAsTask } : {}),
               },
               ...(current.runs ?? []),
             ].slice(0, MAX_REMEMBERED_RUNS),
@@ -3282,6 +3424,44 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       next[key] = cleared
     }
     await saveSchedules(next)
+  }
+
+  /**
+   * Removes one run from the log.
+   *
+   * Keyed on `at` rather than an index: the list is re-sorted and capped as runs accumulate, so
+   * an index the UI computed a moment ago can point at a different run by the time it arrives.
+   * The start time is the one thing about a run that does not move.
+   */
+  async function handleDeleteScheduleRun(id: string, at: number): Promise<void> {
+    const schedules = await loadSchedules()
+    const schedule = schedules[id]
+    if (schedule === undefined) return
+
+    const remaining = (schedule.runs ?? []).filter((run) => run.at !== at)
+    const next: Schedule = { ...schedule, runs: remaining }
+
+    /*
+     * The summary shown on the row belongs to the newest run. Deleting that run has to move it
+     * on, or the list would keep reporting a result whose log is gone — and the "Log" button
+     * beside it would open nothing.
+     */
+    const newest = remaining[0]
+    if (newest === undefined) {
+      delete next.runs
+      delete next.lastResult
+      delete next.lastSummary
+      delete next.lastTaskId
+    } else if (schedule.lastRunAt === at) {
+      next.lastRunAt = newest.at
+      next.lastResult = newest.result
+      if (newest.summary === undefined) delete next.lastSummary
+      else next.lastSummary = newest.summary
+      if (newest.taskId === undefined) delete next.lastTaskId
+      else next.lastTaskId = newest.taskId
+    }
+
+    await saveSchedules({ ...schedules, [id]: next })
   }
 
   /** The final assistant message, for the schedule list and any notification. */

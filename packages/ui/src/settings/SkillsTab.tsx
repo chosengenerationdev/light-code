@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
 import { FolderListEditor } from './FolderListEditor.js'
+import { DismissableProblems } from './DismissableProblems.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -51,16 +52,10 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         Shown rather than only logged. A skill that is silently not offered is impossible to
         diagnose from the chat — the same reasoning as refused Python tools.
       */}
-      {props.issues.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <strong style={{ fontSize: 12, color: colors.error }}>Not loaded</strong>
-          {props.issues.map((issue) => (
-            <div key={issue.filePath} style={{ fontSize: 11, color: colors.error, marginTop: 4 }}>
-              ⚠ {issue.filePath} — {issue.detail}
-            </div>
-          ))}
-        </div>
-      )}
+      <DismissableProblems
+        title="Not loaded"
+        problems={props.issues.map((issue) => `${issue.filePath} — ${issue.detail}`)}
+      />
 
       <div style={{ marginTop: 14 }}>
         {props.skills.length === 0 ? (

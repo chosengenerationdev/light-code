@@ -2,6 +2,7 @@ import type { PythonStatus } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily, labelStyle, primaryButtonStyle, textFieldStyle } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
+import { DismissableProblems } from './DismissableProblems.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -212,16 +213,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             one outcome that teaches nobody anything — and a hash mismatch is either an
             attack or a mistake, both of which need saying out loud.
           */}
-          {status.issues.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <strong style={{ fontSize: 12, color: colors.error }}>Not loaded</strong>
-              {status.issues.map((issue) => (
-                <div key={issue} style={{ fontSize: 11, color: colors.error, marginTop: 4 }}>
-                  ⚠ {issue}
-                </div>
-              ))}
-            </div>
-          )}
+          <DismissableProblems title="Not loaded" problems={status.issues} />
 
           <div style={{ marginTop: 10 }}>
             <strong style={{ fontSize: 12 }}>Registered tools</strong>

@@ -296,6 +296,8 @@ export type UiToHostMessage =
   /** Indexing is user-started, never model-started: it is the largest egress in the product. */
   | { type: 'startIndexing' }
   | { type: 'indexDocs' }
+  /** Empties the documentation index, so nothing stale can be matched. */
+  | { type: 'clearDocsIndex' }
   /** Run a query by hand, exactly as the model would, to judge what the index returns. */
   | { type: 'runSearchProbe'; query: string; target: 'codebase' | 'docs' }
   | { type: 'clearSearchLog' }
@@ -328,6 +330,8 @@ export type UiToHostMessage =
   | { type: 'restartScheduler' }
   /** Clears a schedule's remembered runs. Omit `id` to clear every schedule's. */
   | { type: 'clearScheduleRuns'; id?: string }
+  /** Removes one remembered run, identified by when it started. */
+  | { type: 'deleteScheduleRun'; id: string; at: number }
   /** Opens a past run's transcript in an editor tab rather than the sidebar. */
   | { type: 'openScheduleRun'; taskId: string; title: string }
   /** The user removing one directly. The model's own delete goes through the approval gate. */

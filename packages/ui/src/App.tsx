@@ -567,6 +567,11 @@ export function App(props: AppProps): ReactElement {
         setDocsIndexing(true)
         props.transport.post({ type: 'indexDocs' } satisfies UiToHostMessage)
       },
+      onClearDocsIndex: () => {
+        setDocsResult(undefined)
+        setDocsIndexing(true)
+        props.transport.post({ type: 'clearDocsIndex' } satisfies UiToHostMessage)
+      },
     },
     activity: {
       entries: searchLog,
@@ -829,6 +834,8 @@ export function App(props: AppProps): ReactElement {
                 props.transport.post({ type: 'openScheduleRun', taskId, title } satisfies UiToHostMessage),
               scheduler: schedulerState,
               onRestartScheduler: () => props.transport.post({ type: 'restartScheduler' } satisfies UiToHostMessage),
+              onDeleteRun: (id, at) =>
+                props.transport.post({ type: 'deleteScheduleRun', id, at } satisfies UiToHostMessage),
               onClearRuns: (id) =>
                 props.transport.post({
                   type: 'clearScheduleRuns',

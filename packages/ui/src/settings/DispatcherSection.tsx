@@ -8,6 +8,8 @@ export interface DispatcherSectionProps {
   docsIndex?: string | undefined
   onToggle: (enabled: boolean) => void
   onIndexDocs: () => void
+  /** Empties the index. Separate from reindexing, which replaces rather than removes. */
+  onClearDocsIndex: () => void
   indexing: boolean
   result?: { indexed?: number; index?: string; error?: string } | undefined
   /** Semantic matching needs both; without them search_docs still works, lexically. */
@@ -81,6 +83,20 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
           onClick={props.onIndexDocs}
         >
           {props.indexing ? 'Indexing…' : 'Index documentation'}
+        </button>
+        {/*
+          Clearing is not the same as reindexing, which is why both are here. Reindexing
+          replaces what a tool or skill *currently* describes; it cannot know about an entry
+          whose owner has gone from the corpus entirely, and a stale hit costs findability.
+        */}
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={props.indexing || !props.retrievalReady}
+          title="Remove every indexed tool and skill document. search_docs falls back to matching names and descriptions until you index again."
+          onClick={props.onClearDocsIndex}
+        >
+          Clear index
         </button>
         {props.docsIndex !== undefined && (
           <span style={{ color: colors.muted, fontSize: 11, fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>

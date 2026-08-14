@@ -18,7 +18,21 @@
   Restart button. A schedule that quietly never fires used to look exactly like one that was not
   due yet.
 
-  **Run logs can be cleared**, per schedule or all at once.
+  **Scheduled runs no longer touch your chat.** A run used to reset the one shared conversation,
+  so a job firing while you were mid-conversation wiped your transcript. Your conversation is now
+  set aside for the duration and handed back, the run sends nothing to the chat window, a
+  schedule waits rather than interrupting a turn you are in the middle of, and a message you send
+  during a run is held for the few seconds it takes rather than interleaved.
+
+  **Run logs can be cleared** — one run at a time, a whole schedule's, or all of them.
+
+  **Clear index** sits beside Index documentation in Settings → Search, emptying the tool and
+  skill documentation index. `search_docs` falls back to matching names and descriptions until
+  you index again.
+
+  **The red "Not loaded" lists in the Python and Skills tabs can be dismissed.** A dismissal is
+  remembered against the problems themselves, so a new failure — or the same one recurring after
+  a fix — is always shown again.
 
   **The scheduler is watched, and revived if it stops.** It ticks every 15 seconds now rather
   than every minute — at a one-minute poll a one-minute schedule spends most of its life
