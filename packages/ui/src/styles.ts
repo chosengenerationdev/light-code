@@ -22,8 +22,18 @@
  * reintroduces the `style-src` allowance this exists to avoid.
  */
 
-/** The logo's gradient: indigo-700 to purple-500. The default accent is its bright end. */
-export const DEFAULT_ACCENT = '#A855F7'
+/**
+ * The default accent.
+ *
+ * Green rather than the logo's purple, by explicit request. The logo keeps its own
+ * indigo-to-purple gradient; the two are allowed to differ, and purple remains one press
+ * away in the preset row.
+ *
+ * Worth knowing when changing this: green is light enough (luminance 0.42) that
+ * `contrastFor` flips bubble and button text to near-black. That is correct, and it is why
+ * the text colour is computed rather than assumed to be white.
+ */
+export const DEFAULT_ACCENT = '#22C55E'
 
 export interface AccentPreset {
   id: string
@@ -32,15 +42,16 @@ export interface AccentPreset {
 }
 
 /**
- * Offered as swatches. Purple first because it is the brand, and the rest span the wheel so
- * anyone who dislikes purple has a real choice rather than three shades of the same thing.
+ * Offered as swatches. The default leads, and the rest span the wheel so anyone who dislikes
+ * it has a real choice rather than three shades of the same thing. Purple is kept prominent
+ * because it is still the logo's colour.
  */
 export const ACCENT_PRESETS: readonly AccentPreset[] = [
-  { id: 'purple', label: 'Purple', value: DEFAULT_ACCENT },
+  { id: 'green', label: 'Green', value: DEFAULT_ACCENT },
+  { id: 'purple', label: 'Purple', value: '#A855F7' },
   { id: 'indigo', label: 'Indigo', value: '#6366F1' },
   { id: 'blue', label: 'Blue', value: '#3B82F6' },
   { id: 'teal', label: 'Teal', value: '#14B8A6' },
-  { id: 'green', label: 'Green', value: '#22C55E' },
   { id: 'amber', label: 'Amber', value: '#F59E0B' },
   { id: 'rose', label: 'Rose', value: '#F43F5E' },
   { id: 'graphite', label: 'Graphite', value: '#64748B' },
@@ -378,23 +389,40 @@ option:hover {
 }
 `
 
+/** Exported for `styles.test.ts`, which validates it — see `installStyles` for why. */
+export const STYLESHEET = CSS
+
 let installed = false
 
 /**
  * Adopts the stylesheet. Idempotent, so a hot reload or a second mount cannot stack copies.
  *
- * Failure is swallowed on purpose: an environment without constructable stylesheets should
- * lose the animations, not the panel. Everything structural is inline-styled.
+ * **Two failure modes, and they must not be conflated.** An environment without
+ * constructable stylesheets should lose the animations and keep the panel — everything
+ * structural is inline-styled, so that degradation is fine and silent.
+ *
+ * A `replaceSync` that throws on a *supported* engine is different: it means the CSS below
+ * has a syntax error, the whole sheet is dropped, and the UI silently loses every hover,
+ * transition and animation at once. Swallowing that would make a one-character typo
+ * undiagnosable, so it is reported. `styles.test.ts` additionally checks the sheet's brace
+ * balance and that every custom property it reads is one something actually defines, since
+ * an undefined `var()` resolves to nothing and paints as transparent rather than erroring.
  */
 export function installStyles(): void {
   if (installed) return
   installed = true
+
+  if (typeof CSSStyleSheet === 'undefined' || !('adoptedStyleSheets' in Document.prototype)) {
+    // Deliberately not falling back to a <style> element — that is exactly the `style-src`
+    // allowance this module exists to avoid.
+    return
+  }
+
   try {
     const sheet = new CSSStyleSheet()
     sheet.replaceSync(CSS)
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
-  } catch {
-    // No adoptedStyleSheets. Deliberately not falling back to a <style> element — that is
-    // exactly the `style-src` allowance this module exists to avoid.
+  } catch (error) {
+    console.error('Light Code: the stylesheet failed to parse, so the UI will have no transitions.', error)
   }
 }

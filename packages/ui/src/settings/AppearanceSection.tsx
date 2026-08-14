@@ -92,7 +92,7 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
           }}
         />
         {!isValidAccent(custom) && (
-          <span style={{ color: colors.error, fontSize: 11, fontFamily }}>Needs a hex colour, e.g. #A855F7</span>
+          <span style={{ color: colors.error, fontSize: 11, fontFamily }}>Needs a hex colour, e.g. #22C55E</span>
         )}
       </div>
     </section>

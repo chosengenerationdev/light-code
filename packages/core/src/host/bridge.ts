@@ -322,7 +322,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
   // must not depend on the UI package; the UI is authoritative and this is only the value
   // sent before the user has chosen one.
-  let cachedAccentColor = '#A855F7'
+  let cachedAccentColor = '#22C55E'
   let cachedModeId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -330,7 +330,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     cachedApprovals = config.approvals?.[approvalsKey] ?? {}
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
-    cachedAccentColor = config.ui?.accentColor ?? '#A855F7'
+    cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     return config
   }
 

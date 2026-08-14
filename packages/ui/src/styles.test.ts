@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACCENT_PRESETS, contrastFor, DEFAULT_ACCENT, isValidAccent, parseHex } from './styles.js'
+import { ACCENT_PRESETS, contrastFor, DEFAULT_ACCENT, isValidAccent, parseHex, STYLESHEET } from './styles.js'
 
 describe('accent parsing', () => {
   it('accepts both hex forms, with or without the hash', () => {
@@ -53,8 +53,22 @@ describe('contrast selection', () => {
 })
 
 describe('the preset palette', () => {
-  it('leads with the brand purple', () => {
+  it('leads with the default', () => {
     expect(ACCENT_PRESETS[0]?.value).toBe(DEFAULT_ACCENT)
+  })
+
+  /** The logo is still purple, so it has to stay reachable in one press. */
+  it('still offers the logo purple', () => {
+    expect(ACCENT_PRESETS.map((preset) => preset.value.toLowerCase())).toContain('#a855f7')
+  })
+
+  /**
+   * Green is on the light side, so the default pairs with dark text. Pinned because getting
+   * it wrong is invisible in a unit test and unreadable on screen.
+   */
+  it('pairs the default with dark text', () => {
+    expect(DEFAULT_ACCENT).toBe('#22C55E')
+    expect(contrastFor(DEFAULT_ACCENT)).toBe('#12111a')
   })
 
   it('offers only valid, distinct colours', () => {
@@ -68,5 +82,55 @@ describe('the preset palette', () => {
     for (const preset of ACCENT_PRESETS) {
       expect(['#ffffff', '#12111a']).toContain(contrastFor(preset.value))
     }
+  })
+})
+
+/**
+ * The stylesheet is 200 hand-written lines that nothing else validates.
+ *
+ * It is adopted through `replaceSync`, which throws on a syntax error and takes the *whole*
+ * sheet with it — every hover, transition and animation in the product gone at once. And an
+ * undefined `var()` does not throw at all: it resolves to nothing and paints as transparent,
+ * which is worse, because it fails silently and only on the one element that used it.
+ *
+ * These checks are structural rather than a real CSS parse, but they catch the two mistakes
+ * actually likely here: an unbalanced brace and a mistyped custom property.
+ */
+describe('the stylesheet', () => {
+  it('has balanced braces', () => {
+    const open = (STYLESHEET.match(/{/g) ?? []).length
+    const close = (STYLESHEET.match(/}/g) ?? []).length
+    expect(open).toBe(close)
+  })
+
+  it('defines every custom property it reads', () => {
+    // Set by applyAccent() on the document root rather than declared in the sheet.
+    const fromAccent = new Set([
+      '--lc-accent',
+      '--lc-accent-deep',
+      '--lc-accent-bright',
+      '--lc-accent-contrast',
+      '--lc-accent-a12',
+      '--lc-accent-a20',
+      '--lc-accent-a35',
+    ])
+    const declared = new Set([...STYLESHEET.matchAll(/(--lc-[a-z0-9-]+)\s*:/g)].map((match) => match[1]))
+    const read = [...STYLESHEET.matchAll(/var\((--lc-[a-z0-9-]+)/g)].map((match) => match[1])
+
+    for (const name of read) {
+      expect(fromAccent.has(name as string) || declared.has(name as string), `${String(name)} is read but never set`).toBe(true)
+    }
+  })
+
+  /** Every one of these is a rule that would silently stop applying if the class were renamed. */
+  it('carries the classes the components attach', () => {
+    for (const className of ['lc-in-left', 'lc-in-right', 'lc-fade-up', 'lc-dot', 'lc-scroll', 'lc-tab', 'lc-swatch', 'lc-btn-accent', 'lc-panel']) {
+      expect(STYLESHEET, className).toContain(`.${className}`)
+    }
+  })
+
+  /** Vestibular disorders make sliding bubbles genuinely unpleasant; this is not optional. */
+  it('honours prefers-reduced-motion', () => {
+    expect(STYLESHEET).toContain('prefers-reduced-motion')
   })
 })

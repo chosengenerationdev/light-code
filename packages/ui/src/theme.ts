@@ -34,13 +34,18 @@ export const colors = {
    * The fallbacks matter: they are what renders during the first paint, before config has
    * arrived over the bridge. Without them the UI flashes unstyled purple-less grey.
    */
-  accent: 'var(--lc-accent, #A855F7)',
-  accentDeep: 'var(--lc-accent-deep, #6821A0)',
-  accentContrast: 'var(--lc-accent-contrast, #ffffff)',
-  accentSoft: 'var(--lc-accent-a12, rgba(168, 85, 247, 0.12))',
-  accentRing: 'var(--lc-accent-a35, rgba(168, 85, 247, 0.35))',
-  /** The logo's own gradient, reproduced from whatever accent is active. */
-  accentGradient: 'linear-gradient(135deg, var(--lc-accent-deep, #6821A0), var(--lc-accent, #A855F7))',
+  accent: 'var(--lc-accent, #22C55E)',
+  accentDeep: 'var(--lc-accent-deep, #157A3A)',
+  /*
+   * Near-black, not white: the default accent is green, which is light enough that white
+   * text on it fails. `contrastFor` computes the real value at runtime; this fallback only
+   * has to be right for the default.
+   */
+  accentContrast: 'var(--lc-accent-contrast, #12111a)',
+  accentSoft: 'var(--lc-accent-a12, rgba(34, 197, 94, 0.12))',
+  accentRing: 'var(--lc-accent-a35, rgba(34, 197, 94, 0.35))',
+  /** A gradient in the shape of the logo's, reproduced from whatever accent is active. */
+  accentGradient: 'linear-gradient(135deg, var(--lc-accent-deep, #157A3A), var(--lc-accent, #22C55E))',
 } as const
 
 export const fontFamily = 'var(--vscode-font-family, sans-serif)'

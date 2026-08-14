@@ -261,7 +261,7 @@ export const configSchema = z
      */
     ui: z
       .object({
-        accentColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #A855F7'),
+        accentColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #22C55E'),
       })
       .partial(),
     /**
