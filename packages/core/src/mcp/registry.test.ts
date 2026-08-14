@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SecretStore } from '../platform/secrets.js'
 import { interpolateSecrets } from './client.js'
-import { McpRegistry } from './registry.js'
+import { connectionSignature, McpRegistry } from './registry.js'
 
 class FakeSecretStore implements SecretStore {
   private readonly values = new Map<string, string>()
@@ -94,5 +94,49 @@ describe('McpRegistry enable/disable', () => {
 
     expect(mcp.warningsFor('fetched')[0]).toMatch(/downloads the server from the network/i)
     expect(mcp.warningsFor('local')).toEqual([])
+  })
+})
+
+/**
+ * Which config changes justify tearing down a running server.
+ *
+ * A real bug, found in office use: setting a tool to Always or Never writes `disabledTools`
+ * into the server's entry, the whole-entry comparison saw a difference, and the connection was
+ * dropped mid-session. It stayed down until the next turn, so from the outside changing a
+ * permission simply killed the server.
+ */
+describe('connectionSignature', () => {
+  const server = { command: 'node', args: ['server.js'], env: { TOKEN: 'x' } }
+
+  it('ignores a tool being disabled — that is policy, not a connection detail', () => {
+    expect(connectionSignature({ ...server, disabledTools: ['dangerous'] })).toBe(connectionSignature(server))
+  })
+
+  it('ignores the disabled flag, which is handled deliberately elsewhere', () => {
+    expect(connectionSignature({ ...server, disabled: true })).toBe(connectionSignature(server))
+  })
+
+  it('still notices a changed command, argument or environment', () => {
+    expect(connectionSignature({ ...server, command: 'python' })).not.toBe(connectionSignature(server))
+    expect(connectionSignature({ ...server, args: ['other.js'] })).not.toBe(connectionSignature(server))
+    expect(connectionSignature({ ...server, env: { TOKEN: 'y' } })).not.toBe(connectionSignature(server))
+  })
+
+  it('still notices a changed URL on an HTTP server', () => {
+    const http = { url: 'https://a.example/mcp' }
+    expect(connectionSignature({ ...http, url: 'https://b.example/mcp' })).not.toBe(connectionSignature(http))
+    expect(connectionSignature({ ...http, disabledTools: ['x'] })).toBe(connectionSignature(http))
+  })
+
+  /** A server that has gone must always compare as different, so it is disconnected. */
+  it('treats a removed server as different from any real one', () => {
+    expect(connectionSignature(undefined)).not.toBe(connectionSignature(server))
+  })
+
+  /** Adding then clearing a permission must return to the original signature, not drift. */
+  it('round-trips when a permission is set and then removed', () => {
+    const withPolicy = { ...server, disabledTools: ['a'] }
+    const cleared = { ...withPolicy, disabledTools: [] }
+    expect(connectionSignature(cleared)).toBe(connectionSignature(server))
   })
 })

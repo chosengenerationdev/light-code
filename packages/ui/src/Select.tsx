@@ -102,12 +102,28 @@ export function Select(props: SelectProps): ReactElement {
       }
       close()
     }
+
+    /*
+     * Closing on scroll is how a `fixed` popup avoids drifting away from its button when an
+     * ancestor scrolls. But the popup **is itself scrollable** once the list is longer than
+     * its max height — and in capture phase that scroll reaches this handler too.
+     *
+     * The result was that a long dropdown shut the instant you tried to scroll it, which is
+     * precisely when a dropdown most needs to stay open. Scrolling the list is not a reason
+     * to close the list.
+     */
+    const onScroll = (event: Event): void => {
+      const target = event.target as Node | null
+      if (target !== null && listRef.current?.contains(target) === true) return
+      close()
+    }
+
     // Capture, so a scroll inside the settings pane closes it too rather than only the window.
-    window.addEventListener('scroll', close, true)
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
     document.addEventListener('pointerdown', onPointerDown, true)
     return () => {
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
       document.removeEventListener('pointerdown', onPointerDown, true)
     }

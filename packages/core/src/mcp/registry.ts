@@ -68,6 +68,31 @@ interface DiscoveredTool {
  * Owns connections, their lifecycle, and the tools they expose. Connects lazily — a
  * configured-but-unused server should not cost a process at startup (§11).
  */
+/**
+ * The parts of a server entry that decide *how* we connect to it.
+ *
+ * Compared instead of the whole entry, because the whole entry also carries **policy** —
+ * `disabledTools` and `disabled` — and a change to policy is not a reason to tear down a
+ * running process.
+ *
+ * This was a real bug, and an ugly one: setting a tool to Always or Never wrote
+ * `disabledTools` into the entry, the naive whole-entry comparison saw a difference, and the
+ * server was disconnected mid-session. It stayed down until the next turn or panel open, so
+ * from the outside changing a permission simply killed the server. `disabled` is excluded for
+ * the same reason and is handled deliberately below, where it disconnects *on purpose*.
+ *
+ * Omitting rather than listing the connection fields on purpose. A new transport field added
+ * later is then compared by default and correctly forces a reconnect; forgetting to add a new
+ * *policy* field here merely reconnects when it need not, which is the safe direction to fail.
+ */
+export function connectionSignature(config: McpServerConfig | undefined): string {
+  if (config === undefined) return ''
+  const connection: Record<string, unknown> = { ...config }
+  delete connection.disabledTools
+  delete connection.disabled
+  return JSON.stringify(connection)
+}
+
 export class McpRegistry {
   private readonly connections = new Map<string, McpConnection>()
   private readonly statuses = new Map<string, McpServerStatus>()
@@ -89,10 +114,19 @@ export class McpRegistry {
     const previous = this.servers
     this.servers = servers
 
+    /*
+     * Reconnected immediately rather than left idle. A server whose command or URL was just
+     * edited was running a moment ago and the user expects it to still be running — leaving it
+     * down until the next turn is why editing one appeared to stop it.
+     *
+     * Only servers that were *already* connected are restarted, so this never spawns a process
+     * the user had not already started (§11: nothing spawns at VS Code startup).
+     */
+    const reconnect: string[] = []
     for (const name of this.connections.keys()) {
-      const before = previous[name]
       const after = servers[name]
-      if (after === undefined || JSON.stringify(before) !== JSON.stringify(after)) {
+      if (after === undefined || connectionSignature(previous[name]) !== connectionSignature(after)) {
+        reconnect.push(name)
         await this.disconnect(name)
       }
     }
@@ -111,6 +145,16 @@ export class McpRegistry {
         this.statuses.delete(name)
         this.errors.delete(name)
         this.toolsByServer.delete(name)
+      }
+    }
+
+    for (const name of reconnect) {
+      const config = servers[name]
+      // Fire-and-forget: a slow server must not hold up the save that triggered this.
+      if (config !== undefined && config.disabled !== true) {
+        void this.connect(name, config).catch(() => {
+          // Already recorded as an error on the server's own state by `connect`.
+        })
       }
     }
 

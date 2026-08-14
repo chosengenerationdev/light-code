@@ -1,5 +1,26 @@
 # light-code-vscode
 
+## 0.16.1
+
+### Patch Changes
+
+- Two fixes from real use.
+
+  **Setting a tool to Always or Never no longer kills the MCP server.** The permission is stored
+  as `disabledTools` on the server's entry, and the check deciding whether a config change
+  warranted reconnecting compared the _whole_ entry — so a policy change looked like a
+  connection change and the running process was torn down. It stayed down until the next
+  message, which made changing a permission look like it crashed the server. Only the fields
+  that decide how we connect are compared now.
+
+  A server whose command or URL genuinely did change is also reconnected straight away instead
+  of sitting idle until the next message, so editing one no longer appears to stop it.
+
+  **Long dropdowns no longer close when you scroll them.** The popup closes on scroll so it
+  cannot drift away from its button when the page moves underneath — but it is itself scrollable
+  once the list is long, and its own scrolling was closing it. Which is exactly when a dropdown
+  most needs to stay open.
+
 ## 0.16.0
 
 ### Minor Changes
