@@ -169,7 +169,7 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
         {/* The consultation itself gets the expert mark; work that merely followed one gets
             it in a quieter position, so the two are distinguishable. */}
         {isConsultation && (
-          <span title="Expert consultation" aria-label="Expert consultation" style={{ display: 'flex', color: colors.focusBorder }}>
+          <span title="Expert consultation" aria-label="Expert consultation" style={{ display: 'flex', color: colors.accent }}>
             <ExpertIcon />
           </span>
         )}
@@ -178,7 +178,7 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
           <span
             title="Following expert advice"
             aria-label="Following expert advice"
-            style={{ display: 'flex', color: colors.focusBorder }}
+            style={{ display: 'flex', color: colors.accent }}
           >
             <ExpertIcon size={12} />
           </span>

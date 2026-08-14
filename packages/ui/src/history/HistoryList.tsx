@@ -53,7 +53,7 @@ export function HistoryList(props: HistoryListProps): ReactElement {
               padding: 10,
               marginBottom: 8,
               borderRadius: 4,
-              border: `1px solid ${isActive ? colors.focusBorder : colors.border}`,
+              border: `1px solid ${isActive ? colors.accent : colors.border}`,
               background: isActive ? colors.assistantBubble : 'transparent',
             }}
           >

@@ -1,7 +1,8 @@
 import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
 import { AttachIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
-import { badgeStyle, colors, fontFamily, iconButtonStyle, optionStyle, selectStyle } from './theme.js'
+import { Select } from './Select.js'
+import { badgeStyle, colors, fontFamily, iconButtonStyle } from './theme.js'
 
 export interface ComposerProps {
   isStreaming: boolean
@@ -230,7 +231,7 @@ export function Composer(props: ComposerProps): ReactElement {
                 gap: 6,
                 fontSize: 11,
                 color: colors.muted,
-                borderLeft: `2px solid ${colors.focusBorder}`,
+                borderLeft: `2px solid ${colors.accent}`,
                 paddingLeft: 6,
               }}
             >
@@ -428,49 +429,37 @@ export function Composer(props: ComposerProps): ReactElement {
       {(props.profiles.length > 0 || props.expertEnabled) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px 8px' }}>
           {props.profiles.length > 0 && (
-          <select
-            aria-label="Provider profile"
+          <Select
+            compact
+            ariaLabel="Provider profile"
             title="Which provider answers the next message"
             value={props.activeProfileId ?? ''}
             disabled={props.isStreaming}
-            onChange={(event) => props.onSelectProfile(event.target.value)}
-            style={{
-              ...selectStyle(true),
-              cursor: props.isStreaming ? 'default' : 'pointer',
-              maxWidth: '60%',
-            }}
-          >
-            {props.profiles.map((profile) => (
-              <option key={profile.id} value={profile.id} style={optionStyle()}>
-                {profile.label} · {profile.model}
-              </option>
-            ))}
-          </select>
+            onChange={props.onSelectProfile}
+            style={{ maxWidth: '60%' }}
+            options={props.profiles.map((profile) => ({
+              value: profile.id,
+              label: profile.label,
+              detail: profile.model,
+            }))}
+          />
           )}
           {props.searchConnections.length > 0 && (
-            <select
-              aria-label="OpenSearch connection"
+            <Select
+              compact
+              ariaLabel="OpenSearch connection"
               title="Which cluster this conversation may search. Change it between messages."
               value={props.activeSearchId ?? ''}
               disabled={props.isStreaming}
-              onChange={(event) => props.onSelectSearch(event.target.value.length > 0 ? event.target.value : undefined)}
-              style={{
-                ...selectStyle(true),
-                cursor: props.isStreaming ? 'default' : 'pointer',
-                maxWidth: '38%',
-              }}
-            >
-              {/* Off is a real choice, and the default one: no connection means the search
-                  tools are not offered at all. */}
-              <option value="" style={optionStyle()}>
-                No search
-              </option>
-              {props.searchConnections.map((connection) => (
-                <option key={connection.id} value={connection.id} style={optionStyle()}>
-                  🔍 {connection.label}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => props.onSelectSearch(value.length > 0 ? value : undefined)}
+              style={{ maxWidth: '38%' }}
+              options={[
+                // Off is a real choice, and the default one: no connection means the search
+                // tools are not offered at all.
+                { value: '', label: 'No search' },
+                ...props.searchConnections.map((connection) => ({ value: connection.id, label: connection.label })),
+              ]}
+            />
           )}
           {props.expertEnabled && (
             <span

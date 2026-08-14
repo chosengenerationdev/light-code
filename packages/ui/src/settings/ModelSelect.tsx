@@ -1,6 +1,7 @@
 import { resolveModelCapabilities, type ModelCapabilityInput } from '@light-code/core/browser'
 import { type ReactElement } from 'react'
-import { colors, fieldErrorStyle, labelStyle, optionStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { Select } from '../Select.js'
+import { colors, fieldErrorStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 export interface ModelSelectProps {
   value: string
@@ -56,21 +57,18 @@ export function ModelSelect(props: ModelSelectProps): ReactElement {
       </div>
 
       {props.models.length > 0 && (
-        <select
-          aria-label="Choose from the gateway's catalogue"
+        <Select
+          ariaLabel="Choose from the gateway's catalogue"
           value={props.models.includes(props.value) ? props.value : ''}
-          onChange={(event) => {
-            if (event.target.value.length > 0) props.onChange(event.target.value)
+          onChange={(value) => {
+            if (value.length > 0) props.onChange(value)
           }}
-          style={textFieldStyle()}
-        >
-          <option value="" style={optionStyle()}>Choose from {props.models.length} available model(s)…</option>
-          {props.models.map((id) => (
-            <option key={id} value={id} style={optionStyle()}>
-              {id}
-            </option>
-          ))}
-        </select>
+          style={{ width: '100%' }}
+          options={[
+            { value: '', label: `Choose from ${props.models.length} available model(s)…` },
+            ...props.models.map((id) => ({ value: id, label: id })),
+          ]}
+        />
       )}
 
       {props.warning !== undefined && props.models.length === 0 && (

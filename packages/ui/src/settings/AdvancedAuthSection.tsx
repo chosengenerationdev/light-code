@@ -1,6 +1,7 @@
 import type { ApigeeSummary, CertSummary, ConnectionTlsInput } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, optionStyle, textFieldStyle } from '../theme.js'
+import { Select } from '../Select.js'
+import { colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
 import { SecretField } from './SecretField.js'
 
 export type AuthType = 'none' | 'apiKey' | 'apigeeMtls'
@@ -122,16 +123,17 @@ export function AdvancedAuthSection(props: AdvancedAuthSectionProps): ReactEleme
         <label htmlFor="lc-auth-type" style={labelStyle()}>
           Authentication
         </label>
-        <select
+        <Select
           id="lc-auth-type"
           value={props.authType}
-          onChange={(event) => props.onAuthTypeChange(event.target.value as AuthType)}
-          style={textFieldStyle()}
-        >
-          <option value="apiKey" style={optionStyle()}>API key</option>
-          <option value="apigeeMtls" style={optionStyle()}>Mutual TLS + OAuth (Apigee)</option>
-          <option value="none" style={optionStyle()}>None</option>
-        </select>
+          onChange={(value) => props.onAuthTypeChange(value as AuthType)}
+          style={{ width: '100%' }}
+          options={[
+            { value: 'apiKey', label: 'API key' },
+            { value: 'apigeeMtls', label: 'Mutual TLS + OAuth (Apigee)' },
+            { value: 'none', label: 'None' },
+          ]}
+        />
       </div>
 
       {props.authType === 'apigeeMtls' && (

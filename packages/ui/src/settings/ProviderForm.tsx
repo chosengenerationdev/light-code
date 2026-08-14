@@ -11,7 +11,8 @@ import {
   type WireFormat,
 } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
-import { colors, fieldErrorStyle, labelStyle, optionStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { Select } from '../Select.js'
+import { colors, fieldErrorStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { AdvancedAuthSection, type AuthType } from './AdvancedAuthSection.js'
 import { ModelSelect } from './ModelSelect.js'
 import { SecretField } from './SecretField.js'
@@ -136,16 +137,16 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         <label htmlFor="lc-preset" style={labelStyle()}>
           Preset
         </label>
-        <select id="lc-preset" defaultValue="" onChange={(event) => applyPreset(event.target.value)} style={textFieldStyle()}>
-          <option value="" disabled style={optionStyle()}>
-            Choose a preset…
-          </option>
-          {providerPresets.map((preset) => (
-            <option key={preset.id} value={preset.id} style={optionStyle()}>
-              {preset.label}
-            </option>
-          ))}
-        </select>
+        <Select
+          id="lc-preset"
+          // Deliberately never shows a selection: applying a preset fills the fields below,
+          // and leaving it stuck on the last one would imply the form still tracks it.
+          value=""
+          placeholder="Choose a preset…"
+          onChange={applyPreset}
+          style={{ width: '100%' }}
+          options={providerPresets.map((preset) => ({ value: preset.id, label: preset.label }))}
+        />
       </div>
 
       <div style={{ marginBottom: 12 }}>

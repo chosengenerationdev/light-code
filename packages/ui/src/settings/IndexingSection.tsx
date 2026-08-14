@@ -1,6 +1,7 @@
 import type { IndexProgress, IndexResult, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, labelStyle, optionStyle, primaryButtonStyle, secondaryButtonStyle, selectStyle, textFieldStyle } from '../theme.js'
+import { Select } from '../Select.js'
+import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 export interface EmbedderState {
   profileId?: string
@@ -95,21 +96,16 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
         <label htmlFor="lc-emb-profile" style={labelStyle()}>
           Embedding provider
         </label>
-        <select
+        <Select
           id="lc-emb-profile"
           value={profileId}
-          onChange={(event) => setProfileId(event.target.value)}
-          style={{ ...selectStyle(), width: '100%' }}
-        >
-          <option value="" style={optionStyle()}>
-            Choose a provider profile…
-          </option>
-          {props.profiles.map((candidate) => (
-            <option key={candidate.id} value={candidate.id} style={optionStyle()}>
-              {candidate.label}
-            </option>
-          ))}
-        </select>
+          onChange={setProfileId}
+          style={{ width: '100%' }}
+          options={[
+            { value: '', label: 'Choose a provider profile…' },
+            ...props.profiles.map((candidate) => ({ value: candidate.id, label: candidate.label })),
+          ]}
+        />
         <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
           Reuses an existing profile&apos;s URL, credentials and certificates — one place to get
           mutual TLS right instead of two.
@@ -127,23 +123,18 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           convenience layered over the field, never a gate in front of it.
         */}
         {props.models.length > 0 && (
-          <select
-            aria-label="Available models"
+          <Select
+            ariaLabel="Available models"
             value={props.models.includes(model) ? model : ''}
-            onChange={(event) => {
-              if (event.target.value.length > 0) setModel(event.target.value)
+            onChange={(value) => {
+              if (value.length > 0) setModel(value)
             }}
-            style={{ ...selectStyle(), width: '100%', marginBottom: 4 }}
-          >
-            <option value="" style={optionStyle()}>
-              {`Choose from ${props.models.length} model(s)…`}
-            </option>
-            {props.models.map((candidate) => (
-              <option key={candidate} value={candidate} style={optionStyle()}>
-                {candidate}
-              </option>
-            ))}
-          </select>
+            style={{ width: '100%', marginBottom: 4 }}
+            options={[
+              { value: '', label: `Choose from ${props.models.length} model(s)…` },
+              ...props.models.map((candidate) => ({ value: candidate, label: candidate })),
+            ]}
+          />
         )}
         <input
           id="lc-emb-model"

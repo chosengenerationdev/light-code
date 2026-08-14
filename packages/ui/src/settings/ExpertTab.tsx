@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, optionStyle, primaryButtonStyle, selectStyle, textFieldStyle } from '../theme.js'
+import { Select } from '../Select.js'
+import { colors, fontFamily, labelStyle, primaryButtonStyle, textFieldStyle } from '../theme.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
 /** Sentinel for the free-text escape hatch, kept out of the value space. */
@@ -127,21 +128,16 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         <label htmlFor="lc-expert-model" style={labelStyle()}>
           Model (optional)
         </label>
-        <select
+        <Select
           id="lc-expert-model"
           value={EXPERT_MODELS.some((option) => option.value === model) ? model : CUSTOM}
-          onChange={(event) => setModel(event.target.value === CUSTOM ? '' : event.target.value)}
-          style={{ ...selectStyle(), width: '100%', marginBottom: 6 }}
-        >
-          {EXPERT_MODELS.map((option) => (
-            <option key={option.value} value={option.value} style={optionStyle()}>
-              {option.label}
-            </option>
-          ))}
-          <option value={CUSTOM} style={optionStyle()}>
-            Something else…
-          </option>
-        </select>
+          onChange={(value) => setModel(value === CUSTOM ? '' : value)}
+          style={{ width: '100%', marginBottom: 6 }}
+          options={[
+            ...EXPERT_MODELS.map((option) => ({ value: option.value, label: option.label })),
+            { value: CUSTOM, label: 'Something else…' },
+          ]}
+        />
 
         {/* Free text stays available whatever the list says — the CLI accepts ids this list
             cannot know about, and §9's rule is that a dropdown never becomes the only way in. */}

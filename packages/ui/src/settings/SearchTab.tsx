@@ -6,12 +6,11 @@ import {
   fontFamily,
   iconButtonStyle,
   labelStyle,
-  optionStyle,
   primaryButtonStyle,
   secondaryButtonStyle,
-  selectStyle,
   textFieldStyle,
 } from '../theme.js'
+import { Select } from '../Select.js'
 import { IndexingSection, type IndexingSectionProps } from './IndexingSection.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { SecretField } from './SecretField.js'
@@ -253,25 +252,27 @@ export function SearchTab(props: SearchTabProps): ReactElement {
           </div>
 
           {props.indexes.length > 0 && (
-            <select
-              aria-label="Available indexes"
+            <Select
+              ariaLabel="Available indexes"
               value={props.indexes.some((index) => index.name === defaultIndex) ? defaultIndex : ''}
-              onChange={(event) => {
-                if (event.target.value.length > 0) setDefaultIndex(event.target.value)
+              onChange={(value) => {
+                if (value.length > 0) setDefaultIndex(value)
               }}
-              style={{ ...selectStyle(), width: '100%' }}
-            >
-              <option value="" style={optionStyle()}>
-                Choose from {props.indexes.length} index(es)…
-              </option>
-              {props.indexes.map((index) => (
-                <option key={index.name} value={index.name} style={optionStyle()}>
-                  {index.name}
-                  {index.docsCount !== undefined ? ` — ${index.docsCount.toLocaleString()} docs` : ''}
-                  {index.storeSize !== undefined ? `, ${index.storeSize}` : ''}
-                </option>
-              ))}
-            </select>
+              style={{ width: '100%' }}
+              options={[
+                { value: '', label: `Choose from ${props.indexes.length} index(es)…` },
+                ...props.indexes.map((index) => ({
+                  value: index.name,
+                  label: index.name,
+                  detail: [
+                    index.docsCount !== undefined ? `${index.docsCount.toLocaleString()} docs` : undefined,
+                    index.storeSize,
+                  ]
+                    .filter((part) => part !== undefined)
+                    .join(', '),
+                })),
+              ]}
+            />
           )}
 
           {/* Typing an index by hand always works: `_cat/indices` is frequently denied to a
@@ -506,7 +507,7 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
               padding: 10,
               marginBottom: 8,
               borderRadius: 4,
-              border: `1px solid ${isActive ? colors.focusBorder : colors.border}`,
+              border: `1px solid ${isActive ? colors.accent : colors.border}`,
               background: isActive ? colors.assistantBubble : 'transparent',
             }}
           >

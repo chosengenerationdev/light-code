@@ -277,9 +277,9 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
                 fontSize: 11,
                 borderRadius: 3,
                 cursor: 'pointer',
-                background: selected ? colors.buttonBackground : 'transparent',
+                background: selected ? colors.accent : 'transparent',
                 color: selected ? colors.buttonForeground : colors.muted,
-                border: `1px solid ${selected ? colors.buttonBackground : colors.border}`,
+                border: `1px solid ${selected ? colors.accent : colors.border}`,
               }}
             >
               {kind.label}
