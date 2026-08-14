@@ -8,6 +8,7 @@ import { toolsForMode } from '../modes/resolve.js'
 import type { Mode } from '../modes/types.js'
 import type { ChatProvider, ChatStreamOptions, ImageAttachment, ToolCall } from '../providers/types.js'
 import { toToolDefinitions } from '../tools/registry.js'
+import { CALL_TOOL_NAME, callToolParamsSchema } from '../tools/callTool.js'
 import type { Tool, ToolExecutionContext, ToolPreview, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { Conversation } from './messages.js'
 import { truncateToolResult, type TruncationStore } from './truncate.js'
@@ -118,11 +119,73 @@ type PreparedCall =
   | { ok: true; tool: Tool; params: Record<string, unknown> }
   | { ok: false; result: ToolResult }
 
+/**
+ * Rewrites a `call_tool` invocation into the call it stands for.
+ *
+ * Done here, before anything else in `prepareToolCall`, so that the checkpoint, the approval
+ * gate, mode filtering and the command allowlist downstream all see the **inner** tool. If
+ * dispatch happened inside `call_tool.execute` instead, approving `call_tool` once would
+ * approve every hidden tool behind it — see `tools/callTool.ts`.
+ */
+function unwrapDispatch(toolCall: ToolCall): { ok: true; call: ToolCall } | { ok: false; result: ToolResult } {
+  if (toolCall.name !== CALL_TOOL_NAME) return { ok: true, call: toolCall }
+
+  let outer: unknown
+  try {
+    outer = JSON.parse(toolCall.arguments.length > 0 ? toolCall.arguments : '{}')
+  } catch (error) {
+    return {
+      ok: false,
+      result: {
+        content: `call_tool received malformed JSON arguments: ${error instanceof Error ? error.message : String(error)}`,
+        isError: true,
+      },
+    }
+  }
+
+  const parsed = callToolParamsSchema.safeParse(outer)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      result: {
+        content: `Invalid arguments for call_tool: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`,
+        isError: true,
+      },
+    }
+  }
+
+  if (parsed.data.name === CALL_TOOL_NAME) {
+    // No recursion. A self-referential dispatch has no legitimate use and is the obvious way
+    // to try to confuse the unwrap into producing a call the gate never inspected.
+    return { ok: false, result: { content: 'call_tool cannot call itself.', isError: true } }
+  }
+
+  return {
+    ok: true,
+    // The id is kept so the tool result still answers the call the provider made — every
+    // provider rejects a transcript with an unanswered tool call.
+    call: { ...toolCall, name: parsed.data.name, arguments: JSON.stringify(parsed.data.arguments ?? {}) },
+  }
+}
+
 /** Resolves and validates a tool call without running it, so approval sees real params. */
-function prepareToolCall(toolCall: ToolCall, registry: ToolRegistry, mode: Mode): PreparedCall {
+function prepareToolCall(original: ToolCall, registry: ToolRegistry, mode: Mode): PreparedCall {
+  const unwrapped = unwrapDispatch(original)
+  if (!unwrapped.ok) return { ok: false, result: unwrapped.result }
+  const toolCall = unwrapped.call
+  const viaDispatch = toolCall !== original
+
   const tool = registry.get(toolCall.name)
   if (tool === undefined) {
-    return { ok: false, result: { content: `Unknown tool "${toolCall.name}".`, isError: true } }
+    return {
+      ok: false,
+      result: {
+        content: viaDispatch
+          ? `call_tool could not find a tool named "${toolCall.name}". Use search_docs to get the exact name.`
+          : `Unknown tool "${toolCall.name}".`,
+        isError: true,
+      },
+    }
   }
 
   // Defence in depth: the tool was already withheld from the system prompt, but earlier
