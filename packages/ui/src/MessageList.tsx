@@ -31,7 +31,13 @@ export interface MessageListProps {
  * `maxWidth: 85%` is what makes it read as a conversation rather than as full-width blocks
  * with a tint; a bubble that spans the pane has no side.
  */
-function TextBlock(props: { role: 'user' | 'assistant'; content: string; expertInformed?: boolean | undefined }): ReactElement {
+function TextBlock(props: {
+  role: 'user' | 'assistant'
+  content: string
+  expertInformed?: boolean | undefined
+  /** Marks the newest user message, so Chat can tell whether it is still on screen. */
+  isLatestPrompt?: boolean
+}): ReactElement {
   const isAssistant = props.role === 'assistant'
 
   const avatar = (
@@ -61,6 +67,7 @@ function TextBlock(props: { role: 'user' | 'assistant'; content: string; expertI
   return (
     <div
       className={isAssistant ? 'lc-in-left' : 'lc-in-right'}
+      {...(props.isLatestPrompt === true ? { 'data-lc-latest-prompt': 'true' } : {})}
       style={{
         display: 'flex',
         gap: 8,
@@ -339,6 +346,20 @@ function ReasoningBlock(props: { content: string; pending?: boolean | undefined 
 }
 
 export function MessageList(props: MessageListProps): ReactElement {
+  /*
+   * The newest user message, marked so `Chat` can observe whether it has scrolled away. Found
+   * by index rather than by a flag on the message, because `DisplayMessage` is the shared
+   * transcript shape and a rendering concern has no business in it.
+   */
+  let latestPromptIndex = -1
+  for (let index = props.messages.length - 1; index >= 0; index--) {
+    const message = props.messages[index]
+    if (message?.kind === 'text' && message.role === 'user') {
+      latestPromptIndex = index
+      break
+    }
+  }
+
   return (
     <div role="log" aria-live="polite">
       {props.messages.map((message, index) =>
@@ -347,7 +368,13 @@ export function MessageList(props: MessageListProps): ReactElement {
         ) : message.kind === 'reasoning' ? (
           <ReasoningBlock key={index} content={message.content} pending={message.pending} />
         ) : (
-          <TextBlock key={index} role={message.role} content={message.content} expertInformed={message.expertInformed} />
+          <TextBlock
+            key={index}
+            role={message.role}
+            content={message.content}
+            expertInformed={message.expertInformed}
+            isLatestPrompt={index === latestPromptIndex}
+          />
         ),
       )}
       {props.error !== undefined && (

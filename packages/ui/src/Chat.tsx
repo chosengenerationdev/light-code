@@ -1,8 +1,9 @@
 import type { ApprovalDecision, ContextUsage, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
-import type { ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
 import { Composer } from './Composer.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
+import { PinnedPrompt } from './PinnedPrompt.js'
 import { ExpertSpend } from './ExpertSpend.js'
 import { TokenBar } from './TokenBar.js'
 import { WorkingIndicator } from './WorkingIndicator.js'
@@ -37,6 +38,53 @@ export interface ChatProps {
 }
 
 export function Chat(props: ChatProps): ReactElement {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [promptOutOfView, setPromptOutOfView] = useState(false)
+
+  /** The newest thing the user asked, for the pin. */
+  const latestPrompt = (() => {
+    for (let index = props.messages.length - 1; index >= 0; index--) {
+      const message = props.messages[index]
+      if (message?.kind === 'text' && message.role === 'user') return message.content
+    }
+    return undefined
+  })()
+
+  /*
+   * Watches whether the newest user message is still on screen.
+   *
+   * An observer rather than scroll arithmetic: `scroll` fires continuously and would need
+   * measuring on every frame, while this reports only the transition that matters. Scoped to
+   * the scroll container as root, so it answers "visible in the transcript" rather than
+   * "visible in the window", which differ the moment the panel is short.
+   *
+   * Re-established whenever the message list changes, because the marked element is a
+   * different node after each turn.
+   */
+  useEffect(() => {
+    const root = scrollRef.current
+    const target = root?.querySelector('[data-lc-latest-prompt]')
+    if (root === null || target === null || target === undefined) {
+      setPromptOutOfView(false)
+      return
+    }
+    if (typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry !== undefined) setPromptOutOfView(!entry.isIntersecting)
+      },
+      { root, threshold: 0 },
+    )
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [props.messages])
+
+  const revealPrompt = (): void => {
+    scrollRef.current?.querySelector('[data-lc-latest-prompt]')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+
   /**
    * What to say the model is doing, or undefined when it is not working.
    *
@@ -65,7 +113,16 @@ export function Chat(props: ChatProps): ReactElement {
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div className="lc-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollBehavior: 'smooth' }}>
+      {/*
+        Only once the real message has scrolled away. Rendering it unconditionally would print
+        the same sentence twice whenever the conversation still fits, which is most of them.
+      */}
+      {promptOutOfView && latestPrompt !== undefined && <PinnedPrompt text={latestPrompt} onReveal={revealPrompt} />}
+      <div
+        ref={scrollRef}
+        className="lc-scroll"
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollBehavior: 'smooth' }}
+      >
         <MessageList messages={props.messages} error={props.error} />
         {workingLabel !== undefined && (
           <WorkingIndicator label={workingLabel} variant={consulting ? 'expert' : 'default'} />
