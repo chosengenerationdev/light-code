@@ -20,6 +20,11 @@
 
   **Run logs can be cleared**, per schedule or all at once.
 
+  **The scheduler is watched, and revived if it stops.** It ticks every 15 seconds now rather
+  than every minute — at a one-minute poll a one-minute schedule spends most of its life
+  visibly overdue — and the extension checks in on it twice a minute, restarting it if it has
+  gone quiet. A single run that wedges can no longer block every later one forever.
+
   **Notifications can carry a report.** A VS Code notification is one line of plain text — it
   cannot render a table or a colour, whoever sends it. So `notify` now takes an optional
   Markdown `details`, and the notification offers to open it as a document: tables, headings and

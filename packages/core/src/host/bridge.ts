@@ -195,12 +195,35 @@ function stripEmpty<T extends object>(source: T): Partial<T> {
  * extension and the Node server both call this, which is the whole point — a fix to the
  * approval gate or the MCP tab reaches both without being written twice.
  */
+/** How often the schedule timer looks. A quarter of the shortest interval a schedule can use. */
+const SCHEDULE_TICK_MS = 15_000
+
+/**
+ * How long a single scheduled run may hold the scheduler before it is presumed wedged.
+ *
+ * Generous on purpose — a real run doing real work can take many minutes, and cutting one
+ * short is worse than being late. This exists only to stop one stuck run from disabling every
+ * schedule permanently.
+ */
+const STUCK_RUN_MS = 30 * 60_000
+
 /**
  * A live bridge. Outlives any one view, so a host can rebuild its UI without rebuilding this.
  */
 export interface ChatBridge {
   /** Re-pushes state a freshly created view could not have received. */
   resync: () => void
+  /**
+   * Whether the schedule timer is still ticking, for an outside watchdog.
+   *
+   * The timer has now stopped twice for reasons that left no trace, so the host polls this
+   * and restarts it rather than trusting it to stay up. A scheduler that silently dies is
+   * indistinguishable from one with nothing to do, which is why both failures took so long
+   * to see.
+   */
+  schedulerHealth: () => { running: boolean; lastTickAt?: number; runningScheduleId?: string }
+  /** Restarts the timer. Safe at any time; idempotent while it is healthy. */
+  restartScheduler: () => void
   dispose: () => void
 }
 
@@ -2924,11 +2947,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setScheduleEnabled') {
       void handleSetScheduleEnabled(message.id, message.enabled)
     } else if (message.type === 'restartScheduler') {
-      if (scheduleTimer !== undefined) {
-        clearInterval(scheduleTimer)
-        scheduleTimer = undefined
-      }
-      startScheduleTimer()
+      restartScheduleTimer()
       logger.info('schedule timer restarted by the user')
       void postSchedules()
     } else if (message.type === 'clearScheduleRuns') {
@@ -3086,6 +3105,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let scheduleTimer: ReturnType<typeof setInterval> | undefined
   /** When the timer last ran, so a stopped scheduler is visible rather than guessed at. */
   let lastScheduleTickAt: number | undefined
+  /** When the in-flight run started, so a wedged one can be released rather than blocking forever. */
+  let runStartedAt: number | undefined
 
   /** Every tool that exists, for the picker. Built with everything on so nothing is hidden. */
   function allToolsForPicker(): { name: string; description: string; group: string }[] {
@@ -3176,6 +3197,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (schedule === undefined) return
 
     runningScheduleId = id
+    runStartedAt = Date.now()
     void postSchedules()
 
     const startedAt = Date.now()
@@ -3202,6 +3224,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
     } finally {
       runningScheduleId = undefined
+      runStartedAt = undefined
       const latest = await loadSchedules()
       const current = latest[id]
       if (current !== undefined) {
@@ -3280,14 +3303,61 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * deleted, and does not need rebuilding on every edit. A minute is also the finest interval
    * the schema allows, so nothing is lost.
    */
+  /** Stops and starts, unconditionally. The manual button and the watchdog share this. */
+  function restartScheduleTimer(): void {
+    if (scheduleTimer !== undefined) {
+      clearInterval(scheduleTimer)
+      scheduleTimer = undefined
+    }
+    startScheduleTimer()
+  }
+
   function startScheduleTimer(): void {
     if (scheduleTimer !== undefined) return
+    /*
+     * Every 15 seconds, not every minute.
+     *
+     * A tick only reads a small JSON file, and at a one-minute poll a one-minute schedule
+     * spends most of its life visibly overdue — it fires roughly every two minutes, which
+     * reads as a broken scheduler even when it is working. Fifteen seconds bounds the lateness
+     * at a quarter of the shortest interval anyone can ask for.
+     */
     scheduleTimer = setInterval(() => {
-      void (async () => {
+      void runScheduleTick().catch((error: unknown) => {
+        /*
+         * An unhandled rejection here would be reported nowhere and the interval would keep
+         * firing blind. Logged so a failing tick is diagnosable from the output channel
+         * rather than inferred from schedules that never run.
+         */
+        logger.warn(`schedule tick failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }, SCHEDULE_TICK_MS)
+    // Immediately, too: a schedule that came due while the timer was down should not wait out
+    // a full interval before anyone notices.
+    void runScheduleTick().catch(() => undefined)
+  }
+
+  async function runScheduleTick(): Promise<void> {
+    await (async () => {
         // Recorded before the early return so the UI can tell a busy scheduler from a dead
         // one — both look identical from the outside otherwise.
-        lastScheduleTickAt = Date.now()
-        if (runningScheduleId !== undefined) return
+      lastScheduleTickAt = Date.now()
+      if (runningScheduleId !== undefined) {
+        /*
+         * A run that never finishes would stop the scheduler for good, since every later tick
+         * returns here. That is one of the shapes the "it just stopped" report can take, so it
+         * is bounded rather than trusted: past the cap the flag is cleared and it is reported.
+         * Worst case a slow run overlaps with the next one, which is far better than a
+         * scheduler that is silently dead.
+         */
+        if (runStartedAt !== undefined && Date.now() - runStartedAt > STUCK_RUN_MS) {
+          logger.warn(`schedule "${runningScheduleId}" has been running for too long — releasing the scheduler`)
+          runningScheduleId = undefined
+          runStartedAt = undefined
+          void postSchedules()
+        }
+        return
+      }
         const now = Date.now()
         const schedules = await loadSchedules()
 
@@ -3317,15 +3387,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             return
           }
         }
-      })().catch((error: unknown) => {
-        /*
-         * An unhandled rejection here would be reported nowhere and the interval would keep
-         * firing blind. Logged so a failing tick is diagnosable from the output channel
-         * rather than inferred from schedules that never run.
-         */
-        logger.warn(`schedule tick failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
-    }, 60_000)
+    })()
   }
 
   /*
@@ -3343,6 +3405,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * than pulled — so without this, reopening the panel would show an empty chat while the
      * conversation was still very much alive in the bridge.
      */
+    schedulerHealth: () => ({
+      running: scheduleTimer !== undefined,
+      ...(lastScheduleTickAt === undefined ? {} : { lastTickAt: lastScheduleTickAt }),
+      ...(runningScheduleId === undefined ? {} : { runningScheduleId }),
+    }),
+    restartScheduler: () => {
+      restartScheduleTimer()
+    },
     resync: () => {
       void (async () => {
         try {

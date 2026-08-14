@@ -2,7 +2,13 @@ import { z } from 'zod'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
-  message: z.string().min(1).describe('One short sentence. It is read out of context, in a notification.'),
+  message: z
+    .string()
+    .min(1)
+    .describe(
+      'One short sentence, on one line. A notification is plain text — line breaks, Markdown and ' +
+        'formatting are not rendered, so anything longer belongs in `details`.',
+    ),
   level: z
     .enum(['info', 'warning'])
     .optional()
@@ -67,7 +73,15 @@ export function createNotifyTool(options: NotifyOptions): Tool<NotifyParams> {
     parametersSchema: paramsSchema,
 
     async execute(params): Promise<ToolResult> {
-      options.notify(params.message, params.level ?? 'info', params.details)
+      /*
+       * Flattened, not rejected.
+       *
+       * A notification is a single line whatever is passed to it, so a multi-line `message`
+       * would be silently mangled by the platform. Collapsing it here at least keeps it
+       * readable, and `details` is where the model is told to put the real content.
+       */
+      const line = params.message.replace(/\s+/g, ' ').trim()
+      options.notify(line, params.level ?? 'info', params.details)
       return {
         content:
           params.details === undefined

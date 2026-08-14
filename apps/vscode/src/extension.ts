@@ -1,12 +1,21 @@
 import * as vscode from 'vscode'
-import { ConfigManager, Logger, isDue, wireChatBridge, type Schedule } from '@light-code/core'
+import { ConfigManager, Logger, isDue, wireChatBridge, type ChatBridge, type Schedule } from '@light-code/core'
 import { VSCodeConfigStore } from './platform/config.js'
 import { WebviewTransport } from './platform/transport.js'
 import { ChatViewProvider } from './webview/chatViewProvider.js'
 import { createVSCodeHostServices } from './webview/hostServices.js'
 
-/** Matches the bridge's own tick. A minute is the finest interval a schedule can ask for. */
-const SCHEDULE_POLL_MS = 60_000
+/** How often the host looks in on the scheduler. Frequent enough to revive it within a minute. */
+const SCHEDULE_POLL_MS = 30_000
+
+/**
+ * How stale the bridge's last tick may be before the timer is presumed dead.
+ *
+ * The bridge ticks every 15s, so three missed ticks is a confident diagnosis rather than a
+ * slow machine. This exists because the timer has now stopped twice leaving no trace of why —
+ * the honest response to that is to watch it, not to assume the next fix held.
+ */
+const TICK_STALE_MS = 75_000
 
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = vscode.window.createOutputChannel('Light Code')
@@ -32,8 +41,8 @@ export function activate(context: vscode.ExtensionContext): void {
    * reported symptom: nothing ran, yet Run Now worked, because Run Now is only reachable
    * from the panel that was keeping the timer alive.
    */
-  let bridge: { resync: () => void; dispose: () => void } | undefined
-  const ensureBridge = (): { resync: () => void } => {
+  let bridge: ChatBridge | undefined
+  const ensureBridge = (): ChatBridge => {
     bridge ??= wireChatBridge(createVSCodeHostServices(transport, context, outputChannel))
     return bridge
   }
@@ -62,9 +71,30 @@ export function activate(context: vscode.ExtensionContext): void {
     new VSCodeConfigStore(context, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
   )
   const poll = setInterval(() => {
-    if (bridge !== undefined) return
     void (async () => {
       try {
+        /*
+         * Once a bridge exists this is a watchdog rather than a starter.
+         *
+         * The bridge's own timer has stopped twice now — after working for a while, with
+         * nothing in the log — so its liveness is checked rather than assumed. A stale
+         * last-tick means the interval is gone, and it is restarted here without the user
+         * having to notice and press anything.
+         */
+        if (bridge !== undefined) {
+          const health = bridge.schedulerHealth()
+          const stale = health.lastTickAt !== undefined && Date.now() - health.lastTickAt > TICK_STALE_MS
+          if (!health.running || stale) {
+            outputChannel.appendLine(
+              `[warn] the schedule timer stopped (running=${String(health.running)}, last tick ${
+                health.lastTickAt === undefined ? 'never' : new Date(health.lastTickAt).toISOString()
+              }) — restarting it`,
+            )
+            bridge.restartScheduler()
+          }
+          return
+        }
+
         const { config } = await configManager.load()
         const schedules: Schedule[] = Object.values(config.schedules ?? {})
         if (schedules.some((schedule) => isDue(schedule, Date.now()))) {
