@@ -197,6 +197,15 @@ function ScheduleEditor(props: {
   onCancel: () => void
 }): ReactElement {
   const [draft, setDraft] = useState<Schedule>(props.schedule)
+  const [filter, setFilter] = useState('')
+  /*
+   * Selected tools stay listed whatever the filter says.
+   *
+   * Without this, typing a search hides what you already ticked, and the count at the bottom
+   * disagrees with the visible list — which reads as the filter having deselected them. What
+   * a schedule may do must never be ambiguous.
+   */
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false)
 
   const set = (patch: Partial<Schedule>): void => setDraft((current) => ({ ...current, ...patch }))
   const setTrigger = (patch: Partial<ScheduleTrigger>): void =>
@@ -205,15 +214,31 @@ function ScheduleEditor(props: {
   const risky = riskyGroupsIn(props.tools, draft.allowedTools)
   const valid = draft.name.trim().length > 0 && draft.prompt.trim().length > 0
 
+  const needle = filter.trim().toLowerCase()
+  const matches = (tool: ScheduleToolInfo): boolean => {
+    const selected = draft.allowedTools.includes(tool.name)
+    if (showSelectedOnly && !selected) return false
+    if (needle.length === 0) return true
+    // Selected tools survive the filter, so a search never appears to untick anything.
+    if (selected) return true
+    // Underscores are searched as spaces too: "create page" should find confluence__create_page.
+    const haystack = `${tool.name} ${tool.name.replace(/[_-]+/g, ' ')} ${tool.description}`.toLowerCase()
+    return needle.split(/\s+/).every((term) => haystack.includes(term))
+  }
+
   const grouped = new Map<string, ScheduleToolInfo[]>()
   for (const tool of props.tools) {
     // Control tools are always available and are not a choice, so listing them would imply
     // ticking them changed something.
     if (tool.group === 'always') continue
+    if (!matches(tool)) continue
     const bucket = grouped.get(tool.group) ?? []
     bucket.push(tool)
     grouped.set(tool.group, bucket)
   }
+
+  const visible = [...grouped.values()].flat()
+  const selectableNow = visible.filter((tool) => !draft.allowedTools.includes(tool.name))
 
   const toggle = (name: string): void =>
     set({
@@ -339,6 +364,54 @@ function ScheduleEditor(props: {
         Nothing is ticked to begin with. A tool you do not tick is not offered to the run at all,
         so a server added later never widens an existing schedule.
       </p>
+
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          value={filter}
+          spellCheck={false}
+          aria-label="Filter tools"
+          placeholder="Filter by name or description…"
+          onChange={(event) => setFilter(event.target.value)}
+          style={{ ...textFieldStyle(), flex: 1, minWidth: 140 }}
+        />
+        <button
+          type="button"
+          aria-pressed={showSelectedOnly}
+          title="Show only what this schedule may use"
+          onClick={() => setShowSelectedOnly(!showSelectedOnly)}
+          style={{
+            ...secondaryButtonStyle(),
+            fontSize: 11,
+            background: showSelectedOnly ? colors.accent : colors.secondaryButtonBackground,
+            color: showSelectedOnly ? colors.accentContrast : colors.secondaryButtonForeground,
+          }}
+        >
+          {draft.allowedTools.length} selected
+        </button>
+      </div>
+
+      {/*
+        Acts on the *filtered* set only, and says so. A bare "select all" against forty hidden
+        MCP tools is exactly the accident this whole picker exists to prevent.
+      */}
+      {needle.length > 0 && selectableNow.length > 0 && (
+        <button
+          type="button"
+          style={{ ...secondaryButtonStyle(), fontSize: 11, marginBottom: 8 }}
+          onClick={() =>
+            set({ allowedTools: [...draft.allowedTools, ...selectableNow.map((tool) => tool.name)] })
+          }
+        >
+          Select the {selectableNow.length} shown
+        </button>
+      )}
+
+      {visible.length === 0 && (
+        <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 10px' }}>
+          {showSelectedOnly ? 'Nothing selected yet.' : `No tool matches "${filter.trim()}".`}
+        </p>
+      )}
 
       {[...grouped.entries()].map(([group, tools]) => (
         <div key={group} style={{ marginBottom: 10 }}>
