@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.15.0
+
+### Minor Changes
+
+- Skills can live in several folders, and the documentation index maintains itself.
+
+  **Skills — one writable folder, any number of read-only ones.** Settings → Skills now lets you
+  choose where new skills are saved and add further folders to read from: a shared team
+  collection, a personal set, another checkout. Creating and editing always go to the one place,
+  so a folder shared with colleagues can be listed by all of them without anyone's assistant
+  being able to modify it. Earlier folders win a name clash, like `PATH`, so a personal skill
+  overrides a shared one — and a shadowed skill is reported rather than silently ignored.
+
+  **The tools folder is editable at last.** `python.toolsDir` has been configurable since it
+  shipped, but the tab only displayed it, so moving it meant hand-editing config. It stays a
+  single folder: a Python tool is code, and keeping it in the repository is what gets changes
+  reviewed.
+
+  **The documentation index rebuilds itself** when the catalogue changes — an MCP server
+  connecting or announcing new tools, a Python tool created or deleted, a skill written, a folder
+  reconfigured. It fingerprints the corpus first, so the usual case costs nothing, and it waits a
+  few seconds for the dust to settle rather than reindexing once per server at startup. Deleting
+  a tool or skill now removes its index entry automatically.
+
+  **Index names take a prefix.** Settings → Search → **Index name prefix** replaces `light-code`
+  at the front of both the codebase and documentation collections, so a shared cluster shows
+  whose is whose. Changing it points at new, empty collections; the old ones keep their data
+  until you remove them.
+
 ## 0.14.0
 
 ### Minor Changes
