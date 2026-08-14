@@ -270,6 +270,25 @@ export {
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
 export { toolsForMode } from './modes/resolve.js'
 export { createCallToolTool, callToolParamsSchema, CALL_TOOL_NAME, type CallToolParams } from './tools/callTool.js'
+export {
+  createSearchDocsTool,
+  runDocsSearch,
+  renderDocsMatches,
+  type SearchDocsParams,
+  type SearchDocsOptions,
+} from './tools/searchDocs.js'
+export {
+  buildDocCorpus,
+  docEntryId,
+  parseDocEntryId,
+  schemaForTool,
+  toolDocText,
+  skillDocText,
+  toolDocEntry,
+  skillDocEntry,
+  type DocEntry,
+  type DocEntryKind,
+} from './rag/toolDocs.js'
 export type { Mode } from './modes/types.js'
 export { runAgentTurn, type AgentTurnEvents, type RunAgentTurnOptions } from './agent/loop.js'
 export {
