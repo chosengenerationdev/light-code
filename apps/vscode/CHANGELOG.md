@@ -1,5 +1,26 @@
 # light-code-vscode
 
+## 0.17.0
+
+### Minor Changes
+
+- Read Word documents, spreadsheets and HTML pages.
+
+  The assistant can now open `.docx`, `.xlsx` and `.html` files with a new `read_document` tool.
+  Previously `read_file` decoded them as UTF-8 and returned pages of unreadable binary, because
+  Office files are ZIP archives rather than text.
+
+  Long documents page through with offset and limit, exactly like `read_file`, and a workbook
+  returns one sheet at a time with the other sheet names listed so the assistant can ask for the
+  one it needs. Twenty sheets in a single reply would fill the context window on its own.
+
+  No new dependencies, and the download is the same size as before: `.docx` and `.xlsx` are both
+  ZIP archives of XML, so one small reader covers both using what Node already provides.
+
+  **PDF is not supported yet** and says so plainly rather than returning something garbled. It is
+  the one format that genuinely needs a parser rather than a reader, and that is a decision about
+  download size rather than a small amount of code.
+
 ## 0.16.1
 
 ### Patch Changes
