@@ -1,6 +1,6 @@
 import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
-import { AttachIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
+import { AttachIcon, CrossIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
 import { activeMentionQuery, insertMention as insertMentionInto } from './mentions.js'
 import { Select } from './Select.js'
 import { badgeStyle, colors, fontFamily, iconButtonStyle } from './theme.js'
@@ -34,6 +34,33 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
 /** Reads a File into the bare base64 the protocol expects, without the data: prefix. */
+/** A non-image file, read as text and prepended to the message. */
+export interface TextAttachment {
+  name: string
+  text: string
+}
+
+/** Above this a file belongs in the workspace, where `read_file` can page through it. */
+const MAX_TEXT_BYTES = 512 * 1024
+
+/** A NUL says the file is not text; sending its bytes as characters would be noise. */
+function looksBinary(text: string): boolean {
+  return text.includes('\u0000')
+}
+
+async function toTextAttachment(file: File): Promise<TextAttachment | { error: string }> {
+  if (file.size > MAX_TEXT_BYTES) {
+    return {
+      error: `${file.name} is too large to attach (${Math.round(file.size / 1024)}KB). Put it in the workspace and ask me to read it — read_file can page through any size.`,
+    }
+  }
+  const text = await file.text()
+  if (looksBinary(text)) {
+    return { error: `${file.name} is not a text file, so there is nothing readable to attach.` }
+  }
+  return { name: file.name || 'attachment', text }
+}
+
 async function toAttachment(file: File): Promise<ImageAttachmentInput | undefined> {
   if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) return undefined
   if (file.size > MAX_IMAGE_BYTES) return undefined
@@ -52,6 +79,7 @@ async function toAttachment(file: File): Promise<ImageAttachmentInput | undefine
 export function Composer(props: ComposerProps): ReactElement {
   const [text, setText] = useState('')
   const [images, setImages] = useState<ImageAttachmentInput[]>([])
+  const [texts, setTexts] = useState<TextAttachment[]>([])
   const [mentionQuery, setMentionQuery] = useState<string | undefined>(undefined)
   const [highlighted, setHighlighted] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
@@ -85,20 +113,34 @@ export function Composer(props: ComposerProps): ReactElement {
     setHighlighted(0)
   }
 
+  /**
+   * Any file, not only images.
+   *
+   * An image goes to the model as an image; everything else is read as text and prepended to
+   * the message. Refusing a `.log` or a `.crt` because it is not a picture was an artefact of
+   * attachments having been built for vision — the model can read text perfectly well, and a
+   * file the user dragged in may not even be inside the workspace for `read_file` to reach.
+   */
   const addFiles = async (files: FileList | File[]): Promise<void> => {
-    const accepted: ImageAttachmentInput[] = []
-    let rejected = 0
+    const acceptedImages: ImageAttachmentInput[] = []
+    const acceptedTexts: TextAttachment[] = []
+    const problems: string[] = []
+
     for (const file of Array.from(files)) {
-      const attachment = await toAttachment(file)
-      if (attachment === undefined) rejected += 1
-      else accepted.push(attachment)
+      if (SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+        const image = await toAttachment(file)
+        if (image === undefined) problems.push(`${file.name} is larger than 5MB.`)
+        else acceptedImages.push(image)
+        continue
+      }
+      const result = await toTextAttachment(file)
+      if ('error' in result) problems.push(result.error)
+      else acceptedTexts.push(result)
     }
-    if (accepted.length > 0) setImages((previous) => [...previous, ...accepted])
-    setNotice(
-      rejected > 0
-        ? `${rejected} file(s) skipped — images only (PNG, JPEG, WebP, GIF) up to 5MB.`
-        : undefined,
-    )
+
+    if (acceptedImages.length > 0) setImages((previous) => [...previous, ...acceptedImages])
+    if (acceptedTexts.length > 0) setTexts((previous) => [...previous, ...acceptedTexts])
+    setNotice(problems.length > 0 ? problems.join(' ') : undefined)
   }
 
   const insertMention = (candidatePath: string): void => {
@@ -119,8 +161,21 @@ export function Composer(props: ComposerProps): ReactElement {
 
   const submit = (): void => {
     const trimmed = text.trim()
-    if (trimmed.length === 0 && images.length === 0) return
-    props.onSend(trimmed, images)
+    if (trimmed.length === 0 && images.length === 0 && texts.length === 0) return
+
+    /*
+     * Attached text is prepended in fenced blocks rather than sent as a separate field: it
+     * then travels through the ordinary message path, is visible in the transcript exactly as
+     * the model saw it, and needs no protocol change. Fenced and named so the model can tell
+     * the file apart from the question about it.
+     */
+    const attached = texts
+      .map((attachment) => `--- ${attachment.name} ---\n\`\`\`\n${attachment.text}\n\`\`\``)
+      .join('\n\n')
+    const body = attached.length > 0 ? `${attached}\n\n${trimmed}` : trimmed
+
+    props.onSend(body, images)
+    setTexts([])
     setText('')
     if (textareaRef.current !== null) {
       textareaRef.current.style.height = 'auto'
@@ -132,7 +187,7 @@ export function Composer(props: ComposerProps): ReactElement {
 
   // Sending mid-turn queues rather than being refused. Waiting for a long turn to finish
   // before you can even type the follow-up is the thing this exists to fix.
-  const canSend = text.trim().length > 0 || images.length > 0
+  const canSend = text.trim().length > 0 || images.length > 0 || texts.length > 0
 
   /**
    * Attaching is never blocked on the capability table.
@@ -230,6 +285,44 @@ export function Composer(props: ComposerProps): ReactElement {
                 style={{ background: 'transparent', border: 'none', color: colors.muted, cursor: 'pointer', padding: 0 }}
               >
                 ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/*
+        Listed and removable, like an image. An attachment the user cannot see is one they
+        cannot un-attach, and a whole log file silently riding along on the next message is an
+        expensive surprise.
+      */}
+      {texts.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '6px 8px 0' }}>
+          {texts.map((attachment, index) => (
+            <div
+              key={`${attachment.name}-${index}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '2px 4px 2px 8px',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 8,
+                fontSize: 11,
+                color: colors.muted,
+              }}
+              title={`${attachment.name} — ${String(Math.max(1, Math.round(attachment.text.length / 1024)))}KB of text, included in your next message`}
+            >
+              <span style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>{attachment.name}</span>
+              <span>{Math.max(1, Math.round(attachment.text.length / 1024))}KB</span>
+              <button
+                type="button"
+                title="Remove"
+                aria-label={`Remove ${attachment.name}`}
+                style={iconButtonStyle('ghost')}
+                onClick={() => setTexts((current) => current.filter((_, position) => position !== index))}
+              >
+                <CrossIcon size={11} />
               </button>
             </div>
           ))}
@@ -369,7 +462,7 @@ export function Composer(props: ComposerProps): ReactElement {
         <input
           ref={fileInputRef}
           type="file"
-          accept={SUPPORTED_IMAGE_TYPES.join(',')}
+
           multiple
           hidden
           onChange={(event) => {
@@ -379,8 +472,12 @@ export function Composer(props: ComposerProps): ReactElement {
         />
         <button
           type="button"
-          title={props.supportsVision ? 'Attach an image' : 'Attach an image (this model is not known to accept images)'}
-          aria-label="Attach an image"
+          title={
+            props.supportsVision
+              ? 'Attach a file — text is included in the message, images are sent to the model'
+              : 'Attach a file. Text is included in the message; this model is not known to accept images'
+          }
+          aria-label="Attach a file"
           style={iconButtonStyle('secondary', props.isStreaming)}
           disabled={props.isStreaming}
           onClick={() => fileInputRef.current?.click()}

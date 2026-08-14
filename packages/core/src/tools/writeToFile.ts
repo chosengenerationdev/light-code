@@ -18,7 +18,7 @@ export const writeToFileTool: Tool<WriteToFileParams> = {
     'An existing file must have been read with read_file this session before it can be overwritten.',
   parametersSchema: paramsSchema,
   async execute(params, context): Promise<ToolResult> {
-    const resolved = await resolveToolPath(context, params.path)
+    const resolved = await resolveToolPath(context, params.path, { write: true })
     if (!resolved.ok) return { content: resolved.message, isError: true, path: params.path }
 
     const exists = await context.fs.exists(resolved.realPath)
@@ -39,7 +39,7 @@ export const writeToFileTool: Tool<WriteToFileParams> = {
     return { content: `Wrote ${params.content.length} characters to "${params.path}".`, path: params.path }
   },
   async preview(params, context): Promise<ToolPreview> {
-    const resolved = await resolveToolPath(context, params.path)
+    const resolved = await resolveToolPath(context, params.path, { write: true })
     if (!resolved.ok) return { kind: 'text', text: resolved.message }
 
     // Read the file's *current* content so the diff is against reality, not assumption.

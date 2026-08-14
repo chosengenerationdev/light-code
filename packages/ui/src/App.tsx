@@ -77,6 +77,7 @@ export function App(props: AppProps): ReactElement {
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
   const [maxIterations, setMaxIterations] = useState(25)
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
+  const [readRoots, setReadRoots] = useState<string[]>([])
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   const [expertSpend, setExpertSpend] = useState({ usd: 0, consultations: 0, unpriced: 0 })
   const [dispatcher, setDispatcher] = useState<{ enabled: boolean; hiddenTools: number; docsIndex?: string }>({
@@ -202,6 +203,7 @@ export function App(props: AppProps): ReactElement {
         setApprovals(message.approvals)
         setMaxIterations(message.maxIterations)
         setAccentColor(message.accentColor)
+        setReadRoots(message.readRoots)
         setExpertColor(message.expertColor)
         // Applied straight to the document root rather than threaded through props: the
         // stylesheet reads the CSS variables, and it cannot read React state.
@@ -754,6 +756,8 @@ export function App(props: AppProps): ReactElement {
             onRevokeTool={revokeTool}
             onRevokeCommand={revokeCommand}
             maxIterations={maxIterations}
+            readRoots={readRoots}
+            onSetReadRoots={(roots) => props.transport.post({ type: 'setReadRoots', roots } satisfies UiToHostMessage)}
             accentColor={accentColor}
             onSetAccentColor={(value) => {
               // Applied locally first so dragging through swatches is instant; config catches

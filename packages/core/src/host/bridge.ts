@@ -395,6 +395,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   // sent before the user has chosen one.
   let cachedAccentColor = '#22C55E'
   let cachedExpertColor = '#D97757'
+  /**
+   * Directories tools may read outside the workspace — a network share of logs, typically.
+   *
+   * Refreshed per turn with everything else, so adding one in Settings takes effect on the
+   * next message rather than needing a reload.
+   */
+  let cachedReadRoots: string[] = []
 
   /**
    * What the expert has cost since this task was opened.
@@ -453,6 +460,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
+    cachedReadRoots = (config.filesystem?.readRoots ?? [])
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
     skillsDir = (config.skills?.dir !== undefined ? resolveSkillDir(config.skills.dir) : undefined) ?? defaultSkillsDir
     extraSkillDirs = (config.skills?.paths ?? [])
       .map(resolveSkillDir)
@@ -471,6 +481,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       maxIterations: cachedMaxIterations,
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
+      readRoots: cachedReadRoots,
     })
   }
 
@@ -988,6 +999,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
         workspaceRoot,
         denylist,
         readFiles,
+        readRoots: cachedReadRoots,
         signal: activeAbortController.signal,
         // Supplied by the host, not imported by core: the binary is platform-specific and
         // lives in the VSIX, so resolving it is a host concern (§4).
@@ -2376,6 +2388,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       maxIterations: cachedMaxIterations,
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
+      readRoots: cachedReadRoots,
     })
   }
 
@@ -2696,6 +2709,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     } else if (message.type === 'setMaxIterations') {
       void configManager
         .save('user', { maxIterations: message.value })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setReadRoots') {
+      void configManager
+        .save('user', {
+          filesystem: { readRoots: message.roots.map((root) => root.trim()).filter((root) => root.length > 0) },
+        })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setAccentColor') {

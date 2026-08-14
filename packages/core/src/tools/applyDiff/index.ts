@@ -21,7 +21,7 @@ export const applyDiffTool: Tool<ApplyDiffParams> = {
     'read_file this session. All blocks are validated before any are applied.',
   parametersSchema: paramsSchema,
   async execute(params, context): Promise<ToolResult> {
-    const resolved = await resolveToolPath(context, params.path)
+    const resolved = await resolveToolPath(context, params.path, { write: true })
     if (!resolved.ok) return { content: resolved.message, isError: true, path: params.path }
 
     if (!context.readFiles.has(normalizeForComparison(resolved.realPath))) {
@@ -52,7 +52,7 @@ export const applyDiffTool: Tool<ApplyDiffParams> = {
     return { content: result.message, path: params.path }
   },
   async preview(params, context): Promise<ToolPreview> {
-    const resolved = await resolveToolPath(context, params.path)
+    const resolved = await resolveToolPath(context, params.path, { write: true })
     if (!resolved.ok) return { kind: 'text', text: resolved.message }
 
     let original: string

@@ -30,6 +30,16 @@ export interface ToolExecutionContext {
    */
   readFiles: Set<string>
   /**
+   * Extra directories tools may **read** from, beyond the workspace.
+   *
+   * For files that genuinely live elsewhere — a network share of logs being the case that
+   * prompted this, and on Windows that means a UNC path the workspace can never contain.
+   *
+   * Read-only by construction: `resolveToolPath` ignores these when a tool is writing, because
+   * checkpoints only snapshot the workspace and an edit outside it could not be rolled back.
+   */
+  readRoots?: string[]
+  /**
    * Absolute path to the `rg` executable, supplied by the host.
    *
    * Core deliberately does **not** import `@vscode/ripgrep`. That package resolves a

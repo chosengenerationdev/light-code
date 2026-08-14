@@ -2,8 +2,8 @@ import fsSync from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { confine, PathConfinementError } from './confine.js'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { confine, confineToAny, PathConfinementError } from './confine.js'
 
 // Symlink creation needs a privilege Windows doesn't grant by default (Developer Mode
 // or admin) — probe once, synchronously, so `it.skipIf` can gate the relevant test.
@@ -67,5 +67,54 @@ describe('confine', () => {
     await expect(confine(path.join(outside, 'new-file.txt'), root)).rejects.toThrow(
       PathConfinementError,
     )
+  })
+})
+
+/**
+ * Reading outside the workspace, by explicit configuration.
+ *
+ * The case that prompted it: logs on a network share. On Windows that is a UNC path, which no
+ * amount of workspace-relative resolution will ever reach — so it has to be an allowed root or
+ * it is unreachable entirely.
+ */
+describe('confineToAny', () => {
+  let workspace: string
+  let elsewhere: string
+
+  beforeEach(async () => {
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-ws-'))
+    elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-share-'))
+    await fs.writeFile(path.join(elsewhere, 'app.log'), 'entries', 'utf8')
+    await fs.writeFile(path.join(workspace, 'a.ts'), 'code', 'utf8')
+  })
+  afterEach(async () => {
+    await fs.rm(workspace, { recursive: true, force: true })
+    await fs.rm(elsewhere, { recursive: true, force: true })
+  })
+
+  it('allows a path inside any listed root', async () => {
+    const target = path.join(elsewhere, 'app.log')
+    await expect(confineToAny(target, [workspace, elsewhere])).resolves.toContain('app.log')
+  })
+
+  it('still allows the workspace', async () => {
+    await expect(confineToAny(path.join(workspace, 'a.ts'), [workspace, elsewhere])).resolves.toContain('a.ts')
+  })
+
+  /** The default remains confinement: an unlisted folder is refused exactly as before. */
+  it('refuses a path in no listed root', async () => {
+    await expect(confineToAny(path.join(elsewhere, 'app.log'), [workspace])).rejects.toBeInstanceOf(
+      PathConfinementError,
+    )
+  })
+
+  /** A share that is not mounted must not take the other roots down with it. */
+  it('skips a root that cannot be resolved', async () => {
+    const missing = path.join(elsewhere, 'not-mounted')
+    await expect(confineToAny(path.join(workspace, 'a.ts'), [missing, workspace])).resolves.toContain('a.ts')
+  })
+
+  it('names a way forward when it refuses', async () => {
+    await expect(confineToAny(path.join(elsewhere, 'app.log'), [workspace])).rejects.toThrow(/Settings → Approvals/)
   })
 })

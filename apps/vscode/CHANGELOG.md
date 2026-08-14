@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.21.0
+
+### Minor Changes
+
+- Read files outside the workspace, and attach any kind of file.
+
+  **Folders it may read.** Settings → Approvals now takes a list of folders outside the workspace
+  that the assistant may read — a log directory, or a network share such as `\server\logs`. Logs
+  on a share were simply unreachable before: everything was confined to the workspace, and on
+  Windows a UNC path is not somewhere a workspace-relative path can ever go.
+
+  Reading only. Edits stay confined to the workspace whatever is listed, because a checkpoint
+  snapshots the workspace and an edit elsewhere could not be undone.
+
+  **Attachments accept any file.** Attaching a certificate or a log used to be refused as "images
+  only" — an artefact of attachments having been built for vision. An image is still sent to the
+  model as an image; anything else is read as text and included in the message, named and fenced
+  so it is clear where the file ends and your question begins. Attached files are listed above
+  the composer and can be removed before sending.
+
 ## 0.20.1
 
 ### Patch Changes

@@ -39,6 +39,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onRevokeCommand: (command: string) => void
   maxIterations: number
   onSetMaxIterations: (value: number) => void
+  readRoots: string[]
+  onSetReadRoots: (roots: string[]) => void
   accentColor: string
   onSetAccentColor: (value: string) => void
   expertColor: string
@@ -194,6 +196,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRevokeCommand={props.onRevokeCommand}
             maxIterations={props.maxIterations}
             onSetMaxIterations={props.onSetMaxIterations}
+            readRoots={props.readRoots}
+            onSetReadRoots={props.onSetReadRoots}
           />
         ) : active === 'search' ? (
           <SearchTab {...props.search} />

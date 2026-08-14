@@ -258,6 +258,8 @@ export type UiToHostMessage =
   | { type: 'setMode'; modeId: string }
   | { type: 'setAutoApprove'; group: ApprovableGroup; enabled: boolean }
   | { type: 'setMaxIterations'; value: number }
+  /** Folders tools may read outside the workspace. Replaces the whole list. */
+  | { type: 'setReadRoots'; roots: string[] }
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
   | { type: 'setExpertColor'; value: string }
@@ -381,6 +383,8 @@ export type HostToUiMessage =
       maxIterations: number
       accentColor: string
       expertColor: string
+      /** Folders tools may read beyond the workspace. Reading only — writes stay confined. */
+      readRoots: string[]
     }
   /** Server health plus the raw JSON the editor round-trips, and any spawn warnings. */
   | {

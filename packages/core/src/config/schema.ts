@@ -311,6 +311,21 @@ export const configSchema = z
     retrieval: retrievalConfigSchema,
     skills: skillsConfigSchema,
     /**
+     * Where tools may read outside the workspace.
+     *
+     * **User-scope only** (invariant 5). A repository able to add a root would grant itself
+     * read access to anything on the machine the moment you opened it — which is the whole
+     * point of confinement, so it must remain the user's decision.
+     *
+     * Reading only. Writing stays confined to the workspace whatever is listed here, because
+     * checkpoints snapshot the workspace and an edit elsewhere would have no rollback.
+     */
+    filesystem: z
+      .object({
+        readRoots: z.array(z.string()),
+      })
+      .partial(),
+    /**
      * Prompts that run unattended (§9b).
      *
      * **User-scope only** (invariant 5), and this is the sharpest entry on that list after

@@ -41,6 +41,9 @@ export const USER_SCOPE_ONLY_KEYS = [
   // A schedule runs tools with nobody watching. A repository able to add one would execute
   // code of its choosing the moment the panel opened.
   'schedules',
+  // A root here is read access to somewhere outside the workspace. A repository granting
+  // itself that on open is precisely what confinement exists to prevent.
+  'filesystem',
 ] as const
 
 export interface ScopeMergeResult {
