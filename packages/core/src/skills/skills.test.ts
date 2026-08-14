@@ -152,3 +152,94 @@ describe('the system prompt with skills', () => {
     expect(prompt).toMatch(/stale skill is worse than a missing one/)
   })
 })
+
+describe('loadSkills across several folders', () => {
+  let primary: string
+  let shared: string
+
+  beforeEach(async () => {
+    primary = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-skills-primary-'))
+    shared = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-skills-shared-'))
+  })
+  afterEach(async () => {
+    await fs.rm(primary, { recursive: true, force: true })
+    await fs.rm(shared, { recursive: true, force: true })
+  })
+
+  const put = (dir: string, file: string, content: string): Promise<void> =>
+    fs.writeFile(path.join(dir, file), content, 'utf8')
+
+  it('merges every folder and records where each skill came from', async () => {
+    await put(primary, 'mine.md', renderSkill('mine', 'Personal note.', 'Body'))
+    await put(shared, 'team.md', renderSkill('team', 'Team note.', 'Body'))
+
+    const loaded = await loadSkills([primary, shared])
+
+    expect(loaded.skills.map((skill) => skill.name)).toEqual(['mine', 'team'])
+    expect(loaded.skills.find((skill) => skill.name === 'team')?.sourceDir).toBe(shared)
+  })
+
+  /**
+   * The list is a search path, like `PATH`. Your own folder is first, so a personal skill
+   * overrides a shared one of the same name — the only direction that lets someone correct a
+   * shared note locally without editing everyone's copy.
+   */
+  it('lets an earlier folder win a name collision', async () => {
+    await put(primary, 'deploy.md', renderSkill('deploy', 'Mine wins.', 'Body'))
+    await put(shared, 'deploy.md', renderSkill('deploy', 'Shared loses.', 'Body'))
+
+    const loaded = await loadSkills([primary, shared])
+
+    expect(loaded.skills).toHaveLength(1)
+    expect(loaded.skills[0]?.description).toBe('Mine wins.')
+  })
+
+  /** Two folders quietly disagreeing is impossible to diagnose from the outside. */
+  it('reports the shadowed one rather than dropping it silently', async () => {
+    await put(primary, 'deploy.md', renderSkill('deploy', 'Mine.', 'Body'))
+    await put(shared, 'deploy.md', renderSkill('deploy', 'Theirs.', 'Body'))
+
+    const loaded = await loadSkills([primary, shared])
+
+    expect(loaded.issues).toHaveLength(1)
+    expect(loaded.issues[0]?.detail).toMatch(/shadowed/i)
+    expect(loaded.issues[0]?.detail).toContain(primary)
+  })
+
+  /**
+   * Easy to configure by accident when one entry is relative and another absolute. Without
+   * collapsing, every skill in that folder would shadow itself and report a false conflict.
+   */
+  it('collapses a folder listed twice', async () => {
+    await put(primary, 'a.md', renderSkill('a', 'About A.', 'Body'))
+
+    const loaded = await loadSkills([primary, primary, path.join(primary, '.')])
+
+    expect(loaded.skills).toHaveLength(1)
+    expect(loaded.issues).toHaveLength(0)
+  })
+
+  /** A shared folder may be on a drive that is not mounted; that is not an error. */
+  it('ignores a folder that does not exist', async () => {
+    await put(primary, 'a.md', renderSkill('a', 'About A.', 'Body'))
+
+    const loaded = await loadSkills([primary, path.join(shared, 'nope')])
+
+    expect(loaded.skills).toHaveLength(1)
+    expect(loaded.issues).toHaveLength(0)
+  })
+
+  /** Prompt order must not depend on folder arrangement — it sits in the cached prefix (§12). */
+  it('sorts by name regardless of which folder supplied it', async () => {
+    await put(primary, 'zebra.md', renderSkill('zebra', 'Z.', 'Body'))
+    await put(shared, 'alpha.md', renderSkill('alpha', 'A.', 'Body'))
+
+    const loaded = await loadSkills([primary, shared])
+    expect(loaded.skills.map((skill) => skill.name)).toEqual(['alpha', 'zebra'])
+  })
+
+  it('still accepts a single folder as a plain string', async () => {
+    await put(primary, 'a.md', renderSkill('a', 'About A.', 'Body'))
+    expect((await loadSkills(primary)).skills).toHaveLength(1)
+  })
+})

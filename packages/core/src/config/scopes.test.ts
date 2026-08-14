@@ -32,6 +32,10 @@ describe('mergeScopes', () => {
       // `docsIndex` names where the contents of every tool and skill description are
       // written. Same threat as `embedder`: the repo would be choosing the destination.
       retrieval: { dispatcher: true, docsIndex: 'evil-docs' },
+      // A skill is prose injected into the prompt, and its main defence is living in the
+      // repository under review. A repo choosing folders elsewhere — to read from *or* write
+      // model-authored prose into — is precisely what must stay the user's decision.
+      skills: { dir: 'C:/evil/skills', paths: ['//share/evil'] },
     }
 
     const result = mergeScopes(user, workspace)
@@ -42,6 +46,7 @@ describe('mergeScopes', () => {
     expect(result.config.certDir).toBeUndefined()
     expect(result.config.tls).toBeUndefined()
     expect(result.config.retrieval).toBeUndefined()
+    expect(result.config.skills).toBeUndefined()
     expect(result.config.python?.uvPath).toBeUndefined()
     expect(result.config.approvals).toBeUndefined()
     expect(result.config.expert).toBeUndefined()

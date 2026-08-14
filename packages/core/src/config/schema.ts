@@ -183,6 +183,35 @@ export function vectorStoreTls(store: VectorStoreConfig): TlsSettings | undefine
 }
 
 /**
+ * Where skills are kept (§13).
+ *
+ * **User-scope only** (invariant 5), and the reason is the absolute paths. A workspace able to
+ * set these would choose folders anywhere on the machine to read prose from *and* to write
+ * model-authored prose into — and a skill is a persistent prompt-injection vector whose main
+ * defence is that it lives in the repository and lands in code review. Pointing that
+ * elsewhere is precisely what must stay the user's decision.
+ *
+ * Note this takes nothing away from a repository: `.lightcode/skills/` inside the workspace is
+ * always read, so a project can still ship its own skills without configuring anything.
+ */
+export const skillsConfigSchema = z
+  .object({
+    /**
+     * Where `write_skill` puts new skills, and the only folder skills can be deleted from.
+     * Relative paths resolve against the workspace. Defaults to `.lightcode/skills`.
+     */
+    dir: z.string(),
+    /**
+     * Extra folders to read skills from — a shared team folder, a personal collection.
+     * **Read-only:** nothing is ever written to these, so a folder shared between people
+     * cannot be edited by one person's assistant on everyone else's behalf.
+     */
+    paths: z.array(z.string()),
+  })
+  .partial()
+export type SkillsConfig = z.infer<typeof skillsConfigSchema>
+
+/**
  * Keeping tool schemas out of the prompt, and finding them again on demand (§12).
  *
  * User-scope only (invariant 5) for the same reason as `embedder`: `docsIndex` names a
@@ -262,6 +291,7 @@ export const configSchema = z
     activeVectorStoreId: z.string(),
     embedder: embedderConfigSchema,
     retrieval: retrievalConfigSchema,
+    skills: skillsConfigSchema,
     activeProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,

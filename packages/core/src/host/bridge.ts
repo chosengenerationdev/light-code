@@ -216,24 +216,53 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    * injects into its own future context, and plain markdown in git is the main thing
    * standing between that and an unreviewed instruction (§13).
    */
-  const skillsDir = workspaceRoot !== undefined ? path.join(workspaceRoot, '.lightcode', 'skills') : undefined
+  const defaultSkillsDir = workspaceRoot !== undefined ? path.join(workspaceRoot, '.lightcode', 'skills') : undefined
+
+  /**
+   * Where skills are written, and the ordered list of folders they are read from.
+   *
+   * Both derive from config, so they are refreshed with everything else once per turn rather
+   * than fixed when the bridge is constructed — a folder added in Settings has to take effect
+   * without reloading the window.
+   */
+  let skillsDir = defaultSkillsDir
+  let extraSkillDirs: string[] = []
+
+  /** Relative entries resolve against the workspace; absolute ones are taken as given. */
+  function resolveSkillDir(entry: string): string | undefined {
+    const trimmed = entry.trim()
+    if (trimmed.length === 0) return undefined
+    if (path.isAbsolute(trimmed)) return path.resolve(trimmed)
+    return workspaceRoot === undefined ? undefined : path.resolve(workspaceRoot, trimmed)
+  }
+
+  /** The write folder first — it wins name collisions — then the read-only ones in order. */
+  function skillSearchPath(): string[] {
+    return [skillsDir, ...extraSkillDirs].filter((dir): dir is string => dir !== undefined)
+  }
+
   let skills: Skill[] = []
   let skillIssues: { filePath: string; detail: string }[] = []
   const refreshSkills = async (): Promise<void> => {
-    if (skillsDir === undefined) return
-    const loaded = await loadSkills(skillsDir)
+    const dirs = skillSearchPath()
+    if (dirs.length === 0) return
+    const loaded = await loadSkills(dirs)
     skills = loaded.skills
     skillIssues = loaded.issues
     for (const issue of loaded.issues) logger.warn(`skill ${issue.filePath}: ${issue.detail}`)
   }
 
   async function postSkills(): Promise<void> {
+    // The folder list lives in config and is refreshed here, not only per turn — otherwise
+    // adding a folder in Settings would show no change until the next message.
+    await loadSettings()
     await refreshSkills()
     post({
       type: 'skills',
       skills: skills.map((skill) => ({ ...skill })),
       issues: skillIssues,
       ...(skillsDir !== undefined ? { skillsDir } : {}),
+      extraDirs: extraSkillDirs,
     })
   }
 
@@ -242,6 +271,23 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       if (skillsDir === undefined) return
       // Same name rule the tool uses, so a hand-typed name cannot escape the directory.
       if (!isValidSkillName(name)) throw new Error(`"${name}" is not a valid skill name.`)
+
+      /*
+       * Only the write folder can be deleted from. The extras are shared or reference
+       * material, and one person's assistant must not be able to remove a file everyone
+       * else depends on.
+       *
+       * Said explicitly rather than left to `force: true`, which would report success while
+       * deleting nothing — the skill would still be listed afterwards and the user would have
+       * no idea why.
+       */
+      const existing = skills.find((skill) => skill.name === name)
+      if (existing !== undefined && existing.sourceDir !== undefined && existing.sourceDir !== skillsDir) {
+        throw new Error(
+          `"${name}" lives in ${existing.sourceDir}, which is a read-only skills folder. Delete the file there, or remove the folder in Settings.`,
+        )
+      }
+
       await fs.rm(path.join(skillsDir, skillFileName(name)), { force: true })
       await postSkills()
     } catch (error) {
@@ -378,6 +424,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
+    skillsDir = (config.skills?.dir !== undefined ? resolveSkillDir(config.skills.dir) : undefined) ?? defaultSkillsDir
+    extraSkillDirs = (config.skills?.paths ?? [])
+      .map(resolveSkillDir)
+      .filter((dir): dir is string => dir !== undefined)
     return config
   }
 
@@ -2417,6 +2467,16 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleRequestEmbedderModels(message.profileId)
     } else if (message.type === 'requestSkills') {
       void postSkills()
+    } else if (message.type === 'saveSkillDirs') {
+      void configManager
+        .save('user', {
+          skills: {
+            ...(message.dir.trim().length > 0 ? { dir: message.dir.trim() } : {}),
+            paths: message.paths.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+          },
+        })
+        .then(() => postSkills())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'deleteSkillFile') {
       void handleDeleteSkillFile(message.name)
     } else if (message.type === 'requestPython') {

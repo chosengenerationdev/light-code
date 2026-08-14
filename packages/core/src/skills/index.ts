@@ -24,6 +24,13 @@ export interface Skill {
   description: string
   /** Absolute path, so the model can `read_file` it without guessing. */
   filePath: string
+  /**
+   * Which configured folder it came from.
+   *
+   * Needed because only the first folder is writable: the Skills tab uses this to say where
+   * a skill lives and to refuse deleting one it does not own.
+   */
+  sourceDir?: string
 }
 
 export interface SkillLoadIssue {
@@ -80,7 +87,7 @@ export function renderSkill(name: string, description: string, body: string): st
   return `---\nname: ${name}\ndescription: ${flattened}\n---\n\n${body.trimStart()}`
 }
 
-export async function loadSkills(skillsDir: string): Promise<LoadedSkills> {
+async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
   const skills: Skill[] = []
   const issues: SkillLoadIssue[] = []
 
@@ -88,6 +95,9 @@ export async function loadSkills(skillsDir: string): Promise<LoadedSkills> {
   try {
     entries = (await fs.readdir(skillsDir)).filter((file) => file.endsWith('.md'))
   } catch {
+    // A configured folder that does not exist yet is not an error — the workspace one is
+    // absent until the first skill is written, and a shared folder may be on a drive that
+    // is not mounted right now.
     return { skills, issues }
   }
 
@@ -102,11 +112,62 @@ export async function loadSkills(skillsDir: string): Promise<LoadedSkills> {
         issues.push({ filePath, detail: 'No `description` in the frontmatter, so it was not offered.' })
         continue
       }
-      skills.push({ name, description: parsed.description, filePath })
+      skills.push({ name, description: parsed.description, filePath, sourceDir: skillsDir })
     } catch (error) {
       issues.push({ filePath, detail: error instanceof Error ? error.message : String(error) })
     }
   }
+  return { skills, issues }
+}
+
+/**
+ * Loads skills from every configured folder, in order.
+ *
+ * ## Earlier folders win
+ *
+ * The list is a search path, like `PATH`. The first folder is the one skills are *written*
+ * to, so a skill you wrote yourself overrides one of the same name from a shared team folder
+ * — which is the direction people expect, and the only one that lets someone correct a
+ * shared note locally without editing everyone's copy.
+ *
+ * A shadowed skill is reported as an issue rather than dropped silently. Two folders quietly
+ * disagreeing about what `deployment` means is exactly the kind of thing that is impossible
+ * to diagnose from the outside, and the Skills tab surfaces it.
+ *
+ * Duplicate paths are collapsed, since configuring the same folder twice — easy to do when
+ * one entry is relative and another absolute — would otherwise make every skill in it shadow
+ * itself and report a spurious conflict.
+ */
+export async function loadSkills(dirs: string | readonly string[]): Promise<LoadedSkills> {
+  const ordered = (typeof dirs === 'string' ? [dirs] : dirs).map((dir) => path.resolve(dir))
+  const unique = ordered.filter((dir, index) => ordered.indexOf(dir) === index)
+
+  const skills: Skill[] = []
+  const issues: SkillLoadIssue[] = []
+  const claimed = new Map<string, Skill>()
+
+  for (const dir of unique) {
+    const loaded = await loadOneDirectory(dir)
+    issues.push(...loaded.issues)
+
+    for (const skill of loaded.skills) {
+      const winner = claimed.get(skill.name)
+      if (winner !== undefined) {
+        issues.push({
+          filePath: skill.filePath,
+          detail: `Shadowed: "${skill.name}" is already defined by ${winner.filePath}, which takes precedence.`,
+        })
+        continue
+      }
+      claimed.set(skill.name, skill)
+      skills.push(skill)
+    }
+  }
+
+  // Sorted by name rather than by folder so the prompt block has a stable order regardless
+  // of how the folders are arranged — the same cache reasoning as everything else at the
+  // front of the prompt (§12).
+  skills.sort((a, b) => a.name.localeCompare(b.name))
   return { skills, issues }
 }
 

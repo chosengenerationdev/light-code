@@ -33,6 +33,11 @@ export const USER_SCOPE_ONLY_KEYS = [
   // `retrieval.docsIndex` names where the contents of your tool and skill documentation are
   // written. Same threat as `embedder`: a workspace able to set it chooses the destination.
   'retrieval',
+  // Skill folders are absolute paths that are read into the prompt and written to. A skill is
+  // a prompt-injection vector whose main defence is living in the repo under code review, so
+  // where that happens is the user's call. `.lightcode/skills/` is always read regardless, so
+  // a project loses nothing.
+  'skills',
 ] as const
 
 export interface ScopeMergeResult {

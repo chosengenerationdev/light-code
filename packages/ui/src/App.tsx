@@ -126,6 +126,10 @@ export function App(props: AppProps): ReactElement {
   const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>([])
   const [skillIssues, setSkillIssues] = useState<{ filePath: string; detail: string }[]>([])
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
+  const [skillExtraDirs, setSkillExtraDirs] = useState<string[]>([])
+  // What the user typed, not the resolved absolute path — the field must round-trip a
+  // relative entry as the relative entry, or saving would silently rewrite it.
+  const [skillConfiguredDir, setSkillConfiguredDir] = useState('')
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -299,6 +303,7 @@ export function App(props: AppProps): ReactElement {
         setSkills(message.skills)
         setSkillIssues(message.issues)
         setSkillsDir(message.skillsDir)
+        setSkillExtraDirs(message.extraDirs)
       } else if (message.type === 'python') {
         setPythonStatus(message.status)
       } else if (message.type === 'embedderModels') {
@@ -754,7 +759,13 @@ export function App(props: AppProps): ReactElement {
               skills,
               issues: skillIssues,
               skillsDir,
+              extraDirs: skillExtraDirs,
+              configuredDir: skillConfiguredDir,
               onDelete: (name) => props.transport.post({ type: 'deleteSkillFile', name } satisfies UiToHostMessage),
+              onSaveDirs: (dir: string, paths: string[]) => {
+                setSkillConfiguredDir(dir)
+                props.transport.post({ type: 'saveSkillDirs', dir, paths } satisfies UiToHostMessage)
+              },
             }}
             python={{
               status: pythonStatus,

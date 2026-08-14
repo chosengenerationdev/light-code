@@ -1,13 +1,20 @@
 import { useState, type ReactElement } from 'react'
-import { colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { badgeStyle, colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { FolderListEditor } from './FolderListEditor.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
 export interface SkillsTabProps {
-  skills: { name: string; description: string; filePath: string }[]
+  skills: { name: string; description: string; filePath: string; sourceDir?: string }[]
   issues: { filePath: string; detail: string }[]
+  /** Where new skills are written. Undefined when no folder is open. */
   skillsDir?: string | undefined
+  /** Read-only folders searched after `skillsDir`. */
+  extraDirs: string[]
+  /** The configured value rather than the resolved one, so the field round-trips what was typed. */
+  configuredDir: string
   onDelete: (name: string) => void
+  onSaveDirs: (dir: string, paths: string[]) => void
 }
 
 /**
@@ -67,10 +74,24 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
             <div key={skill.name} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <strong style={{ fontFamily: monospace, fontSize: 12 }}>{skill.name}</strong>
+                {/*
+                  Marked rather than hidden. A skill from a shared folder behaves identically
+                  in conversation, so the only place the difference shows is here — and the
+                  Remove button being absent needs an explanation beside it.
+                */}
+                {skill.sourceDir !== undefined && props.skillsDir !== undefined && skill.sourceDir !== props.skillsDir && (
+                  <span style={{ ...badgeStyle(), fontSize: 9 }} title={`Read-only, from ${skill.sourceDir}`}>
+                    shared
+                  </span>
+                )}
                 <span style={{ marginLeft: 'auto' }}>
-                  <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(skill.name)}>
-                    Remove
-                  </button>
+                  {skill.sourceDir === undefined || props.skillsDir === undefined || skill.sourceDir === props.skillsDir ? (
+                    <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(skill.name)}>
+                      Remove
+                    </button>
+                  ) : (
+                    <span style={{ color: colors.muted, fontSize: 10 }}>read-only</span>
+                  )}
                 </span>
               </div>
               <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{skill.description}</div>
@@ -100,6 +121,17 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
           ))
         )}
       </div>
+      <FolderListEditor
+        primary={props.configuredDir}
+        primaryPlaceholder={props.skillsDir ?? '.lightcode/skills'}
+        primaryLabel="Where new skills are saved"
+        primaryHint="Leave blank for .lightcode/skills in the workspace. Creating, editing and deleting all happen here."
+        extras={props.extraDirs}
+        extrasLabel="Also read skills from"
+        extrasHint="Shared or reference folders, searched in order after the one above. Never written to, so a folder shared with colleagues stays safe. A name defined twice is taken from the first folder that has it."
+        onSave={props.onSaveDirs}
+      />
+
     </div>
   )
 }

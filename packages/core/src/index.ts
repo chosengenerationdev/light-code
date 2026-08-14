@@ -172,9 +172,11 @@ export {
   vectorStoreSchema,
   embedderConfigSchema,
   retrievalConfigSchema,
+  skillsConfigSchema,
   vectorStoreTls,
   type VectorStoreConfig,
   type RetrievalConfig,
+  type SkillsConfig,
 } from './config/schema.js'
 
 export {
