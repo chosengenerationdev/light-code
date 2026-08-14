@@ -319,6 +319,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   let cachedApprovals: WorkspaceApprovals = {}
   /** Mirrors config so the loop and the settings message agree without re-reading. */
   let cachedMaxIterations = 25
+  // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
+  // must not depend on the UI package; the UI is authoritative and this is only the value
+  // sent before the user has chosen one.
+  let cachedAccentColor = '#A855F7'
   let cachedModeId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -326,6 +330,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     cachedApprovals = config.approvals?.[approvalsKey] ?? {}
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
+    cachedAccentColor = config.ui?.accentColor ?? '#A855F7'
     return config
   }
 
@@ -333,7 +338,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     const { config } = await configManager.load()
     await configManager.save('user', { approvals: { ...config.approvals, [approvalsKey]: next } })
     cachedApprovals = next
-    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: next, maxIterations: cachedMaxIterations })
+    post({
+      type: 'settings',
+      modeId: findMode(cachedModeId).id,
+      approvals: next,
+      maxIterations: cachedMaxIterations,
+      accentColor: cachedAccentColor,
+    })
   }
 
   const userGate = new WebviewApprovalGate(post)
@@ -1736,7 +1747,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
 
   async function postSettings(): Promise<void> {
     await loadSettings()
-    post({ type: 'settings', modeId: findMode(cachedModeId).id, approvals: cachedApprovals, maxIterations: cachedMaxIterations })
+    post({
+      type: 'settings',
+      modeId: findMode(cachedModeId).id,
+      approvals: cachedApprovals,
+      maxIterations: cachedMaxIterations,
+      accentColor: cachedAccentColor,
+    })
   }
 
   /** Approve now, and remember it for this workspace. */
@@ -2056,6 +2073,15 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     } else if (message.type === 'setMaxIterations') {
       void configManager
         .save('user', { maxIterations: message.value })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setAccentColor') {
+      /*
+       * Saved to user scope, not workspace: an accent is a preference about the person's
+       * editor, and someone who picks teal wants teal in every repository they open.
+       */
+      void configManager
+        .save('user', { ui: { accentColor: message.value } })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setAutoApprove') {

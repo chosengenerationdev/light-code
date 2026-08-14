@@ -17,6 +17,7 @@ import { PythonTab, type PythonTabProps } from './PythonTab.js'
 import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
 import type { BrowseRequest } from './PathField.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
+import { AppearanceSection } from './AppearanceSection.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
   approvals: WorkspaceApprovals
@@ -25,6 +26,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onRevokeCommand: (command: string) => void
   maxIterations: number
   onSetMaxIterations: (value: number) => void
+  accentColor: string
+  onSetAccentColor: (value: string) => void
   mcpServers: McpServerState[]
   mcpJson: string
   mcpWarnings: Record<string, string[]>
@@ -51,7 +54,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   skills: SkillsTabProps
 }
 
-type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network' | 'python' | 'skills'
+type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network' | 'python' | 'skills' | 'appearance'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'providers', label: 'Providers' },
@@ -62,6 +65,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'network', label: 'Network' },
   { id: 'python', label: 'Python' },
   { id: 'skills', label: 'Skills' },
+  { id: 'appearance', label: 'Appearance' },
 ]
 
 /**
@@ -74,11 +78,20 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', borderBottom: `1px solid ${colors.border}`, flexShrink: 0 }}>
+      <div
+        role="tablist"
+        className="lc-scroll"
+        style={{ display: 'flex', borderBottom: `1px solid ${colors.border}`, flexShrink: 0, overflowX: 'auto' }}
+      >
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
+            role="tab"
+            // Drives the underline in styles.ts, which scales from the centre so switching
+            // tabs slides rather than blinks.
+            aria-selected={active === tab.id}
+            className="lc-tab"
             onClick={() => setActive(tab.id)}
             style={{
               padding: '8px 12px',
@@ -87,16 +100,21 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               background: 'transparent',
               color: active === tab.id ? colors.foreground : colors.muted,
               border: 'none',
-              borderBottom: `2px solid ${active === tab.id ? colors.buttonBackground : 'transparent'}`,
               cursor: 'pointer',
+              whiteSpace: 'nowrap',
             }}
           >
             {tab.label}
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        {active === 'providers' ? (
+      {/* Keyed on the tab so a switch re-mounts and replays the entry animation. */}
+      <div key={active} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        {active === 'appearance' ? (
+          <div style={{ padding: 12 }}>
+            <AppearanceSection accentColor={props.accentColor} onChange={props.onSetAccentColor} />
+          </div>
+        ) : active === 'providers' ? (
           <ProvidersTab
             profiles={props.profiles}
             activeProfileId={props.activeProfileId}

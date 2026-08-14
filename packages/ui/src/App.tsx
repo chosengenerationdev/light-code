@@ -34,6 +34,7 @@ import type { SearchIndex } from './settings/SearchTab.js'
 import type { EmbedderState } from './settings/IndexingSection.js'
 import { HistoryList } from './history/HistoryList.js'
 import { BackIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
+import { applyAccent, DEFAULT_ACCENT } from './styles.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
 
 export interface AppProps {
@@ -72,6 +73,7 @@ export function App(props: AppProps): ReactElement {
   const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID)
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
   const [maxIterations, setMaxIterations] = useState(25)
+  const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [mcpServers, setMcpServers] = useState<McpServerState[]>([])
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
@@ -176,6 +178,10 @@ export function App(props: AppProps): ReactElement {
         setModeId(message.modeId)
         setApprovals(message.approvals)
         setMaxIterations(message.maxIterations)
+        setAccentColor(message.accentColor)
+        // Applied straight to the document root rather than threaded through props: the
+        // stylesheet reads the CSS variables, and it cannot read React state.
+        applyAccent(message.accentColor)
       } else if (message.type === 'mcp') {
         setMcpServers(message.servers)
         setMcpJson(message.json)
@@ -659,6 +665,14 @@ export function App(props: AppProps): ReactElement {
             onRevokeTool={revokeTool}
             onRevokeCommand={revokeCommand}
             maxIterations={maxIterations}
+            accentColor={accentColor}
+            onSetAccentColor={(value) => {
+              // Applied locally first so dragging through swatches is instant; config catches
+              // up on the round trip and re-confirms it.
+              setAccentColor(value)
+              applyAccent(value)
+              props.transport.post({ type: 'setAccentColor', value } satisfies UiToHostMessage)
+            }}
             onSetMaxIterations={(value) =>
               props.transport.post({ type: 'setMaxIterations', value } satisfies UiToHostMessage)
             }

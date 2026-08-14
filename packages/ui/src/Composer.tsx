@@ -184,6 +184,7 @@ export function Composer(props: ComposerProps): ReactElement {
         <div
           role="listbox"
           aria-label="Workspace files"
+          className="lc-scroll lc-fade-up"
           style={{ maxHeight: 160, overflowY: 'auto', borderBottom: `1px solid ${colors.border}` }}
         >
           {props.mentionCandidates.map((candidate, index) => (
@@ -296,6 +297,9 @@ export function Composer(props: ComposerProps): ReactElement {
           a single field rather than an input with things bolted beside it. The border lives
           here; the textarea itself is borderless and transparent. */}
       <div
+        // `lc-input` gives the whole box the accent focus ring via :focus-within, so focusing
+        // the borderless textarea inside lights up the control the user actually sees.
+        className="lc-input"
         style={{
           display: 'flex',
           gap: 4,
@@ -304,7 +308,7 @@ export function Composer(props: ComposerProps): ReactElement {
           padding: 4,
           background: colors.inputBackground,
           border: `1px solid ${colors.inputBorder}`,
-          borderRadius: 4,
+          borderRadius: 12,
         }}
       >
         <textarea
@@ -402,6 +406,7 @@ export function Composer(props: ComposerProps): ReactElement {
         ) : (
           <button
             type="button"
+            className="lc-btn-accent"
             title="Send"
             aria-label="Send"
             style={iconButtonStyle('primary', !canSend)}

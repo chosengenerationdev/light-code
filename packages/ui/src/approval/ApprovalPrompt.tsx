@@ -1,6 +1,7 @@
 import type { ApprovalDecision, ToolGroup, ToolPreview } from '@light-code/core/browser'
 import type { ReactElement } from 'react'
-import { colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { CheckIcon, CrossIcon } from '../icons.js'
+import { colors, fontFamily, iconButtonStyle, secondaryButtonStyle } from '../theme.js'
 import { DiffView } from './DiffView.js'
 
 export interface PendingApproval {
@@ -86,11 +87,15 @@ export function ApprovalPrompt(props: ApprovalPromptProps): ReactElement {
   const { approval } = props
   return (
     <div
+      className="lc-fade-up"
       style={{
-        margin: '6px 8px',
+        margin: '6px 10px 6px 40px',
         padding: 10,
-        borderRadius: 4,
-        border: `1px solid ${colors.focusBorder}`,
+        borderRadius: 12,
+        // The accent, not focusBorder: this is the one thing on screen waiting for you, and
+        // it should be unmistakably the app asking rather than a generic focused box.
+        border: `1px solid ${colors.accent}`,
+        boxShadow: `0 0 0 3px ${colors.accentSoft}`,
         fontFamily,
       }}
     >
@@ -102,12 +107,37 @@ export function ApprovalPrompt(props: ApprovalPromptProps): ReactElement {
       <PreviewBody preview={approval.preview} />
 
       <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-        <button type="button" style={primaryButtonStyle(false)} onClick={() => props.onDecide(approval.id, 'approve')}>
-          Approve
+        {/* Approve and Deny become icons: a tick and a cross are unambiguous, and these two
+            are the pair every approval dialog has ever had. The "always allow" control below
+            deliberately keeps its words — see the comment there. */}
+        <button
+          type="button"
+          className="lc-btn-accent"
+          title="Approve — run this once"
+          aria-label="Approve, run this once"
+          style={{ ...iconButtonStyle('primary'), width: 34 }}
+          onClick={() => props.onDecide(approval.id, 'approve')}
+        >
+          <CheckIcon size={16} />
         </button>
-        <button type="button" style={secondaryButtonStyle()} onClick={() => props.onDecide(approval.id, 'deny')}>
-          Deny
+        <button
+          type="button"
+          title="Deny — do not run this"
+          aria-label="Deny, do not run this"
+          style={{ ...iconButtonStyle('secondary'), width: 34 }}
+          onClick={() => props.onDecide(approval.id, 'deny')}
+        >
+          <CrossIcon size={16} />
         </button>
+        {/*
+          * **These keep their text on purpose, against the icons-everywhere rule.**
+          *
+          * The difference between "run this once" and "never ask me about this again" is a
+          * standing grant, and it is precisely the distinction an icon cannot carry. A user
+          * who mis-taps a glyph here does not lose a click, they lose the approval gate for
+          * that command for the rest of the workspace's life. Invariant 8 exists so this
+          * surface tells the truth; a wordless button would undo that for tidiness.
+          */}
         {approval.preview.kind === 'command' ? (
           <button
             type="button"

@@ -251,6 +251,20 @@ export const configSchema = z
      */
     maxIterations: z.number().int().min(1).max(500),
     /**
+     * Appearance. Cosmetic only, and deliberately **not** on invariant 5's user-scope-only
+     * list: the worst a hostile workspace achieves by setting it is an ugly panel, which is
+     * not a threat, and a project wanting its own accent is a reasonable thing to commit.
+     *
+     * Validated as a hex colour rather than accepted as any string. It is written into a CSS
+     * custom property, and while `setProperty` will simply reject a malformed value, letting
+     * arbitrary text reach a stylesheet is not a habit worth forming.
+     */
+    ui: z
+      .object({
+        accentColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #A855F7'),
+      })
+      .partial(),
+    /**
      * Standard `mcpServers` shape so configs paste in from other clients unmodified (§11).
      * Global and workspace scopes both allowed — workspace wins — because an MCP server
      * is often project-specific. Note this is *deliberately not* on invariant 5's list:

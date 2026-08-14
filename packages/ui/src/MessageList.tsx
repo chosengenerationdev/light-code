@@ -1,6 +1,6 @@
 import type { ToolCallSummary, TranscriptEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
-import { AgentIcon, CheckIcon, CrossIcon, ExpertIcon, SpinnerIcon, UserIcon } from './icons.js'
+import { AgentIcon, CheckIcon, ChevronIcon, CrossIcon, ExpertIcon, SpinnerIcon, UserIcon } from './icons.js'
 import { colors, fontFamily } from './theme.js'
 
 /**
@@ -21,37 +21,89 @@ export interface MessageListProps {
   error: string | undefined
 }
 
+/**
+ * A chat bubble, sided like a messaging app: the assistant on the left, you on the right.
+ *
+ * The side does the work the old "Assistant" / "You" labels did, which is why there is no
+ * label — who said what is legible from across the room. The avatar stays because a wall of
+ * bubbles with no anchor is harder to skim than it looks, and it carries the expert marker.
+ *
+ * `maxWidth: 85%` is what makes it read as a conversation rather than as full-width blocks
+ * with a tint; a bubble that spans the pane has no side.
+ */
 function TextBlock(props: { role: 'user' | 'assistant'; content: string; expertInformed?: boolean | undefined }): ReactElement {
   const isAssistant = props.role === 'assistant'
-  return (
-    <div
+
+  const avatar = (
+    <span
+      title={isAssistant ? 'Assistant' : 'You'}
+      aria-label={isAssistant ? 'Assistant' : 'You'}
       style={{
-        padding: '8px 12px',
-        margin: '6px 8px',
-        borderRadius: 4,
-        background: isAssistant ? colors.assistantBubble : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 22,
+        height: 22,
+        borderRadius: '50%',
+        flexShrink: 0,
+        marginTop: 2,
+        // The assistant wears the accent; you get the editor's own surface. Reinforces the
+        // side rather than competing with it.
+        background: isAssistant ? colors.accentGradient : colors.secondaryButtonBackground,
+        color: isAssistant ? colors.accentContrast : colors.muted,
         border: isAssistant ? 'none' : `1px solid ${colors.border}`,
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
       }}
     >
-      {/* Icon rather than a repeated "Assistant" / "You" label: the same two words on every
-          message are noise once you know the layout. The word survives as the tooltip. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: colors.muted, marginBottom: 4, fontFamily }}>
-        <span title={isAssistant ? 'Assistant' : 'You'} aria-label={isAssistant ? 'Assistant' : 'You'} style={{ display: 'flex' }}>
-          {isAssistant ? <AgentIcon /> : <UserIcon />}
-        </span>
+      {isAssistant ? <AgentIcon size={12} /> : <UserIcon size={12} />}
+    </span>
+  )
+
+  return (
+    <div
+      className={isAssistant ? 'lc-in-left' : 'lc-in-right'}
+      style={{
+        display: 'flex',
+        gap: 8,
+        margin: '8px 10px',
+        // Reversed for you, so the avatar sits on the outside on both sides.
+        flexDirection: isAssistant ? 'row' : 'row-reverse',
+        alignItems: 'flex-start',
+      }}
+    >
+      {avatar}
+      <div
+        className="lc-bubble"
+        style={{
+          maxWidth: '85%',
+          padding: '8px 12px',
+          background: isAssistant ? colors.assistantBubble : colors.accentGradient,
+          color: isAssistant ? colors.foreground : colors.accentContrast,
+          // The squared-off corner points at the speaker — the tail, without drawing one.
+          borderRadius: isAssistant ? '14px 14px 14px 4px' : '14px 14px 4px 14px',
+          boxShadow: isAssistant ? 'none' : `0 1px 8px ${colors.accentRing}`,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          fontFamily,
+        }}
+      >
         {props.expertInformed === true && (
           <span
             title="Informed by an expert consultation"
             aria-label="Informed by an expert consultation"
-            style={{ display: 'flex', color: colors.focusBorder }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              marginBottom: 4,
+              opacity: 0.75,
+              color: isAssistant ? colors.accent : colors.accentContrast,
+            }}
           >
             <ExpertIcon size={12} />
           </span>
         )}
+        {props.content}
       </div>
-      {props.content}
     </div>
   )
 }
@@ -71,15 +123,23 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
 
   return (
     <div
+      className="lc-in-left"
       style={{
-        margin: '6px 8px',
-        borderRadius: 4,
+        // Indented to the width of an avatar plus its gap, so tool activity lines up under
+        // the assistant's bubbles rather than starting a third column.
+        margin: '6px 10px 6px 40px',
+        borderRadius: 10,
         border: `1px solid ${toolCall.isError === true ? colors.error : colors.border}`,
+        background: pending ? colors.accentSoft : 'transparent',
         overflow: 'hidden',
+        transition: 'background-color 190ms ease',
       }}
     >
       <button
         type="button"
+        className="lc-btn"
+        aria-expanded={expanded}
+        title={expanded ? 'Hide details' : 'Show details'}
         onClick={() => setExpanded(!expanded)}
         style={{
           display: 'flex',
@@ -96,7 +156,16 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
           textAlign: 'left',
         }}
       >
-        <span style={{ color: colors.muted }}>{expanded ? '▾' : '▸'}</span>
+        <span
+          style={{
+            display: 'flex',
+            color: colors.muted,
+            transform: expanded ? 'rotate(90deg)' : 'none',
+            transition: 'transform 190ms cubic-bezier(0.22, 0.85, 0.28, 1)',
+          }}
+        >
+          <ChevronIcon />
+        </span>
         {/* The consultation itself gets the expert mark; work that merely followed one gets
             it in a quieter position, so the two are distinguishable. */}
         {isConsultation && (
@@ -157,9 +226,12 @@ function ReasoningBlock(props: { content: string; pending?: boolean | undefined 
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <div style={{ margin: '4px 8px' }}>
+    <div className="lc-in-left" style={{ margin: '4px 10px 4px 40px' }}>
       <button
         type="button"
+        className="lc-btn"
+        aria-expanded={expanded}
+        title={expanded ? 'Hide the reasoning' : 'Show the reasoning'}
         onClick={() => setExpanded(!expanded)}
         style={{
           display: 'flex',
@@ -167,15 +239,24 @@ function ReasoningBlock(props: { content: string; pending?: boolean | undefined 
           gap: 6,
           background: 'transparent',
           border: 'none',
+          borderRadius: 6,
           color: colors.muted,
           cursor: 'pointer',
-          padding: '2px 0',
+          padding: '2px 6px 2px 2px',
           fontFamily,
           fontSize: 11,
           fontStyle: 'italic',
         }}
       >
-        <span>{expanded ? '▾' : '▸'}</span>
+        <span
+          style={{
+            display: 'flex',
+            transform: expanded ? 'rotate(90deg)' : 'none',
+            transition: 'transform 190ms cubic-bezier(0.22, 0.85, 0.28, 1)',
+          }}
+        >
+          <ChevronIcon />
+        </span>
         <span>{props.pending === true ? 'Thinking…' : 'Thought process'}</span>
       </button>
       {expanded && (
@@ -213,8 +294,20 @@ export function MessageList(props: MessageListProps): ReactElement {
         ),
       )}
       {props.error !== undefined && (
-        <div role="alert" style={{ padding: '8px 12px', margin: '6px 8px', color: colors.error }}>
-          Error: {props.error}
+        <div
+          role="alert"
+          className="lc-fade-up"
+          style={{
+            padding: '8px 12px',
+            margin: '6px 10px 6px 40px',
+            borderRadius: 10,
+            border: `1px solid ${colors.error}`,
+            color: colors.error,
+            fontFamily,
+            fontSize: 12,
+          }}
+        >
+          {props.error}
         </div>
       )}
     </div>

@@ -5,7 +5,8 @@ import { Composer } from './Composer.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
 import { TokenBar } from './TokenBar.js'
 import { WorkingIndicator } from './WorkingIndicator.js'
-import { colors, secondaryButtonStyle } from './theme.js'
+import { UndoIcon } from './icons.js'
+import { cls, colors, iconButtonStyle } from './theme.js'
 
 export interface ChatProps {
   messages: DisplayMessage[]
@@ -57,7 +58,7 @@ export function Chat(props: ChatProps): ReactElement {
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div className="lc-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollBehavior: 'smooth' }}>
         <MessageList messages={props.messages} error={props.error} />
         {workingLabel !== undefined && <WorkingIndicator label={workingLabel} />}
         {props.pendingApproval !== undefined && (
@@ -83,8 +84,17 @@ export function Chat(props: ChatProps): ReactElement {
           }}
         >
           <span>Files were changed this task.</span>
-          <button type="button" style={secondaryButtonStyle()} onClick={props.onRollback}>
-            Undo all changes
+          {/* Icon plus tooltip, like the rest of the chrome. The tooltip is deliberately
+              explicit about scope — "Undo" alone would not say it reverts the whole task. */}
+          <button
+            type="button"
+            className={cls.button}
+            title="Undo all changes made during this task"
+            aria-label="Undo all changes made during this task"
+            style={iconButtonStyle('secondary')}
+            onClick={props.onRollback}
+          >
+            <UndoIcon size={14} />
           </button>
         </div>
       )}

@@ -240,3 +240,40 @@ export function SettingsIcon({ size = 16 }: IconProps): ReactElement {
     </svg>
   )
 }
+
+/**
+ * The disclosure chevron. Always points right; callers rotate it with a CSS transform so
+ * expanding animates instead of swapping one glyph for another.
+ *
+ * Replaces the ▸/▾ text characters that were here before. Those are font-dependent — they
+ * render at a different size and baseline in every theme — and they cannot be transitioned.
+ */
+export function ChevronIcon({ size = 12 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 3.5 L10.5 8 L6 12.5" />
+    </svg>
+  )
+}
+
+/** Roll back the workspace to the pre-edit checkpoint. */
+export function UndoIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 8a5 5 0 1 1 1.6 3.7" />
+      <path d="M2.5 4.5 L3 8 L6.5 7.6" />
+    </svg>
+  )
+}
+
+/** Appearance / accent colour. */
+export function PaletteIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <path d="M8 1.6a6.4 6.4 0 0 0 0 12.8c1 0 1.4-.7 1.1-1.4-.4-.9.2-1.7 1.2-1.7h1.1A3 3 0 0 0 14.4 8 6.4 6.4 0 0 0 8 1.6Z" />
+      <circle cx="5.2" cy="6.4" r="0.95" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="4.6" r="0.95" fill="currentColor" stroke="none" />
+      <circle cx="10.9" cy="6.2" r="0.95" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}

@@ -25,20 +25,53 @@ export const colors = {
   error: 'var(--vscode-errorForeground)',
   focusBorder: 'var(--vscode-focusBorder)',
   assistantBubble: 'var(--vscode-editor-inactiveSelectionBackground, var(--vscode-input-background))',
+
+  /*
+   * The accent. Set on the document root by `applyAccent` (styles.ts) rather than hardcoded,
+   * so the user's chosen colour flows everywhere at once — including into rules in the
+   * stylesheet, which cannot read a JS constant.
+   *
+   * The fallbacks matter: they are what renders during the first paint, before config has
+   * arrived over the bridge. Without them the UI flashes unstyled purple-less grey.
+   */
+  accent: 'var(--lc-accent, #A855F7)',
+  accentDeep: 'var(--lc-accent-deep, #6821A0)',
+  accentContrast: 'var(--lc-accent-contrast, #ffffff)',
+  accentSoft: 'var(--lc-accent-a12, rgba(168, 85, 247, 0.12))',
+  accentRing: 'var(--lc-accent-a35, rgba(168, 85, 247, 0.35))',
+  /** The logo's own gradient, reproduced from whatever accent is active. */
+  accentGradient: 'linear-gradient(135deg, var(--lc-accent-deep, #6821A0), var(--lc-accent, #A855F7))',
 } as const
 
 export const fontFamily = 'var(--vscode-font-family, sans-serif)'
 
+/**
+ * Classes from `styles.ts`, applied alongside inline styles.
+ *
+ * Inline styles carry everything structural so the UI survives without the stylesheet;
+ * these carry hover, press and focus, which cannot be expressed per-element.
+ */
+export const cls = {
+  button: 'lc-btn',
+  accentButton: 'lc-btn lc-btn-accent',
+  input: 'lc-input',
+  scroll: 'lc-scroll',
+  panel: 'lc-panel',
+  tab: 'lc-tab',
+  swatch: 'lc-swatch',
+} as const
+
 export function primaryButtonStyle(disabled: boolean): CSSProperties {
   return {
-    background: colors.buttonBackground,
-    color: colors.buttonForeground,
+    background: disabled ? colors.secondaryButtonBackground : colors.accentGradient,
+    color: disabled ? colors.muted : colors.accentContrast,
     border: 'none',
-    borderRadius: 2,
-    padding: '4px 12px',
+    borderRadius: 6,
+    padding: '5px 14px',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
     fontFamily,
+    fontWeight: 500,
   }
 }
 
@@ -50,13 +83,15 @@ export function iconButtonStyle(kind: 'primary' | 'secondary' | 'ghost', disable
     width: 28,
     height: 28,
     padding: 0,
-    borderRadius: 4,
+    // Rounder than the old 4px: an icon button reads as a target rather than a box, and it
+    // is what makes the press animation land as "soft" rather than as a shrinking rectangle.
+    borderRadius: 8,
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.5 : 1,
     flexShrink: 0,
   }
   if (kind === 'primary') {
-    return { ...base, background: colors.buttonBackground, color: colors.buttonForeground, border: 'none' }
+    return { ...base, background: colors.accentGradient, color: colors.accentContrast, border: 'none' }
   }
   if (kind === 'secondary') {
     return {
