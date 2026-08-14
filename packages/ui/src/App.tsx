@@ -776,6 +776,7 @@ export function App(props: AppProps): ReactElement {
                   type: 'setPython',
                   dynamicTools: settings.dynamicTools,
                   ...(settings.uvPath.length > 0 ? { uvPath: settings.uvPath } : {}),
+                  ...(settings.toolsDir.length > 0 ? { toolsDir: settings.toolsDir } : {}),
                   timeoutSeconds: settings.timeoutSeconds,
                   ...(settings.indexUrl.length > 0 ? { indexUrl: settings.indexUrl } : {}),
                   offline: settings.offline,

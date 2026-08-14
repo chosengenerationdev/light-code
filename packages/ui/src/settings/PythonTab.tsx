@@ -12,6 +12,7 @@ export interface PythonTabProps {
   onSave: (settings: {
     dynamicTools: 'off' | 'on'
     uvPath: string
+    toolsDir: string
     timeoutSeconds: number
     indexUrl: string
     offline: boolean
@@ -30,6 +31,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   const status = props.status
   const [enabled, setEnabled] = useState(false)
   const [uvPath, setUvPath] = useState('')
+  const [toolsDir, setToolsDir] = useState('')
   const [timeout, setTimeoutSeconds] = useState('30')
   const [indexUrl, setIndexUrl] = useState('')
   const [offline, setOffline] = useState(false)
@@ -38,6 +40,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   // Routed by purpose, not by focus: the native dialog takes focus while it is open.
   useEffect(() => {
     if (props.pickedPath?.purpose === 'python.uvPath') setUvPath(props.pickedPath.path)
+    if (props.pickedPath?.purpose === 'python.toolsDir') setToolsDir(props.pickedPath.path)
   }, [props.pickedPath])
 
   // Resynced from the host rather than seeded once — its reply can arrive after mount.
@@ -97,6 +100,17 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             onChange={setUvPath}
           />
 
+          <PathField
+            id="lc-py-tools"
+            label="Where tools are kept"
+            value={toolsDir}
+            placeholder={status?.toolsDir ?? '.lightcode/tools'}
+            hint="Leave blank for .lightcode/tools in the workspace, which is the safer default: a tool is code the model wrote, and keeping it in the repository means every change lands in git and gets reviewed. One folder only — each tool's approved content hash is recorded alongside it."
+            browse={{ purpose: 'python.toolsDir', kind: 'folder' }}
+            onBrowse={props.onBrowse}
+            onChange={setToolsDir}
+          />
+
           <div style={{ marginBottom: 10 }}>
             <label htmlFor="lc-py-index" style={labelStyle()}>
               Package index
@@ -151,6 +165,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             props.onSave({
               dynamicTools: enabled ? 'on' : 'off',
               uvPath: uvPath.trim(),
+              toolsDir: toolsDir.trim(),
               timeoutSeconds: Number.isFinite(parsed) ? parsed : 30,
               indexUrl: indexUrl.trim(),
               offline,

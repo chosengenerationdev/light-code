@@ -1691,6 +1691,11 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
         python: {
           dynamicTools: input.dynamicTools,
           ...(input.uvPath !== undefined && input.uvPath.length > 0 ? { uvPath: input.uvPath } : {}),
+          // Absent rather than empty when cleared, so the manager falls back to
+          // `.lightcode/tools` instead of resolving an empty string against the workspace.
+          ...(input.toolsDir !== undefined && input.toolsDir.trim().length > 0
+            ? { toolsDir: input.toolsDir.trim() }
+            : {}),
           ...(input.timeoutSeconds !== undefined ? { timeoutSeconds: input.timeoutSeconds } : {}),
           ...(input.indexUrl !== undefined && input.indexUrl.length > 0 ? { indexUrl: input.indexUrl } : {}),
           ...(input.offline !== undefined ? { offline: input.offline } : {}),

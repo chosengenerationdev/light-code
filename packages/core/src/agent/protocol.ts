@@ -306,6 +306,8 @@ export type UiToHostMessage =
       type: 'setPython'
       dynamicTools: 'off' | 'on'
       uvPath?: string
+      /** Where tools live. Empty restores `.lightcode/tools` in the workspace. */
+      toolsDir?: string
       timeoutSeconds?: number
       indexUrl?: string
       offline?: boolean
