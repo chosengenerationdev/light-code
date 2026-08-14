@@ -485,6 +485,33 @@ real and unchanged, so Phase 8b resolves it structurally rather than by acceptin
 **Do not turn this into per-turn tool-definition selection.** That is the specific thing
 the original decision ruled out, and the reason still holds.
 
+### The dispatcher (2026-08-14) — and why it is *not* the thing this section forbids
+
+The user asked for tool and skill documentation to live in a vector store, retrieved
+semantically, loaded into context on demand and dropped again afterwards. Read quickly that
+sounds like exactly the banned design. It is not, and the distinction is worth writing down
+precisely, because the next session will have the same doubt.
+
+What §12 forbids is **the set of advertised tool definitions varying per turn**: they sit at
+the front of the prompt, so changing them invalidates the prefix and all history after it.
+What shipped instead:
+
+- **`call_tool(name, arguments)`** — one entry point, always present, byte-identical whether
+  the workspace hides three tools or three hundred. `agent/dispatch.test.ts` asserts that
+  directly, building two registries of wildly different size and comparing the serialised
+  definitions.
+- Tools registered `dispatchOnly` are **fully registered but unadvertised**. The prefix does
+  not grow with the catalogue, and it does not *change* within a session either.
+- **`search_docs`** returns schemas as tool *results*, mid-conversation, where they cost
+  nothing at the prefix — precisely the carve-out this section already made.
+
+So the prefix ends up *more* stable than before, not less. The banned design made the tool
+block a function of the turn; this makes it a constant.
+
+**`dispatchOnly` is a prompt-size control, not a security control.** A hidden tool is still
+callable by name. Withholding a *capability* is what modes and the approval gate are for, and
+collapsing the two would be a real mistake.
+
 The other two original objections stand as warnings rather than blocks: a silent miss is
 still a silent miss, so `search_docs` supplements `read_file` and never replaces it, and the
 embedding dependency is why the whole feature is opt-in and ships disabled.
@@ -904,6 +931,23 @@ installation, and skills.
 - Skills load once per turn before the prompt is built and are then fixed, like tool
   definitions and for the same cache reason (§12). Load order is sorted for that reason too.
 
+**The `VectorStore` seam exists now (2026-08-14), and it is two interfaces rather than one.**
+That is not tidiness: the read/write split between `OpenSearchClient` and
+`OpenSearchIndexWriter` is a security property — the object a tool receives has no write
+method to call — and a single `VectorStore` interface would have handed `search_codebase` an
+`upsert`. So `VectorSearcher` is what tools get, `VectorIndexWriter` is what the indexer gets,
+and `rag/vectorStoreFactory.ts` builds them through **separate functions** so no caller
+wanting a read can reach a write.
+- **`search_docs` (the raw-DSL OpenSearch tool, `search_opensearch`) stays outside the seam.**
+  Querying the organisation's existing indexes has no Qdrant or Chroma counterpart, and
+  forcing it through a neutral interface means inventing a query language and translating it —
+  which §11 names as a silent-failure source. It is offered only when the active store is
+  OpenSearch, so a future backend means the tool is *absent*, not present and broken.
+- Adding Qdrant is now: an adapter, a `case` in the factory, and a string in
+  `vectorStoreKindSchema`. The compiler names the third if you forget it.
+- The kNN request body moved out of `search_codebase` into the adapter. It was the one
+  OpenSearch-shaped thing in a tool, and it had **no test coverage at all** before this.
+
 **Vector-store backends: sequencing decided 2026-08-13.** The user reconfirmed wanting Qdrant
 and Chroma as alternatives to OpenSearch, for codebase indexing *and* potentially for skills.
 Agreed order: **verify OpenSearch against a real cluster first, then build the `VectorStore`
@@ -915,7 +959,45 @@ the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSc
 
 ---
 
-## SESSION HANDOVER — written 2026-08-14, read this first
+## SESSION HANDOVER — rewritten 2026-08-14 (second session that day), read this first
+
+**Three things changed today. The first two close long-standing unknowns.**
+
+1. **OpenSearch indexing is verified against the user's real cluster.** They confirmed it
+   works. This was blocker #1 in the previous handover and it is gone — indexing is no longer
+   an unproven path, and the Qdrant work is unblocked.
+2. **The marketplace is on 0.11.0**, published 2026-08-13. Queried directly, not inferred.
+   The note below claiming 0.8.1 was stale *again* — that is now three times. **Query the
+   gallery. Do not repeat a version from this file.**
+3. **Two features landed** (see §12's dispatcher subsection and §19): the `VectorStore` seam,
+   and a `call_tool` + `search_docs` dispatcher so tool schemas can leave the prompt.
+
+**Where the code is.** `main` at `cd10643`, clean, everything committed. 615 tests passing,
+1 skipped (the symlink case). Build and lint green. Latest built artifact is still
+`light-code-vscode-0.11.0.vsix`; the Skills tab, the seam and the dispatcher all landed after
+it, so the next package is 0.12.0.
+
+**The dispatcher is built but NOT yet wired into the bridge.** This is the important caveat:
+`call_tool`, `search_docs`, `dispatchOnly` registration and the doc corpus all exist and are
+tested, but nothing in `host/bridge.ts` registers MCP or Python tools as `dispatchOnly`, and
+no config key turns it on. It is inert in the running product. Remaining work, in order:
+
+1. Config: a `retrieval` block (user-scope only — it names an index and an embedder) with the
+   dispatcher off by default.
+2. Bridge: register MCP and Python tools `dispatchOnly` when it is on; register `call_tool`
+   and `search_docs`; build the docs index from `buildDocCorpus`.
+3. Eviction — the user explicitly asked to be able to drop retrieved docs back out of
+   context. `context/supersede.ts` already does exactly this for superseded `read_file`
+   results and is the place to extend.
+4. A **Search tab panel** (user-requested): recent queries and an ad-hoc query box.
+   `runDocsSearch` is already split out from the tool so the panel can run the identical path.
+
+**Do not** index a tool that is already advertised in the prompt, and do not let `search_docs`
+serve a schema from the index — both are load-bearing and explained in `rag/toolDocs.ts`.
+
+---
+
+## Previous handover — written 2026-08-14, superseded above
 
 **Where things are.** `main` is clean at `d90f15a`; everything is committed and pushed except
 this handover. Latest built artifact is `light-code-vscode-0.11.0.vsix`; the Skills tab landed
@@ -924,11 +1006,9 @@ check and 0.10.0 was uploaded on 2026-08-13 but had not appeared — **query the
 trust this paragraph** (trap: two claims in these notes were stale for months).
 
 **Blocked on the user — do not start these without their input:**
-1. **Verify OpenSearch indexing against their real cluster.** 0.10.1 fixed two bugs their
-   cluster found (non-finite floats serialising to `null`; vector width fixed at index
-   creation). Nothing here has ever run against a real cluster.
+1. ~~Verify OpenSearch indexing against their real cluster.~~ **Done 2026-08-14 — it works.**
 2. **Open the Python tab and the Skills tab in a real Extension Host.** Phase 9 and the Skills
-   tab were driven entirely from scripts. Most likely place for a bug.
+   tab were driven entirely from scripts. Most likely place for a bug. Still outstanding.
 
 **Agreed next build, in this order — decided 2026-08-13, do not re-litigate:**
 1. *After* OpenSearch is verified: extract a `VectorStore` interface, then add **Qdrant**.
