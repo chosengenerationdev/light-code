@@ -75,6 +75,7 @@ export function App(props: AppProps): ReactElement {
   const [maxIterations, setMaxIterations] = useState(25)
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
+  const [expertSpend, setExpertSpend] = useState({ usd: 0, consultations: 0, unpriced: 0 })
   const [mcpServers, setMcpServers] = useState<McpServerState[]>([])
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
@@ -260,6 +261,8 @@ export function App(props: AppProps): ReactElement {
           ...(message.venvDir !== undefined ? { venvDir: message.venvDir } : {}),
           detail: message.detail,
         })
+      } else if (message.type === 'expertSpend') {
+        setExpertSpend({ usd: message.usd, consultations: message.consultations, unpriced: message.unpriced })
       } else if (message.type === 'mcpServerSaved') {
         setMcpSavedTick((tick) => tick + 1)
       } else if (message.type === 'embedder') {
@@ -584,7 +587,9 @@ export function App(props: AppProps): ReactElement {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <strong>Light Code</strong>
-          {view === 'chat' && <ModeSelector modeId={modeId} disabled={isStreaming} onChange={changeMode} />}
+          {view === 'chat' && (
+            <ModeSelector modeId={modeId} disabled={isStreaming} onChange={changeMode} expertAvailable={expertEnabled} />
+          )}
         </div>
         {view === 'chat' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -759,6 +764,7 @@ export function App(props: AppProps): ReactElement {
             onAlwaysAllow={alwaysAllow}
             onRollback={rollback}
             usage={usage}
+            expertSpend={expertSpend}
             supportsVision={supportsVision}
             mentionCandidates={mentionCandidates}
             onQueryMentions={queryMentions}

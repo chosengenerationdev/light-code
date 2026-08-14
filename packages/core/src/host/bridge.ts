@@ -47,6 +47,7 @@ import {
   type VectorSearcher,
   createDefaultToolRegistry,
   detectClaudeCli,
+  buildExpertBriefing,
   createReadToolResultTool,
   deriveTitle,
   findMode,
@@ -324,6 +325,46 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   // sent before the user has chosen one.
   let cachedAccentColor = '#22C55E'
   let cachedExpertColor = '#D97757'
+
+  /**
+   * What the expert has cost since this task was opened.
+   *
+   * Scoped to the task rather than persisted, and the UI says so. Reconstructing a resumed
+   * task's historical spend would mean parsing dollar figures back out of stored result text
+   * — brittle, and wrong the moment that wording changes. A number that is *definitely* "this
+   * session, this task" beats one that is quietly incomplete.
+   *
+   * `consultations` counts every attempt including failures; `usd` totals only the ones the
+   * CLI priced, so `unpriced` records the gap rather than letting the total imply it is
+   * complete when it is not.
+   */
+  let expertSpend = { usd: 0, consultations: 0, unpriced: 0 }
+
+  /**
+   * The expert's conversation for the current task.
+   *
+   * Scoped to the task, not the workspace: consultations about one piece of work should build
+   * on each other, and consultations about an unrelated task should not drag that history
+   * along -- it would be paid for on every future call and would confuse the answer.
+   */
+  let expertSessionId: string | undefined
+
+  function resetExpertSpend(): void {
+    expertSpend = { usd: 0, consultations: 0, unpriced: 0 }
+    expertSessionId = undefined
+    postExpertSpend()
+  }
+
+  function postExpertSpend(): void {
+    post({ type: 'expertSpend', ...expertSpend })
+  }
+
+  function recordConsultation(info: { costUsd?: number; isError: boolean }): void {
+    expertSpend.consultations += 1
+    if (info.costUsd !== undefined) expertSpend.usd += info.costUsd
+    else expertSpend.unpriced += 1
+    postExpertSpend()
+  }
   let cachedModeId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -432,7 +473,33 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
     if (expert !== undefined) {
-      combined.register(createAskExpertTool({ cli: expert.cli, ...(expert.model !== undefined ? { model: expert.model } : {}) }))
+      combined.register(
+        createAskExpertTool({
+          cli: expert.cli,
+          ...(expert.model !== undefined ? { model: expert.model } : {}),
+          onConsultation: recordConsultation,
+          session: {
+            get: () => expertSessionId,
+            set: (sessionId) => {
+              expertSessionId = sessionId
+            },
+          },
+          /*
+           * Lazy, and reading `combined` — the registry it describes is still being built at
+           * this point, and the expert must be told about tools registered after this line
+           * as much as before it.
+           */
+          briefing: () =>
+            buildExpertBriefing({
+              // `ask_expert` itself is excluded: telling the expert it can consult itself is
+              // noise at best and a loop at worst.
+              promptTools: combined.promptList().filter((tool) => tool.name !== 'ask_expert'),
+              dispatchOnlyTools: combined.dispatchOnlyList(),
+              skills,
+              retrievalAvailable: combined.get('search_docs') !== undefined,
+            }),
+        }),
+      )
     }
     return combined
   }
@@ -589,6 +656,12 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
 
     conversation.restore(task.messages)
     readFiles.clear()
+    /*
+     * Both reset on a task switch. The spend counter is explicitly "since this task was
+     * opened", and the expert session belongs to the work it was about — resuming it for a
+     * different task would pay to carry irrelevant history and would muddy the answers.
+     */
+    resetExpertSpend()
     taskCheckpoint = undefined
     activeTaskCreatedAt = task.createdAt
     truncationStore.startTask(task.resultHandles)
@@ -602,6 +675,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     // The current task is already saved after each turn, so nothing needs flushing here.
     conversation.reset()
     readFiles.clear()
+    resetExpertSpend()
     taskCheckpoint = undefined
     activeTaskCreatedAt = Date.now()
     truncationStore.startTask()
@@ -685,12 +759,28 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
        */
       await refreshSkills()
 
+      /*
+       * Resolved once here and reused for the turn. The mode contributes both tool filtering
+       * and system-prompt guidance, and those two must agree — a prompt telling the model to
+       * consult an expert whose tool was filtered out would be worse than either alone.
+       */
+      const activeMode = findMode(config.modeId)
+
       const desiredPrompt = buildSystemPrompt(workspaceRoot, {
         model: profile.model,
         providerLabel: profile.label,
         expertAvailable: expertCliInfo !== undefined,
         skills: renderSkillsForPrompt(skills),
         canWriteSkills: skillsDir !== undefined,
+        /*
+         * Junior mode's instructions are worse than useless without the expert to delegate
+         * to: the model would be told to consult something it has no tool for. The picker
+         * disables the mode in that case, but config can still name it, so it is checked
+         * here too.
+         */
+        ...(activeMode.guidance !== undefined && (activeMode.requiresExpert !== true || expertCliInfo !== undefined)
+          ? { modeGuidance: activeMode.guidance }
+          : {}),
       })
       if (conversation.systemPrompt() !== desiredPrompt) conversation.setSystemPrompt(desiredPrompt)
 
@@ -724,7 +814,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
         approvalGate,
         // Resolved once per turn, so the tool definitions stay byte-stable for the whole
         // loop — swapping them mid-turn would break the prompt cache prefix (§12).
-        mode: findMode(config.modeId),
+        mode: activeMode,
         contextWindow: capabilities.contextWindow,
         // CLAUDE.md §5 has called this configurable since Phase 0; until now it was not.
         maxIterations: cachedMaxIterations,

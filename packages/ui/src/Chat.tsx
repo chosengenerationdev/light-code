@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
 import { Composer } from './Composer.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
+import { ExpertSpend } from './ExpertSpend.js'
 import { TokenBar } from './TokenBar.js'
 import { WorkingIndicator } from './WorkingIndicator.js'
 import { UndoIcon } from './icons.js'
@@ -20,6 +21,7 @@ export interface ChatProps {
   onAlwaysAllow: (id: string, scope: 'tool' | 'command') => void
   onRollback: () => void
   usage: ContextUsage | undefined
+  expertSpend: { usd: number; consultations: number; unpriced: number }
   supportsVision: boolean
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void
@@ -105,6 +107,7 @@ export function Chat(props: ChatProps): ReactElement {
           </button>
         </div>
       )}
+      <ExpertSpend {...props.expertSpend} />
       <TokenBar usage={props.usage} />
       <Composer
         isStreaming={props.isStreaming}

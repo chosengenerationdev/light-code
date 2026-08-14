@@ -12,6 +12,14 @@ export interface SystemPromptOptions {
   skills?: string
   /** Set when `write_skill` is offered, so the model knows it can record what it learns. */
   canWriteSkills?: boolean
+  /**
+   * Extra instructions from the active mode — Junior mode's delegation rules, for instance.
+   *
+   * Appended last so it can qualify everything above it, which is exactly what Junior mode
+   * needs: it tightens the general "consult when it seems worthwhile" advice into a budget.
+   * Prefix-safe because mode is resolved once per turn (§12).
+   */
+  modeGuidance?: string
 }
 
 /**
@@ -112,6 +120,11 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
       '- You remain responsible for the work. Treat its answer as advice from a colleague:',
       '  verify it against the actual code, and say so if you disagree.',
     )
+  }
+
+  // Last, so a mode can narrow anything above it rather than being contradicted by it.
+  if (options.modeGuidance !== undefined && options.modeGuidance.length > 0) {
+    lines.push('', options.modeGuidance)
   }
 
   return lines.join('\n')

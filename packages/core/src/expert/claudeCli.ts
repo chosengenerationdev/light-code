@@ -151,6 +151,19 @@ export interface ExpertConsultation {
   cwd: string
   /** Overrides the model the CLI would otherwise pick. */
   model?: string
+  /**
+   * Continue an earlier consultation instead of starting cold.
+   *
+   * **This is the single largest cost lever in the feature.** Measured against CLI 2.1.227:
+   * a cold consultation pays `cache_creation_input_tokens: 18643` to establish Claude Code's
+   * own system prompt and tool definitions -- $0.187 for a reply of "OK". Resuming the same
+   * session turns that into `cache_read_input_tokens: 18643` and costs $0.0099. Nineteen
+   * times cheaper, before counting the workspace context that no longer has to be re-sent.
+   *
+   * The cache is 1-hour TTL (`ephemeral_1h_input_tokens`), so this holds while a session is
+   * being used and lapses back to the cold price after an idle hour.
+   */
+  resumeSessionId?: string
   signal?: AbortSignal
   timeoutMs?: number
 }
@@ -163,6 +176,15 @@ export interface ExpertAnswer {
   costUsd?: number
   durationMs?: number
   isError: boolean
+  /**
+   * The CLI's id for this conversation. Pass it back as `resumeSessionId` to continue.
+   *
+   * Returned even on failure when the CLI supplied one, so a session is not orphaned by a
+   * single bad answer.
+   */
+  sessionId?: string
+  /** True when a resume was attempted and had to fall back to a cold start. */
+  resumeFailed?: boolean
 }
 
 interface CliResultEnvelope {
@@ -173,6 +195,7 @@ interface CliResultEnvelope {
   total_cost_usd?: unknown
   duration_ms?: unknown
   permission_denials?: unknown
+  session_id?: unknown
 }
 
 /** Pulls the tool names out of the CLI's permission-denial records, whatever their shape. */
@@ -229,9 +252,15 @@ export async function consultExpert(
     args.push('--model', consultation.model)
   }
 
-  let raw
-  try {
-    raw = await run(cli.executable, args, {
+  const invoke = async (sessionId: string | undefined): Promise<Awaited<ReturnType<typeof run>>> => {
+    /*
+     * Every restriction above is passed on a resume too, not just on the first call. The
+     * session is stored by the CLI and we do not control what it remembers about its own
+     * configuration — re-asserting read-only each time costs nothing and means the guarantee
+     * cannot lapse partway through a conversation.
+     */
+    const withSession = sessionId !== undefined ? [...args, '--resume', sessionId] : args
+    return run(cli.executable, withSession, {
       cwd: consultation.cwd,
       timeoutMs: consultation.timeoutMs ?? 180_000,
       ...(consultation.signal !== undefined ? { signal: consultation.signal } : {}),
@@ -239,6 +268,25 @@ export async function consultExpert(
       // §16 is explicit that model output must never be interpolated into a command line.
       input: consultation.question,
     })
+  }
+
+  let raw
+  let resumeFailed = false
+  try {
+    raw = await invoke(consultation.resumeSessionId)
+
+    /*
+     * A stored session can disappear — the CLI prunes transcripts, the user cleared them, or
+     * the id came from a different machine. That must degrade to a cold consultation rather
+     * than failing the turn: the question is still perfectly answerable, just more expensive.
+     * Detected by exit code plus an empty stdout, since `--resume` on a missing id fails
+     * before producing a JSON envelope.
+     */
+    if (consultation.resumeSessionId !== undefined && raw.code !== 0 && raw.stdout.trim().length === 0) {
+      logger?.debug(`expert session ${consultation.resumeSessionId} could not be resumed; starting a fresh one`)
+      resumeFailed = true
+      raw = await invoke(undefined)
+    }
   } catch (error) {
     return {
       text: `Could not consult the expert: ${error instanceof Error ? error.message : String(error)}`,
@@ -271,5 +319,11 @@ export async function consultExpert(
   }
   if (typeof envelope.total_cost_usd === 'number') answer.costUsd = envelope.total_cost_usd
   if (typeof envelope.duration_ms === 'number') answer.durationMs = envelope.duration_ms
+  // Captured even when the answer failed: the session still exists, and throwing it away
+  // would make the next consultation pay the cold-start price for nothing.
+  if (typeof envelope.session_id === 'string' && envelope.session_id.length > 0) {
+    answer.sessionId = envelope.session_id
+  }
+  if (resumeFailed) answer.resumeFailed = true
   return answer
 }

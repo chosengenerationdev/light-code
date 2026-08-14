@@ -6,6 +6,12 @@ export interface ModeSelectorProps {
   modeId: string
   disabled: boolean
   onChange: (modeId: string) => void
+  /**
+   * Junior mode delegates its thinking to the Claude CLI, so without one configured it is an
+   * ordinary Code session whose prompt keeps referring to an expert that is not there.
+   * Disabled rather than hidden, so the feature is discoverable and says what it needs.
+   */
+  expertAvailable: boolean
 }
 
 export function ModeSelector(props: ModeSelectorProps): ReactElement {
@@ -19,7 +25,13 @@ export function ModeSelector(props: ModeSelectorProps): ReactElement {
       title={mode.description}
       ariaLabel="Mode"
       onChange={props.onChange}
-      options={BUILTIN_MODES.map((option) => ({ value: option.id, label: option.name }))}
+      options={BUILTIN_MODES.map((option) => ({
+        value: option.id,
+        label: option.name,
+        ...(option.requiresExpert === true && !props.expertAvailable
+          ? { disabled: true, detail: 'needs the expert' }
+          : {}),
+      }))}
     />
   )
 }

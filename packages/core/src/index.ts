@@ -123,6 +123,7 @@ export {
   type ExpertAnswer,
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
+export { buildExpertBriefing, type BriefingInput } from './expert/briefing.js'
 export {
   OpenSearchClient,
   OpenSearchError,

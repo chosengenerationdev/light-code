@@ -361,6 +361,13 @@ export type HostToUiMessage =
       platform: McpPlatform
     }
   /** The write reached disk; the form closes on this rather than optimistically. */
+  /**
+   * What the expert has cost since the current task was opened.
+   *
+   * `unpriced` counts consultations the CLI reported no cost for. Kept separate rather than
+   * folded in as zero, so a total is never quietly incomplete while looking exact.
+   */
+  | { type: 'expertSpend'; usd: number; consultations: number; unpriced: number }
   | { type: 'mcpServerSaved'; name: string }
   /**
    * What the probe found. An absent `interpreter` means nothing was found and `detail` says
