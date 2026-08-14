@@ -1,5 +1,64 @@
 # light-code-vscode
 
+## 0.12.0
+
+### Minor Changes
+
+- Expert answers are marked in their own colour.
+
+  When the Claude CLI expert answers, that block now carries a coral-orange of its own rather than
+  the product's accent — a tinted surface, its own border, and the result relabelled "Claude's
+  answer". The colour is configurable in Settings → **Appearance**, beside the accent, with a live
+  preview so the pair is judged together.
+
+  The distinction is by authorship, deliberately. An `ask_expert` result is literally Claude's
+  words, so it is coloured as such. A reply merely _informed_ by a consultation is your own
+  model's text, written after taking advice — it gets a small "informed by expert" mark and keeps
+  its own bubble, because colouring it would claim Claude wrote it.
+
+  The colour is kept separate from the accent because one colour cannot mean both "this is Light
+  Code" and "these words came from somewhere else". If you set both to the same value the
+  Appearance tab says so, but does not stop you — the expert mark still tells them apart, which is
+  why colour is never the only signal.
+
+  While a consultation is in flight the indicator says "Consulting the expert" and takes the
+  expert's colour. It is the slowest thing the agent does and the only one that spends money at a
+  second provider.
+
+- d90f15a: See and manage skills in Settings → Skills.
+
+  Skills shipped with no way to view them: the only way to know what the assistant had been told
+  to remember was to browse `.lightcode/skills/` yourself. The tab now lists each one with its
+  description and file, and lets you delete any of them.
+
+  It also surfaces skills that were **not** loaded — a file missing a `description` is skipped,
+  because without one the model has nothing to decide on, and previously that was a log line
+  nobody saw.
+
+- A theme of its own: green accent, messenger-style chat, and motion throughout.
+
+  The chat is now sided like a messaging app — the assistant on the left, you on the right, with
+  bubbles that arrive from the side they belong to, so the direction of a conversation is legible
+  before you have read a word. Buttons press softly, panels and tabs transition rather than blink,
+  and the typing indicator is a typing indicator.
+
+  **The accent is yours to choose.** Settings → **Appearance** offers eight presets and a hex
+  field, applied live as you type. It defaults to green and is saved per user, so it follows you
+  between repositories. Text on the accent is computed rather than assumed — white on amber is
+  unreadable, and a colour picker invites exactly that.
+
+  Every dropdown was rebuilt. A native `<select>` popup paints its selected row with the system
+  highlight, which no amount of CSS reaches — blue, in a themed UI, and worse on macOS where the
+  list ignores CSS entirely. Dropdowns now render their own list, which also means they get proper
+  keyboard behaviour and open upward when there is no room below.
+
+  Accessibility notes: `prefers-reduced-motion` is honoured — every animation here is decoration,
+  and vestibular disorders make sliding bubbles genuinely unpleasant. Focus rings appear for
+  keyboard navigation and not after mouse clicks.
+
+  None of this loosened the webview's `default-src 'none'` content-security policy. It has no
+  `style-src` entry and still does not need one.
+
 ## 0.11.0
 
 ### Minor Changes
