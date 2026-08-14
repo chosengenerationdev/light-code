@@ -95,9 +95,21 @@ export const expertConfigSchema = z
  * One OpenSearch cluster. A named list rather than a singleton because different
  * environments run different clusters — the same reasoning as provider profiles.
  */
+/**
+ * The backends a store may name.
+ *
+ * A single-member enum rather than a `z.literal`, because it is the one place a new backend
+ * is declared: adding Qdrant means adding a string here and an adapter in
+ * `rag/vectorStoreFactory.ts`, and the type error list is the to-do list. Kept to backends
+ * that actually work — a config naming one that does not would fail at use, far from the
+ * setting that caused it.
+ */
+export const vectorStoreKindSchema = z.enum(['opensearch'])
+export type VectorStoreKind = z.infer<typeof vectorStoreKindSchema>
+
 export const vectorStoreSchema = z.object({
-  /** Only OpenSearch in this phase; Qdrant and Chroma are deferred until it is proven. */
-  kind: z.literal('opensearch'),
+  /** Only OpenSearch so far; Qdrant and Chroma follow once a real cluster has proven it. */
+  kind: vectorStoreKindSchema,
   label: z.string().min(1),
   /** User-supplied. No default endpoint exists anywhere (invariant 3). */
   url: z.string().min(1).url('Must be a valid URL'),

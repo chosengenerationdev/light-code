@@ -157,7 +157,7 @@ describe('OpenSearchIndexWriter ownership', () => {
     const writer = new OpenSearchIndexWriter(client, connection)
 
     await expect(
-      writer.bulkIndex('prod-logs', [
+      writer.upsert('prod-logs', [
         { id: '1', text: 't', path: 'a.ts', startLine: 1, endLine: 2, vector: [1] },
       ]),
     ).rejects.toThrow(/not created by Light Code/)
@@ -172,7 +172,7 @@ describe('OpenSearchIndexWriter ownership', () => {
 
   it('refuses to adopt an existing index that lacks the marker', async () => {
     const { client } = http(() => ({ payload: { 'prod-logs': { mappings: {} } } }))
-    await expect(new OpenSearchIndexWriter(client, connection).ensureIndex('prod-logs', 8)).rejects.toThrow(
+    await expect(new OpenSearchIndexWriter(client, connection).ensureCollection('prod-logs', 8)).rejects.toThrow(
       /not created by Light Code/,
     )
   })
@@ -182,7 +182,7 @@ describe('OpenSearchIndexWriter ownership', () => {
       url.includes('_mapping') ? { payload: ownedMapping } : method === 'POST' ? { payload: { errors: false } } : { payload: {} },
     )
 
-    await new OpenSearchIndexWriter(client, connection).bulkIndex('idx', [
+    await new OpenSearchIndexWriter(client, connection).upsert('idx', [
       { id: '1', text: 't', path: 'a.ts', startLine: 1, endLine: 2, vector: [1] },
     ])
 
@@ -208,7 +208,7 @@ describe('OpenSearchIndexWriter ownership', () => {
         : { payload: {} },
     )
 
-    await expect(new OpenSearchIndexWriter(client, connection).ensureIndex('idx', 1536)).rejects.toThrow(
+    await expect(new OpenSearchIndexWriter(client, connection).ensureCollection('idx', 1536)).rejects.toThrow(
       /stores 768-dimensional vectors.*produces 1536/s,
     )
   })
@@ -226,12 +226,12 @@ describe('OpenSearchIndexWriter ownership', () => {
         : { payload: {} },
     )
 
-    await expect(new OpenSearchIndexWriter(client, connection).ensureIndex('idx', 1536)).resolves.toBeUndefined()
+    await expect(new OpenSearchIndexWriter(client, connection).ensureCollection('idx', 1536)).resolves.toBeUndefined()
   })
 
   it('refuses a wildcard as a write target', async () => {
     const { client } = http(() => ({ payload: {} }))
-    await expect(new OpenSearchIndexWriter(client, connection).ensureIndex('logs-*', 8)).rejects.toBeInstanceOf(
+    await expect(new OpenSearchIndexWriter(client, connection).ensureCollection('logs-*', 8)).rejects.toBeInstanceOf(
       OpenSearchError,
     )
   })
@@ -245,7 +245,7 @@ describe('OpenSearchIndexWriter behaviour', () => {
       return { payload: {} }
     })
 
-    await new OpenSearchIndexWriter(client, connection).ensureIndex('idx', 1024)
+    await new OpenSearchIndexWriter(client, connection).ensureCollection('idx', 1024)
 
     const create = calls.find((call) => call.method === 'PUT')
     const body = JSON.parse(String(create?.body)) as {
@@ -267,7 +267,7 @@ describe('OpenSearchIndexWriter behaviour', () => {
     )
 
     await expect(
-      new OpenSearchIndexWriter(client, connection).bulkIndex('idx', [
+      new OpenSearchIndexWriter(client, connection).upsert('idx', [
         { id: '1', text: 't', path: 'a.ts', startLine: 1, endLine: 1, vector: [1] },
       ]),
     ).rejects.toThrow(/mapper_parsing_exception/)
@@ -275,7 +275,7 @@ describe('OpenSearchIndexWriter behaviour', () => {
 
   it('does nothing at all for an empty batch', async () => {
     const { client, calls } = http(() => ({ payload: {} }))
-    await new OpenSearchIndexWriter(client, connection).bulkIndex('idx', [])
+    await new OpenSearchIndexWriter(client, connection).upsert('idx', [])
     expect(calls).toHaveLength(0)
   })
 })

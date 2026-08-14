@@ -142,6 +142,16 @@ export {
   type QueryLimits,
 } from './rag/opensearch/query.js'
 export { OpenSearchIndexWriter, OWNED_INDEX_MARKER, type IndexedDocument } from './rag/opensearch/writer.js'
+export {
+  VectorStoreError,
+  type VectorDocument,
+  type VectorMatch,
+  type VectorSearcher,
+  type VectorSearchOptions,
+  type VectorIndexWriter,
+  type VectorStoreConnection,
+} from './rag/vectorStore.js'
+export { createVectorSearcher, createVectorIndexWriter } from './rag/vectorStoreFactory.js'
 export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'

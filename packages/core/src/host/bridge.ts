@@ -42,7 +42,9 @@ import {
   resolveConnectionTls,
   vectorStoreTls,
   OpenSearchClient,
-  OpenSearchIndexWriter,
+  createVectorSearcher,
+  createVectorIndexWriter,
+  type VectorSearcher,
   createDefaultToolRegistry,
   detectClaudeCli,
   createReadToolResultTool,
@@ -375,7 +377,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   function currentToolRegistry(
     expert?: { cli: ClaudeCliInfo; model?: string },
     search?: { client: OpenSearchClient; store: VectorStoreConfig; indexes: string[] },
-    codebase?: { client: OpenSearchClient; embedder: Embedder; index: string; connectionLabel: string },
+    codebase?: { searcher: VectorSearcher; embedder: Embedder; index: string; connectionLabel: string },
   ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
@@ -653,7 +655,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       // Listed once per turn so the tool description can name real indexes; a failure here
       // only costs the model that hint, never the tool.
       const searchIndexes =
-        search !== undefined ? await search.client.listIndexes().then((list) => list.map((i) => i.name)).catch(() => []) : []
+        search?.opensearch !== undefined
+          ? await search.opensearch.listIndexes().then((list) => list.map((i) => i.name)).catch(() => [])
+          : []
 
       // Rebuilt whenever the profile or expert availability changes, so the model can
       // answer "which model are you?" accurately and knows whether ask_expert exists.
@@ -752,13 +756,15 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
           expertCliInfo !== undefined
             ? { cli: expertCliInfo, ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}) }
             : undefined,
-          search !== undefined ? { client: search.client, store: search.store, indexes: searchIndexes } : undefined,
+          search?.opensearch !== undefined
+            ? { client: search.opensearch, store: search.store, indexes: searchIndexes }
+            : undefined,
           /*
            * Only when all three exist. Resolved once per turn like everything else feeding
            * the prefix, so the tool block stays byte-stable for the whole loop (§12).
            */
           search !== undefined && embedder !== undefined && codebaseIndex !== undefined
-            ? { client: search.client, embedder, index: codebaseIndex, connectionLabel: search.store.label }
+            ? { searcher: search.searcher, embedder, index: codebaseIndex, connectionLabel: search.store.label }
             : undefined,
         ),
         toolContext,
@@ -1138,7 +1144,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    * secure storage and the CA from disk at call time rather than caching either.
    */
   async function openSearchConnectionFor(store: VectorStoreConfig, id: string): Promise<OpenSearchConnection> {
-    const connection: OpenSearchConnection = { url: store.url }
+    const connection: OpenSearchConnection = { url: store.url, label: store.label }
 
     const username = store.usernameRef !== undefined ? await secrets.get(searchUserRefFor(id)) : undefined
     const password = store.passwordRef !== undefined ? await secrets.get(searchPasswordRefFor(id)) : undefined
@@ -1169,21 +1175,44 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     return new OpenSearchClient(httpClient, await openSearchConnectionFor(store, id))
   }
 
+  /** The read half of whichever backend the active store names. Never a writer. */
+  async function vectorSearcherFor(store: VectorStoreConfig, id: string): Promise<VectorSearcher> {
+    return createVectorSearcher(httpClient, store, await openSearchConnectionFor(store, id))
+  }
+
   /**
    * The active connection for this session, or undefined when search is off.
    *
    * Search tools exist only when a connection is selected — §12 requires the tool set to be
    * stable within a session, so selection is the boundary at which it may change.
    */
-  async function resolveSearch(
-    config: LightCodeConfig,
-  ): Promise<{ client: OpenSearchClient; store: VectorStoreConfig; id: string } | undefined> {
+  async function resolveSearch(config: LightCodeConfig): Promise<
+    | {
+        /** Backend-neutral, for `search_codebase`. */
+        searcher: VectorSearcher
+        /**
+         * Present only for an OpenSearch cluster, and that is the seam working as intended:
+         * `search_docs` queries the organisation's *existing* indexes with raw DSL, which
+         * Qdrant and Chroma have no counterpart for. When a future backend is active this is
+         * undefined and the tool is simply not offered, rather than offered and broken.
+         */
+        opensearch?: OpenSearchClient
+        store: VectorStoreConfig
+        id: string
+      }
+    | undefined
+  > {
     const id = config.activeVectorStoreId
     if (id === undefined) return undefined
     const store = config.vectorStores?.[id]
     if (store === undefined) return undefined
     try {
-      return { client: await openSearchClientFor(store, id), store, id }
+      return {
+        searcher: await vectorSearcherFor(store, id),
+        ...(store.kind === 'opensearch' ? { opensearch: await openSearchClientFor(store, id) } : {}),
+        store,
+        id,
+      }
     } catch (error) {
       logger.warn('could not build the search client', String(error))
       return undefined
@@ -1297,7 +1326,9 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
         workspaceRoot: root,
         index,
         embedder,
-        writer: new OpenSearchIndexWriter(httpClient, await openSearchConnectionFor(search.store, search.id)),
+        // The one place a writer is built. Not reachable from any tool — a user starts this
+        // from Settings, which is what keeps the model unable to write to a cluster at all.
+        writer: createVectorIndexWriter(httpClient, search.store, await openSearchConnectionFor(search.store, search.id)),
         denylist,
         manifest,
         saveManifest: async (next) => {

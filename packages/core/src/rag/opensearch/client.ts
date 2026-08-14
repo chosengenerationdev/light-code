@@ -1,5 +1,13 @@
-import type { HttpClient, HttpRequestOptions, TlsOptions } from '../../platform/http.js'
+import type { VectorStoreKind } from '../../config/schema.js'
+import type { HttpClient, HttpRequestOptions } from '../../platform/http.js'
 import { describeTlsError } from '../../providers/auth/apigeeMtls.js'
+import {
+  VectorStoreError,
+  type VectorMatch,
+  type VectorSearchOptions,
+  type VectorSearcher,
+  type VectorStoreConnection,
+} from '../vectorStore.js'
 
 /**
  * A thin OpenSearch REST client.
@@ -22,12 +30,8 @@ import { describeTlsError } from '../../providers/auth/apigeeMtls.js'
  *    only by the indexer — which a user starts from Settings and no tool can invoke.
  */
 
-export interface OpenSearchConnection {
-  url: string
-  username?: string
-  password?: string
-  tls?: TlsOptions
-}
+/** Kept as a name because it reads well at OpenSearch call sites; the shape is shared. */
+export type OpenSearchConnection = VectorStoreConnection
 
 export interface IndexInfo {
   name: string
@@ -51,12 +55,13 @@ export interface SearchResult {
   tookMs: number
 }
 
-export class OpenSearchError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message)
+/**
+ * Extends `VectorStoreError` so a caller that does not care which backend failed — the
+ * indexer, `search_codebase`, the bridge — catches one type rather than a growing list.
+ */
+export class OpenSearchError extends VectorStoreError {
+  constructor(message: string, status?: number) {
+    super(message, status)
     this.name = 'OpenSearchError'
   }
 }
@@ -68,11 +73,17 @@ export function isSafeIndexName(name: string): boolean {
   return /^[a-z0-9][a-z0-9._\-*+]{0,254}$/.test(name) && !name.includes('..')
 }
 
-export class OpenSearchClient {
+export class OpenSearchClient implements VectorSearcher {
+  readonly kind: VectorStoreKind = 'opensearch'
+
   constructor(
     private readonly http: HttpClient,
     private readonly connection: OpenSearchConnection,
   ) {}
+
+  get label(): string {
+    return this.connection.label ?? this.connection.url
+  }
 
   private get base(): string {
     return this.connection.url.replace(/\/+$/, '')
@@ -230,6 +241,64 @@ export class OpenSearchClient {
         }
       }),
     }
+  }
+
+  /**
+   * The `VectorSearcher` half: nearest neighbours over a collection Light Code indexed.
+   *
+   * The kNN body lives here rather than in `search_codebase` because it is the one genuinely
+   * OpenSearch-shaped thing about that tool — Qdrant and Chroma each want a different request
+   * entirely. With it here, adding a backend touches no tool.
+   */
+  async searchByVector(
+    collection: string,
+    vector: readonly number[],
+    options: VectorSearchOptions,
+  ): Promise<VectorMatch[]> {
+    const prefix = options.pathPrefix?.trim()
+    const body: Record<string, unknown> = {
+      /*
+       * Returning the stored vector would send a 1024-float array per hit — many times the
+       * size of the code it describes, and of no use to the model.
+       */
+      _source: { excludes: ['vector'] },
+      query: {
+        knn: {
+          vector: {
+            vector: [...vector],
+            /*
+             * Neighbours considered per shard. It must be at least the number of hits wanted,
+             * or a filter can leave fewer than requested.
+             */
+            k: Math.max(options.size, 10),
+            ...(prefix !== undefined && prefix.length > 0 ? { filter: { prefix: { path: prefix } } } : {}),
+          },
+        },
+      },
+    }
+
+    const result = await this.search(collection, body, {
+      size: options.size,
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+    })
+
+    return result.hits.map((hit) => {
+      const source = hit.source as {
+        path?: unknown
+        startLine?: unknown
+        endLine?: unknown
+        text?: unknown
+      }
+      const match: VectorMatch = {
+        id: hit.id,
+        score: hit.score,
+        text: typeof source.text === 'string' ? source.text : '',
+        path: typeof source.path === 'string' ? source.path : hit.id,
+      }
+      if (typeof source.startLine === 'number') match.startLine = source.startLine
+      if (typeof source.endLine === 'number') match.endLine = source.endLine
+      return match
+    })
   }
 }
 

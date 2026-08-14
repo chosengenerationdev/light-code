@@ -42,7 +42,20 @@ describe('read-only enforcement', () => {
   it('exposes no write methods at all', () => {
     const client = new OpenSearchClient(recordingHttp(() => ({})).http, connection) as unknown as Record<string, unknown>
 
-    for (const method of ['bulk', 'index', 'ensureIndex', 'delete', 'deleteByQuery', 'update', 'createIndex']) {
+    for (const method of [
+      'bulk',
+      'index',
+      'ensureIndex',
+      // The seam renamed the writer's methods, so the names guarded against changed too. A
+      // searcher that grew `upsert` would satisfy `VectorIndexWriter` structurally and hand
+      // every tool a write path — the exact thing the two-interface split exists to stop.
+      'ensureCollection',
+      'upsert',
+      'delete',
+      'deleteByQuery',
+      'update',
+      'createIndex',
+    ]) {
       expect(client[method]).toBeUndefined()
     }
   })

@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { PathDenylist } from '../fs/denylist.js'
 import { chunkFile, looksLikeText, type ChunkOptions } from './chunk.js'
 import type { Embedder } from './embedder.js'
-import type { IndexedDocument, OpenSearchIndexWriter } from './opensearch/writer.js'
+import type { VectorDocument, VectorIndexWriter } from './vectorStore.js'
 
 /**
  * Walks a workspace, chunks it, embeds it, and writes it to an index Light Code owns.
@@ -110,7 +110,8 @@ export interface IndexerOptions {
   workspaceRoot: string
   index: string
   embedder: Embedder
-  writer: OpenSearchIndexWriter
+  /** Any backend. The indexer has never needed OpenSearch specifically — only these three calls. */
+  writer: VectorIndexWriter
   denylist: PathDenylist
   /** Loaded from and saved to disk by the caller. */
   manifest: IndexManifest
@@ -160,7 +161,7 @@ export async function indexWorkspace(options: IndexerOptions): Promise<IndexResu
     if (signal?.aborted === true) throw new IndexingCancelledError()
   }
 
-  await writer.ensureIndex(index, embedder.dimensions, signal)
+  await writer.ensureCollection(index, embedder.dimensions, signal)
 
   /*
    * A change to the model, its width, or the chunk shape makes every stored vector
@@ -175,12 +176,12 @@ export async function indexWorkspace(options: IndexerOptions): Promise<IndexResu
   const previous = stale ? {} : options.manifest.files
   const current: Record<string, string> = {}
 
-  let pending: IndexedDocument[] = []
+  let pending: VectorDocument[] = []
   const flush = async (): Promise<void> => {
     if (pending.length === 0) return
     progress.phase = 'writing'
     report()
-    await writer.bulkIndex(index, pending, signal)
+    await writer.upsert(index, pending, signal)
     progress.chunksWritten += pending.length
     pending = []
   }

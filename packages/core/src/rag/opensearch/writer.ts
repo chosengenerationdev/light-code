@@ -1,5 +1,7 @@
+import type { VectorStoreKind } from '../../config/schema.js'
 import type { HttpClient, HttpRequestOptions } from '../../platform/http.js'
 import { describeTlsError } from '../../providers/auth/apigeeMtls.js'
+import type { VectorDocument, VectorIndexWriter } from '../vectorStore.js'
 import { isSafeIndexName, OpenSearchError, type OpenSearchConnection } from './client.js'
 
 /**
@@ -19,16 +21,15 @@ import { isSafeIndexName, OpenSearchError, type OpenSearchConnection } from './c
 /** Every index this writes carries it, and it refuses to write to one that lacks it. */
 export const OWNED_INDEX_MARKER = 'light-code'
 
-export interface IndexedDocument {
-  id: string
-  text: string
-  path: string
-  startLine: number
-  endLine: number
-  vector: number[]
-}
+/**
+ * What the indexer produces. Identical across backends, so it is `VectorDocument` — kept as
+ * an alias because the name reads better at OpenSearch call sites and predates the seam.
+ */
+export type IndexedDocument = VectorDocument
 
-export class OpenSearchIndexWriter {
+export class OpenSearchIndexWriter implements VectorIndexWriter {
+  readonly kind: VectorStoreKind = 'opensearch'
+
   constructor(
     private readonly http: HttpClient,
     private readonly connection: OpenSearchConnection,
@@ -113,7 +114,7 @@ export class OpenSearchIndexWriter {
    * embedder validates every vector against the configured dimensions rather than
    * discovering the mismatch here as an opaque mapping rejection.
    */
-  async ensureIndex(index: string, dimensions: number, signal?: AbortSignal): Promise<void> {
+  async ensureCollection(index: string, dimensions: number, signal?: AbortSignal): Promise<void> {
     if (!isSafeIndexName(index)) throw new OpenSearchError(`"${index}" is not a valid index name.`)
     if (index.includes('*')) throw new OpenSearchError('An index to write to cannot be a wildcard pattern.')
 
@@ -186,7 +187,7 @@ export class OpenSearchIndexWriter {
    * rather than trusted — a silent partial write would leave a corpus that looks complete
    * and quietly is not.
    */
-  async bulkIndex(index: string, documents: readonly IndexedDocument[], signal?: AbortSignal): Promise<void> {
+  async upsert(index: string, documents: readonly IndexedDocument[], signal?: AbortSignal): Promise<void> {
     if (documents.length === 0) return
     await this.assertOwned(index, signal)
 

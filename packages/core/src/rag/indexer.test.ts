@@ -6,7 +6,7 @@ import { PathDenylist } from '../fs/denylist.js'
 import { chunkFile, looksLikeText } from './chunk.js'
 import { indexWorkspace, type IndexManifest } from './indexer.js'
 import type { Embedder } from './embedder.js'
-import type { IndexedDocument, OpenSearchIndexWriter } from './opensearch/writer.js'
+import type { VectorDocument, VectorIndexWriter } from './vectorStore.js'
 
 describe('chunkFile', () => {
   const lines = (count: number): string => Array.from({ length: count }, (_, i) => `line ${i + 1}`).join('\n')
@@ -64,7 +64,7 @@ describe('looksLikeText', () => {
 
 describe('indexWorkspace', () => {
   let root: string
-  let written: IndexedDocument[]
+  let written: VectorDocument[]
   let deleted: string[]
   let manifest: IndexManifest
 
@@ -75,15 +75,18 @@ describe('indexWorkspace', () => {
     embed: async () => [0.1, 0.2, 0.3],
   } as unknown as Embedder
 
-  const writer = {
-    ensureIndex: async () => {},
-    bulkIndex: async (_index: string, documents: readonly IndexedDocument[]) => {
+  // Typed as the interface, not the OpenSearch class — which is the point of the seam:
+  // the indexer never needed OpenSearch, only these three calls.
+  const writer: VectorIndexWriter = {
+    kind: 'opensearch',
+    ensureCollection: async () => {},
+    upsert: async (_collection: string, documents: readonly VectorDocument[]) => {
       written.push(...documents)
     },
-    deleteByPaths: async (_index: string, paths: readonly string[]) => {
+    deleteByPaths: async (_collection: string, paths: readonly string[]) => {
       deleted.push(...paths)
     },
-  } as unknown as OpenSearchIndexWriter
+  }
 
   const blank = (): IndexManifest => ({ model: 'embed-1', dimensions: 3, chunkSignature: 'null', files: {} })
 
