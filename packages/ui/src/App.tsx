@@ -813,6 +813,9 @@ export function App(props: AppProps): ReactElement {
               onToggle: (id, enabled) =>
                 props.transport.post({ type: 'setScheduleEnabled', id, enabled } satisfies UiToHostMessage),
               onRunNow: (id) => props.transport.post({ type: 'runScheduleNow', id } satisfies UiToHostMessage),
+              // The same candidates the composer uses; the host does not care who asked.
+              mentionCandidates,
+              onQueryMentions: queryMentions,
             }}
             python={{
               status: pythonStatus,

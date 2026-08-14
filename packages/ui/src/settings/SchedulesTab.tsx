@@ -1,7 +1,8 @@
 import type { Schedule, ScheduleTrigger, ScheduleToolInfo } from '@light-code/core/browser'
 import { describeNextRun, describeTrigger, riskyGroupsIn } from '@light-code/core/browser'
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
+import { activeMentionQuery, insertMention } from '../mentions.js'
 import { Select } from '../Select.js'
 import {
   badgeStyle,
@@ -25,6 +26,16 @@ export interface SchedulesTabProps {
   onToggle: (id: string, enabled: boolean) => void
   onRunNow: (id: string) => void
   runningId?: string | undefined
+  /**
+   * `@` file mentions in the prompt, plumbed exactly as the composer's are.
+   *
+   * They already *resolve* at run time — a scheduled prompt goes through the same
+   * `resolveMentions` path as a typed one — so this is the autocomplete, not the feature.
+   * Without it you have to know and type the path exactly, and a typo silently becomes
+   * ordinary prose rather than a file.
+   */
+  mentionCandidates: string[]
+  onQueryMentions: (query: string) => void
 }
 
 const GROUP_LABELS: Record<string, string> = {
@@ -73,6 +84,8 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
       <ScheduleEditor
         schedule={editing}
         tools={props.tools}
+        mentionCandidates={props.mentionCandidates}
+        onQueryMentions={props.onQueryMentions}
         onCancel={() => setEditing(undefined)}
         onSave={(next) => {
           props.onSave(next)
@@ -193,6 +206,8 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
 function ScheduleEditor(props: {
   schedule: Schedule
   tools: ScheduleToolInfo[]
+  mentionCandidates: string[]
+  onQueryMentions: (query: string) => void
   onSave: (schedule: Schedule) => void
   onCancel: () => void
 }): ReactElement {
@@ -206,6 +221,43 @@ function ScheduleEditor(props: {
    * a schedule may do must never be ambiguous.
    */
   const [showSelectedOnly, setShowSelectedOnly] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState<string | undefined>(undefined)
+  const [highlighted, setHighlighted] = useState(0)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+
+  const showingMentions = mentionQuery !== undefined && props.mentionCandidates.length > 0
+
+  // In a ref so the effect depends only on the query. Depending on the callback would fire a
+  // workspace lookup on every parent render, which is most keystrokes.
+  const queryMentionsRef = useRef(props.onQueryMentions)
+  queryMentionsRef.current = props.onQueryMentions
+
+  useEffect(() => {
+    if (mentionQuery === undefined) return
+    // Debounced for the same reason as the composer: `findFiles` over a large repository is
+    // not free, and the query changes on every keystroke inside a mention.
+    const timer = setTimeout(() => queryMentionsRef.current(mentionQuery), 120)
+    return () => clearTimeout(timer)
+  }, [mentionQuery])
+
+  const syncMentions = (value: string, caret: number): void => {
+    setMentionQuery(activeMentionQuery(value, caret))
+    setHighlighted(0)
+  }
+
+  const chooseMention = (candidate: string): void => {
+    const textarea = promptRef.current
+    const caret = textarea?.selectionStart ?? draft.prompt.length
+    const inserted = insertMention(draft.prompt, caret, candidate)
+    if (inserted === undefined) return
+
+    set({ prompt: inserted.text })
+    setMentionQuery(undefined)
+    requestAnimationFrame(() => {
+      textarea?.focus()
+      textarea?.setSelectionRange(inserted.caret, inserted.caret)
+    })
+  }
 
   const set = (patch: Partial<Schedule>): void => setDraft((current) => ({ ...current, ...patch }))
   const setTrigger = (patch: Partial<ScheduleTrigger>): void =>
@@ -268,15 +320,83 @@ function ScheduleEditor(props: {
       </label>
       <textarea
         id="lc-sched-prompt"
+        ref={promptRef}
         value={draft.prompt}
         rows={4}
-        placeholder="Read the latest build log and tell me if anything failed."
-        onChange={(event) => set({ prompt: event.target.value })}
+        placeholder="Read @src/app.ts and tell me if anything looks wrong."
+        onChange={(event) => {
+          set({ prompt: event.target.value })
+          syncMentions(event.target.value, event.target.selectionStart)
+        }}
+        onKeyDown={(event) => {
+          if (!showingMentions) return
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setHighlighted((current) => (current + 1) % props.mentionCandidates.length)
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            setHighlighted(
+              (current) => (current - 1 + props.mentionCandidates.length) % props.mentionCandidates.length,
+            )
+          } else if (event.key === 'Enter' || event.key === 'Tab') {
+            // Enter would otherwise insert a newline mid-mention, leaving a broken path behind.
+            event.preventDefault()
+            const candidate = props.mentionCandidates[highlighted]
+            if (candidate !== undefined) chooseMention(candidate)
+          } else if (event.key === 'Escape') {
+            setMentionQuery(undefined)
+          }
+        }}
         style={{ ...textFieldStyle(), marginBottom: 4, resize: 'vertical', fontFamily }}
       />
+
+      {showingMentions && (
+        <div
+          role="listbox"
+          aria-label="Workspace files"
+          className="lc-scroll"
+          style={{
+            maxHeight: 150,
+            overflowY: 'auto',
+            border: `1px solid ${colors.accent}`,
+            borderRadius: 8,
+            marginBottom: 6,
+          }}
+        >
+          {props.mentionCandidates.map((candidate, index) => (
+            <button
+              key={candidate}
+              type="button"
+              role="option"
+              aria-selected={index === highlighted}
+              // mousedown, not click: click fires after blur, which closes the list first.
+              onMouseDown={(event) => {
+                event.preventDefault()
+                chooseMention(candidate)
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '4px 10px',
+                background: index === highlighted ? colors.accent : 'transparent',
+                border: 'none',
+                color: index === highlighted ? colors.accentContrast : colors.foreground,
+                cursor: 'pointer',
+                fontFamily: monospace,
+                fontSize: 11,
+              }}
+            >
+              {candidate}
+            </button>
+          ))}
+        </div>
+      )}
+
       <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginBottom: 12 }}>
-        Sent exactly as if you had typed it. Nobody can answer a follow-up question, so ask for
-        something it can finish alone.
+        Sent exactly as if you had typed it, including <code style={{ fontFamily: monospace }}>@</code> file
+        mentions — their contents are attached when the schedule runs, not now. Nobody can answer a
+        follow-up question, so ask for something it can finish alone.
       </span>
 
       <span style={labelStyle()}>When</span>
@@ -406,6 +526,32 @@ function ScheduleEditor(props: {
           Select the {selectableNow.length} shown
         </button>
       )}
+
+      {/*
+        Listed read-only rather than hidden. They were omitted on the grounds that ticking them
+        changes nothing — true, but it left no way to answer "can this schedule notify me?"
+        except by reading the source.
+      */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginBottom: 4 }}>
+          Always available
+        </span>
+        {props.tools
+          .filter((tool) => tool.group === 'always')
+          .map((tool) => (
+            <label
+              key={tool.name}
+              title="Always available to every schedule — it performs no work on the workspace."
+              style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 4, opacity: 0.75 }}
+            >
+              <input type="checkbox" checked disabled style={{ marginTop: 3 }} />
+              <span>
+                <span style={{ display: 'block', fontFamily: monospace, fontSize: 11 }}>{tool.name}</span>
+                <span style={{ display: 'block', color: colors.muted, fontSize: 10 }}>{tool.description}</span>
+              </span>
+            </label>
+          ))}
+      </div>
 
       {visible.length === 0 && (
         <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 10px' }}>

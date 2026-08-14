@@ -1,6 +1,7 @@
 import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
 import { AttachIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
+import { activeMentionQuery, insertMention as insertMentionInto } from './mentions.js'
 import { Select } from './Select.js'
 import { badgeStyle, colors, fontFamily, iconButtonStyle } from './theme.js'
 
@@ -48,16 +49,6 @@ async function toAttachment(file: File): Promise<ImageAttachmentInput | undefine
 }
 
 /** The `@` token the caret currently sits in, or undefined when it is not in one. */
-function activeMentionQuery(text: string, caret: number): string | undefined {
-  const before = text.slice(0, caret)
-  const at = before.lastIndexOf('@')
-  if (at === -1) return undefined
-  const token = before.slice(at + 1)
-  // A space closes the mention; so does a second @.
-  if (/[\s@]/.test(token)) return undefined
-  return token
-}
-
 export function Composer(props: ComposerProps): ReactElement {
   const [text, setText] = useState('')
   const [images, setImages] = useState<ImageAttachmentInput[]>([])
@@ -113,21 +104,16 @@ export function Composer(props: ComposerProps): ReactElement {
   const insertMention = (candidatePath: string): void => {
     const textarea = textareaRef.current
     const caret = textarea?.selectionStart ?? text.length
-    const before = text.slice(0, caret)
-    const at = before.lastIndexOf('@')
-    if (at === -1) return
+    const inserted = insertMentionInto(text, caret, candidatePath)
+    if (inserted === undefined) return
 
-    // Quote paths with spaces so the resolver reads them as one target.
-    const rendered = candidatePath.includes(' ') ? `@"${candidatePath}"` : `@${candidatePath}`
-    const next = `${text.slice(0, at)}${rendered} ${text.slice(caret)}`
-    setText(next)
+    setText(inserted.text)
     setMentionQuery(undefined)
 
     // Restore the caret after the inserted mention rather than leaving it at the end.
-    const position = at + rendered.length + 1
     requestAnimationFrame(() => {
       textarea?.focus()
-      textarea?.setSelectionRange(position, position)
+      textarea?.setSelectionRange(inserted.caret, inserted.caret)
     })
   }
 

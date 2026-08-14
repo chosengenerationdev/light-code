@@ -45,6 +45,8 @@ function render(schedules: Schedule[] = [], saved: Schedule[] = []): void {
         onDelete={() => {}}
         onToggle={() => {}}
         onRunNow={() => {}}
+        mentionCandidates={[]}
+        onQueryMentions={() => {}}
       />,
     ),
   )
@@ -61,6 +63,12 @@ function openEditor(): void {
 }
 
 const checkboxes = (): HTMLInputElement[] => [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+
+/** By label text rather than index — a reordered list must not silently tick the wrong tool. */
+function checkboxFor(toolName: string): HTMLInputElement | undefined {
+  const label = [...container.querySelectorAll('label')].find((entry) => entry.textContent?.includes(toolName))
+  return label?.querySelector<HTMLInputElement>('input[type="checkbox"]') ?? undefined
+}
 const toolNames = (): string[] =>
   [...container.querySelectorAll('label')].map((label) => label.textContent ?? '').filter((text) => text.length > 0)
 
@@ -75,16 +83,23 @@ function type(placeholder: string, value: string): void {
 
 describe('the schedule tool picker', () => {
   /** A schedule runs unattended, so every capability must be an explicit decision. */
-  it('starts with nothing ticked', () => {
+  it('starts with nothing selectable ticked', () => {
     openEditor()
-    expect(checkboxes().length).toBeGreaterThan(0)
-    expect(checkboxes().every((box) => !box.checked)).toBe(true)
+    const choosable = checkboxes().filter((box) => !box.disabled)
+    expect(choosable.length).toBeGreaterThan(0)
+    expect(choosable.every((box) => !box.checked)).toBe(true)
   })
 
-  /** Control tools are always available, so offering them implies ticking changes something. */
-  it('does not list the always-available tools', () => {
+  /**
+   * Shown, but not as a choice. Hiding them was defensible — ticking changes nothing — and it
+   * left no way to answer "can this schedule notify me?" without reading the source.
+   */
+  it('lists the always-available tools as fixed rather than hiding them', () => {
     openEditor()
-    expect(toolNames().join(' ')).not.toContain('attempt_completion')
+    const box = checkboxFor('attempt_completion')
+    expect(box).toBeDefined()
+    expect(box?.checked).toBe(true)
+    expect(box?.disabled).toBe(true)
   })
 
   it('lists MCP and built-in tools together', () => {
@@ -98,7 +113,9 @@ describe('the schedule tool picker', () => {
     openEditor()
     type('Filter by name', 'wiki')
     expect(toolNames().join(' ')).toContain('confluence__create_page')
-    expect(toolNames().join(' ')).not.toContain('read_file')
+    // The always-available section is not part of the filtered set, so only choosable tools
+    // are checked here.
+    expect(checkboxFor('read_file')).toBeUndefined()
   })
 
   /** "create page" should find confluence__create_page — nobody types the underscores. */
@@ -115,14 +132,12 @@ describe('the schedule tool picker', () => {
    */
   it('keeps a selected tool visible however the filter is set', () => {
     openEditor()
-    const readFile = checkboxes()[0]
-    act(() => readFile?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    act(() => checkboxFor('read_file')?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 
     type('Filter by name', 'zzz-nothing-matches')
 
-    const listed = toolNames().join(' ')
-    expect(listed).toContain('read_file')
-    expect(checkboxes().some((box) => box.checked)).toBe(true)
+    expect(toolNames().join(' ')).toContain('read_file')
+    expect(checkboxFor('read_file')?.checked).toBe(true)
   })
 
   /** Bulk select must act on what is shown, never on the whole hidden catalogue. */

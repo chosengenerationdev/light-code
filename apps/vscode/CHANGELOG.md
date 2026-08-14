@@ -1,5 +1,20 @@
 # light-code-vscode
 
+## 0.19.1
+
+### Patch Changes
+
+- `@` file mentions in a schedule's prompt, and the always-available tools are visible.
+
+  Typing `@` in a schedule prompt now offers the same file picker the chat composer has. The
+  mentions always _worked_ — a scheduled prompt goes through the same path a typed one does, and
+  the file contents are attached when the schedule runs — but you had to know and type the path
+  exactly, and a typo silently became ordinary prose.
+
+  The tool list also now shows what every schedule can do regardless of what you tick: `notify`
+  and finishing. They were left out because ticking them changes nothing, which was true and
+  left no way to tell whether a schedule could notify you at all.
+
 ## 0.19.0
 
 ### Minor Changes
