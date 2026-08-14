@@ -289,6 +289,9 @@ export type UiToHostMessage =
    * reconstruct it anyway — secrets are write-only across this bridge (invariant 7).
    */
   | { type: 'requestEmbedderModels'; profileId: string }
+  | { type: 'requestSkills' }
+  /** The user removing one directly. The model's own delete goes through the approval gate. */
+  | { type: 'deleteSkillFile'; name: string }
   | { type: 'requestPython' }
   | {
       type: 'setPython'
@@ -393,6 +396,14 @@ export type HostToUiMessage =
   | { type: 'searchConnectionSaved'; id: string }
   | { type: 'network'; settings: NetworkSettingsSummary }
   | { type: 'python'; status: PythonStatus }
+  | {
+      type: 'skills'
+      skills: { name: string; description: string; filePath: string }[]
+      /** Files that could not be offered, and why. Shown, not just logged. */
+      issues: { filePath: string; detail: string }[]
+      /** Undefined when no folder is open, so the tab can say why there are none. */
+      skillsDir?: string
+    }
   /** Kept apart from `models` so the provider form and this tab cannot overwrite each other. */
   | { type: 'embedderModels'; models: string[]; warning?: string }
   | { type: 'embedderSaved' }

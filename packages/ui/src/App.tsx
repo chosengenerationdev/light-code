@@ -111,6 +111,9 @@ export function App(props: AppProps): ReactElement {
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
   const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
   const [pythonStatus, setPythonStatus] = useState<PythonStatus | undefined>(undefined)
+  const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>([])
+  const [skillIssues, setSkillIssues] = useState<{ filePath: string; detail: string }[]>([])
+  const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -259,6 +262,10 @@ export function App(props: AppProps): ReactElement {
           ...(message.indexNameIsCustom !== undefined ? { indexNameIsCustom: message.indexNameIsCustom } : {}),
           indexedFiles: message.indexedFiles,
         })
+      } else if (message.type === 'skills') {
+        setSkills(message.skills)
+        setSkillIssues(message.issues)
+        setSkillsDir(message.skillsDir)
       } else if (message.type === 'python') {
         setPythonStatus(message.status)
       } else if (message.type === 'embedderModels') {
@@ -315,6 +322,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestPython' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -675,6 +683,12 @@ export function App(props: AppProps): ReactElement {
             expert={expert}
             onSaveExpert={saveExpert}
             search={searchProps}
+            skills={{
+              skills,
+              issues: skillIssues,
+              skillsDir,
+              onDelete: (name) => props.transport.post({ type: 'deleteSkillFile', name } satisfies UiToHostMessage),
+            }}
             python={{
               status: pythonStatus,
               onBrowse: browseForPath,

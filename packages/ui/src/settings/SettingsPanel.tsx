@@ -14,6 +14,7 @@ import { ExpertTab, type ExpertState } from './ExpertTab.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
+import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
 import type { BrowseRequest } from './PathField.js'
 import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 
@@ -47,9 +48,10 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   search: SearchTabProps
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
   python: PythonTabProps
+  skills: SkillsTabProps
 }
 
-type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network' | 'python'
+type TabId = 'providers' | 'approvals' | 'mcp' | 'search' | 'expert' | 'network' | 'python' | 'skills'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'providers', label: 'Providers' },
@@ -59,6 +61,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'expert', label: 'Expert' },
   { id: 'network', label: 'Network' },
   { id: 'python', label: 'Python' },
+  { id: 'skills', label: 'Skills' },
 ]
 
 /**
@@ -123,6 +126,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           />
         ) : active === 'search' ? (
           <SearchTab {...props.search} />
+        ) : active === 'skills' ? (
+          <SkillsTab {...props.skills} />
         ) : active === 'python' ? (
           <PythonTab {...props.python} />
         ) : active === 'network' ? (

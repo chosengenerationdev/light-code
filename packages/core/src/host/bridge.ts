@@ -31,6 +31,8 @@ import {
   createDeleteSkillTool,
   loadSkills,
   renderSkillsForPrompt,
+  isValidSkillName,
+  skillFileName,
   type Skill,
   Embedder,
   indexWorkspace,
@@ -209,11 +211,35 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    */
   const skillsDir = workspaceRoot !== undefined ? path.join(workspaceRoot, '.lightcode', 'skills') : undefined
   let skills: Skill[] = []
+  let skillIssues: { filePath: string; detail: string }[] = []
   const refreshSkills = async (): Promise<void> => {
     if (skillsDir === undefined) return
     const loaded = await loadSkills(skillsDir)
     skills = loaded.skills
+    skillIssues = loaded.issues
     for (const issue of loaded.issues) logger.warn(`skill ${issue.filePath}: ${issue.detail}`)
+  }
+
+  async function postSkills(): Promise<void> {
+    await refreshSkills()
+    post({
+      type: 'skills',
+      skills: skills.map((skill) => ({ ...skill })),
+      issues: skillIssues,
+      ...(skillsDir !== undefined ? { skillsDir } : {}),
+    })
+  }
+
+  async function handleDeleteSkillFile(name: string): Promise<void> {
+    try {
+      if (skillsDir === undefined) return
+      // Same name rule the tool uses, so a hand-typed name cannot escape the directory.
+      if (!isValidSkillName(name)) throw new Error(`"${name}" is not a valid skill name.`)
+      await fs.rm(path.join(skillsDir, skillFileName(name)), { force: true })
+      await postSkills()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
   }
 
   const builtinTools = createDefaultToolRegistry()
@@ -2055,6 +2081,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleSaveEmbedder(message.profileId, message.model, message.dimensions, message.indexName)
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
+    } else if (message.type === 'requestSkills') {
+      void postSkills()
+    } else if (message.type === 'deleteSkillFile') {
+      void handleDeleteSkillFile(message.name)
     } else if (message.type === 'requestPython') {
       void postPython()
     } else if (message.type === 'setPython') {
