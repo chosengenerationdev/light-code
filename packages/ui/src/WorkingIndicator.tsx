@@ -4,6 +4,14 @@ import { colors, fontFamily } from './theme.js'
 export interface WorkingIndicatorProps {
   /** What is happening right now, e.g. "Running read_file". Defaults to "Thinking". */
   label?: string
+  /**
+   * Tints the dots in the expert's colour while a consultation is in flight.
+   *
+   * A consultation is the slowest thing the agent does and the only one that spends money
+   * at a second provider, so "who is working" is worth showing during the wait rather than
+   * only in the result afterwards.
+   */
+  variant?: 'default' | 'expert'
 }
 
 /**
@@ -64,7 +72,13 @@ export function WorkingIndicator(props: WorkingIndicatorProps): ReactElement {
           <span
             key={dot}
             className="lc-dot"
-            style={{ width: 5, height: 5, borderRadius: '50%', background: colors.accent, display: 'block' }}
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: '50%',
+              background: props.variant === 'expert' ? colors.expert : colors.accent,
+              display: 'block',
+            }}
           />
         ))}
       </span>

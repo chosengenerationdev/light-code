@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
-import { applyAccent, DEFAULT_ACCENT, installStyles } from './styles.js'
+import { applyAccent, applyExpert, DEFAULT_ACCENT, DEFAULT_EXPERT, installStyles } from './styles.js'
 import { VsCodeTransport } from './transport.js'
 
 const rootElement = document.getElementById('root')
@@ -20,5 +20,6 @@ document.body.style.margin = '0'
  */
 installStyles()
 applyAccent(DEFAULT_ACCENT)
+applyExpert(DEFAULT_EXPERT)
 
 createRoot(rootElement).render(<App transport={new VsCodeTransport()} />)

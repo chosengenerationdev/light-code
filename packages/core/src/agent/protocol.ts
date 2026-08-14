@@ -251,6 +251,7 @@ export type UiToHostMessage =
   | { type: 'setMaxIterations'; value: number }
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
+  | { type: 'setExpertColor'; value: string }
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
   | { type: 'revokeAllowedTool'; toolName: string }
@@ -340,7 +341,14 @@ export type HostToUiMessage =
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */
-  | { type: 'settings'; modeId: string; approvals: WorkspaceApprovals; maxIterations: number; accentColor: string }
+  | {
+      type: 'settings'
+      modeId: string
+      approvals: WorkspaceApprovals
+      maxIterations: number
+      accentColor: string
+      expertColor: string
+    }
   /** Server health plus the raw JSON the editor round-trips, and any spawn warnings. */
   | {
       type: 'mcp'

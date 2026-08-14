@@ -323,6 +323,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   // must not depend on the UI package; the UI is authoritative and this is only the value
   // sent before the user has chosen one.
   let cachedAccentColor = '#22C55E'
+  let cachedExpertColor = '#D97757'
   let cachedModeId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -331,6 +332,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
+    cachedExpertColor = config.ui?.expertColor ?? '#D97757'
     return config
   }
 
@@ -344,6 +346,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       approvals: next,
       maxIterations: cachedMaxIterations,
       accentColor: cachedAccentColor,
+      expertColor: cachedExpertColor,
     })
   }
 
@@ -1753,6 +1756,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       approvals: cachedApprovals,
       maxIterations: cachedMaxIterations,
       accentColor: cachedAccentColor,
+      expertColor: cachedExpertColor,
     })
   }
 
@@ -2081,7 +2085,14 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
        * editor, and someone who picks teal wants teal in every repository they open.
        */
       void configManager
-        .save('user', { ui: { accentColor: message.value } })
+        // Both written together: `save` merges at the top level, so writing `ui` with only
+        // one key would drop the other.
+        .save('user', { ui: { accentColor: message.value, expertColor: cachedExpertColor } })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setExpertColor') {
+      void configManager
+        .save('user', { ui: { accentColor: cachedAccentColor, expertColor: message.value } })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setAutoApprove') {

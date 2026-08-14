@@ -42,6 +42,9 @@ export function Chat(props: ChatProps): ReactElement {
    * of progress, and an indicator underneath them is just clutter. It stays up while a
    * tool runs, because that is the other stretch with nothing to look at.
    */
+  const lastCall = props.messages[props.messages.length - 1]
+  const consulting = lastCall?.kind === 'tool' && lastCall.toolCall.name === 'ask_expert' && lastCall.toolCall.result === undefined
+
   const workingLabel = ((): string | undefined => {
     if (!props.isStreaming) return undefined
     // An approval prompt is on screen and waiting for the user — nothing is working.
@@ -49,7 +52,9 @@ export function Chat(props: ChatProps): ReactElement {
 
     const last = props.messages[props.messages.length - 1]
     if (last?.kind === 'tool' && last.toolCall.result === undefined) {
-      return `Running ${last.toolCall.name}`
+      // Named rather than generic: a consultation can take half a minute, and "Running
+      // ask_expert" does not tell you that something else is doing the thinking.
+      return consulting ? 'Consulting the expert' : `Running ${last.toolCall.name}`
     }
     if (last?.kind === 'text' && last.role === 'assistant' && last.pending === true) return undefined
     if (last?.kind === 'reasoning' && last.pending === true) return undefined
@@ -60,7 +65,9 @@ export function Chat(props: ChatProps): ReactElement {
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div className="lc-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollBehavior: 'smooth' }}>
         <MessageList messages={props.messages} error={props.error} />
-        {workingLabel !== undefined && <WorkingIndicator label={workingLabel} />}
+        {workingLabel !== undefined && (
+          <WorkingIndicator label={workingLabel} variant={consulting ? 'expert' : 'default'} />
+        )}
         {props.pendingApproval !== undefined && (
           <ApprovalPrompt
             approval={props.pendingApproval}

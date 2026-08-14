@@ -57,6 +57,29 @@ export const ACCENT_PRESETS: readonly AccentPreset[] = [
   { id: 'graphite', label: 'Graphite', value: '#64748B' },
 ]
 
+/**
+ * The expert's default: a coral-orange evoking Claude, whose CLI answers these.
+ *
+ * Deliberately not derived from the accent — see `applyExpert`.
+ */
+export const DEFAULT_EXPERT = '#D97757'
+
+/**
+ * Offered for the expert. Warm tones lead, since the point is to read as "not the product's
+ * colour" and the accent defaults to green — but the full range is here because someone
+ * running an amber accent needs somewhere else to go.
+ */
+export const EXPERT_PRESETS: readonly AccentPreset[] = [
+  { id: 'coral', label: 'Coral', value: DEFAULT_EXPERT },
+  { id: 'orange', label: 'Orange', value: '#F97316' },
+  { id: 'amber', label: 'Amber', value: '#F59E0B' },
+  { id: 'rose', label: 'Rose', value: '#F43F5E' },
+  { id: 'purple', label: 'Purple', value: '#A855F7' },
+  { id: 'blue', label: 'Blue', value: '#3B82F6' },
+  { id: 'teal', label: 'Teal', value: '#14B8A6' },
+  { id: 'graphite', label: 'Graphite', value: '#64748B' },
+]
+
 interface Rgb {
   r: number
   g: number
@@ -130,26 +153,48 @@ export function contrastFor(hex: string): string {
 }
 
 /**
- * Writes the accent tokens onto the document root.
+ * Writes one colour family onto the document root, as `--lc-<prefix>*`.
  *
- * `setProperty` is CSSOM, so this needs no `style-src` either. The stylesheet below reads
- * only these variables, which is what lets the colour change instantly with no re-render and
- * no second copy of the palette.
+ * Shared by the accent and the expert colour so the two can never drift into having
+ * different token shapes — the stylesheet and `theme.ts` both assume every family has the
+ * same members, and a missing one resolves to nothing and paints transparent.
+ *
+ * `setProperty` is CSSOM, so this needs no `style-src` either. The stylesheet reads only
+ * these variables, which is what lets a colour change instantly with no re-render and no
+ * second copy of the palette.
  */
-export function applyAccent(hex: string): void {
-  const rgb = parseHex(hex) ?? parseHex(DEFAULT_ACCENT)
+function writeTokens(prefix: string, hex: string, fallback: string): void {
+  const rgb = parseHex(hex) ?? parseHex(fallback)
   if (rgb === undefined) return
   const root = document.documentElement.style
-  const accent = toHex(rgb)
+  const base = toHex(rgb)
 
-  root.setProperty('--lc-accent', accent)
-  root.setProperty('--lc-accent-deep', toHex(shade(rgb, 0.62)))
-  root.setProperty('--lc-accent-bright', toHex(shade(rgb, 1.22)))
-  root.setProperty('--lc-accent-contrast', contrastFor(accent))
+  root.setProperty(`--lc-${prefix}`, base)
+  root.setProperty(`--lc-${prefix}-deep`, toHex(shade(rgb, 0.62)))
+  root.setProperty(`--lc-${prefix}-bright`, toHex(shade(rgb, 1.22)))
+  root.setProperty(`--lc-${prefix}-contrast`, contrastFor(base))
   // Alpha tints, for hovers and rings that must not fight the editor theme underneath.
-  root.setProperty('--lc-accent-a12', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`)
-  root.setProperty('--lc-accent-a20', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.20)`)
-  root.setProperty('--lc-accent-a35', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`)
+  root.setProperty(`--lc-${prefix}-a12`, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`)
+  root.setProperty(`--lc-${prefix}-a20`, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.20)`)
+  root.setProperty(`--lc-${prefix}-a35`, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`)
+}
+
+/** The product's own colour: buttons, bubbles, selection, focus rings. */
+export function applyAccent(hex: string): void {
+  writeTokens('accent', hex, DEFAULT_ACCENT)
+}
+
+/**
+ * The expert's colour (§12b) — what marks text that came from Claude rather than from the
+ * primary model.
+ *
+ * Separate from the accent on purpose. The accent says "this is Light Code"; this says "these
+ * words came from somewhere else", and a single colour cannot say both. It is configurable
+ * because the default sits close to an amber or rose accent, and only the user can see
+ * whether their particular pair reads as two colours or one.
+ */
+export function applyExpert(hex: string): void {
+  writeTokens('expert', hex, DEFAULT_EXPERT)
 }
 
 /*

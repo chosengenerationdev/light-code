@@ -46,6 +46,24 @@ export const colors = {
   accentRing: 'var(--lc-accent-a35, rgba(34, 197, 94, 0.35))',
   /** A gradient in the shape of the logo's, reproduced from whatever accent is active. */
   accentGradient: 'linear-gradient(135deg, var(--lc-accent-deep, #157A3A), var(--lc-accent, #22C55E))',
+
+  /*
+   * The expert (§12b) — a coral-orange evoking Claude, whose CLI answers these.
+   *
+   * **Fixed, not derived from the accent, and that is the entire point.** The accent says
+   * "this is Light Code"; this says "these words came from somewhere else". If it tracked the
+   * accent the two would be indistinguishable, which is the thing being asked for.
+   *
+   * A user who picks amber or rose as their accent will get something close to this. Colour is
+   * therefore never the *only* signal — the expert mark icon and the tooltip carry it too, so
+   * the distinction survives a collision.
+   */
+  expert: 'var(--lc-expert, #D97757)',
+  expertDeep: 'var(--lc-expert-deep, #86492F)',
+  expertContrast: 'var(--lc-expert-contrast, #ffffff)',
+  expertSoft: 'var(--lc-expert-a12, rgba(217, 119, 87, 0.12))',
+  expertRing: 'var(--lc-expert-a35, rgba(217, 119, 87, 0.35))',
+  expertGradient: 'linear-gradient(135deg, var(--lc-expert-deep, #86492F), var(--lc-expert, #D97757))',
 } as const
 
 export const fontFamily = 'var(--vscode-font-family, sans-serif)'

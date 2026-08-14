@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { ACCENT_PRESETS, contrastFor, DEFAULT_ACCENT, isValidAccent, parseHex, STYLESHEET } from './styles.js'
+import {
+  ACCENT_PRESETS,
+  contrastFor,
+  DEFAULT_ACCENT,
+  DEFAULT_EXPERT,
+  EXPERT_PRESETS,
+  isValidAccent,
+  parseHex,
+  STYLESHEET,
+} from './styles.js'
 
 describe('accent parsing', () => {
   it('accepts both hex forms, with or without the hash', () => {
@@ -132,5 +141,49 @@ describe('the stylesheet', () => {
   /** Vestibular disorders make sliding bubbles genuinely unpleasant; this is not optional. */
   it('honours prefers-reduced-motion', () => {
     expect(STYLESHEET).toContain('prefers-reduced-motion')
+  })
+})
+
+/**
+ * The expert colour marks text that came from Claude rather than the primary model (§12b).
+ * Its whole job is to be distinguishable from the accent, so the properties worth pinning
+ * are about the two of them together, not about either alone.
+ */
+describe('the expert palette', () => {
+  it('defaults to something clearly different from the default accent', () => {
+    expect(DEFAULT_EXPERT).toBe('#D97757')
+    expect(DEFAULT_EXPERT.toLowerCase()).not.toBe(DEFAULT_ACCENT.toLowerCase())
+  })
+
+  it('leads with the default and offers only valid, distinct colours', () => {
+    expect(EXPERT_PRESETS[0]?.value).toBe(DEFAULT_EXPERT)
+    const values = EXPERT_PRESETS.map((preset) => preset.value)
+    for (const value of values) expect(isValidAccent(value), value).toBe(true)
+    expect(new Set(values.map((value) => value.toLowerCase())).size).toBe(values.length)
+  })
+
+  it('produces a usable contrast for every preset', () => {
+    for (const preset of EXPERT_PRESETS) {
+      expect(['#ffffff', '#12111a']).toContain(contrastFor(preset.value))
+    }
+  })
+
+  /**
+   * Both families must have the same token members, or a rule reading one that only the
+   * other defines resolves to nothing and paints transparent. `writeTokens` is shared
+   * precisely to make this true; this asserts nobody has since special-cased one of them.
+   */
+  it('gives the stylesheet the same token shape for both families', () => {
+    const members = (prefix: string): string[] =>
+      [...STYLESHEET.matchAll(new RegExp(String.raw`var\(--lc-${prefix}((?:-[a-z0-9]+)*)`, 'g'))]
+        .map((match) => match[1] ?? '')
+        .filter((suffix, index, all) => all.indexOf(suffix) === index)
+        .sort()
+
+    // Only meaningful for suffixes the sheet actually reads; the accent is read far more
+    // widely, so this checks that every expert token read is one the accent family has too.
+    for (const suffix of members('expert')) {
+      expect(['', '-deep', '-bright', '-contrast', '-a12', '-a20', '-a35'], suffix).toContain(suffix)
+    }
   })
 })

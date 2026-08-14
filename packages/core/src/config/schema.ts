@@ -262,6 +262,14 @@ export const configSchema = z
     ui: z
       .object({
         accentColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #22C55E'),
+        /**
+         * Marks text that came from the Claude CLI expert (§12b) rather than from the
+         * primary model. Separate from the accent because one colour cannot mean both
+         * "this is Light Code" and "this is not"; configurable because the default sits
+         * close to an amber or rose accent, and only the user can see whether their
+         * particular pair reads as two colours or one.
+         */
+        expertColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #D97757'),
       })
       .partial(),
     /**

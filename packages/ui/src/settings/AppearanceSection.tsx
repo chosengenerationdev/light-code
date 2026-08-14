@@ -1,40 +1,66 @@
-import { useState, type ReactElement } from 'react'
-import { ACCENT_PRESETS, DEFAULT_ACCENT, contrastFor, isValidAccent } from '../styles.js'
-import { CheckIcon } from '../icons.js'
+import { useEffect, useState, type ReactElement } from 'react'
+import {
+  ACCENT_PRESETS,
+  contrastFor,
+  DEFAULT_ACCENT,
+  DEFAULT_EXPERT,
+  EXPERT_PRESETS,
+  isValidAccent,
+  type AccentPreset,
+} from '../styles.js'
+import { CheckIcon, ExpertIcon } from '../icons.js'
 import { colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
 
 export interface AppearanceSectionProps {
   accentColor: string
+  onChangeAccent: (value: string) => void
+  expertColor: string
+  onChangeExpert: (value: string) => void
+}
+
+interface ColourPickerProps {
+  label: string
+  description: string
+  value: string
+  presets: readonly AccentPreset[]
+  fallback: string
+  inputId: string
   onChange: (value: string) => void
 }
 
 /**
- * The accent picker.
+ * Swatches plus a hex field.
  *
- * Swatches rather than a colour wheel, because the eight offered are already contrast-checked
- * against both light and dark editor themes. The free-text hex field is there for the person
- * who wants their company's colour and will otherwise go and hand-edit the config file — the
- * same reasoning as §9's "the dropdown is never a hard dependency".
+ * Swatches rather than a colour wheel, because the ones offered are already contrast-checked
+ * against light and dark editor themes. The free-text field is for the person who wants their
+ * company's exact colour and will otherwise go and hand-edit the config file — the same
+ * reasoning as §9's "the dropdown is never a hard dependency".
  *
  * Changes apply live as you type a valid colour, so the choice is judged against the real UI
  * rather than a swatch. Only a valid value is sent onward; a half-typed `#A8` never reaches
  * config.
  */
-export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
-  const [custom, setCustom] = useState(props.accentColor)
+function ColourPicker(props: ColourPickerProps): ReactElement {
+  const [custom, setCustom] = useState(props.value)
+
+  // Resyncs when config answers, or when the other picker's save round-trips a fresh
+  // settings message. Without this the field keeps whatever was typed at mount.
+  useEffect(() => setCustom(props.value), [props.value])
 
   const commit = (value: string): void => {
     setCustom(value)
     if (isValidAccent(value)) props.onChange(value)
   }
 
-  const active = props.accentColor.toLowerCase()
+  const active = props.value.toLowerCase()
 
   return (
-    <section style={{ marginBottom: 20 }}>
-      <span style={labelStyle()}>Accent colour</span>
+    <div style={{ marginBottom: 22 }}>
+      <span style={labelStyle()}>{props.label}</span>
+      <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>{props.description}</p>
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-        {ACCENT_PRESETS.map((preset) => {
+        {props.presets.map((preset) => {
           const selected = preset.value.toLowerCase() === active
           return (
             <button
@@ -57,7 +83,7 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: `linear-gradient(135deg, ${preset.value}, ${preset.value})`,
+                background: preset.value,
                 color: contrastFor(preset.value),
               }}
             >
@@ -67,16 +93,16 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
         })}
       </div>
 
-      <label style={{ ...labelStyle(), marginBottom: 4 }} htmlFor="lc-accent-hex">
+      <label style={{ ...labelStyle(), marginBottom: 4 }} htmlFor={props.inputId}>
         Or a custom hex colour
       </label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <input
-          id="lc-accent-hex"
+          id={props.inputId}
           type="text"
           value={custom}
           spellCheck={false}
-          placeholder={DEFAULT_ACCENT}
+          placeholder={props.fallback}
           onChange={(event) => commit(event.target.value)}
           style={{ ...textFieldStyle(), width: 130, fontFamily: 'var(--vscode-editor-font-family, monospace)' }}
         />
@@ -92,8 +118,100 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
           }}
         />
         {!isValidAccent(custom) && (
-          <span style={{ color: colors.error, fontSize: 11, fontFamily }}>Needs a hex colour, e.g. #22C55E</span>
+          <span style={{ color: colors.error, fontSize: 11, fontFamily }}>Needs a hex colour, e.g. {props.fallback}</span>
         )}
+      </div>
+    </div>
+  )
+}
+
+export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
+  const clash = props.accentColor.toLowerCase() === props.expertColor.toLowerCase()
+
+  return (
+    <section>
+      <ColourPicker
+        label="Accent colour"
+        description="Buttons, your messages, selections and focus rings."
+        value={props.accentColor}
+        presets={ACCENT_PRESETS}
+        fallback={DEFAULT_ACCENT}
+        inputId="lc-accent-hex"
+        onChange={props.onChangeAccent}
+      />
+
+      <ColourPicker
+        label="Expert colour"
+        description="Marks answers that came from Claude rather than from your own model. Kept separate from the accent so the two are told apart at a glance."
+        value={props.expertColor}
+        presets={EXPERT_PRESETS}
+        fallback={DEFAULT_EXPERT}
+        inputId="lc-expert-hex"
+        onChange={props.onChangeExpert}
+      />
+
+      {/*
+       * Warned rather than prevented. Two identical colours defeat the point of having two,
+       * but it is a legitimate thing to want — and the expert mark icon still distinguishes
+       * them — so this states the consequence and leaves the choice alone.
+       */}
+      {clash && (
+        <p style={{ color: colors.error, fontSize: 11, margin: '0 0 14px' }}>
+          These are the same colour, so expert answers will not stand out. Only the expert mark
+          will tell them apart.
+        </p>
+      )}
+
+      <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 12 }}>
+        <span style={labelStyle()}>Preview</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <span
+              style={{
+                padding: '7px 12px',
+                borderRadius: '14px 14px 4px 14px',
+                background: `linear-gradient(135deg, ${props.accentColor}, ${props.accentColor})`,
+                color: contrastFor(props.accentColor),
+                fontSize: 12,
+                fontFamily,
+              }}
+            >
+              Your message
+            </span>
+          </div>
+          <div style={{ display: 'flex' }}>
+            <span
+              style={{
+                padding: '7px 12px',
+                borderRadius: '14px 14px 14px 4px',
+                background: colors.assistantBubble,
+                color: colors.foreground,
+                fontSize: 12,
+                fontFamily,
+              }}
+            >
+              The assistant&apos;s reply
+            </span>
+          </div>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              alignSelf: 'flex-start',
+              padding: '6px 10px',
+              borderRadius: 10,
+              border: `1px solid ${props.expertColor}`,
+              background: colors.expertSoft,
+              color: props.expertColor,
+              fontSize: 12,
+              fontFamily,
+            }}
+          >
+            <ExpertIcon size={12} />
+            Answered by the expert
+          </div>
+        </div>
       </div>
     </section>
   )

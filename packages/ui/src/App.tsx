@@ -34,7 +34,7 @@ import type { SearchIndex } from './settings/SearchTab.js'
 import type { EmbedderState } from './settings/IndexingSection.js'
 import { HistoryList } from './history/HistoryList.js'
 import { BackIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
-import { applyAccent, DEFAULT_ACCENT } from './styles.js'
+import { applyAccent, applyExpert, DEFAULT_ACCENT, DEFAULT_EXPERT } from './styles.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
 
 export interface AppProps {
@@ -74,6 +74,7 @@ export function App(props: AppProps): ReactElement {
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
   const [maxIterations, setMaxIterations] = useState(25)
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
+  const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   const [mcpServers, setMcpServers] = useState<McpServerState[]>([])
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
@@ -179,9 +180,11 @@ export function App(props: AppProps): ReactElement {
         setApprovals(message.approvals)
         setMaxIterations(message.maxIterations)
         setAccentColor(message.accentColor)
+        setExpertColor(message.expertColor)
         // Applied straight to the document root rather than threaded through props: the
         // stylesheet reads the CSS variables, and it cannot read React state.
         applyAccent(message.accentColor)
+        applyExpert(message.expertColor)
       } else if (message.type === 'mcp') {
         setMcpServers(message.servers)
         setMcpJson(message.json)
@@ -672,6 +675,12 @@ export function App(props: AppProps): ReactElement {
               setAccentColor(value)
               applyAccent(value)
               props.transport.post({ type: 'setAccentColor', value } satisfies UiToHostMessage)
+            }}
+            expertColor={expertColor}
+            onSetExpertColor={(value) => {
+              setExpertColor(value)
+              applyExpert(value)
+              props.transport.post({ type: 'setExpertColor', value } satisfies UiToHostMessage)
             }}
             onSetMaxIterations={(value) =>
               props.transport.post({ type: 'setMaxIterations', value } satisfies UiToHostMessage)

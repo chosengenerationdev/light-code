@@ -28,6 +28,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetMaxIterations: (value: number) => void
   accentColor: string
   onSetAccentColor: (value: string) => void
+  expertColor: string
+  onSetExpertColor: (value: string) => void
   mcpServers: McpServerState[]
   mcpJson: string
   mcpWarnings: Record<string, string[]>
@@ -112,7 +114,12 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
       <div key={active} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {active === 'appearance' ? (
           <div style={{ padding: 12 }}>
-            <AppearanceSection accentColor={props.accentColor} onChange={props.onSetAccentColor} />
+            <AppearanceSection
+              accentColor={props.accentColor}
+              onChangeAccent={props.onSetAccentColor}
+              expertColor={props.expertColor}
+              onChangeExpert={props.onSetExpertColor}
+            />
           </div>
         ) : active === 'providers' ? (
           <ProvidersTab

@@ -86,20 +86,29 @@ function TextBlock(props: { role: 'user' | 'assistant'; content: string; expertI
           fontFamily,
         }}
       >
+        {/*
+          * A marker, not a costume. These are the *primary* model's words, written after it
+          * consulted the expert — so the message keeps its own bubble and gains a small
+          * attribution line. Painting it in Claude's colour would claim Claude wrote it.
+          */}
         {props.expertInformed === true && (
           <span
-            title="Informed by an expert consultation"
-            aria-label="Informed by an expert consultation"
+            title="Written after consulting the expert. These are not Claude's words — expand the ask_expert block above for those."
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 4,
-              marginBottom: 4,
-              opacity: 0.75,
-              color: isAssistant ? colors.accent : colors.accentContrast,
+              marginBottom: 5,
+              fontSize: 10,
+              letterSpacing: 0.2,
+              padding: '1px 6px 1px 4px',
+              borderRadius: 8,
+              background: isAssistant ? colors.expertSoft : 'rgba(255, 255, 255, 0.18)',
+              color: isAssistant ? colors.expert : colors.accentContrast,
             }}
           >
-            <ExpertIcon size={12} />
+            <ExpertIcon size={11} />
+            informed by expert
           </span>
         )}
         {props.content}
@@ -121,6 +130,14 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
   const pending = toolCall.result === undefined
   const isConsultation = toolCall.name === 'ask_expert'
 
+  /*
+   * A consultation is the one block whose *result* is another model's words, so it is the one
+   * block that gets the expert's colour rather than Light Code's. Everything else here —
+   * including a tool call that merely followed the expert's advice — stays neutral, because
+   * dressing the primary model's own work in Claude's colour would misattribute it.
+   */
+  const edge = toolCall.isError === true ? colors.error : isConsultation ? colors.expert : colors.border
+
   return (
     <div
       className="lc-in-left"
@@ -129,8 +146,13 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
         // the assistant's bubbles rather than starting a third column.
         margin: '6px 10px 6px 40px',
         borderRadius: 10,
-        border: `1px solid ${toolCall.isError === true ? colors.error : colors.border}`,
-        background: pending ? colors.accentSoft : 'transparent',
+        border: `1px solid ${edge}`,
+        background: isConsultation
+          ? colors.expertSoft
+          : pending
+            ? colors.accentSoft
+            : 'transparent',
+        ...(isConsultation ? { boxShadow: `0 0 0 3px ${colors.expertSoft}` } : {}),
         overflow: 'hidden',
         transition: 'background-color 190ms ease',
       }}
@@ -169,16 +191,30 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
         {/* The consultation itself gets the expert mark; work that merely followed one gets
             it in a quieter position, so the two are distinguishable. */}
         {isConsultation && (
-          <span title="Expert consultation" aria-label="Expert consultation" style={{ display: 'flex', color: colors.accent }}>
-            <ExpertIcon />
+          <span
+            title="Expert consultation — answered by Claude"
+            aria-label="Expert consultation, answered by Claude"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 18,
+              height: 18,
+              borderRadius: '50%',
+              flexShrink: 0,
+              background: colors.expertGradient,
+              color: colors.expertContrast,
+            }}
+          >
+            <ExpertIcon size={11} />
           </span>
         )}
-        <span style={{ fontFamily: monospace }}>{toolCall.name}</span>
+        <span style={{ fontFamily: monospace, color: isConsultation ? colors.expert : undefined }}>{toolCall.name}</span>
         {!isConsultation && props.expertInformed === true && (
           <span
             title="Following expert advice"
             aria-label="Following expert advice"
-            style={{ display: 'flex', color: colors.accent }}
+            style={{ display: 'flex', color: colors.expert }}
           >
             <ExpertIcon size={12} />
           </span>
@@ -202,8 +238,29 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
           <pre style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{toolCall.arguments}</pre>
           {toolCall.result !== undefined && (
             <>
-              <div style={{ color: colors.muted, marginBottom: 2 }}>Result</div>
-              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 300, overflowY: 'auto' }}>
+              <div style={{ color: isConsultation ? colors.expert : colors.muted, marginBottom: 2 }}>
+                {isConsultation ? "Claude's answer" : 'Result'}
+              </div>
+              <pre
+                className={isConsultation ? 'lc-scroll' : undefined}
+                style={{
+                  margin: 0,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  maxHeight: 300,
+                  overflowY: 'auto',
+                  // The one pane in the product containing another model's prose verbatim, so
+                  // it is ruled off in that model's colour rather than left looking like ours.
+                  ...(isConsultation
+                    ? {
+                        borderLeft: `2px solid ${colors.expert}`,
+                        paddingLeft: 8,
+                        fontFamily: fontFamily,
+                        fontSize: 12,
+                      }
+                    : {}),
+                }}
+              >
                 {toolCall.result}
               </pre>
             </>
