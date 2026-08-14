@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { Embedder } from '../rag/embedder.js'
+import type { SearchObserver } from '../rag/searchLog.js'
 import type { VectorSearcher } from '../rag/vectorStore.js'
 import type { Tool, ToolResult } from './types.js'
 
@@ -26,6 +27,8 @@ export interface SearchCodebaseOptions {
   index: string
   /** Shown in the "nothing indexed yet" message so the user knows where to look. */
   connectionLabel: string
+  /** Records the query for the Search tab. A semantic miss is invisible without it. */
+  observer?: SearchObserver
 }
 
 const DEFAULT_SIZE = 8
@@ -52,6 +55,7 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
     parametersSchema: paramsSchema,
 
     async execute(params): Promise<ToolResult> {
+      const startedAt = Date.now()
       try {
         const size = params.size ?? DEFAULT_SIZE
         const vector = await options.embedder.embed(params.query)
@@ -62,6 +66,16 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
           ...(params.pathPrefix !== undefined && params.pathPrefix.trim().length > 0
             ? { pathPrefix: params.pathPrefix.trim() }
             : {}),
+        })
+
+        options.observer?.record({
+          at: startedAt,
+          source: 'search_codebase',
+          query: params.query,
+          collection: options.index,
+          hits: hits.length,
+          elapsedMs: Date.now() - startedAt,
+          via: 'index',
         })
 
         if (hits.length === 0) {
@@ -92,7 +106,19 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
           ].join('\n'),
         }
       } catch (error) {
-        return { content: error instanceof Error ? error.message : String(error), isError: true }
+        const message = error instanceof Error ? error.message : String(error)
+        // Logged too: a search that failed is exactly the one worth seeing in the panel, and
+        // the transcript only shows the model's reaction to it.
+        options.observer?.record({
+          at: startedAt,
+          source: 'search_codebase',
+          query: params.query,
+          collection: options.index,
+          hits: 0,
+          elapsedMs: Date.now() - startedAt,
+          error: message,
+        })
+        return { content: message, isError: true }
       }
     },
   }

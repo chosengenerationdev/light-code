@@ -1,6 +1,7 @@
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
 import type { McpPlatform } from '../mcp/forms.js'
 import type { IndexProgress, IndexResult } from '../rag/indexer.js'
+import type { SearchLogEntry } from '../rag/searchLog.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
@@ -285,6 +286,9 @@ export type UiToHostMessage =
   /** Indexing is user-started, never model-started: it is the largest egress in the product. */
   | { type: 'startIndexing' }
   | { type: 'indexDocs' }
+  /** Run a query by hand, exactly as the model would, to judge what the index returns. */
+  | { type: 'runSearchProbe'; query: string; target: 'codebase' | 'docs' }
+  | { type: 'clearSearchLog' }
   | { type: 'setDispatcher'; enabled: boolean }
   | { type: 'cancelIndexing' }
   | {
@@ -382,6 +386,10 @@ export type HostToUiMessage =
    * folded in as zero, so a total is never quietly incomplete while looking exact.
    */
   | { type: 'expertSpend'; usd: number; consultations: number; unpriced: number }
+  /** Every search the model ran this session, newest first. */
+  | { type: 'searchLog'; entries: SearchLogEntry[] }
+  /** Result of a hand-run query. `text` is what the model would have been given. */
+  | { type: 'searchProbe'; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */
   | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string }
   /** Whether tool schemas are being kept out of the prompt, and how many are hidden. */

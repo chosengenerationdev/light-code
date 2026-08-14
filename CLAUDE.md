@@ -960,7 +960,67 @@ the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSc
 
 ---
 
-## SESSION HANDOVER — 2026-08-14 (third session that day), read this first
+## SESSION HANDOVER — 2026-08-14 (fourth), read this first
+
+**Confirmed working in a real office install:** Python tools and the Skills tab. Those were the
+two oldest untested paths in the project and they are now closed. The rest of the UI still has
+not been rendered — see below.
+
+**Where the code is.** `main`, clean, 685 tests. Artifact `light-code-vscode-0.15.0.vsix` (0.16.0
+pending the changeset in `.changeset/`). Marketplace was on 0.11.0 at last check; 0.12.0 and
+0.13.0 were versioned and never published. **Query the gallery, never trust a version here.**
+
+### Built today, in order
+
+- **Junior mode** (§12b) with a persistent expert session. Measured, not assumed: cold
+  consultation $0.187 / 18,643 cache-creation tokens, resumed $0.0099 reading the same cache.
+  **Do not re-tighten the guidance to "consult as little as possible"** — that was only correct
+  while every call was a cold start, and the session inverted it.
+- **The dispatcher is wired now.** `retrieval.dispatcher` in Settings → Search, off by default.
+  MCP and Python tools become `dispatchOnly`; built-ins stay listed. A test found the real
+  tradeoff: it halves the prompt at forty tools and **makes it bigger at three**, because
+  `call_tool` carries its own description. The tab shows the hidden-tool count for that reason.
+- **`forget_docs`** releases used documentation, derived from the transcript like superseding.
+- **Skills across several folders**: one writable (`skills.dir`), read-only extras
+  (`skills.paths`), `PATH`-style precedence, shadowing reported. `skills` is user-scope only.
+- **Automatic documentation reindexing**, fingerprinted and debounced 3s.
+- **`embedder.indexPrefix`**, applying to both derived index names.
+- **Search activity panel** — every query the model ran, whether it was semantic or lexical,
+  and a box to run one by hand through the same path.
+
+### Things worth not rediscovering
+
+- **`search_docs` never serves a schema from the index.** A hit resolves to a *name*; the
+  parameters come from the live registry, and a hit for a tool that no longer exists is
+  dropped. That is why a stale index costs findability and never correctness.
+- **The lexical fallback is load-bearing**, not polish. Without it, enabling the dispatcher
+  with no vector store would make every MCP tool permanently unreachable.
+- **Nothing breaks when OpenSearch is down.** Every path is guarded: `resolveSearch` returns
+  undefined and the tools are simply not offered; `search_codebase` and `search_opensearch`
+  return tool errors; `search_docs` falls back to lexical; index listing catches to `[]`; the
+  auto-reindex logs and retries. Chat, editing, commands, MCP and the expert never touch it.
+- **Python tool folders stay singular, deliberately** (decided 2026-08-14). A tool is executable
+  code and §13's real mitigation is that it lives in the repo under review. Read-only extras
+  would also need a second approval-hash store outside `.registry.json`, which is the
+  two-stores-that-diverge problem §15 warns about, on the sharpest surface in the project.
+
+### Still true, and still the biggest risk
+
+**Most of the UI has never been rendered.** The theme, the custom `Select`, Junior mode, the
+cost meter, the dispatcher section and the search panel have all shipped without the webview
+being painted once here. There is no DOM test environment (`environment: 'node'`, glob
+`*.test.ts`), so **no component in this repo has ever been render-tested** — which is why the
+dropdown fix had to be made twice.
+
+### Not built
+
+Consultation cap; Qdrant (seam ready, now optional since OpenSearch works and `search_docs`
+degrades lexically); Chroma; Phase 9b (gated on an explicit decision);
+`MANUAL_VERIFICATION.md`, still never run and still the oldest debt.
+
+---
+
+## Previous handover — 2026-08-14 (third session), superseded above
 
 **Where the code is.** `main` at `a11e850`, clean. **652 tests**, 1 skipped. Lint, build,
 typecheck, invariant-4 and the VSIX smoke test all green. Packaged artifact is

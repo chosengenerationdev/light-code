@@ -1,5 +1,28 @@
 # light-code-vscode
 
+## 0.16.0
+
+### Minor Changes
+
+- See what the assistant is searching for, and try a query yourself.
+
+  Settings → **Search** now shows every search run this session — the query, how many hits, how
+  long it took, and which index — plus a box to run one by hand.
+
+  Retrieval is the one part of the product that fails quietly. A tool that errors says so in the
+  transcript; a vector search that returns confident-looking neighbours for a query it did not
+  understand looks exactly like one that worked. The only way to judge it is to see the queries
+  and what came back.
+
+  Each entry says whether it was matched **semantically** or **lexically**, which is the one
+  thing the assistant itself cannot tell you. `search_docs` falls back to matching names and
+  descriptions whenever the index is unreachable or was never built, and in the conversation
+  that reads identically to a real semantic match — so an index that is configured but silently
+  never consulted has been invisible until now.
+
+  The query box runs the same code path the assistant uses, so what you see is exactly what it
+  would have been given. Nothing is sent to the model.
+
 ## 0.15.0
 
 ### Minor Changes

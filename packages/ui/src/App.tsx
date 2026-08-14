@@ -12,6 +12,7 @@ import {
   type TaskListEntry,
   type SearchConnectionInput,
   type SearchConnectionSummary,
+  type SearchLogEntry,
   type McpPlatform,
   type McpServerConfig,
   type McpServerState,
@@ -81,6 +82,9 @@ export function App(props: AppProps): ReactElement {
     hiddenTools: 0,
   })
   const [docsIndexing, setDocsIndexing] = useState(false)
+  const [searchLog, setSearchLog] = useState<SearchLogEntry[]>([])
+  const [searchProbe, setSearchProbe] = useState<{ query: string; text: string; error?: string } | undefined>(undefined)
+  const [searchProbeRunning, setSearchProbeRunning] = useState(false)
   const [docsResult, setDocsResult] = useState<{ indexed?: number; index?: string; error?: string } | undefined>(
     undefined,
   )
@@ -272,6 +276,15 @@ export function App(props: AppProps): ReactElement {
           ...(message.interpreter !== undefined ? { interpreter: message.interpreter } : {}),
           ...(message.venvDir !== undefined ? { venvDir: message.venvDir } : {}),
           detail: message.detail,
+        })
+      } else if (message.type === 'searchLog') {
+        setSearchLog(message.entries)
+      } else if (message.type === 'searchProbe') {
+        setSearchProbeRunning(false)
+        setSearchProbe({
+          query: message.query,
+          text: message.text,
+          ...(message.error !== undefined ? { error: message.error } : {}),
         })
       } else if (message.type === 'dispatcher') {
         setDispatcher({
@@ -537,6 +550,17 @@ export function App(props: AppProps): ReactElement {
         setDocsIndexing(true)
         props.transport.post({ type: 'indexDocs' } satisfies UiToHostMessage)
       },
+    },
+    activity: {
+      entries: searchLog,
+      probe: searchProbe,
+      probeRunning: searchProbeRunning,
+      onProbe: (query: string, target: 'codebase' | 'docs') => {
+        setSearchProbe(undefined)
+        setSearchProbeRunning(true)
+        props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+      },
+      onClear: () => props.transport.post({ type: 'clearSearchLog' } satisfies UiToHostMessage),
     },
   }
 

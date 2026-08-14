@@ -13,6 +13,7 @@ import {
 import { Select } from '../Select.js'
 import { IndexingSection, type IndexingSectionProps } from './IndexingSection.js'
 import { DispatcherSection, type DispatcherSectionProps } from './DispatcherSection.js'
+import { SearchActivity, type SearchActivityProps } from './SearchActivity.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { SecretField } from './SecretField.js'
 
@@ -39,6 +40,8 @@ export interface SearchTabProps {
   indexing: IndexingSectionProps
   /** Keeping tool schemas out of the prompt — same tab, since it is the other retrieval path. */
   dispatcher: DispatcherSectionProps
+  /** What the model has been searching for, and a box to try a query by hand. */
+  activity: SearchActivityProps
 }
 
 const BLANK: SearchConnectionSummary = {
@@ -560,6 +563,7 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
 
       <IndexingSection {...props.indexing} />
       <DispatcherSection {...props.dispatcher} />
+      <SearchActivity {...props.activity} />
     </div>
   )
 }

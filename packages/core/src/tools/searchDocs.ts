@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { Embedder } from '../rag/embedder.js'
 import { parseDocEntryId, schemaForTool, type DocEntryKind } from '../rag/toolDocs.js'
+import type { SearchObserver } from '../rag/searchLog.js'
 import type { VectorSearcher } from '../rag/vectorStore.js'
 import type { Skill } from '../skills/index.js'
 import type { Tool, ToolResult } from './types.js'
@@ -50,6 +51,14 @@ export interface SearchDocsOptions {
     embedder: Embedder
     index: string
   }
+  /**
+   * Records the query for the Search tab.
+   *
+   * This tool matters more than the others here: it silently falls back to lexical matching,
+   * and the model cannot tell the difference. Without the log, an index that is configured
+   * but never actually consulted looks exactly like one that is working.
+   */
+  observer?: SearchObserver
 }
 
 const DEFAULT_LIMIT = 5
@@ -122,8 +131,20 @@ export function createSearchDocsTool(options: SearchDocsOptions): Tool<SearchDoc
     parametersSchema: paramsSchema,
 
     async execute(params): Promise<ToolResult> {
+      const startedAt = Date.now()
       try {
         const { matches, via, note } = await runDocsSearch(options, params)
+
+        options.observer?.record({
+          at: startedAt,
+          source: 'search_docs',
+          query: params.query,
+          ...(options.retrieval !== undefined ? { collection: options.retrieval.index } : {}),
+          hits: matches.length,
+          elapsedMs: Date.now() - startedAt,
+          via,
+          ...(note !== undefined ? { error: note } : {}),
+        })
 
         if (matches.length === 0) {
           return {
@@ -152,7 +173,17 @@ export function createSearchDocsTool(options: SearchDocsOptions): Tool<SearchDoc
             .join('\n'),
         }
       } catch (error) {
-        return { content: error instanceof Error ? error.message : String(error), isError: true }
+        const message = error instanceof Error ? error.message : String(error)
+        options.observer?.record({
+          at: startedAt,
+          source: 'search_docs',
+          query: params.query,
+          ...(options.retrieval !== undefined ? { collection: options.retrieval.index } : {}),
+          hits: 0,
+          elapsedMs: Date.now() - startedAt,
+          error: message,
+        })
+        return { content: message, isError: true }
       }
     },
   }

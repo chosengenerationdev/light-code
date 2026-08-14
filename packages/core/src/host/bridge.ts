@@ -27,6 +27,7 @@ import {
   createSearchOpensearchTool,
   createSearchCodebaseTool,
   createSearchDocsTool,
+  SearchLog,
   createCallToolTool,
   createForgetDocsTool,
   PythonManager,
@@ -398,6 +399,15 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    * CLI priced, so `unpriced` records the gap rather than letting the total imply it is
    * complete when it is not.
    */
+  /**
+   * Every search the model ran this session.
+   *
+   * In memory and bounded. Retrieval is the one part of the product whose failures are quiet
+   * — a search that returns confident neighbours for a query it misunderstood looks exactly
+   * like one that worked — so the queries have to be visible somewhere to be judged at all.
+   */
+  const searchLog = new SearchLog(50, () => post({ type: 'searchLog', entries: [...searchLog.list()] }))
+
   let expertSpend = { usd: 0, consultations: 0, unpriced: 0 }
 
   /**
@@ -562,7 +572,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
      * and the model would keep reaching for it instead of using search_files.
      */
     if (codebase !== undefined) {
-      combined.register(createSearchCodebaseTool(codebase))
+      combined.register(createSearchCodebaseTool({ ...codebase, observer: searchLog }))
     }
     /*
      * `search_docs` is registered whenever the dispatcher is on, with or without a vector
@@ -582,6 +592,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
           listTools: () => combined.list(),
           listSkills: () => skills,
           ...(docs !== undefined ? { retrieval: docs } : {}),
+          observer: searchLog,
         }),
       )
     }
@@ -1686,6 +1697,74 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     }
   }
 
+  /**
+   * Runs a query by hand, through the same code path the model uses.
+   *
+   * Deliberately the *same* path rather than a simplified one. A panel that approximated the
+   * real search would prove something, just not the thing being debugged — the whole reason
+   * `runDocsSearch` was split out of the tool is so this cannot drift from it.
+   */
+  async function handleSearchProbe(query: string, target: 'codebase' | 'docs'): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const search = await resolveSearch(config)
+      const embedder = await resolveEmbedder(config)
+
+      if (target === 'codebase') {
+        const index = codebaseIndexName(config)
+        if (search === undefined || embedder === undefined || index === undefined) {
+          post({
+            type: 'searchProbe',
+            query,
+            text: '',
+            error: 'Searching the codebase needs a connection, an embedding model and an indexed workspace.',
+          })
+          return
+        }
+        const tool = createSearchCodebaseTool({
+          searcher: search.searcher,
+          embedder,
+          index,
+          connectionLabel: search.store.label,
+          observer: searchLog,
+        })
+        const result = await tool.execute({ query }, {} as ToolExecutionContext)
+        post({
+          type: 'searchProbe',
+          query,
+          text: result.content,
+          ...(result.isError === true ? { error: 'The search failed.' } : {}),
+        })
+        return
+      }
+
+      /*
+       * Built with the dispatcher forced on, so the probe searches the catalogue as it would
+       * be *used*. With it off nothing is dispatch-only and the probe would report an empty
+       * corpus, which says nothing about whether the index works.
+       */
+      const registry = currentToolRegistry(undefined, undefined, undefined, undefined, true)
+      const docsIndex = docsIndexName(config)
+      const tool = createSearchDocsTool({
+        listTools: () => registry.list(),
+        listSkills: () => skills,
+        ...(search !== undefined && embedder !== undefined && docsIndex !== undefined
+          ? { retrieval: { searcher: search.searcher, embedder, index: docsIndex } }
+          : {}),
+        observer: searchLog,
+      })
+      const result = await tool.execute({ query }, {} as ToolExecutionContext)
+      post({
+        type: 'searchProbe',
+        query,
+        text: result.content,
+        ...(result.isError === true ? { error: 'The search failed.' } : {}),
+      })
+    } catch (error) {
+      post({ type: 'searchProbe', query, text: '', error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleIndexDocs(): Promise<void> {
     const outcome = await indexDocs({ force: true })
     post({
@@ -2591,8 +2670,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleSetToolPermission(message.server, message.tool, message.permission)
     } else if (message.type === 'requestSearch') {
       void postSearch()
-      // The dispatcher lives on the Search tab, so its state ships with the same request.
+      // The dispatcher and the query log live on the Search tab, so they ship with the same
+      // request rather than needing three round trips to populate one panel.
       void postDispatcher()
+      post({ type: 'searchLog', entries: [...searchLog.list()] })
     } else if (message.type === 'saveSearchConnection') {
       void handleSaveSearchConnection(message.connection)
     } else if (message.type === 'deleteSearchConnection') {
@@ -2607,6 +2688,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleTestSearchConnection(message.connection)
     } else if (message.type === 'indexDocs') {
       void handleIndexDocs()
+    } else if (message.type === 'runSearchProbe') {
+      void handleSearchProbe(message.query, message.target)
+    } else if (message.type === 'clearSearchLog') {
+      searchLog.clear()
     } else if (message.type === 'setDispatcher') {
       void configManager
         .save('user', { retrieval: { dispatcher: message.enabled } })

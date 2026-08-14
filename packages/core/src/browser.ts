@@ -70,4 +70,6 @@ export type {
 
 // Type-only, so nothing from indexer.ts (which imports node:fs) reaches the bundle.
 export type { IndexProgress, IndexResult } from './rag/indexer.js'
+// Type-only: SearchLog itself is host state, but the entries cross the bridge.
+export type { SearchLogEntry, SearchLogSource } from './rag/searchLog.js'
 export type { PythonStatus } from './python/manager.js'

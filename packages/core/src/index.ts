@@ -158,6 +158,7 @@ export { createVectorSearcher, createVectorIndexWriter } from './rag/vectorStore
 export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'
+export { SearchLog, type SearchLogEntry, type SearchLogSource, type SearchObserver } from './rag/searchLog.js'
 export { chunkFile, looksLikeText, DEFAULT_CHUNK_OPTIONS, type Chunk, type ChunkOptions } from './rag/chunk.js'
 export {
   indexWorkspace,
