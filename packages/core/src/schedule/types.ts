@@ -73,14 +73,47 @@ export const scheduleSchema = z.object({
    * Control tools are always available regardless; they perform no work.
    */
   allowedTools: z.array(z.string()),
+  /**
+   * When the timer will next run this, in epoch ms.
+   *
+   * **Stored rather than derived on every tick.** A "when next?" function always answers with
+   * a future moment, so comparing it against the clock can never say "due" — which is exactly
+   * how every schedule came to silently never fire. Persisting the target makes the decision a
+   * plain comparison, and it survives a restart.
+   */
+  nextRunAt: z.number().optional(),
   /** Epoch ms. Absent until it has run once. */
   lastRunAt: z.number().optional(),
   lastResult: z.enum(['ok', 'error', 'cancelled']).optional(),
   lastSummary: z.string().optional(),
   /** The task this schedule last produced, so a notification can open it. */
   lastTaskId: z.string().optional(),
+  /**
+   * Recent runs, newest first and bounded.
+   *
+   * Kept on the schedule rather than derived from task history: a run's *task* can be deleted,
+   * and "it ran at 03:00 and failed" is worth keeping even when the transcript is gone. The
+   * cap exists because this lives in the config file — an unbounded log there would grow
+   * without limit and be rewritten on every run.
+   */
+  runs: z
+    .array(
+      z.object({
+        at: z.number(),
+        result: z.enum(['ok', 'error', 'cancelled']),
+        durationMs: z.number().optional(),
+        summary: z.string().optional(),
+        /** Absent once the task has been deleted from history. */
+        taskId: z.string().optional(),
+      }),
+    )
+    .optional(),
 })
 export type Schedule = z.infer<typeof scheduleSchema>
+export type ScheduleRun = NonNullable<Schedule['runs']>[number]
+
+/** How many runs a schedule remembers. Enough to spot a pattern, small enough for a config file. */
+export const MAX_REMEMBERED_RUNS = 20
 
 /** Persisted as a map so an id is unique by construction rather than by convention. */
 export const schedulesSchema = z.record(z.string(), scheduleSchema)

@@ -1,5 +1,23 @@
 # light-code-vscode
 
+## 0.20.1
+
+### Patch Changes
+
+- Schedules now actually fire, and each keeps a run log.
+
+  **Scheduled prompts never ran on their own.** The check asking whether one was due compared the
+  clock against "when does this next run?", and that question always answers with a moment in the
+  future — so the answer was always "not yet", for every schedule, forever. Run Now worked because
+  it skips the check entirely. A schedule now records when it is next due and the timer compares
+  against that.
+
+  Each schedule keeps its **last twenty runs** — when it ran, how long it took, whether it
+  succeeded, and what it said. Click **Log** on any of them to open that run's full transcript,
+  including its thinking and every tool call, **in an ordinary editor tab** rather than the
+  sidebar. A transcript is a document, and an editor reads, scrolls and searches one far better
+  than a panel a third the width.
+
 ## 0.20.0
 
 ### Minor Changes

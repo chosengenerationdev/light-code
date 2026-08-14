@@ -59,6 +59,8 @@ import {
   ScheduledApprovalGate,
   scheduledRunGuidance,
   nextFireTime,
+  isDue,
+  MAX_REMEMBERED_RUNS,
   type Schedule,
   createReadToolResultTool,
   deriveTitle,
@@ -2800,6 +2802,8 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void handleDeleteSchedule(message.id)
     } else if (message.type === 'setScheduleEnabled') {
       void handleSetScheduleEnabled(message.id, message.enabled)
+    } else if (message.type === 'openScheduleRun') {
+      void openRunTranscript(message.taskId, message.title)
     } else if (message.type === 'runScheduleNow') {
       void runSchedule(message.id, 'manual')
     } else if (message.type === 'requestSkills') {
@@ -2896,6 +2900,48 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     await openTask(taskId)
   }
 
+  /**
+   * Opens a stored task as a document, so a run can be read where files are read.
+   *
+   * Rendered from the same `toTranscript` the chat uses, so what appears in the editor is the
+   * conversation that happened rather than a second, differently-derived view of it — two
+   * renderings of one transcript would drift, which is §15's single-schema rule again.
+   */
+  async function openRunTranscript(taskId: string, title: string): Promise<void> {
+    const task = await taskStore.load(taskId)
+    if (task === undefined) {
+      ui.showWarning('That run\'s transcript is no longer stored — task history may have been cleared.')
+      return
+    }
+
+    const lines: string[] = []
+    for (const entry of toTranscript(task.messages)) {
+      if (entry.kind === 'text') {
+        lines.push(entry.role === 'user' ? `## Prompt\n\n${entry.content}` : `## Reply\n\n${entry.content}`)
+      } else if (entry.kind === 'reasoning') {
+        lines.push(`## Thinking\n\n${entry.content}`)
+      } else {
+        const call = entry.toolCall
+        lines.push(
+          [
+            `## Tool: ${call.name}${call.isError === true ? ' (failed)' : ''}`,
+            '',
+            '### Arguments',
+            '```json',
+            call.arguments,
+            '```',
+            ...(call.result !== undefined ? ['', '### Result', '```', call.result, '```'] : []),
+          ].join('\n'),
+        )
+      }
+    }
+
+    await ui.openDocument({
+      title,
+      content: lines.length > 0 ? lines.join('\n\n') : '_This run produced no messages._',
+    })
+  }
+
   // ------------------------------------------------------------------ schedules (§9b)
 
   /**
@@ -2942,7 +2988,12 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       // A blank id means "new". Generated here rather than in the UI so two panels cannot
       // mint the same one.
       const id = schedule.id.length > 0 ? schedule.id : createHash('sha256').update(`${schedule.name}:${String(Date.now())}`).digest('hex').slice(0, 12)
-      await saveSchedules({ ...schedules, [id]: { ...schedule, id } })
+      /*
+       * Re-armed on every save. An edited trigger must take effect now rather than after the
+       * next run, and a schedule created without this would have no `nextRunAt` and never fire.
+       */
+      const armed: Schedule = { ...schedule, id, nextRunAt: nextFireTime(schedule, Date.now()) }
+      await saveSchedules({ ...schedules, [id]: armed })
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -2960,10 +3011,14 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     const existing = schedules[id]
     if (existing === undefined) return
     /*
-     * Re-enabling resets the interval clock. Otherwise a schedule paused for a week is
-     * instantly overdue the moment it comes back, which is never what pausing meant.
+     * Re-enabling re-arms from now. Otherwise a schedule paused for a week is instantly overdue
+     * the moment it comes back, which is never what pausing meant. Pausing drops the target
+     * entirely so nothing can read a stale one as due.
      */
-    await saveSchedules({ ...schedules, [id]: { ...existing, enabled, ...(enabled ? { lastRunAt: Date.now() } : {}) } })
+    const next: Schedule = enabled
+      ? { ...existing, enabled, nextRunAt: nextFireTime(existing, Date.now()) }
+      : { ...existing, enabled, nextRunAt: undefined }
+    await saveSchedules({ ...schedules, [id]: next })
   }
 
   /**
@@ -3017,10 +3072,25 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
           ...latest,
           [id]: {
             ...current,
+            // Armed from completion, not from the start: a run slower than its own interval
+            // would otherwise be due again the instant it finished and never rest.
+            nextRunAt: nextFireTime(current, Date.now()),
             lastRunAt: startedAt,
             lastResult: result,
             ...(summary.length > 0 ? { lastSummary: summary.slice(0, 300) } : {}),
             ...(activeTaskId !== undefined ? { lastTaskId: activeTaskId } : {}),
+            // Newest first, and capped — this lives in the config file, so an unbounded log
+            // would grow forever and be rewritten on every run.
+            runs: [
+              {
+                at: startedAt,
+                result,
+                durationMs: Date.now() - startedAt,
+                ...(summary.length > 0 ? { summary: summary.slice(0, 300) } : {}),
+                ...(activeTaskId !== undefined ? { taskId: activeTaskId } : {}),
+              },
+              ...(current.runs ?? []),
+            ].slice(0, MAX_REMEMBERED_RUNS),
           },
         })
       } else {
@@ -3054,9 +3124,28 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       void (async () => {
         if (runningScheduleId !== undefined) return
         const now = Date.now()
-        for (const schedule of Object.values(await loadSchedules())) {
-          if (!schedule.enabled) continue
-          if (nextFireTime(schedule, now) <= now) {
+        const schedules = await loadSchedules()
+
+        /*
+         * Arm anything enabled that has no target — a schedule written before this field
+         * existed, or one whose config was hand-edited. Without it such a schedule is
+         * permanently not-due and silently never runs, which is the failure this whole
+         * mechanism replaced.
+         */
+        const unarmed = Object.values(schedules).filter(
+          (schedule) => schedule.enabled && schedule.nextRunAt === undefined,
+        )
+        if (unarmed.length > 0) {
+          const armed = { ...schedules }
+          for (const schedule of unarmed) {
+            armed[schedule.id] = { ...schedule, nextRunAt: nextFireTime(schedule, now) }
+          }
+          await saveSchedules(armed)
+          return
+        }
+
+        for (const schedule of Object.values(schedules)) {
+          if (isDue(schedule, now)) {
             await runSchedule(schedule.id, 'due')
             // One per tick: a second would have to wait for the first anyway, and it will be
             // due again on the next pass.

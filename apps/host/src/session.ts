@@ -116,6 +116,8 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
     },
     // Nothing to reveal: the browser UI is whatever tab the user already has open.
     revealPanel: async () => {},
+    // No editor to open one in. Logged so the content is not simply lost.
+    openDocument: async ({ title }) => post(`[info] ${title} is available in the task history`),
 
     /**
      * A plain recursive walk, since there is no editor index to borrow. Pruned at the

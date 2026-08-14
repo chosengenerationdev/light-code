@@ -18,28 +18,35 @@ import type { Schedule, ScheduleTrigger } from './types.js'
 const MINUTE = 60_000
 
 /**
- * Interval schedules count from the last run, not from a fixed epoch.
+ * When a schedule should next fire, counting from `from`.
  *
- * The alternative — firing on wall-clock multiples — means a run that finishes late is
- * immediately due again, so a slow job that takes longer than its interval never rests. Basing
- * it on completion guarantees the gap the user asked for actually exists between runs.
+ * **Takes an explicit `from` rather than reading the clock**, and that distinction is the whole
+ * bug this file once had. The original signature took `now` and always returned a moment
+ * strictly in the future — correct as an answer to "when next?", and useless as a due check,
+ * because `nextFireTime(schedule, now) <= now` is then false by construction. Every schedule
+ * silently never fired; only Run Now worked, because it skips the check.
+ *
+ * The fix is that a schedule *stores* its `nextRunAt`, computed once from the moment it was
+ * saved or last ran, and the timer compares the clock against that stored value. `isDue` below
+ * is the only thing that decides, and unlike the old expression it can be tested.
  */
-export function nextFireTime(schedule: Schedule, now: number): number {
+export function nextFireTime(schedule: Pick<Schedule, 'trigger'>, from: number): number {
   const trigger = schedule.trigger
+  if (trigger.kind === 'interval') return from + trigger.everyMinutes * MINUTE
+  return nextClockTime(trigger, from)
+}
 
-  if (trigger.kind === 'interval') {
-    const from = schedule.lastRunAt ?? now
-    const next = from + trigger.everyMinutes * MINUTE
-    /*
-     * A schedule that was due while VS Code was closed fires once, shortly after startup,
-     * rather than immediately or repeatedly. Immediately would mean every schedule firing at
-     * once on a morning launch; repeatedly would mean catching up on a weekend's worth of
-     * missed runs, which is never what anyone wants from a reminder.
-     */
-    return next <= now ? now + MINUTE : next
-  }
-
-  return nextClockTime(trigger, now)
+/**
+ * Whether the timer should run this schedule now.
+ *
+ * A schedule with no `nextRunAt` is not due — it has never been scheduled, and the bridge
+ * fills that in rather than guessing here. Treating "unknown" as "due" would fire every
+ * schedule the first time the extension loaded after an upgrade.
+ */
+export function isDue(schedule: Schedule, now: number): boolean {
+  if (!schedule.enabled) return false
+  if (schedule.nextRunAt === undefined) return false
+  return now >= schedule.nextRunAt
 }
 
 function nextClockTime(trigger: Extract<ScheduleTrigger, { kind: 'daily' | 'weekly' }>, now: number): number {
@@ -93,7 +100,9 @@ export function describeTrigger(trigger: ScheduleTrigger): string {
 
 export function describeNextRun(schedule: Schedule, now: number): string {
   if (!schedule.enabled) return 'Paused'
-  const next = nextFireTime(schedule, now)
+  // The stored time, not a freshly computed one: the list must show when this schedule will
+  // actually run, which is the same value the timer is waiting on.
+  const next = schedule.nextRunAt ?? nextFireTime(schedule, now)
   const minutes = Math.round((next - now) / MINUTE)
   if (minutes < 1) return 'Due now'
   if (minutes < 60) return `In ${String(minutes)} min`

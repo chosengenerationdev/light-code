@@ -77,8 +77,8 @@ export type { SearchLogEntry, SearchLogSource } from './rag/searchLog.js'
  * platform dependency, so the settings tab can compute "next run" and the risk warning
  * itself rather than round-tripping to the host for a countdown that ticks every 30 seconds.
  */
-export type { Schedule, ScheduleTrigger, Schedules } from './schedule/types.js'
+export type { Schedule, ScheduleTrigger, Schedules, ScheduleRun } from './schedule/types.js'
 export { riskyGroupsIn } from './schedule/types.js'
-export { describeTrigger, describeNextRun, nextFireTime } from './schedule/timing.js'
+export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedule/timing.js'
 export type { ScheduleToolInfo } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'

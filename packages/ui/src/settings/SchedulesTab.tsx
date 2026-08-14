@@ -1,7 +1,7 @@
 import type { Schedule, ScheduleTrigger, ScheduleToolInfo } from '@light-code/core/browser'
 import { describeNextRun, describeTrigger, riskyGroupsIn } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
+import { ChevronIcon, PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
 import { activeMentionQuery, insertMention } from '../mentions.js'
 import { Select } from '../Select.js'
 import {
@@ -36,6 +36,8 @@ export interface SchedulesTabProps {
    */
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void
+  /** Opens a past run's transcript in an editor tab, where a long one is actually readable. */
+  onOpenRun: (taskId: string, title: string) => void
 }
 
 const GROUP_LABELS: Record<string, string> = {
@@ -71,6 +73,7 @@ function blank(): Schedule {
 export function SchedulesTab(props: SchedulesTabProps): ReactElement {
   const [editing, setEditing] = useState<Schedule | undefined>(undefined)
   const [now, setNow] = useState(Date.now())
+  const [expanded, setExpanded] = useState<string | undefined>(undefined)
 
   // The "next run" column is a countdown; without this it freezes at whatever it said when
   // the tab opened, which reads as a stuck scheduler.
@@ -176,21 +179,95 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
 
               <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>
                 {describeTrigger(schedule.trigger)} · {describeNextRun(schedule, now)}
-                {schedule.lastRunAt !== undefined && (
-                  <>
-                    {' · last '}
-                    <span style={{ color: schedule.lastResult === 'error' ? colors.error : colors.muted }}>
-                      {schedule.lastResult ?? 'ok'}
-                    </span>{' '}
-                    {new Date(schedule.lastRunAt).toLocaleString()}
-                  </>
-                )}
               </div>
-              {schedule.lastSummary !== undefined && (
-                <div style={{ color: colors.muted, fontSize: 11, marginTop: 2, fontStyle: 'italic' }}>
-                  {schedule.lastSummary}
-                </div>
+
+              {(schedule.runs ?? []).length > 0 && (
+                <button
+                  type="button"
+                  className="lc-btn"
+                  aria-expanded={expanded === schedule.id}
+                  onClick={() => setExpanded(expanded === schedule.id ? undefined : schedule.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    marginTop: 4,
+                    padding: '2px 4px 2px 0',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: colors.muted,
+                    cursor: 'pointer',
+                    fontFamily,
+                    fontSize: 11,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'flex',
+                      transform: expanded === schedule.id ? 'rotate(90deg)' : 'none',
+                      transition: 'transform 190ms cubic-bezier(0.22, 0.85, 0.28, 1)',
+                    }}
+                  >
+                    <ChevronIcon />
+                  </span>
+                  {(schedule.runs ?? []).length} run{(schedule.runs ?? []).length === 1 ? '' : 's'}
+                </button>
               )}
+
+              {expanded === schedule.id &&
+                (schedule.runs ?? []).map((run, index) => (
+                  <div
+                    key={`${String(run.at)}-${String(index)}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 6,
+                      padding: '3px 0 3px 18px',
+                      fontSize: 11,
+                      color: colors.muted,
+                    }}
+                  >
+                    <span
+                      title={run.result}
+                      style={{ color: run.result === 'error' ? colors.error : colors.accent, flexShrink: 0 }}
+                    >
+                      {run.result === 'error' ? '✗' : '✓'}
+                    </span>
+                    <span style={{ flexShrink: 0 }}>{new Date(run.at).toLocaleString()}</span>
+                    {run.durationMs !== undefined && (
+                      <span style={{ flexShrink: 0 }}>{(run.durationMs / 1000).toFixed(1)}s</span>
+                    )}
+                    {run.summary !== undefined && (
+                      <span
+                        style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={run.summary}
+                      >
+                        {run.summary}
+                      </span>
+                    )}
+                    {/*
+                      Opens in an editor tab rather than the sidebar. A run's transcript is a
+                      document — read, scrolled, searched — and an editor does all of that far
+                      better than a panel a third the width.
+                    */}
+                    {run.taskId !== undefined && (
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
+                        title="Open this run's full transcript in an editor tab"
+                        onClick={() =>
+                          props.onOpenRun(
+                            run.taskId as string,
+                            `${schedule.name} — ${new Date(run.at).toLocaleString()}`,
+                          )
+                        }
+                      >
+                        Log
+                      </button>
+                    )}
+                  </div>
+                ))}
             </div>
           ))}
         </div>

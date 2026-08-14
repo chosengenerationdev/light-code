@@ -31,6 +31,21 @@ export function createVSCodeHostServices(
       return chosen === action
     },
 
+    async openDocument({ title, content, language }: { title: string; content: string; language?: string }) {
+      /*
+       * An untitled in-memory document rather than a temp file on disk. Nothing to clean up,
+       * nothing left behind after a crash, and no path for the user to wonder about — and a
+       * transcript is not something they asked to have written anywhere.
+       */
+      const document = await vscode.workspace.openTextDocument({
+        content: `# ${title}\n\n${content}`,
+        language: language ?? 'markdown',
+      })
+      // Beside the panel rather than replacing it, and preview:false so opening a second run
+      // does not silently replace the first in the same tab.
+      await vscode.window.showTextDocument(document, { preview: false })
+    },
+
     async revealPanel() {
       // The view's own focus command, contributed by the `views` entry in package.json. Using
       // it rather than a custom command means VS Code handles the container being collapsed.

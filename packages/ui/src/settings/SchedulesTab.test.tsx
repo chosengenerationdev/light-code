@@ -47,6 +47,7 @@ function render(schedules: Schedule[] = [], saved: Schedule[] = []): void {
         onRunNow={() => {}}
         mentionCandidates={[]}
         onQueryMentions={() => {}}
+        onOpenRun={() => {}}
       />,
     ),
   )

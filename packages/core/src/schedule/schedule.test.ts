@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { Tool } from '../tools/types.js'
 import { filterToolsForSchedule, registryForSchedule, ScheduledApprovalGate, scheduledRunGuidance } from './runner.js'
-import { describeNextRun, describeTrigger, nextFireTime } from './timing.js'
+import { describeNextRun, describeTrigger, isDue, nextFireTime } from './timing.js'
 import { riskyGroupsIn, scheduleSchema, type Schedule } from './types.js'
 
 function tool(name: string, group: Tool['group'] = 'read'): Tool {
@@ -25,27 +25,60 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 const WEDNESDAY_NOON = new Date(2026, 7, 12, 12, 0, 0, 0).getTime()
 
 describe('nextFireTime — interval', () => {
-  /**
-   * Counted from the last run, not from a fixed epoch. Firing on wall-clock multiples means a
-   * job that overruns its interval is immediately due again and never rests.
-   */
-  it('counts from the last run', () => {
-    const at = nextFireTime(schedule({ lastRunAt: WEDNESDAY_NOON }), WEDNESDAY_NOON + 60_000)
-    expect(at).toBe(WEDNESDAY_NOON + 60 * 60_000)
-  })
-
-  it('counts from now when it has never run', () => {
+  it('counts forward from the moment given', () => {
     expect(nextFireTime(schedule(), WEDNESDAY_NOON)).toBe(WEDNESDAY_NOON + 60 * 60_000)
   })
 
+  it('is a pure function of `from`, never of the clock', () => {
+    expect(nextFireTime(schedule(), 0)).toBe(60 * 60_000)
+  })
+})
+
+/**
+ * **The bug this replaced, and the reason it survived a full test suite.**
+ *
+ * The timer used to ask `nextFireTime(schedule, now) <= now`. That function always answers with
+ * a moment strictly in the future — correct for "when next?", and false by construction as a
+ * due check. Every schedule silently never fired; only Run Now worked, because it skips the
+ * check entirely.
+ *
+ * `nextFireTime` was tested thoroughly and was never wrong. Nothing tested the decision that
+ * used it, which is what these do.
+ */
+describe('isDue', () => {
+  it('is true once the stored time has passed', () => {
+    expect(isDue(schedule({ nextRunAt: WEDNESDAY_NOON - 1 }), WEDNESDAY_NOON)).toBe(true)
+    expect(isDue(schedule({ nextRunAt: WEDNESDAY_NOON }), WEDNESDAY_NOON)).toBe(true)
+  })
+
+  it('is false before it', () => {
+    expect(isDue(schedule({ nextRunAt: WEDNESDAY_NOON + 1 }), WEDNESDAY_NOON)).toBe(false)
+  })
+
+  it('is false when paused, however overdue', () => {
+    expect(isDue(schedule({ enabled: false, nextRunAt: 0 }), WEDNESDAY_NOON)).toBe(false)
+  })
+
+  /** Otherwise every existing schedule fires at once the first time a new build loads. */
+  it('is false when never armed, rather than treating unknown as due', () => {
+    expect(isDue(schedule(), WEDNESDAY_NOON)).toBe(false)
+  })
+
   /**
-   * A schedule due while VS Code was closed fires once, shortly after startup — never
-   * immediately, or a morning launch fires every schedule at once, and never repeatedly to
-   * catch up on a weekend of missed runs.
+   * The end-to-end property the old code failed. Arm a schedule the way the bridge does, and
+   * it must actually become due once its interval has elapsed.
    */
-  it('defers a missed run by a minute rather than firing at once', () => {
-    const missed = schedule({ lastRunAt: WEDNESDAY_NOON - 10 * 60 * 60_000 })
-    expect(nextFireTime(missed, WEDNESDAY_NOON)).toBe(WEDNESDAY_NOON + 60_000)
+  it('becomes due after the interval it was armed with', () => {
+    const armed = schedule({ nextRunAt: nextFireTime(schedule(), WEDNESDAY_NOON) })
+    expect(isDue(armed, WEDNESDAY_NOON + 59 * 60_000)).toBe(false)
+    expect(isDue(armed, WEDNESDAY_NOON + 61 * 60_000)).toBe(true)
+  })
+
+  it('becomes due for a daily schedule once its time arrives', () => {
+    const trigger = { kind: 'daily' as const, hour: 18, minute: 0 }
+    const armed = schedule({ trigger, nextRunAt: nextFireTime({ trigger }, WEDNESDAY_NOON) })
+    expect(isDue(armed, WEDNESDAY_NOON)).toBe(false)
+    expect(isDue(armed, new Date(2026, 7, 12, 18, 0, 1).getTime())).toBe(true)
   })
 })
 

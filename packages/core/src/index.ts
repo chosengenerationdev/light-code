@@ -164,11 +164,13 @@ export {
   scheduleTriggerSchema,
   riskyGroupsIn,
   ALWAYS_AVAILABLE_TO_SCHEDULES,
+  MAX_REMEMBERED_RUNS,
+  type ScheduleRun,
   type Schedule,
   type Schedules,
   type ScheduleTrigger,
 } from './schedule/types.js'
-export { nextFireTime, describeTrigger, describeNextRun } from './schedule/timing.js'
+export { nextFireTime, isDue, describeTrigger, describeNextRun } from './schedule/timing.js'
 export {
   filterToolsForSchedule,
   registryForSchedule,

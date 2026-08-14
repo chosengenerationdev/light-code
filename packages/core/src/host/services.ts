@@ -56,6 +56,17 @@ export interface HostUi {
    * that is not there — the click would appear to do nothing.
    */
   revealPanel(): Promise<void>
+  /**
+   * Opens text in an ordinary editor tab, read-only.
+   *
+   * A scheduled run's transcript is a document, not a conversation to continue — you read it,
+   * scroll it, search it and copy from it, all of which an editor does far better than a
+   * sidebar a third the width. Markdown so the editor can preview it.
+   *
+   * Like every other `HostUi` method it may do nothing (§19): a host with no editor simply
+   * does not open one, and no caller depends on it having happened.
+   */
+  openDocument(options: { title: string; content: string; language?: string }): Promise<void>
   showOpenDialog(options: OpenDialogOptions): Promise<string | undefined>
   showSaveDialog(options: { defaultName: string; extensions?: string[] | undefined }): Promise<string | undefined>
   /**

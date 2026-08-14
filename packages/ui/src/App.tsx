@@ -816,6 +816,8 @@ export function App(props: AppProps): ReactElement {
               // The same candidates the composer uses; the host does not care who asked.
               mentionCandidates,
               onQueryMentions: queryMentions,
+              onOpenRun: (taskId: string, title: string) =>
+                props.transport.post({ type: 'openScheduleRun', taskId, title } satisfies UiToHostMessage),
             }}
             python={{
               status: pythonStatus,

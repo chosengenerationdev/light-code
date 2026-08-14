@@ -322,6 +322,8 @@ export type UiToHostMessage =
   | { type: 'deleteSchedule'; id: string }
   | { type: 'setScheduleEnabled'; id: string; enabled: boolean }
   | { type: 'runScheduleNow'; id: string }
+  /** Opens a past run's transcript in an editor tab rather than the sidebar. */
+  | { type: 'openScheduleRun'; taskId: string; title: string }
   /** The user removing one directly. The model's own delete goes through the approval gate. */
   | { type: 'deleteSkillFile'; name: string }
   /** Replaces the whole skills folder configuration. Empty `dir` restores the default. */
