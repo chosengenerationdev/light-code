@@ -565,8 +565,20 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     combined.register(
       createNotifyTool({
         notify: (message, level) => {
-          if (level === 'warning') ui.showWarning(message)
-          else ui.showInfo(message)
+          /*
+           * From a scheduled run the notification is the only thing the user will see, so it
+           * carries a way into the transcript. Captured at call time rather than at
+           * registration: the task id changes with every run, and the registry is rebuilt per
+           * turn but the closure would otherwise still point at whatever was open when it was
+           * built.
+           */
+          const taskId = runningScheduleId !== undefined ? activeTaskId : undefined
+          if (taskId === undefined) {
+            if (level === 'warning') ui.showWarning(message)
+            else ui.showInfo(message)
+            return
+          }
+          void openFromNotification(message, level, taskId)
         },
       }),
     )
@@ -2870,6 +2882,20 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
   })()
 
 
+  /**
+   * Notifies, and opens the run's transcript if the user takes the action.
+   *
+   * The panel is revealed first. A notification can arrive with the view closed, and `openTask`
+   * posts to a webview that is not there — the click would silently do nothing, which is worse
+   * than not offering it.
+   */
+  async function openFromNotification(message: string, level: 'info' | 'warning', taskId: string): Promise<void> {
+    const open = await ui.showActionMessage(message, 'Open', level)
+    if (!open) return
+    await ui.revealPanel()
+    await openTask(taskId)
+  }
+
   // ------------------------------------------------------------------ schedules (§9b)
 
   /**
@@ -2976,7 +3002,12 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
        * Surfaced, not swallowed. An unattended failure nobody sees is the worst outcome here —
        * the schedule looks like it is working right up until someone needs its output.
        */
-      ui.showWarning(`Scheduled run "${schedule.name}" failed: ${summary}`)
+      const failedTask = activeTaskId
+      if (failedTask !== undefined) {
+        void openFromNotification(`Scheduled run "${schedule.name}" failed: ${summary}`, 'warning', failedTask)
+      } else {
+        ui.showWarning(`Scheduled run "${schedule.name}" failed: ${summary}`)
+      }
     } finally {
       runningScheduleId = undefined
       const latest = await loadSchedules()

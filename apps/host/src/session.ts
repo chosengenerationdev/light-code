@@ -105,6 +105,17 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
     showWarning: (message) => post(`[warn] ${message}`),
     showOpenDialog: async () => undefined,
     showSaveDialog: async () => undefined,
+    /*
+     * Logged, and the action declined. A terminal has nowhere to put a clickable notification,
+     * and `HostUi`'s contract is that no method may be load-bearing (§19) — so resolving false
+     * is the honest answer rather than a reason to block the feature here.
+     */
+    showActionMessage: async (message, _action, level) => {
+      post(`[${level}] ${message}`)
+      return false
+    },
+    // Nothing to reveal: the browser UI is whatever tab the user already has open.
+    revealPanel: async () => {},
 
     /**
      * A plain recursive walk, since there is no editor index to borrow. Pruned at the

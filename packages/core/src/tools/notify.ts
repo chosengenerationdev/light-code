@@ -31,10 +31,17 @@ export function createNotifyTool(options: NotifyOptions): Tool<NotifyParams> {
   return {
     name: 'notify',
     group: 'always',
+    /*
+     * The "unless asked" clause is load-bearing, and is the same lesson 0.3.1 recorded about
+     * the expert: frugality guidance written for the model's own initiative gets applied to
+     * direct instructions too, and the user is left arguing with an assistant that refuses to
+     * do a simple thing it plainly can. "Send me a test notification" must just work.
+     */
     description:
       'Raise a notification the user will see even when the Light Code panel is closed. ' +
-      'Intended for scheduled runs reporting something that needs attention. ' +
-      'In an ordinary conversation the user is already reading your reply — do not use it there.',
+      'If the user asks you to notify them, or to test notifications, do it — that is a direct ' +
+      'instruction. On your own initiative use it only from a scheduled run reporting something ' +
+      'that needs attention; in an ordinary conversation they are already reading your reply.',
     parametersSchema: paramsSchema,
 
     async execute(params): Promise<ToolResult> {

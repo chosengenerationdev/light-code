@@ -25,6 +25,18 @@ export function createVSCodeHostServices(
     showInfo: (message) => void vscode.window.showInformationMessage(`Light Code: ${message}`),
     showWarning: (message) => void vscode.window.showWarningMessage(`Light Code: ${message}`),
 
+    async showActionMessage(message: string, action: string, level: 'info' | 'warning') {
+      const show = level === 'warning' ? vscode.window.showWarningMessage : vscode.window.showInformationMessage
+      const chosen = await show(`Light Code: ${message}`, action)
+      return chosen === action
+    },
+
+    async revealPanel() {
+      // The view's own focus command, contributed by the `views` entry in package.json. Using
+      // it rather than a custom command means VS Code handles the container being collapsed.
+      await vscode.commands.executeCommand('lightCode.chatView.focus')
+    },
+
     async showOpenDialog(options: OpenDialogOptions) {
       const uris = await vscode.window.showOpenDialog({
         canSelectFiles: options.kind === 'file',

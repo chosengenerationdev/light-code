@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.19.0
+
+### Minor Changes
+
+- Scheduled prompts, and notifications.
+
+  A new **Schedules** tab runs a prompt on its own — every hour, daily at a time, or on chosen
+  weekdays — and leaves a normal task you can read afterwards.
+
+  **You choose exactly which tools each schedule may use.** Every tool is listed, including the
+  ones from MCP servers and your Python tools, with a search box for when that list gets long.
+  Nothing is ticked to begin with. A tool you do not tick is not offered to the run at all, so
+  installing a server later never quietly widens a schedule that already exists — and a schedule
+  allowed to post to one place cannot also delete from another.
+
+  That matters because nobody is present to approve anything while it runs. If a selection
+  includes something that edits files, runs commands or reaches an MCP server, the editor says so
+  plainly: anything the run reads could contain instructions, and it would follow them unwatched.
+
+  Runs never overlap, a run missed while VS Code was closed happens once shortly after you open
+  it rather than repeatedly catching up, and pausing a schedule keeps its history. Schedules only
+  fire while VS Code is running — there is no background service, and the tab says so.
+
+  **A `notify` tool** raises a notification you see even with the panel closed, with a button that
+  opens the run that sent it. Ask for one directly — "send me a test notification" — and it will.
+
+  Also: the settings tabs are now icons with the current one named, so they no longer overflow
+  into a scrollbar, and your last message stays pinned at the top once it scrolls out of view.
+
 ## 0.18.0
 
 ### Minor Changes

@@ -36,6 +36,26 @@ export interface HostUi {
   /** Transient, dismissable. Never used to report something the UI must act on. */
   showInfo(message: string): void
   showWarning(message: string): void
+  /**
+   * A message with one action, resolving true when the action was taken.
+   *
+   * Needed by scheduled runs (§9b): a job that finds something at 3am is only useful if the
+   * notification leads somewhere, and a toast with no way into the transcript makes the user
+   * hunt through history for a task they cannot name.
+   *
+   * A `Promise<boolean>` rather than a callback so a host with no notion of an actionable
+   * message can simply resolve false — the contract that no `HostUi` method may be
+   * load-bearing (§19). The browser host will do exactly that until it has somewhere to put
+   * one.
+   */
+  showActionMessage(message: string, action: string, level: 'info' | 'warning'): Promise<boolean>
+  /**
+   * Brings the panel to the front.
+   *
+   * A notification can arrive while the view is closed, and opening a task posts to a webview
+   * that is not there — the click would appear to do nothing.
+   */
+  revealPanel(): Promise<void>
   showOpenDialog(options: OpenDialogOptions): Promise<string | undefined>
   showSaveDialog(options: { defaultName: string; extensions?: string[] | undefined }): Promise<string | undefined>
   /**
