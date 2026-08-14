@@ -170,6 +170,7 @@ export {
   type DocumentKind,
 } from './documents/extract.js'
 export { ZipArchive, ZipError } from './documents/zip.js'
+export { readTail, readLineWindow, countLines, formatBytes, SMALL_FILE_BYTES, type FilePart } from './tools/largeFile.js'
 export { SearchLog, type SearchLogEntry, type SearchLogSource, type SearchObserver } from './rag/searchLog.js'
 export { chunkFile, looksLikeText, DEFAULT_CHUNK_OPTIONS, type Chunk, type ChunkOptions } from './rag/chunk.js'
 export {

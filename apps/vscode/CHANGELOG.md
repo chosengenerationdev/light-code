@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.18.0
+
+### Minor Changes
+
+- Read large logs a part at a time.
+
+  `read_file` gains **tail**, which is how you actually open a log — the end, where the recent
+  events are. It reads only the bytes it needs, so the last two hundred lines of a multi-gigabyte
+  file arrive as quickly as from a small one.
+
+  This also fixes a real limit rather than merely a slow path. `read_file` previously loaded the
+  whole file before applying offset and limit, so on a very large log it did not just use a lot
+  of memory: it exceeded the maximum string length and failed outright, and offset could not help
+  because the whole read happened first. Windows are now read directly.
+
+  A file too large to sensibly read at once is **refused with its size, its line count, and three
+  concrete ways in** — tail, a window from the start, and a window near the end. Quietly
+  returning the first few hundred lines would look exactly like the whole file and be reasoned
+  about as if it were.
+
 ## 0.17.0
 
 ### Minor Changes

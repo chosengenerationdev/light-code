@@ -13,6 +13,16 @@ class RealFileSystem implements FileSystem {
   async readBytes(target: string): Promise<Buffer> {
     return fs.readFile(target)
   }
+  async readBytesSlice(target: string, start: number, end: number): Promise<Buffer> {
+    const handle = await fs.open(target, 'r')
+    try {
+      const buffer = Buffer.alloc(Math.max(0, end - start))
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, start)
+      return buffer.subarray(0, bytesRead)
+    } finally {
+      await handle.close()
+    }
+  }
   async writeFile(target: string, contents: string): Promise<void> {
     await fs.writeFile(target, contents, 'utf8')
   }
