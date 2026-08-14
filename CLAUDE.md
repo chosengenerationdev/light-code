@@ -835,7 +835,8 @@ no native picker, so `showOpenDialog` returns `undefined` — indistinguishable 
 and every path field stays typeable. That is why the Browse buttons were built as an
 addition to the text input rather than a replacement for it.
 
-**Current phase:** **Shipped.** Published to the Visual Studio Marketplace by manual upload —
+**Current phase:** **Shipped.** Junior mode (§12b) is the newest feature; see the handover at
+the end of this file. Published to the Visual Studio Marketplace by manual upload —
 the Azure DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and
 the Release workflow has never run. **0.8.1 was live as of 2026-08-12; 0.10.0 was uploaded on
 2026-08-13 and had not yet appeared in the gallery.**
@@ -959,7 +960,104 @@ the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSc
 
 ---
 
-## SESSION HANDOVER — rewritten 2026-08-14 (second session that day), read this first
+## SESSION HANDOVER — 2026-08-14 (third session that day), read this first
+
+**Where the code is.** `main` at `a11e850`, clean. **652 tests**, 1 skipped. Lint, build,
+typecheck, invariant-4 and the VSIX smoke test all green. Packaged artifact is
+`apps/vscode/light-code-vscode-0.13.0.vsix`, and its contents were verified by extracting it
+and grepping both bundles — not by trusting timestamps, which misled once this session.
+
+**Marketplace was on 0.11.0** (queried 2026-08-14). 0.12.0 was versioned and never published;
+0.13.0 supersedes it. **Query the gallery, never repeat a version from this file** — that note
+has been stale three times now.
+
+### The single most important fact for the next session
+
+**Nothing built today has ever been rendered.** Six user-facing features shipped into the VSIX
+— theme and motion, the custom `Select`, the expert colour, Junior mode, the cost meter, the
+Appearance tab — and the webview has never painted once. The smoke test stubs `vscode` and
+calls `activate()`; it does not mount React. There is no DOM test environment in this repo
+(`environment: 'node'`, glob `*.test.ts`), so **no component here has ever been render-tested**,
+which predates today but is why the dropdown fix had to be made twice.
+
+Before building anything else on top, install the VSIX and open the panel. Most likely to be
+wrong, in order: the `Select` popup position (it is `position: fixed` with a flip-upward rule,
+opened from the bottom of a narrow sidebar); the Python and Skills tabs (still never opened);
+green against a light editor theme.
+
+### Junior mode (0.13.0) — and the measurement that shaped it
+
+A cheap model works, the Claude CLI expert plans. `JUNIOR_MODE` in `modes/builtin.ts`; the
+guidance text *is* the feature.
+
+**Measured against CLI 2.1.227, not assumed** — a cold consultation pays
+`cache_creation_input_tokens: 18643` to establish Claude Code's own prompt and tools, costing
+**$0.187 to reply "OK"**. Resuming the session reads that same cache and costs **$0.0099**.
+Nineteen times cheaper. `consultExpert` captures `session_id` and passes `--resume`; the
+session is task-scoped and reset with the task; a stale id degrades to a cold start rather
+than failing the turn. Cache TTL is 1 hour (`ephemeral_1h_input_tokens`), so this holds while
+a session is active.
+
+**This inverted the design.** The first cost analysis said "ration consultations severely",
+which was true only because every one was a cold start. With a session the first is expensive
+and the rest are cheap, so the guidance now says *make the first one count and never repeat
+context afterwards*. Do not re-tighten it back to "consult as little as possible" without
+re-measuring.
+
+**The expert cannot reach any Light Code tool.** It is a separate CLI process holding only
+`Read`/`Grep`/`Glob` — no MCP tool, no Python tool, no `search_docs`, and no way to discover
+they exist. `expert/briefing.ts` sends an inventory once per session: **names and one-line
+descriptions, never JSON schemas** (forty tools is a few hundred tokens as a list and
+thousands as schemas), sent only on a cold session because a resumed expert still has it.
+
+**Cost is metered in the chat**, above the token bar, scoped to the task. Failed consultations
+are counted — one that errored partway can still have cost money — and unpriced ones are
+tracked separately rather than added as zero, so the total never looks exact while being
+incomplete. **Estimates of what the mode saves are unmeasured**: roughly 40–70% on a typical
+task, order-of-magnitude only. The meter exists so this stops being a guess.
+
+### Still inert: the dispatcher
+
+`call_tool`, `search_docs`, `dispatchOnly` registration and `buildDocCorpus` all exist and are
+tested (30 tests), and **nothing in `host/bridge.ts` registers them**. Consequence worth
+knowing: the expert briefing asks `combined.get('search_docs')`, gets `undefined`, and tells
+the expert to ask the junior directly instead of naming `search_docs`. It degrades correctly,
+but the full loop (expert → "look it up" → junior fetches → reports back) needs the wiring.
+
+Remaining work, in order:
+1. Config: a `retrieval` block (user-scope only — it names an index and an embedder), off by default.
+2. Bridge: register MCP and Python tools `dispatchOnly`; register `call_tool` and `search_docs`;
+   build the docs index from `buildDocCorpus`.
+3. Eviction — the user asked to drop retrieved docs back out of context. `context/supersede.ts`
+   already does this for superseded `read_file` results and is where to extend.
+4. A **Search tab panel** (user-requested): recent queries and an ad-hoc box. `runDocsSearch` is
+   already split out from the tool so the panel runs the identical path.
+
+**Do not** index a tool already advertised in the prompt, and do not let `search_docs` serve a
+schema from the index — both load-bearing, explained in `rag/toolDocs.ts`.
+
+### UI conventions introduced today — read before touching `packages/ui`
+
+- **`styles.ts` is a constructable stylesheet (`adoptedStyleSheets`), deliberately.** It is
+  CSSOM, so it is not subject to `style-src`, and the webview keeps `default-src 'none'` with
+  no `style-src` entry. **Do not convert it to a `<style>` tag or a bundled `.css` import** —
+  either reintroduces the allowance it exists to avoid.
+- **Hover is an inset `box-shadow`, not `background-color`.** Inline styles beat stylesheet
+  rules and nearly every button sets its own background inline, so a `background-color` rule
+  is silently ignored on exactly the buttons that matter.
+- **There are no native `<select>` elements left.** A dropdown popup paints its selected row
+  with the system highlight, which no CSS reaches, and macOS ignores CSS in that popup
+  entirely. `Select.tsx` renders its own listbox. Do not reintroduce `<select>`.
+- Two colour families, `accent` and `expert`, both written by the shared `writeTokens` so
+  their token shapes cannot drift. Text colour on either is *computed* (`contrastFor`),
+  because the default accent is green and white-on-green fails.
+- The expert colour marks **authorship**: an `ask_expert` result is Claude's words and is
+  coloured as such; a merely `expertInformed` reply is the primary model's own text and gets a
+  small chip instead. Do not collapse the two.
+
+---
+
+## Previous handover — 2026-08-14 (second session), superseded above
 
 **Three things changed today. The first two close long-standing unknowns.**
 
