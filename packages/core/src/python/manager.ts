@@ -56,6 +56,15 @@ export interface PythonManagerOptions {
   /** Per-user storage; the venv lives here, outside the workspace. */
   storageDir: string
   logger: Logger
+  /**
+   * Fired after the registry reloads — a tool created, updated or deleted.
+   *
+   * The manager already refreshed itself on those events, but nothing outside it knew. The
+   * host needs to, because the tool list is part of the documentation corpus and part of
+   * what the Python tab displays; without this a tool deleted mid-chat stayed in both until
+   * something else happened to refresh them.
+   */
+  onToolsChanged?: () => void
 }
 
 export class PythonManager {
@@ -210,6 +219,7 @@ export class PythonManager {
     const loaded = await loadRegistry(this.toolsDir, this.worker, this.options.logger)
     this.registered = loaded.tools
     this.issues = loaded.issues
+    this.options.onToolsChanged?.()
   }
 
   /**

@@ -9,6 +9,8 @@ export interface EmbedderState {
   dimensions?: number
   indexName?: string
   indexNameIsCustom?: boolean
+  indexPrefix?: string
+  defaultIndexPrefix?: string
   indexedFiles: number
 }
 
@@ -26,7 +28,7 @@ export interface IndexingSectionProps {
   /** Increments when the host confirms the save reached disk. */
   savedTick: number
   onRequestModels: (profileId: string) => void
-  onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string) => void
+  onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string, indexPrefix: string) => void
   onStartIndexing: () => void
   onCancelIndexing: () => void
 }
@@ -47,6 +49,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
   const [model, setModel] = useState('')
   const [dimensions, setDimensions] = useState('')
   const [indexName, setIndexName] = useState('')
+  const [indexPrefix, setIndexPrefix] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -57,6 +60,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
     setDimensions(props.embedder?.dimensions !== undefined ? String(props.embedder.dimensions) : '')
     // Only a *chosen* name populates the field; a derived one stays as the placeholder.
     setIndexName(props.embedder?.indexNameIsCustom === true ? (props.embedder.indexName ?? '') : '')
+    setIndexPrefix(props.embedder?.indexPrefix ?? '')
   }, [props.embedder])
 
   /*
@@ -182,6 +186,27 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
       </div>
 
       <div style={{ marginBottom: 10 }}>
+        <label htmlFor="lc-emb-prefix" style={labelStyle()}>
+          Index name prefix
+        </label>
+        <input
+          id="lc-emb-prefix"
+          type="text"
+          value={indexPrefix}
+          spellCheck={false}
+          placeholder={props.embedder?.defaultIndexPrefix ?? 'light-code'}
+          onChange={(event) => setIndexPrefix(event.target.value)}
+          style={textFieldStyle()}
+        />
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+          Front of both derived names — the codebase index and the <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>-docs</code>{' '}
+          one — so a shared cluster shows at a glance whose collections are whose. Lowercase letters,
+          digits, dot, dash and underscore. Changing it points at <em>new</em>, empty collections;
+          the old ones keep their data until you delete them in OpenSearch.
+        </span>
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
         <label htmlFor="lc-emb-index" style={labelStyle()}>
           Index name
         </label>
@@ -207,7 +232,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           type="button"
           style={secondaryButtonStyle()}
           disabled={!configured}
-          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim())}
+          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim(), indexPrefix.trim())}
         >
           Save embedder
         </button>

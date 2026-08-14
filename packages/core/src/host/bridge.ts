@@ -207,7 +207,14 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
    * turns it on — §13 requires the feature not to exist until someone enables it, and an
    * inert object is easier to reason about than a conditionally-undefined one.
    */
-  const python = new PythonManager({ workspaceRoot, storageDir, logger })
+  const python = new PythonManager({
+    workspaceRoot,
+    storageDir,
+    logger,
+    // A tool created, updated or deleted during a chat changes both the Python tab and the
+    // documentation corpus. `postPython` refreshes the tab and schedules the reindex.
+    onToolsChanged: () => void postPython(),
+  })
 
   /**
    * Skills, reloaded per turn.
@@ -1442,6 +1449,12 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     }
   }
 
+  /**
+   * Front of every derived index name, overridable so a shared cluster can distinguish teams.
+   * Changing it points at *new* collections — the old ones keep their data until deleted.
+   */
+  const DEFAULT_INDEX_PREFIX = 'light-code'
+
   /** The index Light Code writes this workspace into. User-set or derived; never model-supplied. */
   function codebaseIndexName(config?: LightCodeConfig): string | undefined {
     const chosen = config?.embedder?.indexName?.trim()
@@ -1451,7 +1464,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     // so the same project reindexes into the same place. Hashed because an index name
     // cannot contain most path characters.
     const digest = createHash('sha256').update(path.resolve(workspaceRoot).toLowerCase()).digest('hex').slice(0, 16)
-    return `light-code-${digest}`
+    return `${config?.embedder?.indexPrefix ?? DEFAULT_INDEX_PREFIX}-${digest}`
   }
 
   /**
@@ -1853,6 +1866,10 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
       ...(config.embedder?.model !== undefined ? { model: config.embedder.model } : {}),
       ...(config.embedder?.dimensions !== undefined ? { dimensions: config.embedder.dimensions } : {}),
       ...(index !== undefined ? { indexName: index } : {}),
+      // The configured value, not the resolved one, so the field round-trips what was typed
+      // rather than replacing a blank with the default and looking like it was set.
+      ...(config.embedder?.indexPrefix !== undefined ? { indexPrefix: config.embedder.indexPrefix } : {}),
+      defaultIndexPrefix: DEFAULT_INDEX_PREFIX,
       indexedFiles,
     })
   }
@@ -1862,6 +1879,7 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     model: string,
     dimensions: number,
     indexName?: string,
+    indexPrefix?: string,
   ): Promise<void> {
     try {
       await configManager.save('user', {
@@ -1870,10 +1888,19 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
           model,
           dimensions,
           ...(indexName !== undefined && indexName.trim().length > 0 ? { indexName: indexName.trim() } : {}),
+          // Absent rather than empty when cleared, so the default applies instead of a name
+          // beginning with a stray dash.
+          ...(indexPrefix !== undefined && indexPrefix.trim().length > 0 ? { indexPrefix: indexPrefix.trim() } : {}),
         },
       })
       const { config } = await configManager.load()
       await postEmbedder(config)
+      /*
+       * A changed prefix means different collection names, so whatever is in the new ones is
+       * unrelated to what was in the old. The documentation corpus is small enough to just
+       * rebuild; the codebase index is not, and the user has to press Index for that.
+       */
+      scheduleDocsReindex('index prefix changed')
       // Confirmed explicitly. The form resyncs to the same values it just sent, so without
       // this a successful save is visually indistinguishable from nothing happening.
       post({ type: 'embedderSaved' })
@@ -2595,7 +2622,13 @@ export function wireChatBridge(services: HostServices): { dispose: () => void } 
     } else if (message.type === 'cancelIndexing') {
       indexingAbort?.abort()
     } else if (message.type === 'saveEmbedder') {
-      void handleSaveEmbedder(message.profileId, message.model, message.dimensions, message.indexName)
+      void handleSaveEmbedder(
+        message.profileId,
+        message.model,
+        message.dimensions,
+        message.indexName,
+        message.indexPrefix,
+      )
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
     } else if (message.type === 'requestSkills') {

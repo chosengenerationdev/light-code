@@ -262,6 +262,23 @@ export const embedderConfigSchema = z
      * creation, so switching embedding model means a new index, and naming it is how.
      */
     indexName: z.string().min(1),
+    /**
+     * Replaces `light-code` at the front of every derived index name, so a shared cluster can
+     * tell one team's collections from another's at a glance.
+     *
+     * Applies to both corpora — the codebase index and the `-docs` one — because a prefix
+     * that only covered half of them would be worse than none.
+     *
+     * Constrained more tightly than OpenSearch requires: no `*` or `+`, which are wildcard
+     * characters. They are legal in a name and catastrophic in a *write target*, where a
+     * pattern matching several indexes is not something to discover by accident.
+     */
+    indexPrefix: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9._-]{0,48}$/,
+        'Start with a letter or digit, then lowercase letters, digits, dot, dash or underscore',
+      ),
   })
   .partial()
 

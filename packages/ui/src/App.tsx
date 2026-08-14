@@ -297,6 +297,8 @@ export function App(props: AppProps): ReactElement {
           ...(message.dimensions !== undefined ? { dimensions: message.dimensions } : {}),
           ...(message.indexName !== undefined ? { indexName: message.indexName } : {}),
           ...(message.indexNameIsCustom !== undefined ? { indexNameIsCustom: message.indexNameIsCustom } : {}),
+          ...(message.indexPrefix !== undefined ? { indexPrefix: message.indexPrefix } : {}),
+          defaultIndexPrefix: message.defaultIndexPrefix,
           indexedFiles: message.indexedFiles,
         })
       } else if (message.type === 'skills') {
@@ -501,7 +503,7 @@ export function App(props: AppProps): ReactElement {
         setEmbedderModelsLoading(true)
         props.transport.post({ type: 'requestEmbedderModels', profileId } satisfies UiToHostMessage)
       },
-      onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string) => {
+      onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string, indexPrefix: string) => {
         setError(undefined)
         props.transport.post({
           type: 'saveEmbedder',
@@ -509,6 +511,7 @@ export function App(props: AppProps): ReactElement {
           model,
           dimensions,
           ...(indexName.length > 0 ? { indexName } : {}),
+          ...(indexPrefix.length > 0 ? { indexPrefix } : {}),
         } satisfies UiToHostMessage)
       },
       onStartIndexing: () => {

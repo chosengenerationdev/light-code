@@ -287,7 +287,15 @@ export type UiToHostMessage =
   | { type: 'indexDocs' }
   | { type: 'setDispatcher'; enabled: boolean }
   | { type: 'cancelIndexing' }
-  | { type: 'saveEmbedder'; profileId: string; model: string; dimensions: number; indexName?: string }
+  | {
+      type: 'saveEmbedder'
+      profileId: string
+      model: string
+      dimensions: number
+      indexName?: string
+      /** Front of every derived index name. Empty restores the default. */
+      indexPrefix?: string
+    }
   /**
    * Lists models for an already-saved profile.
    *
@@ -452,6 +460,10 @@ export type HostToUiMessage =
       indexName?: string
       /** False means it was derived from the workspace path rather than chosen. */
       indexNameIsCustom?: boolean
+      /** The configured prefix, absent when the default is in use. */
+      indexPrefix?: string
+      /** What the prefix falls back to, so the field can show it as a placeholder. */
+      defaultIndexPrefix: string
       indexedFiles: number
     }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
