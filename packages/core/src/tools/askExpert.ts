@@ -64,6 +64,14 @@ export interface AskExpertOptions {
    * Sent only when a session is being started, because a resumed expert already has it.
    */
   briefing?: () => string
+  /**
+   * Whether another consultation is within budget.
+   *
+   * Asked here rather than by the caller because a refusal has to become a *tool result* — the
+   * model gets told it is out of budget and carries on alone. Throwing, or quietly not
+   * registering the tool, would leave it waiting for advice that is never coming.
+   */
+  budget?: () => { allowed: boolean; message?: string | undefined }
 }
 
 /**
@@ -86,7 +94,7 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
     description:
       'Consult a stronger expert model about a hard problem: planning a multi-file change, ' +
       'diagnosing a bug you have already failed to fix, or choosing between designs. ' +
-      'Each call costs the user money, so use it for genuinely difficult questions only. ' +
+      'Each call costs the user money, so use it for genuinely difficult questions only, and there may be a per-task budget after which it stops being available. ' +
       'The expert can read the workspace but cannot edit or run anything. ' +
       'Consultations within one task continue the same conversation, so after the first one it ' +
       'remembers what you already told it — a follow-up is far cheaper than a fresh explanation.',
@@ -102,6 +110,13 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
       }
     },
     async execute(params, context): Promise<ToolResult> {
+      const verdict = options.budget?.()
+      if (verdict !== undefined && !verdict.allowed) {
+        // Not an error in the tool's own terms — nothing failed. But `isError` is what makes
+        // the model treat it as a condition to work around rather than as advice to follow.
+        return { content: verdict.message ?? 'The expert budget for this task is exhausted.', isError: true }
+      }
+
       const question =
         params.files !== undefined && params.files.length > 0
           ? `${params.question}\n\nRelevant files in this workspace:\n${params.files.map((file) => `- ${file}`).join('\n')}`

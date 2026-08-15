@@ -22,7 +22,7 @@ export interface ChatProps {
   onAlwaysAllow: (id: string, scope: 'tool' | 'command' | 'folder') => void
   onRollback: () => void
   usage: ContextUsage | undefined
-  expertSpend: { usd: number; consultations: number; unpriced: number }
+  expertSpend: { usd: number; consultations: number; unpriced: number; usage?: number; exhausted?: boolean }
   supportsVision: boolean
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void

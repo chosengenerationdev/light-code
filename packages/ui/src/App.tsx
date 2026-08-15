@@ -79,7 +79,13 @@ export function App(props: AppProps): ReactElement {
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [readRoots, setReadRoots] = useState<string[]>([])
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
-  const [expertSpend, setExpertSpend] = useState({ usd: 0, consultations: 0, unpriced: 0 })
+  const [expertSpend, setExpertSpend] = useState<{
+    usd: number
+    consultations: number
+    unpriced: number
+    usage?: number
+    exhausted?: boolean
+  }>({ usd: 0, consultations: 0, unpriced: 0 })
   const [dispatcher, setDispatcher] = useState<{ enabled: boolean; hiddenTools: number; docsIndex?: string }>({
     enabled: false,
     hiddenTools: 0,
@@ -363,6 +369,8 @@ export function App(props: AppProps): ReactElement {
           ...(message.version !== undefined ? { version: message.version } : {}),
           ...(message.reason !== undefined ? { reason: message.reason } : {}),
           ...(message.model !== undefined ? { model: message.model } : {}),
+          maxSpendUsd: message.maxSpendUsd,
+          maxConsultations: message.maxConsultations,
         })
         // The composer badge means "usable", not merely "switched on".
         setExpertEnabled(message.enabled && message.available)
@@ -586,12 +594,19 @@ export function App(props: AppProps): ReactElement {
     },
   }
 
-  const saveExpert = (enabled: boolean, path: string, model: string): void => {
+  const saveExpert = (
+    enabled: boolean,
+    path: string,
+    model: string,
+    limits: { maxSpendUsd: number; maxConsultations: number },
+  ): void => {
     props.transport.post({
       type: 'setExpert',
       enabled,
       ...(path.length > 0 ? { path } : {}),
       ...(model.length > 0 ? { model } : {}),
+      maxSpendUsd: limits.maxSpendUsd,
+      maxConsultations: limits.maxConsultations,
     } satisfies UiToHostMessage)
   }
   const saveMcpServer = (name: string, previousName: string | undefined, config: McpServerConfig): void => {

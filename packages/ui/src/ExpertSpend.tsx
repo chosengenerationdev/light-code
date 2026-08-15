@@ -7,6 +7,10 @@ export interface ExpertSpendProps {
   consultations: number
   /** Consultations the CLI reported no price for. */
   unpriced: number
+  /** 0..1 against the nearer per-task limit. Absent when nothing is capped. */
+  usage?: number
+  /** True once the expert has stopped being offered for this task. */
+  exhausted?: boolean
 }
 
 /**
@@ -28,6 +32,12 @@ export function ExpertSpend(props: ExpertSpendProps): ReactElement | null {
   if (props.consultations === 0) return null
 
   const plural = props.consultations === 1 ? 'consultation' : 'consultations'
+  /*
+   * Amber before the wall, not only at it. The point of the meter is that someone notices
+   * before the assistant is cut off mid-task, which is the moment it is least welcome.
+   */
+  const near = props.usage !== undefined && props.usage >= 0.8
+  const barColor = props.exhausted === true ? colors.error : near ? colors.warning : colors.expert
   const detail =
     props.unpriced > 0
       ? ` ${props.unpriced} of them reported no cost, so the total is at least this much.`
@@ -46,7 +56,11 @@ export function ExpertSpend(props: ExpertSpendProps): ReactElement | null {
         fontSize: 11,
         flexShrink: 0,
       }}
-      title={`${props.consultations} expert ${plural} since this task was opened.${detail} Starting a new task resets this.`}
+      title={`${String(props.consultations)} expert ${plural} since this task was opened.${detail}${
+        props.exhausted === true
+          ? ' The per-task budget has been reached, so the expert is no longer offered — raise it in Settings → Expert, or start a new task.'
+          : ''
+      } Starting a new task resets this.`}
     >
       <span style={{ display: 'flex', color: colors.expert }}>
         <ExpertIcon size={11} />
@@ -60,8 +74,31 @@ export function ExpertSpend(props: ExpertSpendProps): ReactElement | null {
         </span>{' '}
         this task
       </span>
-      <span style={{ marginLeft: 'auto' }}>
-        {props.consultations} {plural}
+      {props.usage !== undefined && (
+        <span
+          aria-hidden
+          style={{
+            width: 46,
+            height: 3,
+            borderRadius: 2,
+            background: colors.border,
+            overflow: 'hidden',
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              display: 'block',
+              height: '100%',
+              width: `${String(Math.round(props.usage * 100))}%`,
+              background: barColor,
+              transition: 'width 240ms ease',
+            }}
+          />
+        </span>
+      )}
+      <span style={{ marginLeft: 'auto', color: props.exhausted === true ? colors.error : undefined }}>
+        {props.exhausted === true ? 'budget reached' : `${String(props.consultations)} ${plural}`}
         {props.unpriced > 0 ? ' *' : ''}
       </span>
     </div>

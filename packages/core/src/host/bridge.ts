@@ -56,6 +56,9 @@ import {
   buildExpertBriefing,
   buildDocCorpus,
   createNotifyTool,
+  checkExpertBudget,
+  expertBudgetUsage,
+  type ExpertLimits,
   registryForSchedule,
   filterToolsForSchedule,
   ScheduledApprovalGate,
@@ -461,6 +464,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // sent before the user has chosen one.
   let cachedAccentColor = '#22C55E'
   let cachedExpertColor = '#D97757'
+  let cachedExpertLimits: ExpertLimits = {}
   /**
    * Directories tools may read outside the workspace — a network share of logs, typically.
    *
@@ -561,7 +565,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   function postExpertSpend(): void {
-    post({ type: 'expertSpend', ...expertSpend })
+    const usage = expertBudgetUsage(expertSpend, cachedExpertLimits)
+    post({
+      type: 'expertSpend',
+      ...expertSpend,
+      ...(usage === undefined ? {} : { usage }),
+      ...(checkExpertBudget(expertSpend, cachedExpertLimits).allowed ? {} : { exhausted: true }),
+    })
   }
 
   function recordConsultation(info: { costUsd?: number; isError: boolean }): void {
@@ -579,6 +589,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
+    cachedExpertLimits = {
+      ...(config.expert?.maxSpendUsd !== undefined ? { maxSpendUsd: config.expert.maxSpendUsd } : {}),
+      ...(config.expert?.maxConsultations !== undefined ? { maxConsultations: config.expert.maxConsultations } : {}),
+    }
     cachedReadRoots = (config.filesystem?.readRoots ?? [])
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
@@ -788,6 +802,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           cli: expert.cli,
           ...(expert.model !== undefined ? { model: expert.model } : {}),
           onConsultation: recordConsultation,
+          // Read at call time, not captured: the user can raise the limit mid-task and the very
+          // next consultation should honour it, without starting a new task to pick it up.
+          budget: () => checkExpertBudget(expertSpend, cachedExpertLimits),
           session: {
             get: () => expertSessionId,
             set: (sessionId) => {
@@ -1590,10 +1607,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(detected.version !== undefined ? { version: detected.version } : {}),
       ...(detected.reason !== undefined ? { reason: detected.reason } : {}),
       ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
+      maxSpendUsd: config.expert?.maxSpendUsd ?? 0,
+      maxConsultations: config.expert?.maxConsultations ?? 0,
     })
   }
 
-  async function handleSetExpert(enabled: boolean, cliPath?: string, model?: string): Promise<void> {
+  async function handleSetExpert(
+    enabled: boolean,
+    cliPath?: string,
+    model?: string,
+    limits?: { maxSpendUsd?: number; maxConsultations?: number },
+  ): Promise<void> {
     try {
       const { config } = await configManager.load()
       await configManager.save('user', {
@@ -1602,8 +1626,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           enabled,
           ...(cliPath !== undefined && cliPath.length > 0 ? { path: cliPath } : {}),
           ...(model !== undefined && model.length > 0 ? { model } : { model: undefined }),
+          ...(limits?.maxSpendUsd !== undefined ? { maxSpendUsd: limits.maxSpendUsd } : {}),
+          ...(limits?.maxConsultations !== undefined ? { maxConsultations: limits.maxConsultations } : {}),
         },
       })
+      // Reloaded so the cap applies to the next consultation rather than to the next task.
+      await loadSettings()
+      postExpertSpend()
       // Force re-detection: the path may have changed, and a stale probe would report the
       // old binary as still present.
       expertCli = undefined
@@ -3080,7 +3109,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'requestExpert') {
       void postExpert()
     } else if (message.type === 'setExpert') {
-      void handleSetExpert(message.enabled, message.path, message.model)
+      void handleSetExpert(message.enabled, message.path, message.model, {
+        ...(message.maxSpendUsd !== undefined ? { maxSpendUsd: message.maxSpendUsd } : {}),
+        ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
+      })
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
       // Capabilities travel with the profile list: switching profiles can change whether

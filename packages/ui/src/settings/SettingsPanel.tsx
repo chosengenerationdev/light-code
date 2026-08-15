@@ -64,7 +64,12 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetMcpToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
   onConnectMcp: (name: string) => void
   expert: ExpertState | undefined
-  onSaveExpert: (enabled: boolean, path: string, model: string) => void
+  onSaveExpert: (
+    enabled: boolean,
+    path: string,
+    model: string,
+    limits: { maxSpendUsd: number; maxConsultations: number },
+  ) => void
   search: SearchTabProps
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
   python: PythonTabProps

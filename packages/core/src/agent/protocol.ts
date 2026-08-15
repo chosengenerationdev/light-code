@@ -352,7 +352,14 @@ export type UiToHostMessage =
   | { type: 'requestNetwork' }
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
   | { type: 'requestExpert' }
-  | { type: 'setExpert'; enabled: boolean; path?: string; model?: string }
+  | {
+      type: 'setExpert'
+      enabled: boolean
+      path?: string
+      model?: string
+      maxSpendUsd?: number
+      maxConsultations?: number
+    }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }
   | { type: 'deleteProfile'; id: string }
@@ -419,7 +426,16 @@ export type HostToUiMessage =
    * `unpriced` counts consultations the CLI reported no cost for. Kept separate rather than
    * folded in as zero, so a total is never quietly incomplete while looking exact.
    */
-  | { type: 'expertSpend'; usd: number; consultations: number; unpriced: number }
+  | {
+      type: 'expertSpend'
+      usd: number
+      consultations: number
+      unpriced: number
+      /** 0..1 against the nearer of the two per-task limits; absent when neither is set. */
+      usage?: number
+      /** True once the expert has stopped being available for this task. */
+      exhausted?: boolean
+    }
   /** Every search the model ran this session, newest first. */
   | { type: 'searchLog'; entries: SearchLogEntry[] }
   /** Schedules plus every tool that currently exists, so the picker can list them all. */
@@ -533,6 +549,9 @@ export type HostToUiMessage =
       /** Why it cannot run, phrased for a human. */
       reason?: string
       model?: string
+      /** Per-task ceilings. 0 means no limit. */
+      maxSpendUsd: number
+      maxConsultations: number
     }
   /**
    * Replaces the whole transcript — sent when a task is reopened, and on panel load to

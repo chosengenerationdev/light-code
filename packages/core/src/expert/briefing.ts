@@ -57,6 +57,23 @@ export function buildExpertBriefing(input: BriefingInput): string {
     '',
     'So: give concrete instructions naming the tools it should use, and if you need to know',
     'something only the workspace can tell you, either read it yourself or ask the junior.',
+    '',
+    '### Plan in checkpoints, and review each one',
+    '',
+    'For anything larger than a single edit, split your plan into **checkpoints**: coherent,',
+    'working slices the junior can finish and report back on. It will implement one, tell you',
+    'what it actually did, and come back for your review before continuing. Expect that loop and',
+    'plan for it.',
+    '',
+    'Size them economically. **The user pays for every exchange**, so a checkpoint should be',
+    'large enough that reviewing it is worth the round trip and small enough that a wrong',
+    'direction is caught before much is built on it. Three to six checkpoints suits most tasks;',
+    'a checkpoint per line does not.',
+    '',
+    'When reviewing, be brief and specific: say whether to continue, name what must change, and',
+    'stop. The junior has the plan and you have this conversation — neither needs restating. If',
+    'a report reveals the plan was wrong, say so plainly and give the corrected next checkpoint',
+    'rather than reissuing the whole plan.',
   ]
 
   const listed = (tools: readonly Tool[]): string[] =>

@@ -44,6 +44,34 @@ describe('Junior mode', () => {
     expect(JUNIOR_MODE.guidance ?? '').toMatch(/cannot call any of your tools/i)
   })
 
+  /**
+   * The checkpoint loop is a cost measure, and the guidance has to say so.
+   *
+   * Read as a quality ritual it produces a review after every edit, which spends more than the
+   * mistakes it catches — the opposite of the point. The reasoning is the feature here, exactly
+   * as the session-resume finding was.
+   */
+  it('describes the implement-review-continue loop', () => {
+    const guidance = JUNIOR_MODE.guidance ?? ''
+    expect(guidance).toMatch(/checkpoint/i)
+    expect(guidance).toMatch(/implement one checkpoint/i)
+    expect(guidance).toMatch(/until the work is complete/i)
+  })
+
+  it('frames checkpoints as saving money, and says when not to review', () => {
+    const guidance = JUNIOR_MODE.guidance ?? ''
+    expect(guidance).toMatch(/cost measure/i)
+    // Both halves matter: too small wastes money, too large defeats the purpose.
+    expect(guidance).toMatch(/review costs more than the mistake/i)
+    expect(guidance).toMatch(/Skip the review/i)
+    expect(guidance).toMatch(/Report the delta, never the context/i)
+  })
+
+  it('tells the junior what happens when the budget runs out', () => {
+    // The guidance is wrapped, so the phrase spans a line break.
+    expect((JUNIOR_MODE.guidance ?? '').replace(/\s+/g, ' ')).toMatch(/finish the work alone/i)
+  })
+
   it('carries no guidance on the other modes, so their prompts are unchanged', () => {
     expect(CODE_MODE.guidance).toBeUndefined()
     expect(ASK_MODE.guidance).toBeUndefined()
@@ -173,5 +201,39 @@ describe('cost accounting', () => {
   it('mentions that consultations continue one conversation, so context is not repeated', () => {
     const tool = createAskExpertTool({ cli: { available: true, executable: 'claude' } })
     expect(tool.description).toMatch(/continue the same conversation/i)
+  })
+
+  /**
+   * Refused as a tool *result*, never by throwing or by going unregistered.
+   *
+   * The model has to be told it is out of budget so it can carry on alone. A tool that vanished
+   * mid-task, or one that threw, would leave it waiting for advice that is never coming.
+   */
+  it('refuses when the budget is exhausted, and says so as a result', async () => {
+    let spawned = false
+    const tool = createAskExpertTool({
+      cli: { available: true, executable: 'claude' },
+      budget: () => ({ allowed: false, message: 'The expert budget for this task is exhausted.' }),
+      onConsultation: () => {
+        spawned = true
+      },
+    })
+
+    const result = await tool.execute({ question: 'anything' }, context)
+    expect(result.isError).toBe(true)
+    expect(result.content).toMatch(/exhausted/i)
+    // Nothing was spent: the check runs before the CLI, which is the only ordering that
+    // prevents anything.
+    expect(spawned).toBe(false)
+  })
+
+  it('proceeds when the budget allows it', async () => {
+    const tool = createAskExpertTool({
+      cli: { available: false, executable: 'claude', reason: 'not installed' },
+      budget: () => ({ allowed: true }),
+    })
+    // Reaches the CLI and fails there, rather than being refused by the budget.
+    const result = await tool.execute({ question: 'anything' }, context)
+    expect(result.content).not.toMatch(/budget/i)
   })
 })

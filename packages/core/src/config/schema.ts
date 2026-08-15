@@ -89,6 +89,20 @@ export const expertConfigSchema = z
     path: z.string(),
     /** Overrides the model the CLI would otherwise choose. */
     model: z.string(),
+    /**
+     * Dollars the expert may cost within one task. 0 means no limit.
+     *
+     * Per task rather than per day: it matches the expert session's own scope, and a total
+     * that never resets becomes a thing the user clears rather than a thing that protects them.
+     */
+    maxSpendUsd: z.number().min(0),
+    /**
+     * Consultations allowed within one task. 0 means no limit.
+     *
+     * The backstop for when the CLI reports no cost — a spend limit cannot count what it is
+     * not told the price of, and an unpriced consultation still costs money.
+     */
+    maxConsultations: z.number().int().min(0),
   })
   .partial()
 

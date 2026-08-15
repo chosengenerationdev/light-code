@@ -23,6 +23,8 @@ export const colors = {
   secondaryButtonHoverBackground: 'var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground))',
   hoverBackground: 'var(--vscode-toolbar-hoverBackground)',
   error: 'var(--vscode-errorForeground)',
+  /* Editor warnings, for the state between fine and refused — a budget nearly spent. */
+  warning: 'var(--vscode-editorWarning-foreground, var(--vscode-list-warningForeground, var(--vscode-errorForeground)))',
   focusBorder: 'var(--vscode-focusBorder)',
   assistantBubble: 'var(--vscode-editor-inactiveSelectionBackground, var(--vscode-input-background))',
 

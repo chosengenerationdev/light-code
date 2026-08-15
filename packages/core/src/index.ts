@@ -126,6 +126,7 @@ export {
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
 export { buildExpertBriefing, type BriefingInput } from './expert/briefing.js'
+export { checkExpertBudget, expertBudgetUsage, type ExpertLimits, type ExpertSpend } from './expert/budget.js'
 export {
   OpenSearchClient,
   OpenSearchError,

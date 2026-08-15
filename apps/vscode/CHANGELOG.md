@@ -1,5 +1,32 @@
 # light-code-vscode
 
+## 0.24.0
+
+### Minor Changes
+
+- Junior mode works in checkpoints, and the expert has a budget.
+
+  **The expert now plans in checkpoints and reviews each one.** It splits the work into coherent
+  slices, the assistant implements one, reports what it actually did, takes the feedback, and
+  moves on — until the work is finished.
+
+  This is a cost measure, not a quality ritual, and the guidance says so in those terms. The
+  expensive failure was never a consultation; it was building the wrong thing for twenty turns
+  and having the whole approach redone. Because consultations after the first continue one
+  conversation, a review costs about as much as a cheap follow-up. The instructions are explicit
+  that a checkpoint too small costs more to review than the mistake it could catch, that only
+  the delta is reported rather than the context again, and that a mechanical checkpoint should
+  skip its review entirely.
+
+  **A per-task budget for the expert**, in Settings → Expert: stop after so many dollars, or so
+  many consultations, whichever comes first. Both default to no limit. When one is reached the
+  expert stops being offered and the assistant is told to finish alone rather than waiting for
+  advice that is not coming; a new task resets it.
+
+  The count limit is worth setting alongside a spend limit, because the CLI does not always
+  report a price and an unpriced consultation still costs money. The cost meter in the chat now
+  shows a small bar against the nearer limit, amber before the wall rather than only at it.
+
 ## 0.23.0
 
 ### Minor Changes

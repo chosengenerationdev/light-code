@@ -25,11 +25,18 @@ export interface ExpertState {
   version?: string
   reason?: string
   model?: string
+  maxSpendUsd: number
+  maxConsultations: number
 }
 
 export interface ExpertTabProps {
   expert: ExpertState | undefined
-  onSave: (enabled: boolean, path: string, model: string) => void
+  onSave: (
+    enabled: boolean,
+    path: string,
+    model: string,
+    limits: { maxSpendUsd: number; maxConsultations: number },
+  ) => void
 }
 
 /**
@@ -43,6 +50,11 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
   const [enabled, setEnabled] = useState(props.expert?.enabled ?? false)
   const [path, setPath] = useState(props.expert?.path ?? 'claude')
   const [model, setModel] = useState(props.expert?.model ?? '')
+  // Kept as strings so the fields can be emptied while typing. An empty field means no limit,
+  // which is the same thing zero means — a numeric state would force a 0 in as soon as you
+  // cleared it, and the field would fight you.
+  const [maxSpend, setMaxSpend] = useState(String(props.expert?.maxSpendUsd ?? 0))
+  const [maxCalls, setMaxCalls] = useState(String(props.expert?.maxConsultations ?? 0))
 
   // Resync when the host answers — the tab can mount before the response arrives, which is
   // the same race that made the very first settings screen look like it lost your data.
@@ -51,7 +63,14 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
     setEnabled(props.expert.enabled)
     setPath(props.expert.path)
     setModel(props.expert.model ?? '')
+    setMaxSpend(String(props.expert.maxSpendUsd))
+    setMaxCalls(String(props.expert.maxConsultations))
   }, [props.expert])
+
+  const numeric = (value: string): number => {
+    const parsed = Number(value.trim())
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  }
 
   const detected = props.expert?.available === true
 
@@ -156,6 +175,43 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         </span>
       </div>
 
+      {/*
+        The cap is per task, matching the expert session's own scope. A total that never resets
+        becomes something the user clears rather than something that protects them.
+      */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+        <label style={labelStyle()}>Budget per task</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ color: colors.muted, fontSize: 11 }}>Stop after</span>
+          <input
+            type="number"
+            min="0"
+            step="0.25"
+            value={maxSpend}
+            onChange={(event) => setMaxSpend(event.target.value)}
+            aria-label="Maximum spend per task in dollars"
+            style={{ ...textFieldStyle(), width: 90 }}
+          />
+          <span style={{ color: colors.muted, fontSize: 11 }}>dollars, or</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={maxCalls}
+            onChange={(event) => setMaxCalls(event.target.value)}
+            aria-label="Maximum consultations per task"
+            style={{ ...textFieldStyle(), width: 70 }}
+          />
+          <span style={{ color: colors.muted, fontSize: 11 }}>consultations — whichever comes first.</span>
+        </div>
+        <span style={{ color: colors.muted, fontSize: 11 }}>
+          0 means no limit. When a limit is reached the expert stops being offered for that task
+          and the assistant carries on alone; starting a new task resets it. A count limit is
+          worth setting even if you set a spend limit, because the CLI does not always report a
+          price and an unpriced consultation still costs money.
+        </span>
+      </div>
+
       <div
         style={{
           padding: 8,
@@ -172,7 +228,13 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         approval, so nothing reaches your repository without passing the usual prompt.
       </div>
 
-      <button type="button" style={primaryButtonStyle(false)} onClick={() => props.onSave(enabled, path.trim(), model.trim())}>
+      <button type="button" style={primaryButtonStyle(false)}         onClick={() =>
+          props.onSave(enabled, path.trim(), model.trim(), {
+            maxSpendUsd: numeric(maxSpend),
+            maxConsultations: Math.round(numeric(maxCalls)),
+          })
+        }
+      >
         Save
       </button>
     </div>
