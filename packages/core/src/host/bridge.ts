@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-import { normalizeForComparison } from '../fs/confine.js'
+import { confineToAny, normalizeForComparison } from '../fs/confine.js'
+import { approveTool, forgetTool, isValidToolName, toolFileName } from '../python/registry.js'
 import { isTranscriptMessage } from './backgroundMessages.js'
 import {
   ConfigManager,
@@ -328,6 +329,79 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Skills are part of the corpus, so a written, deleted or relocated one makes the index
     // stale. Debounced and fingerprinted, so the usual case costs nothing.
     scheduleDocsReindex('skills changed')
+  }
+
+  /**
+   * Opens a skill or Python tool in an editor tab.
+   *
+   * Confined to the folders those things live in. The path arrives from the UI, which only ever
+   * sends one it was given — but "the UI would not do that" is not a boundary, and this opens a
+   * file in the user's editor.
+   */
+  async function handleOpenManagedFile(filePath: string): Promise<void> {
+    try {
+      if (ui.openFile === undefined) {
+        ui.showWarning('This host cannot open files. The path is shown beside each entry.')
+        return
+      }
+      const roots = [
+        python.toolsDirectory(),
+        ...(skillsDir === undefined ? [] : [skillsDir]),
+        ...extraSkillDirs.filter((dir): dir is string => dir !== undefined),
+      ]
+      if (roots.length === 0) return
+      const real = await confineToAny(path.resolve(filePath), roots)
+      await ui.openFile(real)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleDeletePythonTool(name: string): Promise<void> {
+    try {
+      const dir = python.toolsDirectory()
+      if (dir.length === 0) return
+      if (!isValidToolName(name)) throw new Error(`"${name}" is not a valid tool name.`)
+      await fs.rm(path.join(dir, toolFileName(name)), { force: true })
+      // The registry entry goes too. Leaving it would re-approve the next file to appear under
+      // that name without anyone looking at it.
+      await forgetTool(dir, name)
+      await python.refresh()
+      await postPython()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Re-pins a tool to the file as it stands now.
+   *
+   * The hash pin refuses a tool whose source changed since approval (§13), which is exactly
+   * right when a repository ships a modified `.py` and exactly infuriating when the user edited
+   * it themselves. This is the "yes, that was me" path, and it deliberately runs the file
+   * through the same validation a model-authored one gets — a tool that does not load must not
+   * be pinned, or the pin would start certifying broken code.
+   */
+  async function handleApprovePythonTool(name: string): Promise<void> {
+    try {
+      const dir = python.toolsDirectory()
+      if (dir.length === 0) return
+      if (!isValidToolName(name)) throw new Error(`"${name}" is not a valid tool name.`)
+
+      const filePath = path.join(dir, toolFileName(name))
+      const source = await fs.readFile(filePath, 'utf8')
+      const described = await python.describe(name, filePath)
+      if (described === undefined) {
+        throw new Error(`"${name}" could not be loaded, so it was not approved. Fix the file and try again.`)
+      }
+
+      await approveTool(dir, name, source, described)
+      await python.refresh()
+      await postPython()
+      ui.showInfo(`py__${name} approved as it stands now.`)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
   }
 
   async function handleDeleteSkillFile(name: string): Promise<void> {
@@ -2912,6 +2986,50 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     post({ type: 'pathPicked', purpose, path: picked })
   }
 
+  /**
+   * A unique variant of `base`, given the names already taken.
+   *
+   * Shared by every clone so they behave the same way. "copy", then "copy 2" — a numeric suffix
+   * from the start reads as a version rather than a duplicate.
+   */
+  function uniqueName(base: string, taken: readonly string[]): string {
+    if (!taken.includes(base)) return base
+    for (let index = 2; index < 1000; index++) {
+      const candidate = `${base} ${String(index)}`
+      if (!taken.includes(candidate)) return candidate
+    }
+    return `${base} ${String(Date.now())}`
+  }
+
+  /**
+   * Copies a server entry, disabled.
+   *
+   * Secrets are `${secret:NAME}` *references* inside the config (§15), so a copy points at the
+   * same credentials without either duplicating a value or losing one — unlike profile
+   * duplication, which has to copy the stored secret because its key is namespaced per profile.
+   *
+   * Disabled, because the point of a clone is to change something before it runs, and a second
+   * identical stdio server spawning immediately is a process nobody asked for.
+   */
+  async function handleDuplicateMcpServer(name: string): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const servers = { ...(config.mcpServers ?? {}) }
+      const source = servers[name]
+      if (source === undefined) return
+
+      const copy = uniqueName(`${name} copy`, Object.keys(servers))
+      servers[copy] = { ...source, disabled: true }
+      await configManager.save('user', { mcpServers: servers })
+      setMcpServersState(servers)
+      await mcp.configure(servers)
+      postMcp()
+      post({ type: 'mcpServerSaved', name: copy })
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleDeleteMcpServer(name: string): Promise<void> {
     try {
       const { config } = await configManager.load()
@@ -3035,6 +3153,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSaveMcpServers(message.json)
     } else if (message.type === 'saveMcpServer') {
       void handleSaveMcpServer(message.name, message.previousName, message.config)
+    } else if (message.type === 'duplicateMcpServer') {
+      void handleDuplicateMcpServer(message.name)
     } else if (message.type === 'deleteMcpServer') {
       void handleDeleteMcpServer(message.name)
     } else if (message.type === 'browseForPath') {
@@ -3103,6 +3223,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void postSchedules()
     } else if (message.type === 'saveSchedule') {
       void handleSaveSchedule(message.schedule)
+    } else if (message.type === 'duplicateSchedule') {
+      void handleDuplicateSchedule(message.id)
     } else if (message.type === 'deleteSchedule') {
       void handleDeleteSchedule(message.id)
     } else if (message.type === 'setScheduleEnabled') {
@@ -3140,6 +3262,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .then(() => postSkills())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'openManagedFile') {
+      void handleOpenManagedFile(message.path)
+    } else if (message.type === 'deletePythonTool') {
+      void handleDeletePythonTool(message.name)
+    } else if (message.type === 'approvePythonTool') {
+      void handleApprovePythonTool(message.name)
     } else if (message.type === 'deleteSkillFile') {
       void handleDeleteSkillFile(message.name)
     } else if (message.type === 'requestPython') {
@@ -3522,6 +3650,36 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * an index the UI computed a moment ago can point at a different run by the time it arrives.
    * The start time is the one thing about a run that does not move.
    */
+  /**
+   * Copies a schedule, disabled and with no history.
+   *
+   * **Disabled on purpose.** Cloning is how someone makes a variant of a job that already
+   * works, and a copy that started firing the moment it was created — on the original's
+   * schedule, with the original's tools — would run something nobody had finished writing.
+   * The run log is not copied either: those runs belong to the schedule that did them.
+   */
+  async function handleDuplicateSchedule(id: string): Promise<void> {
+    const schedules = await loadSchedules()
+    const source = schedules[id]
+    if (source === undefined) return
+
+    const newId = `${String(Date.now().toString(36))}${String(Math.random()).slice(2, 6)}`
+    const copy: Schedule = {
+      ...source,
+      id: newId,
+      name: uniqueName(`${source.name} copy`, Object.values(schedules).map((entry) => entry.name)),
+      enabled: false,
+    }
+    delete copy.runs
+    delete copy.lastRunAt
+    delete copy.lastResult
+    delete copy.lastSummary
+    delete copy.lastTaskId
+    delete copy.nextRunAt
+
+    await saveSchedules({ ...schedules, [newId]: copy })
+  }
+
   async function handleDeleteScheduleRun(id: string, at: number): Promise<void> {
     const schedules = await loadSchedules()
     const schedule = schedules[id]

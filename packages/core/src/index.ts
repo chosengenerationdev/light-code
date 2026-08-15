@@ -20,6 +20,7 @@ export { redact } from './logging/redact.js'
 export { Logger, type LogLevel, type LoggerOptions } from './logging/logger.js'
 
 export { confine, PathConfinementError, normalizeForComparison } from './fs/confine.js'
+export { normalizeWindowsPath } from './fs/windowsPath.js'
 export { PathDenylist } from './fs/denylist.js'
 
 export type {

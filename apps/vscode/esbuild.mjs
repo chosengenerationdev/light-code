@@ -143,4 +143,22 @@ if (watch) {
   await Promise.all(contexts.map((ctx) => ctx.rebuild()))
   await Promise.all(contexts.map((ctx) => ctx.dispose()))
   await copyRipgrepBinary()
+  syncReadme()
+}
+
+/**
+ * The marketplace listing is the repository README, copied at build time.
+ *
+ * `vsce` packages `apps/vscode/README.md`, so for a long time there were two copies of one
+ * document. They were identical right up until one was edited — after which the listing kept
+ * advertising "nine tools" and "no semantic search yet" while the repository described
+ * something several releases newer. Generating it means the listing cannot fall behind again,
+ * which is §15's single-source rule applied to prose.
+ */
+function syncReadme() {
+  const banner = ['<!-- Generated from the repository README by esbuild.mjs. Edit that one, not this. -->', '', ''].join(
+    '\n',
+  )
+  fs.writeFileSync(path.resolve('README.md'), banner + fs.readFileSync(path.resolve('../../README.md'), 'utf8'), 'utf8')
+  console.log('[esbuild] marketplace readme synced from the repository README')
 }

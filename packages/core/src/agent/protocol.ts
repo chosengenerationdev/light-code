@@ -344,6 +344,17 @@ export type UiToHostMessage =
   | { type: 'openScheduleRun'; taskId: string; title: string }
   /** The user removing one directly. The model's own delete goes through the approval gate. */
   | { type: 'deleteSkillFile'; name: string }
+  /** Opens a skill or Python tool file in an editor tab, where it can actually be edited. */
+  | { type: 'openManagedFile'; path: string }
+  | { type: 'deletePythonTool'; name: string }
+  /**
+   * Re-pins a hand-edited tool to its current contents.
+   *
+   * Editing a `.py` outside the model's own update tool leaves it refused on a hash mismatch —
+   * which is the pin working as designed (§13). Without a way to say "yes, that was me", the
+   * only route back is asking the model to rewrite a file the user has already fixed.
+   */
+  | { type: 'approvePythonTool'; name: string }
   /** Replaces the whole skills folder configuration. Empty `dir` restores the default. */
   | { type: 'saveSkillDirs'; dir: string; paths: string[] }
   | { type: 'requestPython' }
@@ -370,6 +381,9 @@ export type UiToHostMessage =
     }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }
+  /** Copies a server entry under a new name. Secrets stay as references — see the bridge. */
+  | { type: 'duplicateMcpServer'; name: string }
+  | { type: 'duplicateSchedule'; id: string }
   | { type: 'deleteProfile'; id: string }
   | { type: 'setActiveProfile'; id: string }
   /**

@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { confineToAny, PathConfinementError, realpathAllowingMissing } from '../fs/confine.js'
+import { normalizeWindowsPath } from '../fs/windowsPath.js'
 import type { ToolExecutionContext } from './types.js'
 
 export type ResolvedToolPath = { ok: true; realPath: string } | { ok: false; message: string }
@@ -22,7 +23,13 @@ export async function resolveToolPath(
   requestedPath: string,
   options: ResolveOptions = {},
 ): Promise<ResolvedToolPath> {
-  const absolute = path.resolve(context.workspaceRoot, requestedPath)
+  /*
+   * Repaired before resolving, because a model over-escaping a Windows path is common and the
+   * result is not merely refused — `path.resolve` turns four leading backslashes into a
+   * drive-relative path and reads somewhere else entirely. See `windowsPath.ts`.
+   */
+  const requested = normalizeWindowsPath(requestedPath)
+  const absolute = path.resolve(context.workspaceRoot, requested)
   const roots =
     options.write === true ? [context.workspaceRoot] : [context.workspaceRoot, ...(context.readRoots ?? [])]
 

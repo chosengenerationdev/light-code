@@ -631,6 +631,10 @@ export function App(props: AppProps): ReactElement {
       config,
     } satisfies UiToHostMessage)
   }
+  /** Opens a skill or Python tool in a real editor tab, where an edit actually saves. */
+  const openManagedFile = (filePath: string): void => {
+    props.transport.post({ type: 'openManagedFile', path: filePath } satisfies UiToHostMessage)
+  }
   const browseForPath = (request: { purpose: string; kind: 'file' | 'folder'; extensions?: string[] }): void => {
     // Cleared first so picking the same path twice in a row still registers as a change.
     setPickedPath(undefined)
@@ -847,6 +851,9 @@ export function App(props: AppProps): ReactElement {
             pickedPath={pickedPath}
             onSaveMcpServer={saveMcpServer}
             onDeleteMcpServer={deleteMcpServer}
+            onDuplicateMcpServer={(name: string) =>
+              props.transport.post({ type: 'duplicateMcpServer', name } satisfies UiToHostMessage)
+            }
             onSaveMcp={saveMcp}
             onRestartMcp={restartMcp}
             onSetMcpServerEnabled={setMcpServerEnabled}
@@ -866,6 +873,7 @@ export function App(props: AppProps): ReactElement {
               skillsDir,
               extraDirs: skillExtraDirs,
               configuredDir: skillConfiguredDir,
+              onOpenFile: openManagedFile,
               onDelete: (name) => props.transport.post({ type: 'deleteSkillFile', name } satisfies UiToHostMessage),
               onSaveDirs: (dir: string, paths: string[]) => {
                 setSkillConfiguredDir(dir)
@@ -878,6 +886,8 @@ export function App(props: AppProps): ReactElement {
               runningId: runningScheduleId,
               onSave: (schedule) => props.transport.post({ type: 'saveSchedule', schedule } satisfies UiToHostMessage),
               onDelete: (id) => props.transport.post({ type: 'deleteSchedule', id } satisfies UiToHostMessage),
+              onDuplicate: (id) =>
+                props.transport.post({ type: 'duplicateSchedule', id } satisfies UiToHostMessage),
               onToggle: (id, enabled) =>
                 props.transport.post({ type: 'setScheduleEnabled', id, enabled } satisfies UiToHostMessage),
               onRunNow: (id) => props.transport.post({ type: 'runScheduleNow', id } satisfies UiToHostMessage),
@@ -900,6 +910,11 @@ export function App(props: AppProps): ReactElement {
               status: pythonStatus,
               onBrowse: browseForPath,
               pickedPath,
+              onOpenFile: openManagedFile,
+              onDeleteTool: (name: string) =>
+                props.transport.post({ type: 'deletePythonTool', name } satisfies UiToHostMessage),
+              onApproveTool: (name: string) =>
+                props.transport.post({ type: 'approvePythonTool', name } satisfies UiToHostMessage),
               onSave: (settings) =>
                 props.transport.post({
                   type: 'setPython',

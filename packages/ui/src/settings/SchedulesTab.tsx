@@ -1,7 +1,7 @@
 import type { Schedule, ScheduleTrigger, ScheduleToolInfo } from '@light-code/core/browser'
 import { describeNextRun, describeTrigger, riskyGroupsIn } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { ChevronIcon, PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
+import { ChevronIcon, CopyIcon, PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
 import { activeMentionQuery, insertMention } from '../mentions.js'
 import { Select } from '../Select.js'
 import {
@@ -23,6 +23,7 @@ export interface SchedulesTabProps {
   tools: ScheduleToolInfo[]
   onSave: (schedule: Schedule) => void
   onDelete: (id: string) => void
+  onDuplicate: (id: string) => void
   onToggle: (id: string, enabled: boolean) => void
   onRunNow: (id: string) => void
   runningId?: string | undefined
@@ -208,6 +209,20 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
                     onClick={() => setEditing(schedule)}
                   >
                     Edit
+                  </button>
+                  {/*
+                    The copy is paused and has no run history: a clone is made to be changed,
+                    and one that fired on the original's schedule before anyone had edited it
+                    would run something nobody finished writing.
+                  */}
+                  <button
+                    type="button"
+                    title="Duplicate this schedule. The copy is paused so you can edit it first."
+                    aria-label="Duplicate"
+                    style={iconButtonStyle('ghost')}
+                    onClick={() => props.onDuplicate(schedule.id)}
+                  >
+                    <CopyIcon />
                   </button>
                   <button
                     type="button"

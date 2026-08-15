@@ -46,6 +46,13 @@ export function createVSCodeHostServices(
       await vscode.window.showTextDocument(document, { preview: false })
     },
 
+    async openFile(filePath: string) {
+      // The real file, not a copy — a skill or a tool is edited by editing it. `preview: false`
+      // so opening a second one does not silently replace the first in the same tab.
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath))
+      await vscode.window.showTextDocument(document, { preview: false })
+    },
+
     async revealPanel() {
       // The view's own focus command, contributed by the `views` entry in package.json. Using
       // it rather than a custom command means VS Code handles the container being collapsed.

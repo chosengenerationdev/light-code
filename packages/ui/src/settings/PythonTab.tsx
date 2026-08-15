@@ -1,8 +1,7 @@
 import type { PythonStatus } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, primaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
-import { DismissableProblems } from './DismissableProblems.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -18,6 +17,11 @@ export interface PythonTabProps {
     indexUrl: string
     offline: boolean
   }) => void
+  /** Opens a tool's source in an editor tab, which is where editing belongs. */
+  onOpenFile: (path: string) => void
+  onDeleteTool: (name: string) => void
+  /** Re-pins a tool the user has edited by hand — see the hash pin in `registry.ts`. */
+  onApproveTool: (name: string) => void
 }
 
 /**
@@ -30,6 +34,7 @@ export interface PythonTabProps {
  */
 export function PythonTab(props: PythonTabProps): ReactElement {
   const status = props.status
+  const [confirming, setConfirming] = useState<string | undefined>(undefined)
   const [enabled, setEnabled] = useState(false)
   const [uvPath, setUvPath] = useState('')
   const [toolsDir, setToolsDir] = useState('')
@@ -213,7 +218,47 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             one outcome that teaches nobody anything — and a hash mismatch is either an
             attack or a mistake, both of which need saying out loud.
           */}
-          <DismissableProblems title="Not loaded" problems={status.issues} />
+          {status.issues.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <strong style={{ fontSize: 12, color: colors.error }}>Not loaded</strong>
+              {status.issues.map((issue) => (
+                <div key={issue.filePath} style={{ marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: colors.error }}>⚠ {issue.detail}</div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 3 }}>
+                    <button
+                      type="button"
+                      style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                      onClick={() => props.onOpenFile(issue.filePath)}
+                    >
+                      Open
+                    </button>
+                    {/*
+                      Offered only where re-pinning would actually fix it. A file that does not
+                      load at all must not be approved — the pin would start certifying broken
+                      code, which is worse than the mismatch it was meant to resolve.
+                    */}
+                    {issue.recoverable && (
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                        title="Trust this file as it stands now. Read it first — a change you did not make is exactly what the check is for."
+                        onClick={() => props.onApproveTool(issue.name)}
+                      >
+                        Approve this version
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                      onClick={() => setConfirming(issue.name)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{ marginTop: 10 }}>
             <strong style={{ fontSize: 12 }}>Registered tools</strong>
@@ -225,14 +270,57 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               </p>
             ) : (
               status.tools.map((tool) => (
-                <div key={tool.name} style={{ padding: '4px 0', borderBottom: `1px solid ${colors.border}` }}>
-                  <span style={{ fontFamily: monospace, fontSize: 12 }}>py__{tool.name}</span>
+                <div key={tool.name} style={{ padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{ fontFamily: monospace, fontSize: 12 }}>py__{tool.name}</span>
+                    <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                      {/*
+                        Opens the real file, not a copy: editing has to write back. A hand-edit
+                        leaves the tool refused on a hash mismatch until it is approved again,
+                        which the "Not loaded" section above offers.
+                      */}
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                        title="Open the source in an editor tab"
+                        onClick={() => props.onOpenFile(tool.filePath)}
+                      >
+                        Open
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                        onClick={() => setConfirming(tool.name)}
+                      >
+                        Delete
+                      </button>
+                    </span>
+                  </div>
                   {tool.description.length > 0 && (
                     <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>{tool.description}</span>
                   )}
                   <span style={{ display: 'block', color: colors.muted, fontSize: 10, fontFamily: monospace }}>
                     {tool.filePath}
                   </span>
+
+                  {confirming === tool.name && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12 }}>
+                      <span>Delete this tool and its approval?</span>
+                      <button
+                        type="button"
+                        style={primaryButtonStyle(false)}
+                        onClick={() => {
+                          props.onDeleteTool(tool.name)
+                          setConfirming(undefined)
+                        }}
+                      >
+                        Delete
+                      </button>
+                      <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(undefined)}>
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))
             )}

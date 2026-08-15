@@ -334,7 +334,31 @@ export function GlobeIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
-/** Python tools — a terminal prompt, for "code that runs". */
+/**
+ * Python's own two-snake mark, drawn in `currentColor`.
+ *
+ * Monochrome rather than the brand blue and yellow: every other icon in this set is a
+ * `currentColor` stroke that the tab bar tints by state, and two coloured pixels in a row of
+ * grey glyphs would look like a mistake. The silhouette is what makes it recognisable anyway.
+ *
+ * The lower half is the upper half rotated 180° about the centre, which is how the real mark is
+ * constructed — so the two halves cannot drift apart under editing.
+ */
+export function PythonIcon({ size = 16 }: IconProps): ReactElement {
+  const half =
+    'M7.9 1.1c-1 0-1.9.1-2.6.4-.6.2-1 .6-1 1.3v1.6h3.7v.5H2.9c-.8 0-1.5.5-1.8 1.3' +
+    '-.3.9-.3 1.9 0 2.9.3.8.8 1.3 1.5 1.3h1.2V8.6c0-1 .9-1.9 1.9-1.9h3.7c.7 0 1.3-.6 1.3-1.3' +
+    'V2.8c0-.7-.5-1.2-1.3-1.4-.5-.2-1-.3-1.5-.3Zm-2.1 1c.4 0 .7.3.7.7s-.3.7-.7.7' +
+    '-.7-.3-.7-.7.3-.7.7-.7Z'
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <path d={half} />
+      <path d={half} transform="rotate(180 8 8)" />
+    </svg>
+  )
+}
+
+/** A terminal prompt, for "code that runs". Kept for anything that is not Python-specific. */
 export function TerminalIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

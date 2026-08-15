@@ -10,16 +10,18 @@ configure a provider.
 
 ## What it does
 
+### The basics
+
 - **Chat in the sidebar**, with an autonomous multi-step agent loop — one tool call per
   step, your approval between steps, until the task is done.
-- **Nine tools:** read files, list files, search (ripgrep), write, apply a diff, run a
-  shell command, use an MCP tool, ask a follow-up, and finish.
+- **Read, search, write, diff, run.** ripgrep-backed search, a strict `apply_diff` with no
+  fuzzy matching, and shell commands in the integrated terminal.
 - **Any provider you can reach.** OpenAI-compatible, Anthropic Messages, and Google Gemini,
   behind named profiles you can switch between. Presets prefill a base URL; every field
   stays editable.
 - **Corporate gateways are a first-class case:** mutual TLS with client certificates,
-  OAuth client-credentials token exchange, custom CA bundles, and a Test Connection button
-  that tells you *which* step failed.
+  OAuth client-credentials token exchange, custom CA bundles configured once and applied
+  everywhere, and a Test Connection button that tells you *which* step failed.
 - **MCP servers** over stdio or Streamable HTTP, with per-server and per-tool controls.
 - **Approval that shows ground truth** — the literal command, the computed diff — never the
   model's description of what it intends to do.
@@ -27,8 +29,45 @@ configure a provider.
   everything in one click. Your own git repository is never touched.
 - **Task history.** Conversations survive closing the panel, reloading the window, and
   restarting VS Code.
-- **`@` mentions** to attach a file or folder, and image attachments for vision-capable
-  models.
+
+### Reading what you actually work with
+
+- **Word, Excel, HTML and PDF** as plain text, with no extra dependency. A PDF whose fonts
+  carry no character map is *reported* rather than returned as garbled text — being told to
+  convert the file beats a confident summary of nonsense.
+- **Large log files, a page at a time** — read the tail, or a line window, without pulling a
+  gigabyte into the context window.
+- **Folders outside the workspace**, including Windows network shares. The assistant asks
+  when it needs one and shows the resolved path; allow it once, or allow the folder. Reading
+  only — edits stay confined to the workspace, because that is what checkpoints can undo.
+- **Attach any file**, not only images. Text is included in the message; images go to
+  vision-capable models.
+
+### Extending it
+
+- **Python tools the model writes.** Off by default. `uv`-managed, dependency blocks
+  installed from your own index, and every tool pinned to a hash of the source you approved —
+  a `.py` that changes on disk is refused, not quietly reloaded.
+- **Skills**: markdown you or the assistant writes down about your codebase. Only the name
+  and one-line description cost context; the body is read on demand. Several folders
+  supported, including read-only shared ones.
+- **Semantic search over your code and over the tool catalogue**, against OpenSearch. Opt-in
+  and disabled by default, with a dispatcher that keeps tool schemas out of the prompt when
+  you have more tools than context.
+- **Scheduled prompts** that run on their own, each with an explicit allowlist of the tools
+  it may use — the default is none. Runs happen in the background without touching the
+  conversation you are in, and leave a transcript you can open in an editor tab.
+- **Notifications**, including a Markdown report the notification can open.
+
+### Spending less
+
+- **Junior mode.** A cheap model does the work and consults Claude — through your own Claude
+  CLI — for the plan. The expert splits the work into checkpoints and reviews each one, and
+  consultations continue a single conversation, which measured about nineteen times cheaper
+  than starting cold each time.
+- **A budget for that expert**, per chat: stop after so many dollars or so many
+  consultations. Set it in the chat header, adjust it mid-conversation, and the expert is
+  told what remains so it plans to fit.
 - **A context budget you can see:** system prompt, tool definitions, conversation, and tool
   results, with cache hit rate.
 
@@ -37,7 +76,7 @@ configure a provider.
 Minimalism is the point, not a stage it will grow out of:
 
 - No browser automation. If you want it, configure a Chrome DevTools MCP server yourself.
-- No semantic codebase search yet — planned, opt-in, and off by default when it lands.
+- No OCR, and no attempt to guess at a PDF it cannot decode.
 - No telemetry, no update checks, no remote assets, no analytics of any kind.
 - No cloud account, no sign-in, no hosted component.
 
@@ -78,12 +117,19 @@ Read this before using it anywhere sensitive.
 > contacts are the model gateway, the MCP servers, and — if you enable indexing — the vector
 > store and embedding endpoint named in your config.
 
+**Indexing is the largest egress in the product.** Enabling it sends the contents of your
+workspace to the embedding endpoint you configured. It is opt-in, ships disabled, and
+confirms the destination the first time you use it.
+
+**Enabling the expert spends money on your Claude account.** It is off by default, nothing
+is spawned until you turn it on, and every consultation's cost appears in the chat.
+
 ### What is *outside* that boundary
 
 **Light Code does not sandbox anything it runs on your instruction.** Shell commands, MCP
-servers, and (later) Python tools execute with your full user privileges, with access to
-your files, your network, and your environment. This is the same trust model as running the
-command yourself in a terminal.
+servers, Python tools, and the Claude CLI execute with your full user privileges, with
+access to your files, your network, and your environment. This is the same trust model as
+running the command yourself in a terminal.
 
 **It does not protect you from another process running as the same user.** Anything that can
 read your VS Code storage can read your config. Secrets go to the OS keychain, which raises

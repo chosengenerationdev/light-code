@@ -1,6 +1,6 @@
 import type { McpPlatform, McpServerConfig, McpServerState, McpServerStatus, McpToolPermission } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { TrashIcon } from '../icons.js'
+import { CopyIcon, TrashIcon } from '../icons.js'
 import {
   colors,
   fieldErrorStyle,
@@ -32,6 +32,7 @@ export interface McpTabProps {
   onSave: (json: string) => void
   onSaveServer: (name: string, previousName: string | undefined, config: McpServerConfig) => void
   onDeleteServer: (name: string) => void
+  onDuplicateServer: (name: string) => void
   onRestart: (name: string) => void
   onSetServerEnabled: (name: string, enabled: boolean) => void
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
@@ -110,6 +111,7 @@ function ServerRow(props: {
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
   onEdit: (name: string) => void
   onDelete: (name: string) => void
+  onDuplicate: (name: string) => void
 }): ReactElement {
   const { server } = props
   const [expanded, setExpanded] = useState(false)
@@ -171,6 +173,19 @@ function ServerRow(props: {
         )}
         <button type="button" style={secondaryButtonStyle()} onClick={() => props.onEdit(server.name)}>
           Edit
+        </button>
+        {/*
+          Copies the entry disabled, so a clone made to be edited does not spawn a second
+          identical server the moment it exists.
+        */}
+        <button
+          type="button"
+          aria-label={`Duplicate ${server.name}`}
+          title="Duplicate this server. The copy starts disabled so you can edit it first."
+          style={iconButtonStyle('ghost')}
+          onClick={() => props.onDuplicate(server.name)}
+        >
+          <CopyIcon />
         </button>
         <button
           type="button"
@@ -340,6 +355,7 @@ export function McpTab(props: McpTabProps): ReactElement {
               onSetToolPermission={props.onSetToolPermission}
               onEdit={setFormFor}
               onDelete={setConfirmDelete}
+            onDuplicate={props.onDuplicateServer}
             />
             {confirmDelete === server.name && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 6px 22px', fontSize: 12 }}>

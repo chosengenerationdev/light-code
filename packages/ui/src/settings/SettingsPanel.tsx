@@ -29,7 +29,7 @@ import {
   SearchIcon,
   ServerIcon,
   ShieldIcon,
-  TerminalIcon,
+  PythonIcon,
 } from '../icons.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -58,6 +58,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   pickedPath: { purpose: string; path: string } | undefined
   onSaveMcpServer: (name: string, previousName: string | undefined, config: McpServerConfig) => void
   onDeleteMcpServer: (name: string) => void
+  onDuplicateMcpServer: (name: string) => void
   onSaveMcp: (json: string) => void
   onRestartMcp: (name: string) => void
   onSetMcpServerEnabled: (name: string, enabled: boolean) => void
@@ -107,7 +108,7 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'search', label: 'Search', Icon: SearchIcon },
   { id: 'expert', label: 'Expert', Icon: ExpertIcon },
   { id: 'schedules', label: 'Schedules', Icon: ClockIcon },
-  { id: 'python', label: 'Python', Icon: TerminalIcon },
+  { id: 'python', label: 'Python', Icon: PythonIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
   { id: 'appearance', label: 'Appearance', Icon: PaletteIcon },
@@ -238,6 +239,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             pickedPath={props.pickedPath}
             onSaveServer={props.onSaveMcpServer}
             onDeleteServer={props.onDeleteMcpServer}
+            onDuplicateServer={props.onDuplicateMcpServer}
             onSave={props.onSaveMcp}
             onRestart={props.onRestartMcp}
             onSetServerEnabled={props.onSetMcpServerEnabled}

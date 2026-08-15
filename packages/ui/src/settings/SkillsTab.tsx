@@ -15,6 +15,8 @@ export interface SkillsTabProps {
   /** The configured value rather than the resolved one, so the field round-trips what was typed. */
   configuredDir: string
   onDelete: (name: string) => void
+  /** Opens the skill in an editor tab. A skill is markdown; editing it is editing a file. */
+  onOpenFile: (path: string) => void
   onSaveDirs: (dir: string, paths: string[]) => void
 }
 
@@ -79,7 +81,20 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
                     shared
                   </span>
                 )}
-                <span style={{ marginLeft: 'auto' }}>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {/*
+                    Offered for shared skills too. Reading one is how you find out what the
+                    assistant has been told about your codebase, and that is worth having
+                    whether or not you may edit it.
+                  */}
+                  <button
+                    type="button"
+                    style={secondaryButtonStyle()}
+                    title="Open this skill in an editor tab"
+                    onClick={() => props.onOpenFile(skill.filePath)}
+                  >
+                    Open
+                  </button>
                   {skill.sourceDir === undefined || props.skillsDir === undefined || skill.sourceDir === props.skillsDir ? (
                     <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(skill.name)}>
                       Remove

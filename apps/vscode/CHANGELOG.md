@@ -1,5 +1,33 @@
 # light-code-vscode
 
+## 0.25.0
+
+### Minor Changes
+
+- Network paths the assistant mangled now work, plus a proper view of tools and skills.
+
+  **Over-escaped Windows paths are repaired.** Asking for a file on a share could produce eight
+  backslashes in the tool call, which collapses to four — and four is not a UNC prefix, so it
+  was read as a drive-relative path and failed with `ENOENT` naming a `C:\` path you never
+  mentioned. Models get this wrong often, the intent survives the mangling completely, and the
+  collapsed forms are not valid paths in the first place, so they are now repaired rather than
+  refused.
+
+  **Tools and skills can be inspected, edited and removed.** Both tabs list what each one is
+  and what it does, with **Open** to see the source in an editor tab, and **Delete**. A Python
+  tool you edit by hand is refused on a hash mismatch — that is the pin working — so there is
+  now an **Approve this version** button for the "yes, that was me" case. It runs the same
+  validation a model-written tool gets, so a file that does not load cannot be approved.
+
+  **Duplicate an MCP server or a schedule**, as you already could a provider profile. Copies
+  start disabled or paused: a clone is made to be edited, and one that started running the
+  moment it existed would run something nobody had finished writing.
+
+  **The Python tab wears Python's own mark** instead of a terminal glyph.
+
+  The marketplace listing has been rewritten — it was several releases out of date, still
+  claiming nine tools and no semantic search.
+
 ## 0.24.2
 
 ### Patch Changes

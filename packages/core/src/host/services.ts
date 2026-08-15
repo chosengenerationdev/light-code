@@ -67,6 +67,14 @@ export interface HostUi {
    * does not open one, and no caller depends on it having happened.
    */
   openDocument(options: { title: string; content: string; language?: string }): Promise<void>
+  /**
+   * Opens a file on disk for editing, as opposed to `openDocument`'s in-memory copy.
+   *
+   * Editing a skill or a Python tool has to write back to the file, so a scratch buffer will
+   * not do. Optional like every other method here: a browser host has no editor, and the tab
+   * keeps showing the path so the file is still findable by hand (§19).
+   */
+  openFile?(filePath: string): Promise<void>
   showOpenDialog(options: OpenDialogOptions): Promise<string | undefined>
   showSaveDialog(options: { defaultName: string; extensions?: string[] | undefined }): Promise<string | undefined>
   /**

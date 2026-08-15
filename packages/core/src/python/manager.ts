@@ -10,6 +10,7 @@ import {
   createUpdatePythonTool,
 } from './tools.js'
 import { installDependencies } from './deps.js'
+import type { WorkerToolDescription } from './worker.js'
 import {
   detectUv,
   discoverWorkspaceVenv,
@@ -47,8 +48,20 @@ export interface PythonStatus {
   /** Why it is not ready, phrased for a human. */
   detail: string
   tools: { name: string; description: string; filePath: string }[]
-  /** Refused tools, surfaced rather than logged — see `registry.ts`. */
-  issues: string[]
+  /**
+   * Refused tools, surfaced rather than logged — see `registry.ts`.
+   *
+   * Structured rather than a sentence, because a refusal the user can *act on* needs the tool's
+   * name and file. A hash mismatch usually means they edited the file themselves, and the way
+   * back is to read it and approve it again — which needs a button, and a button needs a name.
+   */
+  issues: {
+    detail: string
+    name: string
+    filePath: string
+    /** True when approving the file as it stands would resolve it. */
+    recoverable: boolean
+  }[]
 }
 
 export interface PythonManagerOptions {
@@ -214,6 +227,27 @@ export class PythonManager {
   }
 
   /** Re-reads the tools directory. Cheap, and called after any create/update/delete. */
+  /**
+   * Validates a tool file and returns what it describes, without approving it.
+   *
+   * Exists so the settings tab can re-pin a hand-edited tool (§13) through exactly the same
+   * check a model-authored one gets. Approving something that does not load would have the pin
+   * start certifying broken code, which is worse than the mismatch it was meant to resolve.
+   */
+  async describe(name: string, filePath: string): Promise<WorkerToolDescription | undefined> {
+    if (this.worker === undefined) return undefined
+    try {
+      return await this.worker.validate(name, filePath)
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Where tool files live, so the host can open and remove them on the user's behalf. */
+  toolsDirectory(): string {
+    return this.toolsDir
+  }
+
   async refresh(): Promise<void> {
     if (!this.enabled || this.toolsDir.length === 0) return
     const loaded = await loadRegistry(this.toolsDir, this.worker, this.options.logger)
@@ -276,7 +310,14 @@ export class PythonManager {
         description: tool.description,
         filePath: tool.filePath,
       })),
-      issues: this.issues.map(describeIssue),
+      issues: this.issues.map((issue) => ({
+        detail: describeIssue(issue),
+        name: issue.name,
+        filePath: issue.filePath,
+        // `invalid` means the file does not load at all — approving it would pin a broken
+        // tool. Only a pin problem can be fixed by re-pinning.
+        recoverable: issue.kind === 'hash-mismatch' || issue.kind === 'unapproved',
+      })),
     }
   }
 
