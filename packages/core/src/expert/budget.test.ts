@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { checkExpertBudget, expertBudgetUsage, type ExpertSpend } from './budget.js'
+import { checkExpertBudget, describeExpertBudget, expertBudgetUsage, type ExpertSpend } from './budget.js'
 
 const spend = (usd: number, consultations: number, unpriced = 0): ExpertSpend => ({
   usd,
@@ -65,5 +65,36 @@ describe('expertBudgetUsage', () => {
 
   it('never exceeds one, so a bar cannot overflow its track', () => {
     expect(expertBudgetUsage(spend(50, 1), { maxSpendUsd: 10 })).toBe(1)
+  })
+})
+
+describe('describeExpertBudget', () => {
+  it('says nothing when nothing is capped, so no tokens are spent on "unlimited"', () => {
+    expect(describeExpertBudget(spend(3, 3), {})).toBeUndefined()
+  })
+
+  it('reports what is left, not what is used', () => {
+    // Remaining is the number the expert plans against; used is the number it would have to
+    // subtract, and a model asked to do arithmetic before planning will sometimes get it wrong.
+    const line = describeExpertBudget(spend(0.6, 2), { maxSpendUsd: 2, maxConsultations: 5 })
+    expect(line).toContain('3 of 5 consultations left')
+    expect(line).toContain('$1.40 of $2.00 left')
+  })
+
+  it('tells the expert what the number is for', () => {
+    expect(describeExpertBudget(spend(0, 0), { maxConsultations: 3 })).toMatch(/Plan the number of checkpoints/)
+  })
+
+  it('never goes negative when the last consultation overshot', () => {
+    // The check runs before spending, so the final call can carry the total past the limit.
+    const line = describeExpertBudget(spend(2.4, 6), { maxSpendUsd: 2, maxConsultations: 5 })
+    expect(line).toContain('0 of 5')
+    expect(line).not.toContain('-')
+  })
+
+  it('reports only the limit that is set', () => {
+    const line = describeExpertBudget(spend(0, 1), { maxConsultations: 4 })
+    expect(line).toContain('3 of 4 consultations left')
+    expect(line).not.toContain('$')
   })
 })

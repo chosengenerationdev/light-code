@@ -72,6 +72,15 @@ export interface AskExpertOptions {
    * registering the tool, would leave it waiting for advice that is never coming.
    */
   budget?: () => { allowed: boolean; message?: string | undefined }
+  /**
+   * What is left of the budget, told to the expert so it can plan to fit.
+   *
+   * Sent on **every** consultation, not only the first, because the number changes with each
+   * one and a plan sized against a stale figure is the failure this exists to prevent. It is a
+   * single line — the one piece of per-call context cheap enough to repeat, and §12b's rule
+   * against re-sending context is about paragraphs, not about a number that has moved.
+   */
+  budgetSummary?: () => string | undefined
 }
 
 /**
@@ -122,6 +131,10 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
           ? `${params.question}\n\nRelevant files in this workspace:\n${params.files.map((file) => `- ${file}`).join('\n')}`
           : params.question
 
+      const budgetLine = options.budgetSummary?.()
+      const withBudget =
+        budgetLine === undefined || budgetLine.length === 0 ? question : `${question}\n\n[${budgetLine}]`
+
       const previousSession = options.session?.get()
 
       /*
@@ -131,7 +144,7 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
        */
       const briefing = previousSession === undefined ? options.briefing?.() : undefined
       const withBriefing =
-        briefing !== undefined && briefing.length > 0 ? `${briefing}\n\n---\n\n${question}` : question
+        briefing !== undefined && briefing.length > 0 ? `${briefing}\n\n---\n\n${withBudget}` : withBudget
 
       const answer = await consultExpert(options.cli, {
         question: withBriefing,

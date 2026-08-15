@@ -28,6 +28,12 @@
   override belongs to that conversation and is cleared when you start a new chat, so a raised
   ceiling cannot quietly outlive the task it was for.
 
+  **The expert is told what is left, so it plans to fit.** Every consultation carries a one-line
+  statement of the remaining budget. Without it the expert plans as though reviews were free and
+  proposes eight checkpoints on a budget of three, and the assistant then loses it mid-plan —
+  the worst moment for that to happen. It reports what remains rather than what has been used,
+  because that is the number to plan against.
+
   The count limit is worth setting alongside a spend limit, because the CLI does not always
   report a price and an unpriced consultation still costs money. The cost meter in the chat now
   shows a small bar against the nearer limit, amber before the wall rather than only at it.

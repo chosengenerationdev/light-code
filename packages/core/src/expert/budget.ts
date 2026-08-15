@@ -101,3 +101,36 @@ export function expertBudgetUsage(spend: ExpertSpend, limits: ExpertLimits): num
   // The nearer limit is the one that will actually stop the next call, so it is the one shown.
   return Math.min(1, Math.max(...fractions))
 }
+
+/**
+ * A one-line statement of what is left, for the expert itself.
+ *
+ * The expert is the one deciding how many checkpoints the plan has, and therefore how many
+ * reviews it implies. Told nothing, it plans as though reviews were free and proposes eight
+ * checkpoints on a budget of three — the junior then runs out mid-plan, which is the worst
+ * moment to lose it. Told the number, it can size the plan to fit.
+ *
+ * Undefined when nothing is capped, so no tokens are spent saying "unlimited".
+ */
+export function describeExpertBudget(spend: ExpertSpend, limits: ExpertLimits): string | undefined {
+  const parts: string[] = []
+
+  const maxConsultations = limits.maxConsultations ?? 0
+  if (maxConsultations > 0) {
+    const left = Math.max(0, maxConsultations - spend.consultations)
+    parts.push(
+      `${String(left)} of ${String(maxConsultations)} consultation${maxConsultations === 1 ? '' : 's'} left`,
+    )
+  }
+
+  const maxSpend = limits.maxSpendUsd ?? 0
+  if (maxSpend > 0) {
+    parts.push(`${money(Math.max(0, maxSpend - spend.usd))} of ${money(maxSpend)} left`)
+  }
+
+  if (parts.length === 0) return undefined
+  return (
+    `Budget for this task: ${parts.join(', ')}. ` +
+    'Plan the number of checkpoints to fit — when it runs out the junior finishes alone.'
+  )
+}

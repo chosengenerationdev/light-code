@@ -57,6 +57,7 @@ import {
   buildDocCorpus,
   createNotifyTool,
   checkExpertBudget,
+  describeExpertBudget,
   expertBudgetUsage,
   type ExpertLimits,
   registryForSchedule,
@@ -821,6 +822,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // Read at call time, not captured: the user can raise the limit mid-task and the very
           // next consultation should honour it, without starting a new task to pick it up.
           budget: () => checkExpertBudget(expertSpend, effectiveExpertLimits()),
+          budgetSummary: () => describeExpertBudget(expertSpend, effectiveExpertLimits()),
           session: {
             get: () => expertSessionId,
             set: (sessionId) => {
