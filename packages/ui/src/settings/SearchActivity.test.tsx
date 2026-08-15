@@ -62,7 +62,7 @@ describe('SearchActivity', () => {
     const onClear = vi.fn()
     render({
       probe: { query: 'q', text: 'answer' },
-      entries: [{ at: Date.now(), query: 'q', target: 'docs', semantic: true, hits: 2 }],
+      entries: [{ at: Date.now(), source: 'search_docs', query: 'q', hits: 2, elapsedMs: 12, via: 'index' }],
       onClearProbe,
       onClear,
     })
