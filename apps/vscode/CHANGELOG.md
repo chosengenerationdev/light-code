@@ -1,5 +1,20 @@
 # light-code-vscode
 
+## 0.28.2
+
+### Patch Changes
+
+- The global CA covers the new vector backends too — verified rather than assumed.
+
+  Qdrant and Chroma already inherited the CA from Settings → Network, because they share the
+  connection builder OpenSearch uses. That is now pinned by a test asserting each backend sends
+  the resolved TLS material on *every* request, not merely the first — a client that
+  authenticated over TLS and then queried without it would be worse than one that never used it.
+
+  The builder was still called `openSearchConnectionFor`, which was accurate with one backend
+  and a lie with three: exactly the sort of name that has someone add a second, subtly different
+  one rather than reuse it.
+
 ## 0.28.1
 
 ### Patch Changes

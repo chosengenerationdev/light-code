@@ -1896,10 +1896,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /**
-   * Builds a read-only client for a configured connection, resolving credentials from
-   * secure storage and the CA from disk at call time rather than caching either.
+   * Builds a connection for *any* vector store, resolving credentials from secure storage and
+   * the CA from disk at call time rather than caching either.
+   *
+   * **Backend-neutral, and named so since Qdrant and Chroma arrived.** It was
+   * `openSearchConnectionFor`, which was accurate when there was one backend and became a lie
+   * the moment there were three — the sort of name that has someone add a second, subtly
+   * different connection builder rather than reuse this one. `OpenSearchConnection` is itself
+   * an alias of `VectorStoreConnection` for the same reason.
+   *
+   * Every backend therefore inherits the global TLS block: a corporate root set once in
+   * Settings → Network covers the gateway, the token endpoint, the embedder and the vector
+   * store alike, and a per-connection CA adds to it rather than replacing it (§19).
    */
-  async function openSearchConnectionFor(store: VectorStoreConfig, id: string): Promise<OpenSearchConnection> {
+  async function vectorStoreConnectionFor(store: VectorStoreConfig, id: string): Promise<OpenSearchConnection> {
     const connection: OpenSearchConnection = { url: store.url, label: store.label }
 
     const username = store.usernameRef !== undefined ? await secrets.get(searchUserRefFor(id)) : undefined
@@ -1928,12 +1938,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   async function openSearchClientFor(store: VectorStoreConfig, id: string): Promise<OpenSearchClient> {
-    return new OpenSearchClient(httpClient, await openSearchConnectionFor(store, id))
+    return new OpenSearchClient(httpClient, await vectorStoreConnectionFor(store, id))
   }
 
   /** The read half of whichever backend the active store names. Never a writer. */
   async function vectorSearcherFor(store: VectorStoreConfig, id: string): Promise<VectorSearcher> {
-    return createVectorSearcher(httpClient, store, await openSearchConnectionFor(store, id))
+    return createVectorSearcher(httpClient, store, await vectorStoreConnectionFor(store, id))
   }
 
   /**
@@ -2172,7 +2182,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const writer = createVectorIndexWriter(
         httpClient,
         search.store,
-        await openSearchConnectionFor(search.store, search.id),
+        await vectorStoreConnectionFor(search.store, search.id),
       )
       await writer.ensureCollection(index, embedder.dimensions)
 
@@ -2307,7 +2317,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const writer = createVectorIndexWriter(
         httpClient,
         search.store,
-        await openSearchConnectionFor(search.store, search.id),
+        await vectorStoreConnectionFor(search.store, search.id),
       )
       const existing = await writer.listPaths(index)
       if (existing.length > 0) await writer.deleteByPaths(index, existing)
@@ -2415,7 +2425,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         embedder,
         // The one place a writer is built. Not reachable from any tool — a user starts this
         // from Settings, which is what keeps the model unable to write to a cluster at all.
-        writer: createVectorIndexWriter(httpClient, search.store, await openSearchConnectionFor(search.store, search.id)),
+        writer: createVectorIndexWriter(httpClient, search.store, await vectorStoreConnectionFor(search.store, search.id)),
         denylist,
         manifest,
         saveManifest: async (next) => {
