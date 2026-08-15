@@ -26,15 +26,15 @@ export type ReadDocumentParams = z.infer<typeof paramsSchema>
  * one sheet at a time. Oversized results still spill through the usual truncation path (§12),
  * so this can never be the thing that fills the window.
  *
- * PDF is deliberately absent. Word, Excel and HTML need no dependency at all; PDF needs a real
- * parser for compressed content streams and font-level character maps, and that is a bundle
- * decision rather than a parsing chore. Saying so plainly beats returning something garbled.
+ * **PDF is handled without a dependency**, and refuses rather than guesses. A PDF whose fonts
+ * carry no character map would decode to confident nonsense, so `pdf.ts` withholds it and says
+ * what to do instead — a model handed mojibake summarises it as though it were correct.
  */
 export const readDocumentTool: Tool<ReadDocumentParams> = {
   name: 'read_document',
   group: 'read',
   description:
-    'Read a Word document (.docx), spreadsheet (.xlsx) or HTML page as plain text. ' +
+    'Read a Word document (.docx), spreadsheet (.xlsx), PDF or HTML page as plain text. ' +
     'Use this instead of read_file for those formats — read_file returns unreadable binary for them. ' +
     'Supports offset/limit for long documents, and a sheet name for workbooks.',
   parametersSchema: paramsSchema,
@@ -44,16 +44,6 @@ export const readDocumentTool: Tool<ReadDocumentParams> = {
     if (!resolved.ok) return { content: resolved.message, isError: true, path: params.path }
 
     const kind = documentKindFor(params.path)
-    if (params.path.toLowerCase().endsWith('.pdf')) {
-      return {
-        content:
-          `PDF is not supported yet — ${params.path} cannot be read. ` +
-          'Word, Excel and HTML documents work with read_document. If the same content exists in one of ' +
-          'those formats, read that instead; otherwise tell the user PDF support is not available.',
-        isError: true,
-        path: params.path,
-      }
-    }
 
     let extracted
     try {

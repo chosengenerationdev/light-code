@@ -1,5 +1,27 @@
 # light-code-vscode
 
+## 0.23.0
+
+### Minor Changes
+
+- PDFs can be read, and a PDF that cannot be read honestly says so.
+
+  `read_document` now handles `.pdf` alongside Word, Excel and HTML — with no new dependency, so
+  the download is unchanged. A real PDF library is several megabytes that every user pays for
+  whether or not they ever open one.
+
+  **It follows the fonts.** Every modern producer embeds subset fonts whose character codes mean
+  nothing outside that one file, so the text is decoded through each font's own character map.
+  Without that step a page printed from a browser comes back as complete nonsense.
+
+  **And when it cannot decode a file, it refuses instead of guessing.** A PDF with no usable
+  character map, a scan with no text layer, and an encrypted file are each reported by name with
+  what to do about it. Garbled text would otherwise be summarised as though it were correct,
+  which is a worse outcome than being told to export the file to Word or text first.
+
+  Layout is approximate — a PDF stores positioned glyphs rather than paragraphs — but headings,
+  paragraphs and list items come through as separate lines.
+
 ## 0.22.1
 
 ### Patch Changes

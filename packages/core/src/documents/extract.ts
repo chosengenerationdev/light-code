@@ -1,3 +1,4 @@
+import { describePdfProblem, extractPdfText } from './pdf.js'
 import { ZipArchive, ZipError } from './zip.js'
 
 /**
@@ -5,8 +6,8 @@ import { ZipArchive, ZipError } from './zip.js'
  *
  * All zero-dependency. `.docx` and `.xlsx` are ZIP archives of XML, and HTML is already text —
  * so a library would add megabytes to the VSIX for work that is a few hundred lines of careful
- * string handling. PDF is genuinely different and is not here: compressed content streams and
- * font-level character maps make it a real parser problem rather than a parsing chore.
+ * string handling. PDF lives in `pdf.ts` for the same reason — a library is megabytes, and the
+ * text is reachable without one, at the cost of being honest about which files it cannot decode.
  *
  * **Regex rather than an XML parser, deliberately.** These are two known, machine-generated
  * formats and only their text content is wanted. A parser would accept far more syntax, cost a
@@ -15,7 +16,7 @@ import { ZipArchive, ZipError } from './zip.js'
  * dependency is a bigger download for everyone.
  */
 
-export type DocumentKind = 'docx' | 'xlsx' | 'html' | 'text'
+export type DocumentKind = 'docx' | 'xlsx' | 'html' | 'pdf' | 'text'
 
 export interface ExtractedDocument {
   kind: DocumentKind
@@ -39,6 +40,7 @@ export function documentKindFor(filePath: string): DocumentKind {
   if (lower.endsWith('.docx')) return 'docx'
   if (lower.endsWith('.xlsx') || lower.endsWith('.xlsm')) return 'xlsx'
   if (lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.xhtml')) return 'html'
+  if (lower.endsWith('.pdf')) return 'pdf'
   return 'text'
 }
 
@@ -239,8 +241,23 @@ export function extractDocument(filePath: string, buffer: Buffer, options: Extra
     if (kind === 'docx') return extractDocx(buffer)
     if (kind === 'xlsx') return extractXlsx(buffer, options.sheet)
     if (kind === 'html') return extractHtml(buffer.toString('utf8'))
+    if (kind === 'pdf') {
+      const out = extractPdfText(buffer)
+      /*
+       * A `DocumentError` rather than empty text. Every one of these has something the user can
+       * act on — convert it, unprotect it, OCR it — and returning "" would have the model
+       * report an empty document instead (§17).
+       */
+      if (out.problem !== undefined) throw new DocumentError(describePdfProblem(out.problem, filePath))
+      return {
+        kind: 'pdf',
+        text: out.text,
+        note: `${String(out.pages)} page${out.pages === 1 ? '' : 's'}. Layout is approximate — PDF stores positioned glyphs, not paragraphs.`,
+      }
+    }
     return { kind: 'text', text: buffer.toString('utf8') }
   } catch (error) {
+    if (error instanceof DocumentError) throw error
     if (error instanceof ZipError) {
       throw new DocumentError(
         `${filePath} could not be opened as ${kind === 'docx' ? 'a Word document' : 'an Excel workbook'}: ${error.message}`,

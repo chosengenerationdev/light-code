@@ -835,11 +835,13 @@ no native picker, so `showOpenDialog` returns `undefined` — indistinguishable 
 and every path field stays typeable. That is why the Browse buttons were built as an
 addition to the text input rather than a replacement for it.
 
-**Current phase:** **Shipped.** Junior mode (§12b) is the newest feature; see the handover at
-the end of this file. Published to the Visual Studio Marketplace by manual upload —
-the Azure DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and
-the Release workflow has never run. **0.8.1 was live as of 2026-08-12; 0.10.0 was uploaded on
-2026-08-13 and had not yet appeared in the gallery.**
+**Current phase:** **Shipped and in daily use in a corporate deployment**, which is now where
+most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
+DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
+workflow has never run. **0.22.1 was live as of 2026-08-15**, queried from the gallery.
+
+Every previous edition of this paragraph was stale, several of them by many releases, and each
+was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14), published 2026-08-12.
 The bare name `light-code` belongs to an unrelated package, hence the scope.
@@ -960,7 +962,122 @@ the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSc
 
 ---
 
-## SESSION HANDOVER — 2026-08-14 (fourth), read this first
+## SESSION HANDOVER — 2026-08-15, read this first
+
+**Marketplace is on 0.22.1** (queried 2026-08-15, gallery API — not inferred). `main` is clean.
+861 tests, 1 skipped. Artifact `apps/vscode/light-code-vscode-0.22.1.vsix`.
+
+### The one lesson worth carrying forward
+
+**Twice this session a fix was correct and irrelevant, because it was at the wrong layer.** The
+scheduler was "fixed" by repairing `isDue` — a real bug — and still never fired, because the
+timer it feeds was being destroyed with the webview. Confinement was correct in every unit test
+and still refused every network share, because the tests re-derived the comparison instead of
+calling it.
+
+The habit that resolved both: **get evidence from the running system before changing anything.**
+Reading the user's actual `config.json` showed the schedule firing twice and then stopping,
+which ruled out the logic and pointed at lifetime. Probing `path.resolve` on a UNC root showed
+the doubled separator in one line. Neither would have come from reading the code again.
+
+### Built today
+
+- **The bridge outlives the webview.** It was created per `resolveWebviewView`, so the
+  conversation, MCP connections and schedule timer all died when the panel was torn down — and
+  the extension did not even activate until the panel was opened. Now `activate()` owns one
+  bridge for the window; `WebviewTransport` retargets rather than being rebuilt, and
+  `ChatBridge.resync()` pushes the transcript back to a newly created view. Activation is
+  `onStartupFinished`, with a poller that reads *only* config and constructs the bridge when a
+  schedule is genuinely due — §11's "nothing spawns at VS Code startup" still holds, and the
+  VSIX smoke test proves `activate()` completes without building one.
+- **That poller is also a watchdog.** It reads `ChatBridge.schedulerHealth()` and restarts the
+  timer when the last tick goes stale. The timer has now stopped twice with nothing in the log;
+  watching it is the honest response to that, and there is a manual **Restart** button plus a
+  visible "last checked" time in the Schedules tab. A wedged run cannot hold the scheduler
+  forever either.
+- **Scheduled runs are backgrounded.** They used to call `startNewTask()` on the one shared
+  conversation, so a job firing mid-chat wiped the user's transcript. The run snapshots
+  conversation, task id, spilled handles, read-file set and checkpoint and restores them in the
+  `finally` — **restored before anything else awaits**, so a message arriving as the run ends
+  finds the right conversation. UI messages are suppressed by an allowlist
+  (`BACKGROUND_SAFE_MESSAGES`), so a type added later is silent by default rather than leaking.
+  Chat and schedules are serialized: a schedule defers while `userTurnRunning`, and a user
+  message waits on `scheduledRunInFlight`.
+- **Reading outside the workspace is approvable in the chat** (`requestPathAccess` on
+  `ToolExecutionContext`). The prompt shows the *resolved* path. The deny list is consulted
+  **before** asking, so a key can never be approved; writes never ask, because checkpoints
+  snapshot only the workspace; and a scheduled run has no `requestPathAccess` at all, so an
+  unattended run cannot widen its own filesystem access. "Always" stores the containing folder.
+- **PDF, with no dependency** (`documents/pdf.ts`). See below.
+- `notify` takes Markdown `details`, opened as a document from the toast. A VS Code
+  notification is a plain string plus buttons — no Markdown, no table, no colour, and newlines
+  are collapsed — so a multi-line `message` is flattened deliberately rather than left to be
+  mangled.
+- Clearing: individual run logs (keyed on start time, not index — the list is re-sorted and
+  capped), whole-schedule and all-schedule run logs, the documentation index, and the red
+  "Not loaded" problem lists.
+
+### The containment bug, because it will look like a rounding error
+
+`path.resolve` leaves a trailing separator on any path that is **already a root** — a UNC share
+root keeps it, and so does a drive root. So `root + path.sep` built a doubled separator and
+matched nothing. Adding a share under "Folders it may read" was silently useless, which is the
+one case that setting exists for, and the model kept suggesting the file be copied into the
+workspace because that is what the error told it.
+
+The comparison is now `isWithinRoot`, **exported so the test calls the shipped code**. A test
+that re-derives the comparison agrees with itself and passes either way. Verified non-vacuous:
+reverting the fix fails exactly the UNC and drive-root cases.
+
+Also: Windows reports `UNKNOWN`, not `ENOENT`, for a UNC host it cannot reach, and
+`realpathAllowingMissing` rethrew it — a mistyped server name escaped as an unhandled error from
+inside a tool. Unresolvable codes now fall through to confinement.
+
+### PDF — what it does and what it refuses
+
+Zero dependency, because pdf.js is megabytes every user downloads whether or not they open a
+PDF. Objects are indexed by scanning (not via the xref, which is the part a damaged or
+incrementally updated file gets wrong), each page's resources resolve `/F4` to a font, and the
+font's `ToUnicode` CMap decodes its codes.
+
+**Following `ToUnicode` is not optional.** Every modern producer subset-embeds fonts with
+`Identity-H`, where codes are two-byte glyph indices meaningful only inside that file. Measured:
+a page printed by Edge came back *entirely* undecodable until CMaps were followed.
+
+Three things the first version got wrong, all found against a real file and none of which a
+hand-written fixture would have contained:
+- Chromium emits **one `Td` per glyph**, so treating `Td` as a line break put one character on
+  each line. Only a *vertical* move, a `Tm` with a changed y, `T*` or `ET` is a break.
+- `<<` opens a dictionary, not a hex string. Skipping one character landed on the second `<` and
+  read `<</MCID 0 >>` as hex, contributing a stray character mid-text.
+- A `(` inside a string is escaped but a `)` in a nested balanced pair is not, so the content
+  stream is scanned rather than regexed.
+
+**The quality gate is the load-bearing part.** Text that decodes to glyph soup is *withheld*,
+not returned — a model handed mojibake summarises it confidently and is wrong, which is worse
+than being told to convert the file. The same gate catches a scanned PDF. Encrypted files are
+detected separately, because "no text" would send the user after the wrong problem.
+
+`documents/fixtures/chromium-report.pdf` is a genuine Edge-printed PDF, checked in on purpose:
+regenerate one with `msedge --headless=new --print-to-pdf=out.pdf page.html` if another producer
+needs covering.
+
+### Still not done
+
+`MANUAL_VERIFICATION.md` has never been run and is now by a distance the oldest debt — Session A
+is the security properties, and this session added two more of them (in-chat path approval, and
+the deny list beating it). Consultation cap. Qdrant and Chroma (the seam is ready; OpenSearch
+works and `search_docs` degrades lexically, so this is optional rather than blocking). Phase 9b
+is done bar an explicit decision on widening what a schedule may do.
+
+**Never rendered in a real Extension Host:** the theme, Junior mode, the cost meter, the
+dispatcher section, the search panel, and everything added today. jsdom tests prove behaviour,
+not appearance — `packages/ui/src/settings/DismissableProblems.test.tsx` and `Select.test.tsx`
+are the pattern to copy for any component with behaviour.
+
+---
+
+## Previous handover — 2026-08-14 (fourth), superseded above
 
 **Confirmed working in a real office install:** Python tools and the Skills tab. Those were the
 two oldest untested paths in the project and they are now closed. The rest of the UI still has
