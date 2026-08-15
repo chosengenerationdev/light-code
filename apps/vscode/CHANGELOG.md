@@ -1,5 +1,27 @@
 # light-code-vscode
 
+## 0.28.0
+
+### Minor Changes
+
+- Creating a tool or a skill always asks, and approval diffs are syntax highlighted.
+
+  **Auto-approve can no longer cover writing a Python tool or a skill.** These are the one place
+  the assistant writes code that later *runs*, or prose that is later injected into its own
+  context — and auto-approving their creation compounds, because an injected instruction could
+  install a persistent capability that the same setting then approves on every later call.
+  "Auto-approve edits" is a statement about editing the files you are working on, not about
+  granting new abilities, and reading it as the latter is a grant nobody knowingly made.
+
+  Creating, updating and deleting a Python tool, and writing or deleting a skill, now always
+  show you the source first — whatever the toggles say, and even if the tool is on the
+  always-allow list. Nothing the assistant can do is restricted; a human just sees it once.
+
+  **Approval diffs are syntax highlighted**, in whatever language the file's extension implies.
+  Added and removed are still carried by the row background and the gutter marker, so the
+  colours do not fight — this is the view you read to decide whether an edit is safe, and a wall
+  of monochrome is where a stray line hides.
+
 ## 0.27.1
 
 ### Patch Changes
