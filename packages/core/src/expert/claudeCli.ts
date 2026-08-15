@@ -105,9 +105,41 @@ function fallbackLocations(name: string): string[] {
   return candidates
 }
 
+/**
+ * Resolves to `fallback` if the promise has not settled in time.
+ *
+ * **Never trust a child process to die.** `execFile`'s own `timeout` sends a signal and then
+ * waits for the process to exit and its pipes to close — and on Windows killing a `cmd /c`
+ * shim does not kill the grandchild it launched (§16). A grandchild holding stdout open means
+ * the callback never fires, `detectClaudeCli` never resolves, and the Expert tab sits on
+ * "Checking…" for the rest of the session. That is the reported bug.
+ *
+ * This bounds the *wait*, not the process. A leaked child is a smaller problem than a UI that
+ * never answers.
+ */
+export async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 async function probe(executable: string, timeoutMs: number): Promise<ClaudeCliInfo | undefined> {
   try {
-    const { code, stdout } = await run(executable, ['--version'], { timeoutMs })
+    // A margin over the child's own timeout, so the ordinary path still reports a real result
+    // and this only fires when the process genuinely failed to die.
+    const { code, stdout } = await withDeadline(run(executable, ['--version'], { timeoutMs }), timeoutMs + 2_000, {
+      code: 1,
+      stdout: '',
+      stderr: 'timed out',
+    })
     // A non-zero exit means it ran but is broken — a stale shim pointing at a removed Node
     // version, say. That is a different problem from "not installed", so it is not a
     // candidate to keep searching past.
@@ -124,11 +156,20 @@ async function probe(executable: string, timeoutMs: number): Promise<ClaudeCliIn
  * only running it reveals that.
  */
 export async function detectClaudeCli(executable = 'claude', timeoutMs = 10_000): Promise<ClaudeCliInfo> {
+  /*
+   * A budget for the whole search, not just for each probe.
+   *
+   * Several candidates each waiting out their own timeout adds up to most of a minute, which
+   * is indistinguishable from stuck to the person watching it.
+   */
+  const deadline = Date.now() + timeoutMs * 2
+
   const direct = await probe(executable, timeoutMs)
   if (direct !== undefined) return direct
 
   for (const candidate of fallbackLocations(executable)) {
     if (!existsSync(candidate)) continue
+    if (Date.now() >= deadline) break
     const found = await probe(candidate, timeoutMs)
     // Report the path that actually worked, so the settings tab shows the truth rather
     // than the name the user typed.

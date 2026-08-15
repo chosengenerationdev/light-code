@@ -1,5 +1,30 @@
 # light-code-vscode
 
+## 0.24.1
+
+### Patch Changes
+
+- The Expert tab could stick on "Checking…" forever. Fixed, and made recoverable.
+
+  Two faults, either of which was enough on its own. Detection waited on a child process to
+  exit — and on Windows, killing the `.cmd` shim does not kill the program it launched, so a
+  process holding its output open meant the check never returned. Separately, if working it out
+  failed for any reason the result was simply never sent, with nothing logged, so the tab waited
+  for an answer that was not coming.
+
+  Detection now bounds the *wait* rather than trusting the process to die, and there is a budget
+  for the whole search rather than only for each candidate — several candidates each waiting out
+  their own timeout added up to most of a minute, which looks stuck whether or not it is. The
+  state is now always reported, including when the check itself failed, and it says so.
+
+  **A Re-check button**, always available, including while it says "Checking…". A program can
+  hang however carefully it is bounded, so there has to be a way out short of reloading the
+  window.
+
+  **Browse to the executable.** When detection cannot find the CLI, pointing at the file always
+  works, and beats trying to remember where npm put a shim. The field stays typeable for a path
+  that is easier pasted than picked.
+
 ## 0.24.0
 
 ### Minor Changes

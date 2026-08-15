@@ -1609,7 +1609,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Reports the expert's state. Detection runs even when disabled, so the tab can say
    * "found, not enabled" rather than leaving the user guessing whether the path is wrong.
    */
+  /**
+   * Reports the expert's state — always, including when working it out fails.
+   *
+   * Every caller used to be `void postExpert()`, so a rejection anywhere in here vanished: no
+   * message, no log, and a settings tab stuck on "Checking…" for the life of the session. An
+   * answer the user can act on beats silence, even when the answer is "this went wrong".
+   */
   async function postExpert(): Promise<void> {
+    try {
+      await postExpertInner()
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      logger.warn(`could not check the expert CLI: ${reason}`)
+      post({
+        type: 'expert',
+        enabled: false,
+        available: false,
+        path: expertCliPath ?? 'claude',
+        reason: `Could not check whether the Claude CLI is available: ${reason}`,
+        maxSpendUsd: 0,
+        maxConsultations: 0,
+      })
+    }
+  }
+
+  async function postExpertInner(): Promise<void> {
     const { config } = await configManager.load()
     const configured = config.expert?.path ?? 'claude'
     const detected = await detectClaudeCli(configured)

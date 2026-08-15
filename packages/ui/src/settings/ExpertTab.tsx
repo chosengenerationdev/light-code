@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
-import { colors, fontFamily, labelStyle, primaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { PathField, type BrowseRequest } from './PathField.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
 /** Sentinel for the free-text escape hatch, kept out of the value space. */
@@ -31,6 +32,11 @@ export interface ExpertState {
 
 export interface ExpertTabProps {
   expert: ExpertState | undefined
+  /** Native picker, for when detection cannot find it and typing the path is guesswork. */
+  onBrowse?: (request: BrowseRequest) => void
+  pickedPath?: { purpose: string; path: string } | undefined
+  /** Re-runs detection. The probe spawns a process, so it is never automatic on a timer. */
+  onRecheck: () => void
   onSave: (
     enabled: boolean,
     path: string,
@@ -67,6 +73,14 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
     setMaxCalls(String(props.expert.maxConsultations))
   }, [props.expert])
 
+  /*
+   * A path chosen from the picker lands in the field rather than being saved outright: the user
+   * still has to press Save, which keeps one way of committing a change rather than two.
+   */
+  useEffect(() => {
+    if (props.pickedPath?.purpose === 'expert.path') setPath(props.pickedPath.path)
+  }, [props.pickedPath])
+
   const numeric = (value: string): number => {
     const parsed = Number(value.trim())
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
@@ -96,12 +110,27 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           border: `1px solid ${detected ? colors.border : colors.error}`,
         }}
       >
-        <div style={{ fontSize: 12, color: detected ? colors.foreground : colors.error }}>
-          {props.expert === undefined
-            ? 'Checking…'
-            : detected
-              ? `Found: ${props.expert.version ?? props.expert.path}`
-              : 'Claude CLI not found'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 12, color: detected ? colors.foreground : colors.error }}>
+            {props.expert === undefined
+              ? 'Checking…'
+              : detected
+                ? `Found: ${props.expert.version ?? props.expert.path}`
+                : 'Claude CLI not found'}
+          </div>
+          {/*
+            Always offered, including while it says "Checking…". Detection runs a program, and a
+            program can hang however carefully it is bounded — so there has to be a way out that
+            is not "reload the window".
+          */}
+          <button
+            type="button"
+            style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
+            title="Look for the Claude CLI again"
+            onClick={props.onRecheck}
+          >
+            Re-check
+          </button>
         </div>
         {props.expert !== undefined && !detected && (
           <div style={{ fontSize: 11, color: colors.muted, marginTop: 4 }}>
@@ -126,22 +155,24 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         </span>
       </label>
 
-      <div style={{ marginBottom: 12 }}>
-        <label htmlFor="lc-expert-path" style={labelStyle()}>
-          Command
-        </label>
-        <input
-          id="lc-expert-path"
-          type="text"
-          value={path}
-          placeholder="claude"
-          onChange={(event) => setPath(event.target.value)}
-          style={textFieldStyle()}
-        />
-        <span style={{ color: colors.muted, fontSize: 11 }}>
-          Found on PATH by default. Use an absolute path for a non-standard install.
-        </span>
-      </div>
+      {/*
+        Browse matters here more than on most path fields. Detection runs a program, and when
+        that comes back empty — or hangs — the alternative is asking someone to remember where
+        npm put a shim. Pointing at the file is the answer that always works.
+      */}
+      <PathField
+        id="lc-expert-path"
+        label="Command"
+        value={path}
+        placeholder="claude"
+        hint={
+          'Found on PATH by default. If detection cannot find it, browse to the executable — on ' +
+          'Windows that is usually claude.cmd in %APPDATA%\\npm.'
+        }
+        browse={{ purpose: 'expert.path', kind: 'file' }}
+        {...(props.onBrowse !== undefined ? { onBrowse: props.onBrowse } : {})}
+        onChange={setPath}
+      />
 
       <div style={{ marginBottom: 16 }}>
         <label htmlFor="lc-expert-model" style={labelStyle()}>

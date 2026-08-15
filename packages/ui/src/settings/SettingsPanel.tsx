@@ -64,6 +64,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetMcpToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
   onConnectMcp: (name: string) => void
   expert: ExpertState | undefined
+  onRecheckExpert: () => void
   onSaveExpert: (
     enabled: boolean,
     path: string,
@@ -215,7 +216,13 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         ) : active === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
         ) : active === 'expert' ? (
-          <ExpertTab expert={props.expert} onSave={props.onSaveExpert} />
+          <ExpertTab
+            expert={props.expert}
+            onSave={props.onSaveExpert}
+            onRecheck={props.onRecheckExpert}
+            onBrowse={props.onBrowse}
+            pickedPath={props.pickedPath}
+          />
         ) : (
           <McpTab
             servers={props.mcpServers}

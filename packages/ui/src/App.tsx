@@ -853,6 +853,11 @@ export function App(props: AppProps): ReactElement {
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}
+            onRecheckExpert={() => {
+              // Cleared first so the tab visibly restarts rather than showing a stale answer.
+              setExpert(undefined)
+              props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
+            }}
             search={searchProps}
             skills={{
               skills,
