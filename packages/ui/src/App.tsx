@@ -28,6 +28,7 @@ import {
 } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { Chat } from './Chat.js'
+import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
 import { ModeSelector } from './ModeSelector.js'
@@ -710,6 +711,26 @@ export function App(props: AppProps): ReactElement {
           {view === 'chat' && (
             <ModeSelector modeId={modeId} disabled={isStreaming} onChange={changeMode} expertAvailable={expertEnabled} />
           )}
+          {/*
+            Beside the mode selector because choosing Junior mode and deciding what the expert
+            may spend are the same thought, and both belong to this conversation rather than to
+            the application.
+          */}
+          {view === 'chat' && (
+            <ExpertBudget
+              enabled={expertEnabled}
+              usd={expertSpend.usd}
+              consultations={expertSpend.consultations}
+              maxSpendUsd={expertSpend.maxSpendUsd}
+              maxConsultations={expertSpend.maxConsultations}
+              overridden={expertSpend.overridden}
+              {...(expertSpend.usage !== undefined ? { usage: expertSpend.usage } : {})}
+              {...(expertSpend.exhausted !== undefined ? { exhausted: expertSpend.exhausted } : {})}
+              onSetLimits={(limits) =>
+                props.transport.post({ type: 'setTaskExpertLimits', ...limits } satisfies UiToHostMessage)
+              }
+            />
+          )}
         </div>
         {view === 'chat' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -918,9 +939,6 @@ export function App(props: AppProps): ReactElement {
             onRollback={rollback}
             usage={usage}
             expertSpend={expertSpend}
-            onSetExpertLimits={(limits) =>
-              props.transport.post({ type: 'setTaskExpertLimits', ...limits } satisfies UiToHostMessage)
-            }
             supportsVision={supportsVision}
             mentionCandidates={mentionCandidates}
             onQueryMentions={queryMentions}

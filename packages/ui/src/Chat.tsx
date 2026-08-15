@@ -32,7 +32,6 @@ export interface ChatProps {
     maxConsultations: number
     overridden: boolean
   }
-  onSetExpertLimits: (limits: { maxSpendUsd?: number; maxConsultations?: number }) => void
   supportsVision: boolean
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void
@@ -174,11 +173,7 @@ export function Chat(props: ChatProps): ReactElement {
           </button>
         </div>
       )}
-      <ExpertSpend
-        {...props.expertSpend}
-        enabled={props.expertEnabled}
-        onSetLimits={props.onSetExpertLimits}
-      />
+      <ExpertSpend {...props.expertSpend} />
       <TokenBar usage={props.usage} />
       <Composer
         isStreaming={props.isStreaming}

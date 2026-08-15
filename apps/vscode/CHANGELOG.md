@@ -23,13 +23,13 @@
   expert stops being offered and the assistant is told to finish alone rather than waiting for
   advice that is not coming; a new task resets it.
 
-  **The budget can also be set from the chat window, mid-conversation.** The figure beside the
-  cost meter opens it: raise the ceiling for a hard task without changing your default, or lower
-  it for a cheap one. It takes effect on the very next consultation — no need to start a new
-  chat — and once a budget is spent that control says "Raise budget" outright, because the
-  moment you want more is the moment you have just been cut off. An override belongs to that
-  conversation and is cleared when you start a new chat, so a raised ceiling cannot quietly
-  outlive the task it was for.
+  **The budget is set from the chat header, beside the mode selector**, because choosing Junior
+  mode and deciding what the expert may spend are the same thought. Raise the ceiling for a hard
+  task without changing your default, or lower it for a cheap one — it takes effect on the very
+  next consultation, with no need to start a new chat. Once a budget is spent the control reads
+  "Raise budget" outright, since the moment you want more is the moment you have just been cut
+  off. An override belongs to that conversation and is cleared when you start a new chat, so a
+  raised ceiling cannot quietly outlive the task it was for.
 
   **The expert is told what is left, so it plans to fit.** Every consultation carries a one-line
   statement of the remaining budget. Without it the expert plans as though reviews were free and

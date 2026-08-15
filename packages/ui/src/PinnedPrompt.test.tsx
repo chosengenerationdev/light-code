@@ -63,7 +63,6 @@ function chatProps(messages: DisplayMessage[]): ChatProps {
     onRollback: () => {},
     usage: undefined,
     expertSpend: { usd: 0, consultations: 0, unpriced: 0, maxSpendUsd: 0, maxConsultations: 0, overridden: false },
-    onSetExpertLimits: () => {},
     supportsVision: false,
     mentionCandidates: [],
     onQueryMentions: () => {},
