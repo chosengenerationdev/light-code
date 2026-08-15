@@ -1,5 +1,32 @@
 # light-code-vscode
 
+## 0.26.0
+
+### Minor Changes
+
+- Local vector storage with Qdrant and Chroma, and syntax highlighting everywhere.
+
+  **Semantic search no longer needs a cluster.** Point Light Code at a Qdrant or Chroma
+  container on your own machine and your code is embedded and stored locally — nothing about
+  the codebase leaves except what goes to the embedding endpoint you configured. Settings →
+  Search now asks which backend you are using and suggests the usual local address, with the
+  `docker run` line if you have not started one yet.
+
+  Both are hand-written REST clients rather than vendor SDKs, so every byte still leaves through
+  the one HTTP client that mutual TLS, corporate CAs and proxy settings are wired into. Both
+  refuse to write to a collection Light Code did not create, exactly as the OpenSearch writer
+  does, so a mistyped name cannot overwrite somebody else's vectors.
+
+  OpenSearch keeps one capability the others cannot have: querying indexes your organisation
+  already runs, with raw query DSL. That tool is simply absent when a local backend is active
+  rather than present and broken.
+
+  **Code in replies is syntax highlighted**, in any language — including ones it has never heard
+  of, which fall back to a profile that recognises every common comment and string syntax. Done
+  without a highlighting library: the alternatives are the largest thing in the bundle and, since
+  VS Code does not expose its grammar colours to a webview, would have arrived with a theme of
+  their own and looked wrong beside the editor. Colours come from the theme instead.
+
 ## 0.25.0
 
 ### Minor Changes

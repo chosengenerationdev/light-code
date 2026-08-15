@@ -3,6 +3,8 @@ import { CheckIcon, CopyIcon } from './icons.js'
 import { parseMarkdown, type Block, type Inline } from './markdown.js'
 import { colors, fontFamily } from './theme.js'
 
+import { tokenize, TOKEN_COLORS } from './highlight.js'
+
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
 /**
@@ -139,7 +141,21 @@ function CodeBlock(props: { text: string; language?: string | undefined }): Reac
           lineHeight: 1.5,
         }}
       >
-        {props.text}
+        {/*
+          Coloured per token rather than rendered as one string. Highlighting is what tells
+          code from prose at a glance, and a wall of monochrome monospace in a chat transcript
+          is genuinely harder to read than the same text in the editor beside it.
+        */}
+        {tokenize(props.text, props.language).map((token, index) => {
+          const color = TOKEN_COLORS[token.kind]
+          return color === undefined ? (
+            <span key={index}>{token.text}</span>
+          ) : (
+            <span key={index} style={{ color }}>
+              {token.text}
+            </span>
+          )
+        })}
       </pre>
     </div>
   )

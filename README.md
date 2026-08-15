@@ -12,6 +12,8 @@ configure a provider.
 
 ### The basics
 
+- **Syntax-highlighted code** in every reply, in any language — including ones it has never
+  heard of.
 - **Chat in the sidebar**, with an autonomous multi-step agent loop — one tool call per
   step, your approval between steps, until the task is done.
 - **Read, search, write, diff, run.** ripgrep-backed search, a strict `apply_diff` with no
@@ -51,9 +53,10 @@ configure a provider.
 - **Skills**: markdown you or the assistant writes down about your codebase. Only the name
   and one-line description cost context; the body is read on demand. Several folders
   supported, including read-only shared ones.
-- **Semantic search over your code and over the tool catalogue**, against OpenSearch. Opt-in
-  and disabled by default, with a dispatcher that keeps tool schemas out of the prompt when
-  you have more tools than context.
+- **Semantic search over your code and over the tool catalogue** — against a local **Qdrant**
+  or **Chroma** container, or an **OpenSearch** cluster you already run. Opt-in and disabled by
+  default, with a dispatcher that keeps tool schemas out of the prompt when you have more tools
+  than context. The local backends mean your code is embedded and stored on your own machine.
 - **Scheduled prompts** that run on their own, each with an explicit allowlist of the tools
   it may use — the default is none. Runs happen in the background without touching the
   conversation you are in, and leave a transcript you can open in an editor tab.

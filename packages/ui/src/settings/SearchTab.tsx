@@ -1,4 +1,9 @@
-import type { SearchConnectionInput, SearchConnectionSummary, SearchQueryLimits } from '@light-code/core/browser'
+import type {
+  SearchConnectionInput,
+  SearchConnectionSummary,
+  SearchQueryLimits,
+  VectorStoreKind,
+} from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { TrashIcon } from '../icons.js'
 import {
@@ -47,10 +52,48 @@ export interface SearchTabProps {
 const BLANK: SearchConnectionSummary = {
   id: '',
   label: '',
+  kind: 'qdrant',
   url: '',
   hasUsername: false,
   hasPassword: false,
 }
+
+/**
+ * The three backends, with the local ones first.
+ *
+ * A URL is prefilled the same way a provider preset prefills a base URL (§9) — it is a
+ * starting point the user still has to save, not a default endpoint. Invariant 3 is about a
+ * fresh install contacting nothing on its own, and nothing here is contacted until a
+ * connection is saved and made active.
+ */
+const BACKENDS: {
+  kind: VectorStoreKind
+  label: string
+  url: string
+  hint: string
+  run?: string
+}[] = [
+  {
+    kind: 'qdrant',
+    label: 'Qdrant — local',
+    url: 'http://127.0.0.1:6333',
+    hint: 'A single container, nothing leaves your machine. The usual choice for indexing code privately.',
+    run: 'docker run -p 6333:6333 qdrant/qdrant',
+  },
+  {
+    kind: 'chroma',
+    label: 'Chroma — local',
+    url: 'http://127.0.0.1:8000',
+    hint: 'Also local. Needs Chroma 1.0 or newer — the v1 API it replaced is not supported.',
+    run: 'docker run -p 8000:8000 chromadb/chroma',
+  },
+  {
+    kind: 'opensearch',
+    label: 'OpenSearch — a cluster you already run',
+    url: 'https://opensearch.internal:9200',
+    hint: 'The only backend that can also query indexes your organisation already has, with raw DSL.',
+  },
+]
 
 /**
  * A numeric limit with its default as the placeholder, so "unset" reads as the default.
@@ -133,6 +176,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
   const [editing, setEditing] = useState<SearchConnectionSummary | undefined>(undefined)
   const [label, setLabel] = useState('')
   const [url, setUrl] = useState('')
+  const [kind, setKind] = useState<VectorStoreKind>('qdrant')
   const [defaultIndex, setDefaultIndex] = useState('')
   const [caFile, setCaFile] = useState('')
   const [skipVerify, setSkipVerify] = useState(false)
@@ -161,6 +205,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
     const source = editing ?? BLANK
     setLabel(source.label)
     setUrl(source.url)
+    setKind(source.kind)
     setDefaultIndex(source.defaultIndex ?? '')
     setCaFile(source.caFile ?? '')
     setSkipVerify(source.rejectUnauthorized === false)
@@ -173,6 +218,7 @@ export function SearchTab(props: SearchTabProps): ReactElement {
     ...(editing !== undefined && editing.id.length > 0 ? { id: editing.id } : {}),
     label,
     url,
+    kind,
     defaultIndex,
     caFile,
     ...(skipVerify ? { rejectUnauthorized: false } : {}),
@@ -185,8 +231,44 @@ export function SearchTab(props: SearchTabProps): ReactElement {
     return (
       <div style={{ padding: 12, overflowY: 'auto' }}>
         <h3 style={{ margin: '0 0 12px', color: colors.foreground }}>
-          {editing.id.length === 0 ? 'Add OpenSearch connection' : 'Edit connection'}
+          {editing.id.length === 0 ? 'Add a vector store' : 'Edit connection'}
         </h3>
+
+        <div style={{ marginBottom: 12 }}>
+          <label htmlFor="lc-os-kind" style={labelStyle()}>
+            Backend
+          </label>
+          <Select
+            id="lc-os-kind"
+            value={kind}
+            onChange={(value) => {
+              const chosen = BACKENDS.find((backend) => backend.kind === value)
+              setKind(value as VectorStoreKind)
+              /*
+               * The suggested URL is filled in only when the field is empty or still holds
+               * another backend's suggestion — never over something typed. Switching backend
+               * by accident must not silently discard an address someone pasted.
+               */
+              const suggestions = BACKENDS.map((backend) => backend.url)
+              if (chosen !== undefined && (url.trim().length === 0 || suggestions.includes(url.trim()))) {
+                setUrl(chosen.url)
+              }
+            }}
+            options={BACKENDS.map((backend) => ({ value: backend.kind, label: backend.label }))}
+          />
+          <span style={{ color: colors.muted, fontSize: 11 }}>
+            {BACKENDS.find((backend) => backend.kind === kind)?.hint}
+          </span>
+          {(() => {
+            const run = BACKENDS.find((backend) => backend.kind === kind)?.run
+            return run === undefined ? null : (
+              <div style={{ color: colors.muted, fontSize: 11, marginTop: 4 }}>
+                Not running one yet?{' '}
+                <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>{run}</code>
+              </div>
+            )
+          })()}
+        </div>
 
         <div style={{ marginBottom: 12 }}>
           <label htmlFor="lc-os-label" style={labelStyle()}>
@@ -204,13 +286,13 @@ export function SearchTab(props: SearchTabProps): ReactElement {
 
         <div style={{ marginBottom: 12 }}>
           <label htmlFor="lc-os-url" style={labelStyle()}>
-            Cluster URL
+            {kind === 'opensearch' ? 'Cluster URL' : 'Server URL'}
           </label>
           <input
             id="lc-os-url"
             type="text"
             value={url}
-            placeholder="https://opensearch.internal:9200"
+            placeholder={BACKENDS.find((backend) => backend.kind === kind)?.url ?? ''}
             onChange={(event) => setUrl(event.target.value)}
             style={textFieldStyle()}
           />

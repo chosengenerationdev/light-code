@@ -2479,6 +2479,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       connections.push({
         id,
         label: store.label,
+        kind: store.kind,
         url: store.url,
         ...(store.defaultIndex !== undefined ? { defaultIndex: store.defaultIndex } : {}),
         ...(store.caFile !== undefined ? { caFile: store.caFile } : {}),
@@ -2524,7 +2525,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (input.password !== undefined && input.password.length > 0) await secrets.set(searchPasswordRefFor(id), input.password)
 
       const store: VectorStoreConfig = {
-        kind: 'opensearch',
+        kind: input.kind ?? 'opensearch',
         label: input.label.trim().length > 0 ? input.label.trim() : 'OpenSearch',
         url: input.url.trim(),
         ...((await secrets.get(searchUserRefFor(id))) !== undefined ? { usernameRef: searchUserRefFor(id) } : {}),

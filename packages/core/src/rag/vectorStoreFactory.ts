@@ -1,7 +1,9 @@
 import type { VectorStoreConfig } from '../config/schema.js'
 import type { HttpClient } from '../platform/http.js'
+import { ChromaIndexWriter, ChromaSearcher } from './chroma/chroma.js'
 import { OpenSearchClient } from './opensearch/client.js'
 import { OpenSearchIndexWriter } from './opensearch/writer.js'
+import { QdrantIndexWriter, QdrantSearcher } from './qdrant/qdrant.js'
 import {
   VectorStoreError,
   type VectorIndexWriter,
@@ -43,6 +45,10 @@ export function createVectorSearcher(
   switch (store.kind) {
     case 'opensearch':
       return new OpenSearchClient(http, connection)
+    case 'qdrant':
+      return new QdrantSearcher(http, connection)
+    case 'chroma':
+      return new ChromaSearcher(http, connection)
     default:
       return unsupported(String(store.kind))
   }
@@ -56,6 +62,10 @@ export function createVectorIndexWriter(
   switch (store.kind) {
     case 'opensearch':
       return new OpenSearchIndexWriter(http, connection)
+    case 'qdrant':
+      return new QdrantIndexWriter(http, connection)
+    case 'chroma':
+      return new ChromaIndexWriter(http, connection)
     default:
       return unsupported(String(store.kind))
   }

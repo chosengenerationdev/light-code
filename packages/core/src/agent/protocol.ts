@@ -6,6 +6,7 @@ import type { Schedule } from '../schedule/types.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
+import type { VectorStoreKind } from '../config/schema.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
 
@@ -153,6 +154,8 @@ export interface TaskListEntry {
 export interface SearchConnectionSummary {
   id: string
   label: string
+  /** Which backend it speaks. Older configs predate the field and are OpenSearch. */
+  kind: VectorStoreKind
   url: string
   defaultIndex?: string
   caFile?: string
@@ -176,6 +179,7 @@ export interface SearchQueryLimits {
 export interface SearchConnectionInput {
   id?: string
   label: string
+  kind?: VectorStoreKind
   url: string
   defaultIndex?: string
   caFile?: string

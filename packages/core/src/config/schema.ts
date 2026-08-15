@@ -119,11 +119,18 @@ export const expertConfigSchema = z
  * that actually work — a config naming one that does not would fail at use, far from the
  * setting that caused it.
  */
-export const vectorStoreKindSchema = z.enum(['opensearch'])
+export const vectorStoreKindSchema = z.enum(['opensearch', 'qdrant', 'chroma'])
 export type VectorStoreKind = z.infer<typeof vectorStoreKindSchema>
 
 export const vectorStoreSchema = z.object({
-  /** Only OpenSearch so far; Qdrant and Chroma follow once a real cluster has proven it. */
+  /**
+   * Which backend this connection speaks.
+   *
+   * OpenSearch is the corporate case — an existing cluster, mutual TLS, credentials. Qdrant and
+   * Chroma are the local case: a container on `localhost` with no auth, for someone who wants
+   * semantic search without sending their code anywhere. The interface is the same either way;
+   * only the adapter differs.
+   */
   kind: vectorStoreKindSchema,
   label: z.string().min(1),
   /** User-supplied. No default endpoint exists anywhere (invariant 3). */

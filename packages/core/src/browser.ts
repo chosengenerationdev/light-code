@@ -68,6 +68,9 @@ export type {
   ImageAttachmentInput,
 } from './agent/protocol.js'
 
+/** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */
+export type { VectorStoreKind } from './config/schema.js'
+
 // Type-only, so nothing from indexer.ts (which imports node:fs) reaches the bundle.
 export type { IndexProgress, IndexResult } from './rag/indexer.js'
 // Type-only: SearchLog itself is host state, but the entries cross the bridge.
