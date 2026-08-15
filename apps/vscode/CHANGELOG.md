@@ -1,5 +1,18 @@
 # light-code-vscode
 
+## 0.28.1
+
+### Patch Changes
+
+- The result of a hand-run search can be dismissed.
+
+  Settings → Search shows the answer to a query you run yourself, and it stayed until something
+  replaced it — which meant scrolling past an answer you had finished with to reach the log
+  below. There is now a **Clear result** on the result itself, naming the query it belongs to.
+
+  Separate from the Clear on the recent-searches log, deliberately: dismissing an answer should
+  not erase the record of having asked.
+
 ## 0.28.0
 
 ### Minor Changes

@@ -10,7 +10,10 @@ export interface SearchActivityProps {
   probe: { query: string; text: string; error?: string } | undefined
   probeRunning: boolean
   onProbe: (query: string, target: 'codebase' | 'docs') => void
+  /** Empties the recent-searches log. */
   onClear: () => void
+  /** Dismisses the result of the last hand-run query. Separate from the log above it. */
+  onClearProbe: () => void
 }
 
 /**
@@ -79,6 +82,24 @@ export function SearchActivity(props: SearchActivityProps): ReactElement {
 
       {props.probe !== undefined && (
         <div style={{ marginBottom: 12 }}>
+          {/*
+            Its own dismiss, separate from the Clear on the log below. A result can be several
+            hundred lines and stays until something replaces it — which, if the next thing you
+            do is read the log, means scrolling past an answer you have finished with.
+          */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ color: colors.muted, fontSize: 11 }}>
+              Result for “{props.probe.query}”
+            </span>
+            <button
+              type="button"
+              style={{ ...secondaryButtonStyle(), marginLeft: 'auto', fontSize: 10, padding: '1px 6px' }}
+              title="Dismiss this result. The query stays in the log below."
+              onClick={props.onClearProbe}
+            >
+              Clear result
+            </button>
+          </div>
           {props.probe.error !== undefined && (
             <p style={{ color: colors.error, fontSize: 11, margin: '0 0 4px' }}>{props.probe.error}</p>
           )}

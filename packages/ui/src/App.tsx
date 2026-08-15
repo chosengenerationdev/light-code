@@ -609,6 +609,8 @@ export function App(props: AppProps): ReactElement {
         props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
       },
       onClear: () => props.transport.post({ type: 'clearSearchLog' } satisfies UiToHostMessage),
+      // Local state: the result was never stored host-side, so dismissing it is a UI concern.
+      onClearProbe: () => setSearchProbe(undefined),
     },
   }
 
