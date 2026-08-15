@@ -109,6 +109,21 @@ describe('ExpertSpend', () => {
     expect(container.textContent).toContain('budget reached')
   })
 
+  /**
+   * The moment someone wants more budget is the moment they have just been cut off. Making
+   * them recognise a small grey figure as a button is the wrong thing to ask for then.
+   */
+  it('offers to raise the budget once it is spent, rather than only showing the number', () => {
+    const onSetLimits = vi.fn()
+    render({ consultations: 5, usd: 1.2, maxSpendUsd: 1, usage: 1, exhausted: true, onSetLimits })
+
+    click(button('Raise budget'))
+    click(button('Apply to this chat'))
+
+    // Applies to the chat in progress; no new chat needed.
+    expect(onSetLimits).toHaveBeenCalled()
+  })
+
   it('marks the total as a floor when some consultations had no price', () => {
     render({ consultations: 3, unpriced: 1, usd: 0.05 })
     expect(container.textContent).toContain('*')

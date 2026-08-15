@@ -145,18 +145,30 @@ export function ExpertSpend(props: ExpertSpendProps): ReactElement | null {
             {props.exhausted === true ? 'budget reached' : `${String(props.consultations)} ${plural}`}
             {props.unpriced > 0 ? ' *' : ''}
           </span>
+          {/*
+            Labelled "Raise budget" once it is spent, not just showing the number.
+            The moment someone wants more budget is the moment the assistant has just been cut
+            off, and hunting for a small grey figure is the wrong thing to ask of them then.
+          */}
           <button
             type="button"
-            style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+            style={{
+              ...secondaryButtonStyle(),
+              fontSize: 10,
+              padding: '1px 6px',
+              ...(props.exhausted === true ? { borderColor: colors.error, color: colors.error } : {}),
+            }}
             title={
-              props.overridden
-                ? 'Budget for this chat only, overriding Settings. Click to change or clear it.'
-                : 'Set a budget for this chat only. The default comes from Settings → Expert.'
+              props.exhausted === true
+                ? 'Raise the budget for this chat and carry on. Takes effect on the next consultation, without starting a new chat.'
+                : props.overridden
+                  ? 'Budget for this chat only, overriding Settings. Click to change or clear it.'
+                  : 'Set a budget for this chat only. The default comes from Settings → Expert.'
             }
             onClick={() => setEditing((open) => !open)}
           >
-            {limitLabel}
-            {props.overridden ? ' •' : ''}
+            {props.exhausted === true ? 'Raise budget' : limitLabel}
+            {props.overridden && props.exhausted !== true ? ' •' : ''}
           </button>
         </span>
       </div>
