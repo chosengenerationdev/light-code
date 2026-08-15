@@ -1702,28 +1702,48 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * message, no log, and a settings tab stuck on "Checking…" for the life of the session. An
    * answer the user can act on beats silence, even when the answer is "this went wrong".
    */
-  async function postExpert(): Promise<void> {
+  async function postExpert(options: { redetect?: boolean } = {}): Promise<void> {
     try {
-      await postExpertInner()
+      await postExpertInner(options.redetect !== false)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       logger.warn(`could not check the expert CLI: ${reason}`)
+      /*
+       * A failed *detection* must not report the rest of the settings as gone.
+       *
+       * This used to post `enabled: false` with no assessment, which is a claim about
+       * configuration rather than about the probe that failed — and it wiped whatever the tab
+       * was showing. Losing a freshly finished assessment that way is exactly the reported
+       * bug. So config is read again, and only availability is reported as unknown.
+       */
+      const settings = await configManager.load().then(
+        (loaded) => loaded.config.expert,
+        () => undefined,
+      )
       post({
         type: 'expert',
-        enabled: false,
+        enabled: settings?.enabled === true,
         available: false,
-        path: expertCliPath ?? 'claude',
+        path: settings?.path ?? expertCliPath ?? 'claude',
         reason: `Could not check whether the Claude CLI is available: ${reason}`,
-        maxSpendUsd: 0,
-        maxConsultations: 0,
+        ...(settings?.model !== undefined ? { model: settings.model } : {}),
+        maxSpendUsd: settings?.maxSpendUsd ?? 0,
+        maxConsultations: settings?.maxConsultations ?? 0,
+        ...(settings?.assessment !== undefined ? { assessment: settings.assessment } : {}),
       })
     }
   }
 
-  async function postExpertInner(): Promise<void> {
+  async function postExpertInner(redetect: boolean): Promise<void> {
     const { config } = await configManager.load()
     const configured = config.expert?.path ?? 'claude'
-    const detected = await detectClaudeCli(configured)
+    /*
+     * Re-probing spawns a process. After an assessment we have just used the CLI successfully,
+     * so doing it again tells us nothing and does it at the moment the machine is busiest —
+     * which is when the probe is most likely to time out and report the CLI as missing.
+     */
+    const detected =
+      !redetect && expertCli !== undefined && expertCliPath === configured ? expertCli : await detectClaudeCli(configured)
     // Cache the probe so the next turn does not re-spawn it.
     expertCli = detected
     expertCliPath = configured
@@ -1771,7 +1791,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const results: ProbeResult[] = []
       for (const [index, probe] of ASSESSMENT_PROBES.entries()) {
         assessmentStep = `Asking the junior: ${probe.measures} (${String(index + 1)}/${String(ASSESSMENT_PROBES.length)})`
-        await postExpert()
+        await postExpert({ redetect: false })
 
         let answer = ''
         try {
@@ -1800,7 +1820,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
 
       assessmentStep = 'Asking the expert to grade the answers'
-      await postExpert()
+      await postExpert({ redetect: false })
 
       const graded = await consultExpert(cli, {
         question: buildAssessmentQuestion(profile.model, results),
@@ -1832,7 +1852,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     } finally {
       assessmentStep = undefined
-      await postExpert()
+      await postExpert({ redetect: false })
     }
   }
 

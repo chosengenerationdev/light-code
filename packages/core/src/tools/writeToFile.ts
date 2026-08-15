@@ -15,7 +15,11 @@ export const writeToFileTool: Tool<WriteToFileParams> = {
   group: 'edit',
   description:
     'Write full file content, creating the file (and any missing parent directories) if it does not exist. ' +
-    'An existing file must have been read with read_file this session before it can be overwritten.',
+    'An existing file must have been read with read_file this session before it can be overwritten. ' +
+    // Pushed back the other way too: a description that only describes itself does not help a
+    // model choose between two tools that both write Python to disk.
+    'If the user asked for a "tool" and create_python_tool exists, use that instead — a script written here is ' +
+    'just a file, and nothing can call it.',
   parametersSchema: paramsSchema,
   async execute(params, context): Promise<ToolResult> {
     const resolved = await resolveToolPath(context, params.path, { write: true })

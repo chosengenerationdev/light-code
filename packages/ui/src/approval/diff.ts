@@ -26,10 +26,28 @@ function lcsTable(a: string[], b: string[]): number[][] {
   return table
 }
 
-export function diffLines(before: string, after: string): DiffLine[] {
+/**
+ * Splits into lines, treating an empty string as **no lines at all**.
+ *
+ * `''.split('\n')` returns `['']` — one empty line, not zero. For a new file that phantom line
+ * reaches the matcher, which pairs it with the first genuinely blank line in the new content
+ * and reports that line as *unchanged*. The approval prompt then showed a row of a brand-new
+ * file as context, numbered against a file that does not exist, and the rest of the numbering
+ * read as though a line had been skipped.
+ *
+ * Invariant 8 is why this matters more than it looks: the diff is what the user reads to decide
+ * whether an edit is safe, so a row claiming "this line was already there" about a file being
+ * created is the prompt misreporting ground truth.
+ */
+function splitLines(text: string): string[] {
+  if (text.length === 0) return []
   // Normalise CRLF so a line-ending difference doesn't render as every line changed.
-  const a = before.replace(/\r\n/g, '\n').split('\n')
-  const b = after.replace(/\r\n/g, '\n').split('\n')
+  return text.replace(/\r\n/g, '\n').split('\n')
+}
+
+export function diffLines(before: string, after: string): DiffLine[] {
+  const a = splitLines(before)
+  const b = splitLines(after)
   const table = lcsTable(a, b)
 
   const lines: DiffLine[] = []

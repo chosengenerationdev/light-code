@@ -205,11 +205,18 @@ export function createCreatePythonTool(context: PythonToolContext): Tool<CreateP
   return makeWriteTool(context, {
     name: 'create_python_tool',
     mustExist: false,
+    /*
+     * Opens by claiming the word "tool", because the observed failure was the model reaching
+     * for `write_to_file` when the user asked it to "write a tool" — producing a standalone
+     * script that nothing can call. Both tools write Python to a file; only this one registers
+     * it, and the description has to make that the obvious reading.
+     */
     description:
-      'Write a new Python tool that becomes callable in this session. Use this for work that is awkward in shell ' +
-      'commands — parsing, data transformation, anything needing a library. Define a `run` function with type hints; ' +
-      'the schema and description are derived from the code, so there is no metadata to keep in sync. ' +
-      'The user must approve the source before it is saved.',
+      'THE way to create a tool when the user asks for one. Writes a Python tool and registers it, so it becomes ' +
+      'callable as py__<name> from the next message onwards. Use this — not write_to_file — for anything described ' +
+      'as a "tool", and for work awkward in shell commands: parsing, data transformation, anything needing a library. ' +
+      'Define a `run` function with type hints; the schema and description are derived from the code, so there is no ' +
+      'metadata to keep in sync. The user must approve the source before it is saved.',
   })
 }
 

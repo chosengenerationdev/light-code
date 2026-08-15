@@ -1,5 +1,28 @@
 # light-code-vscode
 
+## 0.27.1
+
+### Patch Changes
+
+- Three fixes from real use.
+
+  **A new file's diff showed one line as unchanged.** Splitting an empty string yields one empty
+  line rather than none, and that phantom line was matched against the first blank line in the
+  new content and reported as context — numbered against a file that does not exist, which made
+  the numbering look like a line had been skipped. The approval view is what you read to decide
+  whether an edit is safe, so a row claiming a line was already there is the prompt getting
+  ground truth wrong.
+
+  **A finished assessment could vanish from the Expert tab.** It was saved correctly; the final
+  refresh re-probed for the Claude CLI, and if that probe failed it reported the expert as
+  disabled with no assessment — a claim about your configuration based on a failed process
+  spawn. The refresh no longer re-probes when the CLI has just been used, and a failed probe now
+  reports only availability as unknown instead of wiping everything.
+
+  **Asking for a "tool" wrote a plain script.** Both `create_python_tool` and `write_to_file`
+  write Python to disk, and only one registers it as callable — so the descriptions now say
+  which is which, from both sides.
+
 ## 0.27.0
 
 ### Minor Changes
