@@ -20,17 +20,60 @@ function normalizeForComparison(resolvedPath: string): string {
 }
 
 /**
+ * Whether `target` is `root` or sits underneath it. Both must already be resolved.
+ *
+ * **Exported so it can be tested directly**, because the interesting cases are network shares
+ * and drive roots and neither can be conjured up in a unit test. A test that re-implemented
+ * this comparison would pass whatever the real code did — which is exactly how the bug below
+ * survived a green suite.
+ *
+ * That bug: `path.resolve` leaves a trailing separator on any path that is *already* a root — a
+ * UNC share root keeps it, and so does `D:\` — so the obvious `root + path.sep` produces a
+ * doubled separator and nothing is ever contained by it. A share added under "Folders it may
+ * read" therefore matched no file inside it, and the model, told the path lay outside the
+ * workspace, kept suggesting the file be copied in.
+ *
+ * It only appears at a root, which is why ordinary folders worked and the one form people
+ * actually type for a share did not.
+ */
+export function isWithinRoot(target: string, root: string): boolean {
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  if (target === root) return true
+  // Equal once the root's own trailing separator is discounted, so a share root contains itself.
+  if (target + path.sep === prefix) return true
+  return target.startsWith(prefix)
+}
+
+/**
  * Resolves symlinks and drive-relative/UNC/`\\?\`-prefixed paths as far as they exist.
  * Falls back to resolving the nearest existing ancestor for paths that don't exist yet
  * (e.g. a new file about to be written), so confinement can still be checked before creation.
  */
+/**
+ * Codes that mean "this path does not resolve", as opposed to a real I/O failure.
+ *
+ * `ENOENT` is the ordinary one. The rest are what Windows returns for a UNC path whose host is
+ * unreachable or whose share does not exist — `UNKNOWN` in particular, which does not read as a
+ * missing-file code at all. Rethrowing those turned "I mistyped the server name" into an
+ * unhandled error from inside a tool rather than a sentence about the path.
+ */
+const UNRESOLVABLE_CODES = new Set(['ENOENT', 'ENOTDIR', 'UNKNOWN', 'ENOTFOUND', 'EHOSTUNREACH', 'ENETUNREACH'])
+
 async function realpathAllowingMissing(target: string): Promise<string> {
   try {
     return await fs.realpath(target)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    const code = (error as NodeJS.ErrnoException).code ?? ''
+    if (!UNRESOLVABLE_CODES.has(code)) throw error
     const parent = path.dirname(target)
-    if (parent === target) throw error
+    if (parent === target) {
+      /*
+       * Nothing left to walk up to. Returning the path as given lets confinement decide, which
+       * for an unreachable UNC host is the right answer: refused as outside every root, with
+       * the ordinary message, rather than a raw errno escaping from inside a tool.
+       */
+      return path.resolve(target)
+    }
     const realParent = await realpathAllowingMissing(parent)
     return path.join(realParent, path.basename(target))
   }
@@ -70,9 +113,7 @@ export async function confineToAny(requestedPath: string, roots: readonly string
       continue
     }
     const normalizedRoot = normalizeForComparison(path.resolve(realRoot))
-    if (normalizedTarget === normalizedRoot || normalizedTarget.startsWith(normalizedRoot + path.sep)) {
-      return realTarget
-    }
+    if (isWithinRoot(normalizedTarget, normalizedRoot)) return realTarget
   }
 
   throw new PathConfinementError(requestedPath, roots[0] ?? '')

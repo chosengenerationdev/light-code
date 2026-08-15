@@ -257,7 +257,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     logger,
     // A tool created, updated or deleted during a chat changes both the Python tab and the
     // documentation corpus. `postPython` refreshes the tab and schedules the reindex.
-    onToolsChanged: () => void postPython(),
+    onToolsChanged: () => {
+      void postPython()
+      // Same reasoning as MCP: a Python tool created after the panel opened must appear in
+      // the schedule picker without the user reloading the window.
+      void postSchedules()
+    },
   })
 
   /**
@@ -621,6 +626,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     {
       onStateChanged: () => {
         postMcp()
+        /*
+         * The schedule tool picker is built from the live registry, and MCP servers connect
+         * seconds *after* the panel opens — the UI asks for schedules once, on mount, so it
+         * captured an empty MCP list and never heard again. That is why no MCP tool could be
+         * ticked for a schedule. Re-posting on every state change covers connect, disconnect
+         * and tools/list_changed alike.
+         */
+        void postSchedules()
         // Fires on connect, disconnect and tools/list_changed — every way the MCP half of
         // the corpus can change. Opening the panel fires several at once, which is what the
         // debounce is for.

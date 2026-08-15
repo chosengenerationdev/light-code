@@ -1,5 +1,28 @@
 # light-code-vscode
 
+## 0.22.1
+
+### Patch Changes
+
+- Network shares are actually readable, and MCP tools appear in the schedule picker.
+
+  **A folder that is itself a root matched nothing.** `path.resolve` leaves a trailing separator
+  on a UNC share root and on a drive root, so the containment check appended a second one and no
+  file was ever judged to be inside. Adding `\\server\share` under "Folders it may read" was
+  therefore silently useless — the exact case the setting exists for — and the assistant, told the
+  path lay outside the workspace, kept suggesting the file be copied in. Ordinary folders were
+  unaffected, which is why it took a real share to notice. The comparison is now one exported
+  function with tests against share and drive roots.
+
+  **An unreachable share no longer throws a raw error.** Windows reports `UNKNOWN` rather than a
+  missing-file code for a UNC host it cannot reach, which escaped as an unhandled failure from
+  inside the tool. A mistyped server name now gets the ordinary sentence about the path.
+
+  **MCP and Python tools appear in the schedule tool picker.** The picker is built from the live
+  registry, but MCP servers connect a few seconds after the panel opens and the list was fetched
+  once, on mount — so it captured an empty set and never heard again. It now refreshes whenever
+  the tool catalogue changes.
+
 ## 0.22.0
 
 ### Minor Changes

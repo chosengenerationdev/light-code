@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { confine, confineToAny, PathConfinementError } from './confine.js'
+import { confine, confineToAny, isWithinRoot, PathConfinementError } from './confine.js'
 
 // Symlink creation needs a privilege Windows doesn't grant by default (Developer Mode
 // or admin) — probe once, synchronously, so `it.skipIf` can gate the relevant test.
@@ -116,5 +116,55 @@ describe('confineToAny', () => {
 
   it('names a way forward when it refuses', async () => {
     await expect(confineToAny(path.join(elsewhere, 'app.log'), [workspace])).rejects.toThrow(/Settings → Approvals/)
+  })
+})
+
+/**
+ * Roots that are themselves roots.
+ *
+ * `path.resolve` keeps a trailing separator on a UNC share root and on a drive root, so the
+ * obvious `root + path.sep` prefix has two separators and matches nothing. That made every
+ * network share added under "Folders it may read" silently useless — the exact case the
+ * feature was built for, and the model, told the path was outside the workspace, kept
+ * suggesting the file be copied in.
+ *
+ * String-level, because the real thing needs a mounted share.
+ */
+describe('containment against a root with a trailing separator', () => {
+  const onWindows = process.platform === 'win32'
+  const norm = (value: string): string => (onWindows ? value.toLowerCase() : value)
+
+  /*
+   * Calls the shipped predicate, not a copy of it. Re-implementing the comparison here would
+   * make the test agree with itself rather than with the code, which is precisely how the
+   * trailing-separator bug survived a green suite the first time.
+   */
+  const contains = (root: string, target: string): boolean =>
+    isWithinRoot(norm(path.resolve(target)), norm(path.resolve(root)))
+
+  // Built from a constant rather than written inline: a UNC literal is four backslashes deep
+  // and every layer between here and the file has eaten some of them at least once.
+  const B = '\\'
+  const share = `${B}${B}server${B}share`
+
+  it.runIf(onWindows)('a UNC share root contains files under it', () => {
+    expect(contains(share, `${share}${B}logs${B}a.log`)).toBe(true)
+    // The same root as the user would paste it, with a trailing separator.
+    expect(contains(`${share}${B}`, `${share}${B}a.log`)).toBe(true)
+  })
+
+  it.runIf(onWindows)('a drive root contains files under it', () => {
+    expect(contains(`D:${B}`, `D:${B}a.txt`)).toBe(true)
+  })
+
+  it.runIf(onWindows)('a share root does not contain a different share', () => {
+    expect(contains(share, `${B}${B}server${B}other${B}a.log`)).toBe(false)
+    expect(contains(share, `${B}${B}other${B}share${B}a.log`)).toBe(false)
+  })
+
+  it('an ordinary folder still does not match a sibling with a shared prefix', () => {
+    const base = path.resolve('/tmp/lc-root')
+    expect(contains(base, `${base}-other/a.txt`)).toBe(false)
+    expect(contains(base, path.join(base, 'a.txt'))).toBe(true)
   })
 })
