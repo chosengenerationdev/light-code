@@ -85,7 +85,10 @@ export function App(props: AppProps): ReactElement {
     unpriced: number
     usage?: number
     exhausted?: boolean
-  }>({ usd: 0, consultations: 0, unpriced: 0 })
+    maxSpendUsd: number
+    maxConsultations: number
+    overridden: boolean
+  }>({ usd: 0, consultations: 0, unpriced: 0, maxSpendUsd: 0, maxConsultations: 0, overridden: false })
   const [dispatcher, setDispatcher] = useState<{ enabled: boolean; hiddenTools: number; docsIndex?: string }>({
     enabled: false,
     hiddenTools: 0,
@@ -322,7 +325,16 @@ export function App(props: AppProps): ReactElement {
           ...(message.error !== undefined ? { error: message.error } : {}),
         })
       } else if (message.type === 'expertSpend') {
-        setExpertSpend({ usd: message.usd, consultations: message.consultations, unpriced: message.unpriced })
+        setExpertSpend({
+          usd: message.usd,
+          consultations: message.consultations,
+          unpriced: message.unpriced,
+          ...(message.usage !== undefined ? { usage: message.usage } : {}),
+          ...(message.exhausted !== undefined ? { exhausted: message.exhausted } : {}),
+          maxSpendUsd: message.maxSpendUsd,
+          maxConsultations: message.maxConsultations,
+          overridden: message.overridden,
+        })
       } else if (message.type === 'mcpServerSaved') {
         setMcpSavedTick((tick) => tick + 1)
       } else if (message.type === 'embedder') {
@@ -906,6 +918,9 @@ export function App(props: AppProps): ReactElement {
             onRollback={rollback}
             usage={usage}
             expertSpend={expertSpend}
+            onSetExpertLimits={(limits) =>
+              props.transport.post({ type: 'setTaskExpertLimits', ...limits } satisfies UiToHostMessage)
+            }
             supportsVision={supportsVision}
             mentionCandidates={mentionCandidates}
             onQueryMentions={queryMentions}

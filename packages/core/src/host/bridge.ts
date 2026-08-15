@@ -466,6 +466,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedExpertColor = '#D97757'
   let cachedExpertLimits: ExpertLimits = {}
   /**
+   * A ceiling for this chat only, overriding the configured default.
+   *
+   * Cleared with the task, like the spend it governs. One hard task deserving a bigger budget
+   * is a real need; a raised ceiling that silently outlives it is a limit nobody set.
+   */
+  let taskExpertLimits: ExpertLimits | undefined
+
+  function effectiveExpertLimits(): ExpertLimits {
+    return taskExpertLimits ?? cachedExpertLimits
+  }
+  /**
    * Directories tools may read outside the workspace — a network share of logs, typically.
    *
    * Refreshed per turn with everything else, so adding one in Settings takes effect on the
@@ -561,16 +572,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   function resetExpertSpend(): void {
     expertSpend = { usd: 0, consultations: 0, unpriced: 0 }
     expertSessionId = undefined
+    taskExpertLimits = undefined
     postExpertSpend()
   }
 
   function postExpertSpend(): void {
-    const usage = expertBudgetUsage(expertSpend, cachedExpertLimits)
+    const limits = effectiveExpertLimits()
+    const usage = expertBudgetUsage(expertSpend, limits)
     post({
       type: 'expertSpend',
       ...expertSpend,
       ...(usage === undefined ? {} : { usage }),
-      ...(checkExpertBudget(expertSpend, cachedExpertLimits).allowed ? {} : { exhausted: true }),
+      ...(checkExpertBudget(expertSpend, limits).allowed ? {} : { exhausted: true }),
+      maxSpendUsd: limits.maxSpendUsd ?? 0,
+      maxConsultations: limits.maxConsultations ?? 0,
+      overridden: taskExpertLimits !== undefined,
     })
   }
 
@@ -804,7 +820,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           onConsultation: recordConsultation,
           // Read at call time, not captured: the user can raise the limit mid-task and the very
           // next consultation should honour it, without starting a new task to pick it up.
-          budget: () => checkExpertBudget(expertSpend, cachedExpertLimits),
+          budget: () => checkExpertBudget(expertSpend, effectiveExpertLimits()),
           session: {
             get: () => expertSessionId,
             set: (sessionId) => {
@@ -3072,6 +3088,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleDeleteSchedule(message.id)
     } else if (message.type === 'setScheduleEnabled') {
       void handleSetScheduleEnabled(message.id, message.enabled)
+    } else if (message.type === 'setTaskExpertLimits') {
+      taskExpertLimits =
+        message.maxSpendUsd === undefined && message.maxConsultations === undefined
+          ? undefined
+          : {
+              ...(message.maxSpendUsd !== undefined ? { maxSpendUsd: message.maxSpendUsd } : {}),
+              ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
+            }
+      postExpertSpend()
     } else if (message.type === 'restartScheduler') {
       restartScheduleTimer()
       logger.info('schedule timer restarted by the user')

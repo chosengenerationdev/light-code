@@ -327,6 +327,14 @@ export type UiToHostMessage =
   | { type: 'setScheduleEnabled'; id: string; enabled: boolean }
   | { type: 'runScheduleNow'; id: string }
   /** Restarts the timer by hand, for when it is reported as stopped. */
+  /**
+   * Raises or lowers the expert budget for this chat only.
+   *
+   * Omit both to drop back to the configured default. Deliberately not persisted: an override
+   * belongs to the conversation that needed it, and a raised ceiling that quietly outlived its
+   * task would be a limit nobody set.
+   */
+  | { type: 'setTaskExpertLimits'; maxSpendUsd?: number; maxConsultations?: number }
   | { type: 'restartScheduler' }
   /** Clears a schedule's remembered runs. Omit `id` to clear every schedule's. */
   | { type: 'clearScheduleRuns'; id?: string }
@@ -435,6 +443,11 @@ export type HostToUiMessage =
       usage?: number
       /** True once the expert has stopped being available for this task. */
       exhausted?: boolean
+      /** The limits in force right now, whether from Settings or a per-chat override. */
+      maxSpendUsd: number
+      maxConsultations: number
+      /** True when this chat is overriding the configured default. */
+      overridden: boolean
     }
   /** Every search the model ran this session, newest first. */
   | { type: 'searchLog'; entries: SearchLogEntry[] }

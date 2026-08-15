@@ -23,6 +23,11 @@
   expert stops being offered and the assistant is told to finish alone rather than waiting for
   advice that is not coming; a new task resets it.
 
+  **The budget can also be set for one chat.** The figure beside the cost meter opens it: raise
+  the ceiling for a hard task without changing your default, or lower it for a cheap one. An
+  override belongs to that conversation and is cleared when you start a new chat, so a raised
+  ceiling cannot quietly outlive the task it was for.
+
   The count limit is worth setting alongside a spend limit, because the CLI does not always
   report a price and an unpriced consultation still costs money. The cost meter in the chat now
   shows a small bar against the nearer limit, amber before the wall rather than only at it.

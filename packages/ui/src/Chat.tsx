@@ -22,7 +22,17 @@ export interface ChatProps {
   onAlwaysAllow: (id: string, scope: 'tool' | 'command' | 'folder') => void
   onRollback: () => void
   usage: ContextUsage | undefined
-  expertSpend: { usd: number; consultations: number; unpriced: number; usage?: number; exhausted?: boolean }
+  expertSpend: {
+    usd: number
+    consultations: number
+    unpriced: number
+    usage?: number
+    exhausted?: boolean
+    maxSpendUsd: number
+    maxConsultations: number
+    overridden: boolean
+  }
+  onSetExpertLimits: (limits: { maxSpendUsd?: number; maxConsultations?: number }) => void
   supportsVision: boolean
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void
@@ -164,7 +174,11 @@ export function Chat(props: ChatProps): ReactElement {
           </button>
         </div>
       )}
-      <ExpertSpend {...props.expertSpend} />
+      <ExpertSpend
+        {...props.expertSpend}
+        enabled={props.expertEnabled}
+        onSetLimits={props.onSetExpertLimits}
+      />
       <TokenBar usage={props.usage} />
       <Composer
         isStreaming={props.isStreaming}
