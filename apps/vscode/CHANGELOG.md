@@ -1,5 +1,22 @@
 # light-code-vscode
 
+## 0.24.2
+
+### Patch Changes
+
+- Settings could silently stop answering while a schedule was running.
+
+  Scheduled runs were changed in 0.22.0 to stop writing into your conversation, and that was
+  done by permitting only two kinds of message through while a run was in progress. Everything
+  else was dropped — including replies to things you had just asked for. With a schedule firing
+  every minute, opening Settings during a run meant the answer never arrived: the Expert tab sat
+  on "Checking…", and pressing Re-check afterwards worked. That looked like broken CLI detection
+  and was nothing of the kind; the answer was thrown away in transit.
+
+  Only conversation traffic is held back now, and everything else is sent. The two failure modes
+  are not symmetric: a stray transcript message during a background run is a cosmetic flicker,
+  while a dropped reply is a control that never answers and gives no clue why.
+
 ## 0.24.1
 
 ### Patch Changes

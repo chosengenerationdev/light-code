@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import { normalizeForComparison } from '../fs/confine.js'
+import { isTranscriptMessage } from './backgroundMessages.js'
 import {
   ConfigManager,
   type SecretStore,
@@ -420,19 +421,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await services.workspaceState.set(ACTIVE_TASK_KEY, id)
   }
 
-  /**
-   * Message types a background run may still send.
-   *
-   * Everything else is chat: transcript entries, streamed text, token counts, approval
-   * prompts. A scheduled run that emitted those would overwrite whatever conversation the
-   * user is looking at, which is precisely what running it in the background has to prevent.
-   * An allowlist rather than a block list, so a message type added later is silent by default
-   * rather than leaking into the chat until someone notices.
-   */
-  const BACKGROUND_SAFE_MESSAGES = new Set<HostToUiMessage['type']>(['schedules', 'tasks'])
-
   function post(message: HostToUiMessage): void {
-    if (backgroundRun && !BACKGROUND_SAFE_MESSAGES.has(message.type)) return
+    // Only conversation traffic is withheld — see `backgroundMessages.ts` for why this is a
+    // deny list rather than the allow list it started as.
+    if (backgroundRun && isTranscriptMessage(message.type)) return
     transport.post(message)
   }
 
