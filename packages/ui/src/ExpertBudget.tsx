@@ -18,6 +18,15 @@ export interface ExpertBudgetProps {
   exhausted?: boolean
   /** Whether the expert is switched on and runnable. */
   enabled: boolean
+  /**
+   * The active mode.
+   *
+   * Junior mode is the one built around consulting the expert, so it is the only mode where a
+   * budget is worth a permanent place in the header. `ask_expert` is in the `read` group and so
+   * remains callable elsewhere — the limit still applies there, it is simply not something to
+   * put in front of someone who is not using the feature.
+   */
+  modeId: string
   /** Omitting both clears the override and returns to the configured default. */
   onSetLimits: (limits: { maxSpendUsd?: number; maxConsultations?: number }) => void
 }
@@ -64,7 +73,13 @@ export function ExpertBudget(props: ExpertBudgetProps): ReactElement | null {
     }
   }, [open])
 
+  /*
+   * Shown in Junior mode, and anywhere else only once the expert has actually been consulted.
+   * Hiding it outright in other modes would strand a Code-mode session that did spend money
+   * with no way to adjust the ceiling it is about to hit.
+   */
   if (!props.enabled) return null
+  if (props.modeId !== 'junior' && props.consultations === 0) return null
 
   const numeric = (value: string): number => {
     const parsed = Number(value.trim())

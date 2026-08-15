@@ -26,6 +26,7 @@ const base: ExpertBudgetProps = {
   usd: 0,
   consultations: 0,
   enabled: true,
+  modeId: 'junior',
   onSetLimits: () => {},
 }
 
@@ -59,6 +60,25 @@ describe('ExpertBudget', () => {
   it('is absent for someone who never turned the expert on', () => {
     render({ enabled: false })
     expect(container.textContent).toBe('')
+  })
+
+  /**
+   * Junior mode is the one built around consulting the expert. Elsewhere the button would be
+   * a permanent reminder of a feature the user is not using.
+   */
+  it('stays out of the header in other modes', () => {
+    render({ modeId: 'code' })
+    expect(container.textContent).toBe('')
+  })
+
+  /**
+   * `ask_expert` is in the read group, so Code mode can consult and can spend. Hiding the
+   * control outright would strand such a session with no way to adjust the ceiling it is
+   * about to hit.
+   */
+  it('appears in other modes once the expert has actually been consulted', () => {
+    render({ modeId: 'code', consultations: 2, usd: 0.2, maxSpendUsd: 1 })
+    expect(container.textContent).toContain('$1.00')
   })
 
   /**

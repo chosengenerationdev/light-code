@@ -17,6 +17,10 @@
   their own timeout added up to most of a minute, which looks stuck whether or not it is. The
   state is now always reported, including when the check itself failed, and it says so.
 
+  **The budget control only appears in Junior mode**, which is the mode built around consulting
+  the expert. It still appears in other modes if a consultation has actually happened there, so
+  a session that is spending money always has a way to adjust the ceiling it is about to hit.
+
   **A Re-check button**, always available, including while it says "Checking…". A program can
   hang however carefully it is bounded, so there has to be a way out short of reloading the
   window.

@@ -719,6 +719,7 @@ export function App(props: AppProps): ReactElement {
           {view === 'chat' && (
             <ExpertBudget
               enabled={expertEnabled}
+              modeId={modeId}
               usd={expertSpend.usd}
               consultations={expertSpend.consultations}
               maxSpendUsd={expertSpend.maxSpendUsd}
