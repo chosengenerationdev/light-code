@@ -9,6 +9,8 @@ export interface ExpertBudgetProps {
   maxConsultations: number
   /** True when this chat is overriding the configured default. */
   overridden: boolean
+  /** The expert's own guess at the whole task. A guess, and labelled as one. */
+  estimate?: { consultations?: number; usd?: number }
   /** Spent so far, so the control can show how much of the ceiling is gone. */
   usd: number
   consultations: number
@@ -163,6 +165,53 @@ export function ExpertBudget(props: ExpertBudgetProps): ReactElement | null {
             Spent ${props.usd.toFixed(4)} over {props.consultations}{' '}
             {props.consultations === 1 ? 'consultation' : 'consultations'}.
           </span>
+
+          {/*
+            The expert's estimate, offered with its plan. Labelled "estimates" and kept visually
+            distinct from the spend above it: one is a measurement and the other is a model
+            guessing about its own future behaviour, and conflating them would be dishonest
+            about which number can be relied on.
+          */}
+          {props.estimate !== undefined && (
+            <div
+              style={{
+                padding: '4px 6px',
+                borderRadius: 3,
+                border: `1px solid ${colors.border}`,
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 6,
+                flexWrap: 'wrap',
+              }}
+            >
+              <span style={{ color: colors.expert }}>Expert estimates</span>
+              <span style={{ color: colors.foreground }}>
+                {[
+                  props.estimate.usd === undefined ? undefined : `$${props.estimate.usd.toFixed(2)}`,
+                  props.estimate.consultations === undefined
+                    ? undefined
+                    : `${String(props.estimate.consultations)} consultations`,
+                ]
+                  .filter((part) => part !== undefined)
+                  .join(' over ')}
+              </span>
+              <button
+                type="button"
+                style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
+                title="Fill the fields below with the estimate. A little headroom is added, because an estimate that is exactly right still stops you at the last review."
+                onClick={() => {
+                  // 25% headroom: a budget set to the estimate exactly runs out on the final
+                  // checkpoint, which is the worst moment to lose the expert.
+                  if (props.estimate?.usd !== undefined) setSpend((props.estimate.usd * 1.25).toFixed(2))
+                  if (props.estimate?.consultations !== undefined) {
+                    setCalls(String(Math.ceil(props.estimate.consultations * 1.25)))
+                  }
+                }}
+              >
+                Use it
+              </button>
+            </div>
+          )}
 
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 66, color: colors.muted }}>Stop after</span>

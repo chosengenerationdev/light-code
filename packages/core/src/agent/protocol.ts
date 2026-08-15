@@ -7,6 +7,7 @@ import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
 import type { VectorStoreKind } from '../config/schema.js'
+import type { JuniorAssessment } from '../expert/assessment.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
 
@@ -339,6 +340,9 @@ export type UiToHostMessage =
    * task would be a limit nobody set.
    */
   | { type: 'setTaskExpertLimits'; maxSpendUsd?: number; maxConsultations?: number }
+  /** Runs the probes through the junior, then asks the expert to grade them. Costs money. */
+  | { type: 'assessJunior' }
+  | { type: 'clearAssessment' }
   | { type: 'restartScheduler' }
   /** Clears a schedule's remembered runs. Omit `id` to clear every schedule's. */
   | { type: 'clearScheduleRuns'; id?: string }
@@ -466,6 +470,13 @@ export type HostToUiMessage =
       maxConsultations: number
       /** True when this chat is overriding the configured default. */
       overridden: boolean
+      /**
+       * The expert's own guess at the whole task, offered with its plan.
+       *
+       * A guess by a model about its own future behaviour, so the UI labels it as estimated
+       * and never as a quote — the spend beside it is the number that is true.
+       */
+      estimate?: { consultations?: number; usd?: number }
     }
   /** Every search the model ran this session, newest first. */
   | { type: 'searchLog'; entries: SearchLogEntry[] }
@@ -583,6 +594,12 @@ export type HostToUiMessage =
       /** Per-task ceilings. 0 means no limit. */
       maxSpendUsd: number
       maxConsultations: number
+      /** The expert's judgement of the junior, when one has been made. */
+      assessment?: JuniorAssessment
+      /** True while probes are running, so the tab can show progress rather than nothing. */
+      assessing?: boolean
+      /** How far through the probes, for the same reason. */
+      assessmentStep?: string
     }
   /**
    * Replaces the whole transcript — sent when a task is reopened, and on panel load to

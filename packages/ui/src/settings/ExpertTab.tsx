@@ -1,8 +1,11 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
-import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import type { JuniorAssessment } from '@light-code/core/browser'
+import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { ScopeBadge } from './ScopeBadge.js'
+
+const monospace = 'var(--vscode-editor-font-family, monospace)'
 
 /** Sentinel for the free-text escape hatch, kept out of the value space. */
 const CUSTOM = '__custom__'
@@ -28,6 +31,9 @@ export interface ExpertState {
   model?: string
   maxSpendUsd: number
   maxConsultations: number
+  assessment?: JuniorAssessment
+  assessing?: boolean
+  assessmentStep?: string
 }
 
 export interface ExpertTabProps {
@@ -37,6 +43,9 @@ export interface ExpertTabProps {
   pickedPath?: { purpose: string; path: string } | undefined
   /** Re-runs detection. The probe spawns a process, so it is never automatic on a timer. */
   onRecheck: () => void
+  /** Runs the probes and has the expert grade them. Costs one consultation. */
+  onAssess: () => void
+  onClearAssessment: () => void
   onSave: (
     enabled: boolean,
     path: string,
@@ -259,6 +268,55 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         approval, so nothing reaches your repository without passing the usual prompt.
       </div>
 
+      {/*
+        The assessment sits below the settings because it is a *result*, not a setting — and
+        above Save so it is not mistaken for something Save applies to.
+      */}
+      <div style={{ marginBottom: 16, border: `1px solid ${colors.border}`, borderRadius: 3, padding: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <strong style={{ fontSize: 12, color: colors.foreground }}>How good is the junior?</strong>
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+            <button
+              type="button"
+              style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+              disabled={props.expert?.assessing === true || !detected}
+              title={
+                detected
+                  ? 'Ask the junior five short questions, then have the expert grade the answers. Costs one consultation.'
+                  : 'Needs the Claude CLI — the assessment is the expert’s judgement.'
+              }
+              onClick={props.onAssess}
+            >
+              {props.expert?.assessment === undefined ? 'Assess it' : 'Assess again'}
+            </button>
+            {props.expert?.assessment !== undefined && (
+              <button
+                type="button"
+                style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                onClick={props.onClearAssessment}
+              >
+                Clear
+              </button>
+            )}
+          </span>
+        </div>
+
+        <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>
+          The junior answers five short probes and the expert grades the actual answers — not the
+          model’s name, which would be a recollection rather than a measurement. The verdict is
+          given back to the expert on later tasks so it sizes its plans to what this model can
+          really do.
+        </p>
+
+        {props.expert?.assessing === true && (
+          <p style={{ color: colors.muted, fontSize: 11, marginBottom: 0 }}>{props.expert.assessmentStep ?? 'Working…'}</p>
+        )}
+
+        {props.expert?.assessment !== undefined && (
+          <AssessmentView assessment={props.expert.assessment} currentModel={props.expert.model ?? model} />
+        )}
+      </div>
+
       <button type="button" style={primaryButtonStyle(false)}         onClick={() =>
           props.onSave(enabled, path.trim(), model.trim(), {
             maxSpendUsd: numeric(maxSpend),
@@ -268,6 +326,82 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
       >
         Save
       </button>
+    </div>
+  )
+}
+
+/**
+ * The verdict, and the evidence behind it.
+ *
+ * **The probe answers are shown, collapsed.** An assessment is one model's opinion of another,
+ * and the only way for the user to judge whether it is fair is to read what the junior actually
+ * said. Hiding that would make it an oracle; showing it makes it an argument.
+ */
+function AssessmentView(props: { assessment: JuniorAssessment; currentModel: string }): ReactElement {
+  const [open, setOpen] = useState(false)
+  const { assessment } = props
+  /*
+   * A verdict about a different model is worse than none: it reads as current and describes
+   * something else. Flagged rather than hidden, because the old one may still be wanted.
+   */
+  const stale = assessment.model !== props.currentModel && props.currentModel.length > 0
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', fontSize: 11 }}>
+        <span style={{ fontFamily: monospace, color: colors.foreground }}>{assessment.model}</span>
+        <span style={{ color: colors.muted }}>
+          via {assessment.profileLabel} · {new Date(assessment.assessedAt).toLocaleDateString()}
+          {assessment.costUsd !== undefined ? ` · $${assessment.costUsd.toFixed(4)}` : ''}
+        </span>
+        {stale && (
+          <span style={{ ...badgeStyle('warning'), fontSize: 9 }} title="Assessed for a different model than the one now active">
+            different model
+          </span>
+        )}
+      </div>
+
+      <div
+        style={{
+          whiteSpace: 'pre-wrap',
+          fontSize: 11,
+          color: colors.foreground,
+          marginTop: 6,
+          paddingLeft: 8,
+          borderLeft: `2px solid ${colors.expert}`,
+        }}
+      >
+        {assessment.verdict}
+      </div>
+
+      <button
+        type="button"
+        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginTop: 6 }}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? 'Hide' : 'Show'} what it answered ({assessment.probes.length})
+      </button>
+
+      {open &&
+        assessment.probes.map((probe) => (
+          <div key={probe.id} style={{ marginTop: 8, fontSize: 11 }}>
+            <div style={{ color: colors.foreground }}>{probe.measures}</div>
+            <pre
+              style={{
+                margin: '3px 0 0',
+                padding: 6,
+                whiteSpace: 'pre-wrap',
+                fontFamily: monospace,
+                fontSize: 10,
+                color: probe.error !== undefined ? colors.error : colors.muted,
+                background: colors.inputBackground,
+                borderRadius: 3,
+              }}
+            >
+              {probe.error !== undefined ? `No answer — ${probe.error}` : probe.answer.trim() || '(empty)'}
+            </pre>
+          </div>
+        ))}
     </div>
   )
 }

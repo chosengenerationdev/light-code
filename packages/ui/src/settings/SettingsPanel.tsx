@@ -66,6 +66,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onConnectMcp: (name: string) => void
   expert: ExpertState | undefined
   onRecheckExpert: () => void
+  onAssessJunior: () => void
+  onClearAssessment: () => void
   onSaveExpert: (
     enabled: boolean,
     path: string,
@@ -221,6 +223,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             expert={props.expert}
             onSave={props.onSaveExpert}
             onRecheck={props.onRecheckExpert}
+            onAssess={props.onAssessJunior}
+            onClearAssessment={props.onClearAssessment}
             onBrowse={props.onBrowse}
             pickedPath={props.pickedPath}
           />

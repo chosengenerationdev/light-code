@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.27.0
+
+### Minor Changes
+
+- The expert estimates what a task will cost, and can assess the model it works with.
+
+  **An estimate, before you set the budget.** The expert is the only participant that knows the
+  shape of the work before it starts — it has just read the code and decided how many
+  checkpoints there are. So it now ends its plan with an estimate of the whole task, and the
+  budget control shows it with a **Use it** button that fills in the fields with a little
+  headroom. It rides along with the plan and costs nothing extra.
+
+  It is labelled as an estimate and kept visually apart from the spend beside it, because one is
+  a model guessing about its own future behaviour and the other is a measurement.
+
+  **A skill assessment of the junior**, in Settings → Expert. The junior answers five short
+  probes — following an exact format, admitting it does not know something, writing a small
+  function, finding a bug, noticing a contradiction — and the expert grades the actual answers.
+
+  Deliberately not "ask Claude what it thinks of that model name": that would be a recollection
+  from training data that may predate the release or describe a different quantisation, and
+  would say nothing about your deployment, where a gateway's own prompt and context limit change
+  the behaviour anyway. Grading real answers makes the judgement falsifiable — and the answers
+  are kept and shown, so you can judge the judgement.
+
+  The verdict is given back to the expert on later tasks, so its plans are sized to what your
+  model can actually do. It costs one consultation, which is counted in the meter like any
+  other, and it is a button rather than something that happens on its own.
+
 ## 0.26.0
 
 ### Minor Changes

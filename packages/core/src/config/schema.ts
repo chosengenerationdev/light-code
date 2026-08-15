@@ -97,6 +97,30 @@ export const expertConfigSchema = z
      */
     maxSpendUsd: z.number().min(0),
     /**
+     * The expert's assessment of the junior model, and the answers it judged.
+     *
+     * Stored so it survives a restart and can be shown, and fed back to the expert on later
+     * tasks so its plans are sized to what the junior can actually do. Keyed by nothing —
+     * there is one, for the model that was assessed, and it records which that was so a stale
+     * one is recognisable rather than silently applied to a different model.
+     */
+    assessment: z.object({
+      model: z.string(),
+      profileLabel: z.string(),
+      assessedAt: z.number(),
+      verdict: z.string(),
+      costUsd: z.number().optional(),
+      probes: z.array(
+        z.object({
+          id: z.string(),
+          measures: z.string(),
+          prompt: z.string(),
+          answer: z.string(),
+          error: z.string().optional(),
+        }),
+      ),
+    }).optional(),
+    /**
      * Consultations allowed within one task. 0 means no limit.
      *
      * The backstop for when the CLI reports no cost — a spend limit cannot count what it is

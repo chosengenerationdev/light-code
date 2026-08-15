@@ -70,6 +70,7 @@ export type {
 
 /** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */
 export type { VectorStoreKind } from './config/schema.js'
+export type { JuniorAssessment, ProbeResult } from './expert/assessment.js'
 
 // Type-only, so nothing from indexer.ts (which imports node:fs) reaches the bundle.
 export type { IndexProgress, IndexResult } from './rag/indexer.js'

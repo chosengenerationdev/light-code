@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { consultExpert, type ClaudeCliInfo } from '../expert/claudeCli.js'
+import { extractEstimate, type ExpertEstimate } from '../expert/estimate.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -81,6 +82,8 @@ export interface AskExpertOptions {
    * against re-sending context is about paragraphs, not about a number that has moved.
    */
   budgetSummary?: () => string | undefined
+  /** Receives the expert's own estimate of the whole task, when it offers one. */
+  onEstimate?: (estimate: ExpertEstimate) => void
 }
 
 /**
@@ -169,6 +172,13 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
         return { content: `The expert could not answer: ${answer.text}`, isError: true }
       }
 
+      /*
+       * Pulled out before anything renders it. The marker is machinery — the user reads the
+       * number in the budget control, not as a stray line in the middle of the advice.
+       */
+      const { text: advice, estimate } = extractEstimate(answer.text)
+      if (estimate !== undefined) options.onEstimate?.(estimate)
+
       const notes: string[] = []
       /*
        * Told explicitly, because the model cannot observe it and the default assumption is
@@ -196,7 +206,7 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
 
       return {
         content: [
-          answer.text,
+          advice,
           '',
           '---',
           'This is advice from a consulting model that cannot see your conversation and did not',

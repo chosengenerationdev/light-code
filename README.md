@@ -70,7 +70,11 @@ configure a provider.
   than starting cold each time.
 - **A budget for that expert**, per chat: stop after so many dollars or so many
   consultations. Set it in the chat header, adjust it mid-conversation, and the expert is
-  told what remains so it plans to fit.
+  told what remains so it plans to fit. It also **estimates what the task will cost** when it
+  gives you the plan, so you can set the budget before the work starts rather than after.
+- **The expert can assess your cheaper model.** It puts five short probes to it, grades the
+  actual answers, and tells you what to trust it with — then sizes its own plans accordingly.
+  A judgement about the model in front of it, not a recollection about a model name.
 - **A context budget you can see:** system prompt, tool definitions, conversation, and tool
   results, with cache hit rate.
 

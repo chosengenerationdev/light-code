@@ -58,8 +58,14 @@ import {
   buildExpertBriefing,
   buildDocCorpus,
   createNotifyTool,
+  ASSESSMENT_PROBES,
+  buildAssessmentQuestion,
+  consultExpert,
+  type JuniorAssessment,
+  type ProbeResult,
   checkExpertBudget,
   describeExpertBudget,
+  type ExpertEstimate,
   expertBudgetUsage,
   type ExpertLimits,
   registryForSchedule,
@@ -532,6 +538,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedAccentColor = '#22C55E'
   let cachedExpertColor = '#D97757'
   let cachedExpertLimits: ExpertLimits = {}
+  /** The stored assessment, so the briefing can carry it without a config read per turn. */
+  let cachedAssessment: JuniorAssessment | undefined
   /**
    * A ceiling for this chat only, overriding the configured default.
    *
@@ -539,6 +547,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * is a real need; a raised ceiling that silently outlives it is a limit nobody set.
    */
   let taskExpertLimits: ExpertLimits | undefined
+  /** The expert's estimate for this task, cleared with it. */
+  let taskExpertEstimate: ExpertEstimate | undefined
+  /** Non-empty while the junior is being assessed, for the progress line in the tab. */
+  let assessmentStep: string | undefined
 
   function effectiveExpertLimits(): ExpertLimits {
     return taskExpertLimits ?? cachedExpertLimits
@@ -640,6 +652,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     expertSpend = { usd: 0, consultations: 0, unpriced: 0 }
     expertSessionId = undefined
     taskExpertLimits = undefined
+    taskExpertEstimate = undefined
     postExpertSpend()
   }
 
@@ -654,6 +667,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       maxSpendUsd: limits.maxSpendUsd ?? 0,
       maxConsultations: limits.maxConsultations ?? 0,
       overridden: taskExpertLimits !== undefined,
+      ...(taskExpertEstimate === undefined ? {} : { estimate: taskExpertEstimate }),
     })
   }
 
@@ -672,6 +686,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
+    cachedAssessment = config.expert?.assessment
     cachedExpertLimits = {
       ...(config.expert?.maxSpendUsd !== undefined ? { maxSpendUsd: config.expert.maxSpendUsd } : {}),
       ...(config.expert?.maxConsultations !== undefined ? { maxConsultations: config.expert.maxConsultations } : {}),
@@ -889,6 +904,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // next consultation should honour it, without starting a new task to pick it up.
           budget: () => checkExpertBudget(expertSpend, effectiveExpertLimits()),
           budgetSummary: () => describeExpertBudget(expertSpend, effectiveExpertLimits()),
+          onEstimate: (estimate) => {
+            taskExpertEstimate = estimate
+            postExpertSpend()
+          },
           session: {
             get: () => expertSessionId,
             set: (sessionId) => {
@@ -902,6 +921,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            */
           briefing: () =>
             buildExpertBriefing({
+              ...(cachedAssessment === undefined ? {} : { juniorAssessment: cachedAssessment }),
               // `ask_expert` itself is excluded: telling the expert it can consult itself is
               // noise at best and a loop at worst.
               promptTools: combined.promptList().filter((tool) => tool.name !== 'ask_expert'),
@@ -1718,7 +1738,110 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
       maxSpendUsd: config.expert?.maxSpendUsd ?? 0,
       maxConsultations: config.expert?.maxConsultations ?? 0,
+      ...(config.expert?.assessment !== undefined ? { assessment: config.expert.assessment } : {}),
+      ...(assessmentStep === undefined ? {} : { assessing: true, assessmentStep }),
     })
+  }
+
+  /**
+   * Asks the junior a handful of probes, then has the expert grade the answers.
+   *
+   * **Evidence, not recall.** Asking the expert what it thinks of a model *name* would produce
+   * an authoritative-sounding answer from training data that may predate the release or
+   * describe a different quantisation — and would say nothing about this deployment, where a
+   * gateway's own prompt and context limit change the behaviour anyway. Grading real answers
+   * makes the judgement falsifiable, and the answers are kept so the user can judge it too.
+   *
+   * Costs one expert consultation plus a few cheap junior calls, which is why it is a button
+   * rather than something that happens on its own.
+   */
+  async function handleAssessJunior(): Promise<void> {
+    if (assessmentStep !== undefined) return
+    try {
+      const { config } = await configManager.load()
+      const cli = await resolveExpert(config)
+      if (cli === undefined) {
+        post({ type: 'error', message: 'Enable the expert first — the assessment is its judgement, not ours.' })
+        return
+      }
+
+      const profile = resolveActiveProfile(config)
+      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+
+      const results: ProbeResult[] = []
+      for (const [index, probe] of ASSESSMENT_PROBES.entries()) {
+        assessmentStep = `Asking the junior: ${probe.measures} (${String(index + 1)}/${String(ASSESSMENT_PROBES.length)})`
+        await postExpert()
+
+        let answer = ''
+        try {
+          /*
+           * No tools and no system prompt beyond the probe. The point is to measure the model,
+           * not the scaffolding around it — and a probe that could call `read_file` would
+           * measure whether the harness works.
+           */
+          for await (const chunk of provider.streamChat([{ role: 'user', content: probe.prompt }])) {
+            if (chunk.type === 'text') answer += chunk.text
+            // A provider that streams an error rather than throwing is still a failed probe.
+            if (chunk.type === 'error') throw new Error(chunk.error)
+          }
+          results.push({ id: probe.id, measures: probe.measures, prompt: probe.prompt, answer })
+        } catch (error) {
+          // A probe that fails is itself a finding — a model that times out on five short
+          // questions is one the expert should know about.
+          results.push({
+            id: probe.id,
+            measures: probe.measures,
+            prompt: probe.prompt,
+            answer,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      assessmentStep = 'Asking the expert to grade the answers'
+      await postExpert()
+
+      const graded = await consultExpert(cli, {
+        question: buildAssessmentQuestion(profile.model, results),
+        cwd: workspaceRoot ?? process.cwd(),
+        ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
+      })
+
+      // Counted like any other consultation: it spent the user's money, and a total that
+      // quietly omitted it would understate the spend.
+      recordConsultation({ isError: graded.isError, ...(graded.costUsd !== undefined ? { costUsd: graded.costUsd } : {}) })
+
+      if (graded.isError) {
+        post({ type: 'error', message: `The expert could not assess the junior: ${graded.text}` })
+        return
+      }
+
+      const assessment: JuniorAssessment = {
+        model: profile.model,
+        profileLabel: profile.label ?? profile.model,
+        assessedAt: Date.now(),
+        verdict: graded.text.trim(),
+        probes: results,
+        ...(graded.costUsd !== undefined ? { costUsd: graded.costUsd } : {}),
+      }
+
+      const latest = (await configManager.load()).config
+      await configManager.save('user', { expert: { ...latest.expert, assessment } })
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    } finally {
+      assessmentStep = undefined
+      await postExpert()
+    }
+  }
+
+  async function handleClearAssessment(): Promise<void> {
+    const { config } = await configManager.load()
+    const expert = { ...config.expert }
+    delete expert.assessment
+    await configManager.save('user', { expert })
+    await postExpert()
   }
 
   async function handleSetExpert(
@@ -3239,6 +3362,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
             }
       postExpertSpend()
+    } else if (message.type === 'assessJunior') {
+      void handleAssessJunior()
+    } else if (message.type === 'clearAssessment') {
+      void handleClearAssessment()
     } else if (message.type === 'restartScheduler') {
       restartScheduleTimer()
       logger.info('schedule timer restarted by the user')

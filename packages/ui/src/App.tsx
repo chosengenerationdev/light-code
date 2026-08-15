@@ -89,6 +89,7 @@ export function App(props: AppProps): ReactElement {
     maxSpendUsd: number
     maxConsultations: number
     overridden: boolean
+    estimate?: { consultations?: number; usd?: number }
   }>({ usd: 0, consultations: 0, unpriced: 0, maxSpendUsd: 0, maxConsultations: 0, overridden: false })
   const [dispatcher, setDispatcher] = useState<{ enabled: boolean; hiddenTools: number; docsIndex?: string }>({
     enabled: false,
@@ -335,6 +336,7 @@ export function App(props: AppProps): ReactElement {
           maxSpendUsd: message.maxSpendUsd,
           maxConsultations: message.maxConsultations,
           overridden: message.overridden,
+          ...(message.estimate !== undefined ? { estimate: message.estimate } : {}),
         })
       } else if (message.type === 'mcpServerSaved') {
         setMcpSavedTick((tick) => tick + 1)
@@ -384,6 +386,9 @@ export function App(props: AppProps): ReactElement {
           ...(message.model !== undefined ? { model: message.model } : {}),
           maxSpendUsd: message.maxSpendUsd,
           maxConsultations: message.maxConsultations,
+          ...(message.assessment !== undefined ? { assessment: message.assessment } : {}),
+          ...(message.assessing !== undefined ? { assessing: message.assessing } : {}),
+          ...(message.assessmentStep !== undefined ? { assessmentStep: message.assessmentStep } : {}),
         })
         // The composer badge means "usable", not merely "switched on".
         setExpertEnabled(message.enabled && message.available)
@@ -729,6 +734,7 @@ export function App(props: AppProps): ReactElement {
               maxSpendUsd={expertSpend.maxSpendUsd}
               maxConsultations={expertSpend.maxConsultations}
               overridden={expertSpend.overridden}
+              {...(expertSpend.estimate !== undefined ? { estimate: expertSpend.estimate } : {})}
               {...(expertSpend.usage !== undefined ? { usage: expertSpend.usage } : {})}
               {...(expertSpend.exhausted !== undefined ? { exhausted: expertSpend.exhausted } : {})}
               onSetLimits={(limits) =>
@@ -861,6 +867,8 @@ export function App(props: AppProps): ReactElement {
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}
+            onAssessJunior={() => props.transport.post({ type: 'assessJunior' } satisfies UiToHostMessage)}
+            onClearAssessment={() => props.transport.post({ type: 'clearAssessment' } satisfies UiToHostMessage)}
             onRecheckExpert={() => {
               // Cleared first so the tab visibly restarts rather than showing a stale answer.
               setExpert(undefined)

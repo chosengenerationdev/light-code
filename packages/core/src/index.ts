@@ -127,6 +127,14 @@ export {
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
 export { buildExpertBriefing, type BriefingInput } from './expert/briefing.js'
+export { extractEstimate, ESTIMATE_INSTRUCTION, type ExpertEstimate } from './expert/estimate.js'
+export {
+  ASSESSMENT_PROBES,
+  assessmentForBriefing,
+  buildAssessmentQuestion,
+  type JuniorAssessment,
+  type ProbeResult,
+} from './expert/assessment.js'
 export {
   checkExpertBudget,
   describeExpertBudget,

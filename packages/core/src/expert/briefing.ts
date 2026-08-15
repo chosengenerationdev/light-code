@@ -1,5 +1,7 @@
 import type { Skill } from '../skills/index.js'
 import type { Tool } from '../tools/types.js'
+import { assessmentForBriefing, type JuniorAssessment } from './assessment.js'
+import { ESTIMATE_INSTRUCTION } from './estimate.js'
 
 /**
  * Tells the expert what the junior can do — and, just as importantly, what the expert cannot.
@@ -43,6 +45,13 @@ export interface BriefingInput {
   skills?: readonly Skill[]
   /** True when `search_docs` is available, so the expert can ask for a schema by name. */
   retrievalAvailable?: boolean
+  /**
+   * The expert's own earlier judgement of this junior, if one has been made.
+   *
+   * Its own words, given back to it: a plan sized for a model that cannot hold three steps
+   * in its head is a different plan, and it is the only participant that can size one.
+   */
+  juniorAssessment?: JuniorAssessment
 }
 
 export function buildExpertBriefing(input: BriefingInput): string {
@@ -74,7 +83,12 @@ export function buildExpertBriefing(input: BriefingInput): string {
     'stop. The junior has the plan and you have this conversation — neither needs restating. If',
     'a report reveals the plan was wrong, say so plainly and give the corrected next checkpoint',
     'rather than reissuing the whole plan.',
+    '',
+    ESTIMATE_INSTRUCTION,
   ]
+
+  const assessed = assessmentForBriefing(input.juniorAssessment)
+  if (assessed !== undefined) sections.push('', assessed)
 
   const listed = (tools: readonly Tool[]): string[] =>
     [...tools]
