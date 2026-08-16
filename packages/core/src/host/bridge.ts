@@ -58,6 +58,7 @@ import {
   buildExpertBriefing,
   buildDocCorpus,
   createNotifyTool,
+  syncVectorStores,
   ASSESSMENT_PROBES,
   buildAssessmentQuestion,
   consultExpert,
@@ -2321,6 +2322,70 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * against a hash that still matches, decide nothing had changed, and leave the index empty
    * indefinitely.
    */
+  /**
+   * Copies this workspace's index out of another store into the active one.
+   *
+   * Exists so switching backend does not mean paying to re-embed a whole repository. The
+   * safety condition — that both sides were embedded by the same model, at the same width,
+   * with the same chunking — is read from the *source's* manifest, which the indexer already
+   * writes for its own diffing. Mixing embeddings would produce confident, plausible, wrong
+   * neighbours with no error anywhere, which is why this refuses rather than warns.
+   *
+   * The manifest is copied across on success, so the destination inherits an accurate record
+   * of what it now contains and the next incremental index does the right thing.
+   */
+  async function handleSyncVectorStore(fromId: string): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const target = await resolveSearch(config)
+      const source = config.vectorStores?.[fromId]
+      if (target === undefined || source === undefined) {
+        post({ type: 'storeSync', running: false, error: 'Choose a search connection first.' })
+        return
+      }
+      if (fromId === target.id) {
+        post({ type: 'storeSync', running: false, error: 'That is the store you are already using.' })
+        return
+      }
+
+      const index = codebaseIndexName(config)
+      const embedder = await resolveEmbedder(config)
+      if (index === undefined || embedder === undefined) {
+        post({ type: 'storeSync', running: false, error: 'Configure an embedding model in Settings → Search first.' })
+        return
+      }
+
+      post({ type: 'storeSync', running: true, fromLabel: source.label })
+
+      const sourcePath = path.join(storageDir, 'index-manifests', `${manifestKey(index, fromId)}.json`)
+      const manifest = await fs
+        .readFile(sourcePath, 'utf8')
+        .then((raw) => JSON.parse(raw) as IndexManifest)
+        .catch(() => undefined)
+
+      const result = await syncVectorStores({
+        from: createVectorIndexWriter(httpClient, source, await vectorStoreConnectionFor(source, fromId)),
+        to: createVectorIndexWriter(httpClient, target.store, await vectorStoreConnectionFor(target.store, target.id)),
+        collection: index,
+        manifest,
+        current: { model: embedder.model, dimensions: embedder.dimensions },
+        onProgress: (progress) => post({ type: 'storeSync', running: true, copied: progress.copied, fromLabel: source.label }),
+      })
+
+      // The destination inherits the record of what it now holds, so the next incremental
+      // index diffs against the truth rather than re-embedding everything.
+      if (manifest !== undefined) {
+        const targetPath = path.join(storageDir, 'index-manifests', `${manifestKey(index, target.id)}.json`)
+        await fs.mkdir(path.dirname(targetPath), { recursive: true })
+        await fs.writeFile(targetPath, JSON.stringify(manifest), 'utf8')
+      }
+
+      post({ type: 'storeSync', running: false, copied: result.copied, fromLabel: source.label })
+    } catch (error) {
+      post({ type: 'storeSync', running: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleClearDocsIndex(): Promise<void> {
     const { config } = await configManager.load()
     const index = docsIndexName(config)
@@ -3375,6 +3440,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleRequestSearchIndexes(message.connection)
     } else if (message.type === 'testSearchConnection') {
       void handleTestSearchConnection(message.connection)
+    } else if (message.type === 'syncVectorStore') {
+      void handleSyncVectorStore(message.fromId)
     } else if (message.type === 'clearDocsIndex') {
       void handleClearDocsIndex()
     } else if (message.type === 'indexDocs') {

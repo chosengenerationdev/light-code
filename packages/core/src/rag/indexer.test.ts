@@ -87,6 +87,8 @@ describe('indexWorkspace', () => {
     deleteByPaths: async (_collection: string, paths: readonly string[]) => {
       deleted.push(...paths)
     },
+    // Copying between stores is a separate operation; the indexer never scans.
+    scan: async () => ({ documents: [] }),
     // The workspace indexer diffs against its manifest and never calls this; the docs corpus
     // has no manifest and does. Present to satisfy the interface, and asserted unused below.
     listPaths: async () => {

@@ -134,6 +134,9 @@ export function App(props: AppProps): ReactElement {
   const [searchIndexesWarning, setSearchIndexesWarning] = useState<string | undefined>(undefined)
   const [searchTestResult, setSearchTestResult] = useState<{ ok: boolean; detail: string } | undefined>(undefined)
   const [searchSavedTick, setSearchSavedTick] = useState(0)
+  const [storeSync, setStoreSync] = useState<
+    { running: boolean; copied?: number; error?: string; fromLabel?: string } | undefined
+  >(undefined)
   const [embedder, setEmbedder] = useState<EmbedderState | undefined>(undefined)
   const [indexProgress, setIndexProgress] = useState<IndexProgress | undefined>(undefined)
   const [indexResult, setIndexResult] = useState<{ result?: IndexResult; error?: string } | undefined>(undefined)
@@ -375,6 +378,13 @@ export function App(props: AppProps): ReactElement {
           ...(message.result !== undefined ? { result: message.result } : {}),
           ...(message.error !== undefined ? { error: message.error } : {}),
         })
+      } else if (message.type === 'storeSync') {
+        setStoreSync({
+          running: message.running,
+          ...(message.copied !== undefined ? { copied: message.copied } : {}),
+          ...(message.error !== undefined ? { error: message.error } : {}),
+          ...(message.fromLabel !== undefined ? { fromLabel: message.fromLabel } : {}),
+        })
       } else if (message.type === 'searchConnectionSaved') {
         setSearchSavedTick((tick) => tick + 1)
       } else if (message.type === 'network') {
@@ -536,6 +546,11 @@ export function App(props: AppProps): ReactElement {
       props.transport.post({ type: 'saveSearchConnection', connection } satisfies UiToHostMessage)
     },
     onDelete: (id: string) => props.transport.post({ type: 'deleteSearchConnection', id } satisfies UiToHostMessage),
+    onSyncFrom: (fromId: string) => {
+      setStoreSync({ running: true })
+      props.transport.post({ type: 'syncVectorStore', fromId } satisfies UiToHostMessage)
+    },
+    ...(storeSync !== undefined ? { sync: storeSync } : {}),
     onSetActive: (id: string | undefined) =>
       props.transport.post({ type: 'setActiveSearchConnection', id } satisfies UiToHostMessage),
     onListIndexes: (connection: SearchConnectionInput) =>

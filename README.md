@@ -57,6 +57,7 @@ configure a provider.
   or **Chroma** container, or an **OpenSearch** cluster you already run. Opt-in and disabled by
   default, with a dispatcher that keeps tool schemas out of the prompt when you have more tools
   than context. The local backends mean your code is embedded and stored on your own machine.
+  Moving between stores copies the vectors across rather than re-embedding everything.
 - **Scheduled prompts** that run on their own, each with an explicit allowlist of the tools
   it may use — the default is none. Runs happen in the background without touching the
   conversation you are in, and leave a transcript you can open in an editor tab.

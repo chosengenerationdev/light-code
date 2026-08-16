@@ -171,6 +171,7 @@ export {
   type VectorStoreConnection,
 } from './rag/vectorStore.js'
 export { createVectorSearcher, createVectorIndexWriter } from './rag/vectorStoreFactory.js'
+export { syncVectorStores, describeSyncMismatch, type SyncResult } from './rag/syncStores.js'
 export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'

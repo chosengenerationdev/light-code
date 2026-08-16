@@ -314,6 +314,8 @@ export type UiToHostMessage =
   | { type: 'indexDocs' }
   /** Empties the documentation index, so nothing stale can be matched. */
   | { type: 'clearDocsIndex' }
+  /** Copies this workspace's index from another store into the active one, vectors and all. */
+  | { type: 'syncVectorStore'; fromId: string }
   /** Run a query by hand, exactly as the model would, to judge what the index returns. */
   | { type: 'runSearchProbe'; query: string; target: 'codebase' | 'docs' }
   | { type: 'clearSearchLog' }
@@ -517,6 +519,8 @@ export type HostToUiMessage =
   | { type: 'searchProbe'; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */
   | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string }
+  /** Progress and outcome of copying one store into another. */
+  | { type: 'storeSync'; running: boolean; copied?: number; error?: string; fromLabel?: string }
   /** Whether tool schemas are being kept out of the prompt, and how many are hidden. */
   | { type: 'dispatcher'; enabled: boolean; hiddenTools: number; docsIndex?: string }
   | { type: 'mcpServerSaved'; name: string }

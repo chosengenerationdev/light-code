@@ -39,6 +39,9 @@ export interface SearchTabProps {
   onSave: (connection: SearchConnectionInput) => void
   onDelete: (id: string) => void
   onSetActive: (id: string | undefined) => void
+  /** Copies this workspace's index out of another store into the active one. */
+  onSyncFrom: (fromId: string) => void
+  sync?: { running: boolean; copied?: number; error?: string; fromLabel?: string }
   onListIndexes: (connection: SearchConnectionInput) => void
   onTest: (connection: SearchConnectionInput) => void
   /** Codebase indexing, rendered under the connection list. */
@@ -584,6 +587,62 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
 
       {props.connections.length === 0 && (
         <p style={{ color: colors.muted, fontFamily }}>No connections yet.</p>
+      )}
+
+      {/*
+        Copying between stores, offered only when there is somewhere to copy *from*.
+        Switching backend otherwise means re-embedding the whole repository — minutes to hours,
+        and real money where embedding is billed — to produce vectors that already exist.
+      */}
+      {props.activeConnectionId !== undefined && props.connections.length > 1 && (
+        <div
+          style={{
+            padding: 10,
+            marginBottom: 12,
+            borderRadius: 4,
+            border: `1px solid ${colors.border}`,
+            fontFamily,
+            fontSize: 12,
+          }}
+        >
+          <strong style={{ color: colors.foreground, fontSize: 12 }}>Copy an existing index here</strong>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '4px 0 8px' }}>
+            Moves this workspace&rsquo;s vectors into the active store without re-embedding. Only
+            possible when both were indexed with the same embedding model — otherwise the copy is
+            refused, because mixing embeddings makes every search quietly wrong rather than
+            visibly broken.
+          </p>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            {props.connections
+              .filter((connection) => connection.id !== props.activeConnectionId)
+              .map((connection) => (
+                <button
+                  key={connection.id}
+                  type="button"
+                  style={secondaryButtonStyle()}
+                  disabled={props.sync?.running === true}
+                  title={`Copy this workspace's index from ${connection.label} into the active store`}
+                  onClick={() => props.onSyncFrom(connection.id)}
+                >
+                  From {connection.label}
+                </button>
+              ))}
+          </div>
+          {props.sync !== undefined && (
+            <p
+              style={{
+                color: props.sync.error !== undefined ? colors.error : colors.muted,
+                fontSize: 11,
+                margin: '6px 0 0',
+              }}
+            >
+              {props.sync.error ??
+                (props.sync.running
+                  ? `Copying from ${props.sync.fromLabel ?? 'the other store'}… ${String(props.sync.copied ?? 0)} so far.`
+                  : `Copied ${String(props.sync.copied ?? 0)} entries from ${props.sync.fromLabel ?? 'the other store'}.`)}
+            </p>
+          )}
+        </div>
       )}
 
       {props.connections.map((connection) => {

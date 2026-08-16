@@ -125,6 +125,24 @@ export interface VectorIndexWriter {
    * implementation must cap rather than silently return a partial answer as if complete.
    */
   listPaths(collection: string, options?: { limit?: number; signal?: AbortSignal }): Promise<string[]>
+  /**
+   * Every stored document, vectors included, a page at a time.
+   *
+   * **On the writer, like `listPaths`, and for the same reason.** Reading a whole collection
+   * back — with its vectors — is a bulk-export capability, and the object handed to tools must
+   * not have one. A tool that could page through the index could exfiltrate the entire
+   * embedded codebase through the chat, which is precisely the shape of thing the read/write
+   * split exists to make impossible.
+   *
+   * Exists so one store can be copied into another without paying to re-embed. `cursor` is
+   * opaque and backend-defined; the caller passes back whatever it was given until `next` is
+   * undefined. Returning an empty page for a collection that does not exist is correct — that
+   * is the ordinary "nothing to copy" case, not an error.
+   */
+  scan(
+    collection: string,
+    options?: { cursor?: unknown; pageSize?: number; signal?: AbortSignal },
+  ): Promise<{ documents: VectorDocument[]; next?: unknown }>
 }
 
 /**

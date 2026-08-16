@@ -293,6 +293,51 @@ export class ChromaIndexWriter extends ChromaBase implements VectorIndexWriter {
     )
   }
 
+  async scan(
+    collection: string,
+    options: { cursor?: unknown; pageSize?: number; signal?: AbortSignal } = {},
+  ): Promise<{ documents: VectorDocument[]; next?: unknown }> {
+    this.assertName(collection)
+    const found = await this.lookup(collection, options.signal)
+    if (found?.id === undefined) return { documents: [] }
+
+    const pageSize = options.pageSize ?? 256
+    const offset = typeof options.cursor === 'number' ? options.cursor : 0
+
+    const result = await this.rest.expectOk<{
+      ids?: string[]
+      embeddings?: number[][] | null
+      documents?: (string | null)[]
+      metadatas?: (Record<string, unknown> | null)[]
+    }>(
+      `${this.base}/collections/${found.id}/get`,
+      'POST',
+      // Chroma pages by limit/offset rather than a cursor, so the cursor *is* the offset.
+      { include: ['embeddings', 'documents', 'metadatas'], limit: pageSize, offset },
+      options.signal,
+    )
+
+    const ids = result.ids ?? []
+    const documents: VectorDocument[] = []
+    for (let index = 0; index < ids.length; index++) {
+      const metadata = result.metadatas?.[index] ?? {}
+      const vector = result.embeddings?.[index]
+      const path = typeof metadata.path === 'string' ? metadata.path : undefined
+      if (path === undefined || !Array.isArray(vector)) continue
+      documents.push({
+        id: ids[index] ?? '',
+        text: result.documents?.[index] ?? '',
+        path,
+        startLine: typeof metadata.startLine === 'number' ? metadata.startLine : 1,
+        endLine: typeof metadata.endLine === 'number' ? metadata.endLine : 1,
+        vector,
+      })
+    }
+
+    // A short page is the last one. Asking again would return nothing and cost a round trip.
+    return ids.length < pageSize ? { documents } : { documents, next: offset + ids.length }
+  }
+
   async listPaths(collection: string, options: { limit?: number; signal?: AbortSignal } = {}): Promise<string[]> {
     this.assertName(collection)
     const limit = options.limit ?? 10_000

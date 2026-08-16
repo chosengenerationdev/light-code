@@ -1,5 +1,31 @@
 # light-code-vscode
 
+## 0.30.0
+
+### Minor Changes
+
+- Copy an index between vector stores instead of re-embedding it.
+
+  Switching backend used to mean indexing the whole repository again — minutes to hours, and
+  real money wherever embedding is billed — to produce vectors that already existed. Settings →
+  Search now offers **Copy an existing index here**, which streams this workspace's vectors out
+  of another store and into the active one.
+
+  **It refuses when the two were embedded differently.** A vector only means anything alongside
+  vectors from the same model, at the same width, with the same chunking; mixing them produces
+  confident, plausible, wrong neighbours with no error anywhere — the worst failure shape in the
+  product. The check reads the source's own indexing record, so the refusal names which part
+  disagrees and points at reindexing instead.
+
+  The copy is streamed a page at a time rather than gathered in memory, which for a large index
+  is hundreds of megabytes of float arrays. The bookkeeping is copied across on success, so the
+  next incremental index diffs against the truth instead of starting over.
+
+  Reading a whole collection back is deliberately on the write half of the vector-store
+  interface, alongside the other bulk operations. The object handed to tools has no such method:
+  a tool able to page through the index could exfiltrate the entire embedded codebase through
+  the chat.
+
 ## 0.29.1
 
 ### Patch Changes

@@ -230,6 +230,58 @@ export class OpenSearchIndexWriter implements VectorIndexWriter {
    * A missing index yields an empty list rather than throwing — reconciling a collection that
    * has not been created yet is the first-run case, and every path is new by definition.
    */
+  async scan(
+    index: string,
+    options: { cursor?: unknown; pageSize?: number; signal?: AbortSignal } = {},
+  ): Promise<{ documents: VectorDocument[]; next?: unknown }> {
+    if (!isSafeIndexName(index)) throw new OpenSearchError(`"${index}" is not a valid index name.`)
+
+    const size = options.pageSize ?? 256
+    /*
+     * `search_after` rather than a scroll cursor: a scroll holds a server-side context open,
+     * which a copy that is cancelled halfway would leak on someone's production cluster. Sorted
+     * by `_id` because it is the one field guaranteed present and unique.
+     */
+    const after = options.cursor
+    try {
+      const body = await this.request<{ hits?: { hits?: { _id?: string; _source?: Record<string, unknown>; sort?: unknown }[] } }>(
+        `/${encodeURIComponent(index)}/_search`,
+        'POST',
+        {
+          size,
+          sort: [{ _id: 'asc' }],
+          query: { match_all: {} },
+          ...(after === undefined || after === null ? {} : { search_after: after }),
+        },
+        options.signal,
+      )
+
+      const hits = body.hits?.hits ?? []
+      const documents: VectorDocument[] = []
+      for (const hit of hits) {
+        const source = hit._source ?? {}
+        const vector = source.vector
+        const path = source.path
+        if (typeof path !== 'string' || !Array.isArray(vector)) continue
+        documents.push({
+          id: hit._id ?? '',
+          text: typeof source.text === 'string' ? source.text : '',
+          path,
+          startLine: typeof source.startLine === 'number' ? source.startLine : 1,
+          endLine: typeof source.endLine === 'number' ? source.endLine : 1,
+          vector: vector as number[],
+        })
+      }
+
+      const last = hits[hits.length - 1]?.sort
+      return hits.length < size || last === undefined ? { documents } : { documents, next: last }
+    } catch (error) {
+      // Not yet created is the ordinary "nothing to copy" case.
+      if (error instanceof OpenSearchError && error.status === 404) return { documents: [] }
+      throw error
+    }
+  }
+
   async listPaths(index: string, options: { limit?: number; signal?: AbortSignal } = {}): Promise<string[]> {
     if (!isSafeIndexName(index)) throw new OpenSearchError(`"${index}" is not a valid index name.`)
 

@@ -293,6 +293,47 @@ export class QdrantIndexWriter extends QdrantBase implements VectorIndexWriter {
     )
   }
 
+  async scan(
+    collection: string,
+    options: { cursor?: unknown; pageSize?: number; signal?: AbortSignal } = {},
+  ): Promise<{ documents: VectorDocument[]; next?: unknown }> {
+    this.assertName(collection)
+    const result = await this.rest.send<{ result?: { points?: QdrantPoint[]; next_page_offset?: unknown } }>(
+      `${this.collectionPath(collection)}/points/scroll`,
+      'POST',
+      {
+        limit: options.pageSize ?? 256,
+        with_payload: true,
+        with_vector: true,
+        ...(options.cursor === undefined || options.cursor === null ? {} : { offset: options.cursor }),
+      },
+      options.signal,
+    )
+    if (result.status === 404) return { documents: [] }
+    if (result.status < 200 || result.status >= 300) {
+      throw new VectorStoreError(`Could not read "${collection}" (HTTP ${String(result.status)}).`, result.status)
+    }
+
+    const documents: VectorDocument[] = []
+    for (const point of result.body.result?.points ?? []) {
+      const payload = point.payload ?? {}
+      const path = typeof payload.path === 'string' ? payload.path : undefined
+      // No path is the ownership marker, which is bookkeeping rather than content.
+      if (path === undefined || !Array.isArray(point.vector)) continue
+      documents.push({
+        id: typeof payload.chunkId === 'string' ? payload.chunkId : point.id,
+        text: typeof payload.text === 'string' ? payload.text : '',
+        path,
+        startLine: typeof payload.startLine === 'number' ? payload.startLine : 1,
+        endLine: typeof payload.endLine === 'number' ? payload.endLine : 1,
+        vector: point.vector,
+      })
+    }
+
+    const next = result.body.result?.next_page_offset
+    return next === undefined || next === null ? { documents } : { documents, next }
+  }
+
   async listPaths(collection: string, options: { limit?: number; signal?: AbortSignal } = {}): Promise<string[]> {
     this.assertName(collection)
     const limit = options.limit ?? 10_000
