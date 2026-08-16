@@ -19,6 +19,7 @@ import {
   type McpServerConfig,
   type McpServerState,
   type NetworkSettingsSummary,
+  type PythonSettings,
   type PythonStatus,
   type McpToolPermission,
   type TestConnectionStep,
@@ -141,6 +142,7 @@ export function App(props: AppProps): ReactElement {
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
   const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
   const [pythonStatus, setPythonStatus] = useState<PythonStatus | undefined>(undefined)
+  const [pythonSettings, setPythonSettings] = useState<PythonSettings | undefined>(undefined)
   const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>([])
   const [skillIssues, setSkillIssues] = useState<{ filePath: string; detail: string }[]>([])
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
@@ -358,6 +360,7 @@ export function App(props: AppProps): ReactElement {
         setSkillExtraDirs(message.extraDirs)
       } else if (message.type === 'python') {
         setPythonStatus(message.status)
+        setPythonSettings(message.settings)
       } else if (message.type === 'embedderModels') {
         setEmbedderModels(message.models)
         setEmbedderModelsWarning(message.warning)
@@ -918,6 +921,7 @@ export function App(props: AppProps): ReactElement {
             }}
             python={{
               status: pythonStatus,
+              settings: pythonSettings,
               onBrowse: browseForPath,
               pickedPath,
               onOpenFile: openManagedFile,

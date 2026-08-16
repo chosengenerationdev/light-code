@@ -59,6 +59,7 @@ export type {
   NetworkSettingsInput,
   NetworkSettingsSummary,
   TestConnectionStep,
+  PythonSettings,
   SearchConnectionSummary,
   SearchConnectionInput,
   SearchQueryLimits,

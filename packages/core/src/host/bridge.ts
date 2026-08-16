@@ -2458,7 +2458,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   async function postPython(): Promise<void> {
-    post({ type: 'python', status: python.status() })
+    const saved = (await configManager.load().then((loaded) => loaded.config.python, () => undefined)) ?? {}
+    post({
+      type: 'python',
+      status: python.status(),
+      settings: {
+        dynamicTools: saved.dynamicTools ?? 'off',
+        ...(saved.uvPath !== undefined ? { uvPath: saved.uvPath } : {}),
+        ...(saved.toolsDir !== undefined ? { toolsDir: saved.toolsDir } : {}),
+        ...(saved.venvPath !== undefined ? { venvPath: saved.venvPath } : {}),
+        ...(saved.indexUrl !== undefined ? { indexUrl: saved.indexUrl } : {}),
+        ...(saved.offline !== undefined ? { offline: saved.offline } : {}),
+        ...(saved.timeoutSeconds !== undefined ? { timeoutSeconds: saved.timeoutSeconds } : {}),
+      },
+    })
     // Python tools are part of the corpus, and this fires whenever the registry reloads —
     // a tool created, updated, deleted, or the folder pointed somewhere else.
     scheduleDocsReindex('Python tools changed')
@@ -2474,6 +2487,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // `.lightcode/tools` instead of resolving an empty string against the workspace.
           ...(input.toolsDir !== undefined && input.toolsDir.trim().length > 0
             ? { toolsDir: input.toolsDir.trim() }
+            : {}),
+          ...(input.venvPath !== undefined && input.venvPath.trim().length > 0
+            ? { venvPath: input.venvPath.trim() }
             : {}),
           ...(input.timeoutSeconds !== undefined ? { timeoutSeconds: input.timeoutSeconds } : {}),
           ...(input.indexUrl !== undefined && input.indexUrl.length > 0 ? { indexUrl: input.indexUrl } : {}),

@@ -1,5 +1,23 @@
 # light-code-vscode
 
+## 0.29.0
+
+### Minor Changes
+
+- The Python tab now shows what is saved, and lets you choose the environment.
+
+  **Settings looked as though they were not persisting.** They were — the tab simply never
+  received them. It was sent the *resolved* status (which interpreter won, which tools loaded)
+  and used that only for placeholders, so every field rendered empty on each mount. A saved
+  value looked lost, and saving again from those empty boxes would quietly have cleared it. The
+  saved settings are now sent alongside the status and every field is resynced from them.
+
+  **You can choose the Python environment.** `venvPath` existed in the config schema and had no
+  control anywhere, so "which Python is this actually using?" was answerable only by reading the
+  status line and unanswerable if you disagreed with it. There is now a field, with Browse:
+  leave it blank to prefer the project's own `.venv`, or give a venv folder or a `python.exe`
+  directly.
+
 ## 0.28.2
 
 ### Patch Changes

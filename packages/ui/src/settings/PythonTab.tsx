@@ -1,4 +1,4 @@
-import type { PythonStatus } from '@light-code/core/browser'
+import type { PythonSettings, PythonStatus } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
@@ -7,12 +7,15 @@ const monospace = 'var(--vscode-editor-font-family, monospace)'
 
 export interface PythonTabProps {
   status: PythonStatus | undefined
+  /** What is saved in config — the source for these fields. See the `python` message. */
+  settings: PythonSettings | undefined
   onBrowse: (request: BrowseRequest) => void
   pickedPath: { purpose: string; path: string } | undefined
   onSave: (settings: {
     dynamicTools: 'off' | 'on'
     uvPath: string
     toolsDir: string
+    venvPath: string
     timeoutSeconds: number
     indexUrl: string
     offline: boolean
@@ -35,6 +38,7 @@ export interface PythonTabProps {
 export function PythonTab(props: PythonTabProps): ReactElement {
   const status = props.status
   const [confirming, setConfirming] = useState<string | undefined>(undefined)
+  const [venvPath, setVenvPath] = useState('')
   const [enabled, setEnabled] = useState(false)
   const [uvPath, setUvPath] = useState('')
   const [toolsDir, setToolsDir] = useState('')
@@ -47,13 +51,30 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   useEffect(() => {
     if (props.pickedPath?.purpose === 'python.uvPath') setUvPath(props.pickedPath.path)
     if (props.pickedPath?.purpose === 'python.toolsDir') setToolsDir(props.pickedPath.path)
+    if (props.pickedPath?.purpose === 'python.venvPath') setVenvPath(props.pickedPath.path)
   }, [props.pickedPath])
 
-  // Resynced from the host rather than seeded once — its reply can arrive after mount.
+  /*
+   * Every field is resynced from the saved settings, not just the toggle.
+   *
+   * Only `enabled` was, so re-opening the tab showed blank boxes for values that were saved —
+   * which reads as "nothing persisted", and would have quietly cleared them on the next save
+   * from those empty fields. The resolved status stays as the *placeholder*: it reports which
+   * interpreter won, which is usually not the one that was typed.
+   */
   useEffect(() => {
-    if (status === undefined) return
-    setEnabled(status.enabled)
-  }, [status])
+    const saved = props.settings
+    if (saved === undefined) return
+    setEnabled(saved.dynamicTools === 'on')
+    setUvPath(saved.uvPath ?? '')
+    setToolsDir(saved.toolsDir ?? '')
+    setVenvPath(saved.venvPath ?? '')
+    setIndexUrl(saved.indexUrl ?? '')
+    setOffline(saved.offline === true)
+    setTimeoutSeconds(String(saved.timeoutSeconds ?? 30))
+    // Any answer from the host supersedes an optimistic "Saved." from a previous click.
+    setSaved(false)
+  }, [props.settings])
 
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily, fontSize: 13, color: colors.foreground }}>
@@ -117,6 +138,21 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             onChange={setToolsDir}
           />
 
+          {/*
+            The environment. Absent until now, which left "which Python is this actually using?"
+            answerable only by reading the status line and unanswerable if you disagreed with it.
+          */}
+          <PathField
+            id="lc-py-venv"
+            label="Python environment"
+            value={venvPath}
+            placeholder={status?.venvPath ?? "the project's .venv, or one created for you"}
+            hint="Leave blank to prefer the project's own .venv — that is where its internal libraries already are. Give a venv folder, or a python.exe directly, to override."
+            browse={{ purpose: 'python.venvPath', kind: 'folder' }}
+            onBrowse={props.onBrowse}
+            onChange={setVenvPath}
+          />
+
           <div style={{ marginBottom: 10 }}>
             <label htmlFor="lc-py-index" style={labelStyle()}>
               Package index
@@ -172,6 +208,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               dynamicTools: enabled ? 'on' : 'off',
               uvPath: uvPath.trim(),
               toolsDir: toolsDir.trim(),
+              venvPath: venvPath.trim(),
               timeoutSeconds: Number.isFinite(parsed) ? parsed : 30,
               indexUrl: indexUrl.trim(),
               offline,

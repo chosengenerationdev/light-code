@@ -166,6 +166,17 @@ export interface SearchConnectionSummary {
   limits?: SearchQueryLimits | undefined
 }
 
+/** What is saved under `python` in config, as opposed to what was resolved from it. */
+export interface PythonSettings {
+  dynamicTools: 'off' | 'on'
+  uvPath?: string
+  toolsDir?: string
+  venvPath?: string
+  indexUrl?: string
+  offline?: boolean
+  timeoutSeconds?: number
+}
+
 /** Guard rails against a query that could hurt a production cluster. */
 export interface SearchQueryLimits {
   maxHits?: number | undefined
@@ -372,6 +383,13 @@ export type UiToHostMessage =
       uvPath?: string
       /** Where tools live. Empty restores `.lightcode/tools` in the workspace. */
       toolsDir?: string
+      /**
+       * The environment to run tools in. Empty restores automatic selection.
+       *
+       * Accepts a venv directory or an interpreter path — a user who knows which Python they
+       * want usually has the `python.exe` to hand, not the folder two levels above it.
+       */
+      venvPath?: string
       timeoutSeconds?: number
       indexUrl?: string
       offline?: boolean
@@ -547,7 +565,21 @@ export type HostToUiMessage =
   /** The save reached disk. The form stays open until this arrives, so a failure keeps the typed values. */
   | { type: 'searchConnectionSaved'; id: string }
   | { type: 'network'; settings: NetworkSettingsSummary }
-  | { type: 'python'; status: PythonStatus }
+  | {
+      type: 'python'
+      /** Resolved reality: which interpreter is in use, which tools loaded, what was refused. */
+      status: PythonStatus
+      /**
+       * What is actually saved in config, as opposed to what was resolved from it.
+       *
+       * Sent because the tab had no other source for its own fields and rendered them empty on
+       * every mount — so a saved setting looked lost, and re-saving from empty fields would
+       * have quietly cleared it. `status` cannot serve here: it reports the interpreter that
+       * *won*, which is usually not the one that was typed, and is a placeholder rather than a
+       * value.
+       */
+      settings: PythonSettings
+    }
   | {
       type: 'skills'
       /** `sourceDir` says which configured folder it came from — only the first is writable. */
