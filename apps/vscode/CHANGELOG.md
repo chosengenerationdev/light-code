@@ -1,5 +1,30 @@
 # light-code-vscode
 
+## 0.29.1
+
+### Patch Changes
+
+- A new file is shown as a file, and switching vector store no longer leaves search empty.
+
+  **Creating a tool showed an all-green diff against nothing.** Technically accurate, and it
+  reads as though something were being *changed* when the honest description is "here is a file
+  that does not exist yet" — with a marker column and a wash of colour that have nothing to
+  contrast with. A new file is now shown as plain, syntax-highlighted source with line numbers.
+  Editing still shows a diff, and deleting still shows a removal, because both of those are
+  changes.
+
+  **Switching vector store silently gave you an empty index.** The bookkeeping that records
+  "everything up to here is already written" was keyed on the collection *name*, which is the
+  same whichever backend is behind it. Moving from OpenSearch to Qdrant therefore left a
+  manifest asserting the new, empty collection was already populated: the indexer skipped every
+  unchanged file, the documentation reindex reported nothing to do, and search returned no
+  results with no error anywhere.
+
+  It is now keyed on the store as well, so switching backends starts from an honest blank slate
+  — and switching back finds the earlier bookkeeping still valid, since the data in that cluster
+  never went anywhere. Existing manifests are superseded, so the first index after upgrading is
+  a full one.
+
 ## 0.29.0
 
 ### Minor Changes

@@ -2121,13 +2121,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * comparing is far cheaper than embedding it — and the embedder model is part of the hash,
    * because changing model makes every stored vector incomparable with new ones.
    */
-  function docsFingerprintPath(index: string): string {
-    return path.join(storageDir, 'index-manifests', `${index}.docs.json`)
+  function docsFingerprintPath(index: string, storeId: string): string {
+    return path.join(storageDir, 'index-manifests', `${manifestKey(index, storeId)}.docs.json`)
   }
 
-  async function readDocsFingerprint(index: string): Promise<string | undefined> {
+  /**
+   * The bookkeeping key for one index **in one store**.
+   *
+   * These files record "everything up to here is already written", and that is a claim about a
+   * particular collection in a particular backend — not about a name. Keyed on the name alone,
+   * switching from OpenSearch to Qdrant left a manifest asserting the new, empty collection was
+   * already populated: the codebase indexer would skip every unchanged file and the docs
+   * reindex would report `unchanged` and write nothing, so search returned no results with no
+   * error anywhere. Silence is the worst shape that failure could take.
+   *
+   * Including the store id means switching backends starts from an honest blank slate, and
+   * switching *back* finds the earlier manifest still valid — the data in that cluster never
+   * went anywhere.
+   */
+  function manifestKey(index: string, storeId: string): string {
+    return `${index}@${storeId}`
+  }
+
+  async function readDocsFingerprint(index: string, storeId: string): Promise<string | undefined> {
     try {
-      const raw = JSON.parse(await fs.readFile(docsFingerprintPath(index), 'utf8')) as { fingerprint?: unknown }
+      const raw = JSON.parse(await fs.readFile(docsFingerprintPath(index, storeId), 'utf8')) as { fingerprint?: unknown }
       return typeof raw.fingerprint === 'string' ? raw.fingerprint : undefined
     } catch {
       return undefined
@@ -2173,7 +2191,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .update(entries.map((entry) => `${entry.id}\u0000${entry.text}`).join('\u0001'))
         .digest('hex')
 
-      if (!options.force && fingerprint === (await readDocsFingerprint(index))) {
+      if (!options.force && fingerprint === (await readDocsFingerprint(index, search.id))) {
         return { unchanged: true, index, indexed: entries.length }
       }
 
@@ -2209,9 +2227,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * Written only after the store accepted everything. A fingerprint saved before the
        * write would make a failed run look successful, and nothing would retry it.
        */
-      await fs.mkdir(path.dirname(docsFingerprintPath(index)), { recursive: true })
+      await fs.mkdir(path.dirname(docsFingerprintPath(index, search.id)), { recursive: true })
       await fs.writeFile(
-        docsFingerprintPath(index),
+        docsFingerprintPath(index, search.id),
         JSON.stringify({ fingerprint, indexedAt: Date.now(), count: documents.length }),
         'utf8',
       )
@@ -2321,7 +2339,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
       const existing = await writer.listPaths(index)
       if (existing.length > 0) await writer.deleteByPaths(index, existing)
-      await fs.rm(docsFingerprintPath(index), { force: true })
+      await fs.rm(docsFingerprintPath(index, search.id), { force: true })
       post({ type: 'docsIndexed', indexed: 0, index })
       logger.info(`cleared ${String(existing.length)} documentation entries from "${index}"`)
     } catch (error) {
@@ -2414,7 +2432,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     indexingAbort = new AbortController()
-    const manifestPath = path.join(storageDir, 'index-manifests', `${index}.json`)
+    const manifestPath = path.join(storageDir, 'index-manifests', `${manifestKey(index, search.id)}.json`)
     try {
       const manifest = await loadIndexManifest(manifestPath, embedder)
       const isIgnored = await ignoredFilesPredicate()
