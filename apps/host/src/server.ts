@@ -8,6 +8,7 @@ import {
 import path from 'node:path'
 import type { Transport } from '@light-code/core'
 import { SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
+import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
 import { createSession } from './session.js'
 
@@ -46,6 +47,11 @@ export interface ServerOptions {
   bindAddress?: string
   port?: number
   logSink?: (line: string) => void
+  /**
+   * Who may change shared configuration. Defaults to "everyone", which is correct for the
+   * local single-user case and wrong for anything else — see `roles.ts`.
+   */
+  roles?: RolePolicy
 }
 
 export interface RunningServer {
@@ -70,6 +76,7 @@ interface Connection {
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const log = options.logSink ?? ((line: string) => process.stderr.write(`${line}\n`))
   const identity = options.identity ?? new SingleUserIdentity()
+  const roles = options.roles ?? SINGLE_USER_POLICY
   const bindAddress = options.bindAddress ?? '127.0.0.1'
 
   const connections = new Map<string, Connection>()
@@ -205,7 +212,25 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         reject(response, { status: 409, reason: 'No event stream open. Reload the page.' })
         return
       }
-      connection.deliver(await readJsonBody(request))
+      const body = await readJsonBody(request)
+
+      /*
+       * The one place inbound messages enter, and therefore the one place this can be
+       * enforced. Checked here rather than in the bridge because the bridge is shared with
+       * the VS Code host, where there is no such thing as a second user — teaching core about
+       * roles would put a concept in it that only one host has.
+       */
+      const type = typeof (body as { type?: unknown })?.type === 'string' ? (body as { type: string }).type : ''
+      if (roles.shared && roles.roleFor(principal) !== 'admin' && isAdminOnly(type)) {
+        log(`refused "${type}" from ${principal.displayName} (${principal.id}): not an administrator`)
+        // Answered rather than dropped: the UI hides these controls, so a message arriving
+        // here is either a stale page or someone poking the API, and both deserve a reason.
+        connection.transport.post({ type: 'error', message: refusalFor(type) })
+        respondJson(response, 403, { ok: false })
+        return
+      }
+
+      connection.deliver(body)
       respondJson(response, 202, { ok: true })
       return
     }

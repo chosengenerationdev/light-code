@@ -1,6 +1,6 @@
 {
   "name": "@chosengeneration/light-code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A minimal agentic coding assistant, served to your browser from a local Node server",
   "license": "MIT",
   "type": "module",
@@ -19,21 +19,18 @@
     "typecheck": "tsc -b tsconfig.json",
     "start": "node ./dist/cli.js"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "@vscode/ripgrep": "^1.18.0",
-    "env-paths": "^4.0.0",
-    "undici": "^8.10.0",
-    "zod": "^4.4.3"
-  },
   "devDependencies": {
     "@light-code/core": "workspace:*",
     "@light-code/ui": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "env-paths": "^4.0.0",
     "esbuild": "^0.27.2",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "undici": "^8.10.0",
+    "zod": "^4.4.3"
   },
   "keywords": [
     "ai",
@@ -59,5 +56,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "optionalDependencies": {
+    "@vscode/ripgrep": "^1.18.0"
   }
 }

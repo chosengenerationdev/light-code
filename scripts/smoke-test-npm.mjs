@@ -65,8 +65,17 @@ try {
   fs.mkdirSync(project)
   fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'consumer', private: true }))
 
-  check('it installs from the tarball into an empty project', () => {
-    execFileSync('npm', ['install', '--no-audit', '--no-fund', '--loglevel', 'error', tarball], {
+  /*
+   * `--offline` is the point of this check, not a speed optimisation.
+   *
+   * The package is built for environments where npm cannot reach a registry — a corporate
+   * proxy with no mirror for these dependencies. A tarball that needs five more downloads is
+   * not installable there at all, and "download it from npmjs and install it locally" would
+   * silently mean "and also fetch five other things". Installing with the network refused is
+   * the only way to prove that is not the case.
+   */
+  check('it installs from the tarball with no network at all', () => {
+    execFileSync('npm', ['install', '--offline', '--no-audit', '--no-fund', '--loglevel', 'error', tarball], {
       cwd: project,
       encoding: 'utf8',
       shell: process.platform === 'win32',
@@ -86,6 +95,21 @@ try {
   check('the entry point keeps its shebang', () => {
     const first = fs.readFileSync(path.join(installed, 'dist/cli.js'), 'utf8').split('\n')[0]
     if (!first.startsWith('#!')) throw new Error(`first line is ${JSON.stringify(first)}`)
+  })
+
+  check('it brings no runtime dependencies with it', () => {
+    /*
+     * Everything pure-JS is bundled, so a fresh install is one package. Only the optional
+     * ripgrep may appear — it resolves a binary on disk and cannot be bundled, and the
+     * server degrades two search tools with a message rather than failing to start without it.
+     */
+    const installedPackages = fs
+      .readdirSync(path.join(project, 'node_modules'))
+      .filter((name) => !name.startsWith('.'))
+    const unexpected = installedPackages.filter((name) => name !== '@chosengeneration' && name !== '@vscode')
+    if (unexpected.length > 0) {
+      throw new Error(`fresh install pulled in ${unexpected.join(', ')} — those must be bundled instead`)
+    }
   })
 
   check('the bin shim is linked', () => {

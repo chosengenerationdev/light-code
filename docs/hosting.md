@@ -91,6 +91,39 @@ beside it, readable by the same processes.
 
 ---
 
+## 1b. Shared mode: `--server`
+
+`--server` locks configuration down. Everyone can chat, edit and run things as before; only
+the identities named with `--admin` can change providers, MCP servers, the Python interpreter,
+network trust, search connections, readable folders or schedules.
+
+```bash
+light-code --server --bind 0.0.0.0 --port 8080   --admin <directory-id-of-an-admin> --admin <another>
+```
+
+`--admin` takes the **identity id**, matching `Principal.id` — the immutable directory
+identifier, not a username. A username is reassigned when someone leaves; an object id is not.
+Omit `--admin` entirely and configuration is frozen for everybody, which is a reasonable way to
+run it: write the config file beside the server and let the process only read it.
+
+The rule is that anything invariant 5 already treats as user-scope-only becomes admin-only,
+because a second user on a shared box is the same threat as a hostile repository arriving
+through a different door. Appearance, the active mode and the per-chat expert budget stay with
+the person using the session.
+
+### What `--server` does not do
+
+> **It locks settings, not privileges.** Every user's shell commands, MCP servers and Python
+> tools still run as the account the server process runs as. A non-admin cannot repoint your
+> gateway — and can still ask the agent to read any file that account can read.
+
+Everything in section 2 below still applies in full. `--server` is worth having on a machine
+where the people using it are already trusted with each other's data and you simply do not want
+the configuration drifting; it is not a substitute for isolation, and it does not make hosting
+appropriate anywhere it was not already.
+
+---
+
 ## 2. Multi-user hosting with SSO — read this first
 
 The identity seam exists. `IdentityProvider` takes a request and returns a `Principal`, and

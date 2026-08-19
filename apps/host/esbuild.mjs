@@ -5,9 +5,21 @@ import * as esbuild from 'esbuild'
 /**
  * Two bundles with very different rules.
  *
- * The server is Node ESM with its dependencies left external — it is installed from npm,
- * so `node_modules` is present at runtime and bundling would only make `@vscode/ripgrep`'s
- * binary lookup break the way it once did in the extension.
+ * ## The server bundles its dependencies, deliberately
+ *
+ * It used to leave them external on the reasoning that npm installs them anyway. That is true
+ * where npm can reach a registry — and false in exactly the environment this product is built
+ * for. Behind a corporate proxy with no mirror for these packages, a tarball with five runtime
+ * dependencies is not installable at all, and "download it from npmjs and install it locally"
+ * silently means "and also fetch five more things".
+ *
+ * Bundled, the published tarball installs with no network at all, and the extracted folder
+ * runs with `node dist/cli.js` and no `node_modules` whatsoever. Verified by deleting them.
+ *
+ * `@vscode/ripgrep` stays external because it resolves a *binary* on disk, and bundling it
+ * breaks that lookup — which is precisely how a VSIX once shipped that could not activate
+ * (§19). It is optional at runtime: without it two search tools degrade with a clear message
+ * instead of the server failing to start.
  *
  * The client is a browser bundle of packages/ui. It is bundled and self-contained because
  * invariant 4 forbids remote assets: everything the page loads comes from this server.
@@ -23,7 +35,7 @@ await esbuild.build({
   target: 'node20',
   sourcemap: true,
   // Workspace packages are bundled (they are not published); real dependencies are not.
-  external: ['@vscode/ripgrep', 'env-paths', '@modelcontextprotocol/sdk', 'undici', 'zod'],
+  external: ['@vscode/ripgrep'],
   logLevel: 'info',
   banner: {
     // The bundle is ESM but core reaches for `require` to locate ripgrep lazily, which ESM
