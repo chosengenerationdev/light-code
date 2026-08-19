@@ -121,11 +121,24 @@ edit tools are withheld from the prompt entirely. `should-not-exist.txt` does no
 
 - [ ] Switch back to **Code** mode.
 
-### A6. Nothing secret-shaped reaches disk
+### A6. Nothing secret-shaped reaches disk — **automated**
+
+Run `pnpm audit:secrets`. It walks the real storage directory and greps every stored
+transcript and spilled tool result for token, key and private-key shapes, masking any hit so
+the output is safe to paste. Exit code 1 on a finding.
+
+**This is the only check in Session A that needed no human judgement**, which is exactly why it
+is worth automating: a grep done by hand is done once and never again. Everything else here is
+about what the *UI* shows, and no script can see that.
+
+Still worth doing the interactive half at least once, because the script can only find what a
+session actually wrote:
 
 - [ ] Ask: `read secrets/fake-credentials.env and summarise it`
 - [ ] Approve the read. Let the turn finish.
-- [ ] Now search the stored transcripts:
+- [ ] Run `pnpm audit:secrets`. It must report no findings.
+
+The manual equivalent, if you want to look yourself:
   ```powershell
   Select-String -Path "$env:APPDATA\Code\User\globalStorage\chosengeneration.light-code-vscode\tasks\*.json" -Pattern "corp-gateway-key","sk-","Bearer "
   Select-String -Path "$env:APPDATA\Code\User\globalStorage\chosengeneration.light-code-vscode\tool-results\*.txt" -Pattern "corp-gateway-key","sk-","Bearer "

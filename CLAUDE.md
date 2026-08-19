@@ -148,7 +148,7 @@ Autonomous multi-step, modelled on Roo:
 
 ## 6. Tools
 
-Nine in v1:
+Nine in v1, and more since — see the handover for what exists now:
 
 | Tool | Group | Notes |
 |---|---|---|
@@ -838,7 +838,7 @@ addition to the text input rather than a replacement for it.
 **Current phase:** **Shipped and in daily use in a corporate deployment**, which is now where
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
-workflow has never run. **0.22.1 was live as of 2026-08-15**, queried from the gallery.
+workflow has never run. **0.30.0 was live as of 2026-08-19**, queried from the gallery.
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
@@ -962,7 +962,108 @@ the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSc
 
 ---
 
-## SESSION HANDOVER — 2026-08-15, read this first
+## SESSION HANDOVER — 2026-08-19, read this first
+
+**Marketplace is on 0.30.0** (queried 2026-08-19). `main` is clean. **1043 tests**, 1 skipped.
+Artifact `apps/vscode/light-code-vscode-0.30.0.vsix`.
+
+### The habit that found almost everything this session
+
+**Read the running system's state before changing code.** Four bugs in a row were diagnosed
+this way and would not have been found by re-reading source:
+
+- the user's `config.json` showed a schedule firing twice and then stopping — which ruled out
+  the logic I had just "fixed" and pointed at the timer's *lifetime*;
+- the same file showed a one-minute schedule beside a valid expert block, which is what
+  identified the dropped-settings-reply bug;
+- and showed `python: absent`, explaining both "tool creation shows a diff" and "my
+  always-ask change did nothing" — Python tools were simply off;
+- a real Edge-printed PDF disproved three assumptions the parser was built on.
+
+**A correction to a previous commit message.** `fix(test): SearchActivity test used a stale
+SearchLogEntry shape` claims the ui `typecheck` task covers different files than `build`. That
+is **false** — they are the same command, verified by planting a type error and watching both
+catch it. What actually happened is that I skipped `pnpm typecheck` in that round. The gate is
+sound; do not go looking for a hole that is not there.
+
+### Built since 0.22
+
+- **Qdrant and Chroma** (`rag/qdrant`, `rag/chroma`), for *local* vector storage — a container
+  on loopback, which is the case the user wanted. Hand-written REST, no vendor SDKs, because
+  each client carries its own HTTP stack and invariant 2 requires core's `HttpClient`.
+  Three adapter-shaping differences: Qdrant rejects string point ids (hashed to deterministic
+  UUIDs, real id in the payload), Qdrant has nowhere to record ownership (a marker *point*
+  where OpenSearch uses `_meta`), Chroma keys operations by collection UUID and returns
+  distances rather than scores.
+- **Copying an index between stores** (`rag/syncStores.ts`), so switching backend does not mean
+  re-embedding. The guard is the feature: vectors are only comparable within one model, width
+  and chunking, so it refuses unless the *source's manifest* matches what is configured now.
+  Mixing embeddings yields confident, plausible, wrong neighbours with **no error anywhere**.
+- **PDF** (`documents/pdf.ts`). Following `ToUnicode` is not optional — every modern producer
+  subset-embeds `Identity-H` fonts, and an Edge-printed page was *entirely* undecodable until
+  CMaps were followed. The quality gate is load-bearing: glyph soup is withheld, never returned.
+- **Expert budget, estimate and assessment.** Budget is per chat, set from the header, adjustable
+  mid-turn; the expert is told what remains so it plans to fit; it estimates the whole task with
+  its plan; and it can assess the junior from *probe answers* rather than from the model's name.
+- **Junior mode plans in checkpoints** and reviews each one — framed as a cost measure, because
+  read as a quality ritual it produces a review after every edit.
+- **Syntax highlighting** in chat and in approval diffs, no library. A new file renders as a file
+  rather than an all-green diff against nothing.
+
+### Bugs worth not reintroducing
+
+- **A background run must not drop replies the user asked for.** 0.22's suppression was an
+  *allow* list of two message types, which also swallowed `expert`, `settings` and friends —
+  so with a one-minute schedule, opening Settings during a run left the tab on "Checking…".
+  Now a deny list of conversation traffic (`host/backgroundMessages.ts`); the default is send.
+  The failure modes are not symmetric: a stray transcript line is cosmetic, a dropped reply is
+  a control that never answers.
+- **Index manifests are keyed on `index@storeId`.** Keyed on the name alone, switching backend
+  left a manifest asserting the new empty collection was already populated — the indexer skipped
+  everything and search returned nothing, silently.
+- **`path.resolve` keeps a trailing separator on a path that is already a root**, so
+  `root + path.sep` matched nothing for a UNC share or a drive root. `isWithinRoot` is exported
+  precisely so the test calls the shipped code rather than a copy of it.
+- **Models over-escape Windows paths** — eight backslashes arrived for a NAS path, four survived
+  parsing, and `path.resolve` turned that into a `C:\` path. Repaired (`fs/windowsPath.ts`)
+  rather than refused, because the collapsed forms are not valid paths in the first place.
+- **The scheduler died with the webview.** The bridge is created once per window now and the view
+  attaches to it; the extension activates on `onStartupFinished` with a config-only poller that
+  builds the bridge when something is due, so §11's "nothing spawns at startup" still holds.
+  There is also a watchdog, because the timer stopped twice leaving no trace.
+- **The Python tab never received its own saved settings** — only the resolved status, used for
+  placeholders. Fields rendered blank, which reads as data loss and would have cleared them on
+  the next save.
+
+### Two rules added to the approval model
+
+- **`ALWAYS_ASK_TOOLS`** (`approval/policy.ts`): creating, updating or deleting a Python tool,
+  and writing or deleting a skill, are never auto-approved — not by a category toggle and not by
+  the always-allow list, which is checked *after*. These write code that later runs or prose
+  later injected into context, and auto-approving their creation compounds.
+- **Reading outside the workspace is approvable in the chat**, showing the resolved path. The
+  deny list is consulted *before* asking, writes never ask, and a scheduled run has no
+  `requestPathAccess` at all — nobody is there, so an unattended run cannot widen its own access.
+
+### Still not done
+
+`MANUAL_VERIFICATION.md` remains largely unrun and is still the oldest debt — but **A6 is now
+`pnpm audit:secrets`** and passes against real storage (38 files, nothing secret-shaped), which
+is the first time that check has been run since Phase 6b. It was worth automating precisely
+because it needed no judgement: a grep done by hand is done once and never again. Verified
+non-vacuous by planting a Bearer token, an `sk-` key and a basic-auth URL. The rest of Session A
+is about what the UI shows and no script can see that. OCR for scanned PDFs needs a
+dependency. Phase 9b widening is gated on an explicit decision. `apps/host` multi-user is
+unchanged and still unsafe. Publishing is still manual — no `VSCE_PAT`.
+
+**Almost nothing built in the last three sessions has been rendered in a real Extension Host.**
+jsdom covers behaviour; there are now render tests for `Select`, `DismissableProblems`,
+`ExpertBudget`, `ExpertSpend`, `ExpertTab`, `PythonTab`, `SearchActivity` and `DiffView`. Write
+one for any component with behaviour — several bugs this session would have been caught by one.
+
+---
+
+## Previous handover — 2026-08-15, superseded above
 
 **Marketplace is on 0.22.1** (queried 2026-08-15, gallery API — not inferred). `main` is clean.
 861 tests, 1 skipped. Artifact `apps/vscode/light-code-vscode-0.22.1.vsix`.

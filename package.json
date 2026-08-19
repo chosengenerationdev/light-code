@@ -21,6 +21,7 @@
     "fetch-ripgrep": "node scripts/fetch-ripgrep.mjs",
     "smoke": "node scripts/smoke-test-vsix.mjs",
     "check:no-external-urls": "node scripts/check-no-external-urls.mjs",
+    "audit:secrets": "node scripts/audit-stored-secrets.mjs",
     "verify:release": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm check:no-external-urls && pnpm package && pnpm smoke",
     "package:universal": "node scripts/fetch-ripgrep.mjs && pnpm --filter light-code-vscode exec node ./esbuild.mjs --target=universal && pnpm --filter light-code-vscode exec vsce package --no-dependencies",
     "serve": "pnpm --filter @chosengeneration/light-code run build && node apps/host/dist/cli.js",
