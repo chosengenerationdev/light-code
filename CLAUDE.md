@@ -1053,7 +1053,17 @@ is the first time that check has been run since Phase 6b. It was worth automatin
 because it needed no judgement: a grep done by hand is done once and never again. Verified
 non-vacuous by planting a Bearer token, an `sk-` key and a basic-auth URL. The rest of Session A
 is about what the UI shows and no script can see that. OCR for scanned PDFs needs a
-dependency. Phase 9b widening is gated on an explicit decision. `apps/host` multi-user is
+dependency. **Phase 9b is decided (2026-08-19).** Editing and file creation in a scheduled run are granted
+by ticking the tools when the schedule is written — that allowlist *is* the approval, made in
+advance for one named job, and the default remains nothing. What a schedule can never be granted
+is `NEVER_AVAILABLE_TO_SCHEDULES`: creating or updating a Python tool, and writing or deleting a
+skill. Authorising a *change* and authorising a *capability* are different acts, and §13 requires
+approval showing the source — which cannot happen unattended. Note this had to be repeated in
+`schedule/runner.ts` because a scheduled run **replaces** the approval gate rather than wrapping
+it, so `ALWAYS_ASK_TOOLS` in `approval/policy.ts` never runs for it.
+
+Publishing automation is **not wanted** — the user decided against it on 2026-08-19; manual
+upload stays. `apps/host` multi-user is
 unchanged and still unsafe. Publishing is still manual — no `VSCE_PAT`.
 
 **Almost nothing built in the last three sessions has been rendered in a real Extension Host.**

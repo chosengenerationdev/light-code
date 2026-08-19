@@ -24,18 +24,49 @@ import { ALWAYS_AVAILABLE_TO_SCHEDULES, type Schedule } from './types.js'
  */
 
 /**
+ * Tools a schedule may never be granted, however deliberately it is ticked.
+ *
+ * Editing files unattended is a legitimate thing to authorise in advance: the user chose the
+ * tools, in the open, for one named job, and the allowlist *is* their approval. Writing a
+ * **Python tool or a skill** is not the same act. Those install model-authored code that later
+ * runs, and prose later injected into the assistant's own context — and §13 requires approval
+ * that shows the full source, which is exactly what cannot happen with nobody watching.
+ *
+ * The distinction is between authorising a *change* and authorising a *capability*. A checkbox
+ * ticked once cannot honestly mean "write and install any code you like, unattended, forever",
+ * so the checkbox is not offered.
+ *
+ * This mirrors `ALWAYS_ASK_TOOLS` in `approval/policy.ts`, which covers the interactive path.
+ * It has to be repeated here because a scheduled run **replaces** the approval gate rather than
+ * wrapping it, so the policy gate — and that list — never runs.
+ */
+export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
+  'create_python_tool',
+  'update_python_tool',
+  'delete_python_tool',
+  'write_skill',
+  'delete_skill',
+]
+
+/**
  * The tools a schedule may use: exactly those named, plus the control tools.
  *
  * An **allowlist**, so installing a new MCP server never silently widens an existing schedule.
  * `ask_followup_question` is dropped even if named — there is nobody to answer it, and a run
  * that asked would wait for a reply that never arrives.
+ *
+ * Enforced in the *registry*, so a forbidden tool is never offered rather than offered and
+ * refused: the model cannot spend a turn working around something it was never given.
  */
 export function filterToolsForSchedule(all: readonly Tool[], schedule: Pick<Schedule, 'allowedTools'>): Tool[] {
   const named = new Set(schedule.allowedTools)
   const always = new Set<string>(ALWAYS_AVAILABLE_TO_SCHEDULES)
 
+  const never = new Set(NEVER_AVAILABLE_TO_SCHEDULES)
+
   return all.filter((tool) => {
     if (tool.name === 'ask_followup_question') return false
+    if (never.has(tool.name)) return false
     if (always.has(tool.name)) return true
     return named.has(tool.name)
   })
@@ -64,6 +95,13 @@ export class ScheduledApprovalGate implements ApprovalGate {
   constructor(private readonly schedule: Pick<Schedule, 'allowedTools'>) {}
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalDecision> {
+    // Repeated here rather than trusted to the registry: this class exists as the second line
+    // of defence, and the thing most worth defending twice is the one that installs code.
+    if (NEVER_AVAILABLE_TO_SCHEDULES.includes(request.toolName)) {
+      this.refused.push(request.toolName)
+      return 'deny'
+    }
+
     const permitted =
       this.schedule.allowedTools.includes(request.toolName) ||
       (ALWAYS_AVAILABLE_TO_SCHEDULES as readonly string[]).includes(request.toolName)

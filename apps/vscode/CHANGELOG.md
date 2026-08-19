@@ -1,5 +1,26 @@
 # light-code-vscode
 
+## 0.30.1
+
+### Patch Changes
+
+- A schedule can be given editing permission, but never permission to install code.
+
+  Granting a scheduled run the right to create or edit files already worked as intended: the
+  tools you tick when you write the schedule *are* the approval, made in advance, in the open,
+  for one named job — and the default is still nothing at all.
+
+  What was missing is the line on the other side of that. `create_python_tool`, `write_skill`
+  and their siblings were offered in the same picker, and ticking one would have let an
+  unattended run install model-authored code that later executes, with nobody seeing the source.
+  Authorising a *change* and authorising a *capability* are different acts, and a checkbox
+  ticked once cannot honestly mean "write and install any code you like, forever".
+
+  Those tools are no longer offered to a schedule, are refused if one somehow reaches the gate,
+  and are withheld from the registry so a run is never told they exist. The equivalent rule
+  already covered interactive use; a scheduled run replaces the approval gate rather than
+  wrapping it, so it never saw that rule.
+
 ## 0.30.0
 
 ### Minor Changes

@@ -256,3 +256,61 @@ describe('the schedule schema', () => {
     expect(scheduleSchema.safeParse(schedule({ allowedTools: [] })).success).toBe(true)
   })
 })
+
+/**
+ * What a schedule may be granted in advance, and what it may not.
+ *
+ * Editing files unattended is a legitimate thing to authorise: the user picked the tools, in
+ * the open, for one named job, and that allowlist *is* their approval. Installing a Python tool
+ * or a skill is a different act — model-authored code that later runs, and prose later injected
+ * into the assistant's own context — and §13 requires approval showing the source, which is the
+ * one thing that cannot happen with nobody watching.
+ */
+describe('what a schedule can never be granted', () => {
+  const forbidden = ['create_python_tool', 'update_python_tool', 'delete_python_tool', 'write_skill', 'delete_skill']
+
+  it('never registers a capability-granting tool, even when explicitly ticked', () => {
+    const all = forbidden.map((name) => tool(name, 'edit'))
+    const filtered = filterToolsForSchedule(all, { allowedTools: [...forbidden] })
+    // Withheld from the registry, so the model is never told it exists — it cannot spend the
+    // run working around something it was never offered.
+    expect(filtered).toEqual([])
+  })
+
+  it('refuses one at the gate too, as a second line of defence', async () => {
+    const gate = new ScheduledApprovalGate({ allowedTools: [...forbidden] })
+    for (const name of forbidden) {
+      const decision = await gate.requestApproval({
+        id: '1',
+        toolName: name,
+        group: 'edit',
+        preview: { kind: 'text', text: '' },
+      })
+      expect(decision).toBe('deny')
+    }
+  })
+
+  /**
+   * The distinction that matters: authorising a *change* is fine, authorising a *capability*
+   * is not. A schedule that tidies files is the whole point of the feature.
+   */
+  it('still grants ordinary editing when it was ticked', async () => {
+    const all = [tool('write_to_file', 'edit'), tool('apply_diff', 'edit'), tool('execute_command', 'command')]
+    const filtered = filterToolsForSchedule(all, { allowedTools: ['write_to_file', 'execute_command'] })
+    expect(filtered.map((entry) => entry.name).sort()).toEqual(['execute_command', 'write_to_file'])
+
+    const gate = new ScheduledApprovalGate({ allowedTools: ['write_to_file'] })
+    const decision = await gate.requestApproval({
+      id: '1',
+      toolName: 'write_to_file',
+      group: 'edit',
+      preview: { kind: 'diff', path: 'a.txt', before: '', after: 'x' },
+    })
+    expect(decision).toBe('approve')
+  })
+
+  it('still grants nothing at all by default', () => {
+    const all = [tool('write_to_file', 'edit'), tool('apply_diff', 'edit')]
+    expect(filterToolsForSchedule(all, { allowedTools: [] })).toEqual([])
+  })
+})

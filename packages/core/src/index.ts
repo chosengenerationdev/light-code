@@ -190,6 +190,7 @@ export {
 export { nextFireTime, isDue, describeTrigger, describeNextRun } from './schedule/timing.js'
 export {
   filterToolsForSchedule,
+  NEVER_AVAILABLE_TO_SCHEDULES,
   registryForSchedule,
   ScheduledApprovalGate,
   scheduledRunGuidance,

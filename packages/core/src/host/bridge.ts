@@ -71,6 +71,7 @@ import {
   type ExpertLimits,
   registryForSchedule,
   filterToolsForSchedule,
+  NEVER_AVAILABLE_TO_SCHEDULES,
   ScheduledApprovalGate,
   scheduledRunGuidance,
   nextFireTime,
@@ -3674,6 +3675,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   function allToolsForPicker(): { name: string; description: string; group: string }[] {
     return currentToolRegistry(undefined, undefined, undefined, undefined, false)
       .list()
+      /*
+       * The ones a schedule can never be granted are not offered. A picker that lists a tool
+       * the run will refuse teaches the wrong thing twice — once when it is ticked, and again
+       * when the run reports it as unavailable.
+       */
+      .filter((tool) => !NEVER_AVAILABLE_TO_SCHEDULES.includes(tool.name))
       .map((tool) => ({ name: tool.name, description: tool.description, group: tool.group }))
       .sort((a, b) => a.name.localeCompare(b.name))
   }
