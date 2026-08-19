@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "light-code": "./dist/cli.js"
+    "light-code": "dist/cli.js"
   },
   "files": [
     "dist/**/*.js",
