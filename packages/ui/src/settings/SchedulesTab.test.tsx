@@ -40,13 +40,17 @@ const SKILLS = [
   { name: 'release-process', description: 'How a release is cut here.' },
 ]
 
-function render(schedules: Schedule[] = [], saved: Schedule[] = []): void {
+function render(
+  schedules: Schedule[] = [],
+  saved: Schedule[] = [],
+  skills: { name: string; description: string }[] = SKILLS,
+): void {
   act(() =>
     root.render(
       <SchedulesTab
         schedules={schedules}
         tools={TOOLS}
-        skills={SKILLS}
+        skills={skills}
         onSave={(schedule) => saved.push(schedule)}
         onDelete={() => {}}
         onToggle={() => {}}
@@ -67,8 +71,8 @@ const click = (element: Element | null | undefined): void => {
   act(() => element?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 }
 
-function openEditor(saved: Schedule[] = []): void {
-  render([], saved)
+function openEditor(saved: Schedule[] = [], skills?: { name: string; description: string }[]): void {
+  render([], saved, skills)
   const newButton = [...container.querySelectorAll('button')].find((b) => b.textContent === 'New schedule')
   click(newButton)
 }
@@ -134,6 +138,16 @@ describe('the schedule tool picker', () => {
    * knowledge, and every schedule written before this picker existed has no list at all — reading
    * that as "none" would quietly strip a working nightly job of the conventions it relied on.
    */
+  /**
+   * The section stays visible with nothing to show, because a control that disappears when its
+   * subject is empty is indistinguishable from one that was never built.
+   */
+  it('says so when there are no skills, rather than hiding the whole section', () => {
+    openEditor([], [])
+    expect(container.textContent).toContain('What it should know')
+    expect(container.textContent).toContain('No skills recorded yet')
+  })
+
   it('starts with every skill ticked, because a schedule that never chose means all of them', () => {
     openEditor()
     const boxes = skillCheckboxes()

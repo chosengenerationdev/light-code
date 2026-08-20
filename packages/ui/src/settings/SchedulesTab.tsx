@@ -771,9 +771,24 @@ function ScheduleEditor(props: {
         no skill list at all, and that means "all of them". Taking knowledge away from a job
         that was working, on upgrade, would be the worse failure by a distance.
       */}
-      {props.skills.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <span style={labelStyle()}>What it should know</span>
+      {/*
+        Shown even with no skills recorded, saying so.
+        
+        Hiding it entirely was the first version, and it is the mistake the MCP tab already made
+        once: a control that vanishes when its subject is empty is indistinguishable from a
+        control that is missing, so someone told the feature exists goes looking and concludes it
+        does not. An empty state costs two lines and answers the question.
+      */}
+      <div style={{ marginBottom: 12 }}>
+        <span style={labelStyle()}>What it should know</span>
+        {props.skills.length === 0 ? (
+          <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+            No skills recorded yet. Once there are some — markdown notes in{' '}
+            <code style={{ fontFamily: monospace }}>.lightcode/skills/</code>, written from the chat
+            or by hand — you can pick which of them this run is told about.
+          </p>
+        ) : (
+          <>
           <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
             {draft.allowedSkills === undefined ? (
               <>
@@ -835,8 +850,9 @@ function ScheduleEditor(props: {
               </label>
             )
           })}
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
       {/*
         The warning the plan asks for, shown only when it applies. Unattended execution plus
