@@ -962,6 +962,31 @@ the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSc
 
 ---
 
+## The walkthrough is generated, not written (2026-08-20)
+
+`contributes.walkthroughs` in `apps/vscode/package.json` is **produced**, and its diagrams come
+from `scripts/generate-walkthrough-art.mjs`. Three things about it are load-bearing:
+
+- **A step about a tab must be able to open that tab.** `lightCode.openSettings` takes a tab id;
+  the description carries `[Open the X tab](command:lightCode.openSettings?%5B%22x%22%5D)`. This is
+  the difference between a tour and a document, and `walkthrough.test.ts` asserts it for all eleven
+  tabs. The command is hidden from the palette — it is useless without its argument.
+- **The message is held until the webview is live.** `reveal` returns long before React mounts, so
+  `WebviewTransport.postWhenLive` keeps one navigation and flushes it on the first *inbound*
+  message, which proves the script is running. Only navigation may be held this way; holding state
+  would deliver something stale to a view that has since rebuilt itself from the host.
+- **The diagram spec is a copy of the UI's field names.** When a tab gains a setting, add a row in
+  the generator. A diagram that omits a field teaches that the panel is smaller than it is.
+
+The guide button lives in the **chat header**, not in Settings — help reachable only after you have
+navigated is help for people who no longer need it.
+
+`SettingsNavigation.test.tsx` renders all eleven tabs with nothing configured. That path barely
+existed before: the walkthrough now sends people directly into tabs they have never opened, and
+four of them threw on a missing array when it was first written.
+
+---
+
 ## SESSION HANDOVER — 2026-08-19, read this first
 
 **Marketplace is on 0.30.0** (queried 2026-08-19). `main` is clean. **1043 tests**, 1 skipped.
