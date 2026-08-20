@@ -4,6 +4,20 @@
 
 ### Minor Changes
 
+- A walkthrough for new users, and a Tools tab.
+
+  **Get started with Light Code** appears on install: nine short steps covering providers and
+  corporate gateways, how the agent loop and attachments work, what the approval prompt shows
+  you, MCP servers, Python tools and skills, semantic search, the Claude expert and its budget,
+  scheduled runs, and — plainly — what the product does not do.
+
+  The first two steps complete from *state* rather than from clicking them, so someone who
+  already configured a provider is not told to do it again.
+
+  **You can reopen it any time**: the help icon at the end of the settings tabs, or
+  *Light Code: Open the walkthrough* in the command palette. VS Code shows onboarding once and
+  then effectively hides it, and nine features is a lot to have read on day one and remembered.
+
 - A Tools tab: everything the assistant can call, in one place.
 
   Until now the only complete catalogue was inside the schedule editor's permission picker,

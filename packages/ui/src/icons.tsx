@@ -368,6 +368,17 @@ export function TerminalIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+/** Onboarding — a question mark, for the thing you go looking for when unsure. */
+export function HelpIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M6.2 6.1a1.9 1.9 0 1 1 2.5 1.8c-.5.2-.7.6-.7 1.1v.3" />
+      <path d="M8 11.6h.01" />
+    </svg>
+  )
+}
+
 /** The tool catalogue — a toolbox, for the box everything is kept in. */
 export function ToolboxIcon({ size = 16 }: IconProps): ReactElement {
   return (

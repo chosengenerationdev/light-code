@@ -53,6 +53,11 @@ export function createVSCodeHostServices(
       await vscode.window.showTextDocument(document, { preview: false })
     },
 
+    async openWalkthrough() {
+      // The category is the fully-qualified `<publisher>.<name>#<walkthrough id>`.
+      await vscode.commands.executeCommand('lightCode.openWalkthrough')
+    },
+
     async revealPanel() {
       // The view's own focus command, contributed by the `views` entry in package.json. Using
       // it rather than a custom command means VS Code handles the container being collapsed.

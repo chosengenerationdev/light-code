@@ -3481,6 +3481,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
+    } else if (message.type === 'openWalkthrough') {
+      void ui.openWalkthrough?.()
     } else if (message.type === 'requestTools') {
       void postTools()
     } else if (message.type === 'requestSchedules') {

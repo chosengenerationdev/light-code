@@ -57,6 +57,13 @@ export interface HostUi {
    */
   revealPanel(): Promise<void>
   /**
+   * Shows the host's own onboarding, when it has one.
+   *
+   * Optional like everything else here (§19): a browser has no Get Started page, and the UI
+   * simply does not offer the button rather than offering one that does nothing.
+   */
+  openWalkthrough?(): Promise<void>
+  /**
    * Opens text in an ordinary editor tab, read-only.
    *
    * A scheduled run's transcript is a document, not a conversation to continue — you read it,

@@ -31,6 +31,7 @@ import {
   ServerIcon,
   ShieldIcon,
   PythonIcon,
+  HelpIcon,
   ToolboxIcon,
 } from '../icons.js'
 
@@ -80,6 +81,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
   python: PythonTabProps
   tools: ToolsTabProps
+  /** Reopens the host's onboarding. Absent where the host has none. */
+  onOpenWalkthrough?: (() => void) | undefined
   skills: SkillsTabProps
   schedules: SchedulesTabProps
 }
@@ -172,6 +175,33 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             </button>
           )
         })}
+        {/*
+          A way back to the walkthrough, at the end of the tabs rather than among them: it is
+          not a settings page, and VS Code otherwise shows onboarding once and effectively
+          hides it. Nine features is a lot to have read on the first day and remembered.
+        */}
+        {props.onOpenWalkthrough !== undefined && (
+          <button
+            type="button"
+            className="lc-tab"
+            title="Open the walkthrough"
+            aria-label="Open the walkthrough"
+            onClick={props.onOpenWalkthrough}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '8px 8px',
+              marginLeft: 'auto',
+              background: 'transparent',
+              color: colors.muted,
+              border: 'none',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <HelpIcon size={15} />
+          </button>
+        )}
       </div>
       {/* Keyed on the tab so a switch re-mounts and replays the entry animation. */}
       <div key={active} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>

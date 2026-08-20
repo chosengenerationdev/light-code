@@ -363,6 +363,8 @@ export type UiToHostMessage =
   | { type: 'requestSchedules' }
   /** The whole tool catalogue, for the read-only Tools view. */
   | { type: 'requestTools' }
+  /** Reopen the host's onboarding. Ignored where the host has none. */
+  | { type: 'openWalkthrough' }
   | { type: 'saveSchedule'; schedule: Schedule }
   | { type: 'deleteSchedule'; id: string }
   | { type: 'setScheduleEnabled'; id: string; enabled: boolean }

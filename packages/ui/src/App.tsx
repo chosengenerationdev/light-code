@@ -943,6 +943,9 @@ export function App(props: AppProps): ReactElement {
                 } satisfies UiToHostMessage),
             }}
             tools={toolCatalogue}
+            onOpenWalkthrough={() =>
+              props.transport.post({ type: 'openWalkthrough' } satisfies UiToHostMessage)
+            }
             python={{
               status: pythonStatus,
               settings: pythonSettings,

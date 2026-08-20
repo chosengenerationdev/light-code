@@ -36,7 +36,22 @@ export class WebviewTransport implements Transport {
     this.webview = undefined
   }
 
+  /**
+   * Watches outbound messages, for things the *extension* needs to know.
+   *
+   * The walkthrough completes its steps from context keys, and whether a provider exists or a
+   * turn has finished is knowledge the bridge already broadcasts. Observing that is far better
+   * than the extension re-reading config and guessing — two readers of one fact drift, and this
+   * one would drift silently into a walkthrough step that never ticks.
+   */
+  observe(listener: (message: unknown) => void): void {
+    this.observers.add(listener)
+  }
+
+  private readonly observers = new Set<(message: unknown) => void>()
+
   post(message: unknown): void {
+    for (const observer of this.observers) observer(message)
     const webview = this.webview
     if (webview === undefined) return
     webview.postMessage(message).then((delivered) => {

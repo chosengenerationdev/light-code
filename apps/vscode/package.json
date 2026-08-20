@@ -50,6 +50,10 @@
       {
         "command": "lightCode.openPanel",
         "title": "Light Code: Open Panel"
+      },
+      {
+        "command": "lightCode.openWalkthrough",
+        "title": "Light Code: Open the walkthrough"
       }
     ],
     "viewsContainers": {
@@ -69,7 +73,115 @@
           "name": "Chat"
         }
       ]
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "lightCode.getStarted",
+        "title": "Get started with Light Code",
+        "description": "Point it at a model, then turn on only the parts you want.",
+        "steps": [
+          {
+            "id": "provider",
+            "title": "Point it at a model",
+            "description": "Light Code ships with no endpoints \u2014 a fresh install contacts nothing until you configure a provider.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/provider.md"
+            },
+            "completionEvents": [
+              "onContext:lightCode.hasProvider"
+            ]
+          },
+          {
+            "id": "chat",
+            "title": "Ask for something real",
+            "description": "One tool call at a time, with the result in front of you. Attach files, read documents, page through logs.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/chat.md"
+            },
+            "completionEvents": [
+              "onContext:lightCode.hasChatted"
+            ]
+          },
+          {
+            "id": "approvals",
+            "title": "Nothing happens without you",
+            "description": "Every edit and command is shown as ground truth before it runs \u2014 and Deny is a real answer.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/approvals.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "mcp",
+            "title": "Connect the servers you already run",
+            "description": "MCP over stdio or HTTP. Their tools become ordinary tools, with the same approval prompt.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/mcp.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "python",
+            "title": "Let it write tools, and teach it your codebase",
+            "description": "Python tools pinned to the source you approved, and skills that cost a line of context each.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/python.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "search",
+            "title": "Find things by meaning",
+            "description": "Semantic search over your code, against a local Qdrant or Chroma, or an OpenSearch cluster.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/search.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "expert",
+            "title": "Spend less on the hard parts",
+            "description": "A cheap model does the work and consults Claude for the plan, inside a budget you set.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/expert.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "schedules",
+            "title": "Let it run on its own",
+            "description": "Prompts that run unattended, each with its own explicit list of tools.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/schedules.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "privacy",
+            "title": "What it does not do",
+            "description": "No telemetry, no default endpoints, no sandboxing \u2014 and why each of those is stated plainly.\n[Open Light Code](command:lightCode.openPanel)",
+            "media": {
+              "markdown": "walkthrough/privacy.md"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "build": "node ./esbuild.mjs",

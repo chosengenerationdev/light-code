@@ -25,3 +25,6 @@ resources/mark-white.png
 node_modules/@vscode/ripgrep/**/*.md
 node_modules/@vscode/ripgrep/**/*.ts
 node_modules/@vscode/ripgrep/.github/**
+
+# Walkthrough media is referenced by contributes.walkthroughs and must ship.
+!walkthrough/**

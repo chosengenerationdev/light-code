@@ -47,6 +47,29 @@ export function activate(context: vscode.ExtensionContext): void {
     return bridge
   }
 
+  /*
+   * Context keys the walkthrough completes its steps from.
+   *
+   * Keyed on state rather than on clicking the step: someone who configured a provider before
+   * opening Get Started should not be told to do it again. Set from what the bridge already
+   * broadcasts, so there is one source for the fact rather than two that can disagree.
+   */
+  transport.observe((message) => {
+    const payload = message as { type?: string; profiles?: unknown[] }
+    if (payload.type === 'profiles') {
+      void vscode.commands.executeCommand(
+        'setContext',
+        'lightCode.hasProvider',
+        Array.isArray(payload.profiles) && payload.profiles.length > 0,
+      )
+    }
+    // `done` ends a turn, so it is the first moment a conversation has actually happened —
+    // as opposed to the panel merely being open.
+    if (payload.type === 'done') {
+      void vscode.commands.executeCommand('setContext', 'lightCode.hasChatted', true)
+    }
+  })
+
   const provider = new ChatViewProvider(context, transport, ensureBridge)
   const viewDisposable = vscode.window.registerWebviewViewProvider('lightCode.chatView', provider, {
     // Keeps the webview alive across view switches so a quick trip to Explorer does not
@@ -56,6 +79,22 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const openCommand = vscode.commands.registerCommand('lightCode.openPanel', () => {
     void vscode.commands.executeCommand('workbench.view.extension.lightCode')
+  })
+
+  /*
+   * The walkthrough, on demand.
+   *
+   * VS Code shows it once on install and then effectively hides it — the Get Started page is
+   * not somewhere people return to, and a walkthrough that covers nine features is worth
+   * re-reading long after the first day. The command id is qualified with the extension id
+   * because `openWalkthrough` takes the fully-qualified category.
+   */
+  const walkthroughCommand = vscode.commands.registerCommand('lightCode.openWalkthrough', () => {
+    void vscode.commands.executeCommand(
+      'workbench.action.openWalkthrough',
+      `${context.extension.id}#lightCode.getStarted`,
+      false,
+    )
   })
 
   /*
@@ -107,7 +146,7 @@ export function activate(context: vscode.ExtensionContext): void {
     })()
   }, SCHEDULE_POLL_MS)
 
-  context.subscriptions.push(viewDisposable, openCommand, {
+  context.subscriptions.push(viewDisposable, openCommand, walkthroughCommand, {
     dispose: () => {
       clearInterval(poll)
       bridge?.dispose()
