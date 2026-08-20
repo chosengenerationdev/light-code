@@ -144,3 +144,23 @@ describe('which skills a scheduled run is told about', () => {
     ])
   })
 })
+
+/**
+ * From a real session: asked to "create a tool to add 5 numbers", the model called
+ * `write_to_file` and then `execute_command`, having no `create_python_tool` because the feature
+ * was off. It produced a plain script and described it as a tool — true in English, false in this
+ * product, and nothing anywhere said why.
+ */
+describe('when Python tools are switched off', () => {
+  it('tells the model, so it offers the choice instead of substituting a script', () => {
+    const prompt = buildSystemPrompt('/w', { pythonToolsDisabled: true })
+    expect(prompt).toContain('Settings')
+    expect(prompt).toContain('Python')
+    expect(prompt).toContain('Do not write a script and call it a tool')
+  })
+
+  it('says nothing at all when they are available', () => {
+    expect(buildSystemPrompt('/w', {})).not.toContain('Do not write a script and call it a tool')
+    expect(buildSystemPrompt('/w', { pythonToolsDisabled: false })).not.toContain('switched off in Settings')
+  })
+})

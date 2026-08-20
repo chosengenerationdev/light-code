@@ -10,6 +10,17 @@ export interface SystemPromptOptions {
    * demand with `read_file`, so a skill costs a few tokens whether it is short or enormous.
    */
   skills?: string
+  /**
+   * Set when Python tools are switched off, so "create a tool" is not silently answered with a
+   * script.
+   *
+   * Without this the model has no `create_python_tool`, writes an ordinary `.py` file, and says
+   * it created a tool — which is true in English and false in this product. The user is left
+   * with a script that is not registered, not hash-pinned and not callable, and nothing anywhere
+   * explains the gap. Costing two lines of prompt to convert that into a question is a good
+   * trade; costing them only while the feature is off is a better one.
+   */
+  pythonToolsDisabled?: boolean
   /** Set when `write_skill` is offered, so the model knows it can record what it learns. */
   canWriteSkills?: boolean
   /**
@@ -82,6 +93,19 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
 
   if (options.skills !== undefined && options.skills.length > 0) {
     lines.push('', options.skills)
+  }
+
+  if (options.pythonToolsDisabled === true) {
+    lines.push(
+      '',
+      'Python tools:',
+      '- You cannot create runnable tools right now — the feature is switched off in Settings',
+      '  → Python.',
+      // One line, unwrapped: it is the instruction that matters and a test asserts it verbatim.
+      '- Do not write a script and call it a tool.',
+      '- If the user asks for a "tool", say it is switched off and let them choose: enable it in',
+      '  Settings → Python, or have you write an ordinary script instead.',
+    )
   }
 
   if (options.canWriteSkills === true) {

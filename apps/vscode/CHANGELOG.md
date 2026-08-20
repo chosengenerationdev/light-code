@@ -1,5 +1,19 @@
 # light-code-vscode
 
+## 0.33.3
+
+### Patch Changes
+
+- "Create a tool" no longer silently produces a script.
+
+  With Python tools switched off — the default — the model has no `create_python_tool`, so asked
+  for a tool it wrote an ordinary `.py` file with `write_to_file` and said it had created a tool.
+  True in English, false in this product: the result is not registered, not hash-pinned, and not
+  callable. Nothing anywhere explained the gap.
+
+  The prompt now says the feature is off when it is, and the model offers the choice instead:
+  enable it in Settings → Python, or have a plain script written deliberately.
+
 ## 0.33.2
 
 ### Patch Changes

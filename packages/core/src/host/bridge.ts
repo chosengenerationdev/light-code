@@ -1285,6 +1285,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         skillsSearchable,
         canWriteSkills: skillsDir !== undefined,
         /*
+         * Read from config rather than from the registry, because the prompt is built before the
+         * registry is. Only the *off* case is claimed: "on but uv is missing" leaves the model
+         * equally toolless, but the Python tab reports that with the actual reason, and telling
+         * the user to switch on something already switched on would be worse than saying nothing.
+         */
+        pythonToolsDisabled: config.python?.dynamicTools !== 'on',
+        /*
          * Junior mode's instructions are worse than useless without the expert to delegate
          * to: the model would be told to consult something it has no tool for. The picker
          * disables the mode in that case, but config can still name it, so it is checked
