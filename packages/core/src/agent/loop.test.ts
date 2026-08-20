@@ -47,16 +47,18 @@ interface EventLog {
   toolResult: { call: ToolCall; result: ToolResult }[]
   done: true[]
   error: string[]
+  nudged: true[]
 }
 
 function collectEvents(): { events: AgentTurnEvents; log: EventLog } {
-  const log: EventLog = { text: [], toolCall: [], toolResult: [], done: [], error: [] }
+  const log: EventLog = { text: [], toolCall: [], toolResult: [], done: [], error: [], nudged: [] }
   const events: AgentTurnEvents = {
     onTextChunk: (text) => log.text.push(text),
     onToolCall: (call) => log.toolCall.push(call),
     onToolResult: (call, result) => log.toolResult.push({ call, result }),
     onDone: () => log.done.push(true),
     onError: (message) => log.error.push(message),
+    onNudgedToContinue: () => log.nudged.push(true),
   }
   return { events, log }
 }
@@ -226,5 +228,71 @@ describe('runAgentTurn — late errors preserve partial text', () => {
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: 'partial' },
     ])
+  })
+})
+
+/**
+ * The reported failure, end to end: "I'll create a dummy skill... Let me make something
+ * generic but realistic." and then nothing happened. The heuristic being right is worth
+ * nothing unless the loop acts on it, which is what these cover.
+ */
+describe('runAgentTurn — the model announces an action and calls nothing', () => {
+  it('asks it to continue, and the tool then runs', async () => {
+    const provider = new ScriptedMultiTurnProvider([
+      [{ type: 'text', text: "I'll create the skill. Let me make something realistic." }, { type: 'done' }],
+      [{ type: 'toolCall', toolCall: { id: '1', name: 'write_skill', arguments: '{}' } }, { type: 'done' }],
+      [{ type: 'text', text: 'Created it.' }, { type: 'done' }],
+    ])
+    const registry = new ToolRegistry()
+    registry.register(fakeTool('write_skill', async () => ({ content: 'written' })))
+    const conversation = new Conversation()
+    const { events, log } = collectEvents()
+
+    await runAgentTurn(provider, conversation, 'create a skill', registry, fakeToolExecutionContext(), events)
+
+    expect(log.nudged).toEqual([true])
+    expect(log.toolCall.map((call) => call.name)).toEqual(['write_skill'])
+    expect(log.done).toEqual([true])
+    // The announcement is kept: it is what the model actually said, and deleting it would make
+    // the restored transcript disagree with what the user watched happen.
+    expect(conversation.toArray()[1]).toMatchObject({ role: 'assistant' })
+  })
+
+  /** A chatty model must not be talked round forever — one nudge, then the turn ends. */
+  it('nudges at most once, however many times it narrates', async () => {
+    const narration: StreamChunk[] = [{ type: 'text', text: 'Let me look into that.' }, { type: 'done' }]
+    const provider = new ScriptedMultiTurnProvider([narration, narration, narration, narration])
+    const { events, log } = collectEvents()
+
+    await runAgentTurn(provider, new Conversation(), 'go', new ToolRegistry(), fakeToolExecutionContext(), events)
+
+    expect(log.nudged).toEqual([true])
+    expect(log.done).toEqual([true])
+    // Two requests: the original and the one after the nudge. Not four.
+    expect(provider.receivedMessages).toHaveLength(2)
+  })
+
+  /** The behaviour every release so far has had, and the common case. It must not change. */
+  it('leaves an ordinary answer alone, spending no extra request', async () => {
+    const provider = new ScriptedMultiTurnProvider([
+      [{ type: 'text', text: 'There are three profiles configured.' }, { type: 'done' }],
+    ])
+    const { events, log } = collectEvents()
+
+    await runAgentTurn(provider, new Conversation(), 'how many?', new ToolRegistry(), fakeToolExecutionContext(), events)
+
+    expect(log.nudged).toEqual([])
+    expect(log.done).toEqual([true])
+    expect(provider.receivedMessages).toHaveLength(1)
+  })
+
+  it('still reports an empty response as an error rather than nudging it', async () => {
+    const provider = new ScriptedMultiTurnProvider([[{ type: 'done' }]])
+    const { events, log } = collectEvents()
+
+    await runAgentTurn(provider, new Conversation(), 'hi', new ToolRegistry(), fakeToolExecutionContext(), events)
+
+    expect(log.nudged).toEqual([])
+    expect(log.error).toHaveLength(1)
   })
 })

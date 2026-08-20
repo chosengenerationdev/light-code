@@ -1424,6 +1424,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             post({ type: 'contextUsage', usage: { ...breakdown, supersededCount, compactedCount } })
           },
           onCompacted: (summarisedCount) => post({ type: 'compacted', summarisedCount }),
+          onNudgedToContinue: () => {
+            // Logged, not shown. The transcript already reads correctly — the preamble, then the
+            // tool call it should have made — and a banner between them would explain a seam the
+            // user cannot otherwise see. It belongs in the log, where a model doing this every
+            // turn becomes visible as a pattern.
+            logger.warn('the model described an action without calling a tool; asked it to continue')
+          },
           onQueuedMessageConsumed: (text) => {
             // Shown as an ordinary user turn: that is exactly what it became in the
             // conversation, and a restored transcript will render it the same way.

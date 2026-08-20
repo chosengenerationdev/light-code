@@ -1,3 +1,4 @@
+import { CONTINUE_PROMPT, looksUnfinished, MAX_CONTINUE_NUDGES } from './unfinished.js'
 import { requiresApproval, type ApprovalGate } from '../approval/types.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
 import { computeBreakdown, type TokenBreakdown } from '../context/budget.js'
@@ -36,6 +37,13 @@ export interface AgentTurnEvents {
   onCompacted?(summarisedCount: number): void
   /** A queued message has entered the conversation; the UI moves it out of the queue. */
   onQueuedMessageConsumed?(text: string): void
+  /**
+   * The model announced an action, called nothing, and was asked once to go ahead.
+   *
+   * Reported rather than silent: an extra request was spent, and if this fires on every turn
+   * the model or the prompt is at fault and the log is where that becomes visible.
+   */
+  onNudgedToContinue?(): void
 }
 
 export interface RunAgentTurnOptions {
@@ -328,6 +336,7 @@ export async function runAgentTurn(
 
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
   const mistakeCounts = new Map<string, number>()
+  let continueNudges = 0
   const mode = options.mode ?? CODE_MODE
   // Filtered before definitions are built: an excluded tool never reaches the system
   // prompt, so the model is never told it exists (§8).
@@ -370,14 +379,35 @@ export async function runAgentTurn(
     }
 
     if (toolCall === undefined) {
-      if (assistantText.length > 0) {
-        conversation.addAssistantMessage(assistantText)
-        events.onDone()
-      } else {
+      if (assistantText.length === 0) {
         events.onError(
           'The provider finished without returning any text. Check the base URL and model name, and that the endpoint supports streaming chat completions.',
         )
+        return
       }
+
+      conversation.addAssistantMessage(assistantText)
+
+      /*
+       * "I'll create the skill. Let me write something realistic." — and then nothing.
+       *
+       * Ending the turn on plain text is right for an answer and wrong for an announcement, and
+       * the two are indistinguishable to the loop without looking at the words. A model that
+       * narrates its intent and drops the tool call leaves the user staring at a promise, unable
+       * to tell whether the work failed or was never attempted — which is exactly the silent
+       * ending reported against every release so far.
+       *
+       * So it gets asked once to go ahead. `looksUnfinished` explains why a heuristic is
+       * acceptable here and nowhere near the edit path.
+       */
+      if (continueNudges < MAX_CONTINUE_NUDGES && looksUnfinished(assistantText)) {
+        continueNudges++
+        conversation.addUserMessage(CONTINUE_PROMPT)
+        events.onNudgedToContinue?.()
+        continue
+      }
+
+      events.onDone()
       return
     }
 

@@ -1,5 +1,22 @@
 # light-code-vscode
 
+## 0.33.1
+
+### Patch Changes
+
+- Fixes the turn that ends after announcing work it never did.
+
+  A reply with text and no tool call ended the turn — correct for an answer, wrong for
+  "I'll create the skill. Let me make something realistic.", which is a preamble to a tool
+  call the model then dropped. Nothing errored: the text was recorded, the turn completed,
+  and you were left looking at a promise with no way to tell whether the work had failed or
+  was never attempted. This is the silent ending that has been reported against several
+  releases and never reproduced.
+
+  The loop now recognises an announcement and asks the model once to go ahead. Ordinary
+  answers are untouched and cost no extra request; a chatty model is nudged at most once per
+  turn rather than argued with.
+
 ## 0.33.0
 
 ### Minor Changes
