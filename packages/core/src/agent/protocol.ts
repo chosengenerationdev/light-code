@@ -470,6 +470,14 @@ export type HostToUiMessage =
       alwaysScope?: 'folder'
     }
   /** A rollback point now exists; the UI can offer to undo back to it. */
+  /**
+   * Opens Settings on a named tab.
+   *
+   * Exists for the walkthrough: telling someone a setting is "in the MCP tab" is weaker
+   * than putting them in it, and a guide that only describes navigation is the thing they
+   * have to translate rather than follow.
+   */
+  | { type: 'openSettings'; tab: string }
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */

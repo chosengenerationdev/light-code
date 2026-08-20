@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.31.0",
+  "version": "0.32.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -54,6 +54,10 @@
       {
         "command": "lightCode.openWalkthrough",
         "title": "Light Code: Open the walkthrough"
+      },
+      {
+        "command": "lightCode.openSettings",
+        "title": "Light Code: Open Settings"
       }
     ],
     "viewsContainers": {
@@ -77,26 +81,72 @@
     "walkthroughs": [
       {
         "id": "lightCode.getStarted",
-        "title": "Get started with Light Code",
-        "description": "Point it at a model, then turn on only the parts you want.",
+        "title": "Light Code: a guided tour",
+        "description": "Every tab, what is in it, and what each setting does - with a button that takes you there.",
         "steps": [
           {
-            "id": "provider",
-            "title": "Point it at a model",
-            "description": "Light Code ships with no endpoints \u2014 a fresh install contacts nothing until you configure a provider.\n[Open Light Code](command:lightCode.openPanel)",
+            "id": "orientation",
+            "title": "Where everything is",
+            "description": "Light Code lives in one sidebar panel. The chat is the whole product; the gear opens eleven settings tabs, and the question mark reopens this guide whenever you want it.\n\nThe numbers in the picture are the four things worth knowing before anything else.\n\n[Open the panel](command:lightCode.openPanel)",
             "media": {
-              "markdown": "walkthrough/provider.md"
+              "image": {
+                "light": "walkthrough/media/orientation-light.svg",
+                "dark": "walkthrough/media/orientation-dark.svg",
+                "hc": "walkthrough/media/orientation-dark.svg",
+                "hcLight": "walkthrough/media/orientation-light.svg"
+              },
+              "altText": "The VS Code window: the Light Code icon in the activity bar, the chat panel, and the new-task, history, settings and guide buttons in its header."
+            },
+            "completionEvents": [
+              "onCommand:lightCode.openPanel"
+            ]
+          },
+          {
+            "id": "providers",
+            "title": "Providers - point it at a model",
+            "description": "Nothing ships configured. There are no default endpoints, so a fresh install contacts nothing until you fill this in.\n\n**Preset** prefills a base URL and wire format - OpenAI-compatible, Anthropic, Gemini, DeepSeek - and every field stays editable for a gateway that fronts one differently. **Authentication** is a separate axis: an API key, or Apigee client-certificate mTLS with a token grant. **Model** is fetched from your gateway and always typeable, because many return nothing. Keep one profile per gateway and switch between them from the chat header.\n\n**Test connection** is the field worth using first: it loads certificates, gets a token, lists models, and tells you which of the three failed.\n\n[Open the Providers tab](command:lightCode.openSettings?%5B%22providers%22%5D)",
+            "media": {
+              "image": {
+                "light": "walkthrough/media/providers-light.svg",
+                "dark": "walkthrough/media/providers-dark.svg",
+                "hc": "walkthrough/media/providers-dark.svg",
+                "hcLight": "walkthrough/media/providers-light.svg"
+              },
+              "altText": "The Providers tab, showing the profile list and the fields for editing one: preset, label, base URL, authentication, API key, model and Test connection."
             },
             "completionEvents": [
               "onContext:lightCode.hasProvider"
             ]
           },
           {
-            "id": "chat",
-            "title": "Ask for something real",
-            "description": "One tool call at a time, with the result in front of you. Attach files, read documents, page through logs.\n[Open Light Code](command:lightCode.openPanel)",
+            "id": "network",
+            "title": "Network - certificates, once, for everything",
+            "description": "If your company intercepts TLS or issues client certificates, this is the only place you set that up. It applies to every connection: the gateway, the token endpoint, MCP over HTTP, the vector store and the embedder.\n\n**CA certificate** is added to the public roots rather than replacing them, so trusting your corporate root does not cost you every other host. **Certificate and key** - or a **PFX bundle**, which is what Windows PKI usually issues - identify you. Any single connection can override either.\n\n**Verify TLS certificates** can be turned off, and the panel says plainly what that costs: an interceptor can read and change the traffic, API key included. Add the CA instead.\n\n[Open the Network tab](command:lightCode.openSettings?%5B%22network%22%5D)",
             "media": {
-              "markdown": "walkthrough/chat.md"
+              "image": {
+                "light": "walkthrough/media/network-light.svg",
+                "dark": "walkthrough/media/network-dark.svg",
+                "hc": "walkthrough/media/network-dark.svg",
+                "hcLight": "walkthrough/media/network-light.svg"
+              },
+              "altText": "The Network tab, showing certificate directory, CA certificate, client certificate and key, PFX bundle, passphrase, and the verify-TLS toggle."
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "chat",
+            "title": "The chat - ask for something real",
+            "description": "Type a request. It reads files, searches, edits and runs commands, one step at a time, and stops when it is done or when it needs you.\n\n**@** names a file directly. Paste a screenshot, or drop a Word, Excel, PDF or HTML file in. Long output is truncated with a handle it can re-read, so a huge log does not eat the window - the bar above the composer shows what has.\n\n**Mode** picks what it may do: Code edits and runs, Ask is read-only, Junior brings the expert in. **History** keeps every past task, and reopening one restores the whole transcript.\n\n[Open the panel](command:lightCode.openPanel)",
+            "media": {
+              "image": {
+                "light": "walkthrough/media/chat-light.svg",
+                "dark": "walkthrough/media/chat-dark.svg",
+                "hc": "walkthrough/media/chat-dark.svg",
+                "hcLight": "walkthrough/media/chat-light.svg"
+              },
+              "altText": "The chat header, with the mode selector, the expert budget, and the four header buttons labelled; below it, the composer."
             },
             "completionEvents": [
               "onContext:lightCode.hasChatted"
@@ -104,10 +154,16 @@
           },
           {
             "id": "approvals",
-            "title": "Nothing happens without you",
-            "description": "Every edit and command is shown as ground truth before it runs \u2014 and Deny is a real answer.\n[Open Light Code](command:lightCode.openPanel)",
+            "title": "Approvals - nothing happens without you",
+            "description": "Every tool call is shown before it runs, as ground truth: the real command, the computed diff, the actual source. Never the model's description of what it means to do. **Deny** is a real answer - it goes back as a result and the turn continues.\n\nThis tab is where standing permission is granted and, more importantly, taken back. The four toggles skip the prompt by category and **all ship off**. Below them are the grants you made in the chat: always-allowed commands, always-allowed MCP tools, and folders outside the workspace it may read.\n\nCommand matching is **exact, byte for byte**. Allowing `npm test` never allows `npm test && rm -rf /`.\n\nBefore its first edit to a task it snapshots the workspace, so you can roll the whole thing back.\n\n[Open the Approvals tab](command:lightCode.openSettings?%5B%22approvals%22%5D)",
             "media": {
-              "markdown": "walkthrough/approvals.md"
+              "image": {
+                "light": "walkthrough/media/approvals-light.svg",
+                "dark": "walkthrough/media/approvals-dark.svg",
+                "hc": "walkthrough/media/approvals-dark.svg",
+                "hcLight": "walkthrough/media/approvals-light.svg"
+              },
+              "altText": "The Approvals tab, showing four auto-approve toggles all off, the always-allowed command and tool lists, extra readable folders, and the maximum-steps setting."
             },
             "completionEvents": [
               "onStepSelected"
@@ -115,10 +171,16 @@
           },
           {
             "id": "mcp",
-            "title": "Connect the servers you already run",
-            "description": "MCP over stdio or HTTP. Their tools become ordinary tools, with the same approval prompt.\n[Open Light Code](command:lightCode.openPanel)",
+            "title": "MCP - connect the servers you already run",
+            "description": "Standard `mcpServers` configuration, so a config from another client pastes in unchanged. stdio or HTTP, inferred from whether you gave a command or a URL.\n\nServers connect when the panel opens and show health, so a mistyped command is visible immediately rather than the first time something needs it. Every tool is namespaced `server__tool`, and each one has its own **Always / Ask / Never** - one server can expose forty.\n\nSecrets go in as `${secret:NAME}` and are resolved from the OS keychain at spawn time, never written into the file.\n\n[Open the Mcp tab](command:lightCode.openSettings?%5B%22mcp%22%5D)",
             "media": {
-              "markdown": "walkthrough/mcp.md"
+              "image": {
+                "light": "walkthrough/media/mcp-light.svg",
+                "dark": "walkthrough/media/mcp-dark.svg",
+                "hc": "walkthrough/media/mcp-dark.svg",
+                "hcLight": "walkthrough/media/mcp-light.svg"
+              },
+              "altText": "The MCP tab, showing two servers with health, per-tool Always/Ask/Never controls, and the JSON configuration box."
             },
             "completionEvents": [
               "onStepSelected"
@@ -126,10 +188,33 @@
           },
           {
             "id": "python",
-            "title": "Let it write tools, and teach it your codebase",
-            "description": "Python tools pinned to the source you approved, and skills that cost a line of context each.\n[Open Light Code](command:lightCode.openPanel)",
+            "title": "Python - let it write its own tools",
+            "description": "It can write a Python tool mid-conversation and call it from the next message. Dependencies are declared in the file and installed with `uv`; the schema comes from your type hints, so there is no metadata to keep in step.\n\n**Python environment** prefers your project's own venv, because that is where your internal libraries already are. **Package index** can point at an internal mirror, or refuse the network entirely.\n\nThis is the sharpest surface in the product, so it is off by default and creating a tool **always** prompts with the full source - no toggle skips it. Approval pins a hash of exactly what you saw; a file edited outside is refused and reported, and tools live in `.lightcode/tools/` so they land in git and get reviewed.\n\n[Open the Python tab](command:lightCode.openSettings?%5B%22python%22%5D)",
             "media": {
-              "markdown": "walkthrough/python.md"
+              "image": {
+                "light": "walkthrough/media/python-light.svg",
+                "dark": "walkthrough/media/python-dark.svg",
+                "hc": "walkthrough/media/python-dark.svg",
+                "hcLight": "walkthrough/media/python-light.svg"
+              },
+              "altText": "The Python tab, showing the enable toggle, uv path, environment choice, tools folder, package index, timeout, and a created tool with its content-hash approval note."
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "skills",
+            "title": "Skills - teach it your conventions",
+            "description": "A skill is a markdown file with a name and a description. Only those two lines are in the prompt; it reads the body when a task actually calls for it, so a skill can be as long as you like and costs a few tokens until used.\n\nThis is the answer to \"it does not know about our internal libraries\". It offers to write one when you explain something durable, and offers to correct one when something contradicts it - a stale skill is worse than a missing one.\n\nYou get a writable folder plus any number of read-only ones, such as a shared team folder, with PATH-style precedence and shadowing reported rather than silently applied. Writing a skill needs approval too: it is prose that steers every future turn.\n\n[Open the Skills tab](command:lightCode.openSettings?%5B%22skills%22%5D)",
+            "media": {
+              "image": {
+                "light": "walkthrough/media/skills-light.svg",
+                "dark": "walkthrough/media/skills-dark.svg",
+                "hc": "walkthrough/media/skills-dark.svg",
+                "hcLight": "walkthrough/media/skills-light.svg"
+              },
+              "altText": "The Skills tab, showing two skills, the writable skills folder, extra read-only folders, the problems list, and the approval note."
             },
             "completionEvents": [
               "onStepSelected"
@@ -137,10 +222,33 @@
           },
           {
             "id": "search",
-            "title": "Find things by meaning",
-            "description": "Semantic search over your code, against a local Qdrant or Chroma, or an OpenSearch cluster.\n[Open Light Code](command:lightCode.openPanel)",
+            "title": "Search - find things by meaning",
+            "description": "Optional, off by default, and **the largest thing Light Code ever sends anywhere**: indexing uploads the contents of your workspace to the embedding endpoint you name. It says so, and where to, before the first upload.\n\n**Qdrant** and **Chroma** run locally if you would rather nothing left the machine; **OpenSearch** is usually the one your company already has. Embeddings reuse a provider profile, so there is no second set of credentials. You can **copy an index between backends**, so changing your mind later does not orphan what you indexed.\n\nThe toggle worth understanding is **looking tools up instead of listing them**: it halves the prompt at forty tools and makes it bigger at three, so the tab shows the count and lets you decide.\n\n[Open the Search tab](command:lightCode.openSettings?%5B%22search%22%5D)",
             "media": {
-              "markdown": "walkthrough/search.md"
+              "image": {
+                "light": "walkthrough/media/search-light.svg",
+                "dark": "walkthrough/media/search-dark.svg",
+                "hc": "walkthrough/media/search-dark.svg",
+                "hcLight": "walkthrough/media/search-light.svg"
+              },
+              "altText": "The Search tab, showing the backend choice, connection fields, embedding profile, the index button, the look-tools-up toggle, index copying, and query limits."
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "tools",
+            "title": "Tools - everything it can call",
+            "description": "One read-only list of every tool available right now: the built-in nine, everything your MCP servers expose, and the Python tools it has written. Search matches descriptions as well as names, so you can look for what you want done rather than what it is called.\n\nA **looked up** badge means the tool is kept out of the system prompt to save space. It is still callable - the assistant finds it first. A shorter prompt is not a shorter tool list; withholding a capability is what Approvals and modes are for.\n\n[Open the Tools tab](command:lightCode.openSettings?%5B%22tools%22%5D)",
+            "media": {
+              "image": {
+                "light": "walkthrough/media/tools-light.svg",
+                "dark": "walkthrough/media/tools-dark.svg",
+                "hc": "walkthrough/media/tools-dark.svg",
+                "hcLight": "walkthrough/media/tools-light.svg"
+              },
+              "altText": "The Tools tab, showing the search box and the catalogue grouped into built-in, MCP and Python tools, with the looked-up badge explained."
             },
             "completionEvents": [
               "onStepSelected"
@@ -148,10 +256,16 @@
           },
           {
             "id": "expert",
-            "title": "Spend less on the hard parts",
-            "description": "A cheap model does the work and consults Claude for the plan, inside a budget you set.\n[Open Light Code](command:lightCode.openPanel)",
+            "title": "Expert - spend less on the hard parts",
+            "description": "In **Junior mode** a cheap model does the work and consults Claude, through the Claude CLI, on the parts that need it. The expert plans, sets checkpoints, and reviews each one as the junior finishes it.\n\nIt is read-only by construction - Read, Grep and Glob, never edit or execute - so a second agent can never act outside the approval gate. It keeps one session per task, which makes the first consultation the expensive one and every later one about nineteen times cheaper.\n\n**Budget per task** caps both spend and number of consultations, and the same control sits in the chat header so you can raise it mid-task. The expert is told what is left and plans to fit, gives you a cost estimate up front, and can assess how your primary model is doing.\n\n[Open the Expert tab](command:lightCode.openSettings?%5B%22expert%22%5D)",
             "media": {
-              "markdown": "walkthrough/expert.md"
+              "image": {
+                "light": "walkthrough/media/expert-light.svg",
+                "dark": "walkthrough/media/expert-dark.svg",
+                "hc": "walkthrough/media/expert-dark.svg",
+                "hcLight": "walkthrough/media/expert-light.svg"
+              },
+              "altText": "The Expert tab, showing the enable toggle, command and model, the per-task spend and consultation limits, cost estimate, skill assessment, and the read-only tool restriction."
             },
             "completionEvents": [
               "onStepSelected"
@@ -159,10 +273,33 @@
           },
           {
             "id": "schedules",
-            "title": "Let it run on its own",
-            "description": "Prompts that run unattended, each with its own explicit list of tools.\n[Open Light Code](command:lightCode.openPanel)",
+            "title": "Schedules - let it run on its own",
+            "description": "A prompt on a timer. Runs in the background without touching the chat you are in, and keeps running with the panel closed.\n\nNobody is present to approve anything, so an unattended run does not inherit your auto-approve settings. Permission is granted **per schedule**: files are read-only unless you say otherwise, and you pick exactly which tools it may call. Creating Python tools or skills is never available to a schedule at all - model-authored code with no one watching is the one thing that stays out of reach.\n\nEvery run is logged with its full transcript, and `notify` raises a toast when a run has something to say.\n\n[Open the Schedules tab](command:lightCode.openSettings?%5B%22schedules%22%5D)",
             "media": {
-              "markdown": "walkthrough/schedules.md"
+              "image": {
+                "light": "walkthrough/media/schedules-light.svg",
+                "dark": "walkthrough/media/schedules-dark.svg",
+                "hc": "walkthrough/media/schedules-dark.svg",
+                "hcLight": "walkthrough/media/schedules-light.svg"
+              },
+              "altText": "The Schedules tab, showing a schedule name, prompt and interval, the file-permission and tool filters for unattended runs, and the run history."
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "appearance",
+            "title": "Appearance - make it yours",
+            "description": "The panel follows your editor theme. Two colours are yours to set: the **accent**, used for anything actionable, and the **expert** colour, which marks authorship - text in it is Claude's words rather than your primary model's.\n\nText on either is computed rather than fixed, so it stays readable whatever you pick. Motion follows your OS reduced-motion setting, and can be turned off here regardless.\n\n[Open the Appearance tab](command:lightCode.openSettings?%5B%22appearance%22%5D)",
+            "media": {
+              "image": {
+                "light": "walkthrough/media/appearance-light.svg",
+                "dark": "walkthrough/media/appearance-dark.svg",
+                "hc": "walkthrough/media/appearance-dark.svg",
+                "hcLight": "walkthrough/media/appearance-light.svg"
+              },
+              "altText": "The Appearance tab, showing the accent colour swatches, the expert colour swatches, and the reduced-motion toggle."
             },
             "completionEvents": [
               "onStepSelected"
@@ -171,9 +308,15 @@
           {
             "id": "privacy",
             "title": "What it does not do",
-            "description": "No telemetry, no default endpoints, no sandboxing \u2014 and why each of those is stated plainly.\n[Open Light Code](command:lightCode.openPanel)",
+            "description": "No telemetry. No update checks. No default endpoints - a fresh install contacts nothing. No remote assets in the panel.\n\nThe only hosts it ever reaches are the ones you configured: your gateway, your MCP servers, and - only if you turn Search on - your vector store and embedding endpoint.\n\nTwo things are stated plainly rather than glossed. **Indexing is the largest egress in the product**: enabling it sends your workspace to the embedder. And **nothing is sandboxed** - commands, Python tools and MCP servers run as you, with your permissions, and Light Code does not protect you from another process running as the same user. Approval is the real boundary, which is why it is per-invocation and why every toggle ships off.\n\nSource, issues and the full security section: [github.com/chosengenerationdev/light-code](https://github.com/chosengenerationdev/light-code)",
             "media": {
-              "markdown": "walkthrough/privacy.md"
+              "image": {
+                "light": "walkthrough/media/privacy-light.svg",
+                "dark": "walkthrough/media/privacy-dark.svg",
+                "hc": "walkthrough/media/privacy-dark.svg",
+                "hcLight": "walkthrough/media/privacy-light.svg"
+              },
+              "altText": "A diagram of what leaves the machine: your gateway and MCP servers, plus the vector store and embedder only if Search is enabled; then the four things Light Code never does, and a warning that nothing is sandboxed."
             },
             "completionEvents": [
               "onStepSelected"
@@ -181,7 +324,15 @@
           }
         ]
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "lightCode.openSettings",
+          "when": "false"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node ./esbuild.mjs",

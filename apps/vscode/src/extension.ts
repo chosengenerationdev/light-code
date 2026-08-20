@@ -81,6 +81,23 @@ export function activate(context: vscode.ExtensionContext): void {
     void vscode.commands.executeCommand('workbench.view.extension.lightCode')
   })
 
+  /**
+   * Opens Settings on a named tab.
+   *
+   * This is what makes the walkthrough a walkthrough rather than a description of one. Telling
+   * someone a setting is "under Network" leaves them to find it; a button that puts them in the
+   * tab does not. Argument-taking, so it is hidden from the palette — `lightCode.openPanel` is
+   * the one people should find there.
+   */
+  const settingsCommand = vscode.commands.registerCommand(
+    'lightCode.openSettings',
+    async (tab?: unknown): Promise<void> => {
+      await vscode.commands.executeCommand('workbench.view.extension.lightCode')
+      // Held until the webview's script actually runs; `reveal` returns well before that.
+      transport.postWhenLive({ type: 'openSettings', tab: typeof tab === 'string' ? tab : 'providers' })
+    },
+  )
+
   /*
    * The walkthrough, on demand.
    *
@@ -146,7 +163,7 @@ export function activate(context: vscode.ExtensionContext): void {
     })()
   }, SCHEDULE_POLL_MS)
 
-  context.subscriptions.push(viewDisposable, openCommand, walkthroughCommand, {
+  context.subscriptions.push(viewDisposable, openCommand, walkthroughCommand, settingsCommand, {
     dispose: () => {
       clearInterval(poll)
       bridge?.dispose()

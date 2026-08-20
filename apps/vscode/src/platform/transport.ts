@@ -17,6 +17,17 @@ import type { Logger, Transport } from '@light-code/core'
 export class WebviewTransport implements Transport {
   private webview: vscode.Webview | undefined
   private subscription: vscode.Disposable | undefined
+  /**
+   * One message held for a view that exists but has not run its script yet.
+   *
+   * `reveal` returns long before React mounts, so a walkthrough button that posted straight
+   * away would land nowhere and the tab would simply not open — the exact silent failure a
+   * navigation button must not have. A single slot rather than a queue: the last place asked
+   * for is the only one worth going to.
+   */
+  private pendingNavigation: unknown | undefined
+  /** Proven by an inbound message. A view that has spoken can certainly listen. */
+  private live = false
   private readonly listeners = new Set<(message: unknown) => void>()
 
   constructor(private readonly logger?: Logger) {}
@@ -26,11 +37,32 @@ export class WebviewTransport implements Transport {
     this.detach()
     this.webview = webview
     this.subscription = webview.onDidReceiveMessage((message: unknown) => {
+      if (!this.live) {
+        this.live = true
+        const held = this.pendingNavigation
+        this.pendingNavigation = undefined
+        if (held !== undefined) this.post(held)
+      }
       for (const listener of this.listeners) listener(message)
     })
   }
 
+  /**
+   * Posts now if the view is running, otherwise on the next one that starts.
+   *
+   * Only for navigation. Holding *state* like this would be wrong — it would arrive against a
+   * view that has since rebuilt itself from the host and be stale on delivery.
+   */
+  postWhenLive(message: unknown): void {
+    if (this.live && this.webview !== undefined) {
+      this.post(message)
+      return
+    }
+    this.pendingNavigation = message
+  }
+
   detach(): void {
+    this.live = false
     this.subscription?.dispose()
     this.subscription = undefined
     this.webview = undefined

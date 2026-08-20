@@ -39,7 +39,7 @@ import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
 import type { EmbedderState } from './settings/IndexingSection.js'
 import { HistoryList } from './history/HistoryList.js'
-import { BackIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
+import { BackIcon, HelpIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
 import { applyAccent, applyExpert, DEFAULT_ACCENT, DEFAULT_EXPERT } from './styles.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
 
@@ -68,6 +68,7 @@ function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
 
 export function App(props: AppProps): ReactElement {
   const [view, setView] = useState<View>('chat')
+  const [requestedTab, setRequestedTab] = useState<{ tab: string; nonce: number }>()
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -223,6 +224,14 @@ export function App(props: AppProps): ReactElement {
           preview: message.preview,
           ...(message.alwaysScope === undefined ? {} : { alwaysScope: message.alwaysScope }),
         })
+      } else if (message.type === 'openSettings') {
+        /*
+         * The walkthrough asking to be shown a tab. It arrives as a normal host message so
+         * the same path serves any future caller — nothing about it is walkthrough-specific.
+         */
+        props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
+        setRequestedTab({ tab: message.tab, nonce: Date.now() })
+        setView('settings')
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
         setApprovals(message.approvals)
@@ -789,6 +798,22 @@ export function App(props: AppProps): ReactElement {
             <button type="button" aria-label="Settings" title="Settings" style={iconButtonStyle('ghost')} onClick={openSettings}>
               <SettingsIcon />
             </button>
+            {/*
+              The guide lives in the main header, not inside Settings.
+
+              Putting it behind the gear meant you had to already be somewhere specific to find
+              out where anything is — help that is only reachable once you have navigated is
+              help for people who no longer need it.
+            */}
+            <button
+              type="button"
+              aria-label="Guide"
+              title="Open the guide"
+              style={iconButtonStyle('ghost')}
+              onClick={() => props.transport.post({ type: 'openWalkthrough' } satisfies UiToHostMessage)}
+            >
+              <HelpIcon />
+            </button>
           </div>
         ) : (
           <button type="button" aria-label="Back" title="Back" style={iconButtonStyle('ghost')} onClick={() => setView('chat')}>
@@ -832,6 +857,7 @@ export function App(props: AppProps): ReactElement {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {view === 'settings' ? (
           <SettingsPanel
+            {...(requestedTab !== undefined ? { requestedTab } : {})}
             profiles={profiles}
             activeProfileId={activeProfileId}
             onSave={saveProfile}
@@ -943,9 +969,6 @@ export function App(props: AppProps): ReactElement {
                 } satisfies UiToHostMessage),
             }}
             tools={toolCatalogue}
-            onOpenWalkthrough={() =>
-              props.transport.post({ type: 'openWalkthrough' } satisfies UiToHostMessage)
-            }
             python={{
               status: pythonStatus,
               settings: pythonSettings,

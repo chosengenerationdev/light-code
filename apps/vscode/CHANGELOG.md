@@ -1,5 +1,19 @@
 # light-code-vscode
 
+## 0.32.0
+
+### Minor Changes
+
+- The walkthrough is now an illustrated tour of the panel rather than a description of one.
+
+  Fourteen steps: where everything is, the chat itself, one for each of the eleven settings tabs,
+  and what leaves the machine. Each carries a diagram of that tab — the tab strip with one tab lit
+  and its real fields in the order they appear — and a button that opens it, so a setting's location
+  is something you are shown rather than told.
+
+  The guide button moved out of Settings and into the main chat header, next to the gear. Help that
+  is only reachable once you have navigated is help for people who no longer need it.
+
 ## 0.31.0
 
 ### Minor Changes
@@ -11,11 +25,11 @@
   you, MCP servers, Python tools and skills, semantic search, the Claude expert and its budget,
   scheduled runs, and — plainly — what the product does not do.
 
-  The first two steps complete from *state* rather than from clicking them, so someone who
+  The first two steps complete from _state_ rather than from clicking them, so someone who
   already configured a provider is not told to do it again.
 
   **You can reopen it any time**: the help icon at the end of the settings tabs, or
-  *Light Code: Open the walkthrough* in the command palette. VS Code shows onboarding once and
+  _Light Code: Open the walkthrough_ in the command palette. VS Code shows onboarding once and
   then effectively hides it, and nine features is a lot to have read on day one and remembered.
 
 - A Tools tab: everything the assistant can call, in one place.
@@ -26,7 +40,7 @@
   with a search that matches descriptions as well as names, because someone looking for a
   capability knows what they want done rather than what it is called.
 
-  It is read-only on purpose. What a tool *is* belongs to whatever created it — an MCP server's
+  It is read-only on purpose. What a tool _is_ belongs to whatever created it — an MCP server's
   tools change when its config does, Python tools are files on disk, built-ins are the product —
   so editing here would mean a second place to change things that already have one.
 
@@ -41,13 +55,13 @@
 - A schedule can be given editing permission, but never permission to install code.
 
   Granting a scheduled run the right to create or edit files already worked as intended: the
-  tools you tick when you write the schedule *are* the approval, made in advance, in the open,
+  tools you tick when you write the schedule _are_ the approval, made in advance, in the open,
   for one named job — and the default is still nothing at all.
 
   What was missing is the line on the other side of that. `create_python_tool`, `write_skill`
   and their siblings were offered in the same picker, and ticking one would have let an
   unattended run install model-authored code that later executes, with nobody seeing the source.
-  Authorising a *change* and authorising a *capability* are different acts, and a checkbox
+  Authorising a _change_ and authorising a _capability_ are different acts, and a checkbox
   ticked once cannot honestly mean "write and install any code you like, forever".
 
   Those tools are no longer offered to a schedule, are refused if one somehow reaches the gate,
@@ -88,14 +102,14 @@
 - A new file is shown as a file, and switching vector store no longer leaves search empty.
 
   **Creating a tool showed an all-green diff against nothing.** Technically accurate, and it
-  reads as though something were being *changed* when the honest description is "here is a file
+  reads as though something were being _changed_ when the honest description is "here is a file
   that does not exist yet" — with a marker column and a wash of colour that have nothing to
   contrast with. A new file is now shown as plain, syntax-highlighted source with line numbers.
   Editing still shows a diff, and deleting still shows a removal, because both of those are
   changes.
 
   **Switching vector store silently gave you an empty index.** The bookkeeping that records
-  "everything up to here is already written" was keyed on the collection *name*, which is the
+  "everything up to here is already written" was keyed on the collection _name_, which is the
   same whichever backend is behind it. Moving from OpenSearch to Qdrant therefore left a
   manifest asserting the new, empty collection was already populated: the indexer skipped every
   unchanged file, the documentation reindex reported nothing to do, and search returned no
@@ -113,7 +127,7 @@
 - The Python tab now shows what is saved, and lets you choose the environment.
 
   **Settings looked as though they were not persisting.** They were — the tab simply never
-  received them. It was sent the *resolved* status (which interpreter won, which tools loaded)
+  received them. It was sent the _resolved_ status (which interpreter won, which tools loaded)
   and used that only for placeholders, so every field rendered empty on each mount. A saved
   value looked lost, and saving again from those empty boxes would quietly have cleared it. The
   saved settings are now sent alongside the status and every field is resynced from them.
@@ -132,7 +146,7 @@
 
   Qdrant and Chroma already inherited the CA from Settings → Network, because they share the
   connection builder OpenSearch uses. That is now pinned by a test asserting each backend sends
-  the resolved TLS material on *every* request, not merely the first — a client that
+  the resolved TLS material on _every_ request, not merely the first — a client that
   authenticated over TLS and then queried without it would be worse than one that never used it.
 
   The builder was still called `openSearchConnectionFor`, which was accurate with one backend
@@ -159,7 +173,7 @@
 - Creating a tool or a skill always asks, and approval diffs are syntax highlighted.
 
   **Auto-approve can no longer cover writing a Python tool or a skill.** These are the one place
-  the assistant writes code that later *runs*, or prose that is later injected into its own
+  the assistant writes code that later _runs_, or prose that is later injected into its own
   context — and auto-approving their creation compounds, because an injected instruction could
   install a persistent capability that the same setting then approves on every later call.
   "Auto-approve edits" is a statement about editing the files you are working on, not about
@@ -310,7 +324,7 @@
   failed for any reason the result was simply never sent, with nothing logged, so the tab waited
   for an answer that was not coming.
 
-  Detection now bounds the *wait* rather than trusting the process to die, and there is a budget
+  Detection now bounds the _wait_ rather than trusting the process to die, and there is a budget
   for the whole search rather than only for each candidate — several candidates each waiting out
   their own timeout added up to most of a minute, which looks stuck whether or not it is. The
   state is now always reported, including when the check itself failed, and it says so.

@@ -6,7 +6,7 @@ import type {
   McpToolPermission,
   WorkspaceApprovals,
 } from '@light-code/core/browser'
-import { useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
 import { ApprovalsTab } from './ApprovalsTab.js'
 import { McpTab } from './McpTab.js'
@@ -31,7 +31,6 @@ import {
   ServerIcon,
   ShieldIcon,
   PythonIcon,
-  HelpIcon,
   ToolboxIcon,
 } from '../icons.js'
 
@@ -81,8 +80,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
   python: PythonTabProps
   tools: ToolsTabProps
-  /** Reopens the host's onboarding. Absent where the host has none. */
-  onOpenWalkthrough?: (() => void) | undefined
+  /** Changes which tab is shown. Bumped by the host so the same tab can be asked for twice. */
+  requestedTab?: { tab: string; nonce: number } | undefined
   skills: SkillsTabProps
   schedules: SchedulesTabProps
 }
@@ -133,6 +132,17 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
 export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const [active, setActive] = useState<TabId>('providers')
 
+  /*
+   * Keyed on a nonce, not on the tab name: the walkthrough may ask for the tab already
+   * showing — someone re-reading a step — and an effect keyed on the name alone would do
+   * nothing the second time, which reads as a broken button.
+   */
+  const requested = props.requestedTab
+  useEffect(() => {
+    if (requested === undefined) return
+    if (TABS.some((tab) => tab.id === requested.tab)) setActive(requested.tab as TabId)
+  }, [requested])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div
@@ -175,34 +185,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             </button>
           )
         })}
-        {/*
-          A way back to the walkthrough, at the end of the tabs rather than among them: it is
-          not a settings page, and VS Code otherwise shows onboarding once and effectively
-          hides it. Nine features is a lot to have read on the first day and remembered.
-        */}
-        {props.onOpenWalkthrough !== undefined && (
-          <button
-            type="button"
-            className="lc-tab"
-            title="Open the walkthrough"
-            aria-label="Open the walkthrough"
-            onClick={props.onOpenWalkthrough}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              padding: '8px 8px',
-              marginLeft: 'auto',
-              background: 'transparent',
-              color: colors.muted,
-              border: 'none',
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            <HelpIcon size={15} />
-          </button>
-        )}
-      </div>
+        </div>
       {/* Keyed on the tab so a switch re-mounts and replays the entry animation. */}
       <div key={active} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {active === 'appearance' ? (
