@@ -368,6 +368,17 @@ export function TerminalIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+/** The tool catalogue — a toolbox, for the box everything is kept in. */
+export function ToolboxIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.8" y="5.4" width="12.4" height="7.8" rx="1.3" />
+      <path d="M5.8 5.4V4.1c0-.6.5-1.1 1.1-1.1h2.2c.6 0 1.1.5 1.1 1.1v1.3" />
+      <path d="M1.8 8.6h12.4M6.6 8.6v1.4h2.8V8.6" />
+    </svg>
+  )
+}
+
 /** Skills — a book, for written-down knowledge. */
 export function BookIcon({ size = 16 }: IconProps): ReactElement {
   return (

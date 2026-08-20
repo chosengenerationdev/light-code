@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.31.0
+
+### Minor Changes
+
+- A Tools tab: everything the assistant can call, in one place.
+
+  Until now the only complete catalogue was inside the schedule editor's permission picker,
+  which is a strange place to go to answer "what can it actually do" — and the built-in tools
+  appeared nowhere else at all. Settings → **Tools** lists them grouped by where they came from,
+  with a search that matches descriptions as well as names, because someone looking for a
+  capability knows what they want done rather than what it is called.
+
+  It is read-only on purpose. What a tool *is* belongs to whatever created it — an MCP server's
+  tools change when its config does, Python tools are files on disk, built-ins are the product —
+  so editing here would mean a second place to change things that already have one.
+
+  With the dispatcher on it marks which tools are kept out of the system prompt and says plainly
+  that they are **still callable**, because a shorter prompt looking like a shorter tool list is
+  exactly the misreading that feature invites.
+
 ## 0.30.1
 
 ### Patch Changes

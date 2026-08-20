@@ -177,6 +177,27 @@ export interface PythonSettings {
   timeoutSeconds?: number
 }
 
+/**
+ * One tool, as the Tools view shows it.
+ *
+ * `advertised` is the field that earns its place: with the dispatcher on, MCP and Python tools
+ * are registered but kept out of the prompt and reached through `call_tool`. They remain fully
+ * callable — hiding the *advertisement* is a prompt-size measure and never a permission — so a
+ * view that did not say which were hidden would make a shorter prompt look like a shorter tool
+ * list, which is the misreading the dispatcher invites.
+ */
+export interface ToolCatalogueEntry {
+  name: string
+  description: string
+  group: ToolGroup
+  /** Where it came from, so the view groups by the thing the user actually configures. */
+  source: 'built-in' | 'mcp' | 'python'
+  /** The MCP server it belongs to, when `source` is `mcp`. */
+  server?: string
+  /** False when it is registered but kept out of the system prompt. */
+  advertised: boolean
+}
+
 /** Guard rails against a query that could hurt a production cluster. */
 export interface SearchQueryLimits {
   maxHits?: number | undefined
@@ -340,6 +361,8 @@ export type UiToHostMessage =
   | { type: 'requestEmbedderModels'; profileId: string }
   | { type: 'requestSkills' }
   | { type: 'requestSchedules' }
+  /** The whole tool catalogue, for the read-only Tools view. */
+  | { type: 'requestTools' }
   | { type: 'saveSchedule'; schedule: Schedule }
   | { type: 'deleteSchedule'; id: string }
   | { type: 'setScheduleEnabled'; id: string; enabled: boolean }
@@ -501,6 +524,12 @@ export type HostToUiMessage =
   /** Every search the model ran this session, newest first. */
   | { type: 'searchLog'; entries: SearchLogEntry[] }
   /** Schedules plus every tool that currently exists, so the picker can list them all. */
+  | {
+      type: 'tools'
+      tools: ToolCatalogueEntry[]
+      /** True when the dispatcher is on, so the view can explain why some are hidden. */
+      dispatcher: boolean
+    }
   | {
       type: 'schedules'
       schedules: Schedule[]

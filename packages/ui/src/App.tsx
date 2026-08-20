@@ -20,6 +20,7 @@ import {
   type McpServerState,
   type NetworkSettingsSummary,
   type PythonSettings,
+  type ToolCatalogueEntry,
   type PythonStatus,
   type McpToolPermission,
   type TestConnectionStep,
@@ -151,6 +152,10 @@ export function App(props: AppProps): ReactElement {
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
+  const [toolCatalogue, setToolCatalogue] = useState<{ tools: ToolCatalogueEntry[]; dispatcher: boolean }>({
+    tools: [],
+    dispatcher: false,
+  })
   const [schedulerState, setSchedulerState] = useState<{ running: boolean; lastTickAt?: number } | undefined>(
     undefined,
   )
@@ -304,6 +309,8 @@ export function App(props: AppProps): ReactElement {
           ...(message.venvDir !== undefined ? { venvDir: message.venvDir } : {}),
           detail: message.detail,
         })
+      } else if (message.type === 'tools') {
+        setToolCatalogue({ tools: message.tools, dispatcher: message.dispatcher })
       } else if (message.type === 'schedules') {
         setSchedules(message.schedules)
         setScheduleTools(message.tools)
@@ -432,6 +439,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestPython' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -934,6 +942,7 @@ export function App(props: AppProps): ReactElement {
                   ...(id === undefined ? {} : { id }),
                 } satisfies UiToHostMessage),
             }}
+            tools={toolCatalogue}
             python={{
               status: pythonStatus,
               settings: pythonSettings,

@@ -58,6 +58,8 @@ import {
   buildExpertBriefing,
   buildDocCorpus,
   createNotifyTool,
+  parseNamespacedToolName,
+  type ToolCatalogueEntry,
   syncVectorStores,
   ASSESSMENT_PROBES,
   buildAssessmentQuestion,
@@ -276,6 +278,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Same reasoning as MCP: a Python tool created after the panel opened must appear in
       // the schedule picker without the user reloading the window.
       void postSchedules()
+      void postTools()
     },
   })
 
@@ -748,6 +751,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * and tools/list_changed alike.
          */
         void postSchedules()
+        // Same reasoning: MCP servers connect seconds after the panel opens, so a catalogue
+        // fetched once on mount would show an empty list for ever.
+        void postTools()
         // Fires on connect, disconnect and tools/list_changed — every way the MCP half of
         // the corpus can change. Opening the panel fires several at once, which is what the
         // debounce is for.
@@ -3475,6 +3481,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
+    } else if (message.type === 'requestTools') {
+      void postTools()
     } else if (message.type === 'requestSchedules') {
       void postSchedules()
     } else if (message.type === 'saveSchedule') {
@@ -3683,6 +3691,45 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .filter((tool) => !NEVER_AVAILABLE_TO_SCHEDULES.includes(tool.name))
       .map((tool) => ({ name: tool.name, description: tool.description, group: tool.group }))
       .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /**
+   * Everything that exists right now, for the read-only Tools view.
+   *
+   * Built with the dispatcher *as configured* rather than forced either way, unlike the
+   * documentation corpus — the point of this view is to show what the model can currently see,
+   * so a truthful `advertised` matters more than a complete corpus.
+   */
+  async function postTools(): Promise<void> {
+    const { config } = await configManager.load()
+    const dispatcher = config.retrieval?.dispatcher === true
+    const registry = currentToolRegistry(undefined, undefined, undefined, undefined, dispatcher)
+    const advertised = new Set(registry.promptList().map((tool) => tool.name))
+    const pythonNames = new Set(python.tools().map((tool) => tool.name))
+    const mcpNames = new Set(mcp.enabledTools().map((tool) => tool.name))
+
+    post({
+      type: 'tools',
+      dispatcher,
+      tools: registry
+        .list()
+        .map((tool) => {
+          // Source is taken from the registries that produced them rather than guessed from
+          // the name: a built-in could one day contain `__`, and a server could be called
+          // `py`. Asking the thing that owns the tool cannot be wrong in either case.
+          const server = mcpNames.has(tool.name) ? parseNamespacedToolName(tool.name)?.serverName : undefined
+          const source = pythonNames.has(tool.name) ? 'python' : mcpNames.has(tool.name) ? 'mcp' : 'built-in'
+          return {
+            name: tool.name,
+            description: tool.description,
+            group: tool.group,
+            source,
+            ...(server !== undefined ? { server } : {}),
+            advertised: advertised.has(tool.name),
+          } satisfies ToolCatalogueEntry
+        })
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    })
   }
 
   async function loadSchedules(): Promise<Record<string, Schedule>> {

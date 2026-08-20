@@ -61,6 +61,7 @@ export type {
   TestConnectionStep,
   PythonSettings,
   SearchConnectionSummary,
+  ToolCatalogueEntry,
   SearchConnectionInput,
   SearchQueryLimits,
   TranscriptEntry,

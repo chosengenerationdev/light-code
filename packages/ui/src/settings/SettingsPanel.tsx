@@ -14,6 +14,7 @@ import { ExpertTab, type ExpertState } from './ExpertTab.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
+import { ToolsTab, type ToolsTabProps } from './ToolsTab.js'
 import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
 import { SchedulesTab, type SchedulesTabProps } from './SchedulesTab.js'
 import type { BrowseRequest } from './PathField.js'
@@ -30,6 +31,7 @@ import {
   ServerIcon,
   ShieldIcon,
   PythonIcon,
+  ToolboxIcon,
 } from '../icons.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -77,6 +79,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   search: SearchTabProps
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
   python: PythonTabProps
+  tools: ToolsTabProps
   skills: SkillsTabProps
   schedules: SchedulesTabProps
 }
@@ -89,6 +92,7 @@ type TabId =
   | 'expert'
   | 'network'
   | 'python'
+  | 'tools'
   | 'skills'
   | 'schedules'
   | 'appearance'
@@ -111,6 +115,8 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'expert', label: 'Expert', Icon: ExpertIcon },
   { id: 'schedules', label: 'Schedules', Icon: ClockIcon },
   { id: 'python', label: 'Python', Icon: PythonIcon },
+  // After the sources it lists, because it is where you go to *read* rather than change.
+  { id: 'tools', label: 'Tools', Icon: ToolboxIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
   { id: 'appearance', label: 'Appearance', Icon: PaletteIcon },
@@ -214,6 +220,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <SchedulesTab {...props.schedules} />
         ) : active === 'skills' ? (
           <SkillsTab {...props.skills} />
+        ) : active === 'tools' ? (
+          <ToolsTab {...props.tools} />
         ) : active === 'python' ? (
           <PythonTab {...props.python} />
         ) : active === 'network' ? (

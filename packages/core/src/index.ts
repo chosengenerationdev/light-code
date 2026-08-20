@@ -376,6 +376,7 @@ export type {
   NetworkSettingsInput,
   NetworkSettingsSummary,
   SearchConnectionSummary,
+  ToolCatalogueEntry,
   SearchConnectionInput,
   SearchQueryLimits,
 } from './agent/protocol.js'
