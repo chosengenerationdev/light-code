@@ -27,6 +27,24 @@ async function main(): Promise<void> {
     return
   }
 
+  /*
+   * An unrecognised flag is reported, not ignored.
+   *
+   * A stale `npx` cache served a version that predated `--server`, which accepted the flag
+   * silently and started in single-user mode — so the operator believed configuration was
+   * locked when it was not. A flag that does nothing is worse than one that errors, and worse
+   * still when the thing it was supposed to do is a restriction.
+   */
+  const unknown = args.filter((arg) => arg.startsWith('--') && !KNOWN_FLAGS.has(arg))
+  if (unknown.length > 0) {
+    process.stderr.write(
+      `light-code: unknown option${unknown.length === 1 ? '' : 's'} ${unknown.join(', ')}\n` +
+        'If you expected this to work, you may be on an older cached copy — try:\n' +
+        '  npx @chosengeneration/light-code@latest --help\n',
+    )
+    process.exit(2)
+  }
+
   const serverMode = args.includes('--server')
   const adminIds = valuesOf(args, '--admin')
   const workspaceRoot = path.resolve(valueOf(args, '--workspace') ?? process.cwd())
@@ -85,6 +103,25 @@ async function main(): Promise<void> {
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 }
+
+/**
+ * Every flag this version understands.
+ *
+ * Kept beside `usage()` deliberately — the two drift the moment they live apart, and a flag
+ * missing from here is rejected outright rather than quietly ignored, which is the loud
+ * failure to have.
+ */
+const KNOWN_FLAGS = new Set([
+  '--help',
+  '-h',
+  '--workspace',
+  '--port',
+  '--data-dir',
+  '--no-open',
+  '--server',
+  '--admin',
+  '--bind',
+])
 
 /** Every value given for a repeatable flag, so `--admin a --admin b` works. */
 function valuesOf(args: string[], flag: string): string[] {

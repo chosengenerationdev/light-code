@@ -16,5 +16,21 @@ export default defineConfig({
       'apps/*/src/**/*.test.ts',
     ],
     passWithNoTests: true,
+    /*
+     * Bounded worker pool, because an unbounded one is flaky on this machine.
+     *
+     * The default spawns a fork per core and the suite intermittently died with "Failed to
+     * start forks worker" / "Timeout waiting for worker to respond" — never a test failure,
+     * always start-up contention, and it blocked the release gate twice. Several of these
+     * files pay jsdom's start-up cost, which makes the first seconds the busiest.
+     *
+     * Capped rather than serialised: the suite still runs in parallel and takes about the same
+     * wall time, because the bottleneck was never CPU.
+     */
+    pool: 'forks',
+    poolOptions: { forks: { maxForks: 4, minForks: 1 } },
+    /* A worker that is genuinely wedged should fail the file, not the whole run. */
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 })
