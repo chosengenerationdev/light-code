@@ -1,5 +1,20 @@
 # light-code-vscode
 
+## 0.33.2
+
+### Patch Changes
+
+- The schedule editor's skill picker is searchable.
+
+  A filter over names and descriptions, matching the tool picker beside it — a list you have to
+  scroll to read is not a picker. Descriptions are matched too, because you remember what a note
+  was about rather than what it was called, which is the same thing the description does when the
+  chat searches for one.
+
+  With a filter active, **Tick the N shown** and **Untick the N shown** act on the visible set and
+  say how many, so a bulk action can never reach a skill that is scrolled out of sight. A running
+  count says how many of your skills the run is currently told about.
+
 ## 0.33.1
 
 ### Patch Changes

@@ -394,6 +394,7 @@ function ScheduleEditor(props: {
 }): ReactElement {
   const [draft, setDraft] = useState<Schedule>(props.schedule)
   const [filter, setFilter] = useState('')
+  const [skillFilter, setSkillFilter] = useState('')
   /*
    * Selected tools stay listed whatever the filter says.
    *
@@ -439,6 +440,26 @@ function ScheduleEditor(props: {
       textarea?.setSelectionRange(inserted.caret, inserted.caret)
     })
   }
+
+  const skillNeedle = skillFilter.trim().toLowerCase()
+  /*
+   * Matches descriptions as well as names, like the Tools tab's search and for the same reason:
+   * you remember what a note was *about*, not what it was called. That is also exactly what the
+   * description is for when the chat searches for one.
+   */
+  const visibleSkills = props.skills.filter(
+    (skill) =>
+      skillNeedle.length === 0 ||
+      skill.name.toLowerCase().includes(skillNeedle) ||
+      skill.description.toLowerCase().includes(skillNeedle),
+  )
+  /*
+   * `allowedSkills` absent means every skill, so the bulk actions have to start from the full
+   * set — otherwise ticking the shown ones would narrow to *only* those, which is the opposite
+   * of what a filter plus "tick these" reads as.
+   */
+  const currentSkillNames = (): string[] => draft.allowedSkills ?? props.skills.map((skill) => skill.name)
+  const chosenSkillCount = currentSkillNames().length
 
   const set = (patch: Partial<Schedule>): void => setDraft((current) => ({ ...current, ...patch }))
   const setTrigger = (patch: Partial<ScheduleTrigger>): void =>
@@ -805,21 +826,77 @@ function ScheduleEditor(props: {
             )}
           </p>
 
-          {draft.allowedSkills !== undefined && (
-            <button
-              type="button"
-              style={{ ...secondaryButtonStyle(), fontSize: 11, marginBottom: 8 }}
-              onClick={() => {
-                const next = { ...draft }
-                delete next.allowedSkills
-                setDraft(next)
-              }}
-            >
-              Include all of them again
-            </button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+            <input
+              type="search"
+              value={skillFilter}
+              spellCheck={false}
+              aria-label="Filter skills"
+              placeholder="Filter by name or description…"
+              onChange={(event) => setSkillFilter(event.target.value)}
+              style={{ ...textFieldStyle(), flex: 1, minWidth: 140 }}
+            />
+            {/*
+              A count rather than a "show selected only" toggle, which the tool picker has and
+              this does not need: tools start empty, so finding the few you ticked is the
+              problem there. Skills start full, so the question is how many you have left.
+            */}
+            <span style={{ color: colors.muted, fontSize: 11 }}>
+              {chosenSkillCount} of {props.skills.length} selected
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            {draft.allowedSkills !== undefined && (
+              <button
+                type="button"
+                style={{ ...secondaryButtonStyle(), fontSize: 11 }}
+                onClick={() => {
+                  const next = { ...draft }
+                  delete next.allowedSkills
+                  setDraft(next)
+                }}
+              >
+                Include all of them again
+              </button>
+            )}
+            {/*
+              Acts on the filtered set and says how many, the same rule the tool picker follows.
+              "Select all" against a list you cannot currently see is the accident both pickers
+              exist to prevent.
+            */}
+            {skillNeedle.length > 0 && visibleSkills.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  style={{ ...secondaryButtonStyle(), fontSize: 11 }}
+                  onClick={() =>
+                    set({ allowedSkills: [...new Set([...currentSkillNames(), ...visibleSkills.map((s) => s.name)])] })
+                  }
+                >
+                  Tick the {visibleSkills.length} shown
+                </button>
+                <button
+                  type="button"
+                  style={{ ...secondaryButtonStyle(), fontSize: 11 }}
+                  onClick={() => {
+                    const hidden = new Set(visibleSkills.map((s) => s.name))
+                    set({ allowedSkills: currentSkillNames().filter((name) => !hidden.has(name)) })
+                  }}
+                >
+                  Untick the {visibleSkills.length} shown
+                </button>
+              </>
+            )}
+          </div>
+
+          {visibleSkills.length === 0 && (
+            <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+              No skill matches &ldquo;{skillFilter.trim()}&rdquo;.
+            </p>
           )}
 
-          {props.skills.map((skill) => {
+          {visibleSkills.map((skill) => {
             const chosen = draft.allowedSkills === undefined || draft.allowedSkills.includes(skill.name)
             return (
               <label
@@ -834,7 +911,7 @@ function ScheduleEditor(props: {
                     // The first untick has to materialise the list, since "undefined" means
                     // everything — starting from the full set is what makes that one click
                     // mean "all but this" rather than "only this".
-                    const current = draft.allowedSkills ?? props.skills.map((entry) => entry.name)
+                    const current = currentSkillNames()
                     set({
                       allowedSkills: chosen
                         ? current.filter((name) => name !== skill.name)

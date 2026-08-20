@@ -155,6 +155,32 @@ describe('the schedule tool picker', () => {
     expect(boxes.every((box) => box.checked)).toBe(true)
   })
 
+  /** Same reason the tool picker has one: a long list is unusable without it. */
+  it('filters skills by name and by description', () => {
+    openEditor()
+    const field = container.querySelector<HTMLInputElement>('input[aria-label="Filter skills"]')
+    expect(field).not.toBeNull()
+
+    const type = (value: string): void => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+      act(() => {
+        setter?.call(field, value)
+        field?.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+
+    type('release')
+    expect(skillCheckboxes().map((box) => box.dataset['skill'])).toEqual(['release-process'])
+
+    // By description too — you remember what a note was about, not what it was called.
+    type('internal services')
+    expect(skillCheckboxes().map((box) => box.dataset['skill'])).toEqual(['internal-http-client'])
+
+    type('nothing-like-this')
+    expect(skillCheckboxes()).toHaveLength(0)
+    expect(container.textContent).toContain('No skill matches')
+  })
+
   it('narrows to the rest when one skill is unticked', () => {
     const saved: Schedule[] = []
     openEditor(saved)
