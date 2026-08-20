@@ -94,9 +94,19 @@ export function App(props: AppProps): ReactElement {
     overridden: boolean
     estimate?: { consultations?: number; usd?: number }
   }>({ usd: 0, consultations: 0, unpriced: 0, maxSpendUsd: 0, maxConsultations: 0, overridden: false })
-  const [dispatcher, setDispatcher] = useState<{ enabled: boolean; hiddenTools: number; docsIndex?: string }>({
-    enabled: false,
+  const [dispatcher, setDispatcher] = useState<{
+    enabled: boolean
+    hiddenTools: number
+    skills: boolean
+    hiddenSkills: number
+    docsIndex?: string
+  }>({
+    // Matches the shipped default, so the checkbox does not flick off and back on while the
+    // host's first `dispatcher` message is in flight.
+    enabled: true,
     hiddenTools: 0,
+    skills: true,
+    hiddenSkills: 0,
   })
   const [docsIndexing, setDocsIndexing] = useState(false)
   const [searchLog, setSearchLog] = useState<SearchLogEntry[]>([])
@@ -153,6 +163,7 @@ export function App(props: AppProps): ReactElement {
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
+  const [scheduleSkills, setScheduleSkills] = useState<{ name: string; description: string }[]>([])
   const [toolCatalogue, setToolCatalogue] = useState<{ tools: ToolCatalogueEntry[]; dispatcher: boolean }>({
     tools: [],
     dispatcher: false,
@@ -321,6 +332,7 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'tools') {
         setToolCatalogue({ tools: message.tools, dispatcher: message.dispatcher })
       } else if (message.type === 'schedules') {
+        setScheduleSkills(message.skills)
         setSchedules(message.schedules)
         setScheduleTools(message.tools)
         setRunningScheduleId(message.runningId)
@@ -338,6 +350,8 @@ export function App(props: AppProps): ReactElement {
         setDispatcher({
           enabled: message.enabled,
           hiddenTools: message.hiddenTools,
+          skills: message.skills,
+          hiddenSkills: message.hiddenSkills,
           ...(message.docsIndex !== undefined ? { docsIndex: message.docsIndex } : {}),
         })
       } else if (message.type === 'docsIndexed') {
@@ -614,6 +628,8 @@ export function App(props: AppProps): ReactElement {
     dispatcher: {
       enabled: dispatcher.enabled,
       hiddenTools: dispatcher.hiddenTools,
+      skills: dispatcher.skills,
+      hiddenSkills: dispatcher.hiddenSkills,
       ...(dispatcher.docsIndex !== undefined ? { docsIndex: dispatcher.docsIndex } : {}),
       indexing: docsIndexing,
       ...(docsResult !== undefined ? { result: docsResult } : {}),
@@ -622,6 +638,10 @@ export function App(props: AppProps): ReactElement {
       onToggle: (enabled: boolean) => {
         setDispatcher((current) => ({ ...current, enabled }))
         props.transport.post({ type: 'setDispatcher', enabled } satisfies UiToHostMessage)
+      },
+      onToggleSkills: (enabled: boolean) => {
+        setDispatcher((current) => ({ ...current, skills: enabled }))
+        props.transport.post({ type: 'setSkillRetrieval', enabled } satisfies UiToHostMessage)
       },
       onIndexDocs: () => {
         setDocsResult(undefined)
@@ -945,6 +965,7 @@ export function App(props: AppProps): ReactElement {
             schedules={{
               schedules,
               tools: scheduleTools,
+              skills: scheduleSkills,
               runningId: runningScheduleId,
               onSave: (schedule) => props.transport.post({ type: 'saveSchedule', schedule } satisfies UiToHostMessage),
               onDelete: (id) => props.transport.post({ type: 'deleteSchedule', id } satisfies UiToHostMessage),

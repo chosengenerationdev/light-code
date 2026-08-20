@@ -35,12 +35,18 @@ const TOOLS: ScheduleToolInfo[] = [
   { name: 'attempt_completion', description: 'Finish.', group: 'always' },
 ]
 
+const SKILLS = [
+  { name: 'internal-http-client', description: 'How to call internal services.' },
+  { name: 'release-process', description: 'How a release is cut here.' },
+]
+
 function render(schedules: Schedule[] = [], saved: Schedule[] = []): void {
   act(() =>
     root.render(
       <SchedulesTab
         schedules={schedules}
         tools={TOOLS}
+        skills={SKILLS}
         onSave={(schedule) => saved.push(schedule)}
         onDelete={() => {}}
         onToggle={() => {}}
@@ -61,13 +67,39 @@ const click = (element: Element | null | undefined): void => {
   act(() => element?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 }
 
-function openEditor(): void {
-  render()
+function openEditor(saved: Schedule[] = []): void {
+  render([], saved)
   const newButton = [...container.querySelectorAll('button')].find((b) => b.textContent === 'New schedule')
   click(newButton)
 }
 
-const checkboxes = (): HTMLInputElement[] => [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+/** A new schedule needs a name and a prompt before Save is enabled. */
+function fillRequiredFields(): void {
+  const setValue = (element: HTMLInputElement | HTMLTextAreaElement | null, value: string): void => {
+    const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(prototype.prototype, 'value')?.set
+    act(() => {
+      setter?.call(element, value)
+      element?.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  setValue(container.querySelector<HTMLInputElement>('input[type="text"]'), 'nightly')
+  setValue(container.querySelector('textarea'), 'summarise failing tests')
+}
+
+function save(): void {
+  fillRequiredFields()
+  click([...container.querySelectorAll('button')].find((button) => button.textContent === 'Save'))
+}
+
+/*
+ * Tools and skills are picked in the same editor with opposite defaults — nothing ticked versus
+ * everything ticked — so an assertion about "the checkboxes" has to say which it means.
+ */
+const toolCheckboxes = (): HTMLInputElement[] =>
+  [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:not([data-skill])')]
+const skillCheckboxes = (): HTMLInputElement[] =>
+  [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-skill]')]
 
 /** By label text rather than index — a reordered list must not silently tick the wrong tool. */
 function checkboxFor(toolName: string): HTMLInputElement | undefined {
@@ -88,11 +120,35 @@ function type(placeholder: string, value: string): void {
 
 describe('the schedule tool picker', () => {
   /** A schedule runs unattended, so every capability must be an explicit decision. */
-  it('starts with nothing selectable ticked', () => {
+  it('starts with no tool ticked', () => {
     openEditor()
-    const choosable = checkboxes().filter((box) => !box.disabled)
+    const choosable = toolCheckboxes().filter((box) => !box.disabled)
     expect(choosable.length).toBeGreaterThan(0)
     expect(choosable.every((box) => !box.checked)).toBe(true)
+  })
+
+  /**
+   * The opposite default to tools, deliberately.
+   *
+   * An unticked tool is a capability withheld, so nothing is granted until asked for. A skill is
+   * knowledge, and every schedule written before this picker existed has no list at all — reading
+   * that as "none" would quietly strip a working nightly job of the conventions it relied on.
+   */
+  it('starts with every skill ticked, because a schedule that never chose means all of them', () => {
+    openEditor()
+    const boxes = skillCheckboxes()
+    expect(boxes.length).toBe(2)
+    expect(boxes.every((box) => box.checked)).toBe(true)
+  })
+
+  it('narrows to the rest when one skill is unticked', () => {
+    const saved: Schedule[] = []
+    openEditor(saved)
+    const box = skillCheckboxes()[0]
+    act(() => box?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    save()
+    // Materialised into a real list on the first untick: "all but this one", not "only this one".
+    expect(saved[0]?.allowedSkills).toEqual(['release-process'])
   })
 
   /**

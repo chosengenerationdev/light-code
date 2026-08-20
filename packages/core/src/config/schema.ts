@@ -267,14 +267,30 @@ export type SkillsConfig = z.infer<typeof skillsConfigSchema>
 export const retrievalConfigSchema = z
   .object({
     /**
-     * Off by default, and that is a real default rather than caution.
+     * **On by default since 0.33.0**, at the user's request: looking a tool up first is the
+     * behaviour they want, and a corporate install with several MCP servers is the case this
+     * product is actually deployed into.
      *
-     * The dispatcher trades a smaller prompt for less reliable tool calls: models are
-     * measurably better at native tool-calling than at naming a tool inside `call_tool`.
-     * It earns its place when a large MCP catalogue genuinely dominates the context window,
-     * which is a minority of installs.
+     * The cost it trades against is real and unchanged — models are measurably better at
+     * native tool-calling than at naming a tool inside `call_tool`. Two things keep that from
+     * biting a small install: nothing is hidden unless there is something to hide (a workspace
+     * with no MCP or Python tools registers no dispatcher tools at all, so it pays nothing),
+     * and the switch is one click away in Settings → Search, which reports exactly how many
+     * tools it is hiding.
      */
     dispatcher: z.boolean(),
+    /**
+     * The same treatment for skills: their names and descriptions leave the prompt and are
+     * found with `search_docs` instead.
+     *
+     * On by default, and paired with `dispatcher` rather than independent of it in practice —
+     * but a separate key because the trade is different. A tool's schema is large and its name
+     * is guessable from the task; a skill's summary is one line and is the *only* thing that
+     * makes the model aware the skill exists at all. So hiding skills saves less and risks
+     * more, which is why a count and a standing instruction to search stay in the prompt even
+     * when the list does not — see `renderSkillsHintForPrompt`.
+     */
+    skills: z.boolean(),
     /**
      * Where the documentation corpus is indexed. Absent means `search_docs` still works,
      * matching names and descriptions from the live registry instead of by meaning — see
@@ -284,6 +300,25 @@ export const retrievalConfigSchema = z
   })
   .partial()
 export type RetrievalConfig = z.infer<typeof retrievalConfigSchema>
+
+/**
+ * Whether tool schemas are kept out of the prompt.
+ *
+ * A function rather than a `.default()` on the schema because the stored config is
+ * deliberately sparse: writing `dispatcher: true` into every config file on load would make
+ * a later change of default invisible to everyone who had ever opened Settings.
+ */
+export function dispatcherEnabled(retrieval: RetrievalConfig | undefined): boolean {
+  return retrieval?.dispatcher !== false
+}
+
+/** Whether skill summaries are kept out of the prompt and found with `search_docs` instead. */
+export function skillRetrievalEnabled(retrieval: RetrievalConfig | undefined): boolean {
+  // Tied to the dispatcher: `search_docs` is what finds a hidden skill, and it is only
+  // registered when the dispatcher is on. Hiding skills without it would make every skill
+  // permanently invisible — the same trap the lexical fallback exists to avoid for tools.
+  return dispatcherEnabled(retrieval) && retrieval?.skills !== false
+}
 
 /**
  * Embeddings, borrowed from an existing provider profile.

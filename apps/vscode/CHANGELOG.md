@@ -1,5 +1,33 @@
 # light-code-vscode
 
+## 0.33.0
+
+### Minor Changes
+
+- Looking things up is now the default, and skills work the same way as tools.
+
+  MCP and Python tool schemas, and skill summaries, are kept out of the system prompt; the
+  assistant finds them with `search_docs` and calls them through `call_tool`. Both halves are
+  separate checkboxes in Settings → Search, and either can be switched off.
+
+  Nothing is registered when there is nothing to hide. A workspace with no MCP servers, no Python
+  tools and no skills gets no dispatcher tools at all, so the case where this cost more than it
+  saved no longer exists.
+
+  Skills keep a count and a standing instruction to search even when the list is gone. A tool is
+  looked up because the task obviously calls for one; a skill's one-line description is the only
+  thing that makes the model aware the subject was ever written about, so the trigger is replaced
+  rather than dropped.
+
+  Scheduled runs name their skills instead of searching, under **What it should know** in the
+  schedule editor. A schedule's tools are an allowlist that may not include `search_docs`, and a
+  run that comes up empty has nobody watching. Schedules that predate this include every skill,
+  as they did before.
+
+  Also fixes a latent bug: saving one `retrieval` setting replaced the whole block rather than
+  merging into it, which discarded a hand-set `docsIndex`. Invisible with a single toggle;
+  guaranteed to bite with two.
+
 ## 0.32.0
 
 ### Minor Changes

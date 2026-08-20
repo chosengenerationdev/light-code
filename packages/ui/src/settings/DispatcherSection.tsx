@@ -5,6 +5,11 @@ export interface DispatcherSectionProps {
   enabled: boolean
   /** How many tools are hidden, or would be if it were switched on. */
   hiddenTools: number
+  /** Skill summaries are retrieved rather than listed. */
+  skills: boolean
+  /** How many skills that affects. */
+  hiddenSkills: number
+  onToggleSkills: (enabled: boolean) => void
   docsIndex?: string | undefined
   onToggle: (enabled: boolean) => void
   onIndexDocs: () => void
@@ -50,7 +55,10 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
 
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 10px' }}>
         {props.hiddenTools === 0 ? (
-          <>There are no MCP or Python tools to hide, so this would change nothing.</>
+          // Not "this would change nothing" any more: with the dispatcher on by default, an
+          // empty catalogue means the dispatcher tools are not registered at all, and saying
+          // so is the difference between "inert" and "costing you three tool schemas".
+          <>No MCP or Python tools to hide, so nothing is registered for this and it costs nothing.</>
         ) : (
           <>
             {props.enabled ? 'Hiding' : 'Would hide'}{' '}
@@ -69,6 +77,44 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
           </>
         )}
       </p>
+
+      {/*
+        Its own checkbox rather than folded into the one above, because it is a different
+        trade. A tool schema is large and the model knows it wants "a tool that lists PRs"; a
+        skill summary is one line and is the only thing that tells the model the subject was
+        ever written about. So this saves less and risks more, and someone should be able to
+        keep tool retrieval while leaving skills listed.
+      */}
+      <label
+        style={{
+          display: 'flex',
+          gap: 8,
+          alignItems: 'flex-start',
+          margin: '0 0 8px',
+          cursor: props.enabled ? 'pointer' : 'not-allowed',
+          opacity: props.enabled ? 1 : 0.55,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={props.skills && props.enabled}
+          disabled={!props.enabled}
+          onChange={(event) => props.onToggleSkills(event.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span>
+          <span style={{ display: 'block', fontSize: 13 }}>Look up skills the same way</span>
+          <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+            Skill summaries stop being listed in every request. A count and an instruction to
+            search stay, so the assistant still knows notes exist and looks for one before
+            working on something unfamiliar.{' '}
+            {props.hiddenSkills === 0
+              ? 'No skills recorded yet, so this changes nothing today.'
+              : `${String(props.hiddenSkills)} ${props.hiddenSkills === 1 ? 'skill' : 'skills'} affected.`}
+            {!props.enabled && ' Needs the setting above, which is what finds them.'}
+          </span>
+        </span>
+      </label>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <button

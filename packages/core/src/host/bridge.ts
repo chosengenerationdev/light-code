@@ -39,6 +39,7 @@ import {
   createDeleteSkillTool,
   loadSkills,
   renderSkillsForPrompt,
+  renderSkillsHintForPrompt,
   isValidSkillName,
   skillFileName,
   type Skill,
@@ -73,6 +74,7 @@ import {
   type ExpertLimits,
   registryForSchedule,
   filterToolsForSchedule,
+  skillsForSchedule,
   NEVER_AVAILABLE_TO_SCHEDULES,
   ScheduledApprovalGate,
   scheduledRunGuidance,
@@ -110,6 +112,8 @@ import {
   type HostToUiMessage,
   type ImageAttachmentInput,
   type LightCodeConfig,
+  dispatcherEnabled,
+  skillRetrievalEnabled,
   type NetworkSettingsInput,
   type McpServersConfig,
   type McpToolPermission,
@@ -794,6 +798,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * (§12). Resolved once per turn like the mode, so the tool block stays byte-stable.
      */
     dispatcher = false,
+    /**
+     * Keeps skill summaries out of the prompt too, found with `search_docs` instead. Separate
+     * from `dispatcher` because it is a separate trade — see `skillRetrievalEnabled`.
+     */
+    hideSkills = false,
   ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
@@ -884,8 +893,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * by meaning — and that fallback is load-bearing, not a nicety: hiding every MCP tool
      * behind a `search_docs` that did not exist would make them all permanently unreachable.
      */
-    if (dispatcher) {
+    /*
+     * Nothing is hidden unless there is something to hide.
+     *
+     * The dispatcher is on by default now, and the one case where it costs more than it saves
+     * is a workspace with no MCP servers, no Python tools and no skills: `call_tool`,
+     * `search_docs` and `forget_docs` carry their own descriptions, so registering them to
+     * search an empty catalogue is pure loss. Conditioning on the catalogue removes that case
+     * entirely rather than asking the user to notice it.
+     *
+     * `call_tool` and `search_docs` are decided separately because they answer to different
+     * things: a workspace with skills but no MCP tools needs to *find* documentation without
+     * needing an indirect way to *call* anything.
+     */
+    const hasHiddenTools = dispatcher && combined.dispatchOnlyList().length > 0
+    const hasHiddenSkills = hideSkills && skills.length > 0
+    if (hasHiddenTools) {
       combined.register(createCallToolTool())
+    }
+    if (dispatcher && (hasHiddenTools || hasHiddenSkills)) {
       // Registered with search_docs, never without it: releasing documentation only makes
       // sense where documentation is being retrieved.
       combined.register(createForgetDocsTool())
@@ -1232,11 +1258,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 .filter((name) => name !== 'attempt_completion'),
             )
 
+      /*
+       * A schedule names its skills instead of searching for them.
+       *
+       * Its tools are an allowlist the user ticked and may well not include `search_docs`, so
+       * telling an unattended run that notes exist and to go and find them can leave it with
+       * nothing to search with — and nobody is there to notice. Naming them up front is also
+       * simply the better fit: a job that runs the same prompt every night knows in advance
+       * which conventions apply, where a chat cannot.
+       *
+       * `allowedSkills` absent means all of them, so schedules written before this keep the
+       * behaviour they had.
+       */
+      const skillsSearchable = skillRetrievalEnabled(config.retrieval) && schedule === undefined
+      const turnSkills = schedule === undefined ? skills : skillsForSchedule(skills, schedule.allowedSkills)
+
       const desiredPrompt = buildSystemPrompt(workspaceRoot, {
         model: profile.model,
         providerLabel: profile.label,
         expertAvailable: expertCliInfo !== undefined,
-        skills: renderSkillsForPrompt(skills),
+        /*
+         * Either the whole list or a count and an instruction to search — never both, and
+         * never neither. `renderSkillsHintForPrompt` explains why the count stays.
+         */
+        skills: skillsSearchable ? renderSkillsHintForPrompt(skills.length) : renderSkillsForPrompt(turnSkills),
+        skillsSearchable,
         canWriteSkills: skillsDir !== undefined,
         /*
          * Junior mode's instructions are worse than useless without the expert to delegate
@@ -1352,7 +1398,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           search !== undefined && embedder !== undefined && docsIndex !== undefined
             ? { searcher: search.searcher, embedder, index: docsIndex }
             : undefined,
-          config.retrieval?.dispatcher === true,
+          dispatcherEnabled(config.retrieval),
+          skillsSearchable,
       )
 
       /*
@@ -2088,6 +2135,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let indexingAbort: AbortController | undefined
 
   /**
+   * Saves one field of the `retrieval` block without dropping the others.
+   *
+   * `ConfigManager.save` merges one level only, so `{ retrieval: { skills: true } }` replaces
+   * the whole block rather than adding to it. With a single toggle that was invisible; with two
+   * it means each one silently switches the other off, and it has always quietly discarded a
+   * hand-set `docsIndex` — which nothing in the UI writes, so nobody would connect the loss to
+   * having clicked a checkbox.
+   *
+   * Merging here rather than making `save` deep: an array or a keyed map is *meant* to be
+   * replaced, and a deep merge would make removing an entry from `approvals` or `profiles`
+   * impossible. The nesting is this block's problem, so the fix belongs to this block.
+   *
+   * Reading the merged config is correct because `retrieval` is user-scope only (invariant 5),
+   * so the merged view and the user file agree by construction.
+   */
+  async function saveRetrieval(patch: Partial<NonNullable<LightCodeConfig['retrieval']>>): Promise<void> {
+    const { config } = await configManager.load()
+    await configManager.save('user', { retrieval: { ...config.retrieval, ...patch } })
+  }
+
+  /**
    * Reports the dispatcher's state to the UI, including how many tools it is actually hiding.
    *
    * The count is the useful part: the setting is only worth having when the catalogue is big
@@ -2096,15 +2164,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function postDispatcher(): Promise<void> {
     const { config } = await configManager.load()
-    const enabled = config.retrieval?.dispatcher === true
+    // The skill count is part of what this reports, and nothing else has necessarily loaded
+    // it yet — the panel can be opened before a single turn has run.
+    await refreshSkills()
+    const enabled = dispatcherEnabled(config.retrieval)
     // Counted with the dispatcher forced on, so the number answers "how many *would* be
     // hidden" while it is still switched off.
-    const hidden = currentToolRegistry(undefined, undefined, undefined, undefined, true).dispatchOnlyList().length
+    const hidden = currentToolRegistry(undefined, undefined, undefined, undefined, true, true).dispatchOnlyList().length
     const index = docsIndexName(config)
     post({
       type: 'dispatcher',
       enabled,
       hiddenTools: hidden,
+      skills: skillRetrievalEnabled(config.retrieval),
+      hiddenSkills: skills.length,
       ...(index !== undefined ? { docsIndex: index } : {}),
     })
   }
@@ -3458,13 +3531,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'clearSearchLog') {
       searchLog.clear()
     } else if (message.type === 'setDispatcher') {
-      void configManager
-        .save('user', { retrieval: { dispatcher: message.enabled } })
+      void saveRetrieval({ dispatcher: message.enabled })
         .then(() => {
           void postDispatcher()
           // Switching it on is the moment the index starts being consulted, and it may never
           // have been built. Off needs nothing — the index simply stops being read.
           if (message.enabled) scheduleDocsReindex('dispatcher enabled')
+        })
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setSkillRetrieval') {
+      void saveRetrieval({ skills: message.enabled })
+        .then(() => {
+          void postDispatcher()
+          // Same reason as the dispatcher: switching it on is when the index starts being
+          // consulted for skills, and it may never have been built.
+          if (message.enabled) scheduleDocsReindex('skill retrieval enabled')
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'startIndexing') {
@@ -3740,11 +3821,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   async function postSchedules(): Promise<void> {
+    // The picker lists real skills, so it has to reflect what is on disk now rather than
+    // whatever the last turn happened to load.
+    await refreshSkills()
     const schedules = await loadSchedules()
     post({
       type: 'schedules',
       schedules: Object.values(schedules).sort((a, b) => a.name.localeCompare(b.name)),
       tools: allToolsForPicker(),
+      skills: skills.map((skill) => ({ name: skill.name, description: skill.description })),
       ...(runningScheduleId !== undefined ? { runningId: runningScheduleId } : {}),
       scheduler: {
         running: scheduleTimer !== undefined,

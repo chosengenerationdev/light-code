@@ -74,6 +74,20 @@ export const scheduleSchema = z.object({
    */
   allowedTools: z.array(z.string()),
   /**
+   * Which skills this run is told about, by name.
+   *
+   * **Absent means all of them**, which is what every schedule written before this existed
+   * means, and the only reading that cannot silently take knowledge away from a job that was
+   * working. An empty array is a real choice — "this run needs none" — and is honoured.
+   *
+   * Why a list rather than the retrieval the chat uses: a scheduled run's tools are an
+   * allowlist the user ticked, and it may well not include `search_docs`, so telling the run
+   * that notes exist and to go and search for them can leave it with nothing to search with.
+   * Choosing the relevant ones up front is also simply better for a job that does the same
+   * thing every night — it knows in advance which conventions apply, where the chat cannot.
+   */
+  allowedSkills: z.array(z.string()).optional(),
+  /**
    * When the timer will next run this, in epoch ms.
    *
    * **Stored rather than derived on every tick.** A "when next?" function always answers with
@@ -131,6 +145,22 @@ export type Schedules = z.infer<typeof schedulesSchema>
 export const ALWAYS_AVAILABLE_TO_SCHEDULES = ['attempt_completion', 'notify'] as const
 
 /** Groups whose presence in a schedule's allowlist warrants a warning in the UI. */
+/**
+ * The skills a scheduled run is told about.
+ *
+ * Absent means all — see `allowedSkills`. Names that no longer resolve are dropped silently
+ * rather than reported: a skill can be deleted or renamed long after a schedule was written,
+ * and failing a nightly job over a stale name in a list of hints would be a poor trade.
+ */
+export function skillsForSchedule<T extends { name: string }>(
+  skills: readonly T[],
+  allowed: readonly string[] | undefined,
+): T[] {
+  if (allowed === undefined) return [...skills]
+  const wanted = new Set(allowed)
+  return skills.filter((skill) => wanted.has(skill.name))
+}
+
 export function riskyGroupsIn(tools: readonly { name: string; group: string }[], allowed: readonly string[]): string[] {
   const selected = new Set(allowed)
   const groups = new Set<string>()

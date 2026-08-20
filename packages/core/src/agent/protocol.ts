@@ -341,6 +341,7 @@ export type UiToHostMessage =
   | { type: 'runSearchProbe'; query: string; target: 'codebase' | 'docs' }
   | { type: 'clearSearchLog' }
   | { type: 'setDispatcher'; enabled: boolean }
+  | { type: 'setSkillRetrieval'; enabled: boolean }
   | { type: 'cancelIndexing' }
   | {
       type: 'saveEmbedder'
@@ -544,6 +545,8 @@ export type HostToUiMessage =
       type: 'schedules'
       schedules: Schedule[]
       tools: ScheduleToolInfo[]
+      /** Every skill, so a schedule can name the ones it needs rather than searching. */
+      skills: { name: string; description: string }[]
       runningId?: string
       /**
        * Whether the timer is ticking, and when it last did.
@@ -561,7 +564,16 @@ export type HostToUiMessage =
   /** Progress and outcome of copying one store into another. */
   | { type: 'storeSync'; running: boolean; copied?: number; error?: string; fromLabel?: string }
   /** Whether tool schemas are being kept out of the prompt, and how many are hidden. */
-  | { type: 'dispatcher'; enabled: boolean; hiddenTools: number; docsIndex?: string }
+  | {
+      type: 'dispatcher'
+      enabled: boolean
+      hiddenTools: number
+      /** Skill summaries are retrieved rather than listed. */
+      skills: boolean
+      /** How many skills that affects, so the panel can say what it is trading. */
+      hiddenSkills: number
+      docsIndex?: string
+    }
   | { type: 'mcpServerSaved'; name: string }
   /**
    * What the probe found. An absent `interpreter` means nothing was found and `detail` says

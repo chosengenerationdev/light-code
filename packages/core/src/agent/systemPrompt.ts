@@ -13,6 +13,14 @@ export interface SystemPromptOptions {
   /** Set when `write_skill` is offered, so the model knows it can record what it learns. */
   canWriteSkills?: boolean
   /**
+   * True when skills are found with `search_docs` rather than listed above.
+   *
+   * Only changes the wording of the write guidance, but it has to: "check the list above"
+   * is an instruction to consult something that is no longer there, and following it would
+   * mean concluding no skill covers the subject without having looked.
+   */
+  skillsSearchable?: boolean
+  /**
    * Extra instructions from the active mode — Junior mode's delegation rules, for instance.
    *
    * Appended last so it can qualify everything above it, which is exactly what Junior mode
@@ -86,14 +94,20 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
       '  do not write one unprompted.',
       '- "Durable" means it would be true again next week and useful to a future',
       '  conversation. A one-off instruction for the current task is not a skill.',
-      '- Before writing a new skill, check the list above: if one already covers the',
-      '  subject, read it and update that instead of creating a near-duplicate.',
+      options.skillsSearchable === true
+        ? '- Before writing a new skill, search for one with search_docs: if a note already ' +
+          'covers the subject, read it and update that instead of creating a near-duplicate.'
+        : '- Before writing a new skill, check the list above: if one already covers the ' +
+          'subject, read it and update that instead of creating a near-duplicate.',
       '- When you learn something *corrects* an existing skill, say so and offer to update',
       '  it. A stale skill is worse than a missing one, because it is trusted.',
       '- Write for a reader who has none of this conversation: name the package, the import',
       '  path, the function, and show a short example. Avoid "as discussed" and "the usual".',
-      '- The description line is the only part always in context, so make it say what',
-      '  subject the skill covers — it is a trigger for reading, not a summary.',
+      options.skillsSearchable === true
+        ? '- The description line is what search matches on, so make it say what subject the ' +
+          'skill covers in the words someone would search for — it is a trigger, not a summary.'
+        : '- The description line is the only part always in context, so make it say what ' +
+          'subject the skill covers — it is a trigger for reading, not a summary.',
     )
   }
 

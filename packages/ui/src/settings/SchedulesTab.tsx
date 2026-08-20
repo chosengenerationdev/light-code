@@ -21,6 +21,13 @@ export interface SchedulesTabProps {
   schedules: Schedule[]
   /** Every tool that exists right now — built-in, MCP and Python alike. */
   tools: ScheduleToolInfo[]
+  /**
+   * Every skill that exists right now, so a schedule can be told which ones apply to it.
+   *
+   * The chat finds skills with `search_docs`; a schedule names them instead, because its tool
+   * list may not include `search_docs` and there is nobody watching to notice.
+   */
+  skills: { name: string; description: string }[]
   onSave: (schedule: Schedule) => void
   onDelete: (id: string) => void
   onDuplicate: (id: string) => void
@@ -95,6 +102,7 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
       <ScheduleEditor
         schedule={editing}
         tools={props.tools}
+        skills={props.skills}
         mentionCandidates={props.mentionCandidates}
         onQueryMentions={props.onQueryMentions}
         onCancel={() => setEditing(undefined)}
@@ -378,6 +386,7 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
 function ScheduleEditor(props: {
   schedule: Schedule
   tools: ScheduleToolInfo[]
+  skills: { name: string; description: string }[]
   mentionCandidates: string[]
   onQueryMentions: (query: string) => void
   onSave: (schedule: Schedule) => void
@@ -755,6 +764,79 @@ function ScheduleEditor(props: {
           ))}
         </div>
       ))}
+
+      {/*
+        Skills, chosen the same way tools are — and for the same reason. What differs is the
+        default: an unticked *tool* is withheld, but a schedule that has never been edited has
+        no skill list at all, and that means "all of them". Taking knowledge away from a job
+        that was working, on upgrade, would be the worse failure by a distance.
+      */}
+      {props.skills.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <span style={labelStyle()}>What it should know</span>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+            {draft.allowedSkills === undefined ? (
+              <>
+                All {props.skills.length} {props.skills.length === 1 ? 'skill is' : 'skills are'}{' '}
+                included. Tick a few to narrow it — useful when a run only touches one area and
+                the rest is prompt it pays for every time.
+              </>
+            ) : (
+              <>
+                Only the ticked skills are put in this run&rsquo;s prompt. Unlike the chat, a
+                schedule does not search for them — it may not have <code>search_docs</code>, and
+                nobody is watching if it comes up empty.
+              </>
+            )}
+          </p>
+
+          {draft.allowedSkills !== undefined && (
+            <button
+              type="button"
+              style={{ ...secondaryButtonStyle(), fontSize: 11, marginBottom: 8 }}
+              onClick={() => {
+                const next = { ...draft }
+                delete next.allowedSkills
+                setDraft(next)
+              }}
+            >
+              Include all of them again
+            </button>
+          )}
+
+          {props.skills.map((skill) => {
+            const chosen = draft.allowedSkills === undefined || draft.allowedSkills.includes(skill.name)
+            return (
+              <label
+                key={skill.name}
+                style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 4, cursor: 'pointer' }}
+              >
+                <input
+                  type="checkbox"
+                  data-skill={skill.name}
+                  checked={chosen}
+                  onChange={() => {
+                    // The first untick has to materialise the list, since "undefined" means
+                    // everything — starting from the full set is what makes that one click
+                    // mean "all but this" rather than "only this".
+                    const current = draft.allowedSkills ?? props.skills.map((entry) => entry.name)
+                    set({
+                      allowedSkills: chosen
+                        ? current.filter((name) => name !== skill.name)
+                        : [...current, skill.name],
+                    })
+                  }}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <span style={{ display: 'block', fontFamily: monospace, fontSize: 11 }}>{skill.name}</span>
+                  <span style={{ display: 'block', color: colors.muted, fontSize: 10 }}>{skill.description}</span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      )}
 
       {/*
         The warning the plan asks for, shown only when it applies. Unattended execution plus

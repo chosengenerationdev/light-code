@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.32.0",
+  "version": "0.33.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -206,7 +206,7 @@
           {
             "id": "skills",
             "title": "Skills - teach it your conventions",
-            "description": "A skill is a markdown file with a name and a description. Only those two lines are in the prompt; it reads the body when a task actually calls for it, so a skill can be as long as you like and costs a few tokens until used.\n\nThis is the answer to \"it does not know about our internal libraries\". It offers to write one when you explain something durable, and offers to correct one when something contradicts it - a stale skill is worse than a missing one.\n\nYou get a writable folder plus any number of read-only ones, such as a shared team folder, with PATH-style precedence and shadowing reported rather than silently applied. Writing a skill needs approval too: it is prose that steers every future turn.\n\n[Open the Skills tab](command:lightCode.openSettings?%5B%22skills%22%5D)",
+            "description": "A skill is a markdown file with a name and a description. The body is never in the prompt - it is read with `read_file` when a task actually calls for it, so a skill can be as long as you like.\n\nBy default the summaries are not in the prompt either: the assistant searches for a relevant note with `search_docs`, the same way it finds tools. What stays is a count and an instruction to look, so it still knows notes exist - a description nobody sees is a note nobody reads. Switch it off in **Search** if you would rather every summary sat in the prompt.\n\nThis is the answer to \"it does not know about our internal libraries\". It offers to write one when you explain something durable, and offers to correct one when something contradicts it - a stale skill is worse than a missing one.\n\nYou get a writable folder plus any number of read-only ones, such as a shared team folder, with PATH-style precedence and shadowing reported rather than silently applied. Writing a skill needs approval too: it is prose that steers every future turn.\n\n[Open the Skills tab](command:lightCode.openSettings?%5B%22skills%22%5D)",
             "media": {
               "image": {
                 "light": "walkthrough/media/skills-light.svg",
@@ -214,7 +214,7 @@
                 "hc": "walkthrough/media/skills-dark.svg",
                 "hcLight": "walkthrough/media/skills-light.svg"
               },
-              "altText": "The Skills tab, showing two skills, the writable skills folder, extra read-only folders, the problems list, and the approval note."
+              "altText": "The Skills tab, showing two skills, a note that they are found by searching rather than listing, the writable skills folder, extra read-only folders, the problems list, and the approval note."
             },
             "completionEvents": [
               "onStepSelected"
@@ -223,7 +223,7 @@
           {
             "id": "search",
             "title": "Search - find things by meaning",
-            "description": "Optional, off by default, and **the largest thing Light Code ever sends anywhere**: indexing uploads the contents of your workspace to the embedding endpoint you name. It says so, and where to, before the first upload.\n\n**Qdrant** and **Chroma** run locally if you would rather nothing left the machine; **OpenSearch** is usually the one your company already has. Embeddings reuse a provider profile, so there is no second set of credentials. You can **copy an index between backends**, so changing your mind later does not orphan what you indexed.\n\nThe toggle worth understanding is **looking tools up instead of listing them**: it halves the prompt at forty tools and makes it bigger at three, so the tab shows the count and lets you decide.\n\n[Open the Search tab](command:lightCode.openSettings?%5B%22search%22%5D)",
+            "description": "Indexing is optional, ships disabled, and is **the largest thing Light Code ever sends anywhere**: it uploads the contents of your workspace to the embedding endpoint you name. It says so, and where to, before the first upload.\n\n**Qdrant** and **Chroma** run locally if you would rather nothing left the machine; **OpenSearch** is usually the one your company already has. Embeddings reuse a provider profile, so there is no second set of credentials. You can **copy an index between backends**, so changing your mind later does not orphan what you indexed.\n\n**Looking things up rather than listing them is the default.** MCP and Python tool schemas, and skill summaries, stay out of the prompt; the assistant finds them with `search_docs` and calls them through `call_tool`. Nothing is registered when there is nothing to hide, so a workspace with no MCP servers and no skills pays nothing for it. The tab shows how many things it is hiding, and either half can be switched off - models do call a tool listed in the prompt slightly more reliably than one named through a dispatcher.\n\n[Open the Search tab](command:lightCode.openSettings?%5B%22search%22%5D)",
             "media": {
               "image": {
                 "light": "walkthrough/media/search-light.svg",
@@ -231,7 +231,7 @@
                 "hc": "walkthrough/media/search-dark.svg",
                 "hcLight": "walkthrough/media/search-light.svg"
               },
-              "altText": "The Search tab, showing the backend choice, connection fields, embedding profile, the index button, the look-tools-up toggle, index copying, and query limits."
+              "altText": "The Search tab, showing the backend choice, connection fields, embedding profile, the index button, the two look-things-up toggles for tools and skills, index copying, and query limits."
             },
             "completionEvents": [
               "onStepSelected"
@@ -240,7 +240,7 @@
           {
             "id": "tools",
             "title": "Tools - everything it can call",
-            "description": "One read-only list of every tool available right now: the built-in nine, everything your MCP servers expose, and the Python tools it has written. Search matches descriptions as well as names, so you can look for what you want done rather than what it is called.\n\nA **looked up** badge means the tool is kept out of the system prompt to save space. It is still callable - the assistant finds it first. A shorter prompt is not a shorter tool list; withholding a capability is what Approvals and modes are for.\n\n[Open the Tools tab](command:lightCode.openSettings?%5B%22tools%22%5D)",
+            "description": "One read-only list of every tool available right now: the built-in nine, everything your MCP servers expose, and the Python tools it has written. Search matches descriptions as well as names, so you can look for what you want done rather than what it is called.\n\nA **looked up** badge means the tool is kept out of the system prompt to save space - the default for MCP and Python tools. It is still callable: the assistant searches for it and calls it by name. A shorter prompt is not a shorter tool list; withholding a capability is what Approvals and modes are for.\n\n[Open the Tools tab](command:lightCode.openSettings?%5B%22tools%22%5D)",
             "media": {
               "image": {
                 "light": "walkthrough/media/tools-light.svg",
@@ -274,7 +274,7 @@
           {
             "id": "schedules",
             "title": "Schedules - let it run on its own",
-            "description": "A prompt on a timer. Runs in the background without touching the chat you are in, and keeps running with the panel closed.\n\nNobody is present to approve anything, so an unattended run does not inherit your auto-approve settings. Permission is granted **per schedule**: files are read-only unless you say otherwise, and you pick exactly which tools it may call. Creating Python tools or skills is never available to a schedule at all - model-authored code with no one watching is the one thing that stays out of reach.\n\nEvery run is logged with its full transcript, and `notify` raises a toast when a run has something to say.\n\n[Open the Schedules tab](command:lightCode.openSettings?%5B%22schedules%22%5D)",
+            "description": "A prompt on a timer. Runs in the background without touching the chat you are in, and keeps running with the panel closed.\n\nNobody is present to approve anything, so an unattended run does not inherit your auto-approve settings. Permission is granted **per schedule**: files are read-only unless you say otherwise, and you pick exactly which tools it may call. Creating Python tools or skills is never available to a schedule at all - model-authored code with no one watching is the one thing that stays out of reach.\n\n**A schedule names the skills it needs** rather than searching for them, under *What it should know*. Its tool list may not include `search_docs`, and a run that comes up empty has nobody to notice. All skills are included until you narrow it.\n\nEvery run is logged with its full transcript, and `notify` raises a toast when a run has something to say.\n\n[Open the Schedules tab](command:lightCode.openSettings?%5B%22schedules%22%5D)",
             "media": {
               "image": {
                 "light": "walkthrough/media/schedules-light.svg",
@@ -282,7 +282,7 @@
                 "hc": "walkthrough/media/schedules-dark.svg",
                 "hcLight": "walkthrough/media/schedules-light.svg"
               },
-              "altText": "The Schedules tab, showing a schedule name, prompt and interval, the file-permission and tool filters for unattended runs, and the run history."
+              "altText": "The Schedules tab, showing a schedule name, prompt and interval, the file-permission, tool and skill filters for unattended runs, and the run history."
             },
             "completionEvents": [
               "onStepSelected"

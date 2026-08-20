@@ -178,6 +178,38 @@ export async function loadSkills(dirs: string | readonly string[]): Promise<Load
  * the front of the prompt — a skill created mid-session appears at the next turn, which is
  * the same rule Python tools follow and for the same cache reason (§12).
  */
+/**
+ * What the prompt says when skill summaries are being retrieved rather than listed.
+ *
+ * The count and the instruction stay even though the list goes, and that is the whole design.
+ * A tool is looked up because the task obviously needs one — "list the pull requests" tells the
+ * model to go looking. A skill is different: its one-line description is the *only* thing that
+ * makes the model aware the subject has been written about at all, so removing it silently
+ * removes the trigger. Nothing would error; the model would just answer from its own knowledge
+ * and be confidently wrong about an internal library.
+ *
+ * So the trigger is replaced rather than dropped. A count is proof there is something to find —
+ * "12 notes exist" is a much stronger prompt to search than a general instruction — and it
+ * costs one line however many skills there are.
+ */
+export function renderSkillsHintForPrompt(count: number): string {
+  if (count === 0) return ''
+  const plural = count === 1 ? 'note has' : 'notes have'
+  return [
+    '## Skills',
+    '',
+    `${String(count)} ${plural} been recorded for this workspace: house conventions, internal`,
+    'libraries, and gotchas specific to this codebase. They are not listed here.',
+    '',
+    '- Before working on an unfamiliar part of this workspace, or whenever the user mentions',
+    '  something internal you do not recognise, call search_docs to look for a relevant note.',
+    '- Search by subject, in your own words — "how we call internal HTTP services", not a',
+    '  guessed file name.',
+    '- A hit gives you the summary and a path. Read the file for the full text before acting',
+    '  on the subject.',
+  ].join('\n')
+}
+
 export function renderSkillsForPrompt(skills: readonly Skill[]): string {
   if (skills.length === 0) return ''
   const lines = skills.map((skill) => `- ${skill.name}: ${skill.description}\n  (${skill.filePath})`)
