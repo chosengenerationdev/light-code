@@ -10,6 +10,7 @@ import { GUIDE_STEPS, type Transport } from '@light-code/core'
 import { SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
+import type { SharedConfig, SharedConfigStore } from './sharedConfig.js'
 import { createSession } from './session.js'
 
 /*
@@ -82,6 +83,8 @@ export interface ServerOptions {
    * local single-user case and wrong for anything else — see `roles.ts`.
    */
   roles?: RolePolicy
+  /** Settings an administrator sets once for everyone. Absent in single-user mode. */
+  sharedConfig?: SharedConfigStore
 }
 
 export interface RunningServer {
@@ -107,7 +110,18 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const log = options.logSink ?? ((line: string) => process.stderr.write(`${line}\n`))
   const identity = options.identity ?? new SingleUserIdentity()
   const roles = options.roles ?? SINGLE_USER_POLICY
+  /*
+   * The administrator's settings, kept in memory and refreshed when they are saved.
+   *
+   * Held here rather than read per command because it is consulted on every one, and because the
+   * *point* of it is to be shared: one copy that every session sees is the behaviour, not an
+   * optimisation of it.
+   */
+  const sharedStore = options.sharedConfig
+  let sharedCache: SharedConfig = { variables: [], adminIds: [] }
+
   const bindAddress = options.bindAddress ?? '127.0.0.1'
+  if (sharedStore !== undefined) sharedCache = await sharedStore.load()
 
   /*
    * Which principals arrived through the admin URL.
@@ -168,6 +182,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       dataDir: options.dataDir,
       ripgrepPath: options.ripgrepPath,
       logSink: log,
+      /*
+       * Read at use, not captured: an administrator saving a variable must reach a session that
+       * is already open. `SharedConfigStore` caches, so this is a map lookup rather than a read.
+       */
+      adminVariables: () => sharedCache.variables,
     })
     const originalDispose = connection.dispose
     connection.dispose = () => {

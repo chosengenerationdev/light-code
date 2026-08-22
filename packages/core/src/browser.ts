@@ -42,6 +42,15 @@ export { providerPresets, type ProviderPreset } from './providers/presets.js'
  * lives in core at all is that two hosts render it: VS Code as `contributes.walkthroughs`, the
  * browser as a view of its own. Two copies of onboarding prose is two copies that go stale.
  */
+// Pure data and a pure merge, so it is safe in the browser bundle. The UI needs the same
+// precedence rule the server applies, or it would show a value that is not the one in force.
+export {
+  resolveSessionVariables,
+  isValidVariableName,
+  type SessionVariable,
+  type ResolvedVariable,
+  type VariableScope,
+} from './session/variables.js'
 export {
   GUIDE_STEPS,
   GUIDE_TITLE,

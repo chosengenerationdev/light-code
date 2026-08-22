@@ -40,6 +40,15 @@ export interface ToolExecutionContext {
    */
   readRoots?: string[]
   /**
+   * Values made visible to whatever this session spawns — shell commands, Python tools.
+   *
+   * Optional and absent in the VS Code extension, which has one user and their own environment
+   * already. The Node host supplies it because a shared server has to answer "whose value" —
+   * see `session/variables.ts`, and note especially that these are **not secrets**: everything
+   * spawned runs as the service account, so another user's agent can read them.
+   */
+  sessionEnv?: Record<string, string>
+  /**
    * Asks the user whether a path outside every allowed root may be read.
    *
    * Pre-registering every share before the assistant can look at anything is a lot of friction

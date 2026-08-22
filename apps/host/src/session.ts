@@ -1,14 +1,18 @@
-import { watch as fsWatch, type FSWatcher } from 'node:fs'
+import { readFileSync, watch as fsWatch, type FSWatcher } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
   Logger,
+  resolveSessionVariables,
+  sessionVariablesSchema,
+  toEnvironment,
   wireChatBridge,
   workspaceConfigPath,
   type ConfigScope,
   type ConfigStore,
   type HostServices,
   type HostUi,
+  type SessionVariable,
   type Transport,
   type WorkspaceState,
 } from '@light-code/core'
@@ -163,6 +167,13 @@ export interface SessionOptions {
   dataDir: string
   ripgrepPath: string | undefined
   logSink: (line: string) => void
+  /**
+   * Variables an administrator set for everyone, read fresh on each command.
+   *
+   * A function, not a value: an administrator editing one should reach a session already
+   * running, not only sessions started afterwards.
+   */
+  adminVariables?: () => readonly SessionVariable[]
 }
 
 /**
@@ -172,9 +183,40 @@ export interface SessionOptions {
  * spilled tool results all live under a directory derived from the principal id, so adding
  * SSO changes who that is and nothing else.
  */
+/**
+ * A user's own session variables, read from their config file.
+ *
+ * Exported so the test calls the shipped function rather than re-deriving the parse — a test that
+ * reimplements what it checks agrees with itself and passes either way, which is how the UNC
+ * containment bug survived a green suite.
+ *
+ * Read directly rather than through `ConfigManager`: this is consulted on every command, and a
+ * malformed *unrelated* key should not cost the user their variables. Any failure yields none,
+ * which is what an empty list already means, so the degradation is one someone can reason about.
+ */
+export function readUserVariables(configPath: string): readonly SessionVariable[] {
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>
+    const parsed = sessionVariablesSchema.safeParse(raw['variables'])
+    return parsed.success ? parsed.data : []
+  } catch {
+    return []
+  }
+}
+
 export async function createSession(options: SessionOptions): Promise<{ dispose: () => void }> {
   const userDir = path.join(options.dataDir, 'users', storageKeyFor(options.principal))
   await fs.mkdir(userDir, { recursive: true, mode: 0o700 })
+
+  /*
+   * Read straight from the user's own config file rather than through `ConfigManager`.
+   *
+   * This is consulted on every command, and the real reason is not speed: a malformed unrelated
+   * key should not cost the user their variables. A failure here yields none, which is what an
+   * empty list already means, so the degradation is one someone can reason about.
+   */
+  const configPath = path.join(userDir, 'config.json')
+  const userVariables = (): readonly SessionVariable[] => readUserVariables(configPath)
 
   const workspaceState = new FileWorkspaceState(path.join(userDir, 'workspace-state.json'))
   await workspaceState.load()
@@ -195,6 +237,14 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
      * also survives whatever port the server happened to bind.
      */
     guideMediaBase: '/guide',
+    /*
+     * Resolved per read, so both halves stay live — an administrator's edit and the user's own
+     * each reach the next command rather than the next session.
+     *
+     * The administrator's win. That is a precedence rule and not a secrecy one: everything a
+     * session spawns runs as the service account, so another user's agent can read these.
+     */
+    sessionEnv: () => toEnvironment(resolveSessionVariables(options.adminVariables?.() ?? [], userVariables())),
   }
 
   new Logger({ level: 'debug', sink: options.logSink }).info(

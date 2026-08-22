@@ -6,6 +6,7 @@ import envPaths from 'env-paths'
 import type { IdentityProvider } from './identity.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
 import { adminListPolicy } from './roles.js'
+import { SharedConfigStore } from './sharedConfig.js'
 import { startServer } from './server.js'
 
 /**
@@ -112,6 +113,20 @@ async function main(): Promise<void> {
     })
   }
 
+  /*
+   * The administrator's own settings, beside the per-user directories rather than inside one.
+   *
+   * `--admin-id` seeds the list on every start and the interface can add to it. The command line
+   * wins at startup deliberately: an operator who has locked themselves out needs a way back that
+   * does not require the interface they cannot reach.
+   */
+  const sharedConfig = new SharedConfigStore(path.join(dataDir, 'shared.json'))
+  const shared = await sharedConfig.load()
+  const effectiveAdminIds = [...new Set([...shared.adminIds, ...adminIds])]
+  if (adminIds.length > 0 && effectiveAdminIds.length !== shared.adminIds.length) {
+    await sharedConfig.save({ adminIds: effectiveAdminIds })
+  }
+
   const here = path.dirname(fileURLToPath(import.meta.url))
   const server = await startServer({
     workspaceRoot,
@@ -119,7 +134,7 @@ async function main(): Promise<void> {
     clientDir: path.join(here, 'client'),
     ripgrepPath: resolveRipgrep(),
     port: Number.isNaN(port) ? 0 : port,
-    ...(serverMode ? { roles: adminListPolicy(adminIds) } : {}),
+    ...(serverMode ? { roles: adminListPolicy(effectiveAdminIds), sharedConfig } : {}),
     ...(identity !== undefined ? { identity } : {}),
     ...(bindAddress !== undefined ? { bindAddress } : {}),
   })
@@ -132,9 +147,9 @@ async function main(): Promise<void> {
   )
   if (serverMode) {
     const who =
-      adminIds.length === 0
-        ? 'nobody — no --admin was given, so configuration is frozen'
-        : `${String(adminIds.length)} administrator(s)`
+      effectiveAdminIds.length === 0
+        ? 'nobody — no --admin-id was given, so configuration is frozen'
+        : `${String(effectiveAdminIds.length)} administrator(s)`
     process.stdout.write(`  mode       shared — settings are read-only except for ${who}\n`)
     /*
      * Printed on every start rather than left to the docs. An operator sharing this needs

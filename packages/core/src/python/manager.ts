@@ -78,6 +78,18 @@ export interface PythonManagerOptions {
    * something else happened to refresh them.
    */
   onToolsChanged?: () => void
+  /**
+   * Session variables to add to the worker's environment, read at spawn time.
+   *
+   * A function rather than a value because the worker outlives an edit: reading it here means a
+   * changed variable applies to the next worker, and the caller can say so, rather than the
+   * manager holding a copy from whenever it was constructed.
+   *
+   * These are *added to* the allowlist in `minimalPythonEnv`, never a way around it. The
+   * allowlist exists so a provider API key cannot reach model-authored code (§13), and that is
+   * unchanged: what arrives here is what a human deliberately declared.
+   */
+  sessionEnv?: () => Record<string, string>
 }
 
 export class PythonManager {
@@ -150,7 +162,7 @@ export class PythonManager {
     }
 
     try {
-      const env = minimalPythonEnv()
+      const env = minimalPythonEnv(this.options.sessionEnv?.() ?? {})
 
       /*
        * Prefer an environment the project already has. That is where the user's internal
@@ -281,7 +293,7 @@ export class PythonManager {
                 ...(this.indexUrl !== undefined ? { indexUrl: this.indexUrl } : {}),
                 extraIndexUrls: this.extraIndexUrls,
                 offline: this.offline,
-                env: minimalPythonEnv(),
+                env: minimalPythonEnv(this.options.sessionEnv?.() ?? {}),
               }),
           }
         : {}),

@@ -20,7 +20,16 @@ export const executeCommandTool: Tool<ExecuteCommandParams> = {
   parametersSchema: paramsSchema,
   async execute(params, context): Promise<ToolResult> {
     const cwd = params.cwd !== undefined ? params.cwd : context.workspaceRoot
-    const proc = context.terminal.run(params.command, { cwd })
+    /*
+     * Layered over the inherited environment rather than replacing it: a command still needs PATH
+     * and everything else the shell expects, and `TerminalRunOptions.env` is a patch, not a
+     * replacement. Absent when the host supplies none, so the extension's call is byte-for-byte
+     * the one it always made.
+     */
+    const proc = context.terminal.run(params.command, {
+      cwd,
+      ...(context.sessionEnv !== undefined ? { env: context.sessionEnv } : {}),
+    })
 
     let output = ''
     let truncated = false

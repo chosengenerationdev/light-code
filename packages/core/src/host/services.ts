@@ -135,4 +135,13 @@ export interface HostServices {
    * degradation rather than a broken one.
    */
   guideMediaBase?: string | undefined
+  /**
+   * Values this session makes visible to what it runs, already resolved.
+   *
+   * A function, read per turn, so a change applies to the next command without restarting a
+   * session. Undefined in the VS Code extension: one user, their own environment, nothing to
+   * resolve. The Node host supplies it because a shared server has to answer whose value wins —
+   * `session/variables.ts` holds that rule and the reason it goes the way it does.
+   */
+  sessionEnv?: () => Record<string, string>
 }

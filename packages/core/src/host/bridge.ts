@@ -275,6 +275,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     workspaceRoot,
     storageDir,
     logger,
+    // Read at worker spawn, so a changed variable applies to the next worker rather than being
+    // frozen at construction. Added to the allowlist in minimalPythonEnv, never a way past it.
+    ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv } : {}),
     // A tool created, updated or deleted during a chat changes both the Python tab and the
     // documentation corpus. `postPython` refreshes the tab and schedules the reindex.
     onToolsChanged: () => {
@@ -1337,6 +1340,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         denylist,
         readFiles,
         readRoots: cachedReadRoots,
+        // Resolved per turn by the host, so an edit applies to the next command rather than
+        // needing a new session. Absent in the extension, where there is nothing to resolve.
+        ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv() } : {}),
         /*
          * Omitted for a scheduled run: there is nobody to answer, and a run that could grant
          * itself new filesystem access would defeat the point of its allowlist.

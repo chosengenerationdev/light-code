@@ -11,6 +11,16 @@ export { resolveConnectionTls, TlsConfigError, type TlsFileSettings, type Resolv
 
 export type { LightCodeConfig } from './config/schema.js'
 export { configSchema, parseConfig, ConfigValidationError } from './config/schema.js'
+export {
+  resolveSessionVariables,
+  toEnvironment,
+  isValidVariableName,
+  sessionVariableSchema,
+  sessionVariablesSchema,
+  type SessionVariable,
+  type ResolvedVariable,
+  type VariableScope,
+} from './session/variables.js'
 export { GUIDE_STEPS, GUIDE_TITLE, GUIDE_DESCRIPTION, type GuideStep, type GuideTab } from './guide/steps.js'
 export { mergeScopes, USER_SCOPE_ONLY_KEYS, type ScopeMergeResult } from './config/scopes.js'
 export { defaultUserConfigPath, workspaceConfigPath } from './config/paths.js'
