@@ -1,5 +1,18 @@
 # @chosengeneration/light-code
 
+## 0.10.0
+
+### Minor Changes
+
+- `--guide` opens the operator guide as a page instead of printing markdown.
+
+  A guide is something you read, and a wall of markdown in a console is the format people were
+  trying to get away from. It renders to a self-contained HTML file and opens it with the OS
+  handler — no port, no process left running, and no network at all, which matters because the
+  deployment this guide is written for is often airgapped.
+
+  `--guide --no-open` still prints, which is the right answer over SSH and when piping into a pager.
+
 ## 0.9.0
 
 ### Minor Changes

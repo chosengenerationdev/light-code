@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
+import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
 import type { IdentityProvider } from './identity.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
 import { adminListPolicy } from './roles.js'
+import { OPERATOR_GUIDE } from './generated/operatorGuide.js'
+import { guidePage } from './guideHtml.js'
 import { renderGuide } from './guideText.js'
 import { SharedConfigStore } from './sharedConfig.js'
 import { startServer } from './server.js'
@@ -40,8 +44,25 @@ async function main(): Promise<void> {
    * no `docs/` directory at all.
    */
   if (args.includes('--guide')) {
-    process.stdout.write(renderGuide(process.stdout.isTTY === true))
-    process.stdout.write('\n')
+    /*
+     * A page, because a guide is something you read and a wall of markdown in a console is the
+     * format people were trying to get away from.
+     *
+     * Written to a temp file and opened with the OS handler rather than served: no port, no
+     * process left running, and it works with no network at all — which matters, because the
+     * deployment this guide is written for is frequently airgapped.
+     *
+     * `--no-open` still prints, which is the right answer over SSH and when piping into a pager.
+     */
+    if (args.includes('--no-open')) {
+      process.stdout.write(renderGuide(process.stdout.isTTY === true))
+      process.stdout.write('\n')
+      return
+    }
+    const file = path.join(os.tmpdir(), 'light-code-guide.html')
+    await fs.writeFile(file, guidePage(OPERATOR_GUIDE), 'utf8')
+    process.stdout.write(`Opening the guide: ${file}\n(--guide --no-open prints it instead.)\n`)
+    openBrowser(pathToFileURL(file).href)
     return
   }
 
@@ -290,9 +311,9 @@ Usage: light-code [options]
                       refused, which is the safe direction to fail
   --user-header <h>   Header carrying the user id (default X-Forwarded-User)
   --bind <address>    Interface to listen on (default: 127.0.0.1)
-  --guide             Print the operator guide — setting up shared mode,
-                      who can change what, and what it does not protect
-                      against. Pipe it into a pager for comfort
+  --guide             Open the operator guide in your browser — setting up
+                      shared mode, who can change what, and what it does not
+                      protect against. Add --no-open to print it instead
   -h, --help          This message
 
 Binds 127.0.0.1 unless --bind says otherwise. Anything that can reach the port
