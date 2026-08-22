@@ -73,14 +73,20 @@ with 421, an absent or wrong token with 401, and a handoff token cannot be redee
 `--data-dir`, defaulting to the OS application-data directory:
 
 ```
+<data>/shared.json                     administrator ids, variables for everyone  (0600)
 <data>/users/<hash of principal id>/
     config.json            profiles, MCP servers, approvals   (0600)
     secrets.json           API keys, passwords                (0600)
+    variables.json         this user's session variables      (0600)
     workspace-state.json   which task was open
     tasks/                 conversation history
     tool-results/          spilled tool output
     checkpoints/           shadow-git snapshots
 ```
+
+**Variables are a file of their own, not a key in `config.json`.** The config schema strips keys
+it does not recognise, so variables kept there would survive until the first unrelated save and
+then vanish silently. Do not move them back.
 
 Everything is already per-principal, which is the groundwork for the next section.
 
@@ -91,46 +97,170 @@ beside it, readable by the same processes.
 
 ---
 
-## 1b. Shared mode: `--server`
+## 1b. Shared mode: `--server` — a usage guide
 
-`--server` locks configuration down. Everyone can chat, edit and run things as before; only
-the identities named with `--admin` can change providers, MCP servers, the Python interpreter,
-network trust, search connections, readable folders or schedules.
+One server, many people, two URLs. Read section 2 before deciding to run it: this locks
+*settings*, not *privileges*, and the difference matters.
 
-```bash
-light-code --server --bind 0.0.0.0 --port 8080   --admin <directory-id-of-an-admin> --admin <another>
+### Set it up
+
+**1. Put a reverse proxy in front.** IIS, nginx or anything that terminates your existing
+authentication — Kerberos, NTLM, OIDC. The proxy authenticates the user and states the result in
+a header.
+
+**2. Make the proxy set the user header, and strip any inbound copy of it.** Stripping is not
+optional: without it a user types their own header and becomes whoever they like.
+
+```nginx
+location / {
+    proxy_set_header X-Forwarded-User        $remote_user;   # replaces, never appends
+    proxy_set_header X-Forwarded-Display-Name $remote_user;
+    proxy_pass http://127.0.0.1:8080;
+}
 ```
 
-`--admin` takes the **identity id**, matching `Principal.id` — the immutable directory
-identifier, not a username. A username is reassigned when someone leaves; an object id is not.
-Omit `--admin` entirely and configuration is frozen for everybody, which is a reasonable way to
-run it: write the config file beside the server and let the process only read it.
+Send the **immutable directory id** — an Entra object id, an AD SID — not a username. A username
+gets reassigned to a different human when someone leaves; an object id does not.
 
-The rule is that anything invariant 5 already treats as user-scope-only becomes admin-only,
-because a second user on a shared box is the same threat as a hostile repository arriving
-through a different door. Appearance, the active mode and the per-chat expert budget stay with
-the person using the session.
+**3. Start the server.**
 
-### What `--server` does not do
+```bash
+light-code --server \
+  --workspace /srv/repo \
+  --trust-proxy 10.0.0.5 \
+  --admin-id 8f3c1e22-... \
+  --port 8080
+```
 
-> **It locks settings, not privileges.** Every user's shell commands, MCP servers and Python
-> tools still run as the account the server process runs as. A non-admin cannot repoint your
-> gateway — and can still ask the agent to read any file that account can read.
+It prints both URLs:
 
-Everything in section 2 below still applies in full. `--server` is worth having on a machine
-where the people using it are already trusted with each other's data and you simply do not want
-the configuration drifting; it is not a substitute for isolation, and it does not make hosting
-appropriate anywhere it was not already.
+```
+  users          http://127.0.0.1:8080/
+  administrators http://127.0.0.1:8080/admin
+```
+
+**4. Restrict `/admin` at the proxy.** Light Code does not guard that path — see below.
+
+### The flags
+
+| Flag | What it does |
+|---|---|
+| `--server` | Shared mode. Settings become read-only except for administrators. |
+| `--trust-proxy <ip>` | Believe the user header from this address. **Repeatable, and required** — without it every request is refused. |
+| `--user-header <h>` | Which header carries the id. Default `X-Forwarded-User`. |
+| `--admin-id <id>` | Seed an administrator. Repeatable. Applied on every start and merged into the stored list. |
+| `--admin` | Opens `/admin` rather than `/` when launching a browser. Takes **no value** — the old `--admin <id>` form is an error pointing at `--admin-id`. |
+| `--bind <address>` | Interface to listen on. Leave it at `127.0.0.1` and let the proxy be the only route in. |
+
+### The header is not the trust boundary — the address is
+
+Anything that can reach the port can send `X-Forwarded-User: anyone`. So the header is believed
+**only** from an address you named, checked against the socket's peer, which a client cannot
+choose.
+
+That is why `--server` refuses to start without `--trust-proxy`. A deployment that refuses
+everyone is a support call; one that believes everyone is a breach.
+
+Two more properties worth knowing:
+
+- **A repeated header is refused, not resolved.** A proxy that appends rather than replaces is
+  exactly how an attacker-supplied value ends up beside the real one, and there is no safe way to
+  pick between two answers to "who is this".
+- **`::ffff:10.0.0.5` and `10.0.0.5` are treated as the same machine**, because that is what Node
+  reports for an IPv4 client on a dual-stack listener. `::1` and `127.0.0.1` are **not**
+  interchangeable — you named one of them and meant it.
+
+### The two URLs
+
+`/` is everyone's. `/admin` is the administrator's interface.
+
+> **Reaching `/admin` is assumed to be restricted upstream.** Light Code does not re-derive who
+> may be there. **Anyone who can reach `/admin` directly is an administrator**, so exposing the
+> port without the proxy in front exposes the admin interface with it.
+
+The administrator id list is still consulted, and it is the second condition: someone at `/admin`
+who is not on the list is treated as an ordinary user. So a proxy rule that was never written
+degrades to "nobody is an administrator" rather than "everybody is".
+
+Administrators can edit the list from the **Variables** tab, so adding a colleague does not need a
+restart. Removing yourself is allowed and logged — refusing it would mean the last administrator
+can never be replaced — and `--admin-id` still wins at startup, which is the way back in.
+
+### What only an administrator can change
+
+| Administrators | Everyone |
+|---|---|
+| Providers, models, API keys, Test connection | Their own session variables |
+| Network trust: CA, client certificate, verify TLS | Mode (Code / Ask / Junior) |
+| MCP servers and per-tool permissions | Accent and expert colours |
+| Enabling Python, the interpreter, the tools folder | The per-chat expert budget |
+| Search connections, the embedder, indexing | Chatting, editing, running commands |
+| Schedules, including running one by hand | Their own task history |
+| Readable folders outside the workspace | |
+| Auto-approve toggles and the always-allow lists | |
+| Session variables that apply to everyone | |
+
+The rule: anything invariant 5 already treats as user-scope-only becomes admin-only, because a
+second user on a shared box is the same threat as a hostile repository arriving by another door.
+Anything unlisted that looks like a settings change (`save…`, `set…`, `delete…`) defaults to
+**restricted** — forgetting to list something should mean "an administrator has to do it", never
+"anyone may repoint the gateway".
+
+A refused message is answered, not dropped: the UI hides these controls, so one arriving is either
+a stale page or someone poking the API, and both deserve a reason.
+
+---
+
+## 1c. Session variables
+
+Values handed to everything a session runs — shell commands and Python tools — as environment
+variables. Set them in the **Variables** tab.
+
+> **They are not secret.** Everything a session spawns runs as the server's own account, so
+> another user can have their assistant read them. This answers *whose value applies*, not *who
+> can see it*. API keys belong in **Providers**, which stores them separately and never sends
+> them back to a page.
+
+### Two scopes, and the administrator wins
+
+- **Yours** — only your sessions see them. Stored in `<data>/users/<hash>/variables.json`.
+- **Everyone's** — set by an administrator, applied to every user. Stored in `<data>/shared.json`.
+
+Where both set the same name, **the administrator's value is used**. A variable set centrally is
+set precisely because it has to be the same everywhere — an internal package index, a proxy, a
+compliance flag — and a per-user value quietly winning would defeat the only reason to set one.
+
+The one that lost is not hidden. Your row says so:
+
+> **overridden** — An administrator set `REGISTRY` for everyone, so sessions use
+> `https://pypi.internal/simple` and not yours.
+
+Without that you would edit a value that could never apply and see no sign of it.
+
+### Names
+
+Letters, digits and underscore, not starting with a digit. Anything else is refused as you type
+it, because a name a shell cannot set fails by starting a process with a *silently different*
+environment rather than by erroring.
+
+### Where they reach
+
+`execute_command` and Python tools. The Python worker's environment stays an allowlist — the
+reason it exists is that a provider API key must never reach model-authored code — and these are
+added to it, because they are what a human deliberately declared.
+
+An edit applies to the **next command**, not the next session; a Python tool picks one up when its
+worker next starts.
 
 ---
 
 ## 2. Multi-user hosting with SSO — read this first
 
-The identity seam exists. `IdentityProvider` takes a request and returns a `Principal`, and
-every store is already keyed by `Principal.id`, so adding OIDC or Windows authentication is
-a small, well-bounded piece of work.
+Identity is built. `ProxyHeaderIdentity` reads the user from your proxy's header, every store is
+keyed by `Principal.id`, and section 1b is the setup guide. So the question of *who is asking* is
+answered.
 
-**That is not the hard part.** The hard part is this:
+**That was never the hard part.** The hard part is this:
 
 > Light Code executes shell commands, reads and writes files, and spawns MCP servers. On a
 > hosted deployment, all of that runs as **the account the server process runs as** — not as
@@ -173,14 +303,15 @@ instance, one small team sharing a service account they all already have.
 
 ### If you deploy it anyway
 
-Because "one team who all trust each other" is a real situation:
+Because "one team who all trust each other" is a real situation. Section 1b is the how; this is
+the shortlist of things not to skip:
 
-- Put it behind IIS or a reverse proxy that terminates authentication, and pass the
-  principal through a header the proxy sets and strips from inbound requests.
-- Implement `IdentityProvider` against that header. Return the immutable directory
-  identifier — an Entra object id or an AD SID — as `Principal.id`, never the username or
-  email, both of which get reassigned to a different person when someone leaves.
+- Put it behind a proxy that terminates authentication, sets the user header, and **strips any
+  inbound copy of it**.
+- Send the immutable directory identifier as the id, never the username or email — both get
+  reassigned to a different person when someone leaves.
 - Bind the server to loopback and let the proxy be the only thing that reaches it.
+- **Restrict `/admin` at the proxy.** Light Code does not guard it.
 - Terminate TLS at the proxy. The `Host` allowlist needs the proxy's public authority added.
 - Run the service account with the least privilege that still works, and keep its home
   directory off any share.

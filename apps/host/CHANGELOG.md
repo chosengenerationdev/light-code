@@ -1,5 +1,22 @@
 # @chosengeneration/light-code
 
+## 0.6.0
+
+### Minor Changes
+
+- `light-code --guide` prints the operator guide.
+
+  Setting up shared mode, the flags, who can change what, session variables, and what it
+  deliberately does not protect against — the same document as `docs/hosting.md`, baked into the
+  bundle so it exists in a published install where there is no `docs/` directory to read.
+
+  Printed rather than opened in a browser: this is read while standing a server up, often over SSH
+  on a box that has no browser, and it pipes into a pager cleanly.
+
+  Shared mode's startup banner now prints both URLs instead of a handoff link with an empty token —
+  there is no handoff in shared mode, and instructions for a mechanism that is not running send
+  people looking for a token that was never minted.
+
 ## 0.5.0
 
 ### Minor Changes

@@ -6,6 +6,7 @@ import envPaths from 'env-paths'
 import type { IdentityProvider } from './identity.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
 import { adminListPolicy } from './roles.js'
+import { renderGuide } from './guideText.js'
 import { SharedConfigStore } from './sharedConfig.js'
 import { startServer } from './server.js'
 
@@ -27,6 +28,20 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) {
     process.stdout.write(usage())
+    return
+  }
+
+  /*
+   * The operator guide, from the terminal.
+   *
+   * Printed rather than opened in a browser: this is read while setting a server up, frequently
+   * over SSH on a box with no browser and often piped into `less`. It is the same document as
+   * `docs/hosting.md`, baked into the bundle so it exists in a published install where there is
+   * no `docs/` directory at all.
+   */
+  if (args.includes('--guide')) {
+    process.stdout.write(renderGuide(process.stdout.isTTY === true))
+    process.stdout.write('\n')
     return
   }
 
@@ -161,7 +176,25 @@ async function main(): Promise<void> {
     )
   }
   process.stdout.write('\n')
-  process.stdout.write(`Opening ${server.url}\n(If the browser does not open, paste this within 10 seconds:)\n${launchUrl}\n\n`)
+  /*
+   * Two different things to say, because the two modes hand off differently.
+   *
+   * Shared mode has no handoff token — the proxy authenticates every request — so printing one
+   * meant printing `#t=` with nothing after it and telling the operator to paste it within ten
+   * seconds. Instructions for a mechanism that is not running are worse than none: they send
+   * someone looking for a token that was never minted.
+   */
+  if (serverMode) {
+    process.stdout.write(
+      `  users          ${server.url}/\n` +
+        `  administrators ${server.url}/admin\n\n` +
+        `Both go through your proxy. Anyone reaching /admin directly is an administrator.\n\n`,
+    )
+  } else {
+    process.stdout.write(
+      `Opening ${server.url}\n(If the browser does not open, paste this within 10 seconds:)\n${launchUrl}\n\n`,
+    )
+  }
 
   if (!noOpen) openBrowser(launchUrl)
 
@@ -193,6 +226,7 @@ const KNOWN_FLAGS = new Set([
   '--trust-proxy',
   '--user-header',
   '--bind',
+  '--guide',
 ])
 
 /** Every value given for a repeatable flag, so `--admin a --admin b` works. */
@@ -256,6 +290,9 @@ Usage: light-code [options]
                       refused, which is the safe direction to fail
   --user-header <h>   Header carrying the user id (default X-Forwarded-User)
   --bind <address>    Interface to listen on (default: 127.0.0.1)
+  --guide             Print the operator guide — setting up shared mode,
+                      who can change what, and what it does not protect
+                      against. Pipe it into a pager for comfort
   -h, --help          This message
 
 Binds 127.0.0.1 unless --bind says otherwise. Anything that can reach the port
