@@ -22,6 +22,18 @@ import { createSession } from './session.js'
 export const CLIENT_ASSETS: Record<string, string> = {
   '/': 'index.html',
   '/index.html': 'index.html',
+  /*
+   * The administrator's URL. The same page — the client asks the server what it may do rather
+   * than being a second bundle — but a distinct address, because that is what a proxy rule can
+   * be written against.
+   *
+   * **Reaching it is assumed to be restricted upstream.** Light Code does not re-derive who may
+   * be here; the proxy, the firewall or a separate listener decides. The consequence, stated
+   * once so nobody has to infer it: anyone who can reach `/admin` directly is an administrator,
+   * so exposing the port without the proxy in front exposes this with it.
+   */
+  '/admin': 'index.html',
+  '/admin/': 'index.html',
   '/client.js': 'client.js',
   '/client.css': 'client.css',
   /*
@@ -97,7 +109,30 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const roles = options.roles ?? SINGLE_USER_POLICY
   const bindAddress = options.bindAddress ?? '127.0.0.1'
 
+  /*
+   * Which principals arrived through the admin URL.
+   *
+   * Kept here rather than read from the request at message time because the event stream and the
+   * messages are separate HTTP requests: only the page load knows which door was used, and the
+   * POSTs that follow do not carry it. Cleared with the connection, so closing the tab ends it.
+   */
+  const adminConnections = new Set<string>()
   const connections = new Map<string, Connection>()
+
+  /*
+   * An administrator is someone at the admin URL who is also on the list.
+   *
+   * Two conditions rather than one, and both earn their place. The URL alone is what the
+   * operator's proxy rule guards, and it is what the user asked to rely on. The list is what
+   * survives a proxy that was never configured — with no list, `roleFor` answers 'user' and a
+   * shared server refuses configuration changes to everyone, which is the safe direction to
+   * fail. Single-user mode is unaffected: `SINGLE_USER_POLICY` is not shared and answers
+   * 'admin' for the one person there is.
+   */
+  function isAdminSession(principal: Principal): boolean {
+    if (!roles.shared) return true
+    return adminConnections.has(principal.id) && roles.roleFor(principal) === 'admin'
+  }
   let policy: OriginPolicy = { allowedHosts: [], allowedOrigins: [] }
 
   async function openConnection(principal: Principal, response: ServerResponse): Promise<Connection> {
@@ -209,8 +244,32 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       // Flushes headers so the client's reader resolves before the first real message.
       response.write(': connected\n\n')
 
+      /*
+       * The page says which URL it was loaded from, because only the page load knows: the
+       * POSTs that follow are separate requests carrying no such thing. It is not a privilege
+       * claim — it selects an interface, and the *upstream* decided who could load it at all.
+       */
+      const viaAdminUrl = url.searchParams.get('view') === 'admin'
+      if (viaAdminUrl) adminConnections.add(principal.id)
+      else adminConnections.delete(principal.id)
+
       const connection = await openConnection(principal, response)
       connections.set(principal.id, connection)
+
+      /*
+       * Told once, at the top of the stream, so the UI can mark what this session may change
+       * before it renders a control the server will refuse. §15's "scope is visible in the UI"
+       * applied to people rather than to config files: a field that will be rejected on save
+       * should not look editable.
+       */
+      // `transport.post` is outbound; `connection.deliver` feeds a message *into* the bridge as
+      // though the UI had sent it. The names read the other way round, which cost an hour once.
+      connection.transport.post({
+        type: 'hostRole',
+        role: isAdminSession(principal) ? 'admin' : 'user',
+        shared: roles.shared,
+        displayName: principal.displayName,
+      })
 
       // Proxies and load balancers drop an idle stream; a comment line is not an event, so
       // the client never sees these.
@@ -239,7 +298,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
        * roles would put a concept in it that only one host has.
        */
       const type = typeof (body as { type?: unknown })?.type === 'string' ? (body as { type: string }).type : ''
-      if (roles.shared && roles.roleFor(principal) !== 'admin' && isAdminOnly(type)) {
+      if (roles.shared && !isAdminSession(principal) && isAdminOnly(type)) {
         log(`refused "${type}" from ${principal.displayName} (${principal.id}): not an administrator`)
         // Answered rather than dropped: the UI hides these controls, so a message arriving
         // here is either a stale page or someone poking the API, and both deserve a reason.

@@ -1,5 +1,24 @@
 # @chosengeneration/light-code
 
+## 0.4.0
+
+### Minor Changes
+
+- Real users, and an administrator's URL. Node host only — the extension is untouched.
+
+  `ProxyHeaderIdentity` reads the user from a header your reverse proxy sets, and believes it only
+  from an address you name with `--trust-proxy`. The header is not the trust boundary: anything
+  that can reach the port can type one, so the check is on the socket's peer address, which a
+  client cannot choose. With no trusted proxy configured every request is refused — a deployment
+  that refuses everyone is a support call, one that believes everyone is a breach.
+
+  `/admin` serves the administrator's interface and `/` serves everyone's. Reaching `/admin` is
+  assumed to be restricted upstream; the admin id list still decides who is actually treated as one.
+
+  `--admin` is now a boolean that opens the admin URL. The old `--admin <id>` form is an **error**
+  naming `--admin-id`, not silently reinterpreted — it would otherwise name nobody and open admin
+  mode instead.
+
 ## 0.3.0
 
 ### Minor Changes

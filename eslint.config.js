@@ -72,7 +72,14 @@ export default tseslint.config(
      * nothing in these files calls out, and the model gateway is still reached only
      * through HttpClient.
      */
-    files: ['apps/host/src/server.ts', 'apps/host/src/security.ts', 'apps/host/src/identity.ts', 'apps/host/src/security.test.ts'],
+    files: [
+      'apps/host/src/server.ts',
+      'apps/host/src/security.ts',
+      'apps/host/src/identity.ts',
+      'apps/host/src/proxyIdentity.ts',
+      'apps/host/src/security.test.ts',
+      'apps/host/src/proxyIdentity.test.ts',
+    ],
     rules: { 'no-restricted-imports': 'off' },
   },
   {

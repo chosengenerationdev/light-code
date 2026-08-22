@@ -82,3 +82,42 @@ describe('which messages are an administrator’s', () => {
     expect(new Set(ADMIN_ONLY_MESSAGES).size).toBe(ADMIN_ONLY_MESSAGES.length)
   })
 })
+
+/**
+ * Named individually at the user's request (2026-08-22), because these three are the ones they
+ * called out and a prefix rule that happens to catch them is not the same as a decision.
+ *
+ * Each also fails dangerously if it drifts: Python runs model-authored code, a search connection
+ * chooses where the workspace is uploaded, and a schedule executes with nobody watching.
+ */
+describe('the three the user named', () => {
+  it('keeps enabling Python to an administrator', () => {
+    expect(isAdminOnly('setPython')).toBe(true)
+  })
+
+  it('keeps search connections and indexing to an administrator', () => {
+    for (const type of [
+      'saveSearchConnection',
+      'deleteSearchConnection',
+      'setActiveSearchConnection',
+      'saveEmbedder',
+      'startIndexing',
+      'indexDocs',
+      'syncVectorStore',
+    ]) {
+      expect(isAdminOnly(type), type).toBe(true)
+    }
+  })
+
+  it('keeps schedules to an administrator, including running one by hand', () => {
+    for (const type of ['saveSchedule', 'deleteSchedule', 'setScheduleEnabled', 'runScheduleNow', 'duplicateSchedule']) {
+      expect(isAdminOnly(type), type).toBe(true)
+    }
+  })
+
+  /** Added after the list was written, and caught by the prefix rule rather than by memory. */
+  it('catches the retrieval toggles nobody added to the list', () => {
+    expect(isAdminOnly('setSkillRetrieval')).toBe(true)
+    expect(isAdminOnly('setDispatcher')).toBe(true)
+  })
+})

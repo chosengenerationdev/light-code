@@ -479,6 +479,14 @@ export type HostToUiMessage =
    * have to translate rather than follow.
    */
   | { type: 'openSettings'; tab: string }
+  /**
+   * Which door this session came through. **Sent only by the Node host**, never by the bridge.
+   *
+   * The shape lives here because this is where the UI's protocol is defined, but core stays
+   * ignorant of roles deliberately: a second user is a concept only one host has, and teaching
+   * the bridge about it would put it in the extension too, where it means nothing.
+   */
+  | { type: 'hostRole'; role: 'admin' | 'user'; shared: boolean; displayName: string }
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */

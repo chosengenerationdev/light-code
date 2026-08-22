@@ -48,7 +48,15 @@ export class HttpTransport implements Transport {
   private async listen(): Promise<void> {
     for (;;) {
       try {
-        const response = await fetch('/api/events', { headers: { Authorization: `Bearer ${this.token ?? ''}` } })
+        /*
+         * Which interface this tab is. Read from the address bar rather than stored, so the two
+         * URLs behave as two URLs — opening /admin in a second tab does not retroactively change
+         * what the first one is, and a reload of either lands where it was.
+         */
+        const view = window.location.pathname.startsWith('/admin') ? '?view=admin' : ''
+        const response = await fetch(`/api/events${view}`, {
+          headers: { Authorization: `Bearer ${this.token ?? ''}` },
+        })
         if (!response.ok || response.body === null) throw new Error(`stream failed: ${response.status}`)
         this.onStatus('connected')
 

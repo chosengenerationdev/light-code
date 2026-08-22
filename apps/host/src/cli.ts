@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import envPaths from 'env-paths'
+import type { IdentityProvider } from './identity.js'
+import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
 import { adminListPolicy } from './roles.js'
 import { startServer } from './server.js'
 
@@ -45,8 +47,31 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
+  /*
+   * `--admin` changed meaning, so the old form is an error rather than a reinterpretation.
+   *
+   * It used to take an id — `--admin alice` named an administrator. It is now a boolean that
+   * opens the administrator's URL, and ids moved to `--admin-id`. Silently accepting the old
+   * spelling would name nobody and open admin mode instead, which is the precise failure this
+   * CLI already learned once with an unknown flag: something that quietly does the wrong thing
+   * beats something that errors, only for the person who wrote it.
+   */
+  const strayAdminValue = valuesOf(args, '--admin')
+  if (strayAdminValue.length > 0) {
+    process.stderr.write(
+      `light-code: --admin no longer takes a value.\n` +
+        `  --admin           opens the administrator's interface\n` +
+        `  --admin-id <id>   names an administrator (repeatable)\n` +
+        `Did you mean: --admin-id ${strayAdminValue.join(' --admin-id ')}\n`,
+    )
+    process.exit(2)
+  }
+
   const serverMode = args.includes('--server')
-  const adminIds = valuesOf(args, '--admin')
+  const adminMode = args.includes('--admin')
+  const adminIds = valuesOf(args, '--admin-id')
+  const trustedProxies = valuesOf(args, '--trust-proxy')
+  const userHeader = valueOf(args, '--user-header')
   const workspaceRoot = path.resolve(valueOf(args, '--workspace') ?? process.cwd())
   const dataDir = valueOf(args, '--data-dir') ?? envPaths('light-code', { suffix: '' }).data
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
@@ -59,6 +84,34 @@ async function main(): Promise<void> {
   // A shared server has no browser to open on the machine it runs on.
   const noOpen = args.includes('--no-open') || serverMode
 
+  /*
+   * Shared mode needs real users, and the only source of those is the proxy in front. Refusing
+   * to start without a trusted address is deliberate: the alternative is a server that appears
+   * to have per-user settings while resolving everyone to the same person, which would silently
+   * put one user's keys in front of another and look like it was working.
+   */
+  let identity: IdentityProvider | undefined
+  if (serverMode) {
+    const bad = validateTrustedProxies(trustedProxies)
+    if (bad.length > 0) {
+      process.stderr.write(`light-code: --trust-proxy is not an IP address: ${bad.join(', ')}
+`)
+      process.exit(2)
+    }
+    if (trustedProxies.length === 0) {
+      process.stderr.write(
+        'light-code: --server needs --trust-proxy <address of your reverse proxy>.\n' +
+          'Users are identified by a header the proxy sets, and a header is only believable\n' +
+          'from an address you name — anything that can reach this port can type one.\n',
+      )
+      process.exit(2)
+    }
+    identity = new ProxyHeaderIdentity({
+      trustedProxies,
+      ...(userHeader !== undefined ? { userHeader } : {}),
+    })
+  }
+
   const here = path.dirname(fileURLToPath(import.meta.url))
   const server = await startServer({
     workspaceRoot,
@@ -67,12 +120,13 @@ async function main(): Promise<void> {
     ripgrepPath: resolveRipgrep(),
     port: Number.isNaN(port) ? 0 : port,
     ...(serverMode ? { roles: adminListPolicy(adminIds) } : {}),
+    ...(identity !== undefined ? { identity } : {}),
     ...(bindAddress !== undefined ? { bindAddress } : {}),
   })
 
   // The token is in the fragment, which the browser never sends to the server — that is
   // what makes it usable as a one-time handoff. It is single-use and expires in 10s.
-  const launchUrl = `${server.url}/#t=${server.launchToken ?? ''}`
+  const launchUrl = `${server.url}${adminMode ? '/admin' : ''}/#t=${server.launchToken ?? ''}`
   process.stdout.write(
     `\nLight Code\n  workspace  ${workspaceRoot}\n  data       ${dataDir}\n  listening  ${server.url}\n`,
   )
@@ -120,6 +174,9 @@ const KNOWN_FLAGS = new Set([
   '--no-open',
   '--server',
   '--admin',
+  '--admin-id',
+  '--trust-proxy',
+  '--user-header',
   '--bind',
 ])
 
@@ -177,7 +234,12 @@ Usage: light-code [options]
   --no-open           Print the URL instead of launching a browser
   --server            Shared mode: configuration is read-only for everyone
                       except the administrators named below
-  --admin <id>        An administrator's identity id (repeatable)
+  --admin             Open the administrator's interface (/admin) instead
+  --admin-id <id>     An administrator's identity id (repeatable)
+  --trust-proxy <ip>  Believe the user header from this address (repeatable).
+                      Required in shared mode; without it every request is
+                      refused, which is the safe direction to fail
+  --user-header <h>   Header carrying the user id (default X-Forwarded-User)
   --bind <address>    Interface to listen on (default: 127.0.0.1)
   -h, --help          This message
 
