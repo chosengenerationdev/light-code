@@ -60,4 +60,31 @@ await esbuild.build({
 for (const asset of ['index.html', 'client.css']) {
   fs.copyFileSync(path.join('src', 'client', asset), path.join(outDir, 'client', asset))
 }
+
+/*
+ * The guide's diagrams, copied from the extension.
+ *
+ * They are generated once, by `scripts/generate-walkthrough-art.mjs`, and both hosts show the
+ * same tour. The files are checked in under `apps/vscode` because a VSIX can only contain what
+ * sits beneath the extension root and `contributes.walkthroughs` names them at a fixed path —
+ * so the extension is where they must live, and the browser copies rather than the reverse.
+ *
+ * Missing art is a warning, not a failure: `node dist/cli.js` should still start. The guide
+ * degrades to text, which is worth far more than a build that will not produce a server.
+ */
+const artDir = path.join('..', 'vscode', 'walkthrough', 'media')
+const guideOut = path.join(outDir, 'client', 'guide')
+if (fs.existsSync(artDir)) {
+  fs.mkdirSync(guideOut, { recursive: true })
+  let copied = 0
+  for (const file of fs.readdirSync(artDir)) {
+    if (!file.endsWith('.svg')) continue
+    fs.copyFileSync(path.join(artDir, file), path.join(guideOut, file))
+    copied++
+  }
+  console.log(`[esbuild] guide art: ${String(copied)} files`)
+} else {
+  console.warn('[esbuild] no guide art found — the guide will render without diagrams')
+}
+
 console.log('[esbuild] host built')

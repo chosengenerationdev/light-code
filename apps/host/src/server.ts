@@ -6,7 +6,7 @@ import {
   type ServerResponse,
 } from 'node:http'
 import path from 'node:path'
-import type { Transport } from '@light-code/core'
+import { GUIDE_STEPS, type Transport } from '@light-code/core'
 import { SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
@@ -19,17 +19,35 @@ import { createSession } from './session.js'
  * The disable is file-scoped and this comment is the recorded reason.
  */
 
-const CLIENT_ASSETS: Record<string, string> = {
+export const CLIENT_ASSETS: Record<string, string> = {
   '/': 'index.html',
   '/index.html': 'index.html',
   '/client.js': 'client.js',
   '/client.css': 'client.css',
+  /*
+   * The guide's diagrams, one entry per step and palette.
+   *
+   * Derived from `GUIDE_STEPS` rather than listed by hand, but still a *fixed table*: the keys
+   * come from checked-in data, never from the request, so `serveAsset` keeps the property that
+   * makes it safe — no part of the path is attacker-supplied and traversal is unreachable.
+   */
+  ...Object.fromEntries(
+    GUIDE_STEPS.flatMap((step) =>
+      (['light', 'dark'] as const).map((theme) => [
+        `/guide/${step.id}-${theme}.svg`,
+        `guide/${step.id}-${theme}.svg`,
+      ]),
+    ),
+  ),
 }
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
+  // Served as an image, and the CSP's `img-src 'self'` is what keeps it one: an SVG loaded
+  // through <img> cannot run script, whatever it contains.
+  '.svg': 'image/svg+xml',
 }
 
 export interface ServerOptions {

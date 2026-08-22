@@ -1,5 +1,7 @@
 import type { IncomingMessage } from 'node:http'
 import { describe, expect, it } from 'vitest'
+import { GUIDE_STEPS } from '@light-code/core'
+import { CLIENT_ASSETS } from './server.js'
 import { SingleUserIdentity, storageKeyFor, timingSafeEquals } from './identity.js'
 import { checkRequest, securityHeaders, type OriginPolicy } from './security.js'
 
@@ -176,5 +178,34 @@ describe('storageKeyFor', () => {
     expect(storageKeyFor({ id: 'S-1-5-21-1004336348', displayName: 'Renamed' })).toBe(key)
     expect(storageKeyFor({ id: '../../etc', displayName: 'x' })).toMatch(/^[0-9a-f]{32}$/)
     expect(storageKeyFor({ id: 'other', displayName: 'x' })).not.toBe(key)
+  })
+})
+
+describe('the guide’s diagrams', () => {
+  /**
+   * Served from a fixed table derived from checked-in data, never from the request. That is what
+   * keeps `serveAsset` free of traversal: no part of the path it joins comes from the client.
+   */
+  it('maps every guide step to a light and a dark file', () => {
+    for (const step of GUIDE_STEPS) {
+      expect(CLIENT_ASSETS[`/guide/${step.id}-light.svg`]).toBe(`guide/${step.id}-light.svg`)
+      expect(CLIENT_ASSETS[`/guide/${step.id}-dark.svg`]).toBe(`guide/${step.id}-dark.svg`)
+    }
+  })
+
+  it('offers nothing outside that table', () => {
+    for (const attempt of [
+      '/guide/../../etc/passwd',
+      '/guide/../server.js',
+      '/guide/orientation-dark.svg/../../client.js',
+      '/guide/does-not-exist-light.svg',
+    ]) {
+      expect(CLIENT_ASSETS[attempt]).toBeUndefined()
+    }
+  })
+
+  /** Loaded through <img>, where the CSP's img-src keeps an SVG from running anything. */
+  it('serves them as images', () => {
+    expect(securityHeaders()['Content-Security-Policy']).toContain("img-src 'self'")
   })
 })

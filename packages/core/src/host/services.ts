@@ -126,4 +126,13 @@ export interface HostServices {
   ripgrepPath: string | undefined
   /** Appends one line to wherever this host shows diagnostics. */
   logSink: (line: string) => void
+  /**
+   * Where the in-app guide's diagrams are served from, without a trailing slash.
+   *
+   * Only for a host that renders the tour itself. VS Code leaves this undefined — it has
+   * `openWalkthrough` and its own Get Started page, which references the same files by a path
+   * the manifest already declares. Absent means the guide renders as text, which is a real
+   * degradation rather than a broken one.
+   */
+  guideMediaBase?: string | undefined
 }

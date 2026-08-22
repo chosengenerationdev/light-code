@@ -34,6 +34,7 @@ import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
 import { ModeSelector } from './ModeSelector.js'
+import { Guide } from './guide/Guide.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
 import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
@@ -47,7 +48,7 @@ export interface AppProps {
   transport: Transport
 }
 
-type View = 'chat' | 'settings' | 'history'
+type View = 'chat' | 'settings' | 'history' | 'guide'
 
 /** If the last message is still streaming, finalize it (drop the `pending` flag) in place. */
 function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
@@ -69,6 +70,11 @@ function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
 export function App(props: AppProps): ReactElement {
   const [view, setView] = useState<View>('chat')
   const [requestedTab, setRequestedTab] = useState<{ tab: string; nonce: number }>()
+  /*
+   * What the guide button does, answered by the host rather than assumed. VS Code opens its
+   * own Get Started page; a browser has none, so the UI shows the tour itself.
+   */
+  const [guide, setGuide] = useState<{ native: boolean; mediaBase?: string }>({ native: true })
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -245,6 +251,10 @@ export function App(props: AppProps): ReactElement {
         setView('settings')
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
+        setGuide({
+          native: message.nativeGuide,
+          ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
+        })
         setApprovals(message.approvals)
         setMaxIterations(message.maxIterations)
         setAccentColor(message.accentColor)
@@ -830,7 +840,13 @@ export function App(props: AppProps): ReactElement {
               aria-label="Guide"
               title="Open the guide"
               style={iconButtonStyle('ghost')}
-              onClick={() => props.transport.post({ type: 'openWalkthrough' } satisfies UiToHostMessage)}
+              onClick={() => {
+                if (guide.native) {
+                  props.transport.post({ type: 'openWalkthrough' } satisfies UiToHostMessage)
+                  return
+                }
+                setView('guide')
+              }}
             >
               <HelpIcon />
             </button>
@@ -875,7 +891,19 @@ export function App(props: AppProps): ReactElement {
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {view === 'settings' ? (
+        {view === 'guide' ? (
+          <Guide
+            {...(guide.mediaBase !== undefined ? { mediaBase: guide.mediaBase } : {})}
+            onClose={() => setView('chat')}
+            onOpenTab={(tab) => {
+              // The same path the host's own message takes, so a tab reached from the guide and
+              // a tab reached from a walkthrough button land identically.
+              props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
+              setRequestedTab({ tab, nonce: Date.now() })
+              setView('settings')
+            }}
+          />
+        ) : view === 'settings' ? (
           <SettingsPanel
             {...(requestedTab !== undefined ? { requestedTab } : {})}
             profiles={profiles}

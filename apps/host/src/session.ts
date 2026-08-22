@@ -189,6 +189,12 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
     storageDir: userDir,
     ripgrepPath: options.ripgrepPath,
     logSink: options.logSink,
+    /*
+     * Served from this origin, which is what `img-src 'self'` in the CSP permits and the whole
+     * reason the diagrams are copied into the client bundle rather than fetched. A relative base
+     * also survives whatever port the server happened to bind.
+     */
+    guideMediaBase: '/guide',
   }
 
   new Logger({ level: 'debug', sink: options.logSink }).info(

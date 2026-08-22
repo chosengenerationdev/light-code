@@ -722,7 +722,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
       readRoots: cachedReadRoots,
+      ...guideCapability(),
     })
+  }
+
+  /*
+   * What the UI needs to know about the *host*, not the config.
+   *
+   * Derived from the services it was given rather than declared separately: a host that
+   * implements `openWalkthrough` has native onboarding by definition, and one that does not is
+   * telling the UI to render its own. Two ways of saying the same thing would eventually
+   * disagree, and the failure is a button that does nothing.
+   */
+  function guideCapability(): { nativeGuide: boolean; guideMediaBase?: string } {
+    return {
+      nativeGuide: ui.openWalkthrough !== undefined,
+      ...(services.guideMediaBase !== undefined ? { guideMediaBase: services.guideMediaBase } : {}),
+    }
   }
 
   const userGate = new WebviewApprovalGate(post)
@@ -3057,6 +3073,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
       readRoots: cachedReadRoots,
+      ...guideCapability(),
     })
   }
 

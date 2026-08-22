@@ -164,3 +164,30 @@ describe('when Python tools are switched off', () => {
     expect(buildSystemPrompt('/w', { pythonToolsDisabled: false })).not.toContain('switched off in Settings')
   })
 })
+
+/**
+ * The regression this fixes: 0.31.0 put a guide button in the chat header unconditionally, and
+ * `HostUi.openWalkthrough` is optional — so in the browser it posted a message nothing handled
+ * and did nothing at all. Asking the host is the only honest way to know, since the capability
+ * is precisely "did this host implement that method".
+ */
+describe('who owns the guide button', () => {
+  const capability = (ui: { openWalkthrough?: () => Promise<void> }, mediaBase?: string) => ({
+    nativeGuide: ui.openWalkthrough !== undefined,
+    ...(mediaBase !== undefined ? { guideMediaBase: mediaBase } : {}),
+  })
+
+  it('is the host’s own onboarding when it has some', () => {
+    expect(capability({ openWalkthrough: async () => undefined }).nativeGuide).toBe(true)
+  })
+
+  it('is the in-app tour when it does not', () => {
+    expect(capability({}).nativeGuide).toBe(false)
+  })
+
+  /** No diagrams is a text tour, not fourteen broken images. */
+  it('carries a media base only when the host serves one', () => {
+    expect(capability({}, '/guide').guideMediaBase).toBe('/guide')
+    expect(capability({}).guideMediaBase).toBeUndefined()
+  })
+})

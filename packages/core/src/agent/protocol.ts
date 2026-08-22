@@ -491,6 +491,22 @@ export type HostToUiMessage =
       expertColor: string
       /** Folders tools may read beyond the workspace. Reading only — writes stay confined. */
       readRoots: string[]
+      /**
+       * True when the host has onboarding of its own — VS Code's Get Started page.
+       *
+       * The UI needs this to decide what its guide button does, and asking the host is the only
+       * honest way: `HostUi.openWalkthrough` is optional (§19), so a UI that always posted
+       * `openWalkthrough` would render a button that silently does nothing everywhere it is not
+       * implemented. That is exactly what shipped in 0.31.0 for the browser.
+       */
+      nativeGuide: boolean
+      /**
+       * Where the in-app guide's diagrams are served from, without a trailing slash.
+       *
+       * Absent means there are none, and the guide renders as text rather than as fourteen
+       * broken images.
+       */
+      guideMediaBase?: string
     }
   /** Server health plus the raw JSON the editor round-trips, and any spawn warnings. */
   | {

@@ -37,6 +37,18 @@ export {
   type McpServerKind,
 } from './mcp/forms.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
+/*
+ * The guided tour's content. Pure strings, which is what makes it safe here — and the reason it
+ * lives in core at all is that two hosts render it: VS Code as `contributes.walkthroughs`, the
+ * browser as a view of its own. Two copies of onboarding prose is two copies that go stale.
+ */
+export {
+  GUIDE_STEPS,
+  GUIDE_TITLE,
+  GUIDE_DESCRIPTION,
+  type GuideStep,
+  type GuideTab,
+} from './guide/steps.js'
 
 export { validateProviderForm, type FieldError } from './config/validate.js'
 

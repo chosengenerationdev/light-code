@@ -92,6 +92,23 @@ try {
     if (missing.length > 0) throw new Error(`missing ${missing.join(', ')}`)
   })
 
+  /*
+   * Caught exactly this: `files` listed .js, .html and .css, so the guide's diagrams were built,
+   * copied into dist, served locally, and then silently left out of the tarball. Every published
+   * install would have shown fourteen broken images. Nothing else in the pipeline looks at what
+   * the *package* contains as opposed to what the build produced — which is the same blind spot
+   * that once shipped a VSIX that could not activate.
+   */
+  check('the guide ships with its diagrams', () => {
+    const dir = path.join(installed, 'dist/client/guide')
+    if (!fs.existsSync(dir)) throw new Error('dist/client/guide is not in the package')
+    const svgs = fs.readdirSync(dir).filter((file) => file.endsWith('.svg'))
+    // Two palettes per step, and a step without both is a broken image for half the users.
+    if (svgs.length < 20) throw new Error(`only ${String(svgs.length)} diagrams packaged`)
+    const lopsided = svgs.filter((file) => !fs.existsSync(path.join(dir, file.replace('-light.svg', '-dark.svg'))))
+    if (lopsided.length > 0) throw new Error(`no dark variant for ${lopsided.join(', ')}`)
+  })
+
   check('the entry point keeps its shebang', () => {
     const first = fs.readFileSync(path.join(installed, 'dist/cli.js'), 'utf8').split('\n')[0]
     if (!first.startsWith('#!')) throw new Error(`first line is ${JSON.stringify(first)}`)

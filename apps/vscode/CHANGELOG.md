@@ -1,5 +1,19 @@
 # light-code-vscode
 
+## 0.33.4
+
+### Patch Changes
+
+- The guide button in the chat header now knows whether the host has a guide.
+
+  It was added unconditionally in 0.31.0 and posted `openWalkthrough` regardless. `HostUi.openWalkthrough`
+  is optional, so in the browser host the message reached nothing and the button silently did
+  nothing — the exact failure the interface's contract exists to prevent. The host now says whether
+  it has native onboarding, and the UI either opens it or renders the tour itself.
+
+  The tour's content moved to `packages/core/src/guide/steps.ts`, shared by both hosts. The VS Code
+  manifest is generated from it exactly as before — verified byte-identical across the move.
+
 ## 0.33.3
 
 ### Patch Changes
