@@ -280,6 +280,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Read at worker spawn, so a changed variable applies to the next worker rather than being
     // frozen at construction. Added to the allowlist in minimalPythonEnv, never a way past it.
     ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv } : {}),
+    ...(services.submitForReview !== undefined
+      ? {
+          submitForReview: (request: { name: string; content: string; existingContent: string; producedBy?: string }) =>
+            services.submitForReview?.({ kind: 'python-tool', ...request }) ?? Promise.resolve(''),
+        }
+      : {}),
     /*
      * A resolver, not a generator: the tool's *parameters* change shape depending on whether one
      * is configured — specification versus source — so the answer is needed when the tool list is
@@ -899,7 +905,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }),
     )
     if (skillsDir !== undefined) {
-      const context = { skillsDir, onChanged: refreshSkills }
+      const context = {
+        skillsDir,
+        onChanged: refreshSkills,
+        ...(services.submitForReview !== undefined
+          ? {
+              submitForReview: (request: { name: string; content: string; existingContent: string }) =>
+                services.submitForReview?.({ kind: 'skill' as const, ...request }) ?? Promise.resolve(''),
+            }
+          : {}),
+      }
       combined.register(createWriteSkillTool(context))
       combined.register(createDeleteSkillTool(context))
     }

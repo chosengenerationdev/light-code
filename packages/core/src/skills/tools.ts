@@ -21,6 +21,18 @@ import { isValidSkillName, parseFrontmatter, renderSkill, skillFileName } from '
 export interface SkillToolContext {
   skillsDir: string
   onChanged: () => Promise<void>
+  /**
+   * Submits the text for someone else to approve, instead of writing it.
+   *
+   * The same seam Python tools have and for a sharper reason: a skill is prose that steers every
+   * future turn, and on a shared server it steers *everyone's*. One user recording something
+   * wrong — or deliberate — would otherwise reach every colleague's next conversation.
+   *
+   * Absent in the extension, where the person approving is the person asking.
+   */
+  submitForReview?:
+    | ((request: { name: string; content: string; existingContent: string }) => Promise<string>)
+    | undefined
 }
 
 const writeParams = z.object({
@@ -90,8 +102,23 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
     async execute(params): Promise<ToolResult> {
       try {
         const filePath = await resolveSkillPath(context.skillsDir, params.name)
-        const existed = (await readIfPresent(filePath)).length > 0
-        await fs.writeFile(filePath, renderSkill(params.name, params.description, params.body), 'utf8')
+        const before = await readIfPresent(filePath)
+        const existed = before.length > 0
+        const rendered = renderSkill(params.name, params.description, params.body)
+
+        // Before the write, not after: a skill that existed even briefly is one that could be
+        // read into a turn, and "briefly" is not a security property.
+        if (context.submitForReview !== undefined) {
+          return {
+            content: await context.submitForReview({
+              name: params.name,
+              content: rendered,
+              existingContent: before,
+            }),
+          }
+        }
+
+        await fs.writeFile(filePath, rendered, 'utf8')
         await context.onChanged()
         return {
           content:

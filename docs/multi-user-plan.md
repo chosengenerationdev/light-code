@@ -101,7 +101,7 @@ The prerequisite. Nothing else is meaningful while every request resolves to the
   Metering needs usage reaching the provider layer first — a change to every adapter, not something
   to smuggle in behind an unfilled property.
 
-## Phase H5 — the approval queue
+## Phase H5 — the approval queue — **done 2026-08-22**
 
 - A tool or skill written by a non-admin is staged, not registered: no hash entry, not loadable,
   not callable.

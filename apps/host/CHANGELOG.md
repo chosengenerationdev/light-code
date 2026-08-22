@@ -1,5 +1,25 @@
 # @chosengeneration/light-code
 
+## 0.9.0
+
+### Minor Changes
+
+- Python tools and skills written by a non-administrator go to a review queue.
+
+  The in-chat approval gate assumes the approver is present, which is false on a shared server: the
+  person who may approve is not the person asking. So the work is staged, the author's turn is told
+  and carries on, and an administrator reads the source in Settings → **Review**.
+
+  Nothing is written where the workspace can see it until it is approved — the bytes live in the
+  queue, which is §13's own rule (the registry is the boundary, and a file with no registry entry
+  never loads) rather than a second mechanism beside it. A rejection leaves nothing behind, and an
+  approval writes the bytes that were read rather than whatever is on disk by then.
+
+  Rejections take a reason and the author sees it. Resubmitting the same name replaces the pending
+  item rather than queueing a second copy. Administrators keep the ordinary in-chat prompt.
+
+  MCP server configuration is pinned admin-only by name, alongside Python, search and schedules.
+
 ## 0.8.0
 
 ### Minor Changes

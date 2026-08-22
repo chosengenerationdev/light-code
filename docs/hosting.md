@@ -200,6 +200,7 @@ can never be replaced — and `--admin-id` still wins at startup, which is the w
 | Readable folders outside the workspace | Their own task history |
 | Auto-approve toggles and the always-allow lists | |
 | Session variables that apply to everyone | |
+| Approving a queued tool or skill | Submitting one, and seeing their own in the queue |
 
 ### Providers, and bringing your own key
 
@@ -291,6 +292,50 @@ added to it, because they are what a human deliberately declared.
 
 An edit applies to the **next command**, not the next session; a Python tool picks one up when its
 worker next starts.
+
+---
+
+## 1d. The review queue
+
+A Python tool or a skill written by someone who is **not** an administrator is not saved. It goes
+into a queue, the author's turn is told so and carries on, and an administrator reads the source
+and approves or rejects it in Settings → **Review**.
+
+Asynchronous on purpose. The in-chat approval gate assumes the approver is present, which is true
+in a chat and false here: the person who may approve is not the person asking. Blocking the turn
+would hang for hours when nobody is at a screen, and forever for a scheduled run.
+
+### What "queued" means
+
+Nothing is written anywhere the workspace can see it. The bytes live in `<data>/reviews.json`
+until someone approves them, and only then are they written to `.lightcode/tools/` or
+`.lightcode/skills/`. That is §13's rule used as it stands — the *registry* is the security
+boundary, and a file with no registry entry never loads — rather than a second mechanism beside it.
+
+Two consequences worth knowing:
+
+- **A rejected submission leaves nothing behind.** There is no half-written file to clean up.
+- **An approval writes the bytes that were read**, not whatever is on disk by then.
+
+### Reviewing
+
+The queue shows the full source as a diff against what is there now, with the author, the time,
+and — when a [programming provider](#1b-shared-mode---server--a-usage-guide) wrote it — which
+model produced it. Approve is disabled until the source has been opened. That is not a security
+control, since anyone can open it and not read it; it is there because approving code you have not
+looked at is the single mistake this queue exists to make harder, and a button needing no step in
+between is one people press by reflex.
+
+A rejection takes a reason, and the author sees it. Authors can see their own submissions, which is
+how the reason reaches them — a queue only administrators could read would leave someone waiting
+without knowing what for.
+
+Resubmitting the same name **replaces** the pending item rather than adding another. A model told
+its work is queued sometimes tries again, and four near-identical copies of one tool means an
+administrator has to diff them to find the current one.
+
+An administrator's own tools and skills are unaffected: they get the ordinary in-chat prompt, which
+is the same mechanism with the approver already at the screen.
 
 ---
 

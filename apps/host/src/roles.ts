@@ -91,6 +91,8 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
   // Unattended execution with a pre-granted tool list.
   // Session variables an administrator sets for everyone. A user saving their own is
   // `saveUserVariables`, which is deliberately not here — it is theirs.
+  // Approving model-authored code is the whole point of the queue.
+  'decideReview',
   'saveAdminVariables',
   'saveAdminIds',
   'saveSchedule',

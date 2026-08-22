@@ -6,12 +6,19 @@ import {
   type ServerResponse,
 } from 'node:http'
 import path from 'node:path'
-import { GUIDE_STEPS, resolveSessionVariables, sessionVariablesSchema, type Transport } from '@light-code/core'
+import {
+  describeSubmission,
+  GUIDE_STEPS,
+  resolveSessionVariables,
+  sessionVariablesSchema,
+  type Transport,
+} from '@light-code/core'
 import { SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
 import type { SharedConfig, SharedConfigStore } from './sharedConfig.js'
 import { FileSecretStore } from './fileSecretStore.js'
+import { ReviewQueue } from './reviewQueue.js'
 import { toSharedProfileId } from './sharedProfiles.js'
 import { userVariableStoreFor } from './userVariables.js'
 import { createSession } from './session.js'
@@ -127,6 +134,12 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
    * about which user's file the organisation's gateway key ended up in.
    */
   const sharedSecretStore = new FileSecretStore(path.join(options.dataDir, 'shared-secrets.json'))
+  /*
+   * Tools and skills a non-administrator wrote, held until someone may approve them. Beside the
+   * shared config rather than in a user's directory: the queue belongs to the server, and the
+   * person who reads it is not the person who filled it.
+   */
+  const reviews = new ReviewQueue(path.join(options.dataDir, 'reviews.json'))
   let sharedCache: SharedConfig = { variables: [], adminIds: [], profiles: [] }
 
   const bindAddress = options.bindAddress ?? '127.0.0.1'
@@ -196,6 +209,22 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
        * is already open. `SharedConfigStore` caches, so this is a map lookup rather than a read.
        */
       adminVariables: () => sharedCache.variables,
+      /*
+       * Only for someone who cannot approve their own work. An administrator keeps the ordinary
+       * in-chat prompt — the same mechanism with the approver already at the screen — so this is
+       * absent for them rather than a queue they would have to visit to approve themselves.
+       */
+      ...(roles.shared && !isAdminSession(principal)
+        ? {
+            submitForReview: async (request) => {
+              const queued = await reviews.submit({ ...request, authorId: principal.id, authorName: principal.displayName })
+              log(`${principal.displayName} submitted ${request.kind} "${request.name}" for review`)
+              // Every administrator watching sees it appear without reloading.
+              await broadcastReviews()
+              return describeSubmission(queued)
+            },
+          }
+        : {}),
       /*
        * Only in shared mode. Outside it there is one person and every profile is already theirs,
        * so wrapping the stores would add a prefix nobody needs and a second file nobody writes.
@@ -375,6 +404,78 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     reject(response, { status: 404, reason: 'Not found.' })
   }
 
+  /**
+   * The queue, to everyone who should see it.
+   *
+   * An administrator sees every item and can decide. An author sees their own, so a rejection with
+   * a reason reaches the person who has to act on it — a queue only administrators can read makes
+   * the author wait without knowing what for.
+   */
+  async function postReviews(principal: Principal, connection: Connection): Promise<void> {
+    const canDecide = isAdminSession(principal)
+    const all = await reviews.list()
+    const visible = canDecide ? all : all.filter((item) => item.authorId === principal.id)
+    connection.transport.post({
+      type: 'reviews',
+      canDecide,
+      items: visible
+        .sort((a, b) => b.submittedAt - a.submittedAt)
+        .map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          name: item.name,
+          content: item.content,
+          existingContent: item.existingContent,
+          authorName: item.authorName,
+          submittedAt: item.submittedAt,
+          status: item.status,
+          ...(item.producedBy !== undefined ? { producedBy: item.producedBy } : {}),
+          ...(item.decidedBy !== undefined ? { decidedBy: item.decidedBy } : {}),
+          ...(item.reason !== undefined ? { reason: item.reason } : {}),
+        })),
+    })
+  }
+
+  /** Every open session, so a decision or a submission appears without anyone reloading. */
+  async function broadcastReviews(): Promise<void> {
+    for (const [id, connection] of connections) {
+      await postReviews({ id, displayName: id }, connection)
+    }
+  }
+
+  /**
+   * Writes an approved submission where it belongs.
+   *
+   * The bytes come from the queue, never from disk: what the administrator read is what gets
+   * written, even if something else touched the file in between. For a Python tool the hash is
+   * recorded here too — the registry is the boundary (§13), and this is the moment the approval
+   * becomes one.
+   */
+  async function applyApproval(item: { kind: string; name: string; content: string }): Promise<string | undefined> {
+    if (options.workspaceRoot === undefined) return 'No workspace is open, so there is nowhere to write it.'
+    try {
+      if (item.kind === 'skill') {
+        const dir = path.join(options.workspaceRoot, '.lightcode', 'skills')
+        await fs.mkdir(dir, { recursive: true })
+        await fs.writeFile(path.join(dir, `${item.name}.md`), item.content, 'utf8')
+        return undefined
+      }
+      const dir = path.join(options.workspaceRoot, '.lightcode', 'tools')
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(dir, `${item.name}.py`), item.content, 'utf8')
+      /*
+       * Written but deliberately not registered here. Registration derives the schema by importing
+       * the module in the Python worker, which this process does not own — the author's session
+       * does that on its next load, and a file whose hash is not yet approved is simply reported
+       * rather than run. Approving the hash without having imported it would claim a validation
+       * that never happened.
+       */
+      return undefined
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
+  }
+
   /** Everything a session variables panel needs, for whoever is asking. */
   async function postVariables(principal: Principal, connection: Connection): Promise<void> {
     const store = userVariableStoreFor(options.dataDir, principal)
@@ -398,6 +499,36 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     connection: Connection,
   ): Promise<boolean> {
     const payload = body as { variables?: unknown; ids?: unknown }
+    if (type === 'requestReviews') {
+      await postReviews(principal, connection)
+      return true
+    }
+    if (type === 'decideReview') {
+      const id = typeof (body as { id?: unknown }).id === 'string' ? (body as { id: string }).id : ''
+      const approved = (body as { approved?: unknown }).approved === true
+      const reason = typeof (body as { reason?: unknown }).reason === 'string' ? (body as { reason: string }).reason : undefined
+      const decided = await reviews.decide(id, {
+        approved,
+        by: principal.displayName,
+        ...(reason !== undefined ? { reason } : {}),
+      })
+      if (decided === undefined) {
+        connection.transport.post({
+          type: 'error',
+          message: 'That submission has already been decided. Reload to see the current queue.',
+        })
+        return true
+      }
+      if (approved) {
+        const failure = await applyApproval(decided)
+        if (failure !== undefined) {
+          connection.transport.post({ type: 'error', message: `Approved, but could not write it: ${failure}` })
+        }
+      }
+      log(`${principal.displayName} ${approved ? 'approved' : 'rejected'} ${decided.kind} "${decided.name}"`)
+      await broadcastReviews()
+      return true
+    }
     if (type === 'requestVariables') {
       await postVariables(principal, connection)
       return true

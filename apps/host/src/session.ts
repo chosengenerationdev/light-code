@@ -190,6 +190,14 @@ export interface SessionOptions {
   adminVariables?: () => readonly SessionVariable[]
   /** Where a shared profile's API key lives. Absent outside shared mode. */
   sharedSecrets?: SecretStore
+  /**
+   * Submits a tool or skill for review instead of saving it.
+   *
+   * Supplied only for a session that may not approve its own work. An administrator's session gets
+   * none, so they keep the ordinary in-chat prompt showing the full source — which is the same
+   * mechanism, just with the approver already present.
+   */
+  submitForReview?: HostServices['submitForReview']
 }
 
 /**
@@ -250,6 +258,7 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
      * also survives whatever port the server happened to bind.
      */
     guideMediaBase: '/guide',
+    ...(options.submitForReview !== undefined ? { submitForReview: options.submitForReview } : {}),
     /*
      * Resolved per read, so both halves stay live — an administrator's edit and the user's own
      * each reach the next command rather than the next session.

@@ -37,6 +37,7 @@ import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
 import { ModeSelector } from './ModeSelector.js'
 import { Guide } from './guide/Guide.js'
+import type { ReviewItem } from './settings/ReviewsTab.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
 import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
@@ -92,6 +93,8 @@ export function App(props: AppProps): ReactElement {
    * declared in two places that can disagree.
    */
   const [variables, setVariables] = useState<VariablesState>()
+  /** Undefined until a host answers `requestReviews`, so the extension never shows the tab. */
+  const [reviews, setReviews] = useState<{ items: ReviewItem[]; canDecide: boolean }>()
   /** Which profile writes Python tool source. Undefined means the chat model does. */
   const [programmingProfileId, setProgrammingProfileId] = useState<string>()
   /** What this session is, according to the host. Absent in the extension, which has one user. */
@@ -287,6 +290,8 @@ export function App(props: AppProps): ReactElement {
           displayName: message.displayName,
           sharedProfileIds: message.sharedProfileIds,
         })
+      } else if (message.type === 'reviews') {
+        setReviews({ items: message.items, canDecide: message.canDecide })
       } else if (message.type === 'variables') {
         setVariables({
           user: message.user,
@@ -521,6 +526,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestVariables' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestReviews' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -1067,6 +1073,20 @@ export function App(props: AppProps): ReactElement {
                 } satisfies UiToHostMessage),
             }}
             tools={toolCatalogue}
+            {...(reviews !== undefined
+              ? {
+                  reviews: {
+                    ...reviews,
+                    onDecide: (id: string, approved: boolean, reason?: string) =>
+                      props.transport.post({
+                        type: 'decideReview',
+                        id,
+                        approved,
+                        ...(reason !== undefined ? { reason } : {}),
+                      } satisfies UiToHostMessage),
+                  },
+                }
+              : {})}
             {...(variables !== undefined
               ? {
                   variables: {

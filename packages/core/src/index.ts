@@ -28,6 +28,12 @@ export {
   type CodeGenerationRequest,
   type CodeGenerationResult,
 } from './python/codeGenerator.js'
+export {
+  describeSubmission,
+  type ReviewRequest,
+  type ReviewDecision,
+  type ReviewKind,
+} from './review/types.js'
 export { GUIDE_STEPS, GUIDE_TITLE, GUIDE_DESCRIPTION, type GuideStep, type GuideTab } from './guide/steps.js'
 export { mergeScopes, USER_SCOPE_ONLY_KEYS, type ScopeMergeResult } from './config/scopes.js'
 export { defaultUserConfigPath, workspaceConfigPath } from './config/paths.js'

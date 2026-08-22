@@ -15,6 +15,7 @@ import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
 import { ToolsTab, type ToolsTabProps } from './ToolsTab.js'
+import { ReviewsTab, type ReviewsTabProps } from './ReviewsTab.js'
 import { VariablesTab, type VariablesTabProps } from './VariablesTab.js'
 import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
 import { SchedulesTab, type SchedulesTabProps } from './SchedulesTab.js'
@@ -91,6 +92,14 @@ export interface SettingsPanelProps extends ProvidersTabProps {
    * resolve — and the tab is not rendered at all rather than rendered empty. A tab that exists
    * but can never do anything is worse than one that does not.
    */
+  /**
+   * Work waiting to be approved. Present only where the host has a queue — a shared server.
+   *
+   * Shown to authors too, not only administrators: a rejection with a reason has to reach the
+   * person who must act on it, and a queue only administrators can see leaves the author waiting
+   * without knowing what for.
+   */
+  reviews?: ReviewsTabProps | undefined
   variables?: VariablesTabProps | undefined
   skills: SkillsTabProps
   schedules: SchedulesTabProps
@@ -109,6 +118,7 @@ type TabId =
   | 'schedules'
   | 'appearance'
   | 'variables'
+  | 'reviews'
 
 /**
  * Icons rather than words, with the **active tab keeping its label**.
@@ -132,6 +142,7 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'tools', label: 'Tools', Icon: ToolboxIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
+  { id: 'reviews', label: 'Review', Icon: ShieldIcon },
   { id: 'variables', label: 'Variables', Icon: VariablesIcon },
   { id: 'appearance', label: 'Appearance', Icon: PaletteIcon },
 ]
@@ -153,7 +164,11 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
    * A tab that has gone away takes the view with it — otherwise a session that loses the
    * Variables tab (a reconnect that resolves differently) would render an empty pane.
    */
-  const visible = TABS.filter((tab) => tab.id !== 'variables' || props.variables !== undefined)
+  const present: Record<string, boolean> = {
+    variables: props.variables !== undefined,
+    reviews: props.reviews !== undefined,
+  }
+  const visible = TABS.filter((tab) => present[tab.id] ?? true)
   const shown = visible.some((tab) => tab.id === active) ? active : 'providers'
 
   const requested = props.requestedTab
@@ -173,7 +188,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           Filtered rather than disabled. The Variables tab only exists where the host has the
           concept, and a greyed-out tab would invite the question this cannot answer.
         */}
-        {TABS.filter((tab) => tab.id !== 'variables' || props.variables !== undefined).map((tab) => {
+        {visible.map((tab) => {
           const selected = shown === tab.id
           return (
             <button
@@ -211,7 +226,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         </div>
       {/* Keyed on the tab so a switch re-mounts and replays the entry animation. */}
       <div key={shown} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        {shown === 'variables' && props.variables !== undefined ? (
+        {shown === 'reviews' && props.reviews !== undefined ? (
+          <ReviewsTab {...props.reviews} />
+        ) : shown === 'variables' && props.variables !== undefined ? (
           <VariablesTab {...props.variables} />
         ) : shown === 'appearance' ? (
           <div style={{ padding: 12 }}>

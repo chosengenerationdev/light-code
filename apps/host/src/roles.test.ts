@@ -173,3 +173,37 @@ describe('providers, after H3', () => {
     expect(isAdminOnly('exportConfig')).toBe(false)
   })
 })
+
+/**
+ * Named explicitly at the user's request (2026-08-22). Already covered by the list, but an MCP
+ * server is an arbitrary executable this machine spawns — the sharpest thing on it — so it is
+ * worth a test that fails by name rather than one that happens to pass through a prefix rule.
+ */
+describe('MCP configuration', () => {
+  it('is an administrator’s, in every form', () => {
+    for (const type of [
+      'saveMcpServer',
+      'saveMcpServers',
+      'deleteMcpServer',
+      'duplicateMcpServer',
+      'restartMcpServer',
+      'connectMcpServer',
+      'setMcpServerEnabled',
+      'setMcpToolPermission',
+    ]) {
+      expect(isAdminOnly(type), type).toBe(true)
+    }
+  })
+})
+
+describe('the review queue', () => {
+  /** Approving model-authored code is the whole point of it. */
+  it('lets only an administrator decide', () => {
+    expect(isAdminOnly('decideReview')).toBe(true)
+  })
+
+  /** An author must be able to see their own, or a rejection never reaches them. */
+  it('lets anyone ask to see it', () => {
+    expect(isAdminOnly('requestReviews')).toBe(false)
+  })
+})

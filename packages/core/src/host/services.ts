@@ -144,4 +144,18 @@ export interface HostServices {
    * `session/variables.ts` holds that rule and the reason it goes the way it does.
    */
   sessionEnv?: () => Record<string, string>
+  /**
+   * Submits a Python tool or a skill for someone else to approve, rather than saving it.
+   *
+   * Present only where the author may not approve their own work. Absent in the extension, where
+   * the person approving is the person asking — and absent for an administrator on a shared
+   * server, who gets the ordinary in-chat prompt.
+   */
+  submitForReview?: (request: {
+    kind: 'python-tool' | 'skill'
+    name: string
+    content: string
+    existingContent: string
+    producedBy?: string
+  }) => Promise<string>
 }

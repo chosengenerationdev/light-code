@@ -295,6 +295,9 @@ export type UiToHostMessage =
    * not. The shapes live here because this is where the UI's protocol is defined.
    */
   | { type: 'requestVariables' }
+  /* The review queue. Administrator-only except for listing, which shows an author their own. */
+  | { type: 'requestReviews' }
+  | { type: 'decideReview'; id: string; approved: boolean; reason?: string }
   | { type: 'saveUserVariables'; variables: SessionVariable[] }
   | { type: 'saveAdminVariables'; variables: SessionVariable[] }
   | { type: 'saveAdminIds'; ids: string[] }
@@ -521,6 +524,24 @@ export type HostToUiMessage =
    *
    * Sent only by the Node host. Its absence is what tells the UI not to offer the tab.
    */
+  | {
+      type: 'reviews'
+      items: {
+        id: string
+        kind: 'python-tool' | 'skill'
+        name: string
+        content: string
+        existingContent: string
+        authorName: string
+        submittedAt: number
+        status: 'pending' | 'approved' | 'rejected'
+        producedBy?: string
+        decidedBy?: string
+        reason?: string
+      }[]
+      /** False for an author looking at their own submissions. */
+      canDecide: boolean
+    }
   | {
       type: 'variables'
       user: SessionVariable[]
