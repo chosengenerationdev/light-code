@@ -207,6 +207,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
               ...(sharedCache.defaultProfileId !== undefined
                 ? { defaultProfileId: sharedCache.defaultProfileId }
                 : {}),
+              ...(sharedCache.defaultProgrammingProfileId !== undefined
+                ? { defaultProgrammingProfileId: sharedCache.defaultProgrammingProfileId }
+                : {}),
             }),
             sharedSecrets: sharedSecretStore,
           }

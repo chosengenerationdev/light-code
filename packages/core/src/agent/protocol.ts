@@ -288,6 +288,7 @@ export type UiToHostMessage =
   | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' | 'folder' }
   | { type: 'rollback' }
   | { type: 'requestSettings' }
+  | { type: 'setProgrammingProfile'; id: string }
   /*
    * Session variables. **Handled by the Node host, not the bridge** — whose variable wins is a
    * question only a shared server has, and the bridge is shared with the extension where it does
@@ -541,6 +542,13 @@ export type HostToUiMessage =
       expertColor: string
       /** Folders tools may read beyond the workspace. Reading only — writes stay confined. */
       readRoots: string[]
+      /**
+       * Which profile writes Python tool source, or absent when the chat model does.
+       *
+       * Reported with the rest of settings rather than with the profile list, because it is a
+       * setting that happens to name a profile — the same shape as `activeProfileId`.
+       */
+      programmingProfileId?: string
       /**
        * True when the host has onboarding of its own — VS Code's Get Started page.
        *

@@ -64,7 +64,11 @@ export function presentSharedProfiles(profiles: readonly ProviderProfile[]): Pro
 export class SharedProfileConfigStore implements ConfigStore {
   constructor(
     private readonly inner: ConfigStore,
-    private readonly shared: () => { profiles: ProviderProfile[]; defaultProfileId?: string },
+    private readonly shared: () => {
+      profiles: ProviderProfile[]
+      defaultProfileId?: string
+      defaultProgrammingProfileId?: string
+    },
   ) {}
 
   async read(scope: ConfigScope): Promise<string | undefined> {
@@ -107,10 +111,29 @@ export class SharedProfileConfigStore implements ConfigStore {
           ? toSharedProfileId(shared.defaultProfileId)
           : activeId
 
+    /*
+     * The same rule as the active profile: an administrator's default is for someone who has not
+     * chosen, it never overrides a choice, and it is dropped if it names a profile that has since
+     * gone — otherwise removing one would point every session at nothing.
+     */
+    const ownProgramming =
+      typeof parsed['programmingProfileId'] === 'string' ? parsed['programmingProfileId'] : undefined
+    const sharedProgramming =
+      shared.defaultProgrammingProfileId !== undefined
+        ? toSharedProfileId(shared.defaultProgrammingProfileId)
+        : undefined
+    const resolvedProgramming =
+      ownProgramming !== undefined && merged.some((profile) => profile.id === ownProgramming)
+        ? ownProgramming
+        : sharedProgramming !== undefined && merged.some((profile) => profile.id === sharedProgramming)
+          ? sharedProgramming
+          : ownProgramming
+
     return JSON.stringify({
       ...parsed,
       profiles: merged,
       ...(resolvedActive !== undefined ? { activeProfileId: resolvedActive } : {}),
+      ...(resolvedProgramming !== undefined ? { programmingProfileId: resolvedProgramming } : {}),
     })
   }
 

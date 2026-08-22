@@ -702,11 +702,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Rebuilt on every settings load, so a profile change reaches the next turn. */
   let cachedCodeGenerator: CodeGenerator | undefined
+  let cachedProgrammingProfileId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
     const { config } = await configManager.load()
     cachedApprovals = config.approvals?.[approvalsKey] ?? {}
     cachedCodeGenerator = codeGeneratorFor(config)
+    cachedProgrammingProfileId = config.programmingProfileId
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
@@ -738,6 +740,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
       readRoots: cachedReadRoots,
+      ...(cachedProgrammingProfileId !== undefined ? { programmingProfileId: cachedProgrammingProfileId } : {}),
       ...guideCapability(),
     })
   }
@@ -3532,6 +3535,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void configManager
         .save('user', { maxIterations: message.value })
         .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setProgrammingProfile') {
+      /*
+       * An empty id clears it, which is how "the model I am chatting with" is expressed. Saving an
+       * empty string instead would leave a key naming a profile that does not exist, and the
+       * generator would log a warning on every settings load.
+       */
+      void configManager
+        .load()
+        .then(async ({ config }) => {
+          const next = { ...config }
+          if (message.id.length === 0) delete next.programmingProfileId
+          else next.programmingProfileId = message.id
+          await configManager.save('user', next)
+          await postSettings()
+        })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setReadRoots') {
       void configManager

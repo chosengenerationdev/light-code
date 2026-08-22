@@ -79,7 +79,7 @@ The prerequisite. Nothing else is meaningful while every request resolves to the
   per-user, and what stays admin-only is the **shared** set and the defaults.
 - Precedence: a user's own profile is theirs; the admin's default applies when they have none.
 
-## Phase H4 — the programming provider — **core done 2026-08-22**
+## Phase H4 — the programming provider — **done 2026-08-22**
 
 - A profile nominated for generating code. User picks; falls back to the admin's default.
 - Used as a **sub-call** when `create_python_tool` / `update_python_tool` runs: the primary model
@@ -93,9 +93,13 @@ The prerequisite. Nothing else is meaningful while every request resolves to the
   in the product — and duplicating that outside core to keep the feature host-only would be a far
   worse trade than one config key that is absent by default. The extension gains an opt-in key it
   never sets. The *admin default* half stays host-only.
-- **Not yet built:** the picker in the UI, and the admin default falling through to a user who has
-  not chosen. Configured today by setting `programmingProfileId` in config.
-- Cost is metered and attributed, like the expert's. **Not built yet either.**
+- Picked in Settings → Python, under *Which model writes the code*. An administrator's
+  `defaultProgrammingProfileId` applies to anyone who has not chosen, by the same rule as the
+  active profile: it never overrides a choice and is dropped if it names a profile that has gone.
+- **Cost is deliberately not metered, and the field for it was removed.** `StreamChunk` carries no
+  usage, so nothing could fill it, and an optional field nobody populates reads as "this was free".
+  Metering needs usage reaching the provider layer first — a change to every adapter, not something
+  to smuggle in behind an unfilled property.
 
 ## Phase H5 — the approval queue
 

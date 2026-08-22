@@ -92,6 +92,8 @@ export function App(props: AppProps): ReactElement {
    * declared in two places that can disagree.
    */
   const [variables, setVariables] = useState<VariablesState>()
+  /** Which profile writes Python tool source. Undefined means the chat model does. */
+  const [programmingProfileId, setProgrammingProfileId] = useState<string>()
   /** What this session is, according to the host. Absent in the extension, which has one user. */
   const [session, setSession] = useState<{
     role: 'admin' | 'user'
@@ -295,6 +297,7 @@ export function App(props: AppProps): ReactElement {
         })
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
+        setProgrammingProfileId(message.programmingProfileId)
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -1078,6 +1081,16 @@ export function App(props: AppProps): ReactElement {
                 }
               : {})}
             python={{
+              /*
+               * Only profiles that exist can be offered. A picker listing something deleted would
+               * let someone choose a profile the generator then warns about on every settings load.
+               */
+              programming: {
+                profiles: profiles.map((profile) => ({ id: profile.id, label: profile.label })),
+                selectedId: programmingProfileId,
+                onSelect: (id) =>
+                  props.transport.post({ type: 'setProgrammingProfile', id } satisfies UiToHostMessage),
+              },
               status: pythonStatus,
               settings: pythonSettings,
               onBrowse: browseForPath,

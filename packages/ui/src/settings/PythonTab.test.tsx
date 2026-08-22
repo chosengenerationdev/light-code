@@ -111,3 +111,41 @@ describe('the Python tab', () => {
     expect(field('lc-py-tools').value).toBe('second')
   })
 })
+
+describe('choosing which model writes the code', () => {
+  const chosen: string[] = []
+  const withPicker = (selectedId?: string): void => {
+    chosen.length = 0
+    render({
+      // The picker lives in the configuration section, which only appears once Python is on.
+      status,
+      settings: { dynamicTools: 'on' },
+      programming: {
+        profiles: [
+          { id: 'gateway', label: 'Corporate gateway' },
+          { id: 'coder', label: 'Code model' },
+        ],
+        selectedId,
+        onSelect: (id: string) => chosen.push(id),
+      },
+    })
+  }
+
+  it('offers the chat model as the default choice', () => {
+    withPicker()
+    expect(container.textContent).toContain('The model you are chatting with')
+    expect(container.textContent).toContain('writes the Python itself')
+  })
+
+  /** The reassurance that matters: a second model writing code does not skip the gate. */
+  it('says approval still happens once a code model is chosen', () => {
+    withPicker('coder')
+    expect(container.textContent).toContain('approve the source')
+    expect(container.textContent).toContain('which model produced it')
+  })
+
+  it('is absent when the host offers no profiles', () => {
+    render({ status, settings: { dynamicTools: 'on' } })
+    expect(container.textContent).not.toContain('Which model writes the code')
+  })
+})

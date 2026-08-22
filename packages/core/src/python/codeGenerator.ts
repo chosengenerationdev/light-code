@@ -31,8 +31,14 @@ export interface CodeGenerationRequest {
 
 export interface CodeGenerationResult {
   source: string
-  /** For metering. A model that writes code costs money and someone should be able to see it. */
-  usage?: { promptTokens?: number; completionTokens?: number }
+  /*
+   * There is deliberately no token count here.
+   *
+   * `StreamChunk` carries no usage, so nothing could fill it, and an optional field nobody
+   * populates is indistinguishable from one that is always zero — the reader concludes the call
+   * was free. Metering this properly means usage reaching the provider layer first, which is a
+   * change to every adapter and is not smuggled in behind a field.
+   */
   /** Which profile produced it, so the approval prompt can say. */
   producedBy: string
 }

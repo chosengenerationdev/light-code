@@ -1,6 +1,7 @@
 import type { PythonSettings, PythonStatus } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { Select } from '../Select.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -22,6 +23,17 @@ export interface PythonTabProps {
   }) => void
   /** Opens a tool's source in an editor tab, which is where editing belongs. */
   onOpenFile: (path: string) => void
+  /**
+   * Which provider writes tool source, and what there is to choose from.
+   *
+   * Here rather than in Providers because it is a decision about *making tools* — the question
+   * arrives while you are setting this up, not while you are managing credentials.
+   */
+  programming?: {
+    profiles: { id: string; label: string }[]
+    selectedId: string | undefined
+    onSelect: (id: string) => void
+  }
   onDeleteTool: (name: string) => void
   /** Re-pins a tool the user has edited by hand — see the hash pin in `registry.ts`. */
   onApproveTool: (name: string) => void
@@ -152,6 +164,37 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             onBrowse={props.onBrowse}
             onChange={setVenvPath}
           />
+
+          {props.programming !== undefined && props.programming.profiles.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <label htmlFor="lc-py-writer" style={labelStyle()}>
+                Which model writes the code
+              </label>
+              <Select
+                id="lc-py-writer"
+                value={props.programming.selectedId ?? ''}
+                onChange={props.programming.onSelect}
+                options={[
+                  { value: '', label: 'The model you are chatting with' },
+                  ...props.programming.profiles.map((profile) => ({ value: profile.id, label: profile.label })),
+                ]}
+              />
+              <p style={{ color: colors.muted, fontSize: 11, margin: '4px 0 0' }}>
+                {props.programming.selectedId === undefined || props.programming.selectedId === '' ? (
+                  <>
+                    The assistant writes the Python itself. Pick a different profile and it will
+                    describe the tool instead, leaving the file to a model chosen for code.
+                  </>
+                ) : (
+                  <>
+                    The assistant describes what the tool must do and this profile writes the file.
+                    You still approve the source before anything is saved, and the prompt says which
+                    model produced it.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
 
           <div style={{ marginBottom: 10 }}>
             <label htmlFor="lc-py-index" style={labelStyle()}>

@@ -27,6 +27,14 @@ export interface SharedConfig {
   /** Used by anyone who has not chosen a profile, which is every new user. */
   defaultProfileId?: string
   /**
+   * Which profile writes Python tool source for anyone who has not chosen one.
+   *
+   * Separate from `defaultProfileId` because they answer different questions — the model you talk
+   * to and the model that writes code are exactly the pair this feature exists to separate, and
+   * one key covering both would make the split unconfigurable for everybody at once.
+   */
+  defaultProgrammingProfileId?: string
+  /**
    * Identity ids treated as administrators.
    *
    * Seeded from `--admin-id` and editable in the admin interface, so adding a colleague does not
@@ -64,11 +72,14 @@ export class SharedConfigStore {
         */
       const profiles = z.array(providerProfileSchema).safeParse(raw['profiles'])
       const defaultProfileId = typeof raw['defaultProfileId'] === 'string' ? raw['defaultProfileId'] : undefined
+      const defaultProgrammingProfileId =
+        typeof raw['defaultProgrammingProfileId'] === 'string' ? raw['defaultProgrammingProfileId'] : undefined
       this.cache = {
         variables: variables.success ? variables.data : [],
         adminIds,
         profiles: profiles.success ? profiles.data : [],
         ...(defaultProfileId !== undefined ? { defaultProfileId } : {}),
+        ...(defaultProgrammingProfileId !== undefined ? { defaultProgrammingProfileId } : {}),
       }
     } catch {
       // Absent is the normal case on a first run, and unreadable is not worth failing to start

@@ -176,7 +176,11 @@ export interface SessionOptions {
    * Merged into this user's list read-only. Absent outside shared mode, where there is one person
    * and every profile is already theirs.
    */
-  sharedProfiles?: () => { profiles: ProviderProfile[]; defaultProfileId?: string }
+  sharedProfiles?: () => {
+    profiles: ProviderProfile[]
+    defaultProfileId?: string
+    defaultProgrammingProfileId?: string
+  }
   /**
    * Variables an administrator set for everyone, read fresh on each command.
    *
