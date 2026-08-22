@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { sessionVariablesSchema, type SessionVariable } from '@light-code/core'
+import { z } from 'zod'
+import { providerProfileSchema, sessionVariablesSchema, type ProviderProfile, type SessionVariable } from '@light-code/core'
 
 /**
  * Settings an administrator sets once, for everyone.
@@ -17,6 +18,15 @@ export interface SharedConfig {
   /** Applied to every user's session, overriding their own of the same name. */
   variables: SessionVariable[]
   /**
+   * Provider profiles offered to everyone.
+   *
+   * Merged into each user's list, read-only to them, with ids prefixed in that view so the two
+   * halves can never be confused — see `sharedProfiles.ts`. Users add their own alongside these.
+   */
+  profiles: ProviderProfile[]
+  /** Used by anyone who has not chosen a profile, which is every new user. */
+  defaultProfileId?: string
+  /**
    * Identity ids treated as administrators.
    *
    * Seeded from `--admin-id` and editable in the admin interface, so adding a colleague does not
@@ -27,7 +37,7 @@ export interface SharedConfig {
   adminIds: string[]
 }
 
-const EMPTY: SharedConfig = { variables: [], adminIds: [] }
+const EMPTY: SharedConfig = { variables: [], adminIds: [], profiles: [] }
 
 export class SharedConfigStore {
   private cache: SharedConfig | undefined
@@ -47,7 +57,19 @@ export class SharedConfigStore {
       const adminIds = Array.isArray(raw['adminIds'])
         ? raw['adminIds'].filter((id): id is string => typeof id === 'string')
         : []
-      this.cache = { variables: variables.success ? variables.data : [], adminIds }
+      /*
+        * Profiles are validated as a whole rather than entry by entry: a half-valid profile is a
+        * gateway with no credentials or a credential with no gateway, and offering it to every
+        * user would produce a failure that looks like an outage.
+        */
+      const profiles = z.array(providerProfileSchema).safeParse(raw['profiles'])
+      const defaultProfileId = typeof raw['defaultProfileId'] === 'string' ? raw['defaultProfileId'] : undefined
+      this.cache = {
+        variables: variables.success ? variables.data : [],
+        adminIds,
+        profiles: profiles.success ? profiles.data : [],
+        ...(defaultProfileId !== undefined ? { defaultProfileId } : {}),
+      }
     } catch {
       // Absent is the normal case on a first run, and unreadable is not worth failing to start
       // over — an administrator can set it again through the interface.

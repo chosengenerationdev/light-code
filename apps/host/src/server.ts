@@ -11,6 +11,8 @@ import { SingleUserIdentity, type IdentityProvider, type Principal } from './ide
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
 import type { SharedConfig, SharedConfigStore } from './sharedConfig.js'
+import { FileSecretStore } from './fileSecretStore.js'
+import { toSharedProfileId } from './sharedProfiles.js'
 import { userVariableStoreFor } from './userVariables.js'
 import { createSession } from './session.js'
 
@@ -119,7 +121,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
    * optimisation of it.
    */
   const sharedStore = options.sharedConfig
-  let sharedCache: SharedConfig = { variables: [], adminIds: [] }
+  /*
+   * Where a shared profile's API key lives. Beside the shared config rather than in any one user's
+   * directory, so it survives a user clearing their own secrets — and so nobody has to reason
+   * about which user's file the organisation's gateway key ended up in.
+   */
+  const sharedSecretStore = new FileSecretStore(path.join(options.dataDir, 'shared-secrets.json'))
+  let sharedCache: SharedConfig = { variables: [], adminIds: [], profiles: [] }
 
   const bindAddress = options.bindAddress ?? '127.0.0.1'
   if (sharedStore !== undefined) sharedCache = await sharedStore.load()
@@ -188,6 +196,21 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
        * is already open. `SharedConfigStore` caches, so this is a map lookup rather than a read.
        */
       adminVariables: () => sharedCache.variables,
+      /*
+       * Only in shared mode. Outside it there is one person and every profile is already theirs,
+       * so wrapping the stores would add a prefix nobody needs and a second file nobody writes.
+       */
+      ...(sharedStore !== undefined
+        ? {
+            sharedProfiles: () => ({
+              profiles: sharedCache.profiles,
+              ...(sharedCache.defaultProfileId !== undefined
+                ? { defaultProfileId: sharedCache.defaultProfileId }
+                : {}),
+            }),
+            sharedSecrets: sharedSecretStore,
+          }
+        : {}),
     })
     const originalDispose = connection.dispose
     connection.dispose = () => {
@@ -289,6 +312,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         role: isAdminSession(principal) ? 'admin' : 'user',
         shared: roles.shared,
         displayName: principal.displayName,
+        sharedProfileIds: sharedCache.profiles.map((profile) => toSharedProfileId(profile.id)),
       })
 
       // Proxies and load balancers drop an idle stream; a comment line is not an event, so

@@ -64,7 +64,7 @@ describe('the administrator’s shared store', () => {
   })
 
   it('starts empty rather than failing when there is no file', async () => {
-    expect(await new SharedConfigStore(path.join(dir, 'none.json')).load()).toEqual({ variables: [], adminIds: [] })
+    expect(await new SharedConfigStore(path.join(dir, 'none.json')).load()).toEqual({ variables: [], adminIds: [], profiles: [] })
   })
 
   /**

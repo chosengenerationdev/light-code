@@ -34,7 +34,7 @@ answer "who is allowed to change what", which is a real and useful question. The
 
 ---
 
-## Phase H1 — identity and the two URLs
+## Phase H1 — identity and the two URLs — **done 2026-08-22**
 
 The prerequisite. Nothing else is meaningful while every request resolves to the same principal.
 
@@ -62,7 +62,7 @@ The prerequisite. Nothing else is meaningful while every request resolves to the
   a flag that quietly changes meaning is the failure this CLI already learned once.
 - Bootstrap: `--admin-id <id>` (repeatable) seeds the list before an admin exists to manage it.
 
-## Phase H2 — session variables
+## Phase H2 — session variables — **done 2026-08-22**
 
 - Two scopes: **admin, for everyone**, and **user, for one person**.
 - Injected into the environment of what a session runs — `execute_command`, the Python worker,
@@ -72,7 +72,7 @@ The prerequisite. Nothing else is meaningful while every request resolves to the
 - Core seam: an optional `sessionEnv` on the execution context. VS Code supplies none.
 - These are not secrets. Say so next to the field.
 
-## Phase H3 — per-user providers
+## Phase H3 — per-user providers — **done 2026-08-22**
 
 - A user may add their own provider profiles and API keys.
 - Today `saveProfile` is admin-only in `--server` mode (`roles.ts`). That flips: profiles become

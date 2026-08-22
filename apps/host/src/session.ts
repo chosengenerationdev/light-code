@@ -11,11 +11,14 @@ import {
   type ConfigStore,
   type HostServices,
   type HostUi,
+  type ProviderProfile,
+  type SecretStore,
   type SessionVariable,
   type Transport,
   type WorkspaceState,
 } from '@light-code/core'
 import { FileSecretStore } from './fileSecretStore.js'
+import { RoutedSecretStore, SharedProfileConfigStore } from './sharedProfiles.js'
 import { UserVariableStore, userVariablesPath } from './userVariables.js'
 import { storageKeyFor, type Principal } from './identity.js'
 
@@ -168,12 +171,21 @@ export interface SessionOptions {
   ripgrepPath: string | undefined
   logSink: (line: string) => void
   /**
+   * The administrator's provider profiles and default, read fresh.
+   *
+   * Merged into this user's list read-only. Absent outside shared mode, where there is one person
+   * and every profile is already theirs.
+   */
+  sharedProfiles?: () => { profiles: ProviderProfile[]; defaultProfileId?: string }
+  /**
    * Variables an administrator set for everyone, read fresh on each command.
    *
    * A function, not a value: an administrator editing one should reach a session already
    * running, not only sessions started afterwards.
    */
   adminVariables?: () => readonly SessionVariable[]
+  /** Where a shared profile's API key lives. Absent outside shared mode. */
+  sharedSecrets?: SecretStore
 }
 
 /**
@@ -207,8 +219,21 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
 
   const services: HostServices = {
     transport: options.transport,
-    secrets: new FileSecretStore(path.join(userDir, 'secrets.json')),
-    configStore: new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot),
+    /*
+      * A shared profile's API key belongs to the administrator and lives beside the shared config;
+      * everything else is this user's. Routed by the reference, which is all a secret store gets.
+      */
+    secrets:
+      options.sharedSecrets === undefined
+        ? new FileSecretStore(path.join(userDir, 'secrets.json'))
+        : new RoutedSecretStore(new FileSecretStore(path.join(userDir, 'secrets.json')), options.sharedSecrets),
+    configStore:
+      options.sharedProfiles === undefined
+        ? new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot)
+        : new SharedProfileConfigStore(
+            new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot),
+            options.sharedProfiles,
+          ),
     workspaceState,
     ui: createBrowserUi(options.workspaceRoot, options.logSink),
     workspaceRoot: options.workspaceRoot,

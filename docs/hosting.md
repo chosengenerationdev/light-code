@@ -190,15 +190,55 @@ can never be replaced — and `--admin-id` still wins at startup, which is the w
 
 | Administrators | Everyone |
 |---|---|
-| Providers, models, API keys, Test connection | Their own session variables |
-| Network trust: CA, client certificate, verify TLS | Mode (Code / Ask / Junior) |
-| MCP servers and per-tool permissions | Accent and expert colours |
-| Enabling Python, the interpreter, the tools folder | The per-chat expert budget |
-| Search connections, the embedder, indexing | Chatting, editing, running commands |
-| Schedules, including running one by hand | Their own task history |
-| Readable folders outside the workspace | |
+| The **shared** provider set, and the default a new user inherits | **Their own provider profiles, with their own API keys** |
+| Importing a whole configuration | Test connection, and exporting their own configuration |
+| Network trust: CA, client certificate, verify TLS | Their own session variables |
+| MCP servers and per-tool permissions | Mode (Code / Ask / Junior) |
+| Enabling Python, the interpreter, the tools folder | Accent and expert colours |
+| Search connections, the embedder, indexing | The per-chat expert budget |
+| Schedules, including running one by hand | Chatting, editing, running commands |
+| Readable folders outside the workspace | Their own task history |
 | Auto-approve toggles and the always-allow lists | |
 | Session variables that apply to everyone | |
+
+### Providers, and bringing your own key
+
+Everyone can add provider profiles of their own, with their own API keys, and pick which to use.
+That reverses the original blanket rule deliberately. Freezing all of `profiles` treated a second
+user as the same threat as a hostile repository — but the threat that reasoning is about is one
+user repointing *another's* gateway, and a per-user profile cannot do that. Someone bringing their
+own key is spending their own money against a host they chose.
+
+An administrator can also publish profiles for **everyone**, in `shared.json`:
+
+```json
+{
+  "defaultProfileId": "gateway",
+  "profiles": [
+    {
+      "id": "gateway",
+      "label": "Corporate gateway",
+      "wireFormat": "openai",
+      "baseUrl": "https://gateway.internal/v1",
+      "model": "gpt-4o",
+      "auth": { "type": "apiKey", "apiKeyRef": "profile:gateway:apiKey" }
+    }
+  ]
+}
+```
+
+They appear in every user's list marked **provided**, with no Edit and no Delete — a user's file
+never stores them, so an edit would silently vanish on the next save. **Duplicate** is offered
+instead, which is how someone starts from the organisation's gateway and points the copy at their
+own key.
+
+`defaultProfileId` applies to anyone who has not chosen. It never overrides a choice, and it is
+ignored if it names a profile that no longer exists — so removing one cannot leave every session
+pointing at nothing.
+
+A shared profile's API key lives in `<data>/shared-secrets.json` rather than in any one user's
+directory, so it survives a user clearing their own secrets. As everywhere here that is storage,
+not secrecy: every session runs as the same account and can read the file.
 
 The rule: anything invariant 5 already treats as user-scope-only becomes admin-only, because a
 second user on a shared box is the same threat as a hostile repository arriving by another door.

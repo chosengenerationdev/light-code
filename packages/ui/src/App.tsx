@@ -92,6 +92,13 @@ export function App(props: AppProps): ReactElement {
    * declared in two places that can disagree.
    */
   const [variables, setVariables] = useState<VariablesState>()
+  /** What this session is, according to the host. Absent in the extension, which has one user. */
+  const [session, setSession] = useState<{
+    role: 'admin' | 'user'
+    shared: boolean
+    displayName: string
+    sharedProfileIds: string[]
+  }>()
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -266,6 +273,18 @@ export function App(props: AppProps): ReactElement {
         props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
         setRequestedTab({ tab: message.tab, nonce: Date.now() })
         setView('settings')
+      } else if (message.type === 'hostRole') {
+        /*
+         * Sent once at the top of the event stream by the Node host. It was added when the two
+         * URLs were, and nothing read it until now — which is worth noticing: a message nobody
+         * consumes is indistinguishable from one nobody sends.
+         */
+        setSession({
+          role: message.role,
+          shared: message.shared,
+          displayName: message.displayName,
+          sharedProfileIds: message.sharedProfileIds,
+        })
       } else if (message.type === 'variables') {
         setVariables({
           user: message.user,
@@ -940,6 +959,7 @@ export function App(props: AppProps): ReactElement {
             onSetActive={setActiveProfile}
             onExport={exportConfig}
             onImport={importConfig}
+            {...(session !== undefined ? { sharedProfileIds: session.sharedProfileIds } : {})}
             onRequestModels={requestModels}
             onTestConnection={runTestConnection}
             onEditingChange={resetProviderProbes}

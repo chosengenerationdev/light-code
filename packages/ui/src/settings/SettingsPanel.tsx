@@ -224,6 +224,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           </div>
         ) : shown === 'providers' ? (
           <ProvidersTab
+            {...(props.sharedProfileIds !== undefined ? { sharedProfileIds: props.sharedProfileIds } : {})}
             profiles={props.profiles}
             activeProfileId={props.activeProfileId}
             onSave={props.onSave}

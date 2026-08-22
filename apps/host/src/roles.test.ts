@@ -27,10 +27,16 @@ describe('who owns configuration', () => {
 })
 
 describe('which messages are an administrator’s', () => {
+  /**
+   * `saveProfile` and `setActiveProfile` were on this list until H3 and are deliberately not any
+   * more — a user's own profile is theirs. What stayed are the things one user can use to reach
+   * *another's* data or to run code on the machine, which is the distinction the original rule
+   * was reaching for and did not yet have the vocabulary to make.
+   */
   it('covers the things invariant 5 already judged too dangerous to delegate', () => {
     for (const type of [
-      'saveProfile',
-      'setActiveProfile',
+      'saveSharedProfile',
+      'setDefaultProfile',
       'saveMcpServer',
       'setPython',
       'setExpert',
@@ -39,7 +45,7 @@ describe('which messages are an administrator’s', () => {
       'saveSchedule',
       'saveSearchConnection',
     ]) {
-      expect(isAdminOnly(type)).toBe(true)
+      expect(isAdminOnly(type), type).toBe(true)
     }
   })
 
@@ -132,5 +138,38 @@ describe('session variables', () => {
   it('lets a user save their own', () => {
     expect(isAdminOnly('saveUserVariables')).toBe(false)
     expect(isAdminOnly('requestVariables')).toBe(false)
+  })
+})
+
+/**
+ * H3 reversed part of the original rule, and the reversal is the thing worth pinning.
+ *
+ * Profiles were frozen wholesale because a second user was treated as the same threat as a
+ * hostile repository. The threat that reasoning is actually about is one user repointing
+ * *another's* gateway — and a per-user profile cannot do that. Someone bringing their own key is
+ * spending their own money against a host they chose.
+ */
+describe('providers, after H3', () => {
+  it('lets a user manage their own profiles and keys', () => {
+    for (const type of ['saveProfile', 'deleteProfile', 'duplicateProfile', 'setActiveProfile']) {
+      expect(isAdminOnly(type), type).toBe(false)
+    }
+  })
+
+  /** A diagnostic against a profile they can already use. Refusing it hides why a key fails. */
+  it('lets a user test their own connection', () => {
+    expect(isAdminOnly('testConnection')).toBe(false)
+  })
+
+  it('keeps the shared set and the default to an administrator', () => {
+    for (const type of ['saveSharedProfile', 'deleteSharedProfile', 'setDefaultProfile']) {
+      expect(isAdminOnly(type), type).toBe(true)
+    }
+  })
+
+  /** Importing a config writes a whole profile list; exporting only reads their own. */
+  it('keeps importing to an administrator but lets a user export', () => {
+    expect(isAdminOnly('importConfig')).toBe(true)
+    expect(isAdminOnly('exportConfig')).toBe(false)
   })
 })

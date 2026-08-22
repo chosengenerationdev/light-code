@@ -1,7 +1,7 @@
 import type { ProfileInput, ProfileSummary, TestConnectionStep } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { CheckIcon, CopyIcon, EditIcon, TrashIcon } from '../icons.js'
-import { colors, fontFamily, iconButtonStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { badgeStyle, colors, fontFamily, iconButtonStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
 import { ProviderForm, type ProviderFormValues } from './ProviderForm.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
@@ -11,6 +11,14 @@ export interface ProvidersTabProps {
   onSave: (input: ProfileInput) => void
   onDuplicate: (id: string) => void
   onDelete: (id: string) => void
+  /**
+   * Profiles the administrator provides. Usable, not editable.
+   *
+   * A shared server strips these from anything written to a user's file, so an Edit that appeared
+   * to work would be discarded on save — the change would simply not be there next time. Offering
+   * the control at all would be the lie.
+   */
+  sharedProfileIds?: readonly string[]
   onSetActive: (id: string) => void
   onExport: () => void
   onImport: () => void
@@ -101,9 +109,11 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
 
       {props.profiles.map((profile) => {
         const isActive = profile.id === props.activeProfileId
+        const isShared = props.sharedProfileIds?.includes(profile.id) === true
         return (
           <div
             key={profile.id}
+            data-profile={profile.id}
             style={{
               padding: 10,
               marginBottom: 8,
@@ -119,6 +129,13 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
             <div style={{ color: colors.muted, fontSize: 12, marginBottom: 8 }}>
               {profile.baseUrl} — {profile.model}
             </div>
+            {isShared && (
+              <div style={{ color: colors.muted, fontSize: 10, marginBottom: 6 }}>
+                <span style={{ ...badgeStyle(), fontSize: 9, marginRight: 5 }}>provided</span>
+                Set up by an administrator for everyone. Duplicate it to make a copy you can edit
+                with your own key.
+              </div>
+            )}
             {/* Icons with tooltips: the same four words repeat on every row, and the
                 actions are recognisable enough not to need spelling out each time. */}
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -133,33 +150,42 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
                   <CheckIcon />
                 </button>
               )}
+              {!isShared && (
+                <button
+                  type="button"
+                  title="Edit"
+                  aria-label="Edit"
+                  style={iconButtonStyle('secondary')}
+                  onClick={() => open({ mode: 'edit', profile })}
+                >
+                  <EditIcon />
+                </button>
+              )}
+              {/*
+                Duplicate stays available on a shared profile, and is the useful move: it makes a
+                copy that *is* yours, which is how someone starts from the organisation's gateway
+                and points it at their own key.
+              */}
               <button
                 type="button"
-                title="Edit"
-                aria-label="Edit"
-                style={iconButtonStyle('secondary')}
-                onClick={() => open({ mode: 'edit', profile })}
-              >
-                <EditIcon />
-              </button>
-              <button
-                type="button"
-                title="Duplicate"
+                title={isShared ? 'Copy this into a profile of your own' : 'Duplicate'}
                 aria-label="Duplicate"
                 style={iconButtonStyle('secondary')}
                 onClick={() => props.onDuplicate(profile.id)}
               >
                 <CopyIcon />
               </button>
-              <button
-                type="button"
-                title="Delete"
-                aria-label="Delete"
-                style={{ ...iconButtonStyle('secondary'), color: colors.error }}
-                onClick={() => props.onDelete(profile.id)}
-              >
-                <TrashIcon />
-              </button>
+              {!isShared && (
+                <button
+                  type="button"
+                  title="Delete"
+                  aria-label="Delete"
+                  style={{ ...iconButtonStyle('secondary'), color: colors.error }}
+                  onClick={() => props.onDelete(profile.id)}
+                >
+                  <TrashIcon />
+                </button>
+              )}
             </div>
           </div>
         )

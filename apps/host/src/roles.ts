@@ -41,14 +41,20 @@ export type Role = 'admin' | 'user'
  * against a prefix rule as well — see `isAdminOnly`.
  */
 export const ADMIN_ONLY_MESSAGES: readonly string[] = [
-  // Credentials and where inference goes (invariant 5: `profiles`, `activeProfileId`).
-  'saveProfile',
-  'deleteProfile',
-  'duplicateProfile',
-  'setActiveProfile',
-  'testConnection',
+  /*
+   * The *shared* provider set, and the default a new user inherits.
+   *
+   * A user's own profiles are theirs — see PERSONAL_SETTINGS. That is a reversal, made
+   * deliberately: the original rule froze all of `profiles` because a second user was treated as
+   * the same threat as a hostile repository. The threat that reasoning is about is one user
+   * repointing *another's* gateway, and a per-user profile cannot do that — someone bringing
+   * their own key is spending their own money against a host they chose.
+   */
+  'saveSharedProfile',
+  'deleteSharedProfile',
+  'setDefaultProfile',
+  // Writes a whole profile list, so it is not the same act as exporting one.
   'importConfig',
-  'exportConfig',
   // Processes this machine will spawn.
   'saveMcpServer',
   'saveMcpServers',
@@ -116,6 +122,20 @@ const PERSONAL_SETTINGS = new Set([
   // safety net working — the net is meant to be wrong in this direction, and this is where the
   // exception gets made deliberately rather than by weakening the rule.
   'saveUserVariables',
+  /*
+   * A user's own provider profiles, including their own API key.
+   *
+   * They cannot reach the shared ones: the config store strips a shared profile from anything
+   * written to a user's file, so that boundary is storage rather than this list. Test Connection
+   * is theirs too — a diagnostic against a profile they can already use, and refusing it would
+   * leave someone unable to find out why their own key does not work.
+   */
+  'saveProfile',
+  'deleteProfile',
+  'duplicateProfile',
+  'setActiveProfile',
+  'testConnection',
+  'exportConfig',
   'setMode',
   'setAccentColor',
   'setExpertColor',

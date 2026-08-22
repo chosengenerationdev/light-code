@@ -1,5 +1,25 @@
 # @chosengeneration/light-code
 
+## 0.7.0
+
+### Minor Changes
+
+- Users bring their own provider profiles and API keys.
+
+  Profiles were admin-only in shared mode. That was a blanket rule which treated a second user as
+  the same threat as a hostile repository — but the threat that reasoning is about is one user
+  repointing _another's_ gateway, and a per-user profile cannot do that. Everyone can now add their
+  own profiles, set their own keys, choose which to use, and run Test connection against them.
+
+  Administrators can publish a **shared** set in `shared.json`, with a `defaultProfileId` that
+  applies to anyone who has not chosen. Those appear in every user's list marked **provided**, with
+  no Edit and no Delete — a user's file never stores them, so an edit would silently vanish on the
+  next save. Duplicate is offered instead, which is how someone starts from the organisation's
+  gateway and points a copy at their own key.
+
+  A shared profile's key lives in `shared-secrets.json` rather than in whichever user happened to
+  save it, so it survives one user clearing their own secrets.
+
 ## 0.6.0
 
 ### Minor Changes

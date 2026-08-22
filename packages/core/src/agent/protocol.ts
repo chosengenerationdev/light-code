@@ -496,7 +496,21 @@ export type HostToUiMessage =
    * ignorant of roles deliberately: a second user is a concept only one host has, and teaching
    * the bridge about it would put it in the extension too, where it means nothing.
    */
-  | { type: 'hostRole'; role: 'admin' | 'user'; shared: boolean; displayName: string }
+  | {
+      type: 'hostRole'
+      role: 'admin' | 'user'
+      shared: boolean
+      displayName: string
+      /**
+       * Profiles the administrator provides, which this session may use but not change.
+       *
+       * Sent as ids rather than a flag on the profile itself: "not yours" is a fact about the
+       * session, not about the profile, and the same profile is editable in the administrator's
+       * own view. Without this the panel offers Edit on something whose edit is silently
+       * discarded on save.
+       */
+      sharedProfileIds: string[]
+    }
   /**
    * Both scopes, and the resolution between them.
    *
