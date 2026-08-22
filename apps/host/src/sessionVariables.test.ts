@@ -1,10 +1,10 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resolveSessionVariables, toEnvironment } from '@light-code/core'
+import { configSchema, resolveSessionVariables, toEnvironment } from '@light-code/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { readUserVariables } from './session.js'
+import { readVariablesFile, UserVariableStore } from './userVariables.js'
 import { SharedConfigStore } from './sharedConfig.js'
 
 let dir: string
@@ -23,28 +23,32 @@ const write = (name: string, contents: unknown): string => {
 }
 
 describe('a user’s own variables', () => {
-  it('are read from their config file', () => {
-    const file = write('config.json', { variables: [{ name: 'MY_TICKET', value: 'ABC-1234' }] })
-    expect(readUserVariables(file)).toEqual([{ name: 'MY_TICKET', value: 'ABC-1234' }])
+  /*
+   * In `variables.json`, not `config.json`. The config schema strips keys it does not know, so
+   * variables kept there survive until the first unrelated save and then vanish silently.
+   */
+  it('are read from their own file', () => {
+    const file = write('variables.json', { variables: [{ name: 'MY_TICKET', value: 'ABC-1234' }] })
+    expect(readVariablesFile(file)).toEqual([{ name: 'MY_TICKET', value: 'ABC-1234' }])
   })
 
   it('are none when the file does not exist yet', () => {
-    expect(readUserVariables(path.join(dir, 'absent.json'))).toEqual([])
+    expect(readVariablesFile(path.join(dir, 'absent.json'))).toEqual([])
   })
 
   /**
    * The degradation that matters. A user hand-edits their config, breaks an unrelated key, and
    * their variables should not vanish along with it — nor should the session fail to start.
    */
-  it('survive a config file that is broken elsewhere', () => {
-    const file = path.join(dir, 'config.json')
+  it('survive a file that is broken elsewhere', () => {
+    const file = path.join(dir, 'variables.json')
     fs.writeFileSync(file, '{ "variables": [ { "name": "OK", "value": "1" } ], "profiles": NOT_JSON }')
-    expect(readUserVariables(file)).toEqual([])
+    expect(readVariablesFile(file)).toEqual([])
   })
 
   it('are none when the variables key itself is the wrong shape', () => {
-    expect(readUserVariables(write('config.json', { variables: 'nope' }))).toEqual([])
-    expect(readUserVariables(write('config.json', { variables: [{ name: 42 }] }))).toEqual([])
+    expect(readVariablesFile(write('variables.json', { variables: 'nope' }))).toEqual([])
+    expect(readVariablesFile(write('variables.json', { variables: [{ name: 42 }] }))).toEqual([])
   })
 })
 
@@ -94,7 +98,7 @@ describe('what a session ends up handing to a command', () => {
         { name: 'SHARED_ONLY', value: 'from-admin' },
       ],
     })
-    const userFile = write('config.json', {
+    const userFile = write('variables.json', {
       variables: [
         { name: 'REGISTRY', value: 'https://pypi.org/simple' },
         { name: 'MY_TICKET', value: 'ABC-1234' },
@@ -102,12 +106,44 @@ describe('what a session ends up handing to a command', () => {
     })
 
     const shared = await store.load()
-    const env = toEnvironment(resolveSessionVariables(shared.variables, readUserVariables(userFile)))
+    const env = toEnvironment(resolveSessionVariables(shared.variables, readVariablesFile(userFile)))
 
     expect(env).toEqual({
       REGISTRY: 'https://pypi.internal/simple',
       SHARED_ONLY: 'from-admin',
       MY_TICKET: 'ABC-1234',
     })
+  })
+})
+
+/**
+ * Why the variables are not a key in `config.json`, pinned so nobody moves them back.
+ *
+ * `configSchema` is a zod object and strips keys it does not know. Kept in config, variables
+ * would survive until the first unrelated save — changing mode, picking a colour — and then
+ * vanish with no error and nothing to point at. This asserts the stripping directly, so the
+ * reason is visible rather than being a claim in a comment.
+ */
+describe('the reason variables live in a file of their own', () => {
+  it('would be silently discarded by the config schema', () => {
+    const parsed = configSchema.safeParse({ modeId: 'code', variables: [{ name: 'A', value: '1' }] })
+    expect(parsed.success).toBe(true)
+    expect((parsed as { data: Record<string, unknown> }).data['variables']).toBeUndefined()
+  })
+
+  it('survives a round trip through its own store instead', async () => {
+    const store = new UserVariableStore(path.join(dir, 'variables.json'))
+    await store.save([{ name: 'A', value: '1' }])
+    expect(store.read()).toEqual([{ name: 'A', value: '1' }])
+  })
+
+  it('replaces rather than merges, so removing one actually removes it', async () => {
+    const store = new UserVariableStore(path.join(dir, 'variables.json'))
+    await store.save([
+      { name: 'A', value: '1' },
+      { name: 'B', value: '2' },
+    ])
+    await store.save([{ name: 'A', value: '1' }])
+    expect(store.read()).toEqual([{ name: 'A', value: '1' }])
   })
 })

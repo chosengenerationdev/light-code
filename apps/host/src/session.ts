@@ -1,10 +1,9 @@
-import { readFileSync, watch as fsWatch, type FSWatcher } from 'node:fs'
+import { watch as fsWatch, type FSWatcher } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
   Logger,
   resolveSessionVariables,
-  sessionVariablesSchema,
   toEnvironment,
   wireChatBridge,
   workspaceConfigPath,
@@ -17,6 +16,7 @@ import {
   type WorkspaceState,
 } from '@light-code/core'
 import { FileSecretStore } from './fileSecretStore.js'
+import { UserVariableStore, userVariablesPath } from './userVariables.js'
 import { storageKeyFor, type Principal } from './identity.js'
 
 /** User scope lives under the principal's own directory; workspace scope in the repo. */
@@ -183,27 +183,6 @@ export interface SessionOptions {
  * spilled tool results all live under a directory derived from the principal id, so adding
  * SSO changes who that is and nothing else.
  */
-/**
- * A user's own session variables, read from their config file.
- *
- * Exported so the test calls the shipped function rather than re-deriving the parse — a test that
- * reimplements what it checks agrees with itself and passes either way, which is how the UNC
- * containment bug survived a green suite.
- *
- * Read directly rather than through `ConfigManager`: this is consulted on every command, and a
- * malformed *unrelated* key should not cost the user their variables. Any failure yields none,
- * which is what an empty list already means, so the degradation is one someone can reason about.
- */
-export function readUserVariables(configPath: string): readonly SessionVariable[] {
-  try {
-    const raw = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>
-    const parsed = sessionVariablesSchema.safeParse(raw['variables'])
-    return parsed.success ? parsed.data : []
-  } catch {
-    return []
-  }
-}
-
 export async function createSession(options: SessionOptions): Promise<{ dispose: () => void }> {
   const userDir = path.join(options.dataDir, 'users', storageKeyFor(options.principal))
   await fs.mkdir(userDir, { recursive: true, mode: 0o700 })
@@ -215,8 +194,13 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
    * key should not cost the user their variables. A failure here yields none, which is what an
    * empty list already means, so the degradation is one someone can reason about.
    */
-  const configPath = path.join(userDir, 'config.json')
-  const userVariables = (): readonly SessionVariable[] => readUserVariables(configPath)
+  /*
+   * A file of their own, not a key in `config.json`. The config schema strips keys it does not
+   * know, so variables kept there would survive until the first unrelated save and then vanish
+   * silently — see `userVariables.ts`.
+   */
+  const variableStore = new UserVariableStore(userVariablesPath(userDir))
+  const userVariables = (): readonly SessionVariable[] => variableStore.read()
 
   const workspaceState = new FileWorkspaceState(path.join(userDir, 'workspace-state.json'))
   await workspaceState.load()

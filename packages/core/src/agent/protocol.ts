@@ -3,6 +3,7 @@ import type { McpPlatform } from '../mcp/forms.js'
 import type { IndexProgress, IndexResult } from '../rag/indexer.js'
 import type { SearchLogEntry } from '../rag/searchLog.js'
 import type { Schedule } from '../schedule/types.js'
+import type { ResolvedVariable, SessionVariable } from '../session/variables.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
@@ -287,6 +288,15 @@ export type UiToHostMessage =
   | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' | 'folder' }
   | { type: 'rollback' }
   | { type: 'requestSettings' }
+  /*
+   * Session variables. **Handled by the Node host, not the bridge** — whose variable wins is a
+   * question only a shared server has, and the bridge is shared with the extension where it does
+   * not. The shapes live here because this is where the UI's protocol is defined.
+   */
+  | { type: 'requestVariables' }
+  | { type: 'saveUserVariables'; variables: SessionVariable[] }
+  | { type: 'saveAdminVariables'; variables: SessionVariable[] }
+  | { type: 'saveAdminIds'; ids: string[] }
   | { type: 'requestTasks' }
   | { type: 'openTask'; id: string }
   | { type: 'deleteTask'; id: string }
@@ -487,6 +497,24 @@ export type HostToUiMessage =
    * the bridge about it would put it in the extension too, where it means nothing.
    */
   | { type: 'hostRole'; role: 'admin' | 'user'; shared: boolean; displayName: string }
+  /**
+   * Both scopes, and the resolution between them.
+   *
+   * `resolved` is what a command will actually see: `scope` names the winner and
+   * `overriddenUserValue` carries the loser, so the panel can show a user their own value beside
+   * the administrator's that displaced it rather than pretending it does not exist.
+   *
+   * Sent only by the Node host. Its absence is what tells the UI not to offer the tab.
+   */
+  | {
+      type: 'variables'
+      user: SessionVariable[]
+      admin: SessionVariable[]
+      resolved: ResolvedVariable[]
+      adminIds: string[]
+      /** False when the administrator's half is read-only for this session. */
+      canEditAdmin: boolean
+    }
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */

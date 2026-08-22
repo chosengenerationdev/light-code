@@ -15,6 +15,7 @@ import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
 import { ToolsTab, type ToolsTabProps } from './ToolsTab.js'
+import { VariablesTab, type VariablesTabProps } from './VariablesTab.js'
 import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
 import { SchedulesTab, type SchedulesTabProps } from './SchedulesTab.js'
 import type { BrowseRequest } from './PathField.js'
@@ -26,6 +27,7 @@ import {
   ExpertIcon,
   GlobeIcon,
   PaletteIcon,
+  VariablesIcon,
   ProviderIcon,
   SearchIcon,
   ServerIcon,
@@ -82,6 +84,14 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   tools: ToolsTabProps
   /** Changes which tab is shown. Bumped by the host so the same tab can be asked for twice. */
   requestedTab?: { tab: string; nonce: number } | undefined
+  /**
+   * Session variables, present only where the host has them.
+   *
+   * Absent in the VS Code extension — one user with their own environment has nothing to
+   * resolve — and the tab is not rendered at all rather than rendered empty. A tab that exists
+   * but can never do anything is worse than one that does not.
+   */
+  variables?: VariablesTabProps | undefined
   skills: SkillsTabProps
   schedules: SchedulesTabProps
 }
@@ -98,6 +108,7 @@ type TabId =
   | 'skills'
   | 'schedules'
   | 'appearance'
+  | 'variables'
 
 /**
  * Icons rather than words, with the **active tab keeping its label**.
@@ -121,6 +132,7 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'tools', label: 'Tools', Icon: ToolboxIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
+  { id: 'variables', label: 'Variables', Icon: VariablesIcon },
   { id: 'appearance', label: 'Appearance', Icon: PaletteIcon },
 ]
 
@@ -137,6 +149,13 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
    * showing — someone re-reading a step — and an effect keyed on the name alone would do
    * nothing the second time, which reads as a broken button.
    */
+  /*
+   * A tab that has gone away takes the view with it — otherwise a session that loses the
+   * Variables tab (a reconnect that resolves differently) would render an empty pane.
+   */
+  const visible = TABS.filter((tab) => tab.id !== 'variables' || props.variables !== undefined)
+  const shown = visible.some((tab) => tab.id === active) ? active : 'providers'
+
   const requested = props.requestedTab
   useEffect(() => {
     if (requested === undefined) return
@@ -150,8 +169,12 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         className="lc-scroll"
         style={{ display: 'flex', borderBottom: `1px solid ${colors.border}`, flexShrink: 0, overflowX: 'auto' }}
       >
-        {TABS.map((tab) => {
-          const selected = active === tab.id
+        {/*
+          Filtered rather than disabled. The Variables tab only exists where the host has the
+          concept, and a greyed-out tab would invite the question this cannot answer.
+        */}
+        {TABS.filter((tab) => tab.id !== 'variables' || props.variables !== undefined).map((tab) => {
+          const selected = shown === tab.id
           return (
             <button
               key={tab.id}
@@ -187,8 +210,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         })}
         </div>
       {/* Keyed on the tab so a switch re-mounts and replays the entry animation. */}
-      <div key={active} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        {active === 'appearance' ? (
+      <div key={shown} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        {shown === 'variables' && props.variables !== undefined ? (
+          <VariablesTab {...props.variables} />
+        ) : shown === 'appearance' ? (
           <div style={{ padding: 12 }}>
             <AppearanceSection
               accentColor={props.accentColor}
@@ -197,7 +222,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               onChangeExpert={props.onSetExpertColor}
             />
           </div>
-        ) : active === 'providers' ? (
+        ) : shown === 'providers' ? (
           <ProvidersTab
             profiles={props.profiles}
             activeProfileId={props.activeProfileId}
@@ -216,7 +241,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             testRunning={props.testRunning}
             {...(props.testResult !== undefined ? { testResult: props.testResult } : {})}
           />
-        ) : active === 'approvals' ? (
+        ) : shown === 'approvals' ? (
           <ApprovalsTab
             approvals={props.approvals}
             onSetAutoApprove={props.onSetAutoApprove}
@@ -227,19 +252,19 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             readRoots={props.readRoots}
             onSetReadRoots={props.onSetReadRoots}
           />
-        ) : active === 'search' ? (
+        ) : shown === 'search' ? (
           <SearchTab {...props.search} />
-        ) : active === 'schedules' ? (
+        ) : shown === 'schedules' ? (
           <SchedulesTab {...props.schedules} />
-        ) : active === 'skills' ? (
+        ) : shown === 'skills' ? (
           <SkillsTab {...props.skills} />
-        ) : active === 'tools' ? (
+        ) : shown === 'tools' ? (
           <ToolsTab {...props.tools} />
-        ) : active === 'python' ? (
+        ) : shown === 'python' ? (
           <PythonTab {...props.python} />
-        ) : active === 'network' ? (
+        ) : shown === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
-        ) : active === 'expert' ? (
+        ) : shown === 'expert' ? (
           <ExpertTab
             expert={props.expert}
             onSave={props.onSaveExpert}

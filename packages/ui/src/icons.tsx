@@ -267,6 +267,16 @@ export function UndoIcon({ size = 16 }: IconProps): ReactElement {
 }
 
 /** Appearance / accent colour. */
+/** `$` — the shell's own sigil for a variable, which is what these become. */
+export function VariablesIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <path d="M10.2 4.1a2.6 2.6 0 0 0-4.4 1.7c0 2.6 4.4 1.9 4.4 4.5a2.6 2.6 0 0 1-4.4 1.7" strokeLinecap="round" />
+      <path d="M8 1.8v12.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function PaletteIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">

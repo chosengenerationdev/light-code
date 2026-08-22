@@ -6,11 +6,12 @@ import {
   type ServerResponse,
 } from 'node:http'
 import path from 'node:path'
-import { GUIDE_STEPS, type Transport } from '@light-code/core'
+import { GUIDE_STEPS, resolveSessionVariables, sessionVariablesSchema, type Transport } from '@light-code/core'
 import { SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
 import type { SharedConfig, SharedConfigStore } from './sharedConfig.js'
+import { userVariableStoreFor } from './userVariables.js'
 import { createSession } from './session.js'
 
 /*
@@ -326,12 +327,102 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         return
       }
 
+      /*
+       * Variables are the server's, not a session's.
+       *
+       * Answered here rather than forwarded because the whole question — whose value wins — only
+       * exists on a shared server, and the bridge is shared with the extension where it does not.
+       * Handled *after* the role check above, so an ordinary user reaching for the administrator's
+       * half is refused by the same rule as every other shared setting.
+       */
+      if (await handleVariableMessage(principal, type, body, connection)) {
+        respondJson(response, 202, { ok: true })
+        return
+      }
+
       connection.deliver(body)
       respondJson(response, 202, { ok: true })
       return
     }
 
     reject(response, { status: 404, reason: 'Not found.' })
+  }
+
+  /** Everything a session variables panel needs, for whoever is asking. */
+  async function postVariables(principal: Principal, connection: Connection): Promise<void> {
+    const store = userVariableStoreFor(options.dataDir, principal)
+    const user = store.read()
+    const admin = sharedCache.variables
+    connection.transport.post({
+      type: 'variables',
+      user: [...user],
+      admin: [...admin],
+      resolved: resolveSessionVariables(admin, user),
+      adminIds: sharedCache.adminIds,
+      canEditAdmin: isAdminSession(principal),
+    })
+  }
+
+  /** True when the message was one of ours and has been dealt with. */
+  async function handleVariableMessage(
+    principal: Principal,
+    type: string,
+    body: unknown,
+    connection: Connection,
+  ): Promise<boolean> {
+    const payload = body as { variables?: unknown; ids?: unknown }
+    if (type === 'requestVariables') {
+      await postVariables(principal, connection)
+      return true
+    }
+    if (type === 'saveUserVariables') {
+      const parsed = sessionVariablesSchema.safeParse(payload.variables)
+      if (!parsed.success) {
+        connection.transport.post({ type: 'error', message: `Could not save variables: ${parsed.error.message}` })
+        return true
+      }
+      await userVariableStoreFor(options.dataDir, principal).save(parsed.data)
+      await postVariables(principal, connection)
+      return true
+    }
+    if (type === 'saveAdminVariables' || type === 'saveAdminIds') {
+      if (sharedStore === undefined) {
+        connection.transport.post({
+          type: 'error',
+          message: 'There are no shared settings outside --server mode.',
+        })
+        return true
+      }
+      if (type === 'saveAdminVariables') {
+        const parsed = sessionVariablesSchema.safeParse(payload.variables)
+        if (!parsed.success) {
+          connection.transport.post({ type: 'error', message: `Could not save variables: ${parsed.error.message}` })
+          return true
+        }
+        sharedCache = await sharedStore.save({ variables: parsed.data })
+      } else {
+        const ids = Array.isArray(payload.ids) ? payload.ids.filter((id): id is string => typeof id === 'string') : []
+        /*
+         * An administrator removing themselves is allowed but reported: it is a legitimate act
+         * when handing over, and refusing it would mean the last admin can never be replaced.
+         * Recovery is `--admin-id` on the command line, which still wins at startup.
+         */
+        if (!ids.includes(principal.id)) {
+          log(`${principal.displayName} removed themselves from the administrator list`)
+        }
+        sharedCache = await sharedStore.save({ adminIds: [...new Set(ids)] })
+      }
+      /*
+       * Every open session, not just this one. An administrator changing a shared variable is
+       * changing what everyone's next command sees, and a panel still showing the old value is
+       * showing something untrue.
+       */
+      for (const [id, other] of connections) {
+        await postVariables({ id, displayName: id }, other)
+      }
+      return true
+    }
+    return false
   }
 
   async function serveAsset(pathname: string, response: ServerResponse): Promise<void> {

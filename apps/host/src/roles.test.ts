@@ -121,3 +121,16 @@ describe('the three the user named', () => {
     expect(isAdminOnly('setDispatcher')).toBe(true)
   })
 })
+
+describe('session variables', () => {
+  it('keeps the shared half, and the administrator list itself, to an administrator', () => {
+    expect(isAdminOnly('saveAdminVariables')).toBe(true)
+    expect(isAdminOnly('saveAdminIds')).toBe(true)
+  })
+
+  /** A user's own variables are theirs. Nothing is gained by making them ask. */
+  it('lets a user save their own', () => {
+    expect(isAdminOnly('saveUserVariables')).toBe(false)
+    expect(isAdminOnly('requestVariables')).toBe(false)
+  })
+})

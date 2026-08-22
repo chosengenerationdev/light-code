@@ -27,6 +27,8 @@ import {
   type Transport,
   type UiToHostMessage,
   type WorkspaceApprovals,
+  type ResolvedVariable,
+  type SessionVariable,
 } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { Chat } from './Chat.js'
@@ -49,6 +51,15 @@ export interface AppProps {
 }
 
 type View = 'chat' | 'settings' | 'history' | 'guide'
+
+/** What the host reports about session variables. Absent where the host has no such concept. */
+interface VariablesState {
+  user: SessionVariable[]
+  admin: SessionVariable[]
+  resolved: ResolvedVariable[]
+  adminIds: string[]
+  canEditAdmin: boolean
+}
 
 /** If the last message is still streaming, finalize it (drop the `pending` flag) in place. */
 function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
@@ -75,6 +86,12 @@ export function App(props: AppProps): ReactElement {
    * own Get Started page; a browser has none, so the UI shows the tour itself.
    */
   const [guide, setGuide] = useState<{ native: boolean; mediaBase?: string }>({ native: true })
+  /*
+   * Undefined until a host answers `requestVariables`. The VS Code bridge does not handle that
+   * message, so the tab never appears there — the capability announces itself rather than being
+   * declared in two places that can disagree.
+   */
+  const [variables, setVariables] = useState<VariablesState>()
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -249,6 +266,14 @@ export function App(props: AppProps): ReactElement {
         props.transport.post({ type: 'requestProfiles' } satisfies UiToHostMessage)
         setRequestedTab({ tab: message.tab, nonce: Date.now() })
         setView('settings')
+      } else if (message.type === 'variables') {
+        setVariables({
+          user: message.user,
+          admin: message.admin,
+          resolved: message.resolved,
+          adminIds: message.adminIds,
+          canEditAdmin: message.canEditAdmin,
+        })
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
         setGuide({
@@ -473,6 +498,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestVariables' } satisfies UiToHostMessage)
 
     return unsubscribe
   }, [props.transport])
@@ -1018,6 +1044,19 @@ export function App(props: AppProps): ReactElement {
                 } satisfies UiToHostMessage),
             }}
             tools={toolCatalogue}
+            {...(variables !== undefined
+              ? {
+                  variables: {
+                    ...variables,
+                    onSaveUser: (next) =>
+                      props.transport.post({ type: 'saveUserVariables', variables: next } satisfies UiToHostMessage),
+                    onSaveAdmin: (next) =>
+                      props.transport.post({ type: 'saveAdminVariables', variables: next } satisfies UiToHostMessage),
+                    onSaveAdminIds: (ids) =>
+                      props.transport.post({ type: 'saveAdminIds', ids } satisfies UiToHostMessage),
+                  },
+                }
+              : {})}
             python={{
               status: pythonStatus,
               settings: pythonSettings,

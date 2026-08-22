@@ -83,6 +83,10 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
   'saveSkillDirs',
   'deleteSkillFile',
   // Unattended execution with a pre-granted tool list.
+  // Session variables an administrator sets for everyone. A user saving their own is
+  // `saveUserVariables`, which is deliberately not here — it is theirs.
+  'saveAdminVariables',
+  'saveAdminIds',
   'saveSchedule',
   'deleteSchedule',
   'setScheduleEnabled',
@@ -108,6 +112,10 @@ const ADMIN_ONLY = new Set(ADMIN_ONLY_MESSAGES)
  * shared setting.
  */
 const PERSONAL_SETTINGS = new Set([
+  // A user's own session variables. Caught by the unknown-mutating-verb rule, which is the
+  // safety net working — the net is meant to be wrong in this direction, and this is where the
+  // exception gets made deliberately rather than by weakening the rule.
+  'saveUserVariables',
   'setMode',
   'setAccentColor',
   'setExpertColor',
