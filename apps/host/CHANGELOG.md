@@ -1,5 +1,24 @@
 # @chosengeneration/light-code
 
+## 0.8.0
+
+### Minor Changes
+
+- A model chosen for code can write Python tool source.
+
+  Set `programmingProfileId` to one of your provider profiles and `create_python_tool` changes
+  shape: the chat model sends a _specification_ of what the tool must do, and the named profile
+  writes the file. A cheap model is good at deciding a tool is needed and describing it, and much
+  worse at writing it.
+
+  Nothing about approval changes. The prompt shows a real diff of the bytes that will be written —
+  now with a line saying which profile produced them, because source a second model wrote is judged
+  differently from source the assistant you are talking to wrote — and the approved text is what
+  gets hashed into the registry.
+
+  Absent, which is the default, the chat model writes the source exactly as it always has, down to
+  the shape of the tool's parameters.
+
 ## 0.7.0
 
 ### Minor Changes

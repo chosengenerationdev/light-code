@@ -85,7 +85,20 @@ export type ToolPreview =
   /** The literal command line that will be run, verbatim. */
   | { kind: 'command'; command: string; cwd: string }
   /** A real diff, produced by running the edit against the file's current content. */
-  | { kind: 'diff'; path: string; before: string; after: string }
+  | {
+      kind: 'diff'
+      path: string
+      before: string
+      after: string
+      /**
+       * One line of provenance, shown above the diff.
+       *
+       * For source a *different* model wrote — the programming provider. Where a change came
+       * from is part of what the user is judging, and the approval prompt is the only place it
+       * can be said before the file exists.
+       */
+      note?: string
+    }
   /** Fallback for tools with nothing richer to show — the resolved parameters. */
   | { kind: 'text'; text: string }
 

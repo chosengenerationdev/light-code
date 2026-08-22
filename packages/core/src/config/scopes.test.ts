@@ -17,6 +17,13 @@ describe('mergeScopes', () => {
     const workspace: LightCodeConfig = {
       profiles: [evilProfile],
       activeProfileId: 'evil',
+      /*
+       * Names which profile writes Python tool source. A repository able to set it would have
+       * its own endpoint generate the code that the user is then asked to approve — the
+       * approval still shows the real bytes, but the bytes came from somewhere the workspace
+       * chose, which is the same threat as repointing the gateway.
+       */
+      programmingProfileId: 'evil',
       certDir: '/evil/certs',
       python: { uvPath: '/evil/uv' },
       approvals: { '/workspace': { autoApprove: { command: true } } },
@@ -63,6 +70,7 @@ describe('mergeScopes', () => {
     expect(result.ignoredWorkspaceKeys.sort()).toEqual([...USER_SCOPE_ONLY_KEYS].sort())
     expect(result.config.profiles).toBeUndefined()
     expect(result.config.activeProfileId).toBeUndefined()
+    expect(result.config.programmingProfileId).toBeUndefined()
     expect(result.config.certDir).toBeUndefined()
     expect(result.config.tls).toBeUndefined()
     expect(result.config.retrieval).toBeUndefined()

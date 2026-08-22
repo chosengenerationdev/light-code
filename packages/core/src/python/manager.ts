@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Logger } from '../logging/logger.js'
 import type { Tool } from '../tools/types.js'
+import type { CodeGenerator } from './codeGenerator.js'
 import { describeIssue, loadRegistry, type RegisteredTool, type ToolLoadIssue } from './registry.js'
 import {
   adaptPythonTool,
@@ -90,6 +91,14 @@ export interface PythonManagerOptions {
    * unchanged: what arrives here is what a human deliberately declared.
    */
   sessionEnv?: () => Record<string, string>
+  /**
+   * The programming provider, if one is configured, resolved when the tool list is built.
+   *
+   * A resolver rather than a value because the tool parameters differ depending on the answer —
+   * a specification when a code model will write the file, the source itself when the chat model
+   * will. That has to be settled at build time, and the answer can change between turns.
+   */
+  generateSource?: () => CodeGenerator | undefined
 }
 
 export class PythonManager {
@@ -279,8 +288,10 @@ export class PythonManager {
     if (!this.enabled || !this.ready || this.worker === undefined) return []
     const worker = this.worker
     const uv = this.uv
+    const generated = this.options.generateSource?.()
     const context = {
       toolsDir: this.toolsDir,
+      ...(generated !== undefined ? { generateSource: generated } : {}),
       worker,
       onChanged: () => this.refresh(),
       ...(uv !== undefined

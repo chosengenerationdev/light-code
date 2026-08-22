@@ -26,7 +26,9 @@ import {
   formatToolArguments,
   CONTROL_TOOLS,
   createAuthStrategy,
+  buildCodeGenerationPrompt,
   createChatProvider,
+  type CodeGenerator,
   createAskExpertTool,
   createSearchOpensearchTool,
   createSearchCodebaseTool,
@@ -278,6 +280,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Read at worker spawn, so a changed variable applies to the next worker rather than being
     // frozen at construction. Added to the allowlist in minimalPythonEnv, never a way past it.
     ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv } : {}),
+    /*
+     * A resolver, not a generator: the tool's *parameters* change shape depending on whether one
+     * is configured — specification versus source — so the answer is needed when the tool list is
+     * built, not when it is called. Refreshed by `loadSettings`, which runs before every turn, so
+     * changing the profile mid-session takes effect on the next message.
+     */
+    generateSource: () => cachedCodeGenerator,
     // A tool created, updated or deleted during a chat changes both the Python tab and the
     // documentation corpus. `postPython` refreshes the tab and schedules the reindex.
     onToolsChanged: () => {
@@ -691,9 +700,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
   let cachedModeId: string | undefined
 
+  /** Rebuilt on every settings load, so a profile change reaches the next turn. */
+  let cachedCodeGenerator: CodeGenerator | undefined
+
   async function loadSettings(): Promise<LightCodeConfig> {
     const { config } = await configManager.load()
     cachedApprovals = config.approvals?.[approvalsKey] ?? {}
+    cachedCodeGenerator = codeGeneratorFor(config)
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
@@ -3066,6 +3079,44 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ui.showInfo('Workspace rolled back.')
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Writes Python tool source with a model chosen for code, when one is configured.
+   *
+   * Built here rather than in a host because building a provider means auth strategies, TLS
+   * material and the wire adapter — the most security-sensitive construction in the product.
+   * Duplicating that outside core to keep a feature host-only would be a far worse trade than the
+   * one config key this adds, and the key is absent by default, so nothing changes for anyone who
+   * does not set it.
+   */
+  function codeGeneratorFor(config: LightCodeConfig): CodeGenerator | undefined {
+    const id = config.programmingProfileId
+    if (id === undefined || id.length === 0) return undefined
+
+    const profile = config.profiles?.find((candidate) => candidate.id === id)
+    /*
+     * A named profile that no longer exists degrades to "the chat model writes it" rather than
+     * failing the tool call. Quietly losing the split would be the bad outcome, so it is logged.
+     */
+    if (profile === undefined) {
+      logger.warn(
+        `programming provider "${id}" is configured but no such profile exists; the chat model will write tool source`,
+      )
+      return undefined
+    }
+
+    return async (request) => {
+      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+      let text = ''
+      for await (const chunk of provider.streamChat([{ role: 'user', content: buildCodeGenerationPrompt(request) }], {
+        // No tools offered: it is being asked for a file, and offering tools invites it to use one.
+        ...(request.signal !== undefined ? { signal: request.signal } : {}),
+      })) {
+        if (chunk.type === 'text') text += chunk.text
+      }
+      return { source: text, producedBy: profile.label }
     }
   }
 

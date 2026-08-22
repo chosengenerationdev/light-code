@@ -79,7 +79,7 @@ The prerequisite. Nothing else is meaningful while every request resolves to the
   per-user, and what stays admin-only is the **shared** set and the defaults.
 - Precedence: a user's own profile is theirs; the admin's default applies when they have none.
 
-## Phase H4 — the programming provider
+## Phase H4 — the programming provider — **core done 2026-08-22**
 
 - A profile nominated for generating code. User picks; falls back to the admin's default.
 - Used as a **sub-call** when `create_python_tool` / `update_python_tool` runs: the primary model
@@ -87,7 +87,15 @@ The prerequisite. Nothing else is meaningful while every request resolves to the
   ordinary approval prompt showing the full text (§13 — approval shows what will actually run).
 - Core seam: an optional code-generation hook. Absent, the primary model writes the source as it
   does now, so the extension is untouched.
-- Cost is metered and attributed, like the expert's.
+- **Deviation from "node host only", recorded deliberately.** The generator is built in core's
+  bridge from a `programmingProfileId` config key, not in `apps/host`. Building a provider means
+  auth strategies, TLS material and the wire adapter — the most security-sensitive construction
+  in the product — and duplicating that outside core to keep the feature host-only would be a far
+  worse trade than one config key that is absent by default. The extension gains an opt-in key it
+  never sets. The *admin default* half stays host-only.
+- **Not yet built:** the picker in the UI, and the admin default falling through to a user who has
+  not chosen. Configured today by setting `programmingProfileId` in config.
+- Cost is metered and attributed, like the expert's. **Not built yet either.**
 
 ## Phase H5 — the approval queue
 

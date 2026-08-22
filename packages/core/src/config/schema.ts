@@ -415,6 +415,18 @@ export const configSchema = z
      */
     schedules: schedulesSchema,
     activeProfileId: z.string(),
+    /**
+     * The profile that writes Python tool source, when it should not be the chat model.
+     *
+     * A cheap model is fine at deciding a tool is needed and describing it, and much worse at
+     * writing the file. Naming a profile here splits the two: the chat model sends a
+     * specification and this one produces the source, which goes through the ordinary approval
+     * prompt showing the real bytes.
+     *
+     * Absent means the chat model writes it, which is the behaviour every release so far has
+     * had. User-scope only for the same reason as `profiles`: it names where inference goes.
+     */
+    programmingProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,
     /**

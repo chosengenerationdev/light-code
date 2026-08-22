@@ -44,7 +44,19 @@ function describeGroup(group: ToolGroup): string {
 function PreviewBody(props: { preview: ToolPreview }): ReactElement {
   const { preview } = props
   if (preview.kind === 'diff') {
-    return <DiffView path={preview.path} before={preview.before} after={preview.after} />
+    return (
+      <div>
+        {/*
+          Where the change came from, when it did not come from this conversation. Source another
+          model wrote is judged differently from source the assistant you are talking to wrote,
+          and this prompt is the only place that can be said before the file exists.
+        */}
+        {preview.note !== undefined && (
+          <div style={{ color: colors.muted, fontSize: 11, marginBottom: 4 }}>{preview.note}</div>
+        )}
+        <DiffView path={preview.path} before={preview.before} after={preview.after} />
+      </div>
+    )
   }
   if (preview.kind === 'command') {
     return (
