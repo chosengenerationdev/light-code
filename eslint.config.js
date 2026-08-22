@@ -79,6 +79,12 @@ export default tseslint.config(
       'apps/host/src/proxyIdentity.ts',
       'apps/host/src/security.test.ts',
       'apps/host/src/proxyIdentity.test.ts',
+      /*
+       * A local stand-in for the reverse proxy, so shared mode can be tried on one machine.
+       * Invariant 2 governs what the *product* sends: this is a development script, never
+       * published (the npm `files` list is `dist/**`), and it only ever talks to loopback.
+       */
+      'scripts/dev-proxy.mjs',
     ],
     rules: { 'no-restricted-imports': 'off' },
   },

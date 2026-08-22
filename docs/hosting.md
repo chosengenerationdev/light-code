@@ -141,6 +141,27 @@ It prints both URLs:
 
 **4. Restrict `/admin` at the proxy.** Light Code does not guard that path — see below.
 
+### Trying it on one machine
+
+A browser cannot set the user header, so without a proxy in front every request is refused —
+correctly, and the screen stays empty. `scripts/dev-proxy.mjs` closes that gap for local testing:
+
+```bash
+# terminal 1 — the server, trusting loopback
+light-code --server --port 8751 --trust-proxy 127.0.0.1 --admin-id alice
+
+# terminal 2 — a stand-in proxy that stamps a user on every request
+node scripts/dev-proxy.mjs --port 8080 --to 8751 --user alice --name Alice
+```
+
+Then open <http://127.0.0.1:8080/> as a user and <http://127.0.0.1:8080/admin> as an administrator.
+Restart the proxy with `--user bob` to see the same server as someone who is not on the admin list.
+
+**It authenticates nobody.** It stamps whichever user you name onto every request, which is exactly
+what a real proxy must never do. It is safe here only because it binds loopback and you started it.
+Do not put it in front of anything, and do not copy its shape — the real config above *strips* an
+inbound header rather than trusting one.
+
 ### The flags
 
 | Flag | What it does |
