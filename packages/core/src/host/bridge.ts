@@ -2065,12 +2065,37 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   async function handleMeasureExpertCost(): Promise<void> {
-    if (measuringStep !== undefined) return
+    /*
+     * Already running. Said rather than ignored: two consultations take a while, and a button
+     * that silently does nothing on the second click is indistinguishable from one that is broken
+     * — which is exactly how this was reported.
+     */
+    if (measuringStep !== undefined) {
+      post({ type: 'error', message: `Already measuring — ${measuringStep}` })
+      return
+    }
+
+    /*
+     * The panel is told *before* anything is awaited.
+     *
+     * This used to load config and probe for the CLI first, and probing spawns a process — on
+     * Windows through a .cmd shim, which antivirus can make slow. For those seconds the button
+     * looked untouched, so a click that was working was indistinguishable from one that had done
+     * nothing at all. Whatever else this handler does, the first thing it does is say it started.
+     */
+    measuringStep = 'Starting…'
+    logger.info('measuring what an expert consultation costs')
+    await postExpert({ redetect: false })
+
     try {
       const { config } = await configManager.load()
       const cli = await resolveExpert(config)
       if (cli === undefined) {
-        post({ type: 'error', message: 'Enable the expert first — there is nothing to measure otherwise.' })
+        post({
+          type: 'error',
+          message:
+            'The Claude CLI could not be found, so there is nothing to measure. Check the path in this tab.',
+        })
         return
       }
 
