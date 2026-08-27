@@ -73,6 +73,9 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onRecheckExpert: () => void
   onAssessJunior: () => void
   onClearAssessment: () => void
+  /** Runs two real consultations to learn what they cost on this plan. */
+  onMeasureCost: () => void
+  onClearPricing: () => void
   onSaveExpert: (
     enabled: boolean,
     path: string,
@@ -289,6 +292,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRecheck={props.onRecheckExpert}
             onAssess={props.onAssessJunior}
             onClearAssessment={props.onClearAssessment}
+            onMeasureCost={props.onMeasureCost}
+            onClearPricing={props.onClearPricing}
             onBrowse={props.onBrowse}
             pickedPath={props.pickedPath}
           />

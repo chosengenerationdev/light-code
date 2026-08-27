@@ -1,5 +1,21 @@
 # @chosengeneration/light-code
 
+## 0.11.0
+
+### Minor Changes
+
+- **Measure what a consultation costs on your plan**, from the Expert tab.
+
+  The published figures — a cold consultation costing about nineteen times a resumed one — came from
+  one plan on one day. An enterprise agreement, a subscription or a gateway can report something
+  different, or nothing at all, and those numbers are what the budget is set from and what the expert
+  is told when it plans to fit.
+
+  The button makes **two real consultations**, one cold and one resumed, and says so before it spends
+  anything: one sample cannot show the ratio, and the ratio is the number that actually matters. The
+  result is stored, shown with the date it was measured, and sent to the expert with the budget so it
+  plans in your units rather than from what it believes consultations cost in general.
+
 ## 0.10.2
 
 ### Patch Changes

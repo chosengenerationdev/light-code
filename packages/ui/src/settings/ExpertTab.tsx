@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
-import type { JuniorAssessment } from '@light-code/core/browser'
+import { describePricing, type ExpertPricing, type JuniorAssessment } from '@light-code/core/browser'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { ScopeBadge } from './ScopeBadge.js'
@@ -33,6 +33,10 @@ export interface ExpertState {
   maxConsultations: number
   /** Undefined until a consultation has revealed whether this plan prices calls. */
   reportsCost?: boolean
+  /** What a consultation costs here, once measured. */
+  pricing?: ExpertPricing
+  /** Set while a measurement is running. */
+  measuringStep?: string
   assessment?: JuniorAssessment
   assessing?: boolean
   assessmentStep?: string
@@ -48,6 +52,9 @@ export interface ExpertTabProps {
   /** Runs the probes and has the expert grade them. Costs one consultation. */
   onAssess: () => void
   onClearAssessment: () => void
+  /** Runs two real consultations to learn what they cost here. */
+  onMeasureCost: () => void
+  onClearPricing: () => void
   onSave: (
     enabled: boolean,
     path: string,
@@ -255,6 +262,56 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           zero and the limit is never reached. A cap that silently never fires is worse than no cap
           at all, because it is believed.
         */}
+        {/*
+          Measured, not assumed. The published figures came from one plan on one day, and an
+          enterprise agreement or a subscription can report something else entirely — or nothing.
+          Those numbers are what the budget is set from and what the expert is told when it plans
+          to fit, so being wrong about them is not cosmetic.
+        */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            disabled={props.expert?.available !== true || props.expert.measuringStep !== undefined}
+            onClick={props.onMeasureCost}
+          >
+            {props.expert?.measuringStep !== undefined ? 'Measuring…' : 'Measure what a consultation costs'}
+          </button>
+          {props.expert?.pricing !== undefined && (
+            <button type="button" style={secondaryButtonStyle()} onClick={props.onClearPricing}>
+              Clear
+            </button>
+          )}
+        </div>
+
+        {props.expert?.measuringStep !== undefined && (
+          <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>{props.expert.measuringStep}</p>
+        )}
+
+        {/*
+          Said before it is spent. A tool that quietly bills you to tell you about billing would be
+          an unusually poor joke — and two calls is the minimum, because one sample cannot show the
+          ratio between a cold session and a resumed one, which is the number that actually
+          matters.
+        */}
+        {props.expert?.measuringStep === undefined && props.expert?.pricing === undefined && (
+          <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>
+            This makes <strong>two real consultations</strong> — one cold, one resumed — and costs
+            what they cost. It is the only way to learn the price here, and the ratio between the
+            two is what the budget advice depends on.
+          </p>
+        )}
+
+        {props.expert?.pricing !== undefined && (
+          <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>
+            {describePricing(props.expert.pricing)}{' '}
+            <span style={{ opacity: 0.75 }}>
+              Measured {new Date(props.expert.pricing.measuredAt).toLocaleDateString()}. The expert
+              is told these numbers so it plans in them.
+            </span>
+          </p>
+        )}
+
         {props.expert?.reportsCost === false && (
           <p style={{ color: colors.error, fontSize: 11, margin: '6px 0 0' }}>
             <strong>Your plan does not report a cost per consultation</strong>, so the spending

@@ -1027,6 +1027,8 @@ export function App(props: AppProps): ReactElement {
             expert={expert}
             onSaveExpert={saveExpert}
             onAssessJunior={() => props.transport.post({ type: 'assessJunior' } satisfies UiToHostMessage)}
+            onMeasureCost={() => props.transport.post({ type: 'measureExpertCost' } satisfies UiToHostMessage)}
+            onClearPricing={() => props.transport.post({ type: 'clearExpertPricing' } satisfies UiToHostMessage)}
             onClearAssessment={() => props.transport.post({ type: 'clearAssessment' } satisfies UiToHostMessage)}
             onRecheckExpert={() => {
               // Cleared first so the tab visibly restarts rather than showing a stale answer.

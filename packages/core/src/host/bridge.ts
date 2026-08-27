@@ -28,6 +28,9 @@ import {
   createAuthStrategy,
   buildCodeGenerationPrompt,
   createChatProvider,
+  PRICING_PROBE,
+  pricingForPrompt,
+  type ExpertPricing,
   type CodeGenerator,
   createAskExpertTool,
   createSearchOpensearchTool,
@@ -734,6 +737,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedCodeGenerator: CodeGenerator | undefined
   /** Undefined until a consultation has told us. See `recordConsultation`. */
   let cachedReportsCost: boolean | undefined
+  /** Set while a measurement is running, so the panel can say what it is doing. */
+  let measuringStep: string | undefined
+  let cachedPricing: ExpertPricing | undefined
   let cachedProgrammingProfileId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -747,6 +753,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
     cachedAssessment = config.expert?.assessment
     cachedReportsCost = config.expert?.reportsCost
+    cachedPricing = config.expert?.pricing
     cachedExpertLimits = {
       ...(config.expert?.maxSpendUsd !== undefined ? { maxSpendUsd: config.expert.maxSpendUsd } : {}),
       ...(config.expert?.maxConsultations !== undefined ? { maxConsultations: config.expert.maxConsultations } : {}),
@@ -1015,7 +1022,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // Read at call time, not captured: the user can raise the limit mid-task and the very
           // next consultation should honour it, without starting a new task to pick it up.
           budget: () => checkExpertBudget(expertSpend, effectiveExpertLimits()),
-          budgetSummary: () => describeExpertBudget(expertSpend, effectiveExpertLimits()),
+          /*
+           * The measured cost goes with the budget, so the expert plans in this deployment's
+           * units rather than from what it believes consultations cost in general.
+           */
+          budgetSummary: () =>
+            describeExpertBudget(expertSpend, effectiveExpertLimits(), pricingForPrompt(cachedPricing)),
           onEstimate: (estimate) => {
             taskExpertEstimate = estimate
             postExpertSpend()
@@ -1907,6 +1919,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(detected.reason !== undefined ? { reason: detected.reason } : {}),
       ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
       maxSpendUsd: config.expert?.maxSpendUsd ?? 0,
+      ...(config.expert?.pricing !== undefined ? { pricing: config.expert.pricing } : {}),
+      ...(measuringStep !== undefined ? { measuringStep } : {}),
       ...(config.expert?.reportsCost !== undefined ? { reportsCost: config.expert.reportsCost } : {}),
       maxConsultations: config.expert?.maxConsultations ?? 0,
       ...(config.expert?.assessment !== undefined ? { assessment: config.expert.assessment } : {}),
@@ -1926,6 +1940,81 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Costs one expert consultation plus a few cheap junior calls, which is why it is a button
    * rather than something that happens on its own.
    */
+  /**
+   * Measures what a consultation costs here, by having two.
+   *
+   * There is no way to learn the price of a consultation without one, and one sample cannot show
+   * the thing that matters — the *ratio* between a cold session and a resumed one, which is what
+   * every rule about using the expert cheaply depends on. So it is two calls, and the button says
+   * so before it spends anything.
+   *
+   * Deliberately not part of detection. Detection runs whenever the panel opens; this bills you.
+   */
+  async function handleMeasureExpertCost(): Promise<void> {
+    if (measuringStep !== undefined) return
+    try {
+      const { config } = await configManager.load()
+      const cli = await resolveExpert(config)
+      if (cli === undefined) {
+        post({ type: 'error', message: 'Enable the expert first — there is nothing to measure otherwise.' })
+        return
+      }
+
+      /*
+       * A session of its own, discarded afterwards. Measuring inside the task's session would
+       * make the first real consultation of that task look cheap, because this one would have
+       * paid to establish it — and would leave "reply OK" in the expert's context for the rest
+       * of the task.
+       */
+      let sessionId: string | undefined
+      const samples: (number | undefined)[] = []
+
+      for (const [index, label] of ['first consultation', 'follow-up in the same session'].entries()) {
+        measuringStep = `Measuring the ${label} (${String(index + 1)}/2)…`
+        await postExpert({ redetect: false })
+
+        const answer = await consultExpert(
+          cli,
+          {
+            question: PRICING_PROBE,
+            cwd: workspaceRoot ?? process.cwd(),
+            ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
+            // Cold on the first pass, resumed on the second. That pair is the measurement.
+            ...(sessionId !== undefined ? { resumeSessionId: sessionId } : {}),
+          },
+          logger,
+        )
+        samples.push(answer.costUsd)
+        sessionId = answer.sessionId ?? sessionId
+      }
+
+      const [cold, resumed] = samples
+      const reportsCost = cold !== undefined || resumed !== undefined
+      const pricing = {
+        measuredAt: Date.now(),
+        reportsCost,
+        ...(cold !== undefined ? { coldUsd: cold } : {}),
+        ...(resumed !== undefined ? { resumedUsd: resumed } : {}),
+      }
+
+      const { config: current } = await configManager.load()
+      await configManager.save('user', {
+        ...current,
+        expert: { ...current.expert, pricing, reportsCost },
+      })
+      logger.info(
+        reportsCost
+          ? `expert pricing measured: cold ${String(cold)} / resumed ${String(resumed)}`
+          : 'expert pricing measured: this plan reports no cost per consultation',
+      )
+    } catch (error) {
+      post({ type: 'error', message: `Could not measure the expert's cost: ${String(error)}` })
+    } finally {
+      measuringStep = undefined
+      await postExpert({ redetect: false })
+    }
+  }
+
   async function handleAssessJunior(): Promise<void> {
     if (assessmentStep !== undefined) return
     try {
@@ -3744,6 +3833,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
             }
       postExpertSpend()
+    } else if (message.type === 'measureExpertCost') {
+      void handleMeasureExpertCost()
+    } else if (message.type === 'clearExpertPricing') {
+      void configManager
+        .load()
+        .then(async ({ config }) => {
+          const expert = { ...config.expert }
+          delete expert.pricing
+          delete expert.reportsCost
+          await configManager.save('user', { ...config, expert })
+          await postExpert({ redetect: false })
+        })
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'assessJunior') {
       void handleAssessJunior()
     } else if (message.type === 'clearAssessment') {

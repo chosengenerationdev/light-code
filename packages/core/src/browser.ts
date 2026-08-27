@@ -37,6 +37,8 @@ export {
   type McpServerKind,
 } from './mcp/forms.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
+/* Pure formatting over a measured figure, so it is safe in the browser bundle. */
+export { describePricing, type ExpertPricing } from './expert/pricing.js'
 /*
  * The guided tour's content. Pure strings, which is what makes it safe here — and the reason it
  * lives in core at all is that two hosts render it: VS Code as `contributes.walkthroughs`, the

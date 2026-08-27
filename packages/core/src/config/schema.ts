@@ -141,6 +141,19 @@ export const expertConfigSchema = z
      * cap, because it is believed.
      */
     reportsCost: z.boolean(),
+    /**
+     * What a consultation costs on this plan, measured rather than assumed.
+     *
+     * The published figures came from one plan on one day. An enterprise agreement, a
+     * subscription or a gateway can each report something different — and those numbers are what
+     * the budget is set from and what the expert is told when it plans to fit.
+     */
+    pricing: z.object({
+      coldUsd: z.number().min(0).optional(),
+      resumedUsd: z.number().min(0).optional(),
+      measuredAt: z.number(),
+      reportsCost: z.boolean(),
+    }),
   })
   .partial()
 

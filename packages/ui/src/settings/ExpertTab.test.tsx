@@ -50,6 +50,8 @@ function render(state: ExpertState | undefined): void {
         onRecheck={() => {}}
         onAssess={() => {}}
         onClearAssessment={() => {}}
+        onMeasureCost={() => {}}
+        onClearPricing={() => {}}
       />,
     ),
   )

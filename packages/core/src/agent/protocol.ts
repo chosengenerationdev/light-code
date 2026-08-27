@@ -3,6 +3,7 @@ import type { McpPlatform } from '../mcp/forms.js'
 import type { IndexProgress, IndexResult } from '../rag/indexer.js'
 import type { SearchLogEntry } from '../rag/searchLog.js'
 import type { Schedule } from '../schedule/types.js'
+import type { ExpertPricing } from '../expert/pricing.js'
 import type { ResolvedVariable, SessionVariable } from '../session/variables.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
@@ -395,6 +396,8 @@ export type UiToHostMessage =
   | { type: 'setTaskExpertLimits'; maxSpendUsd?: number; maxConsultations?: number }
   /** Runs the probes through the junior, then asks the expert to grade them. Costs money. */
   | { type: 'assessJunior' }
+  | { type: 'measureExpertCost' }
+  | { type: 'clearExpertPricing' }
   | { type: 'clearAssessment' }
   | { type: 'restartScheduler' }
   /** Clears a schedule's remembered runs. Omit `id` to clear every schedule's. */
@@ -785,6 +788,10 @@ export type HostToUiMessage =
        * that silently never fires is worse than no cap because it is believed.
        */
       reportsCost?: boolean
+      /** What a consultation costs here, once measured. */
+      pricing?: ExpertPricing
+      /** Set while the measurement is running, so the button can say what it is doing. */
+      measuringStep?: string
       /** The expert's judgement of the junior, when one has been made. */
       assessment?: JuniorAssessment
       /** True while probes are running, so the tab can show progress rather than nothing. */

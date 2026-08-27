@@ -112,7 +112,12 @@ export function expertBudgetUsage(spend: ExpertSpend, limits: ExpertLimits): num
  *
  * Undefined when nothing is capped, so no tokens are spent saying "unlimited".
  */
-export function describeExpertBudget(spend: ExpertSpend, limits: ExpertLimits): string | undefined {
+export function describeExpertBudget(
+  spend: ExpertSpend,
+  limits: ExpertLimits,
+  /** Measured cost per consultation, so the expert plans in this deployment's units. */
+  pricing?: string,
+): string | undefined {
   const parts: string[] = []
 
   const maxConsultations = limits.maxConsultations ?? 0
@@ -128,9 +133,17 @@ export function describeExpertBudget(spend: ExpertSpend, limits: ExpertLimits): 
     parts.push(`${money(Math.max(0, maxSpend - spend.usd))} of ${money(maxSpend)} left`)
   }
 
-  if (parts.length === 0) return undefined
-  return (
+  /*
+   * The measured cost is worth sending even with no cap set. It is what turns "be economical" into
+   * a number the expert can plan against, and without it the expert prices a task from whatever it
+   * believes consultations cost in general — a guess about somebody else's contract.
+   */
+  if (parts.length === 0) return pricing
+  return [
     `Budget for this task: ${parts.join(', ')}. ` +
-    'Plan the number of checkpoints to fit — when it runs out the junior finishes alone.'
-  )
+      'Plan the number of checkpoints to fit — when it runs out the junior finishes alone.',
+    pricing,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join(' ')
 }
