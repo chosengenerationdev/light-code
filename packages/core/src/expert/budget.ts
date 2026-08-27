@@ -23,6 +23,15 @@ export interface ExpertSpend {
   consultations: number
   /** Consultations the CLI reported no cost for. Counted, never guessed at. */
   unpriced: number
+  /**
+   * Keep-alive pings: their money counts, their count does not.
+   *
+   * A ping's cost is in `usd`, because money spent is money spent and hiding it would make the
+   * meter a lie. But it is deliberately *not* a consultation: a long task would otherwise spend
+   * its consultation allowance on automated pings and refuse the expert when the work needed it,
+   * which is the opposite of what the setting is for.
+   */
+  keepAlives: number
 }
 
 export interface ExpertLimits {

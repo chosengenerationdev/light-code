@@ -667,7 +667,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   const searchLog = new SearchLog(50, () => post({ type: 'searchLog', entries: [...searchLog.list()] }))
 
-  let expertSpend = { usd: 0, consultations: 0, unpriced: 0 }
+  let expertSpend = { usd: 0, consultations: 0, unpriced: 0, keepAlives: 0 }
 
   /**
    * The expert's conversation for the current task.
@@ -679,8 +679,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let expertSessionId: string | undefined
 
   function resetExpertSpend(): void {
-    expertSpend = { usd: 0, consultations: 0, unpriced: 0 }
+    expertSpend = { usd: 0, consultations: 0, unpriced: 0, keepAlives: 0 }
     expertSessionId = undefined
+    /*
+     * A new task means a new session, so there is nothing left to keep warm. Without this the
+     * timer would go on refreshing a session id that has just been discarded — spending on a
+     * cache nothing will ever read.
+     */
+    stopKeepAlive()
     taskExpertLimits = undefined
     taskExpertEstimate = undefined
     postExpertSpend()
@@ -740,6 +746,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** Set while a measurement is running, so the panel can say what it is doing. */
   let measuringStep: string | undefined
   let cachedPricing: ExpertPricing | undefined
+  let cachedKeepAlive = false
   let cachedProgrammingProfileId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -754,6 +761,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedAssessment = config.expert?.assessment
     cachedReportsCost = config.expert?.reportsCost
     cachedPricing = config.expert?.pricing
+    cachedKeepAlive = config.expert?.keepAlive === true
+    // Switched off mid-task, the timer goes with it rather than waiting for its next tick.
+    if (!cachedKeepAlive) stopKeepAlive()
     cachedExpertLimits = {
       ...(config.expert?.maxSpendUsd !== undefined ? { maxSpendUsd: config.expert.maxSpendUsd } : {}),
       ...(config.expert?.maxConsultations !== undefined ? { maxConsultations: config.expert.maxConsultations } : {}),
@@ -1036,6 +1046,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             get: () => expertSessionId,
             set: (sessionId) => {
               expertSessionId = sessionId
+              // Only ever refreshes a session a real consultation created.
+              if (sessionId !== undefined && cachedKeepAlive) ensureKeepAlive()
             },
           },
           /*
@@ -1883,16 +1895,36 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         () => undefined,
       )
       post({
-        type: 'expert',
-        enabled: settings?.enabled === true,
+        ...expertMessageFrom(settings),
         available: false,
         path: settings?.path ?? expertCliPath ?? 'claude',
         reason: `Could not check whether the Claude CLI is available: ${reason}`,
-        ...(settings?.model !== undefined ? { model: settings.model } : {}),
-        maxSpendUsd: settings?.maxSpendUsd ?? 0,
-        maxConsultations: settings?.maxConsultations ?? 0,
-        ...(settings?.assessment !== undefined ? { assessment: settings.assessment } : {}),
       })
+    }
+  }
+
+  /**
+   * Everything the Expert tab is told that comes from *settings* rather than from the probe.
+   *
+   * One construction, used by both the success and the failure path. They had drifted three
+   * times — the guide capability, the programming profile, and the measured pricing all reached
+   * one and not the other — and the failure is always the same shape: a panel that shows nothing
+   * where something was just saved, with no error to explain it.
+   */
+  function expertMessageFrom(settings: LightCodeConfig['expert']): Extract<HostToUiMessage, { type: 'expert' }> {
+    return {
+      type: 'expert',
+      enabled: settings?.enabled === true,
+      available: false,
+      path: settings?.path ?? expertCliPath ?? 'claude',
+      maxSpendUsd: settings?.maxSpendUsd ?? 0,
+      maxConsultations: settings?.maxConsultations ?? 0,
+      keepAlive: settings?.keepAlive === true,
+      ...(settings?.model !== undefined ? { model: settings.model } : {}),
+      ...(settings?.assessment !== undefined ? { assessment: settings.assessment } : {}),
+      ...(settings?.reportsCost !== undefined ? { reportsCost: settings.reportsCost } : {}),
+      ...(settings?.pricing !== undefined ? { pricing: settings.pricing } : {}),
+      ...(measuringStep !== undefined ? { measuringStep } : {}),
     }
   }
 
@@ -1911,19 +1943,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     expertCliPath = configured
 
     post({
-      type: 'expert',
-      enabled: config.expert?.enabled === true,
+      // Everything from settings comes from one place, so the two paths cannot drift again.
+      ...expertMessageFrom(config.expert),
       available: detected.available,
       path: configured,
       ...(detected.version !== undefined ? { version: detected.version } : {}),
       ...(detected.reason !== undefined ? { reason: detected.reason } : {}),
-      ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
-      maxSpendUsd: config.expert?.maxSpendUsd ?? 0,
-      ...(config.expert?.pricing !== undefined ? { pricing: config.expert.pricing } : {}),
-      ...(measuringStep !== undefined ? { measuringStep } : {}),
-      ...(config.expert?.reportsCost !== undefined ? { reportsCost: config.expert.reportsCost } : {}),
-      maxConsultations: config.expert?.maxConsultations ?? 0,
-      ...(config.expert?.assessment !== undefined ? { assessment: config.expert.assessment } : {}),
       ...(assessmentStep === undefined ? {} : { assessing: true, assessmentStep }),
     })
   }
@@ -1950,6 +1975,95 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    *
    * Deliberately not part of detection. Detection runs whenever the panel opens; this bills you.
    */
+  /**
+   * Refreshes the expert's cache before the hour is up, so a break does not cost a cold start.
+   *
+   * ## Why fifty minutes
+   *
+   * The cache is one hour (`ephemeral_1h_input_tokens`) and that TTL is Anthropic's, not ours —
+   * one hour is already the longer of the two they offer. Fifty leaves room for a slow call
+   * without leaving so much that the pings pile up.
+   *
+   * ## What it will not do
+   *
+   * It never starts a session, only refreshes one that a real consultation created — a task where
+   * the expert was never used should cost nothing at all. It stops the moment the budget is spent,
+   * because pinging past a limit the user set to protect themselves is precisely the behaviour
+   * that makes a background timer untrustworthy. And its cost is recorded, so nothing is spent
+   * that the meter does not show.
+   */
+  const KEEP_ALIVE_MS = 50 * 60 * 1000
+  let keepAliveTimer: ReturnType<typeof setInterval> | undefined
+
+  function stopKeepAlive(): void {
+    if (keepAliveTimer === undefined) return
+    clearInterval(keepAliveTimer)
+    keepAliveTimer = undefined
+  }
+
+  function ensureKeepAlive(): void {
+    if (keepAliveTimer !== undefined) return
+    keepAliveTimer = setInterval(() => {
+      void runKeepAlive()
+    }, KEEP_ALIVE_MS)
+    // Never hold the process open for this. A server waiting to shut down should not be kept
+    // alive by a timer whose whole purpose is saving money.
+    keepAliveTimer.unref?.()
+  }
+
+  async function runKeepAlive(): Promise<void> {
+    const session = expertSessionId
+    // No session means no cache to keep warm, and starting one would be spending for nothing.
+    if (session === undefined) {
+      stopKeepAlive()
+      return
+    }
+    try {
+      const { config } = await configManager.load()
+      if (config.expert?.keepAlive !== true) {
+        stopKeepAlive()
+        return
+      }
+      const verdict = checkExpertBudget(expertSpend, effectiveExpertLimits())
+      if (!verdict.allowed) {
+        logger.info('expert keep-alive stopped: the budget for this task is spent')
+        stopKeepAlive()
+        return
+      }
+      const cli = await resolveExpert(config)
+      if (cli === undefined) {
+        stopKeepAlive()
+        return
+      }
+
+      const answer = await consultExpert(
+        cli,
+        {
+          question: PRICING_PROBE,
+          cwd: workspaceRoot ?? process.cwd(),
+          ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
+          resumeSessionId: session,
+        },
+        logger,
+      )
+      /*
+       * Counted as a ping, not a consultation. The money goes into the total because money spent
+       * is money spent; the count stays separate because a long task must not spend its
+       * consultation allowance on automated pings and then refuse the expert when the work needs
+       * it.
+       */
+      expertSpend.keepAlives += 1
+      if (answer.costUsd !== undefined) expertSpend.usd += answer.costUsd
+      if (answer.sessionId !== undefined) expertSessionId = answer.sessionId
+      postExpertSpend()
+      logger.info('expert keep-alive refreshed the session cache')
+    } catch (error) {
+      // A failed ping is not worth interrupting anyone over — the only consequence is paying a
+      // cold start later, which is what would have happened anyway.
+      logger.warn(`expert keep-alive failed: ${String(error)}`)
+    }
+  }
+
   async function handleMeasureExpertCost(): Promise<void> {
     if (measuringStep !== undefined) return
     try {
@@ -3833,6 +3947,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
             }
       postExpertSpend()
+    } else if (message.type === 'setExpertKeepAlive') {
+      void configManager
+        .load()
+        .then(async ({ config }) => {
+          await configManager.save('user', { ...config, expert: { ...config.expert, keepAlive: message.enabled } })
+          await postExpert({ redetect: false })
+        })
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'measureExpertCost') {
       void handleMeasureExpertCost()
     } else if (message.type === 'clearExpertPricing') {
@@ -4534,6 +4656,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // A pending reindex would otherwise fire after teardown and post to a dead webview.
       if (docsReindexTimer !== undefined) clearTimeout(docsReindexTimer)
       if (scheduleTimer !== undefined) clearInterval(scheduleTimer)
+      // Nothing may outlive the bridge, least of all something that spends money.
+      stopKeepAlive()
       unsubscribe()
     },
   }

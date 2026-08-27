@@ -27,7 +27,7 @@ describe('raising the budget while a task is in progress', () => {
   beforeEach(() => {
     consultExpert.mockReset()
     consultExpert.mockResolvedValue({ text: 'advice', sessionId: 's1', deniedTools: [], isError: false })
-    spend = { usd: 0, consultations: 0, unpriced: 0 }
+    spend = { usd: 0, consultations: 0, unpriced: 0, keepAlives: 0 }
     limits = { maxConsultations: 1 }
   })
 

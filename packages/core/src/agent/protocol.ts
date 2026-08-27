@@ -397,6 +397,7 @@ export type UiToHostMessage =
   /** Runs the probes through the junior, then asks the expert to grade them. Costs money. */
   | { type: 'assessJunior' }
   | { type: 'measureExpertCost' }
+  | { type: 'setExpertKeepAlive'; enabled: boolean }
   | { type: 'clearExpertPricing' }
   | { type: 'clearAssessment' }
   | { type: 'restartScheduler' }
@@ -615,6 +616,8 @@ export type HostToUiMessage =
       usd: number
       consultations: number
       unpriced: number
+      /** Keep-alive pings so far. Their cost is in the total; they are not consultations. */
+      keepAlives: number
       /** 0..1 against the nearer of the two per-task limits; absent when neither is set. */
       usage?: number
       /** True once the expert has stopped being available for this task. */
@@ -792,6 +795,8 @@ export type HostToUiMessage =
       pricing?: ExpertPricing
       /** Set while the measurement is running, so the button can say what it is doing. */
       measuringStep?: string
+      /** Whether the cache is refreshed while a task is open. */
+      keepAlive: boolean
       /** The expert's judgement of the junior, when one has been made. */
       assessment?: JuniorAssessment
       /** True while probes are running, so the tab can show progress rather than nothing. */

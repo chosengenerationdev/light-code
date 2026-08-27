@@ -1,5 +1,26 @@
 # @chosengeneration/light-code
 
+## 0.12.0
+
+### Minor Changes
+
+- **Keep the expert's session warm**, so a break does not cost a cold start.
+
+  The cache lasts an hour, and that is Anthropic's limit rather than ours. With this on, a task with
+  an open expert session sends one trivial resumed consultation every fifty minutes — about a
+  fiftieth of the cold start it avoids.
+
+  Off by default and it stays that way: it spends with nobody at the screen. **Its cost is counted in
+  the meter**, so nothing is spent that you cannot see. It is deliberately not counted as a
+  consultation, because a long task must not spend its consultation allowance on automated pings and
+  then refuse the expert when the work needs it.
+
+  It only ever refreshes a session a real consultation created, stops the moment the budget is spent,
+  and stops when the task ends.
+
+  Also fixes the measured price not appearing after measuring it: two places built the expert message
+  and only one of them carried it. They share one construction now.
+
 ## 0.11.0
 
 ### Minor Changes

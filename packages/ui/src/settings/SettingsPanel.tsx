@@ -76,6 +76,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   /** Runs two real consultations to learn what they cost on this plan. */
   onMeasureCost: () => void
   onClearPricing: () => void
+  onSetKeepAlive: (enabled: boolean) => void
   onSaveExpert: (
     enabled: boolean,
     path: string,
@@ -294,6 +295,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onClearAssessment={props.onClearAssessment}
             onMeasureCost={props.onMeasureCost}
             onClearPricing={props.onClearPricing}
+            onSetKeepAlive={props.onSetKeepAlive}
             onBrowse={props.onBrowse}
             pickedPath={props.pickedPath}
           />

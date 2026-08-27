@@ -37,6 +37,8 @@ export interface ExpertState {
   pricing?: ExpertPricing
   /** Set while a measurement is running. */
   measuringStep?: string
+  /** Whether the session cache is refreshed while a task is open. */
+  keepAlive?: boolean
   assessment?: JuniorAssessment
   assessing?: boolean
   assessmentStep?: string
@@ -55,6 +57,7 @@ export interface ExpertTabProps {
   /** Runs two real consultations to learn what they cost here. */
   onMeasureCost: () => void
   onClearPricing: () => void
+  onSetKeepAlive: (enabled: boolean) => void
   onSave: (
     enabled: boolean,
     path: string,
@@ -311,6 +314,41 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
             </span>
           </p>
         )}
+
+        {/*
+          Spending with nobody at the screen, so it is off by default and says plainly what it
+          does. The cost is counted in the meter — a background timer whose spending did not show
+          up anywhere is the version of this feature nobody should trust.
+        */}
+        <label
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'flex-start',
+            margin: '12px 0 0',
+            cursor: props.expert?.available === true ? 'pointer' : 'not-allowed',
+            opacity: props.expert?.available === true ? 1 : 0.55,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={props.expert?.keepAlive === true}
+            disabled={props.expert?.available !== true}
+            onChange={(event) => props.onSetKeepAlive(event.target.checked)}
+            style={{ marginTop: 2 }}
+          />
+          <span>
+            <span style={{ display: 'block', fontSize: 13 }}>Keep the session warm during a task</span>
+            <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+              The expert&rsquo;s cache lasts an hour, so a long break means the next consultation
+              pays full price again. This sends one trivial consultation every fifty minutes while a
+              task has a session open — roughly a fiftieth of the cold start it avoids.{' '}
+              <strong>It spends while you are away</strong>, so it is counted in the meter like
+              anything else. It never starts a session, and stops when the budget is spent or the
+              task ends.
+            </span>
+          </span>
+        </label>
 
         {props.expert?.reportsCost === false && (
           <p style={{ color: colors.error, fontSize: 11, margin: '6px 0 0' }}>

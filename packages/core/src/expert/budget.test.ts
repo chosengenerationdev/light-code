@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { checkExpertBudget, describeExpertBudget, expertBudgetUsage, type ExpertSpend } from './budget.js'
 
-const spend = (usd: number, consultations: number, unpriced = 0): ExpertSpend => ({
+const spend = (usd: number, consultations: number, unpriced = 0, keepAlives = 0): ExpertSpend => ({
   usd,
   consultations,
   unpriced,
+  keepAlives,
 })
 
 describe('checkExpertBudget', () => {

@@ -142,6 +142,17 @@ export const expertConfigSchema = z
      */
     reportsCost: z.boolean(),
     /**
+     * Refresh the expert's cache while a task is open, rather than paying a cold start later.
+     *
+     * The cache is one hour and that TTL is Anthropic's, not ours. A trivial resumed consultation
+     * before it lapses costs about a fiftieth of the cold start it avoids.
+     *
+     * Off by default, and it must stay that way: it spends with nobody at the screen, which is
+     * the one property this product is careful about everywhere else. Its cost is counted in the
+     * meter like anything else.
+     */
+    keepAlive: z.boolean(),
+    /**
      * What a consultation costs on this plan, measured rather than assumed.
      *
      * The published figures came from one plan on one day. An enterprise agreement, a
