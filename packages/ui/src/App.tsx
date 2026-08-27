@@ -484,19 +484,18 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'network') {
         setNetwork(message.settings)
       } else if (message.type === 'expert') {
-        setExpert({
-          enabled: message.enabled,
-          available: message.available,
-          path: message.path,
-          ...(message.version !== undefined ? { version: message.version } : {}),
-          ...(message.reason !== undefined ? { reason: message.reason } : {}),
-          ...(message.model !== undefined ? { model: message.model } : {}),
-          maxSpendUsd: message.maxSpendUsd,
-          maxConsultations: message.maxConsultations,
-          ...(message.assessment !== undefined ? { assessment: message.assessment } : {}),
-          ...(message.assessing !== undefined ? { assessing: message.assessing } : {}),
-          ...(message.assessmentStep !== undefined ? { assessmentStep: message.assessmentStep } : {}),
-        })
+        /*
+         * Everything except the discriminant, rather than a hand-copied list.
+         *
+         * This used to name each field, and every field added since was silently dropped here —
+         * the measured price, whether the plan reports cost, the measuring step, the keep-alive
+         * setting. The bridge sent them, the panel never saw them, and the symptom was a button
+         * that appeared to do nothing while the log said it had worked.
+         *
+         * The whole message is assigned: it is a variable rather than a fresh literal, so the
+         * extra `type` is accepted and carrying it costs nothing.
+         */
+        setExpert(message)
         // The composer badge means "usable", not merely "switched on".
         setExpertEnabled(message.enabled && message.available)
       } else if (message.type === 'tasks') {

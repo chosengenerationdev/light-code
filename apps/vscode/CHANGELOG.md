@@ -1,5 +1,18 @@
 # light-code-vscode
 
+## 0.36.1
+
+### Patch Changes
+
+- The measured consultation price now actually appears in the Expert tab.
+
+  The measurement was working — the log said so and the value was saved — but the panel showed
+  nothing. The message reached the browser and was then unpacked field by field, by name, so every
+  field added since that code was written was dropped on the last hop: the price, whether the plan
+  reports a cost, the measuring step, the keep-alive setting.
+
+  It assigns the message whole now, and a type-level test fails the next time the two diverge.
+
 ## 0.36.0
 
 ### Minor Changes
