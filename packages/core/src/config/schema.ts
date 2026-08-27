@@ -127,6 +127,20 @@ export const expertConfigSchema = z
      * not told the price of, and an unpriced consultation still costs money.
      */
     maxConsultations: z.number().int().min(0),
+    /**
+     * Whether this plan reports a per-consultation cost.
+     *
+     * Learned rather than configured, and learned from real consultations rather than from a
+     * probe — asking the CLI "do you report cost?" means making a call, and the first call in a
+     * session is the expensive one. So it is recorded the first time a consultation comes back
+     * with or without `total_cost_usd`.
+     *
+     * Absent means not yet known. It matters because a spend cap cannot bind on a plan that
+     * reports no cost: `usd` stays zero, the limit is never reached, and the only control that
+     * actually holds is the consultation count. A cap that silently never fires is worse than no
+     * cap, because it is believed.
+     */
+    reportsCost: z.boolean(),
   })
   .partial()
 

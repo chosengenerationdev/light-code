@@ -1,5 +1,20 @@
 # @chosengeneration/light-code
 
+## 0.10.2
+
+### Patch Changes
+
+- The Expert tab says whether your plan's spending limit can actually apply.
+
+  The cost shown per consultation is whatever the Claude CLI reports in `total_cost_usd`. Some plans
+  report nothing there — and then the spending limit can never be reached, because the running total
+  stays at zero. A cap that silently never fires is worse than no cap, because it is believed.
+
+  This is now learned from real consultations rather than asked for: probing would mean making a
+  call, and the first call in a session is the expensive one. After one consultation the panel either
+  says nothing, or says plainly that the spend cap cannot bind and to use the consultation limit,
+  which is checked first and works on any plan.
+
 ## 0.10.1
 
 ### Patch Changes

@@ -112,3 +112,27 @@ describe('the junior assessment in the Expert tab', () => {
     expect(button('Assess it').disabled).toBe(true)
   })
 })
+
+/**
+ * A spend cap cannot bind on a plan that reports no cost — the running total stays at zero and the
+ * limit is never reached. A cap that silently never fires is worse than no cap, because it is
+ * believed. So the panel says which case you are in, once a consultation has settled it.
+ */
+describe('whether the spending limit can apply at all', () => {
+  it('says nothing has settled it yet', () => {
+    render({ enabled: true, available: true, path: 'claude', maxSpendUsd: 1, maxConsultations: 6 })
+    expect(container.textContent).toContain('settled by the first consultation')
+  })
+
+  it('warns plainly when the plan reports no cost', () => {
+    render({ enabled: true, available: true, path: 'claude', maxSpendUsd: 1, maxConsultations: 6, reportsCost: false })
+    expect(container.textContent).toContain('does not report a cost per consultation')
+    expect(container.textContent).toContain('consultation limit instead')
+  })
+
+  it('says nothing at all once cost is known to work', () => {
+    render({ enabled: true, available: true, path: 'claude', maxSpendUsd: 1, maxConsultations: 6, reportsCost: true })
+    expect(container.textContent).not.toContain('does not report a cost')
+    expect(container.textContent).not.toContain('settled by the first consultation')
+  })
+})

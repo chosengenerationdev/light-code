@@ -703,11 +703,37 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (info.costUsd !== undefined) expertSpend.usd += info.costUsd
     else expertSpend.unpriced += 1
     postExpertSpend()
+
+    /*
+     * What this plan does about pricing, learned from the answer rather than asked for.
+     *
+     * A failed consultation says nothing: it can return without a cost because it never got far
+     * enough to have one, which is not the same as a plan that never prices anything.
+     *
+     * Written once. Re-writing config on every consultation would churn the file and its watcher
+     * for a fact that does not change.
+     */
+    if (info.isError) return
+    const learned = info.costUsd !== undefined
+    if (cachedReportsCost === learned) return
+    cachedReportsCost = learned
+    void configManager
+      .load()
+      .then(async ({ config }) => {
+        await configManager.save('user', { ...config, expert: { ...config.expert, reportsCost: learned } })
+        await postExpert()
+      })
+      .catch(() => {
+        // Not worth surfacing: the meter is already accurate for this session, and the only cost
+        // of failing to persist is learning it again next time.
+      })
   }
   let cachedModeId: string | undefined
 
   /** Rebuilt on every settings load, so a profile change reaches the next turn. */
   let cachedCodeGenerator: CodeGenerator | undefined
+  /** Undefined until a consultation has told us. See `recordConsultation`. */
+  let cachedReportsCost: boolean | undefined
   let cachedProgrammingProfileId: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -720,6 +746,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
     cachedAssessment = config.expert?.assessment
+    cachedReportsCost = config.expert?.reportsCost
     cachedExpertLimits = {
       ...(config.expert?.maxSpendUsd !== undefined ? { maxSpendUsd: config.expert.maxSpendUsd } : {}),
       ...(config.expert?.maxConsultations !== undefined ? { maxConsultations: config.expert.maxConsultations } : {}),
@@ -1880,6 +1907,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(detected.reason !== undefined ? { reason: detected.reason } : {}),
       ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
       maxSpendUsd: config.expert?.maxSpendUsd ?? 0,
+      ...(config.expert?.reportsCost !== undefined ? { reportsCost: config.expert.reportsCost } : {}),
       maxConsultations: config.expert?.maxConsultations ?? 0,
       ...(config.expert?.assessment !== undefined ? { assessment: config.expert.assessment } : {}),
       ...(assessmentStep === undefined ? {} : { assessing: true, assessmentStep }),

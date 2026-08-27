@@ -31,6 +31,8 @@ export interface ExpertState {
   model?: string
   maxSpendUsd: number
   maxConsultations: number
+  /** Undefined until a consultation has revealed whether this plan prices calls. */
+  reportsCost?: boolean
   assessment?: JuniorAssessment
   assessing?: boolean
   assessmentStep?: string
@@ -244,6 +246,28 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           />
           <span style={{ color: colors.muted, fontSize: 11 }}>consultations — whichever comes first.</span>
         </div>
+
+        {/*
+          What this plan actually does about pricing, learned from real consultations rather than
+          asked for — asking means making a call, and the first call is the expensive one.
+
+          It matters because a spend cap cannot bind where nothing is priced: the total stays at
+          zero and the limit is never reached. A cap that silently never fires is worse than no cap
+          at all, because it is believed.
+        */}
+        {props.expert?.reportsCost === false && (
+          <p style={{ color: colors.error, fontSize: 11, margin: '6px 0 0' }}>
+            <strong>Your plan does not report a cost per consultation</strong>, so the spending
+            limit above can never be reached — the running total stays at zero. Use the
+            consultation limit instead; it is checked first and works on any plan.
+          </p>
+        )}
+        {props.expert !== undefined && props.expert.reportsCost === undefined && (
+          <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>
+            Whether the spending limit can apply depends on your plan reporting a cost. That is
+            settled by the first consultation, and this will say so once it has.
+          </p>
+        )}
         <span style={{ color: colors.muted, fontSize: 11 }}>
           0 means no limit. When a limit is reached the expert stops being offered for that task
           and the assistant carries on alone; starting a new task resets it. A count limit is

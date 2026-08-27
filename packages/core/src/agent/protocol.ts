@@ -778,6 +778,13 @@ export type HostToUiMessage =
       /** Per-task ceilings. 0 means no limit. */
       maxSpendUsd: number
       maxConsultations: number
+      /**
+       * Whether this plan reports a per-consultation cost, once a consultation has said so.
+       *
+       * Undefined until then. A spend cap cannot bind on a plan that reports no cost, and a cap
+       * that silently never fires is worse than no cap because it is believed.
+       */
+      reportsCost?: boolean
       /** The expert's judgement of the junior, when one has been made. */
       assessment?: JuniorAssessment
       /** True while probes are running, so the tab can show progress rather than nothing. */
