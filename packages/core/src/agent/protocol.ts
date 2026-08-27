@@ -570,6 +570,8 @@ export type HostToUiMessage =
        * setting that happens to name a profile — the same shape as `activeProfileId`.
        */
       programmingProfileId?: string
+      /** True where a different model may be nominated to write Python tool source. */
+      allowProgrammingProfile: boolean
       /**
        * True when the host has onboarding of its own — VS Code's Get Started page.
        *

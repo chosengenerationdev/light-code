@@ -22,7 +22,19 @@ describe('the VS Code host and the shared-server seams', () => {
   it('supplies none of them', () => {
     const extension = sourceOf('extension.ts')
     const bridgeSetup = [extension, sourceOf('webview', 'chatViewProvider.ts')].join('\n')
-    for (const seam of ['sessionEnv', 'submitForReview', 'guideMediaBase', 'sharedProfiles']) {
+    for (const seam of [
+      'sessionEnv',
+      'submitForReview',
+      'guideMediaBase',
+      'sharedProfiles',
+      /*
+       * The programming provider. Its *mechanism* lives in core deliberately — building a
+       * provider means auth strategies and TLS, and duplicating that to keep one feature
+       * host-only would be the worse trade — but it is only ever *offered* by a host that says
+       * so, and the extension does not.
+       */
+      'allowProgrammingProfile',
+    ]) {
       expect(bridgeSetup.includes(seam), `extension host supplies ${seam}`).toBe(false)
     }
   })

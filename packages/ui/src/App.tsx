@@ -97,6 +97,7 @@ export function App(props: AppProps): ReactElement {
   const [reviews, setReviews] = useState<{ items: ReviewItem[]; canDecide: boolean }>()
   /** Which profile writes Python tool source. Undefined means the chat model does. */
   const [programmingProfileId, setProgrammingProfileId] = useState<string>()
+  const [allowProgrammingProfile, setAllowProgrammingProfile] = useState(false)
   /** What this session is, according to the host. Absent in the extension, which has one user. */
   const [session, setSession] = useState<{
     role: 'admin' | 'user'
@@ -303,6 +304,7 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
         setProgrammingProfileId(message.programmingProfileId)
+        setAllowProgrammingProfile(message.allowProgrammingProfile)
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -1105,12 +1107,21 @@ export function App(props: AppProps): ReactElement {
                * Only profiles that exist can be offered. A picker listing something deleted would
                * let someone choose a profile the generator then warns about on every settings load.
                */
-              programming: {
-                profiles: profiles.map((profile) => ({ id: profile.id, label: profile.label })),
-                selectedId: programmingProfileId,
-                onSelect: (id) =>
-                  props.transport.post({ type: 'setProgrammingProfile', id } satisfies UiToHostMessage),
-              },
+              /*
+               * Only where the host offers it. The extension declares nothing, so the picker is
+               * absent there rather than present and inert — the same rule the Variables and
+               * Review tabs follow.
+               */
+              ...(allowProgrammingProfile
+                ? {
+                    programming: {
+                      profiles: profiles.map((profile) => ({ id: profile.id, label: profile.label })),
+                      selectedId: programmingProfileId,
+                      onSelect: (id) =>
+                        props.transport.post({ type: 'setProgrammingProfile', id } satisfies UiToHostMessage),
+                    },
+                  }
+                : {}),
               status: pythonStatus,
               settings: pythonSettings,
               onBrowse: browseForPath,

@@ -4,12 +4,17 @@
 
 ### Minor Changes
 
-- A model chosen for code can write Python tool source.
+- Internal only. A model chosen for code can write Python tool source — but that is a **Node host**
+  feature and is not offered here.
 
-  Set `programmingProfileId` to one of your provider profiles and `create_python_tool` changes
-  shape: the chat model sends a _specification_ of what the tool must do, and the named profile
-  writes the file. A cheap model is good at deciding a tool is needed and describing it, and much
-  worse at writing it.
+  The mechanism lives in core because building a provider means auth strategies, TLS material and
+  the wire adapter, and duplicating that outside core to keep one feature host-only would be a far
+  worse trade. Where it is *offered* is a separate decision: a host declares it, and the extension
+  does not. So there is no picker, the config key is inert, and `create_python_tool` behaves
+  exactly as it always has.
+
+  This entry originally described the feature as available here. It was, briefly, in an unreleased
+  build — the picker was passed to the panel unconditionally rather than on the host's say-so.
 
   Nothing about approval changes. The prompt shows a real diff of the bytes that will be written —
   now with a line saying which profile produced them, because source a second model wrote is judged

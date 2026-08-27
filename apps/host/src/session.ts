@@ -258,6 +258,12 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
      * also survives whatever port the server happened to bind.
      */
     guideMediaBase: '/guide',
+    /*
+     * Offered here and nowhere else. A shared server is where "a cheap model chats, a good one
+     * writes the code" is worth configuring — and where an administrator can set a default for
+     * people who have not chosen.
+     */
+    allowProgrammingProfile: true,
     ...(options.submitForReview !== undefined ? { submitForReview: options.submitForReview } : {}),
     /*
      * Resolved per read, so both halves stay live — an administrator's edit and the user's own

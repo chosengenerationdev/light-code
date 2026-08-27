@@ -158,4 +158,16 @@ export interface HostServices {
     existingContent: string
     producedBy?: string
   }) => Promise<string>
+  /**
+   * Whether a *different* model may be nominated to write Python tool source.
+   *
+   * The mechanism lives in core because building a provider means auth strategies, TLS material
+   * and the wire adapter, and duplicating that in a host to keep one feature host-only would be a
+   * far worse trade. Where it is *offered* is a separate question, and this is it.
+   *
+   * Absent in the VS Code extension: one person, one model, and a second provider nominated for
+   * code is a shared-server idea. Absent also means the config key is inert there, so a
+   * hand-edited file cannot change what `create_python_tool` asks for.
+   */
+  allowProgrammingProfile?: boolean
 }

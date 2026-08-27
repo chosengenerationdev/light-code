@@ -747,7 +747,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       expertColor: cachedExpertColor,
       readRoots: cachedReadRoots,
       ...(cachedProgrammingProfileId !== undefined ? { programmingProfileId: cachedProgrammingProfileId } : {}),
-      ...guideCapability(),
+      ...hostCapabilities(),
     })
   }
 
@@ -759,9 +759,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * telling the UI to render its own. Two ways of saying the same thing would eventually
    * disagree, and the failure is a button that does nothing.
    */
-  function guideCapability(): { nativeGuide: boolean; guideMediaBase?: string } {
+  function hostCapabilities(): { nativeGuide: boolean; guideMediaBase?: string; allowProgrammingProfile: boolean } {
     return {
       nativeGuide: ui.openWalkthrough !== undefined,
+      allowProgrammingProfile: services.allowProgrammingProfile === true,
       ...(services.guideMediaBase !== undefined ? { guideMediaBase: services.guideMediaBase } : {}),
     }
   }
@@ -3110,6 +3111,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * does not set it.
    */
   function codeGeneratorFor(config: LightCodeConfig): CodeGenerator | undefined {
+    /*
+     * Off unless the host offers it. Checked here rather than only in the UI: the tool's
+     * *parameters* change shape when a generator exists, so a hand-edited config would otherwise
+     * make the extension ask for a specification instead of source with nothing in the panel to
+     * explain why.
+     */
+    if (services.allowProgrammingProfile !== true) return undefined
+
     const id = config.programmingProfileId
     if (id === undefined || id.length === 0) return undefined
 
@@ -3148,7 +3157,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
       readRoots: cachedReadRoots,
-      ...guideCapability(),
+      ...hostCapabilities(),
     })
   }
 

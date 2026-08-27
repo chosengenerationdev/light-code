@@ -149,3 +149,15 @@ describe('choosing which model writes the code', () => {
     expect(container.textContent).not.toContain('Which model writes the code')
   })
 })
+
+/**
+ * The picker is host-only. It appeared in the extension for one release because `programming` was
+ * passed unconditionally — a feature the user had twice said was for the Node host showing up in
+ * VS Code, which is the sort of thing nobody reports as a bug and everybody notices.
+ */
+describe('where the picker is offered', () => {
+  it('is absent when the host does not offer it, even with profiles configured', () => {
+    render({ status, settings: { dynamicTools: 'on' } })
+    expect(container.textContent).not.toContain('Which model writes the code')
+  })
+})

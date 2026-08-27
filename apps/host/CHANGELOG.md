@@ -1,5 +1,19 @@
 # @chosengeneration/light-code
 
+## 0.10.1
+
+### Patch Changes
+
+- The programming provider is offered by the host, not assumed by the panel.
+
+  Nominating a different model to write Python tool source is a shared-server idea, and the picker
+  was reaching the VS Code extension because it was passed unconditionally. A host now declares the
+  capability and only this one does — the same rule the Variables and Review tabs already followed.
+
+  The check is in the bridge as well as the panel, because the tool's _parameters_ change shape when
+  a generator exists: without it, a hand-edited config would make the extension ask for a
+  specification instead of source with nothing in the panel to explain why.
+
 ## 0.10.0
 
 ### Minor Changes
