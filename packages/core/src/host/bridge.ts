@@ -2106,6 +2106,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * of the task.
        */
       let sessionId: string | undefined
+      let resumeWorked = false
       const samples: (number | undefined)[] = []
 
       for (const [index, label] of ['first consultation', 'follow-up in the same session'].entries()) {
@@ -2124,6 +2125,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           logger,
         )
         samples.push(answer.costUsd)
+        /*
+         * Whether the *second* pass had a session to resume. Without recording this, a CLI that
+         * returns no session id produces two cold starts labelled cold and resumed, and the ratio
+         * read off them is meaningless in a way nothing on screen would reveal.
+         */
+        if (index === 0) resumeWorked = answer.sessionId !== undefined
         sessionId = answer.sessionId ?? sessionId
       }
 
@@ -2132,6 +2139,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const pricing = {
         measuredAt: Date.now(),
         reportsCost,
+        resumeWorked,
         ...(cold !== undefined ? { coldUsd: cold } : {}),
         ...(resumed !== undefined ? { resumedUsd: resumed } : {}),
       }

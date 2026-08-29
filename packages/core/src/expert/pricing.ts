@@ -25,6 +25,15 @@ export interface ExpertPricing {
   measuredAt: number
   /** False when the plan reported no cost at all, which is a result rather than a failure. */
   reportsCost: boolean
+  /**
+   * Whether the second sample genuinely resumed the first session.
+   *
+   * Without this the measurement could not tell a real ratio from two cold starts: if the CLI
+   * returns no `session_id`, the resume is silently skipped and both samples cost the same. Two
+   * numbers labelled cold and resumed that were both cold is worse than no measurement, because
+   * the conclusion drawn from it — "caching does nothing here" — is exactly wrong.
+   */
+  resumeWorked?: boolean | undefined
 }
 
 /**
@@ -44,6 +53,19 @@ export function describePricing(pricing: ExpertPricing | undefined): string | un
   const cold = pricing.coldUsd
   const resumed = pricing.resumedUsd
   if (cold === undefined || resumed === undefined) return undefined
+
+  /*
+   * A ratio is only meaningful if the second call actually resumed. Reported as unusable rather
+   * than shown, because the wrong conclusion — "caching saves nothing here" — is worse than no
+   * number at all.
+   */
+  if (pricing.resumeWorked === false) {
+    return (
+      `Both samples cost about ${money(cold)}, but the second one did not resume the first ` +
+      'session — the CLI returned no session id, so this is two cold starts rather than a ' +
+      'comparison. Measure again, or check that the CLI supports --resume.'
+    )
+  }
 
   const ratio = resumed > 0 ? cold / resumed : undefined
   return [

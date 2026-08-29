@@ -1,5 +1,19 @@
 # @chosengeneration/light-code
 
+## 0.12.2
+
+### Patch Changes
+
+- The cost measurement now checks that its second sample actually resumed.
+
+  If the Claude CLI returns no session id, the resume is silently skipped and both samples are cold
+  starts — reported as "cold" and "resumed" with a ratio read off them. That is worse than no
+  measurement, because the conclusion drawn from it is that caching saves nothing here, which is
+  exactly wrong.
+
+  It records whether the resume happened and says so plainly when it did not, rather than presenting
+  two cold starts as a comparison.
+
 ## 0.12.1
 
 ### Patch Changes

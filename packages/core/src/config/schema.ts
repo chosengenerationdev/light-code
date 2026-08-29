@@ -164,6 +164,8 @@ export const expertConfigSchema = z
       resumedUsd: z.number().min(0).optional(),
       measuredAt: z.number(),
       reportsCost: z.boolean(),
+      /** Whether the second sample genuinely resumed the first session. */
+      resumeWorked: z.boolean().optional(),
     }),
   })
   .partial()
