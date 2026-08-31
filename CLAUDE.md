@@ -512,6 +512,21 @@ block a function of the turn; this makes it a constant.
 callable by name. Withholding a *capability* is what modes and the approval gate are for, and
 collapsing the two would be a real mistake.
 
+**Both are on by default now (2026-08-2x), and skills go through the same mechanism.** The user
+asked for search-the-tool-first to be the normal way to work, and for skills to be found the same
+way rather than listed. `dispatcherEnabled()` and `skillRetrievalEnabled()` in `config/schema.ts`
+own that default — `retrieval?.dispatcher !== false`, so absent means on and the config file stays
+sparse. Skill retrieval is **tied to** the dispatcher rather than independent of it: `search_docs`
+is what finds a hidden skill and is only registered when the dispatcher is on, so hiding skills
+without it would make every skill unreachable.
+
+**Nothing may decide that default by reading the key.** Two places did — written when the default
+was off, correct then, silently wrong after the flip: tools were hidden by one path while the
+automatic documentation reindex returned early in another, so `search_docs` had no index and
+degraded to matching names. That is what "I have to tell it which tool to use" looks like from the
+outside. `config/retrieval.test.ts` now reads `bridge.ts` and fails on any surviving direct read,
+because the defect is a decision *not reaching* the owner, which no test of the owner can see.
+
 The other two original objections stand as warnings rather than blocks: a silent miss is
 still a silent miss, so `search_docs` supplements `read_file` and never replaces it, and the
 embedding dependency is why the whole feature is opt-in and ships disabled.
@@ -546,6 +561,21 @@ reported in the tool result instead, so nothing is hidden.
 - Off by default. Nothing is spawned and nothing is spent until the user enables it.
 - Cost is surfaced per consultation, in the tool result and in the tab. A number nobody
   sees cannot be managed.
+- **The price is measured on the machine, not assumed from published rates** (`expert/pricing.ts`).
+  A button in the Expert tab runs two trivial consultations — one cold, one resumed — records
+  `coldUsd`/`resumedUsd`, and stores them so Junior mode plans in *this* deployment's numbers. It
+  exists because a corporate plan may account for credit differently, and the documented $0.187 is
+  from one machine on one plan. The user's own measurement came back **0.007117 cold / 0.006539
+  resumed** — a ratio of 1.09 against the 19× documented here.
+- **`resumeWorked` is why that measurement is trustworthy.** If the CLI returns no `session_id`,
+  the second sample is also a cold start, and two cold starts look exactly like a session that
+  saves nothing. The flag records whether a resume actually happened, and `describePricing()`
+  refuses to present a ratio when it did not — the honest reading of that number is "unknown",
+  not "no benefit".
+- **Keep-alive** (`expert.keepAlive`, off by default) pings a live session every fifty minutes
+  against the one-hour cache TTL, so a lunch break does not cost a cold start. It never *starts* a
+  session, stops when the task's budget is spent, and its cost is counted in the meter — a
+  background timer that spends money invisibly is the version of this nobody should trust.
 - Detection falls back to the npm prefix when the bare command is not on PATH. **This is an
   observed failure, not defensive padding:** an editor started before `npm i -g` does not
   see the new binary, so the user installs it and is still told it is missing.
@@ -631,6 +661,47 @@ documentation.
 The installed command is still `light-code`. Scoped packages default to restricted, so
 `publishConfig.access: "public"` is set — without it the first publish 402s asking for a
 paid plan, which reads as a billing problem rather than a missing flag.
+
+### Admin and user modes — **`apps/host` only** (2026-08-2x)
+
+User-requested, and the scope fence is theirs and explicit: *"this is only for node version"*,
+*"i dont want this seperation of admin to be reflecting in vsix"*. The VS Code extension has one
+user who owns their own machine; a role split there would be theatre.
+
+- `light-code --admin` prints a second, separate URL. The assumption the user granted is that
+  **only admins can reach the admin URL** — the split is an operator control, not a defence
+  against someone who already has the admin link.
+- **`apps/host/src/roles.ts` is an allow-by-omission list, deliberately.** A settings message
+  added later must default to *restricted*, so `isAdminOnly` also applies a prefix rule
+  (`save*`/`delete*`/`set*` is admin unless listed as personal). A deny list would silently
+  admit every new control.
+- What it covers mirrors invariant 5 almost exactly: the shared provider set and the default a
+  new user inherits, MCP servers, Python, search connections, schedules, read roots, the
+  dispatcher. A second user on a shared box is the same threat as a hostile repository arriving
+  through a different door.
+- What is deliberately *absent* is as considered: appearance, mode, the per-chat expert budget
+  and the message being typed are personal. An admin has no business owning them.
+- **A user's own profiles are theirs** — a reversal of the first draft, which froze all of
+  `profiles`. The threat invariant 5 is about is one party repointing *another's* gateway, and a
+  per-user profile cannot do that: someone bringing their own key spends their own money against
+  a host they chose.
+- **Session variables**: user-level and admin-level, both exposed to a session as environment
+  variables, **admin wins on collision**. They live in `variables.json`, not `config.json` — the
+  zod schema strips unknown keys, so putting them in the config file meant the next unrelated
+  save deleted them. There is a test asserting that stripping, so the reason stays visible.
+- **A normal user's tool or skill goes to a review queue** (`reviewQueue.ts`); only an admin
+  approves. §13 requires approval showing the source, and on a shared server the person who can
+  give that approval is not the person who asked for it.
+- **None of this makes multi-user hosting safe.** The agent still runs as the service account,
+  so this is not privilege isolation and `docs/hosting.md` still says hosting is only appropriate
+  where every user is already trusted with everything every other user can reach. **Do not soften
+  that because roles now exist** — they lock down configuration, not execution.
+
+**`--guide` serves the operator documentation as a web page**, not as terminal output. It bakes
+`docs/hosting.md` into the bundle at build time (`guideHtml.ts`), so there is no network fetch
+and invariant 4 holds. Note the renderer works on CRLF input: `.` in a JS regex does not match
+`
+`, and the markdown file is CRLF, so the first version silently rendered no headings at all.
 
 **`scripts/smoke-test-npm.mjs` is the VSIX smoke test's counterpart and exists for the same
 reason.** It packs the tarball, installs it into an empty directory with plain `npm`, and
@@ -838,13 +909,17 @@ addition to the text input rather than a replacement for it.
 **Current phase:** **Shipped and in daily use in a corporate deployment**, which is now where
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
-workflow has never run. **0.30.0 was live as of 2026-08-19**, queried from the gallery.
+workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
+the gallery. The local manifest is 0.36.2, so there is one unpublished bump plus this session's
+work on top of it.
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
-Also on npm: `@chosengeneration/light-code` (the Node host, §14), published 2026-08-12.
-The bare name `light-code` belongs to an unrelated package, hence the scope.
+Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
+2026-08-31**; the local manifest is 0.12.2. The bare name `light-code` belongs to an unrelated
+package, hence the scope. **Publishing automation is not wanted** — the user decided against it
+on 2026-08-19 and manual upload stays, for both registries.
 
 **Check the gallery rather than this file before claiming a published version** — the query is
 `POST https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery` with
@@ -858,8 +933,8 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** Phase 8b — vector stores and semantic retrieval. See `IMPLEMENTATION_PLAN.md`;
-read its "prompt-cache constraint" section before starting, and CLAUDE.md §12's revision.
+**Next:** publish the two pending versions, and keep working from what the office deployment
+reports. The plan phases are done; changes now come from daily use.
 
 **TLS material is configured once, globally (added mid-Phase-8b, from the corporate
 deployment).** There were four places to put a CA — top-level `certDir`, a profile's `tls`,
@@ -987,7 +1062,91 @@ four of them threw on a missing array when it was first written.
 
 ---
 
-## SESSION HANDOVER — 2026-08-19, read this first
+## SESSION HANDOVER — 2026-08-31, read this first
+
+**Marketplace 0.36.1** (published 2026-08-27), **npm 0.12.1** — both queried 2026-08-31, not
+inferred. Local manifests are 0.36.2 and 0.12.2. `main` is clean. **1322 tests**, 1 skipped.
+
+### The bug shape that has now cost this project more time than any other
+
+**One fact declared in two places, which drift.** Four instances this session, three of them
+found only because the user said the feature did nothing:
+
+- Two `settings` posts built the capability list separately, so `--guide` reached one host and
+  not the other. Fixed with a shared `hostCapabilities()`.
+- Two `expert` messages were constructed separately, so measured pricing reached the success
+  path and not the failure path. Fixed with a shared `expertMessageFrom()`.
+- `App.tsx` unpacked the expert message **field by field**, so every field added to the protocol
+  was silently dropped on the way to the panel. This is the one that survived three rounds of
+  inspection: the host was correct, the protocol was correct, and the UI was quietly discarding
+  the answer. Fixed by assigning the whole message.
+- Two dispatcher checks read `retrieval?.dispatcher === true` instead of `dispatcherEnabled()`.
+  Both were written while the default was off and became wrong when it flipped — tools hidden by
+  one path, documentation never indexed by another. **This is the answer to "sometimes I have to
+  tell it which tool to use."**
+
+The general fix is the same every time: **one constructor, one owner of a default, and pass the
+whole thing rather than copying fields.** Where a test can see the shape rather than the
+behaviour, write that test — `config/retrieval.test.ts` reads `bridge.ts` and fails on a direct
+read of the key, because a decision that never reaches its owner is invisible to any test of the
+owner.
+
+### The habit that found all of them
+
+**Read the running system.** The user's `config.json` (`retrieval: {dispatcher: true}`, no vector
+store, no embedder) explained the tool-selection complaint. The output channel named the layer of
+the pricing bug in one line after three rounds of source inspection had not. A stub CLI
+(`scratchpad/fakecli/claude.cmd`, emitting the real JSON envelope) proved the cost measurement
+without spending the user's credit. Live two-user servers verified the admin split.
+
+### Built since 0.30
+
+- **Multi-user for `apps/host` only** — admin/user URLs, `--admin`, roles, per-user and admin
+  session variables with admin precedence, a review queue for tools and skills created by a
+  normal user, and shared vs personal provider profiles. §14 has the reasoning. The scope fence
+  is the user's and was stated four times: **none of this appears in the VSIX.** It leaked once —
+  the programming-provider picker became visible in the extension — and the user caught it.
+- **`--guide` opens the operator documentation as a web page**, built into the bundle.
+- **The walkthrough is generated and takes you to each tab** (see the section above it).
+- **The dispatcher and skill retrieval are on by default**, at the user's request: search for the
+  tool first, and find skills the same way.
+- **Expert cost is measured here rather than assumed**, with `resumeWorked` so two cold starts
+  cannot masquerade as a cheap resume; plus a keep-alive so a lunch break does not cost a cold
+  start. Their measured numbers are 0.007117 / 0.006539 — a ratio of 1.09 against the 19× this
+  file documents from a different plan. `docs/office-plan.md` §1 rests on that and may need
+  rewriting once it is known whether their resume actually happened.
+- **Three fixes from office use**, all of which read as the feature being broken:
+  `@` listed every file in `.venv` (a non-null `exclude` **replaces** `files.exclude` rather than
+  adding to it — naming one folder turned off every folder the user had already hidden); a skill
+  added by hand did not appear until the panel was reopened (the folders are watched now); and
+  the documentation reindex is reachable from the MCP tab, where you are when you add a server.
+
+### Answers to standing questions, so they are not re-derived
+
+- **A shared OpenSearch index across a team**: `codebaseIndexName()` hashes the absolute
+  workspace path, so two people at different paths get different indexes. Setting
+  `embedder.indexName` explicitly is how they share one. Manifests stay per user, keyed
+  `index@storeId`.
+- **The 25-step cap is per turn.** `for (let iteration = 0; iteration < maxIterations; ...)` runs
+  inside one turn, so replying "continue" grants a fresh 25. `maxIterations` is configurable.
+- **The expert does know about tools and skills.** `expert/briefing.ts` sends
+  `promptTools + dispatchOnlyTools` and the skill list once per cold session — names and
+  one-line descriptions only, never schemas, because forty tools is a few hundred tokens as a
+  list and thousands as schemas.
+- **MCP tool documentation is indexed**, and reindexes automatically on connect, disconnect and
+  `tools/list_changed`, debounced three seconds and fingerprinted.
+
+### Still not done
+
+`MANUAL_VERIFICATION.md` is still largely unrun and is still the oldest debt. Admin UI for shared
+profiles is reserved in the protocol (`saveSharedProfile`, `setDefaultProfile`) with no handler.
+No render test for `ReviewsTab`. Both pending versions are unpublished. And the standing warning
+holds: **most of what has been built in recent sessions has never been rendered in a real
+Extension Host** — jsdom proves behaviour, not appearance.
+
+---
+
+## Previous handover — 2026-08-19, superseded above
 
 **Marketplace is on 0.30.0** (queried 2026-08-19). `main` is clean. **1043 tests**, 1 skipped.
 Artifact `apps/vscode/light-code-vscode-0.30.0.vsix`.
