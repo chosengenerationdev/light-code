@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { Logger, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
+import { Logger, mentionExcludeGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { resolveRipgrepPath } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
@@ -87,11 +87,20 @@ export function createVSCodeHostServices(
     },
 
     /**
-     * The editor's own index, not a tree walk: it already honours `files.exclude` and
-     * `search.exclude`, so `node_modules` never appears and it stays fast in a large repo.
+     * The editor's own index rather than a tree walk — it stays fast in a large repository.
+     *
+     * The exclude argument is the subtle part. A non-null `exclude` **replaces** `files.exclude`
+     * and `search.exclude` rather than adding to them, so the previous a `node_modules` exclude pattern
+     * silently switched off every exclusion the user had configured. That is how a virtualenv
+     * ended up in the picker. Passing `undefined` restores the editor's own handling, which is
+     * what an emptied list should mean.
      */
-    async findFiles(pattern, limit) {
-      const found = await vscode.workspace.findFiles(pattern, '**/node_modules/**', limit)
+    async findFiles(pattern, limit, excludeFolders) {
+      const exclude = mentionExcludeGlob(excludeFolders)
+      const found =
+        exclude === undefined
+          ? await vscode.workspace.findFiles(pattern, undefined, limit)
+          : await vscode.workspace.findFiles(pattern, exclude, limit)
       return found.map((uri) => uri.fsPath)
     },
   }

@@ -90,7 +90,14 @@ export interface HostUi {
    * A host with an editor's index should use it — VS Code's honours `files.exclude` for
    * free. A plain filesystem walk is an acceptable substitute.
    */
-  findFiles(pattern: string, limit: number): Promise<string[]>
+  /**
+   * Candidate paths for an `@` mention.
+   *
+   * `excludeFolders` is a list of folder names to skip at any depth, resolved by the caller from
+   * config. Passed rather than read here because each host excludes differently — the editor has
+   * an index that already understands globs, the server walks the tree itself.
+   */
+  findFiles(pattern: string, limit: number, excludeFolders: readonly string[]): Promise<string[]>
 }
 
 /**

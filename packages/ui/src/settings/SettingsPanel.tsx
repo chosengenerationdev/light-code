@@ -134,6 +134,16 @@ type TabId =
  *
  * Every icon keeps its label as a tooltip, so nothing is discoverable only by clicking.
  */
+/** The last documentation-index run, as one line. Undefined when nothing has run yet. */
+function describeDocsResult(
+  result: { indexed?: number; index?: string; error?: string } | undefined,
+): string | undefined {
+  if (result === undefined) return undefined
+  if (result.error !== undefined) return `Failed: ${result.error}`
+  const count = result.indexed ?? 0
+  return `Indexed ${String(count)} ${count === 1 ? 'entry' : 'entries'}.`
+}
+
 const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => ReactElement }[] = [
   { id: 'providers', label: 'Providers', Icon: ProviderIcon },
   { id: 'approvals', label: 'Approvals', Icon: ShieldIcon },
@@ -320,6 +330,18 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onSetServerEnabled={props.onSetMcpServerEnabled}
             onSetToolPermission={props.onSetMcpToolPermission}
             onConnect={props.onConnectMcp}
+            /*
+             * Fed from the Search tab's own props rather than from new state. One source for
+             * "is the dispatcher on, is it indexing, what did the last run say" — two would
+             * drift, which is the bug shape that has cost this project the most time.
+             */
+            docsIndex={{
+              enabled: props.search.dispatcher.enabled,
+              ready: props.search.dispatcher.retrievalReady,
+              indexing: props.search.dispatcher.indexing,
+              result: describeDocsResult(props.search.dispatcher.result),
+            }}
+            onIndexDocs={props.search.dispatcher.onIndexDocs}
           />
         )}
       </div>

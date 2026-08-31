@@ -60,6 +60,20 @@ const base = {
     activity: { entries: [] },
     indexes: [],
     indexing: { profiles: [], models: [], warnings: [], issues: [] },
+    // The MCP tab reads this too, since a new server's tools are indexed and the button to
+    // reindex belongs where the server was added. Omitting it here crashed that tab.
+    dispatcher: {
+      enabled: false,
+      hiddenTools: 0,
+      skills: false,
+      hiddenSkills: 0,
+      indexing: false,
+      retrievalReady: false,
+      onToggle: () => undefined,
+      onToggleSkills: () => undefined,
+      onIndexDocs: () => undefined,
+      onClearDocsIndex: () => undefined,
+    },
   },
   network: { warnings: [], issues: [] },
   python: { status: undefined, settings: {}, tools: [], issues: [] },

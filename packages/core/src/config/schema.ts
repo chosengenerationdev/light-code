@@ -443,6 +443,17 @@ export const configSchema = z
     filesystem: z
       .object({
         readRoots: z.array(z.string()),
+        /**
+         * Folders left out of the `@` file picker.
+         *
+         * Plain folder names, matched at any depth. Not a security control — confinement and the
+         * deny list are — this is about a picker that is useless when a virtualenv puts thousands
+         * of files in front of the twenty you were looking for.
+         *
+         * Absent means the defaults apply; an empty array means none, which is a real choice for
+         * someone who genuinely wants to reach into `.venv`.
+         */
+        excludeFromMentions: z.array(z.string()),
       })
       .partial(),
     /**

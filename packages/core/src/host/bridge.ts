@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -28,6 +29,7 @@ import {
   createAuthStrategy,
   buildCodeGenerationPrompt,
   createChatProvider,
+  mentionExcludes,
   PRICING_PROBE,
   pricingForPrompt,
   type ExpertPricing,
@@ -350,6 +352,49 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     for (const issue of loaded.issues) logger.warn(`skill ${issue.filePath}: ${issue.detail}`)
   }
 
+  /*
+   * Watches the skill folders, so a file dropped in appears without reopening anything.
+   *
+   * A skill is a markdown file people create in an editor, in a folder they can see — and the
+   * panel only refreshed when it was asked to, so adding one and looking at the tab showed
+   * nothing. There was no error to notice, which made it read as the skill being rejected.
+   *
+   * Watches the *directory*, not the files: a new file is the event that matters, and editors
+   * save by replacing rather than writing in place, so a per-file watch would miss both.
+   */
+  let skillWatchers: FSWatcher[] = []
+  let skillWatchTimer: ReturnType<typeof setTimeout> | undefined
+
+  function stopWatchingSkills(): void {
+    for (const watcher of skillWatchers) watcher.close()
+    skillWatchers = []
+    if (skillWatchTimer !== undefined) clearTimeout(skillWatchTimer)
+    skillWatchTimer = undefined
+  }
+
+  function watchSkillFolders(): void {
+    stopWatchingSkills()
+    for (const dir of skillSearchPath()) {
+      try {
+        skillWatchers.push(
+          watchPath(dir, () => {
+            /*
+             * Debounced. One save produces several events on every platform, and each one would
+             * otherwise reload the skills and schedule a documentation reindex.
+             */
+            if (skillWatchTimer !== undefined) clearTimeout(skillWatchTimer)
+            skillWatchTimer = setTimeout(() => {
+              void postSkills()
+            }, 300)
+          }),
+        )
+      } catch {
+        // The folder may not exist yet — a first skill creates it, and `postSkills` re-arms the
+        // watch afterwards. Failing to watch must never stop skills being read.
+      }
+    }
+  }
+
   async function postSkills(): Promise<void> {
     // The folder list lives in config and is refreshed here, not only per turn — otherwise
     // adding a folder in Settings would show no change until the next message.
@@ -365,6 +410,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Skills are part of the corpus, so a written, deleted or relocated one makes the index
     // stale. Debounced and fingerprinted, so the usual case costs nothing.
     scheduleDocsReindex('skills changed')
+    // Re-armed here rather than once at startup: the folder list can change, and the folder
+    // itself may not have existed the first time this ran.
+    watchSkillFolders()
   }
 
   /**
@@ -741,6 +789,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Rebuilt on every settings load, so a profile change reaches the next turn. */
   let cachedCodeGenerator: CodeGenerator | undefined
+  /** Undefined means the defaults; an empty array means the user cleared the list. */
+  let cachedMentionExcludes: string[] | undefined
   /** Undefined until a consultation has told us. See `recordConsultation`. */
   let cachedReportsCost: boolean | undefined
   /** Set while a measurement is running, so the panel can say what it is doing. */
@@ -768,6 +818,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(config.expert?.maxSpendUsd !== undefined ? { maxSpendUsd: config.expert.maxSpendUsd } : {}),
       ...(config.expert?.maxConsultations !== undefined ? { maxConsultations: config.expert.maxConsultations } : {}),
     }
+    cachedMentionExcludes = config.filesystem?.excludeFromMentions
     cachedReadRoots = (config.filesystem?.readRoots ?? [])
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
@@ -1854,7 +1905,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     try {
       const pattern = query.length > 0 ? `**/*${query}*` : '**/*'
-      const found = await ui.findFiles(pattern, 30)
+      const found = await ui.findFiles(pattern, 30, mentionExcludes(cachedMentionExcludes))
       const paths = found
         .map((absolute) => path.relative(workspaceRoot, absolute).split(path.sep).join('/'))
         .sort((a, b) => a.length - b.length)
@@ -2016,6 +2067,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // No session means no cache to keep warm, and starting one would be spending for nothing.
     if (session === undefined) {
       stopKeepAlive()
+      stopWatchingSkills()
       return
     }
     try {

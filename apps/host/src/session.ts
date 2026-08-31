@@ -130,10 +130,11 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
      * A plain recursive walk, since there is no editor index to borrow. Pruned at the
      * directories that would otherwise dominate the result and the runtime.
      */
-    async findFiles(pattern, limit) {
+    async findFiles(pattern, limit, excludeFolders) {
       if (workspaceRoot === undefined) return []
       const needle = pattern.replace(/^\*\*\//, '').replace(/\*/g, '').toLowerCase()
-      const skip = new Set(['node_modules', '.git', 'dist', 'out', 'build', '.venv', '__pycache__'])
+      // The same list the editor host applies, resolved from config by the bridge.
+      const skip = new Set(excludeFolders)
       const found: string[] = []
 
       const walk = async (dir: string, depth: number): Promise<void> => {
