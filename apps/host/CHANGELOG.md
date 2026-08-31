@@ -1,5 +1,28 @@
 # @chosengeneration/light-code
 
+## 0.13.0
+
+### Minor Changes
+
+- Tools are found on their own again, and three things from daily use that read as breakage.
+
+  The dispatcher defaults to on, but two checks still tested the old default directly. Tools were
+  hidden from the prompt by one code path while the documentation index was never built by another,
+  so searching for a tool could only match names — which is what "I have to tell it which tool to
+  use" looks like from the outside. The Tools tab reported the dispatcher off at the same time,
+  which is how the two halves managed to disagree unnoticed.
+
+  The `@` picker listed every file in `.venv`. Naming one folder to exclude silently turned off
+  every folder already hidden in the editor's own settings, because an explicit exclude replaces
+  that list rather than adding to it. There is now a folder list of its own, defaulting to the usual
+  build and virtualenv folders.
+
+  A skill added by hand did not appear until the panel was reopened. The skill folders are watched
+  now.
+
+  Tool documentation can be reindexed from the MCP tab, where you are when you add a server, rather
+  than only from Settings → Search.
+
 ## 0.12.2
 
 ### Patch Changes
