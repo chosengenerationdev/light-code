@@ -933,8 +933,12 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the two pending versions, and keep working from what the office deployment
-reports. The plan phases are done; changes now come from daily use.
+**Next:** publish the pending versions — extension 0.37.0, host 0.13.0 — and keep working from
+what the office deployment reports. The plan phases are done; changes now come from daily use.
+
+**`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
+lost, but everything built since `7a04504` existed only on one machine for weeks. Push at the end
+of a session.
 
 **TLS material is configured once, globally (added mid-Phase-8b, from the corporate
 deployment).** There were four places to put a CA — top-level `certDir`, a profile's `tls`,
@@ -1065,7 +1069,9 @@ four of them threw on a missing array when it was first written.
 ## SESSION HANDOVER — 2026-08-31, read this first
 
 **Marketplace 0.36.1** (published 2026-08-27), **npm 0.12.1** — both queried 2026-08-31, not
-inferred. Local manifests are 0.36.2 and 0.12.2. `main` is clean. **1322 tests**, 1 skipped.
+inferred. This session versioned **0.37.0** (extension) and **0.13.0** (host) and packaged
+`apps/vscode/light-code-vscode-0.37.0.vsix` (universal, six ripgrep binaries, smoke test green).
+Neither is published. `main` is clean. **1323 tests**, 1 skipped.
 
 ### The bug shape that has now cost this project more time than any other
 
@@ -1123,10 +1129,16 @@ without spending the user's credit. Live two-user servers verified the admin spl
 
 ### Answers to standing questions, so they are not re-derived
 
-- **A shared OpenSearch index across a team**: `codebaseIndexName()` hashes the absolute
-  workspace path, so two people at different paths get different indexes. Setting
-  `embedder.indexName` explicitly is how they share one. Manifests stay per user, keyed
-  `index@storeId`.
+- **A shared OpenSearch index across a team is workable**, and the reason to think otherwise is
+  wrong: indexed paths are **workspace-relative** (`indexer.ts` stores
+  `path.relative(workspaceRoot, absolute)` with `/` separators), so two checkouts at different
+  drive letters produce identical stored paths. What actually stands in the way is smaller —
+  `codebaseIndexName()` hashes the absolute workspace path, so both people must set
+  `embedder.indexName` to the same literal (config-file only today); the embedding model and
+  width must match; and manifests stay per user (`index@storeId`), so the second person's
+  "Index" re-embeds the whole repo. That converges rather than duplicating, because chunk ids
+  derive from the relative path. The user withdrew the request on 2026-08-31 believing paths
+  made it impossible; if it comes back, it is a field and a warning, not a project.
 - **The 25-step cap is per turn.** `for (let iteration = 0; iteration < maxIterations; ...)` runs
   inside one turn, so replying "continue" grants a fresh 25. `maxIterations` is configurable.
 - **The expert does know about tools and skills.** `expert/briefing.ts` sends
