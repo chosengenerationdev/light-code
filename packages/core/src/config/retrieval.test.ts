@@ -191,3 +191,32 @@ describe('who owns the guide button', () => {
     expect(capability({}).guideMediaBase).toBeUndefined()
   })
 })
+
+/**
+ * The default is `on`, and the way that breaks is not by being read wrongly — it is by not
+ * being read at all.
+ *
+ * Two places in the bridge tested `retrieval?.dispatcher === true` directly. Written when the
+ * default was off, both were correct at the time and both silently became wrong when it
+ * flipped: a user who had never opened the setting had their tools hidden by one code path
+ * and their documentation left unindexed by another, so `search_docs` could only match names.
+ * Nothing errored, and the symptom — "it does not find my MCP tools" — points nowhere near
+ * a boolean.
+ *
+ * So this asserts the *shape* rather than the behaviour: every decision goes through the one
+ * function that owns the default.
+ */
+describe('the dispatcher default has one owner', () => {
+  it('is never decided by reading the config key directly', async () => {
+    const fs = await import('node:fs/promises')
+    const url = await import('node:url')
+    const bridge = url.fileURLToPath(new URL('../host/bridge.ts', import.meta.url))
+    const source = await fs.readFile(bridge, 'utf8')
+
+    // Comments explain the trap by naming it, so only real code is examined.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const direct = [...code.matchAll(/retrieval\?\.(dispatcher|skills)\s*[!=]==/g)].map((m) => m[0])
+
+    expect(direct).toEqual([])
+  })
+})

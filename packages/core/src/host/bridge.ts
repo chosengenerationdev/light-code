@@ -2915,9 +2915,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void (async () => {
         try {
           const { config } = await configManager.load()
-          // Only worth doing when the schemas are actually hidden — with the dispatcher off
-          // nothing consults this index, so indexing would be pure cost.
-          if (config.retrieval?.dispatcher !== true) return
+          /*
+           * Only worth doing when the schemas are actually hidden — with the dispatcher off
+           * nothing consults this index, so indexing would be pure cost.
+           *
+           * Read through `dispatcherEnabled`, not `=== true`. This was written when the
+           * dispatcher was off by default, and reading the key directly meant that once the
+           * default flipped, every user who had never opened the setting had their tools hidden
+           * and their documentation never indexed — findable only by the lexical fallback,
+           * which is exactly the "it does not pick up my tools" report this came from.
+           */
+          if (!dispatcherEnabled(config.retrieval)) return
           const outcome = await indexDocs({ force: false })
           if (outcome.error !== undefined) {
             logger.warn(`documentation reindex failed (${reason}): ${outcome.error}`)
@@ -4253,7 +4261,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function postTools(): Promise<void> {
     const { config } = await configManager.load()
-    const dispatcher = config.retrieval?.dispatcher === true
+    // Same trap as the reindex above: reading the key directly made this view report the
+    // dispatcher off — and compute `advertised` as though it were — for anyone running the
+    // default. A read-only view of what the model can see is worth nothing if it is wrong.
+    const dispatcher = dispatcherEnabled(config.retrieval)
     const registry = currentToolRegistry(undefined, undefined, undefined, undefined, dispatcher)
     const advertised = new Set(registry.promptList().map((tool) => tool.name))
     const pythonNames = new Set(python.tools().map((tool) => tool.name))
