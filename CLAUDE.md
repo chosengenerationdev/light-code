@@ -947,7 +947,7 @@ Record the reason, not just the difference.
 | ~~No semantic search~~ — **reversed 2026-08-09** | Originally excluded because embeddings conflict with the offline posture. The user overrode it: the deployment context is an organisation with an internal gateway, where an internal vector store and embedding endpoint break nothing, and codebase indexing is a capability Roo shipped and people use. Now Phase 8b — opt-in and disabled by default, so the offline posture holds for anyone who leaves it off. Both original objections survive as constraints rather than blocks; see §12. |
 | Three vector backends behind one interface, no vendor SDKs | Invariant 2 sends all egress through core's `HttpClient`, and the OpenSearch/Qdrant/Chroma clients each carry their own HTTP stack. All three databases are plain REST, so thin hand-written clients are the required design, not a workaround. |
 | Dynamic Python tools + skills | New capability Roo did not have. |
-| Scheduled prompts, read-only by default | New capability Roo did not have. Unattended runs have nobody to approve anything, so they get a restricted mode rather than inheriting auto-approve — Phase 9b. Since 2026-09-01 a run may always *discover* (`search_docs`, `call_tool`, `read_tool_result`), because none of those reaches the workspace, the network or a process — and a hit it may not call is marked as such rather than hidden. |
+| Scheduled prompts, read-only by default | New capability Roo did not have. Unattended runs have nobody to approve anything, so they get a restricted mode rather than inheriting auto-approve — Phase 9b. Since 2026-09-01 a run may always *discover* (`search_docs`, `call_tool`, `read_tool_result`), because none of those reaches the workspace, the network or a process — and a hit it may not call is marked as such rather than hidden. Note a granted tool is advertised to a run directly, even one that is `dispatchOnly` in the chat: the schedule's registry is built fresh from the allowlist. |
 
 ---
 
@@ -1165,9 +1165,13 @@ rather than copying fields.** Where a test can see the shape rather than the beh
   no error to notice.
 - **Scheduled runs can discover** (§9b additions in `schedule/types.ts`): `search_docs`,
   `call_tool` and `read_tool_result` are always available, because none of them reaches the
-  workspace, the network or a process. `call_tool` also fixed something simply broken — with the
-  dispatcher on, a schedule granted an MCP tool had no way to invoke it. `search_docs` now marks
-  a hit the run may not call, so it reports what it needed instead of being refused.
+  workspace, the network or a process. `search_docs` marks a hit the run may not call, so it
+  reports what it needed instead of spending a step being refused.
+  **A correction worth keeping**, because it was asserted before it was measured: `call_tool` was
+  claimed to fix a schedule being unable to invoke a granted MCP tool. It does not — a schedule
+  registers its granted tools *plainly*, so they are advertised to the run directly even when
+  they are `dispatchOnly` in the chat. `call_tool` only makes `search_docs`'s own "call it with"
+  instruction work. `schedule/discovery.test.ts` now pins the real behaviour.
 - **The `@` picker ranks instead of truncating.** It asked the file index for thirty and showed
   those thirty, so truncation chose rather than the query. `context/mentionRanking.ts`.
 - **Mentions are coloured in the composer** — a highlight layer behind the textarea, sharing one

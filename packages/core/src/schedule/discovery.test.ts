@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { describe, expect, it } from 'vitest'
 
-import { filterToolsForSchedule, ScheduledApprovalGate } from './runner.js'
+import { filterToolsForSchedule, registryForSchedule, ScheduledApprovalGate } from './runner.js'
 import { ALWAYS_AVAILABLE_TO_SCHEDULES } from './types.js'
 import type { Tool } from '../tools/types.js'
 
@@ -96,5 +96,33 @@ describe('the approval gate agrees with the registry', () => {
       preview: { kind: 'command', command: 'rm -rf /', cwd: '/tmp' },
     })
     expect(decision).toBe('deny')
+  })
+})
+
+/**
+ * What a schedule sees when the dispatcher is on.
+ *
+ * Worth pinning because it is easy to get backwards. In the chat, MCP and Python tools are
+ * registered `dispatchOnly` — unadvertised, reachable only through `call_tool`. A schedule
+ * builds a *fresh* registry from the tools it was granted, and registers them plainly, so a
+ * granted tool is advertised to the run directly. `call_tool` is therefore a convenience here
+ * and not the only route, which is the opposite of what it looks like from the chat side.
+ */
+describe('a granted tool that is dispatch-only in the chat', () => {
+  it('is advertised directly to the scheduled run', () => {
+    const registry = registryForSchedule([tool('s3__get_object'), tool('read_file')], {
+      allowedTools: ['s3__get_object'],
+    })
+
+    expect(registry.promptList().map((entry) => entry.name)).toContain('s3__get_object')
+    expect(registry.isDispatchOnly('s3__get_object')).toBe(false)
+    // And the allowlist still decides: an ungranted tool is absent, not merely unadvertised.
+    expect(registry.list().map((entry) => entry.name)).not.toContain('read_file')
+  })
+
+  /** So the dispatcher cannot be used to reach past the allowlist. */
+  it('leaves call_tool unable to find anything the schedule did not name', () => {
+    const registry = registryForSchedule([tool('deploy_service')], { allowedTools: [] })
+    expect(registry.get('deploy_service')).toBeUndefined()
   })
 })

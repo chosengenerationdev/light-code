@@ -6,9 +6,8 @@
 
 - Scheduled runs can find out what exists, and whether they may use it.
 
-  A schedule's tools are an allowlist, which left an unattended run unable to look anything up
-  — and, with the dispatcher on, unable to invoke even the tools it had been granted, since
-  most tools are unadvertised and reachable only through the dispatcher. Looking things up is
+  A schedule's tools are an allowlist, which left an unattended run unable to look anything up.
+  Looking things up is
   now always available: searching the documentation, the dispatcher itself, and re-reading a
   result this same run had truncated. None of those reaches the workspace, the network or a
   process, so nothing is widened by it — the inner call a dispatched tool stands for is still

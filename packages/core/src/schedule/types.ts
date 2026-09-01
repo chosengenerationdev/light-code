@@ -151,9 +151,14 @@ export type Schedules = z.infer<typeof schedulesSchema>
  *   loop rewrites it into the call it stands for *before* the gate, so the inner tool is checked
  *   against the allowlist exactly as if it had been named directly.
  *
- * `call_tool` also fixes something that was simply broken: with the dispatcher on, most tools
- * are unadvertised and reachable only through it, so a schedule granted an MCP tool had no way
- * to invoke it.
+ * `call_tool` is a convenience rather than a necessity, and it is worth being precise because
+ * the chat makes it look otherwise. There, MCP and Python tools are registered `dispatchOnly`
+ * and reachable only through the dispatcher. A schedule builds a *fresh* registry from what it
+ * was granted and registers those plainly, so a granted tool is advertised to the run directly.
+ * What `call_tool` buys is that `search_docs` output says "call it with call_tool(...)", and
+ * that instruction has to work. It cannot widen anything: the dispatcher resolves names against
+ * the same restricted registry, so a tool the schedule did not name is not there to be found.
+ * `schedule/discovery.test.ts` pins both halves.
  *
  * `ask_followup_question` is deliberately **not** here. There is nobody to answer it, so a run
  * that asked would wait for a reply that never comes — see `runner.ts`. `ask_user_form` is
