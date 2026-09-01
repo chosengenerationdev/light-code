@@ -1,5 +1,6 @@
 import { applyDiffTool } from './applyDiff/index.js'
 import { askFollowupQuestionTool } from './askFollowupQuestion.js'
+import { createAskUserFormTool } from './askUserForm.js'
 import { attemptCompletionTool } from './attemptCompletion.js'
 import { executeCommandTool } from './executeCommand.js'
 import { listFilesTool } from './listFiles.js'
@@ -19,6 +20,15 @@ export { writeToFileTool } from './writeToFile.js'
 export { applyDiffTool } from './applyDiff/index.js'
 export { executeCommandTool } from './executeCommand.js'
 export { askFollowupQuestionTool } from './askFollowupQuestion.js'
+export {
+  coerceFormValue,
+  createAskUserFormTool,
+  formFieldSchema,
+  type AskUserFormParams,
+  type FormAnswer,
+  type FormField,
+  type FormValue,
+} from './askUserForm.js'
 export { attemptCompletionTool } from './attemptCompletion.js'
 export { createReadToolResultTool } from './readToolResult.js'
 
@@ -36,6 +46,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(applyDiffTool)
   registry.register(executeCommandTool)
   registry.register(askFollowupQuestionTool)
+  registry.register(createAskUserFormTool())
   registry.register(attemptCompletionTool)
   return registry
 }

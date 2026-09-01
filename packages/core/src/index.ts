@@ -45,6 +45,7 @@ export {
   mentionExcludeGlob,
   mentionExcludes,
 } from './context/mentionExcludes.js'
+export { compareMentionCandidates } from './context/mentionRanking.js'
 export { GUIDE_STEPS, GUIDE_TITLE, GUIDE_DESCRIPTION, type GuideStep, type GuideTab } from './guide/steps.js'
 export { mergeScopes, USER_SCOPE_ONLY_KEYS, type ScopeMergeResult } from './config/scopes.js'
 export { defaultUserConfigPath, workspaceConfigPath } from './config/paths.js'
@@ -442,6 +443,9 @@ export {
   applyDiffTool,
   executeCommandTool,
   askFollowupQuestionTool,
+  createAskUserFormTool,
+  coerceFormValue,
+  formFieldSchema,
   attemptCompletionTool,
   type Tool,
   type ToolGroup,

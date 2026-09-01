@@ -4,6 +4,14 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+import { compareMentionCandidates } from '../context/mentionRanking.js'
+import {
+  coerceFormValue,
+  type AskUserFormParams,
+  type FormAnswer,
+  type FormField,
+  type FormValue,
+} from '../tools/askUserForm.js'
 import { confineToAny, normalizeForComparison } from '../fs/confine.js'
 import { approveTool, forgetTool, isValidToolName, toolFileName } from '../python/registry.js'
 import { isTranscriptMessage } from './backgroundMessages.js'
@@ -377,7 +385,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     for (const dir of skillSearchPath()) {
       try {
         skillWatchers.push(
-          watchPath(dir, () => {
+          // Recursive, because a skill may be a folder with SKILL.md inside — a non-recursive
+          // watch sees the folder appear and then never hears about the file written into it.
+          watchPath(dir, { recursive: true }, () => {
             /*
              * Debounced. One save produces several events on every platform, and each one would
              * otherwise reload the skills and schedule a documentation reindex.
@@ -605,7 +615,46 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Approvals are keyed by workspace path but stored user-side (invariant 5) — a repo
    * must not be able to grant itself permissions via `.lightcode/config.json`.
    */
+  /*
+   * Scanned wide, shown narrow. The fetch limit is high enough that ranking has something to
+   * choose from in a large repository, and bounded because this runs on every keystroke.
+   */
+  const MENTION_SCAN_LIMIT = 2000
+  const MENTION_RESULT_LIMIT = 30
+
   const approvalsKey = workspaceRoot ?? '__no_workspace__'
+
+  /**
+   * Finds this workspace's approvals however its path happens to be spelled.
+   *
+   * Approvals are stored under the workspace path, and on Windows the same folder legitimately
+   * arrives as `d:\project` or `D:\project` depending on how the window was opened — with or
+   * without a trailing separator, too. A JSON object key is an exact string, so the same
+   * workspace could look like a different one between sessions and every "always allow" the
+   * user had granted would silently stop applying. §16 is explicit that path comparison on
+   * Windows must be case-insensitive; this is that rule reaching the one place that stored a
+   * path as a key rather than comparing it.
+   *
+   * Reading tolerantly rather than rewriting the file: a rename on load would be a write on
+   * every start, and two windows open on the same workspace would race to do it.
+   */
+  function comparableApprovalsKey(key: string): string {
+    // `path.resolve` also drops a trailing separator, which is the other way one workspace
+    // ends up with two spellings. The placeholder is left alone: resolving it would make the
+    // key depend on the process's working directory, which is not stable between sessions.
+    return key === '__no_workspace__' ? key : normalizeForComparison(path.resolve(key))
+  }
+
+  function approvalsFrom(stored: Record<string, WorkspaceApprovals> | undefined): WorkspaceApprovals {
+    if (stored === undefined) return {}
+    const exact = stored[approvalsKey]
+    if (exact !== undefined) return exact
+    const wanted = comparableApprovalsKey(approvalsKey)
+    for (const [key, value] of Object.entries(stored)) {
+      if (comparableApprovalsKey(key) === wanted) return value
+    }
+    return {}
+  }
   // Cached so the policy gate can answer synchronously mid-turn without re-reading config.
   let cachedApprovals: WorkspaceApprovals = {}
   /** Mirrors config so the loop and the settings message agree without re-reading. */
@@ -693,6 +742,68 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Which approval ids are path requests, so "always allow" knows to remember a folder. */
   const pendingPathApprovals = new Map<string, string>()
+
+  /**
+   * Forms the assistant is waiting on, by request id.
+   *
+   * Parked exactly as an approval is, and for the same reason: the turn genuinely cannot
+   * continue until a person answers. Every path out of a turn settles these — a dismissal, a
+   * cancelled turn, a disposed bridge — because a promise nobody will ever resolve is a turn
+   * that hangs with no error and nothing to click.
+   */
+  const pendingForms = new Map<string, (answer: FormAnswer) => void>()
+  /** The fields each pending form asked for, so the reply is coerced against them. */
+  const pendingFormFields = new Map<string, readonly FormField[]>()
+
+  function settleAllForms(): void {
+    for (const resolve of pendingForms.values()) resolve({ submitted: false, values: {} })
+    pendingForms.clear()
+    pendingFormFields.clear()
+  }
+
+  async function requestForm(request: AskUserFormParams): Promise<FormAnswer> {
+    const id = `form-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`
+    const answer = new Promise<FormAnswer>((resolve) => {
+      pendingForms.set(id, resolve)
+    })
+    pendingFormFields.set(id, request.fields)
+    post({
+      type: 'formRequest',
+      id,
+      title: request.title,
+      ...(request.description !== undefined ? { description: request.description } : {}),
+      fields: request.fields,
+    })
+    try {
+      return await answer
+    } finally {
+      pendingForms.delete(id)
+      pendingFormFields.delete(id)
+    }
+  }
+
+  /**
+   * Turns a submitted form into typed values, refusing anything that does not fit its field.
+   *
+   * The form validates too, and that is for the user — but what reaches the model has to be
+   * right regardless of what arrived over the bridge. An unanswered required field or a number
+   * box holding letters comes back as a dismissal with the reason, not as a plausible value.
+   */
+  function answerFromResponse(
+    fields: readonly FormField[],
+    values: Record<string, string | boolean>,
+  ): FormAnswer {
+    const coerced: Record<string, FormValue> = {}
+    for (const field of fields) {
+      const result = coerceFormValue(field, values[field.name])
+      if ('error' in result) {
+        logger.warn(`form field rejected: ${result.error}`)
+        return { submitted: false, values: {} }
+      }
+      coerced[field.name] = result.value
+    }
+    return { submitted: true, values: coerced }
+  }
 
   /**
    * What the expert has cost since this task was opened.
@@ -801,7 +912,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   async function loadSettings(): Promise<LightCodeConfig> {
     const { config } = await configManager.load()
-    cachedApprovals = config.approvals?.[approvalsKey] ?? {}
+    cachedApprovals = approvalsFrom(config.approvals)
     cachedCodeGenerator = codeGeneratorFor(config)
     cachedProgrammingProfileId = config.programmingProfileId
     cachedModeId = config.modeId
@@ -827,6 +938,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .map(resolveSkillDir)
       .filter((dir): dir is string => dir !== undefined)
     return config
+  }
+
+  /**
+   * Says so when a damaged config file was repaired from its backup.
+   *
+   * Recovery is deliberately not silent. Something wrote a file that could not be read, and a
+   * user who is never told will not know a setting they changed just before it happened may
+   * have gone with it — nor that the broken copy is still on disk if they want it.
+   */
+  function announceConfigRecovery(): void {
+    const recovery = configManager.takeRecovery()
+    if (recovery === undefined) return
+    const where = recovery.quarantinedTo === undefined ? '' : ` The damaged file was kept as ${recovery.quarantinedTo}.`
+    const message = `Your ${recovery.scope} settings file could not be read and was restored from the last good copy.${where} Anything changed immediately before this may need setting again.`
+    logger.warn(message)
+    post({ type: 'error', message })
   }
 
   async function saveApprovals(next: WorkspaceApprovals): Promise<void> {
@@ -1482,6 +1609,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * itself new filesystem access would defeat the point of its allowlist.
          */
         ...(schedule === undefined ? { requestPathAccess } : {}),
+        // Also withheld from a scheduled run: nobody is there to fill a form in, and a job
+        // that stops to wait for one would never finish.
+        ...(schedule === undefined ? { requestForm } : {}),
         signal: activeAbortController.signal,
         // Supplied by the host, not imported by core: the binary is platform-specific and
         // lives in the VSIX, so resolving it is a host concern (§4).
@@ -1653,6 +1783,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } finally {
       // Never leave the loop parked on an approval that can no longer be answered.
       userGate.denyAll()
+      settleAllForms()
       activeAbortController = undefined
       // Save in `finally`, so a cancelled or errored turn is still persisted. A turn that
       // failed halfway is exactly the one the user most wants to see again afterwards.
@@ -1904,11 +2035,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       return
     }
     try {
+      /*
+       * Fetch widely, then rank, then cut.
+       *
+       * The limit used to be the same 30 the list shows, and a file index returns matches in
+       * its own order — so in any real repository the thirty that came back were an arbitrary
+       * thirty, and the file being typed was often not among them. That is "it is not scanning
+       * the codebase properly": the search was fine, the truncation was doing the choosing.
+       *
+       * The wider fetch is capped too, because `@` runs on every keystroke.
+       */
       const pattern = query.length > 0 ? `**/*${query}*` : '**/*'
-      const found = await ui.findFiles(pattern, 30, mentionExcludes(cachedMentionExcludes))
+      const found = await ui.findFiles(pattern, MENTION_SCAN_LIMIT, mentionExcludes(cachedMentionExcludes))
       const paths = found
         .map((absolute) => path.relative(workspaceRoot, absolute).split(path.sep).join('/'))
-        .sort((a, b) => a.length - b.length)
+        .sort(compareMentionCandidates(query))
+        .slice(0, MENTION_RESULT_LIMIT)
       post({ type: 'mentionCandidates', query, paths })
     } catch (error) {
       logger.warn('mention lookup failed', String(error))
@@ -3473,6 +3615,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   async function postSettings(): Promise<void> {
     await loadSettings()
+    announceConfigRecovery()
     post({
       type: 'settings',
       modeId: findMode(cachedModeId).id,
@@ -3861,8 +4004,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       postQueued()
       activeAbortController?.abort()
       userGate.denyAll()
+      settleAllForms()
     } else if (message.type === 'approvalResponse') {
       userGate.resolve(message.id, message.decision)
+    } else if (message.type === 'formResponse') {
+      const resolve = pendingForms.get(message.id)
+      // A response for a form nobody is waiting on is normal, not an error: the turn may have
+      // been cancelled between the user pressing the button and the message arriving.
+      if (resolve !== undefined) {
+        pendingForms.delete(message.id)
+        resolve(
+          message.submitted
+            ? answerFromResponse(pendingFormFields.get(message.id) ?? [], message.values)
+            : { submitted: false, values: {} },
+        )
+        pendingFormFields.delete(message.id)
+      }
     } else if (message.type === 'approvalResponseAlways') {
       void handleAlwaysAllow(message.id, message.scope)
     } else if (message.type === 'rollback') {
@@ -4744,6 +4901,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     dispose: () => {
       // Disposing while a turn awaits approval would otherwise leak a pending promise.
       userGate.denyAll()
+      settleAllForms()
       // stdio servers are child processes — not closing them leaks one per panel open.
       void mcp.closeAll()
       // Same reasoning for the Python interpreter, and it kills the whole tree so a tool

@@ -1,6 +1,7 @@
 import type { ApprovalDecision, ContextUsage, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
+import { FormPrompt, type PendingForm } from './FormPrompt.js'
 import { Composer } from './Composer.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
 import { PinnedPrompt } from './PinnedPrompt.js'
@@ -15,6 +16,10 @@ export interface ChatProps {
   isStreaming: boolean
   error: string | undefined
   pendingApproval: PendingApproval | undefined
+  /** A form the assistant is waiting on. At most one, like an approval. */
+  pendingForm: PendingForm | undefined
+  onSubmitForm: (id: string, values: Record<string, string | boolean>) => void
+  onDismissForm: (id: string) => void
   canRollback: boolean
   onSend: (text: string, images: ImageAttachmentInput[]) => void
   onCancel: () => void
@@ -106,8 +111,10 @@ export function Chat(props: ChatProps): ReactElement {
 
   const workingLabel = ((): string | undefined => {
     if (!props.isStreaming) return undefined
-    // An approval prompt is on screen and waiting for the user — nothing is working.
-    if (props.pendingApproval !== undefined) return undefined
+    // An approval prompt is on screen and waiting for the user — nothing is working. A form is
+    // the same situation: saying "Working…" over a control someone has to fill in is a lie
+    // about who is holding the turn up.
+    if (props.pendingApproval !== undefined || props.pendingForm !== undefined) return undefined
 
     const last = props.messages[props.messages.length - 1]
     if (last?.kind === 'tool' && last.toolCall.result === undefined) {
@@ -142,6 +149,9 @@ export function Chat(props: ChatProps): ReactElement {
             onDecide={props.onDecideApproval}
             onAlwaysAllow={props.onAlwaysAllow}
           />
+        )}
+        {props.pendingForm !== undefined && (
+          <FormPrompt form={props.pendingForm} onSubmit={props.onSubmitForm} onDismiss={props.onDismissForm} />
         )}
       </div>
       {props.canRollback && (

@@ -1,7 +1,7 @@
 import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
 import { AttachIcon, CrossIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
-import { activeMentionQuery, insertMention as insertMentionInto } from './mentions.js'
+import { activeMentionQuery, insertMention as insertMentionInto, splitMentions } from './mentions.js'
 import { Select } from './Select.js'
 import { badgeStyle, colors, fontFamily, iconButtonStyle } from './theme.js'
 
@@ -75,6 +75,25 @@ async function toAttachment(file: File): Promise<ImageAttachmentInput | undefine
   return { mediaType: file.type, data: btoa(binary), name: file.name || 'pasted image' }
 }
 
+/**
+ * Every property that decides where a glyph lands.
+ *
+ * Shared by the textarea and the highlight layer drawn behind it, because the two only line up
+ * while they agree exactly. Changing padding or line height in one place alone is the bug this
+ * constant exists to make impossible.
+ */
+const composerTextLayout = {
+  padding: '5px 6px',
+  margin: 0,
+  fontFamily,
+  fontSize: 13,
+  lineHeight: 1.45,
+  // A textarea wraps and preserves runs of spaces; the mirror has to be told to.
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'break-word',
+  border: 'none',
+} as const
+
 /** The `@` token the caret currently sits in, or undefined when it is not in one. */
 export function Composer(props: ComposerProps): ReactElement {
   const [text, setText] = useState('')
@@ -84,6 +103,15 @@ export function Composer(props: ComposerProps): ReactElement {
   const [highlighted, setHighlighted] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const mirrorRef = useRef<HTMLDivElement>(null)
+
+  /** Keeps the highlight layer scrolled to wherever the textarea is. */
+  const syncMirrorScroll = (element: HTMLTextAreaElement): void => {
+    const mirror = mirrorRef.current
+    if (mirror === null) return
+    mirror.scrollTop = element.scrollTop
+    mirror.scrollLeft = element.scrollLeft
+  }
 
   /** Grows the box to fit the text, capped, so the send button never drifts out of line. */
   const resize = (element: HTMLTextAreaElement): void => {
@@ -393,7 +421,49 @@ export function Composer(props: ComposerProps): ReactElement {
           borderRadius: 12,
         }}
       >
-        <textarea
+        {/*
+          The mention highlighter.
+
+          A textarea cannot colour part of its own text, so the text is drawn twice: this
+          layer paints it with the mentions coloured, and the textarea sits exactly on top with
+          transparent glyphs and a visible caret. Everything that affects layout — font, size,
+          line height, padding, wrapping — has to match between the two or the highlight drifts
+          away from the words underneath it, which is why both read from the same constants.
+
+          `aria-hidden`, because a screen reader should hear the textarea once, not twice.
+        */}
+        <div style={{ position: 'relative', flex: 1, display: 'flex' }}>
+          <div
+            ref={mirrorRef}
+            aria-hidden
+            style={{
+              ...composerTextLayout,
+              position: 'absolute',
+              inset: 0,
+              overflow: 'hidden',
+              pointerEvents: 'none',
+              color: colors.inputForeground,
+            }}
+          >
+            {splitMentions(text).map((segment, index) => (
+              <span
+                key={index}
+                style={
+                  segment.isMention
+                    ? { color: colors.accent, fontWeight: 600 }
+                    : undefined
+                }
+              >
+                {segment.text}
+              </span>
+            ))}
+            {/*
+              A trailing newline is not rendered by the browser, so without this the mirror is
+              one line shorter than the textarea and every wrapped line after it sits wrong.
+            */}
+            {text.endsWith('\n') && <span>{'​'}</span>}
+          </div>
+          <textarea
           ref={textareaRef}
           value={text}
           rows={2}
@@ -402,6 +472,7 @@ export function Composer(props: ComposerProps): ReactElement {
             setText(event.target.value)
             syncMentionQuery(event.target.value, event.target.selectionStart)
             resize(event.target)
+            syncMirrorScroll(event.target)
           }}
           onClick={(event) => syncMentionQuery(text, event.currentTarget.selectionStart)}
           onBlur={() => setMentionQuery(undefined)}
@@ -438,24 +509,25 @@ export function Composer(props: ComposerProps): ReactElement {
             }
           }}
           style={{
+            ...composerTextLayout,
             flex: 1,
             resize: 'none',
-            background: 'transparent',
-            color: colors.inputForeground,
             border: 'none',
             outline: 'none',
-            padding: '5px 6px',
-            margin: 0,
-            fontFamily,
-            fontSize: 13,
-            lineHeight: 1.45,
             // Grows with the text up to a limit, instead of a fixed two rows that is too
             // small for a paragraph and too tall for one line.
             minHeight: 44,
             maxHeight: 200,
             overflowY: 'auto',
+            // Drawn by the layer beneath; only the caret and the selection stay visible here.
+            color: 'transparent',
+            caretColor: colors.inputForeground,
+            position: 'relative',
+            background: 'transparent',
           }}
+          onScroll={(event) => syncMirrorScroll(event.currentTarget)}
         />
+        </div>
 
         {/* Always offered. Hiding it for an unrecognised model made attachment look
             unsupported when it was only unknown. */}

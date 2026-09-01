@@ -23,7 +23,7 @@ import { UserVariableStore, userVariablesPath } from './userVariables.js'
 import { storageKeyFor, type Principal } from './identity.js'
 
 /** User scope lives under the principal's own directory; workspace scope in the repo. */
-class FileConfigStore implements ConfigStore {
+export class FileConfigStore implements ConfigStore {
   constructor(
     private readonly userConfigPath: string,
     private readonly workspaceRoot: string | undefined,
@@ -45,13 +45,49 @@ class FileConfigStore implements ConfigStore {
     }
   }
 
+  /** Atomic, with the previous contents kept beside it. See the VS Code store for why. */
   async write(scope: ConfigScope, contents: string): Promise<void> {
     const filePath = this.pathFor(scope)
     if (filePath === undefined) throw new Error(`Cannot write ${scope} config: no workspace is open`)
     await fs.mkdir(path.dirname(filePath), { recursive: true })
+
     // 0600: user config holds no secret values, but it does hold every endpoint and
     // certificate path, which is not something to leave world-readable on a shared server.
-    await fs.writeFile(filePath, contents, { encoding: 'utf8', mode: 0o600 })
+    const temporary = `${filePath}.${process.pid.toString(36)}.tmp`
+    await fs.writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 })
+    await fs.rename(temporary, filePath)
+
+    // Written after the live file and from the same contents, so it exists from the first
+    // save onward. See the VS Code store for why copying the previous file is not enough.
+    try {
+      const backupTemp = `${configBackupPath(filePath)}.tmp`
+      await fs.writeFile(backupTemp, contents, { encoding: 'utf8', mode: 0o600 })
+      await fs.rename(backupTemp, configBackupPath(filePath))
+    } catch {
+      // The live file is written; a missing backup costs recoverability, not correctness.
+    }
+  }
+
+  async readBackup(scope: ConfigScope): Promise<string | undefined> {
+    const filePath = this.pathFor(scope)
+    if (filePath === undefined) return undefined
+    try {
+      return await fs.readFile(configBackupPath(filePath), 'utf8')
+    } catch {
+      return undefined
+    }
+  }
+
+  async quarantine(scope: ConfigScope): Promise<string | undefined> {
+    const filePath = this.pathFor(scope)
+    if (filePath === undefined) return undefined
+    const target = `${filePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+    try {
+      await fs.rename(filePath, target)
+      return target
+    } catch {
+      return undefined
+    }
   }
 
   watch(scope: ConfigScope, onChange: () => void): () => void {
@@ -280,4 +316,9 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
     `session for ${options.principal.displayName} → ${userDir}`,
   )
   return wireChatBridge(services)
+}
+
+/** The last-good copy, beside the file it protects so it shares its permissions and volume. */
+function configBackupPath(filePath: string): string {
+  return `${filePath}.bak`
 }

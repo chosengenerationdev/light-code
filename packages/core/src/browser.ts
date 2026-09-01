@@ -10,6 +10,9 @@ export type { Transport } from './platform/transport.js'
 
 export type { WireFormat, Auth, ProviderProfile } from './providers/types.js'
 export type { ToolGroup, ToolPreview } from './tools/types.js'
+// Type-only, so nothing from the tool's implementation reaches the webview bundle. The UI
+// needs the field shape to render a form and nothing else.
+export type { FormField } from './tools/askUserForm.js'
 export type { ApprovalDecision } from './approval/types.js'
 export type { AutoApproveSettings, WorkspaceApprovals, ApprovableGroup } from './approval/policy.js'
 export type { Mode } from './modes/types.js'

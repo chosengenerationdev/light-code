@@ -243,3 +243,57 @@ describe('loadSkills across several folders', () => {
     expect((await loadSkills(primary)).skills).toHaveLength(1)
   })
 })
+
+/**
+ * The layout Claude and Claude Code use.
+ *
+ * Reported as "I don't see the existing skills listed in skills tab": a folder of skills
+ * copied from there is entirely invisible if only top-level `.md` files are read, and there is
+ * no error to notice — the tab simply shows nothing, which reads as the feature being broken.
+ */
+describe('a skill kept as a folder with SKILL.md inside', () => {
+  it('is loaded, and takes its name from the folder', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-skills-'))
+    await fs.mkdir(path.join(dir, 'invoice-format'))
+    await fs.writeFile(
+      path.join(dir, 'invoice-format', 'SKILL.md'),
+      '---\ndescription: How our invoices are numbered\n---\n\nBody.\n',
+      'utf8',
+    )
+
+    const { skills } = await loadSkills(dir)
+    expect(skills.map((skill) => skill.name)).toEqual(['invoice-format'])
+    expect(skills[0]?.filePath).toContain('SKILL.md')
+  })
+
+  it('is found whatever the case of the filename', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-skills-'))
+    await fs.mkdir(path.join(dir, 'deploys'))
+    await fs.writeFile(path.join(dir, 'deploys', 'skill.md'), '---\ndescription: How we deploy\n---\n', 'utf8')
+
+    expect((await loadSkills(dir)).skills.map((skill) => skill.name)).toEqual(['deploys'])
+  })
+
+  it('lets frontmatter name override the folder, as it does for a file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-skills-'))
+    await fs.mkdir(path.join(dir, 'some-folder'))
+    await fs.writeFile(
+      path.join(dir, 'some-folder', 'SKILL.md'),
+      '---\nname: real-name\ndescription: Named in frontmatter\n---\n',
+      'utf8',
+    )
+
+    expect((await loadSkills(dir)).skills.map((skill) => skill.name)).toEqual(['real-name'])
+  })
+
+  it('ignores a folder that holds no skill file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-skills-'))
+    await fs.mkdir(path.join(dir, 'assets'))
+    await fs.writeFile(path.join(dir, 'assets', 'notes.md'), '# not a skill\n', 'utf8')
+    await fs.writeFile(path.join(dir, 'real.md'), '---\ndescription: A flat one\n---\n', 'utf8')
+
+    const { skills, issues } = await loadSkills(dir)
+    expect(skills.map((skill) => skill.name)).toEqual(['real'])
+    expect(issues).toEqual([])
+  })
+})

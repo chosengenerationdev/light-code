@@ -1,3 +1,4 @@
+import type { AskUserFormParams, FormAnswer } from './askUserForm.js'
 import type { z } from 'zod'
 import type { PathDenylist } from '../fs/denylist.js'
 import type { FileSystem } from '../platform/filesystem.js'
@@ -60,6 +61,14 @@ export interface ToolExecutionContext {
    * ask, so a run cannot widen its own filesystem access.
    */
   requestPathAccess?: (realPath: string) => Promise<boolean>
+  /**
+   * Shows the user a form and waits for it.
+   *
+   * Absent means nobody is there to fill one in — an unattended scheduled run — and
+   * `ask_user_form` then says so rather than blocking a job forever. Same shape and same
+   * reasoning as `requestPathAccess` above.
+   */
+  requestForm?: (request: AskUserFormParams) => Promise<FormAnswer>
   /**
    * Absolute path to the `rg` executable, supplied by the host.
    *

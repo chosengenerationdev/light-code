@@ -87,13 +87,45 @@ export function renderSkill(name: string, description: string, body: string): st
   return `---\nname: ${name}\ndescription: ${flattened}\n---\n\n${body.trimStart()}`
 }
 
+/**
+ * The file inside a skill *folder*, in the layouts people actually have.
+ *
+ * Two shapes are read, and the second exists because of who uses this: `skill-name.md` is what
+ * Light Code writes, and `skill-name/SKILL.md` is the layout Claude and Claude Code use, so a
+ * folder copied across from there is what someone reasonably expects to work. Read only the
+ * flat form and a whole folder of skills is invisible with no error anywhere — which is
+ * exactly how it was reported: "I don't see the existing skills listed".
+ *
+ * Matched case-insensitively: the convention is capitals, Windows does not care, and a
+ * `skill.md` written on a case-sensitive filesystem should not be a silent absence.
+ */
+async function skillFileInFolder(folder: string): Promise<string | undefined> {
+  try {
+    for (const entry of await fs.readdir(folder)) {
+      if (entry.toLowerCase() === 'skill.md') return path.join(folder, entry)
+    }
+  } catch {
+    // Unreadable folder: not a skill, and not worth an issue of its own.
+  }
+  return undefined
+}
+
 async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
   const skills: Skill[] = []
   const issues: SkillLoadIssue[] = []
 
-  let entries: string[]
+  /** `[file to read, name to fall back on]`. */
+  const candidates: [string, string][] = []
   try {
-    entries = (await fs.readdir(skillsDir)).filter((file) => file.endsWith('.md'))
+    for (const entry of await fs.readdir(skillsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const inner = await skillFileInFolder(path.join(skillsDir, entry.name))
+        // The folder names the skill, which is the whole point of that layout.
+        if (inner !== undefined) candidates.push([inner, entry.name])
+      } else if (entry.name.endsWith('.md')) {
+        candidates.push([path.join(skillsDir, entry.name), path.basename(entry.name, '.md')])
+      }
+    }
   } catch {
     // A configured folder that does not exist yet is not an error — the workspace one is
     // absent until the first skill is written, and a shared folder may be on a drive that
@@ -101,11 +133,10 @@ async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
     return { skills, issues }
   }
 
-  for (const file of entries.sort()) {
-    const filePath = path.join(skillsDir, file)
+  for (const [filePath, fallbackName] of candidates.sort((a, b) => a[0].localeCompare(b[0]))) {
     try {
       const parsed = parseFrontmatter(await fs.readFile(filePath, 'utf8'))
-      const name = parsed.name ?? path.basename(file, '.md')
+      const name = parsed.name ?? fallbackName
       if (parsed.description === undefined || parsed.description.length === 0) {
         // Without a description the model has nothing to decide on, so the skill would sit
         // in the prompt costing tokens and never being read.

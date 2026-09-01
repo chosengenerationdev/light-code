@@ -1,5 +1,37 @@
 # @chosengeneration/light-code
 
+## 0.14.0
+
+### Minor Changes
+
+- A form the assistant can ask with, and the config file no longer corrupts.
+
+  The assistant can now ask for structured input instead of a sentence: string, number, yes/no
+  and one-of-a-set fields, rendered as ordinary controls in the transcript. The turn continues
+  with the answers, so it does not have to describe four values in prose and read them back out
+  of prose — the step where the wrong value looks exactly like the right one. Available to
+  anything the assistant is doing, not only to skills, and it grants nothing: acting on what it
+  learns still goes through approval.
+
+  **Settings could be destroyed by an ordinary save.** The config file was written straight over
+  itself and read-modify-written without serialising, so two saves at once could lose one of them
+  or leave the file half-written — after which every read failed and the provider, the approvals
+  and the expert all appeared to vanish at once, repairable only by editing JSON by hand. Writes
+  are now atomic, saves are serialised, and a file that will not parse is restored from the last
+  good copy with the damaged one kept beside it.
+
+  Skills kept as a folder with `SKILL.md` inside — the layout Claude uses — are now loaded, where
+  before a whole folder of them was invisible with no error to notice.
+
+  The `@` picker asked the file index for thirty matches and showed those thirty, so in a large
+  repository the truncation decided what you saw rather than the query. It now searches widely and
+  ranks: a file named for what you typed comes before files merely inside a folder of that name.
+  Mentions are also coloured in the composer, so the attachments in a long prompt can be counted
+  at a glance.
+
+  Approvals are found whatever case the workspace path arrives in, so "always allow" is no longer
+  forgotten between sessions on Windows.
+
 ## 0.13.0
 
 ### Minor Changes

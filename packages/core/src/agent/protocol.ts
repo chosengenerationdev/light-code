@@ -1,3 +1,4 @@
+import type { FormField } from '../tools/askUserForm.js'
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
 import type { McpPlatform } from '../mcp/forms.js'
 import type { IndexProgress, IndexResult } from '../rag/indexer.js'
@@ -285,6 +286,13 @@ export type UiToHostMessage =
   /** Removed before it was consumed. */
   | { type: 'unqueueMessage'; index: number }
   | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
+  /**
+   * The filled-in form, or a dismissal.
+   *
+   * Values arrive as raw strings and booleans and are coerced host-side against the field
+   * types: the UI validating is for the user's benefit, not the model's guarantee.
+   */
+  | { type: 'formResponse'; id: string; submitted: boolean; values: Record<string, string | boolean> }
   /** Approve *and* remember, so this exact command / this tool stops prompting here. */
   | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' | 'folder' }
   | { type: 'rollback' }
@@ -480,6 +488,14 @@ export type HostToUiMessage =
   | { type: 'toolCall'; toolCall: ToolCallSummary; expertInformed?: boolean }
   | { type: 'toolResult'; toolCall: ToolCallSummary; expertInformed?: boolean }
   /** Ground truth for the approval prompt — invariant 8. The UI renders only `preview`. */
+  /** A form the assistant is waiting on. Rendered in the transcript, like an approval. */
+  | {
+      type: 'formRequest'
+      id: string
+      title: string
+      description?: string
+      fields: FormField[]
+    }
   | {
       type: 'approvalRequest'
       id: string

@@ -34,6 +34,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { Chat } from './Chat.js'
 import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
+import type { PendingForm } from './FormPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
 import { ModeSelector } from './ModeSelector.js'
 import { Guide } from './guide/Guide.js'
@@ -112,6 +113,7 @@ export function App(props: AppProps): ReactElement {
   const [activeProfileId, setActiveProfileId] = useState<string | undefined>(undefined)
   const [profilesLoaded, setProfilesLoaded] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | undefined>(undefined)
+  const [pendingForm, setPendingForm] = useState<PendingForm | undefined>(undefined)
   const [canRollback, setCanRollback] = useState(false)
   const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID)
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
@@ -262,6 +264,11 @@ export function App(props: AppProps): ReactElement {
           if (index === -1) return [...prev, entry]
           return [...prev.slice(0, index), entry, ...prev.slice(index + 1)]
         })
+      } else if (message.type === 'formRequest') {
+        setMessages(finalizePendingMessage)
+        // Assigned whole. Copying field by field is how every field added later gets silently
+        // dropped on the last hop — it has happened here before.
+        setPendingForm(message)
       } else if (message.type === 'approvalRequest') {
         setMessages(finalizePendingMessage)
         setPendingApproval({
@@ -1172,6 +1179,15 @@ export function App(props: AppProps): ReactElement {
             isStreaming={isStreaming}
             error={error}
             pendingApproval={pendingApproval}
+            pendingForm={pendingForm}
+            onSubmitForm={(id, values) => {
+              setPendingForm(undefined)
+              props.transport.post({ type: 'formResponse', id, submitted: true, values } satisfies UiToHostMessage)
+            }}
+            onDismissForm={(id) => {
+              setPendingForm(undefined)
+              props.transport.post({ type: 'formResponse', id, submitted: false, values: {} } satisfies UiToHostMessage)
+            }}
             canRollback={canRollback}
             onSend={send}
             onCancel={cancel}

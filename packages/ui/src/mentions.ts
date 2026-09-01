@@ -54,3 +54,43 @@ export function insertMention(text: string, caret: number, candidatePath: string
     caret: at + rendered.length + 1,
   }
 }
+
+/**
+ * Splits composer text into plain runs and `@` mentions, for highlighting.
+ *
+ * ## Why the composer needs this at all
+ *
+ * A long prompt with five attached files gives no sign of which files they were: the mentions
+ * are the same colour as the sentence around them, so the one thing in the message that is not
+ * prose reads as prose. Colouring them makes the attachments countable at a glance, which is
+ * what someone about to press send actually wants to check.
+ *
+ * ## Matching the same shapes the composer writes
+ *
+ * `renderMention` quotes a path containing spaces, so both `@src/api.ts` and `@"my docs/a.md"`
+ * are single tokens and both are matched here. An `@` followed by nothing — mid-typing, before
+ * any path — is deliberately *not* a mention: highlighting a bare `@` the moment it is typed
+ * flickers on every message that merely contains one.
+ */
+export interface MentionSegment {
+  text: string
+  isMention: boolean
+}
+
+const MENTION_PATTERN = /@(?:"[^"\n]+"|[^\s@"]+)/g
+
+export function splitMentions(text: string): MentionSegment[] {
+  const segments: MentionSegment[] = []
+  let index = 0
+
+  // `matchAll` rather than a manual scan: the pattern is the single description of what a
+  // mention looks like, and a second hand-written scanner would be a second one to keep true.
+  for (const match of text.matchAll(MENTION_PATTERN)) {
+    const start = match.index
+    if (start > index) segments.push({ text: text.slice(index, start), isMention: false })
+    segments.push({ text: match[0], isMention: true })
+    index = start + match[0].length
+  }
+  if (index < text.length) segments.push({ text: text.slice(index), isMention: false })
+  return segments
+}
