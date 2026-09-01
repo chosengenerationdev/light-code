@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import { compareMentionCandidates } from '../context/mentionRanking.js'
+import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import {
   coerceFormValue,
   type AskUserFormParams,
@@ -876,11 +877,79 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     })
   }
 
+  /**
+   * The durable record behind the savings figures, one JSON object per line.
+   *
+   * **Lines, not a JSON array.** An array means read-modify-write on every consultation, which
+   * is precisely the shape that corrupted `config.json` (§15) — and this file is written from
+   * inside a turn, where a cancelled run is normal rather than exceptional. An append is one
+   * write, and a torn final line costs one event because every other line still parses.
+   *
+   * Held in memory as well, so the three windows can be summarised without a read per request.
+   */
+  const expertEventsPath = path.join(storageDir, 'expert-events.jsonl')
+  let expertEvents: ExpertEvent[] | undefined
+  /**
+   * Set when a Junior-mode turn begins, cleared the moment the expert is consulted.
+   *
+   * So it is still true at the end only for a turn the cheap model handled alone — which is
+   * exactly the turn worth counting.
+   */
+  let juniorTurnWithoutExpert = false
+
+  async function loadExpertEvents(): Promise<ExpertEvent[]> {
+    if (expertEvents !== undefined) return expertEvents
+    try {
+      const raw = await fs.readFile(expertEventsPath, 'utf8')
+      const parsed: ExpertEvent[] = []
+      for (const line of raw.split('\n')) {
+        if (line.trim().length === 0) continue
+        try {
+          parsed.push(JSON.parse(line) as ExpertEvent)
+        } catch {
+          // One unreadable line — an interrupted append — must not cost the whole history.
+        }
+      }
+      expertEvents = pruneEvents(parsed)
+    } catch {
+      expertEvents = []
+    }
+    return expertEvents
+  }
+
+  function appendExpertEvent(event: ExpertEvent): void {
+    void (async () => {
+      try {
+        const events = await loadExpertEvents()
+        events.push(event)
+        await fs.mkdir(path.dirname(expertEventsPath), { recursive: true })
+        await fs.appendFile(expertEventsPath, `${JSON.stringify(event)}\n`, 'utf8')
+      } catch (error) {
+        // A lost metric is not worth interrupting a turn over.
+        logger.warn(`could not record expert spend: ${String(error)}`)
+      }
+    })()
+  }
+
   function recordConsultation(info: { costUsd?: number; isError: boolean }): void {
+    // This turn is no longer one the expert never saw.
+    juniorTurnWithoutExpert = false
     expertSpend.consultations += 1
     if (info.costUsd !== undefined) expertSpend.usd += info.costUsd
     else expertSpend.unpriced += 1
     postExpertSpend()
+
+    /*
+     * `resumed` is read from whether a session existed *before* this call, which is what
+     * decides whether a cold start was paid for. Taken from the id rather than from the mode,
+     * because a resumed session is the thing that actually saved the money.
+     */
+    appendExpertEvent({
+      at: Date.now(),
+      kind: 'consultation',
+      ...(info.costUsd !== undefined ? { usd: info.costUsd } : {}),
+      resumed: expertSessionId !== undefined,
+    })
 
     /*
      * What this plan does about pricing, learned from the answer rather than asked for.
@@ -1536,6 +1605,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * consult an expert whose tool was filtered out would be worse than either alone.
        */
       const activeMode = findMode(config.modeId)
+      // A scheduled run is nobody's junior: it has no expert budget and no one delegating to it.
+      juniorTurnWithoutExpert = activeMode.id === 'junior' && schedule === undefined
 
       /*
        * Computed from the *full* registry so the run is told the names it actually has, and
@@ -1819,6 +1890,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Cleared before anything else awaits, like the rest of a scheduled run's state: leaving
       // it set would make the next chat turn report its own tools as forbidden.
       scheduleToolAccess = undefined
+
+      /*
+       * A Junior-mode turn the expert never saw.
+       *
+       * Recorded per *turn*, because a turn is the unit a consultation would have replaced.
+       * Counting tool calls would inflate the figure by however chatty the task happened to be,
+       * and the number is only worth showing while it is a floor nobody can argue with.
+       *
+       * Recorded even when the turn failed: a turn the cheap model attempted is still a turn the
+       * expert was not paid for.
+       */
+      if (juniorTurnWithoutExpert) {
+        appendExpertEvent({ at: Date.now(), kind: 'juniorTurn' })
+        juniorTurnWithoutExpert = false
+      }
       // Save in `finally`, so a cancelled or errored turn is still persisted. A turn that
       // failed halfway is exactly the one the user most wants to see again afterwards.
       await persistActiveTask()
@@ -2152,10 +2238,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(settings?.reportsCost !== undefined ? { reportsCost: settings.reportsCost } : {}),
       ...(settings?.pricing !== undefined ? { pricing: settings.pricing } : {}),
       ...(measuringStep !== undefined ? { measuringStep } : {}),
+      // Summarised from the in-memory log, which is loaded once. Undefined only before the
+      // first read completes, which the panel renders as "nothing recorded yet".
+      ...(expertEvents !== undefined
+        ? { savings: summariseSavings(expertEvents, settings?.pricing) }
+        : {}),
     }
   }
 
   async function postExpertInner(redetect: boolean): Promise<void> {
+    // Read here rather than at construction: the panel opening is the first moment anything
+    // needs it, and nothing should touch the disk just because a window opened.
+    await loadExpertEvents()
     const { config } = await configManager.load()
     const configured = config.expert?.path ?? 'claude'
     /*

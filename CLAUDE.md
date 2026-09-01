@@ -601,6 +601,19 @@ reported in the tool result instead, so nothing is hidden.
   saves nothing. The flag records whether a resume actually happened, and `describePricing()`
   refuses to present a ratio when it did not — the honest reading of that number is "unknown",
   not "no benefit".
+- **What the mode saves is reported as a floor, never as an estimate** (`expert/savings.ts`,
+  0.40.0). The Expert tab shows today / 30 days / all time, and the working is on the page.
+  Two components, both priced from the local measurement: turns the cheap model handled alone
+  (each at `resumedUsd`, the cheapest an expert turn can possibly be) and cold starts avoided by
+  resuming (`coldUsd - resumedUsd`, clamped at zero). **What the strong model would have charged
+  to do the work itself is deliberately not counted** — nothing can know it, so no multiplier is
+  applied. That is why every figure says "at least".
+  With no measurement the panel shows a dash: zero would read as "this saved you nothing", which
+  is a claim and the wrong one. This is what §12b's old "roughly 40–70%, order-of-magnitude only"
+  was waiting for — **do not replace the floor with that guess.**
+  The log is `expert-events.jsonl` in storage, **one JSON object per line on purpose**: an array
+  would mean read-modify-write on every consultation, which is the shape that corrupted
+  `config.json` (§15), and a torn final line costs one event rather than the history.
 - **Keep-alive** (`expert.keepAlive`, off by default) pings a live session every fifty minutes
   against the one-hour cache TTL, so a lunch break does not cost a cold start. It never *starts* a
   session, stops when the task's budget is spent, and its cost is counted in the meter — a
@@ -968,14 +981,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.39.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.39.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.40.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.40.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.15.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.16.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -991,7 +1004,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.39.0, host 0.15.0 — and keep working from
+**Next:** publish the pending versions — extension 0.40.0, host 0.16.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
@@ -1126,9 +1139,9 @@ four of them threw on a missing array when it was first written.
 
 ## SESSION HANDOVER — 2026-09-01, read this first
 
-**Marketplace 0.36.1, npm 0.12.1** (queried 2026-08-31). Local manifests **0.39.0** and
-**0.15.0**, built and unpublished; the artifact is `apps/vscode/light-code-vscode-0.39.0.vsix`.
-`main` is clean and pushed. **1377 tests**, 1 skipped.
+**Marketplace 0.36.1, npm 0.12.1** (queried 2026-08-31). Local manifests **0.40.0** and
+**0.16.0**, built and unpublished; the artifact is `apps/vscode/light-code-vscode-0.40.0.vsix`.
+`main` is clean and pushed. **1395 tests**, 1 skipped.
 
 ### The most important thing found this session
 
@@ -1172,6 +1185,9 @@ rather than copying fields.** Where a test can see the shape rather than the beh
   registers its granted tools *plainly*, so they are advertised to the run directly even when
   they are `dispatchOnly` in the chat. `call_tool` only makes `search_docs`'s own "call it with"
   instruction work. `schedule/discovery.test.ts` now pins the real behaviour.
+- **Junior mode reports what it has avoided** (§12b): three windows, every figure a floor with
+  its derivation on the page. The temptation here was a large persuasive number; the reason it
+  is not one is written into `expert/savings.ts` and should stay written down.
 - **The `@` picker ranks instead of truncating.** It asked the file index for thirty and showed
   those thirty, so truncation chose rather than the query. `context/mentionRanking.ts`.
 - **Mentions are coloured in the composer** — a highlight layer behind the textarea, sharing one

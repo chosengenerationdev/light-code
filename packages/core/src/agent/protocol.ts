@@ -1,4 +1,5 @@
 import type { FormField } from '../tools/askUserForm.js'
+import type { ExpertSavings } from '../expert/savings.js'
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
 import type { McpPlatform } from '../mcp/forms.js'
 import type { IndexProgress, IndexResult } from '../rag/indexer.js'
@@ -819,6 +820,13 @@ export type HostToUiMessage =
       assessing?: boolean
       /** How far through the probes, for the same reason. */
       assessmentStep?: string
+      /**
+       * What Junior mode has cost and avoided, over three windows.
+       *
+       * Absent only if the log could not be read. `avoidedUsd` inside it may be undefined,
+       * which means unmeasured — the panel must say so rather than showing zero.
+       */
+      savings?: ExpertSavings
     }
   /**
    * Replaces the whole transcript — sent when a task is reopened, and on panel load to

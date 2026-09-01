@@ -1,5 +1,23 @@
 # @chosengeneration/light-code
 
+## 0.16.0
+
+### Minor Changes
+
+- The Expert tab shows what Junior mode has avoided — today, over thirty days, and all time.
+
+  Every figure is a floor rather than an estimate, and the panel says so. Two things are
+  counted, both priced from the measurement taken on this machine rather than from published
+  rates: turns the cheap model handled alone, each priced at the cheapest an expert turn can
+  possibly be, and cold starts that resuming a live session avoided.
+
+  What is deliberately not counted is what the strong model would have charged to do the work
+  itself — nothing can know that, so no multiplier is applied. The working is on the page,
+  because a number about money whose derivation is hidden is one nobody can check.
+
+  Before a consultation has been priced the panel shows a dash, not a zero: with nothing
+  measured the honest answer is "unknown", where zero would read as "this saved you nothing".
+
 ## 0.15.0
 
 ### Minor Changes

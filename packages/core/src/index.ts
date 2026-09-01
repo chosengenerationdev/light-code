@@ -41,6 +41,14 @@ export {
   type ExpertPricing,
 } from './expert/pricing.js'
 export {
+  summariseSavings,
+  pruneEvents,
+  startOfLocalDay,
+  type ExpertEvent,
+  type ExpertSavings,
+  type SavingsWindow,
+} from './expert/savings.js'
+export {
   DEFAULT_MENTION_EXCLUDES,
   mentionExcludeGlob,
   mentionExcludes,

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
-import { describePricing, type ExpertPricing, type JuniorAssessment } from '@light-code/core/browser'
+import { describePricing, type ExpertPricing, type ExpertSavings, type JuniorAssessment } from '@light-code/core/browser'
+import { SavingsPanel } from './SavingsPanel.js'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { ScopeBadge } from './ScopeBadge.js'
@@ -42,6 +43,8 @@ export interface ExpertState {
   assessment?: JuniorAssessment
   assessing?: boolean
   assessmentStep?: string
+  /** What Junior mode has cost and avoided. Absent before the log has been read. */
+  savings?: ExpertSavings
 }
 
 export interface ExpertTabProps {
@@ -314,6 +317,13 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
             </span>
           </p>
         )}
+
+        {/*
+          Placed directly under the measurement it depends on, so the reader meets the price
+          before the figure derived from it. Above the budget controls, because what the mode has
+          already avoided is the argument for what to spend next.
+        */}
+        <SavingsPanel savings={props.expert?.savings} />
 
         {/*
           Spending with nobody at the screen, so it is off by default and says plainly what it
