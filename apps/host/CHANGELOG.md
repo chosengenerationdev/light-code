@@ -1,5 +1,25 @@
 # @chosengeneration/light-code
 
+## 0.15.0
+
+### Minor Changes
+
+- Scheduled runs can find out what exists, and whether they may use it.
+
+  A schedule's tools are an allowlist, which left an unattended run unable to look anything up
+  — and, with the dispatcher on, unable to invoke even the tools it had been granted, since
+  most tools are unadvertised and reachable only through the dispatcher. Looking things up is
+  now always available: searching the documentation, the dispatcher itself, and re-reading a
+  result this same run had truncated. None of those reaches the workspace, the network or a
+  process, so nothing is widened by it — the inner call a dispatched tool stands for is still
+  checked against the allowlist exactly as if it had been named.
+
+  A search result for a tool the run may not call now says so, rather than leaving it to find
+  out by being refused. It can report what it needed and who should tick it.
+
+  Schedules can also search for skills, unless the schedule named a specific set — in which
+  case listing them is how that choice is honoured.
+
 ## 0.14.0
 
 ### Minor Changes

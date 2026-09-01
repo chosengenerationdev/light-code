@@ -160,6 +160,7 @@ Nine in v1, and more since — see the handover for what exists now:
 | `execute_command` | command | VS Code integrated terminal with shell integration |
 | `use_mcp_tool` | mcp | Namespaced; see §11 |
 | `ask_followup_question` | always | Control tool |
+| `ask_user_form` | always | Typed input — string, number, boolean, choice, list. See §6b |
 | `attempt_completion` | always | Control tool; terminates the loop |
 
 **Explicitly not in v1:** browser automation, semantic/embedding codebase search,
@@ -181,6 +182,34 @@ Phase 9b).
 
 Constraint: **the model must have read a file in the current session before editing it.**
 Cheap invariant, eliminates a class of hallucinated edits.
+
+---
+
+## 6b. Asking the user for input (0.38.0)
+
+`ask_user_form` shows a small form and returns the answers **as a tool result, so the turn
+continues**. User-requested, and explicitly not limited to skills — *"agent should be able to
+show wherever agent wants to get input from user"*.
+
+- **Why it is not `ask_followup_question`.** That tool ends the turn and treats the next message
+  as the answer, which is right for one open question. For four specific values it means the
+  assistant describes them in prose, the user answers in prose, and the assistant parses prose
+  back into values — three places where a wrong value looks exactly like a right one.
+- **Five field types, and no more without a reason.** `string` (optionally multiline), `number`,
+  `boolean` (checkbox), `choice` (the existing `Select` — never a native `<select>`, §the UI
+  conventions), and `list`: one box split on commas *or* pasted newlines, answered as an array.
+  `list` exists because "which trade ids" is a real shape and the alternatives — a string the
+  model splits itself, or twenty fields — are both worse.
+- **It grants nothing.** A submitted form is input, never permission: acting on what it says
+  still goes through the approval gate on its own terms. Reading a filled-in form as consent
+  would put model-authored text where ground truth belongs (invariant 8).
+- **Coerced host-side as well as in the form.** The UI validates for the person filling it in;
+  `coerceFormValue` decides what reaches the model, because a number field must never yield the
+  string "twelve" to be discovered somewhere else much later.
+- **Absent for a scheduled run**, exactly like `requestPathAccess` — nobody is there to answer,
+  and a job that stopped to wait for a form would never finish. The tool says so and continues.
+- Every path out of a turn settles a parked form (dismissal, cancel, dispose). A promise nobody
+  will resolve is a turn that hangs with nothing to click.
 
 ---
 
@@ -644,6 +673,11 @@ Markdown with frontmatter (`name`, `description`).
 - **Only `name` + `description` go in the system prompt.** Bodies are read on demand via
   the existing `read_file` — no dedicated `load_skill` tool needed. This keeps baseline
   cost at a few tokens each and lets skills reference other files and grow arbitrarily.
+- **Two file layouts are read**: `skill-name.md`, which is what `write_skill` produces, and
+  `skill-name/SKILL.md`, which is what Claude and Claude Code use. The second was added
+  2026-09-01 because a folder of skills copied from there was *entirely invisible* with no error
+  anywhere — reported as "I don't see the existing skills listed". The folder names the skill
+  unless frontmatter says otherwise. The folder watcher is recursive for the same reason.
 - A skill file is a **persistent prompt-injection vector** — prose nobody code-reviews.
   Writes go through approval; plain markdown in git is the main defence.
 
@@ -785,6 +819,30 @@ so the extension still feels native.
 - **Import/export** with secrets stripped and cert paths preserved. Colleagues will want to
   share a working gateway config.
 
+**Config writes are atomic and serialised. This is not a detail (added 2026-09-01, from a real
+corruption).** A user's `config.json` was destroyed while the junior assessment was saving, and
+the visible symptoms were "the expert is no longer detected", "my approvals are being asked
+again" and "my skills are gone" — three unrelated-looking reports from one broken file, which
+only hand-editing JSON could repair.
+
+Two causes, both structural:
+- **`fs.writeFile` straight onto the live file.** It truncates first, so anything that
+  interrupts it leaves invalid JSON. Every read then throws, and because `save` reads before it
+  writes, the product cannot even repair itself. `ConfigStore.write` now writes a sibling and
+  renames, which is one filesystem operation: the file is the old contents or the new one.
+- **`save` is read-modify-write with an `await` in the middle.** Two concurrent calls both read
+  the old contents and the second discards the first. `ConfigManager` serialises per scope.
+
+And because neither guarantee covers a machine losing power: **a file that will not parse is
+restored from the last good copy**, the damaged one is moved aside rather than deleted, and the
+user is told. The backup is written *after* the live file and from the same contents, so it
+exists from the first save rather than the second. **A hand-edit that merely fails validation
+still throws** — that is a mistake the user just made in a file they are looking at, and
+silently reverting it would be worse help than naming the field.
+
+The same reasoning applies to any other file this product owns. `taskStore`, `fileSecretStore`
+and `reviewQueue` already wrote temp-and-rename; config was the one that did not.
+
 ### Secrets
 
 Secrets are: provider API keys, Apigee `client_secret`, cert passphrases, MCP server env
@@ -889,7 +947,7 @@ Record the reason, not just the difference.
 | ~~No semantic search~~ — **reversed 2026-08-09** | Originally excluded because embeddings conflict with the offline posture. The user overrode it: the deployment context is an organisation with an internal gateway, where an internal vector store and embedding endpoint break nothing, and codebase indexing is a capability Roo shipped and people use. Now Phase 8b — opt-in and disabled by default, so the offline posture holds for anyone who leaves it off. Both original objections survive as constraints rather than blocks; see §12. |
 | Three vector backends behind one interface, no vendor SDKs | Invariant 2 sends all egress through core's `HttpClient`, and the OpenSearch/Qdrant/Chroma clients each carry their own HTTP stack. All three databases are plain REST, so thin hand-written clients are the required design, not a workaround. |
 | Dynamic Python tools + skills | New capability Roo did not have. |
-| Scheduled prompts, read-only by default | New capability Roo did not have. Unattended runs have nobody to approve anything, so they get a restricted mode rather than inheriting auto-approve — Phase 9b. |
+| Scheduled prompts, read-only by default | New capability Roo did not have. Unattended runs have nobody to approve anything, so they get a restricted mode rather than inheriting auto-approve — Phase 9b. Since 2026-09-01 a run may always *discover* (`search_docs`, `call_tool`, `read_tool_result`), because none of those reaches the workspace, the network or a process — and a hit it may not call is marked as such rather than hidden. |
 
 ---
 
@@ -910,14 +968,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is 0.36.2, so there is one unpublished bump plus this session's
-work on top of it.
+the gallery. The local manifest is **0.39.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.39.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is 0.12.2. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.15.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -933,7 +991,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.37.0, host 0.13.0 — and keep working from
+**Next:** publish the pending versions — extension 0.39.0, host 0.15.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
@@ -1066,7 +1124,88 @@ four of them threw on a missing array when it was first written.
 
 ---
 
-## SESSION HANDOVER — 2026-08-31, read this first
+## SESSION HANDOVER — 2026-09-01, read this first
+
+**Marketplace 0.36.1, npm 0.12.1** (queried 2026-08-31). Local manifests **0.39.0** and
+**0.15.0**, built and unpublished; the artifact is `apps/vscode/light-code-vscode-0.39.0.vsix`.
+`main` is clean and pushed. **1377 tests**, 1 skipped.
+
+### The most important thing found this session
+
+**An ordinary save could destroy `config.json`, and the product could not repair itself.** The
+user hit it: the expert stopped being detected after a junior assessment, and they fixed the JSON
+by hand with Claude in their office. §15 now carries the rule and the reasoning.
+
+Note the *shape* of the report, because it will recur: three separate-sounding complaints — the
+expert gone, approvals asked again, skills missing — were one broken file. **When several
+unrelated settings appear to have been forgotten at once, suspect the file, not the features.**
+
+Their live config is worth knowing: `approvals` holds one key, `d:\Developments\test`, and there
+is **no `skills` and no `filesystem` block at all** — consistent with a configured skills folder
+having been lost in that corruption.
+
+### The bug shape that keeps costing the most time
+
+**One fact declared in two places, which drift.** Two more instances since the last handover:
+`retrieval?.dispatcher === true` in two bridge paths where `dispatcherEnabled()` owns the
+default, so tools were hidden by one path while their documentation was never indexed by
+another. `config/retrieval.test.ts` now reads `bridge.ts` and fails on a direct read of the key.
+
+The fix is always the same: **one owner of a default, one constructor, and pass the whole thing
+rather than copying fields.** Where a test can see the shape rather than the behaviour, write it.
+
+### Built this session
+
+- **Config safety** (§15): atomic writes, saves serialised per scope, recovery from the last good
+  copy with the damaged file kept aside and the user told. Tested in memory *and* against a real
+  filesystem — the in-memory one forces overlap with a delay, which is what actually catches it.
+- **`ask_user_form`** (§6b): typed input — string, number, boolean, choice, list — answered as a
+  tool result so the turn continues. Not skills-only; the user was explicit about that.
+- **Skills as `name/SKILL.md`** (§13), the layout Claude uses. A folder of them was invisible with
+  no error to notice.
+- **Scheduled runs can discover** (§9b additions in `schedule/types.ts`): `search_docs`,
+  `call_tool` and `read_tool_result` are always available, because none of them reaches the
+  workspace, the network or a process. `call_tool` also fixed something simply broken — with the
+  dispatcher on, a schedule granted an MCP tool had no way to invoke it. `search_docs` now marks
+  a hit the run may not call, so it reports what it needed instead of being refused.
+- **The `@` picker ranks instead of truncating.** It asked the file index for thirty and showed
+  those thirty, so truncation chose rather than the query. `context/mentionRanking.ts`.
+- **Mentions are coloured in the composer** — a highlight layer behind the textarea, sharing one
+  layout constant, because the two only line up while they agree exactly.
+- **Approvals are matched however the workspace path is spelled.** Windows hands back `d:\x` and
+  `D:\x`; a JSON key is exact, so "always allow" was silently forgotten. §16's rule reaching the
+  one place that stored a path as a key rather than comparing it.
+- **`filesystem.excludeFromMentions`**, defaulting to the usual build and virtualenv folders. The
+  original bug: a non-null `exclude` **replaces** `files.exclude` rather than adding to it.
+- **The documentation index is reachable from the MCP tab**, where you are when you add a server.
+
+### Answers to standing questions, so they are not re-derived
+
+- **Scheduled runs get skills**, and since this session can *search* for them too — except when
+  the schedule named an `allowedSkills` set, where listing is how that choice is honoured.
+- **A shared vector index across a team is workable.** Indexed paths are workspace-*relative*, so
+  different drive letters are not the obstacle. What is: `codebaseIndexName()` hashes the absolute
+  path (set `embedder.indexName` on both machines), the embedding model and width must match, and
+  manifests are per user so the second person re-embeds. The user withdrew the request believing
+  paths made it impossible — they do not.
+- **MCP tool documentation is indexed**, and reindexes on connect, disconnect and
+  `tools/list_changed`, debounced and fingerprinted.
+- **The 25-step cap is per turn.** Replying "continue" grants a fresh 25.
+- **Python-tool creation and skill writing always ask**, whatever is auto-approved
+  (`ALWAYS_ASK_TOOLS`). Being asked repeatedly for *those* is by design, not a bug.
+
+### Still not done
+
+`MANUAL_VERIFICATION.md` is still largely unrun and is still the oldest debt. Both registries are
+behind. Admin UI for shared profiles is still reserved with no handler. No render test for
+`ReviewsTab`. And the standing warning holds: **most of this has never been rendered in a real
+Extension Host** — jsdom proves behaviour, not appearance. The two most likely to look wrong are
+the form and the composer highlight layer: the highlight is two stacked layers that must align
+exactly, and nothing automated can see whether they do.
+
+---
+
+## Previous handover — 2026-08-31, superseded above
 
 **Marketplace 0.36.1** (published 2026-08-27), **npm 0.12.1** — both queried 2026-08-31, not
 inferred. This session versioned **0.37.0** (extension) and **0.13.0** (host) and packaged

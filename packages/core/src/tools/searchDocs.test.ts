@@ -4,7 +4,7 @@ import type { Embedder } from '../rag/embedder.js'
 import { buildDocCorpus, docEntryId, parseDocEntryId, toolDocText } from '../rag/toolDocs.js'
 import type { VectorMatch, VectorSearcher } from '../rag/vectorStore.js'
 import type { Skill } from '../skills/index.js'
-import { createSearchDocsTool, runDocsSearch } from './searchDocs.js'
+import { createSearchDocsTool, renderDocsMatches, runDocsSearch } from './searchDocs.js'
 import type { Tool, ToolExecutionContext } from './types.js'
 
 const noContext = {} as unknown as ToolExecutionContext
@@ -201,5 +201,49 @@ describe('search_docs without a working index', () => {
     const result = await createSearchDocsTool(options).execute({ query: 'zzzz' }, noContext)
     expect(result.isError).toBeUndefined()
     expect(result.content).toContain('Nothing matched')
+  })
+})
+
+/**
+ * A scheduled run can find a tool it was never granted. Discovering that by calling it and
+ * being refused costs a step and produces a report that reads like a failure — where the
+ * useful answer is "this needed X, which this schedule may not use".
+ */
+describe('search results in a run with restricted tools', () => {
+  const restricted = tool('deploy_service', 'Deploys a service')
+
+  it('says plainly that a found tool cannot be called here', async () => {
+    const rendered = renderDocsMatches(
+      { listTools: () => [restricted], accessibleTo: () => false },
+      [{ kind: 'tool', name: 'deploy_service' }],
+    )
+    expect(rendered).toContain('NOT AVAILABLE')
+    expect(rendered).not.toContain('Call it with')
+  })
+
+  it('gives the normal call instruction when it is available', async () => {
+    const rendered = renderDocsMatches(
+      { listTools: () => [restricted], accessibleTo: () => true },
+      [{ kind: 'tool', name: 'deploy_service' }],
+    )
+    expect(rendered).toContain('Call it with')
+    expect(rendered).not.toContain('NOT AVAILABLE')
+  })
+
+  /** The chat passes no predicate, and must not start warning about tools it can call. */
+  it('treats everything as callable when nothing says otherwise', () => {
+    const rendered = renderDocsMatches({ listTools: () => [restricted] }, [
+      { kind: 'tool', name: 'deploy_service' },
+    ])
+    expect(rendered).toContain('Call it with')
+  })
+
+  /** Annotated, never hidden: a run that cannot see it cannot explain what it would have needed. */
+  it('still returns the tool rather than dropping it', () => {
+    const rendered = renderDocsMatches(
+      { listTools: () => [restricted], accessibleTo: () => false },
+      [{ kind: 'tool', name: 'deploy_service' }],
+    )
+    expect(rendered).toContain('deploy_service')
   })
 })

@@ -622,6 +622,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   const MENTION_SCAN_LIMIT = 2000
   const MENTION_RESULT_LIMIT = 30
 
+  /**
+   * What the *currently running* schedule may call, or undefined in a chat.
+   *
+   * The tool registry — and the one `search_docs` inside it — is built before the run knows it
+   * is a scheduled one, so this is read per call rather than captured. Set as a scheduled run
+   * starts and cleared in its `finally`, alongside the conversation and task state the run
+   * already snapshots and restores.
+   */
+  let scheduleToolAccess: ((toolName: string) => boolean) | undefined
+
   const approvalsKey = workspaceRoot ?? '__no_workspace__'
 
   /**
@@ -1194,6 +1204,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // found, and so a schema is never served from a snapshot.
           listTools: () => combined.list(),
           listSkills: () => skills,
+          // A hit for a tool this run cannot call is still worth returning — annotated, so the
+          // run can say what it needed instead of being refused and reporting a failure.
+          accessibleTo: (name) => scheduleToolAccess?.(name) ?? true,
           ...(docs !== undefined ? { retrieval: docs } : {}),
           observer: searchLog,
         }),
@@ -1550,7 +1563,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * `allowedSkills` absent means all of them, so schedules written before this keep the
        * behaviour they had.
        */
-      const skillsSearchable = skillRetrievalEnabled(config.retrieval) && schedule === undefined
+      /*
+       * A schedule can search for skills too, now that `search_docs` is always available to one
+       * (see `ALWAYS_AVAILABLE_TO_SCHEDULES`). The earlier objection was that its allowlist might
+       * not include the tool, leaving it told to search with nothing to search with.
+       *
+       * The exception is a schedule that **named** its skills. That selection is the user saying
+       * which conventions apply to this job; listing them is honouring it, and making them
+       * searchable instead would quietly reach past the choice.
+       */
+      const skillsSearchable =
+        skillRetrievalEnabled(config.retrieval) && (schedule === undefined || schedule.allowedSkills === undefined)
       const turnSkills = schedule === undefined ? skills : skillsForSchedule(skills, schedule.allowedSkills)
 
       const desiredPrompt = buildSystemPrompt(workspaceRoot, {
@@ -1704,6 +1727,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const turnRegistry = schedule !== undefined ? registryForSchedule(fullRegistry.list(), schedule) : fullRegistry
       if (schedule !== undefined) {
         turnOptions.approvalGate = new ScheduledApprovalGate(schedule)
+        /*
+         * Derived from the registry the run actually gets, not from `allowedTools` — so what
+         * `search_docs` reports as callable is by construction the same set the gate will let
+         * through. Two lists here would be two lists to keep in step, which is the bug shape
+         * this project has paid for most often.
+         */
+        const granted = new Set(turnRegistry.list().map((tool) => tool.name))
+        scheduleToolAccess = (name) => granted.has(name)
       }
 
       await runAgentTurn(
@@ -1785,6 +1816,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       userGate.denyAll()
       settleAllForms()
       activeAbortController = undefined
+      // Cleared before anything else awaits, like the rest of a scheduled run's state: leaving
+      // it set would make the next chat turn report its own tools as forbidden.
+      scheduleToolAccess = undefined
       // Save in `finally`, so a cancelled or errored turn is still persisted. A turn that
       // failed halfway is exactly the one the user most wants to see again afterwards.
       await persistActiveTask()

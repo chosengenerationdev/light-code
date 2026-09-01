@@ -65,7 +65,9 @@ export function filterToolsForSchedule(all: readonly Tool[], schedule: Pick<Sche
   const never = new Set(NEVER_AVAILABLE_TO_SCHEDULES)
 
   return all.filter((tool) => {
-    if (tool.name === 'ask_followup_question') return false
+    // Both ask a person something. Nobody is there, so a run that called one would wait for an
+    // answer that never arrives — dropped even if the allowlist names them.
+    if (tool.name === 'ask_followup_question' || tool.name === 'ask_user_form') return false
     if (never.has(tool.name)) return false
     if (always.has(tool.name)) return true
     return named.has(tool.name)

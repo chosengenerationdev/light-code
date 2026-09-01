@@ -136,13 +136,36 @@ export type Schedules = z.infer<typeof schedulesSchema>
 /**
  * Tools that always run, whatever the allowlist says.
  *
- * These perform no work: they are how the model finishes or reports. Excluding them would make
- * every schedule unable to say it had completed, and the run would look like a hang.
+ * Two kinds, and the distinction is the whole safety argument: these either **perform no work**
+ * or **only read what the run itself already has**. Nothing here can reach the workspace, the
+ * network or a process, so granting them by default widens nothing.
+ *
+ * - `attempt_completion` and `notify` are how a run finishes and reports. Excluding them would
+ *   make every schedule unable to say it had completed, and the run would look like a hang.
+ * - `read_tool_result` re-reads output this same run produced and had truncated. Without it a
+ *   long command's output is unrecoverable *to the run that ran it*, which is a strange way to
+ *   fail and reads as the tool having returned nothing.
+ * - `search_docs` and `call_tool` were added 2026-09-01, at the user's request: a scheduled run
+ *   "should be able to search docs and learn about skills and tools". Neither grants access to
+ *   anything. `search_docs` reads the documentation index, and `call_tool` is a wrapper — the
+ *   loop rewrites it into the call it stands for *before* the gate, so the inner tool is checked
+ *   against the allowlist exactly as if it had been named directly.
+ *
+ * `call_tool` also fixes something that was simply broken: with the dispatcher on, most tools
+ * are unadvertised and reachable only through it, so a schedule granted an MCP tool had no way
+ * to invoke it.
  *
  * `ask_followup_question` is deliberately **not** here. There is nobody to answer it, so a run
- * that asked would wait for a reply that never comes — see `runner.ts`.
+ * that asked would wait for a reply that never comes — see `runner.ts`. `ask_user_form` is
+ * excluded for the same reason, and is not offered to a scheduled run at all.
  */
-export const ALWAYS_AVAILABLE_TO_SCHEDULES = ['attempt_completion', 'notify'] as const
+export const ALWAYS_AVAILABLE_TO_SCHEDULES = [
+  'attempt_completion',
+  'notify',
+  'read_tool_result',
+  'search_docs',
+  'call_tool',
+] as const
 
 /** Groups whose presence in a schedule's allowlist warrants a warning in the UI. */
 /**

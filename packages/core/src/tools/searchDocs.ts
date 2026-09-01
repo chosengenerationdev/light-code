@@ -59,6 +59,19 @@ export interface SearchDocsOptions {
    * but never actually consulted looks exactly like one that is working.
    */
   observer?: SearchObserver
+  /**
+   * Whether the caller may actually invoke a tool it finds here.
+   *
+   * Absent means everything found is callable, which is the chat. A **scheduled run** is the
+   * case this exists for: its tools are an allowlist, so it can find a tool it was never
+   * granted — and discovering that by calling it and being refused wastes a step and produces a
+   * report that reads like a failure. Told up front, it can say "this needs X, which this
+   * schedule may not use" instead, which is the useful answer.
+   *
+   * Deliberately annotates rather than filters. A run that cannot see the tool at all cannot
+   * explain what it would have needed.
+   */
+  accessibleTo?: (toolName: string) => boolean
 }
 
 const DEFAULT_LIMIT = 5
@@ -98,7 +111,7 @@ function lexicalRank(query: string, candidates: { candidate: Candidate; haystack
     .map((entry) => entry.candidate)
 }
 
-function renderTool(tool: Tool): string {
+function renderTool(tool: Tool, accessible: boolean): string {
   return [
     `### tool: ${tool.name}`,
     tool.description,
@@ -107,7 +120,10 @@ function renderTool(tool: Tool): string {
     '```json',
     JSON.stringify(schemaForTool(tool), null, 2),
     '```',
-    `Call it with: call_tool({"name": "${tool.name}", "arguments": { ... }})`,
+    accessible
+      ? `Call it with: call_tool({"name": "${tool.name}", "arguments": { ... }})`
+      : 'NOT AVAILABLE in this run: this schedule was not granted this tool, so calling it ' +
+        'would be refused. Work around it, or report that it was needed and should be ticked.',
   ].join('\n')
 }
 
@@ -270,7 +286,8 @@ export function renderDocsMatches(options: SearchDocsOptions, matches: readonly 
     .map((match) => {
       if (match.kind === 'tool') {
         const tool = tools.get(match.name)
-        return tool !== undefined ? renderTool(tool) : undefined
+        if (tool === undefined) return undefined
+        return renderTool(tool, options.accessibleTo?.(tool.name) ?? true)
       }
       const skill = skills.get(match.name)
       return skill !== undefined ? renderSkill(skill) : undefined
