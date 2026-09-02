@@ -357,6 +357,8 @@ export type UiToHostMessage =
   /** Indexing is user-started, never model-started: it is the largest egress in the product. */
   | { type: 'startIndexing' }
   | { type: 'indexDocs' }
+  /** Excel and Outlook, off by default. Windows only. */
+  | { type: 'setOffice'; excel: boolean; outlook: boolean }
   /** Empties the documentation index, so nothing stale can be matched. */
   | { type: 'clearDocsIndex' }
   /** Copies this workspace's index from another store into the active one, vectors and all. */
@@ -657,6 +659,13 @@ export type HostToUiMessage =
   /** Schedules plus every tool that currently exists, so the picker can list them all. */
   | {
       type: 'tools'
+      /**
+       * Whether this host can reach Excel and Outlook, and whether the user has said yes.
+       *
+       * `supported` is the platform answer: on anything but Windows the toggles are shown
+       * disabled with the reason, rather than offered and then failing.
+       */
+      office: { supported: boolean; excel: boolean; outlook: boolean }
       tools: ToolCatalogueEntry[]
       /** True when the dispatcher is on, so the view can explain why some are hidden. */
       dispatcher: boolean

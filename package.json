@@ -27,7 +27,8 @@
     "serve": "pnpm --filter @chosengeneration/light-code run build && node apps/host/dist/cli.js",
     "smoke:npm": "node scripts/smoke-test-npm.mjs",
     "verify:npm": "pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @chosengeneration/light-code run build && pnpm smoke:npm",
-    "generate:worker": "node scripts/generate-python-worker.mjs"
+    "generate:worker": "node scripts/generate-python-worker.mjs",
+    "generate:office": "node scripts/generate-office-worker.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.1",

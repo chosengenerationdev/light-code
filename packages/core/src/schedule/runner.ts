@@ -46,6 +46,9 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   'delete_python_tool',
   'write_skill',
   'delete_skill',
+  // Same reasoning, and sharper unattended: installing a macro is authorising a capability, and
+  // section 13 requires approval showing the source, which cannot happen with nobody there.
+  'excel_write_macro',
 ]
 
 /**

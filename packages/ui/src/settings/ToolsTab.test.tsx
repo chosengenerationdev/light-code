@@ -40,8 +40,24 @@ const tools: ToolCatalogueEntry[] = [
   },
 ]
 
-function render(props: { tools?: ToolCatalogueEntry[]; dispatcher?: boolean } = {}): void {
-  act(() => root.render(<ToolsTab tools={props.tools ?? tools} dispatcher={props.dispatcher ?? false} />))
+function render(
+  props: {
+    tools?: ToolCatalogueEntry[]
+    dispatcher?: boolean
+    office?: { supported: boolean; excel: boolean; outlook: boolean }
+    onSetOffice?: (excel: boolean, outlook: boolean) => void
+  } = {},
+): void {
+  act(() =>
+    root.render(
+      <ToolsTab
+        tools={props.tools ?? tools}
+        dispatcher={props.dispatcher ?? false}
+        office={props.office ?? { supported: true, excel: false, outlook: false }}
+        onSetOffice={props.onSetOffice ?? (() => undefined)}
+      />,
+    ),
+  )
 }
 
 function search(value: string): void {
@@ -116,5 +132,37 @@ describe('ToolsTab', () => {
   it('explains an empty catalogue rather than looking broken', () => {
     render({ tools: [] })
     expect(container.textContent).toContain('Nothing yet')
+  })
+})
+
+/**
+ * Switching these on lets the assistant read open workbooks and local mail. The copy is the
+ * only thing standing between a click and that grant, so what it says is worth pinning.
+ */
+describe('the Excel and Outlook toggles', () => {
+  it('are off, and say what turning them on allows', () => {
+    render()
+    const boxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+    expect(boxes.length).toBeGreaterThanOrEqual(2)
+    expect(boxes.every((box) => !box.checked)).toBe(true)
+    expect(container.textContent).toContain('any workbook you have open')
+    expect(container.textContent).toContain('Read-only')
+  })
+
+  it('report each change without losing the other', () => {
+    const calls: [boolean, boolean][] = []
+    render({ office: { supported: true, excel: false, outlook: true }, onSetOffice: (e, o) => calls.push([e, o]) })
+
+    const excel = container.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    act(() => excel?.click())
+    expect(calls).toEqual([[true, true]])
+  })
+
+  /** Hiding them off Windows would leave someone wondering where the feature went. */
+  it('are disabled with a reason rather than hidden where COM does not exist', () => {
+    render({ office: { supported: false, excel: false, outlook: false } })
+    const boxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+    expect(boxes.every((box) => box.disabled)).toBe(true)
+    expect(container.textContent).toContain('Windows only')
   })
 })

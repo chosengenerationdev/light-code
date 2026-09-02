@@ -440,6 +440,22 @@ export const configSchema = z
      * Reading only. Writing stays confined to the workspace whatever is listed here, because
      * checkpoints snapshot the workspace and an edit elsewhere would have no rollback.
      */
+    /**
+     * Excel and Outlook on this machine (0.42.0).
+     *
+     * **User-scope only** (invariant 5), and this one is not a close call. A workspace able to
+     * switch it on would read the user's mail and their open spreadsheets the moment the panel
+     * opened. Off by default for the same reason: nothing is spawned and nothing is read until
+     * the user says so.
+     *
+     * Windows only. Elsewhere the tools are absent rather than present and failing.
+     */
+    office: z
+      .object({
+        excel: z.boolean(),
+        outlook: z.boolean(),
+      })
+      .partial(),
     filesystem: z
       .object({
         readRoots: z.array(z.string()),

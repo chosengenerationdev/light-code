@@ -202,9 +202,16 @@ export function App(props: AppProps): ReactElement {
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
   const [scheduleSkills, setScheduleSkills] = useState<{ name: string; description: string }[]>([])
-  const [toolCatalogue, setToolCatalogue] = useState<{ tools: ToolCatalogueEntry[]; dispatcher: boolean }>({
+  const [toolCatalogue, setToolCatalogue] = useState<{
+    tools: ToolCatalogueEntry[]
+    dispatcher: boolean
+    office: { supported: boolean; excel: boolean; outlook: boolean }
+  }>({
     tools: [],
     dispatcher: false,
+    // Assumed unsupported until the host says otherwise, so the toggles never appear enabled
+    // on a machine that cannot honour them.
+    office: { supported: false, excel: false, outlook: false },
   })
   const [schedulerState, setSchedulerState] = useState<{ running: boolean; lastTickAt?: number } | undefined>(
     undefined,
@@ -401,7 +408,9 @@ export function App(props: AppProps): ReactElement {
           detail: message.detail,
         })
       } else if (message.type === 'tools') {
-        setToolCatalogue({ tools: message.tools, dispatcher: message.dispatcher })
+        // Assigned whole. Unpacking field by field is how every field added later gets
+        // silently dropped on the last hop — it has happened in this file before.
+        setToolCatalogue(message)
       } else if (message.type === 'schedules') {
         setScheduleSkills(message.skills)
         setSchedules(message.schedules)
@@ -1085,7 +1094,13 @@ export function App(props: AppProps): ReactElement {
                   ...(id === undefined ? {} : { id }),
                 } satisfies UiToHostMessage),
             }}
-            tools={toolCatalogue}
+            tools={{
+              ...toolCatalogue,
+              onSetOffice: (excel, outlook) => {
+                setToolCatalogue((current) => ({ ...current, office: { ...current.office, excel, outlook } }))
+                props.transport.post({ type: 'setOffice', excel, outlook } satisfies UiToHostMessage)
+              },
+            }}
             {...(reviews !== undefined
               ? {
                   reviews: {

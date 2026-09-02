@@ -12,6 +12,8 @@ export const USER_SCOPE_ONLY_KEYS = [
   // Names where inference goes, exactly as the other two do.
   'programmingProfileId',
   'certDir',
+  // Reads the user's mail and their open workbooks. A repository must never switch it on.
+  'office',
   // The whole block, not just uvPath: toolsDir and venvPath also name where code is found
   // and run from, and dynamicTools decides whether model-authored code runs at all.
   'python',

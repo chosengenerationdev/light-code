@@ -6,6 +6,18 @@ import path from 'node:path'
 
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
+import { OfficeBridge, officeSupported } from '../office/bridge.js'
+import {
+  createExcelSessionsTool,
+  createExcelReadRangeTool,
+  createExcelTraceTool,
+  createExcelListMacrosTool,
+  createExcelReadMacroTool,
+  createExcelWriteMacroTool,
+  createOutlookFoldersTool,
+  createOutlookSearchTool,
+  createOutlookReadTool,
+} from '../tools/office.js'
 import {
   coerceFormValue,
   type AskUserFormParams,
@@ -703,6 +715,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Task-scoped like the session and the spend: advice about one piece of work is not advice
    * about the next, and offering it there would be worse than not having it.
    */
+  /**
+   * The Excel/Outlook helper, built on first use and never before.
+   *
+   * Constructing it spawns PowerShell, which is exactly the sort of thing section 11 says must
+   * not happen because a panel opened. Enabling the feature registers the tools; calling one is
+   * what starts the process.
+   */
+  let officeBridge: OfficeBridge | undefined
+  function office(): OfficeBridge {
+    officeBridge ??= new OfficeBridge({ storageDir, logger })
+    return officeBridge
+  }
+
   let expertAdvice: ExpertConsultationRecord[] = []
   let taskExpertLimits: ExpertLimits | undefined
   /** The expert's estimate for this task, cleared with it. */
@@ -1011,12 +1036,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedPricing: ExpertPricing | undefined
   let cachedKeepAlive = false
   let cachedProgrammingProfileId: string | undefined
+  /** Mirrors config, because the registry is built synchronously and cannot await a load. */
+  let cachedOffice: { excel?: boolean | undefined; outlook?: boolean | undefined } = {}
 
   async function loadSettings(): Promise<LightCodeConfig> {
     const { config } = await configManager.load()
     cachedApprovals = approvalsFrom(config.approvals)
     cachedCodeGenerator = codeGeneratorFor(config)
     cachedProgrammingProfileId = config.programmingProfileId
+    cachedOffice = config.office ?? {}
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
@@ -1281,6 +1309,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * things: a workspace with skills but no MCP tools needs to *find* documentation without
      * needing an indirect way to *call* anything.
      */
+    /*
+     * Windows only, and off by default. Registered rather than advertised-and-failing: on any
+     * other platform the tools are simply absent, which is the same rule mode filtering follows.
+     */
+    if (officeSupported()) {
+      const officeOptions = { bridge: office() }
+      if (cachedOffice.excel === true) {
+        combined.register(createExcelSessionsTool(officeOptions))
+        combined.register(createExcelReadRangeTool(officeOptions))
+        combined.register(createExcelTraceTool(officeOptions))
+        combined.register(createExcelListMacrosTool(officeOptions))
+        combined.register(createExcelReadMacroTool(officeOptions))
+        combined.register(createExcelWriteMacroTool(officeOptions))
+      }
+      if (cachedOffice.outlook === true) {
+        combined.register(createOutlookFoldersTool(officeOptions))
+        combined.register(createOutlookSearchTool(officeOptions))
+        combined.register(createOutlookReadTool(officeOptions))
+      }
+    }
+
     const hasHiddenTools = dispatcher && combined.dispatchOnlyList().length > 0
     const hasHiddenSkills = hideSkills && skills.length > 0
     if (hasHiddenTools) {
@@ -4374,6 +4423,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSyncVectorStore(message.fromId)
     } else if (message.type === 'clearDocsIndex') {
       void handleClearDocsIndex()
+    } else if (message.type === 'setOffice') {
+      void configManager
+        .load()
+        .then(async () => {
+          await configManager.save('user', { office: { excel: message.excel, outlook: message.outlook } })
+          await loadSettings()
+          await postTools()
+          /*
+           * Shut down when both are switched off. A helper process holding a COM reference to
+           * the user's Excel after they revoked the permission is exactly the kind of thing that
+           * makes a permission feel untrue.
+           */
+          if (!message.excel && !message.outlook) {
+            await officeBridge?.dispose()
+            officeBridge = undefined
+          }
+        })
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'indexDocs') {
       void handleIndexDocs()
     } else if (message.type === 'runSearchProbe') {
@@ -4697,6 +4764,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     post({
       type: 'tools',
       dispatcher,
+      office: {
+        supported: officeSupported(),
+        excel: cachedOffice.excel === true,
+        outlook: cachedOffice.outlook === true,
+      },
       tools: registry
         .list()
         .map((tool) => {
@@ -5174,6 +5246,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Same reasoning for the Python interpreter, and it kills the whole tree so a tool
       // that spawned a subprocess does not outlive the session (§16).
       void python.dispose()
+      // Leaves no PowerShell holding a COM reference to the user's Excel.
+      void officeBridge?.dispose()
       // A pending reindex would otherwise fire after teardown and post to a dead webview.
       if (docsReindexTimer !== undefined) clearTimeout(docsReindexTimer)
       if (scheduleTimer !== undefined) clearInterval(scheduleTimer)

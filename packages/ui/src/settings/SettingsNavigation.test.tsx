@@ -77,7 +77,14 @@ const base = {
   },
   network: { warnings: [], issues: [] },
   python: { status: undefined, settings: {}, tools: [], issues: [] },
-  tools: { tools: [], dispatcher: false },
+  tools: {
+    tools: [],
+    dispatcher: false,
+    // Unsupported until the host says otherwise, so the toggles are never enabled on a machine
+    // that cannot honour them.
+    office: { supported: false, excel: false, outlook: false },
+    onSetOffice: () => undefined,
+  },
   skills: { skills: [], issues: [], extraDirs: [], configuredDir: '' },
   schedules: { schedules: [], runs: [], tools: [], mentionCandidates: [] },
 }

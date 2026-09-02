@@ -48,6 +48,12 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   'delete_python_tool',
   'write_skill',
   'delete_skill',
+  /*
+   * VBA installed into a workbook runs on this machine as this user, and nobody reviews a macro
+   * afterwards. That is the same act as creating a Python tool, so it gets the same rule: a
+   * human sees the source once, and no category toggle can stand in for that.
+   */
+  'excel_write_macro',
 ])
 
 export function decideFromPolicy(

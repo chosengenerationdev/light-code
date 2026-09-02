@@ -1,5 +1,33 @@
 # light-code-vscode
 
+## 0.42.0
+
+### Minor Changes
+
+- Excel and Outlook, opt-in and off by default.
+
+  The assistant can attach to the Office applications **already running** on this machine —
+  not to a file on disk, which is the point: the question people have is about the workbook
+  they are looking at, with unsaved edits, mid-investigation.
+
+  Excel: list the open workbooks, read cells with their values and formulas, read or replace
+  VBA modules, and **trace a cell back to what produces it** — following the formula chain
+  across sheets until it reaches raw input, which is how you find the cell that is actually
+  zero behind a `#DIV/0!` three sheets away.
+
+  Outlook: search and read mail. Read-only — nothing can send, reply, delete or move.
+
+  Windows only, because it uses COM to attach to a live application and that exists nowhere
+  else; the tools are absent on other platforms rather than present and failing. Nothing is
+  started, spawned or read until one of the two toggles is switched on in Settings → Tools,
+  and neither can be enabled by a workspace: the setting is user-scope only, since a
+  repository able to set it would read your mail the moment you opened the folder.
+
+  Neither will _launch_ an application that is closed. Starting Outlook from COM takes a
+  minute and can put a profile dialog on screen where nobody is expecting one, so it says to
+  open it instead. Replacing a macro always asks and shows the code — it is code that runs on
+  your machine as you — and the workbook is left unsaved so you can run it before keeping it.
+
 ## 0.41.0
 
 ### Minor Changes

@@ -640,6 +640,49 @@ reported in the tool result instead, so nothing is hidden.
 **Also verified on Windows:** detection through the `.cmd` shim, a live consultation, and
 the reported cost. **Untested:** non-Windows shim layouts.
 
+## 12c. Excel and Outlook (0.42.0)
+
+The assistant can attach to the Office applications **already running** on this machine. Requested
+directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings -> Tools.
+
+- **A live application, not a file.** The question people have is about the workbook in front of
+  them, with unsaved edits. That is also why nothing here opens or saves a file.
+- **`office` is user-scope only** (invariant 5), and it is the sharpest entry on that list after
+  `expert`: a repository able to set it would read your mail and your open spreadsheets the moment
+  you opened the folder.
+- **Windows only.** `Marshal::GetActiveObject` is the only way to reach a running Office
+  application and it does not exist in .NET Core, so the worker is **powershell.exe (5.1)**, not
+  `pwsh`. Elsewhere the tools are absent rather than present and failing.
+- **Neither app is ever launched.** Measured, not assumed: the first live test hung for a full
+  60s timeout because `New-Object -ComObject Outlook.Application` *starts* Outlook. Both are
+  attach-only now and say so.
+- **`excel_trace_cell` is the feature that justifies the rest.** It walks a formula back through
+  its precedents, across sheets, to raw input — the "why is this #DIV/0!" question. Excel's own
+  `Precedents` covers only the current sheet, so cross-sheet references are also read out of the
+  formula text.
+- **`excel_write_macro` is in `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES`.** VBA runs on
+  the machine as the user and nobody reviews a macro afterwards; that is section 13's argument
+  exactly. The approval shows the code, and the workbook is left **unsaved** so it can be run
+  before being kept.
+- **The session picker needed no UI.** `excel_sessions` lists what is open and the model asks with
+  `ask_user_form` (section 6b), which already renders a themed dropdown.
+- Model-supplied text never reaches a command line (section 16): requests are JSON on stdin, and
+  every value is passed as an *argument* to a COM method. `office.test.ts` asserts no
+  `Invoke-Expression` survives in the script.
+- **The script must stay pure ASCII.** Windows PowerShell decodes a BOM-less `.ps1` as ANSI, so one
+  em dash in a comment was a parse error and a worker that never started. The runtime writes a BOM
+  *and* the generator refuses non-ASCII *and* a test asserts it — three belts, because the symptom
+  is a timeout that points nowhere near the cause.
+- **PowerShell scoping cost a debugging round too:** a nested function assigning to an enclosing
+  array creates a local copy, so the first trace returned empty with no error. `$script:` scoped.
+
+**Verified against real Excel 16.0**: sessions, range reads, and a three-level cross-sheet trace
+that correctly identified a zero divisor as the source of a `#DIV/0!`. **Outlook is verified only
+as far as its attach-refusal message** — the search and read paths have never run against a live
+mailbox.
+
+---
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -985,14 +1028,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.41.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.41.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.42.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.42.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.17.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.18.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1008,7 +1051,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.41.0, host 0.17.0 — and keep working from
+**Next:** publish the pending versions — extension 0.42.0, host 0.18.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
@@ -1157,15 +1200,13 @@ stopped agreeing.** The replacement puts the highlight *outside* the input, as c
 Where a feature's correctness is only visible to a human eye, prefer the design that cannot be
 wrong over the one that looks better when it happens to work.
 
-### Not built, and why (2026-09-02)
+### Excel and Outlook are built (§12c)
 
-The user asked for **Excel** (read and edit macros, trace a cell's value back to its source, attach
-to a *running* Excel session chosen from a list) and **Outlook** (search and read mail from the
-local install). Both are real requests and neither is started. They are Windows COM integrations —
-a platform interface (§4), a picker UI, an approval story for touching a live document someone has
-open and unsaved, and a decision about whether they belong in core or as Python tools (§13), which
-already has `uv` and a worker and would need no new platform code. That decision has not been made;
-**do not start either without making it explicitly.**
+Decided the same day they were raised: PowerShell/COM in core rather than Python tools, because it
+adds no dependency and no bundled bytes — the whole feature is about 25KB in the VSIX. Opt-in, off,
+Windows only, user-scope only. §12c has the reasoning and the two traps that each cost a debugging
+round. **Outlook's search and read paths have never run against a live mailbox** — that is the
+first thing to check when someone has Outlook open.
 
 ### The most important thing found this session
 

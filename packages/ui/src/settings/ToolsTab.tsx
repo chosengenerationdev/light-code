@@ -8,6 +8,9 @@ export interface ToolsTabProps {
   tools: ToolCatalogueEntry[]
   /** True when tool schemas are being kept out of the prompt. */
   dispatcher: boolean
+  /** Excel and Outlook on this machine: whether they can be reached, and whether they are on. */
+  office: { supported: boolean; excel: boolean; outlook: boolean }
+  onSetOffice: (excel: boolean, outlook: boolean) => void
 }
 
 const SOURCE_LABELS: Record<ToolCatalogueEntry['source'], string> = {
@@ -86,6 +89,8 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
         </p>
       )}
 
+      <OfficeSection office={props.office} onSet={props.onSetOffice} />
+
       <div style={{ margin: '10px 0' }}>
         <label htmlFor="lc-tools-search" style={labelStyle()}>
           Search
@@ -147,6 +152,84 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
           Nothing matches “{query.trim()}”.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Excel and Outlook on this machine.
+ *
+ * ## Why it is off, and why the wording is blunt
+ *
+ * Switching these on lets the assistant read the workbooks someone has open and the mail in
+ * their local Outlook. That is a large grant and nothing about the phrase "Office integration"
+ * conveys it, so the copy says what it means. It is user-scope only in config for the same
+ * reason: a repository must never be able to turn it on.
+ *
+ * ## Why the toggles are disabled rather than hidden off Windows
+ *
+ * Hiding them would leave someone on a Mac wondering where the feature went. Disabled with the
+ * reason answers the question in place.
+ */
+function OfficeSection(props: {
+  office: { supported: boolean; excel: boolean; outlook: boolean }
+  onSet: (excel: boolean, outlook: boolean) => void
+}): ReactElement {
+  const { office } = props
+  return (
+    <div
+      style={{
+        margin: '12px 0',
+        padding: 10,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 6,
+        opacity: office.supported ? 1 : 0.6,
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Excel and Outlook</div>
+      <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+        {office.supported
+          ? 'Lets the assistant attach to the Office applications already running here. Off by ' +
+            'default: nothing is started and nothing is read until you switch one on.'
+          : 'Windows only — this uses COM to attach to a running Office application, which exists ' +
+            'nowhere else. The tools are absent on this machine rather than present and failing.'}
+      </p>
+
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 6, cursor: office.supported ? 'pointer' : 'not-allowed' }}>
+        <input
+          type="checkbox"
+          checked={office.excel}
+          disabled={!office.supported}
+          onChange={(event) => props.onSet(event.target.checked, office.outlook)}
+          style={{ marginTop: 2 }}
+        />
+        <span>
+          <span style={{ display: 'block', fontSize: 13 }}>Excel</span>
+          <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+            Read cells and formulas from open workbooks, trace where a value comes from, and read
+            or replace VBA. <strong>It can read any workbook you have open</strong>, including
+            unsaved ones. Replacing a macro always asks first and shows the code.
+          </span>
+        </span>
+      </label>
+
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: office.supported ? 'pointer' : 'not-allowed' }}>
+        <input
+          type="checkbox"
+          checked={office.outlook}
+          disabled={!office.supported}
+          onChange={(event) => props.onSet(office.excel, event.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span>
+          <span style={{ display: 'block', fontSize: 13 }}>Outlook</span>
+          <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+            Search and read mail from the Outlook installed here. <strong>Read-only</strong> —
+            nothing can send, reply, delete or move a message. Message text becomes part of the
+            conversation, so it goes to your model provider like anything else you paste in.
+          </span>
+        </span>
+      </label>
     </div>
   )
 }
