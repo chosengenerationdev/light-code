@@ -1313,7 +1313,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * Windows only, and off by default. Registered rather than advertised-and-failing: on any
      * other platform the tools are simply absent, which is the same rule mode filtering follows.
      */
-    if (officeSupported()) {
+    // Constructed only when something will use it: a bridge object built for a feature nobody
+    // switched on is a disposal path that has to stay correct for no benefit.
+    if (officeSupported() && (cachedOffice.excel === true || cachedOffice.outlook === true)) {
       const officeOptions = { bridge: office() }
       if (cachedOffice.excel === true) {
         combined.register(createExcelSessionsTool(officeOptions))
@@ -4751,7 +4753,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * so a truthful `advertised` matters more than a complete corpus.
    */
   async function postTools(): Promise<void> {
-    const { config } = await configManager.load()
+    /*
+     * Refreshed first. `currentToolRegistry` reads cached settings rather than a config it
+     * cannot await, so a `postTools` arriving before the first `loadSettings` would build the
+     * registry from empty defaults and report the Office tools missing while they were enabled.
+     * One fact, one place it is read from.
+     */
+    const config = await loadSettings()
     // Same trap as the reindex above: reading the key directly made this view report the
     // dispatcher off — and compute `advertised` as though it were — for anyone running the
     // default. A read-only view of what the model can see is worth nothing if it is wrong.

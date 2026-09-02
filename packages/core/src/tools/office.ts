@@ -286,24 +286,35 @@ export function createExcelWriteMacroTool(options: OfficeToolOptions): Tool<z.in
   }
 }
 
-export function createOutlookFoldersTool(options: OfficeToolOptions): Tool<Record<string, never>> {
+const foldersSchema = z.object({
+  depth: z.number().int().min(1).max(8).optional().describe('How far to descend into sub-folders. Default 4.'),
+})
+
+export function createOutlookFoldersTool(options: OfficeToolOptions): Tool<z.infer<typeof foldersSchema>> {
   return {
     name: 'outlook_folders',
     group: 'read',
-    description: 'List the mail folders available in the Outlook running on this machine.',
-    parametersSchema: z.object({}),
-    async execute(): Promise<ToolResult> {
+    description:
+      'List the mail folders in the local Outlook, including sub-folders, with the full path to ' +
+      'each. Pass a path from here to outlook_search to search one folder.',
+    parametersSchema: foldersSchema,
+    async execute(params): Promise<ToolResult> {
       try {
         const result = await options.bridge.request<{
-          folders: { store: string; name: string; path: string; items: number; unread: number }[]
-        }>({ op: 'outlook.folders' })
+          folders: { name: string; path: string; depth: number; items: number; unread: number }[]
+        }>({ op: 'outlook.folders', ...params })
 
         if (result.folders.length === 0) return { content: 'Outlook is running but reports no mail folders.' }
         return {
           content: [
-            'Mail folders:',
+            'Mail folders (the full path is what outlook_search wants):',
             ...result.folders.map(
-              (folder) => `- ${folder.path} (${String(folder.items)} items, ${String(folder.unread)} unread)`,
+              (folder) =>
+                // Indented by depth so the shape of the tree is visible, but every line still
+                // carries the whole path: a nested name on its own is not something you can pass
+                // back, and that was the gap - a sub-folder was reachable but undiscoverable.
+                `${'  '.repeat(Math.max(0, folder.depth - 1))}- ${folder.path} ` +
+                `(${String(folder.items)} items, ${String(folder.unread)} unread)`,
             ),
           ].join('\n'),
         }
@@ -315,12 +326,28 @@ export function createOutlookFoldersTool(options: OfficeToolOptions): Tool<Recor
 }
 
 const searchSchema = z.object({
-  folder: z.string().optional().describe('Folder path from outlook_folders. Omit for the inbox.'),
+  folder: z
+    .string()
+    .optional()
+    .describe('Full folder path from outlook_folders, e.g. "you@example.com\\Inbox\\Projects". Omit for the inbox.'),
   from: z.string().optional().describe('Match part of the sender address.'),
   subject: z.string().optional().describe('Match part of the subject.'),
   contains: z.string().optional().describe('Match text in the subject or body.'),
   since: z.string().optional().describe('Only messages received on or after this date, e.g. "2026-08-01".'),
-  limit: z.number().int().min(1).max(100).optional().describe('How many to return. Default 25.'),
+  /**
+   * The one people actually reach for: "anything in the last two hours".
+   *
+   * Wins over `since` when both are given. A relative window is the more specific request, and
+   * asking the model to convert one into the other invites an off-by-a-timezone.
+   */
+  withinMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(20160)
+    .optional()
+    .describe('Only messages received in the last N minutes - 50 for the last 50 minutes, 120 for two hours.'),
+  limit: z.number().int().min(1).max(100).optional().describe('How many of the newest to return. Default 25.'),
 })
 
 export function createOutlookSearchTool(options: OfficeToolOptions): Tool<z.infer<typeof searchSchema>> {
@@ -328,8 +355,10 @@ export function createOutlookSearchTool(options: OfficeToolOptions): Tool<z.infe
     name: 'outlook_search',
     group: 'read',
     description:
-      'Search mail in the local Outlook, newest first. Returns subject, sender, date and a short ' +
-      'preview — use outlook_read_email with the returned id for the full message.',
+      'Search mail in the local Outlook, newest first. Give a folder path from outlook_folders to ' +
+      'search one folder, withinMinutes for a recent window (two hours is 120), and limit for how ' +
+      'many of the newest to return. Returns subject, sender, date and a short preview - use ' +
+      'outlook_read_email with the returned id for the full message.',
     parametersSchema: searchSchema,
     async execute(params): Promise<ToolResult> {
       try {

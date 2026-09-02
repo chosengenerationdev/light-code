@@ -676,6 +676,10 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
 - **PowerShell scoping cost a debugging round too:** a nested function assigning to an enclosing
   array creates a local copy, so the first trace returned empty with no error. `$script:` scoped.
 
+- **Outlook folders are listed recursively** and searching takes `withinMinutes` (0.42.1). The
+  first version listed only the top level, so a nested folder was reachable by path and
+  impossible to discover — reachable-but-invisible is the same failure as absent.
+
 **Verified against real Excel 16.0**: sessions, range reads, and a three-level cross-sheet trace
 that correctly identified a zero divisor as the source of a `#DIV/0!`. **Outlook is verified only
 as far as its attach-refusal message** — the search and read paths have never run against a live
@@ -1028,14 +1032,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.42.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.42.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.42.1**, built and unpublished:
+`apps/vscode/light-code-vscode-0.42.1.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.18.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.18.1**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1051,7 +1055,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.42.0, host 0.18.0 — and keep working from
+**Next:** publish the pending versions — extension 0.42.1, host 0.18.1 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

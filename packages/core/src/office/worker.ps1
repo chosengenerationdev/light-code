@@ -283,21 +283,45 @@ function Get-OutlookNamespace {
     return $app.GetNamespace('MAPI')
 }
 
+# Walks the whole tree, not just the top level.
+#
+# The first version listed store -> folder and stopped, which made a nested folder impossible to
+# *discover* even though Get-OutlookFolder could already reach one by path. Someone whose mail is
+# filed under Inbox\Projects\Acme could see neither the folder nor a reason it was missing.
+#
+# Depth-capped and script-scoped: a large mailbox nests deeply, and PowerShell's nested-function
+# scoping means an inner assignment to `$folders` would build a local copy and discard it - the
+# same trap that made the Excel trace return empty.
 function Invoke-OutlookFolders {
+    param($Request)
+
     $ns = Get-OutlookNamespace
-    $folders = @()
-    foreach ($store in $ns.Folders) {
-        foreach ($folder in $store.Folders) {
-            $folders += [ordered]@{
-                store  = $store.Name
-                name   = $folder.Name
-                path   = "$($store.Name)\$($folder.Name)"
-                items  = $folder.Items.Count
-                unread = $folder.UnReadItemCount
-            }
+    $script:folderList = @()
+    $script:folderMaxDepth = 4
+    if ($Request -and $Request.depth) { $script:folderMaxDepth = [Math]::Min([int]$Request.depth, 8) }
+
+    function Walk-Folder {
+        param($Folder, [string]$Path, [int]$Depth)
+
+        $script:folderList += [ordered]@{
+            name   = $Folder.Name
+            path   = $Path
+            depth  = $Depth
+            items  = $Folder.Items.Count
+            unread = $Folder.UnReadItemCount
+        }
+        if ($Depth -ge $script:folderMaxDepth) { return }
+        foreach ($child in $Folder.Folders) {
+            Walk-Folder -Folder $child -Path "$Path\$($child.Name)" -Depth ($Depth + 1)
         }
     }
-    return @{ folders = $folders }
+
+    foreach ($store in $ns.Folders) {
+        foreach ($folder in $store.Folders) {
+            Walk-Folder -Folder $folder -Path "$($store.Name)\$($folder.Name)" -Depth 1
+        }
+    }
+    return @{ folders = $script:folderList }
 }
 
 function Get-OutlookFolder {
@@ -338,7 +362,17 @@ function Invoke-OutlookSearch {
     $filters = @()
     if ($Request.from) { $filters += "urn:schemas:httpmail:fromemail LIKE '%$($Request.from -replace "'", "''")%'" }
     if ($Request.subject) { $filters += "urn:schemas:httpmail:subject LIKE '%$($Request.subject -replace "'", "''")%'" }
-    if ($Request.since) { $filters += "urn:schemas:httpmail:datereceived >= '$([datetime]::Parse($Request.since).ToString('yyyy-MM-dd HH:mm'))'" }
+    <#
+      Two ways to say "recently", because people say it both ways.
+
+      `withinMinutes` is the one that gets used - "anything in the last two hours" - and computing
+      the cutoff here rather than in the caller means it is relative to *this machine's* clock,
+      which is the clock Outlook stamped the mail with.
+    #>
+    $cutoff = $null
+    if ($Request.withinMinutes) { $cutoff = (Get-Date).AddMinutes(-1 * [double]$Request.withinMinutes) }
+    elseif ($Request.since) { $cutoff = [datetime]::Parse($Request.since) }
+    if ($cutoff) { $filters += "urn:schemas:httpmail:datereceived >= '$($cutoff.ToString('yyyy-MM-dd HH:mm'))'" }
 
     if ($filters.Count -gt 0) {
         $items = $items.Restrict('@SQL=' + ($filters -join ' AND '))
@@ -400,7 +434,7 @@ function Invoke-Request {
         'excel.listMacros'      { return Invoke-ExcelListMacros -Request $Request }
         'excel.readMacro'       { return Invoke-ExcelReadMacro -Request $Request }
         'excel.writeMacro'      { return Invoke-ExcelWriteMacro -Request $Request }
-        'outlook.folders'       { return Invoke-OutlookFolders }
+        'outlook.folders'       { return Invoke-OutlookFolders -Request $Request }
         'outlook.search'        { return Invoke-OutlookSearch -Request $Request }
         'outlook.read'          { return Invoke-OutlookRead -Request $Request }
         default                 { throw "Unknown operation '$($Request.op)'." }

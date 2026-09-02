@@ -1,5 +1,20 @@
 # @chosengeneration/light-code
 
+## 0.18.1
+
+### Patch Changes
+
+- Outlook: sub-folders are listable, and "the last two hours" is one argument.
+
+  Folder listing stopped at the top level, so a message filed under `Inbox\Projects\Acme` was
+  reachable by path but impossible to _discover_ — the tool could already walk a nested path,
+  nothing would ever show you one existed. It now walks the tree, indented by depth, with the
+  full path on every line, because a nested name on its own is not something you can pass back.
+
+  `outlook_search` takes `withinMinutes`, which is how people actually ask: 50 for the last
+  fifty minutes, 120 for two hours. It is computed against this machine's clock — the clock
+  Outlook stamped the mail with — and wins over an absolute `since` when both are given.
+
 ## 0.18.0
 
 ### Minor Changes
