@@ -28,8 +28,15 @@ export function SavingsPanel(props: SavingsPanelProps): ReactElement | null {
   const savings = props.savings
   if (savings === undefined) return null
 
+  /*
+   * Rendered even with nothing recorded, deliberately.
+   *
+   * The first version hid itself until there was something to show, which meant someone who
+   * went looking for the figures found *nothing at all* — indistinguishable from the feature
+   * being broken, and reported exactly that way. An empty state that says what will fill it is
+   * the whole difference between "not here" and "not yet".
+   */
   const nothingYet = savings.allTime.consultations === 0 && savings.allTime.juniorTurns === 0
-  if (nothingYet) return null
 
   return (
     <div
@@ -45,9 +52,11 @@ export function SavingsPanel(props: SavingsPanelProps): ReactElement | null {
     >
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Junior mode</div>
       <div style={{ color: colors.muted, fontSize: 11, marginBottom: 10 }}>
-        {savings.measured
-          ? 'A floor, not an estimate — every figure below is at least this much.'
-          : 'Counted, but not yet priced. Measure a consultation above to see this in money.'}
+        {nothingYet
+          ? 'Nothing recorded yet. This fills in as you work in Junior mode — one entry per turn the cheap model handles alone, and one per consultation.'
+          : savings.measured
+            ? 'A floor, not an estimate — every figure below is at least this much.'
+            : 'Counted, but not yet priced. Measure a consultation above to see this in money.'}
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -75,6 +84,13 @@ export function SavingsPanel(props: SavingsPanelProps): ReactElement | null {
       </button>
 
       {showWorking && <Working savings={savings} />}
+
+      {nothingYet && (
+        <p style={{ color: colors.muted, fontSize: 11, margin: '8px 0 0' }}>
+          Switch the mode selector in the chat header to <strong>Junior</strong> to start. Turns
+          taken before this version was installed were never recorded, so the count begins now.
+        </p>
+      )}
     </div>
   )
 }
@@ -103,6 +119,9 @@ function Metric(props: { label: string; window: SavingsWindow; measured: boolean
       </div>
       <div style={{ color: colors.muted, fontSize: 11 }}>
         {plural(data.juniorTurns, 'junior turn')}, {plural(data.consultations, 'consultation')}
+        {/* Keep-alive pings and price measurements. Their money is in "Spent" above; naming them
+            separately is what stops that figure looking like it disagrees with the count. */}
+        {data.overheadCalls > 0 && ` + ${String(data.overheadCalls)} upkeep`}
       </div>
     </div>
   )

@@ -29,6 +29,7 @@ const window_ = (overrides: Partial<SavingsWindow> = {}): SavingsWindow => ({
   spentUsd: 0,
   unpriced: 0,
   consultations: 0,
+  overheadCalls: 0,
   juniorTurns: 0,
   avoidedUsd: 0,
   ...overrides,
@@ -49,9 +50,15 @@ const click = (label: string): void => {
 }
 
 describe('the Junior mode savings panel', () => {
-  it('shows nothing at all before anything has been recorded', () => {
+  /**
+   * Reported as "when I did F5, I don't see the metrics". The first version hid itself until
+   * there was something to show, which is indistinguishable from the feature not existing.
+   */
+  it('is visible with nothing recorded, and says what will fill it', () => {
     render({ today: window_(), last30Days: window_(), allTime: window_(), measured: true })
-    expect(container.textContent).toBe('')
+    expect(container.textContent).toContain('Junior mode')
+    expect(container.textContent).toContain('Nothing recorded yet')
+    expect(container.textContent).toContain('the count begins now')
   })
 
   it('shows all three windows once there is something to show', () => {

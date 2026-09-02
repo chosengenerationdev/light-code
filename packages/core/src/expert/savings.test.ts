@@ -101,3 +101,36 @@ describe('the event log', () => {
     expect(pruned).toEqual(kept)
   })
 })
+
+/**
+ * A keep-alive ping and the two consultations a price measurement makes all cost real money.
+ * Leaving them out made the panel's "spent" figure quietly wrong the moment anyone used either
+ * feature — but counting them as consultations would be wrong the other way, since nobody asked
+ * the expert anything.
+ */
+describe('spending that was not a question', () => {
+  const overhead = (at: number, usd: number): ExpertEvent => ({
+    at,
+    kind: 'consultation',
+    usd,
+    resumed: true,
+    overhead: true,
+  })
+
+  it('counts its money, and keeps it out of the consultation count', () => {
+    const savings = summariseSavings(
+      [overhead(now - HOUR, 0.01), consultation(now - HOUR, 0.05, true)],
+      pricing,
+      now,
+    )
+    expect(savings.today.spentUsd).toBeCloseTo(0.06)
+    expect(savings.today.consultations).toBe(1)
+    expect(savings.today.overheadCalls).toBe(1)
+  })
+
+  /** A ping avoided nothing; crediting it would be inventing a saving out of upkeep. */
+  it('earns no avoided-cost credit', () => {
+    const savings = summariseSavings([overhead(now - HOUR, 0.01)], pricing, now)
+    expect(savings.today.avoidedUsd).toBe(0)
+  })
+})

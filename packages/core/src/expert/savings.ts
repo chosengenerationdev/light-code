@@ -33,8 +33,16 @@ import type { ExpertPricing } from './pricing.js'
  */
 
 export type ExpertEvent =
-  /** One consultation, whatever it cost and whether it reused a session. */
-  | { at: number; kind: 'consultation'; usd?: number; resumed: boolean }
+  /**
+   * One consultation, whatever it cost and whether it reused a session.
+   *
+   * `overhead` marks spending that was not work: a keep-alive ping, or the two consultations a
+   * price measurement makes. Its money still counts — money spent is money spent, and a "spent"
+   * figure that quietly omitted some would be the dishonest kind of tidy — but it is kept out of
+   * the consultation *count*, which is meant to say how often the expert was actually asked
+   * something. It earns no avoided-cost credit either.
+   */
+  | { at: number; kind: 'consultation'; usd?: number; resumed: boolean; overhead?: boolean }
   /**
    * One turn in Junior mode that the cheap model handled without consulting.
    *
@@ -49,6 +57,8 @@ export interface SavingsWindow {
   /** Consultations whose cost the plan did not report; excluded from `spentUsd`, never as zero. */
   unpriced: number
   consultations: number
+  /** Keep-alive pings and price measurements: real spend, but not the expert answering a question. */
+  overheadCalls: number
   /** Turns the cheap model handled alone. */
   juniorTurns: number
   /**
@@ -94,6 +104,7 @@ function windowFor(events: readonly ExpertEvent[], pricing: ExpertPricing | unde
   let spentUsd = 0
   let unpriced = 0
   let consultations = 0
+  let overheadCalls = 0
   let juniorTurns = 0
   let resumedConsultations = 0
 
@@ -102,9 +113,16 @@ function windowFor(events: readonly ExpertEvent[], pricing: ExpertPricing | unde
       juniorTurns += 1
       continue
     }
-    consultations += 1
+    // Spend is counted for every call; only real consultations count as consultations, and only
+    // they can have avoided a cold start.
     if (event.usd === undefined) unpriced += 1
     else spentUsd += event.usd
+
+    if (event.overhead === true) {
+      overheadCalls += 1
+      continue
+    }
+    consultations += 1
     if (event.resumed) resumedConsultations += 1
   }
 
@@ -112,6 +130,7 @@ function windowFor(events: readonly ExpertEvent[], pricing: ExpertPricing | unde
     spentUsd,
     unpriced,
     consultations,
+    overheadCalls,
     juniorTurns,
     avoidedUsd: avoided(juniorTurns, resumedConsultations, pricing),
   }

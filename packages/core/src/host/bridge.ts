@@ -2376,6 +2376,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       expertSpend.keepAlives += 1
       if (answer.costUsd !== undefined) expertSpend.usd += answer.costUsd
+      // Overhead: real money, but not the expert answering anything. Kept out of the
+      // consultation count so that count still means "times the expert was asked something".
+      appendExpertEvent({
+        at: Date.now(),
+        kind: 'consultation',
+        ...(answer.costUsd !== undefined ? { usd: answer.costUsd } : {}),
+        resumed: true,
+        overhead: true,
+      })
       if (answer.sessionId !== undefined) expertSessionId = answer.sessionId
       postExpertSpend()
       logger.info('expert keep-alive refreshed the session cache')
@@ -2458,6 +2467,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       const [cold, resumed] = samples
       const reportsCost = cold !== undefined || resumed !== undefined
+
+      /*
+       * The measurement's own two consultations cost real money, so they go in the log.
+       *
+       * Marked `overhead`, so they show up in what was spent without pretending the expert was
+       * asked two questions. Omitting them entirely was the first version, and it made the
+       * panel's "spent" figure quietly wrong the moment anyone pressed the button.
+       */
+      samples.forEach((usd, index) => {
+        appendExpertEvent({
+          at: Date.now(),
+          kind: 'consultation',
+          ...(usd !== undefined ? { usd } : {}),
+          resumed: index > 0,
+          overhead: true,
+        })
+      })
       const pricing = {
         measuredAt: Date.now(),
         reportsCost,
