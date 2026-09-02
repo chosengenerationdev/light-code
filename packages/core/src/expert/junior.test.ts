@@ -33,9 +33,23 @@ describe('Junior mode', () => {
    * consults per step costs more than not having the mode at all. These assert the two rules
    * that decide that, so a future reword cannot quietly drop them.
    */
-  it('tells the junior to consult once and not to repeat context', () => {
+  /**
+   * Reported as "junior not automatically taking help from expert when needed, I need to tell
+   * it to take help — else it becomes similar to code mode". The guidance *is* the feature, so
+   * the fix is in the words: consulting has to be the default action, with the exceptions named
+   * rather than the rule.
+   */
+  it('makes consulting the default rather than something to be justified', () => {
     const guidance = JUNIOR_MODE.guidance ?? ''
-    expect(guidance).toMatch(/consult once/i)
+    expect(guidance).toMatch(/your first action is `ask_expert`/i)
+    expect(guidance).toMatch(/when in doubt, consult/i)
+    // Named cases, so "not trivial" is not left to the model's own sense of its competence.
+    expect(guidance).toMatch(/more than one file/i)
+    expect(guidance).toMatch(/your first attempt failed/i)
+  })
+
+  it('still tells it not to repeat context, which is where the saving comes from', () => {
+    const guidance = JUNIOR_MODE.guidance ?? ''
     expect(guidance).toMatch(/remembers/i)
     expect(guidance).toMatch(/failed twice/i)
   })

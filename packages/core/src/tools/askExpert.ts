@@ -34,6 +34,13 @@ export interface AskExpertOptions {
    */
   onConsultation?: (info: { costUsd?: number; isError: boolean }) => void
   /**
+   * Keeps the answer so it can be re-read for free — see `recall_expert_advice`.
+   *
+   * Called with the advice as the model receives it, before the framing notes are added, so a
+   * recall reads as the expert's words rather than as a copy of a tool result.
+   */
+  onAdvice?: (record: { at: number; question: string; advice: string }) => void
+  /**
    * Continues one conversation with the expert across consultations, instead of starting
    * cold each time.
    *
@@ -178,6 +185,14 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
        */
       const { text: advice, estimate } = extractEstimate(answer.text)
       if (estimate !== undefined) options.onEstimate?.(estimate)
+      /*
+       * Recorded here, before the turn can go wrong.
+       *
+       * Advice is the expensive thing in this mode, and it is easy to lose — a failed tool call,
+       * a cancelled turn, a compacted history — after which the obvious recovery is to ask
+       * again, which is the one recovery that costs money for an answer already bought.
+       */
+      options.onAdvice?.({ at: Date.now(), question: params.question, advice })
 
       const notes: string[] = []
       /*

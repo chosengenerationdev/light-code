@@ -22,8 +22,20 @@ import path from 'node:path'
 export interface Skill {
   name: string
   description: string
+  /**
+   * Put into every prompt in full, rather than offered by name.
+   *
+   * Set with `always: true` in the frontmatter. A skill normally costs a line in the prompt and
+   * is read on demand, which is right for forty of them and wrong for the one that says how this
+   * team works — that one has to be in front of the model *before* it decides anything, or it is
+   * consulted only when the model already suspects it needs it, which is exactly when it does
+   * not. Its whole body is included, so keep it short; a long one is paid for on every request.
+   */
+  always?: boolean
   /** Absolute path, so the model can `read_file` it without guessing. */
   filePath: string
+  /** The full text, kept only for an `always` skill — it is what goes into the prompt. */
+  body?: string
   /**
    * Which configured folder it came from.
    *
@@ -60,7 +72,12 @@ export function skillFileName(name: string): string {
  * read them would add a dependency, accept a great deal more syntax than intended, and give
  * a skill file more ways to be subtly wrong. Anything beyond `key: value` is ignored.
  */
-export function parseFrontmatter(source: string): { name?: string; description?: string; body: string } {
+export function parseFrontmatter(source: string): {
+  name?: string
+  description?: string
+  always?: boolean
+  body: string
+} {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(source)
   if (match === null) return { body: source }
 
@@ -75,6 +92,9 @@ export function parseFrontmatter(source: string): { name?: string; description?:
   return {
     ...(fields.name !== undefined ? { name: fields.name } : {}),
     ...(fields.description !== undefined ? { description: fields.description } : {}),
+    // Only an explicit `true` counts. Anything else — absent, `false`, a typo — leaves the skill
+    // an ordinary one, which is the safe direction for a flag that spends tokens on every turn.
+    ...(fields.always?.toLowerCase() === 'true' ? { always: true } : {}),
     body: match[2] ?? '',
   }
 }
@@ -143,7 +163,13 @@ async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
         issues.push({ filePath, detail: 'No `description` in the frontmatter, so it was not offered.' })
         continue
       }
-      skills.push({ name, description: parsed.description, filePath, sourceDir: skillsDir })
+      skills.push({
+        name,
+        description: parsed.description,
+        filePath,
+        sourceDir: skillsDir,
+        ...(parsed.always === true ? { always: true, body: parsed.body.trim() } : {}),
+      })
     } catch (error) {
       issues.push({ filePath, detail: error instanceof Error ? error.message : String(error) })
     }
@@ -242,14 +268,46 @@ export function renderSkillsHintForPrompt(count: number): string {
 }
 
 export function renderSkillsForPrompt(skills: readonly Skill[]): string {
-  if (skills.length === 0) return ''
-  const lines = skills.map((skill) => `- ${skill.name}: ${skill.description}\n  (${skill.filePath})`)
+  const summarised = skills.filter((skill) => skill.always !== true)
+  const sections: string[] = [renderAlwaysSkills(skills)]
+
+  if (summarised.length > 0) {
+    sections.push(
+      [
+        '## Skills',
+        '',
+        'Notes recorded for this workspace. Only the summaries are here — when one looks relevant,',
+        'read its file for the full content before acting on the subject.',
+        '',
+        ...summarised.map((skill) => `- ${skill.name}: ${skill.description}\n  (${skill.filePath})`),
+      ].join('\n'),
+    )
+  }
+  return sections.filter((section) => section.length > 0).join('\n\n')
+}
+
+/**
+ * The skills marked `always: true`, in full.
+ *
+ * Included even when every other skill is being retrieved on demand, because that is the entire
+ * point of the flag: a standing instruction that only arrives once the model has decided it
+ * needs one has arrived too late to change the decision. Requested as "a master skill, available
+ * in all sessions, so the agent will remember and follow it in every session".
+ *
+ * Placed before the summaries so it reads as standing instruction rather than as one entry in a
+ * catalogue. It is paid for on every request, which is why the flag is opt-in and the tab says
+ * to keep such a skill short.
+ */
+export function renderAlwaysSkills(skills: readonly Skill[]): string {
+  const always = skills.filter((skill) => skill.always === true)
+  if (always.length === 0) return ''
+
   return [
-    '## Skills',
+    '## Standing instructions',
     '',
-    'Notes recorded for this workspace. Only the summaries are here — when one looks relevant,',
-    'read its file for the full content before acting on the subject.',
+    'Recorded for this workspace and included in every session. Follow them unless the user says',
+    'otherwise in this conversation.',
     '',
-    ...lines,
+    ...always.map((skill) => [`### ${skill.name}`, '', skill.body ?? skill.description].join('\n')),
   ].join('\n')
 }

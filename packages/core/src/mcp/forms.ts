@@ -41,6 +41,13 @@ export interface McpServerForm {
   headers: Record<string, string>
   env: Record<string, string>
   cwd: string
+  /**
+   * Seconds a single tool call may take. Empty means the SDK's own default.
+   *
+   * Held as a string because it is a text field: an empty box and a zero are different answers,
+   * and a number input turns the first into the second while you are still typing.
+   */
+  timeout: string
 }
 
 export const BLANK_MCP_FORM: McpServerForm = {
@@ -55,6 +62,7 @@ export const BLANK_MCP_FORM: McpServerForm = {
   headers: {},
   env: {},
   cwd: '',
+  timeout: '',
 }
 
 export type McpPlatform = 'win32' | 'posix'
@@ -136,11 +144,13 @@ export function toMcpServerForm(config: McpServerConfig): McpServerForm {
       kind: 'http',
       url: config.url,
       headers: config.headers ?? {},
+      timeout: config.timeout === undefined ? '' : String(config.timeout),
     }
   }
 
   const base: McpServerForm = {
     ...BLANK_MCP_FORM,
+    timeout: config.timeout === undefined ? '' : String(config.timeout),
     kind: 'custom',
     command: config.command,
     args: config.args ?? [],
@@ -191,10 +201,16 @@ export function fromMcpServerForm(
     ...(existing?.disabledTools !== undefined ? { disabledTools: existing.disabledTools } : {}),
   }
 
+  // Ignored rather than rejected when it is not a positive number: the form validates it and
+  // says so, and a save should never silently write a nonsense timeout.
+  const seconds = Number(form.timeout.trim())
+  const timeout = form.timeout.trim().length > 0 && Number.isFinite(seconds) && seconds > 0 ? { timeout: seconds } : {}
+
   if (form.kind === 'http') {
     return {
       url: form.url.trim(),
       ...(Object.keys(form.headers).length > 0 ? { headers: form.headers } : {}),
+      ...timeout,
       ...preserved,
     }
   }
@@ -224,12 +240,19 @@ export function fromMcpServerForm(
     ...(args.length > 0 ? { args } : {}),
     ...(Object.keys(form.env).length > 0 ? { env: form.env } : {}),
     ...(form.cwd.trim().length > 0 ? { cwd: form.cwd.trim() } : {}),
+    ...timeout,
     ...preserved,
   }
 }
 
 /** Field-level validation, so the form can point at the problem instead of failing on save. */
 export function validateMcpServerForm(name: string, form: McpServerForm): Record<string, string> {
+  const timeoutErrors: Record<string, string> = {}
+  if (form.timeout.trim().length > 0) {
+    const seconds = Number(form.timeout.trim())
+    if (!Number.isFinite(seconds) || seconds <= 0) timeoutErrors.timeout = 'Enter a number of seconds, or leave it blank.'
+    else if (seconds > 3600) timeoutErrors.timeout = 'An hour is the most a single call may take.'
+  }
   const errors: Record<string, string> = {}
   if (name.trim().length === 0) errors.name = 'Give the server a name.'
   else if (/[^\w.-]/.test(name.trim())) {
@@ -264,5 +287,5 @@ export function validateMcpServerForm(name: string, form: McpServerForm): Record
       }
       break
   }
-  return errors
+  return { ...errors, ...timeoutErrors }
 }

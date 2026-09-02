@@ -686,6 +686,10 @@ Markdown with frontmatter (`name`, `description`).
 - **Only `name` + `description` go in the system prompt.** Bodies are read on demand via
   the existing `read_file` — no dedicated `load_skill` tool needed. This keeps baseline
   cost at a few tokens each and lets skills reference other files and grow arbitrarily.
+- **A skill with `always: true` in its frontmatter is injected in full, every session** (0.41.0,
+  user-requested as "a master skill"). It bypasses both the summary list and retrieval, because a
+  standing instruction that only arrives once the model suspects it needs one has arrived too
+  late to change the decision. Paid for on every request, so it is opt-in and should be short.
 - **Two file layouts are read**: `skill-name.md`, which is what `write_skill` produces, and
   `skill-name/SKILL.md`, which is what Claude and Claude Code use. The second was added
   2026-09-01 because a folder of skills copied from there was *entirely invisible* with no error
@@ -981,14 +985,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.40.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.40.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.41.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.41.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.16.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.17.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1004,7 +1008,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.40.0, host 0.16.0 — and keep working from
+**Next:** publish the pending versions — extension 0.41.0, host 0.17.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
@@ -1139,9 +1143,29 @@ four of them threw on a missing array when it was first written.
 
 ## SESSION HANDOVER — 2026-09-01, read this first
 
-**Marketplace 0.36.1, npm 0.12.1** (queried 2026-08-31). Local manifests **0.40.0** and
-**0.16.0**, built and unpublished; the artifact is `apps/vscode/light-code-vscode-0.40.0.vsix`.
-`main` is clean and pushed. **1395 tests**, 1 skipped.
+**Marketplace 0.36.1, npm 0.12.1** (queried 2026-08-31). Local manifests **0.41.0** and
+**0.17.0**, built and unpublished; the artifact is `apps/vscode/light-code-vscode-0.41.0.vsix`.
+`main` is clean and pushed. **1420 tests**, 1 skipped.
+
+### A UI lesson worth not repeating
+
+**Do not paint over a text input.** Mention highlighting was built as a coloured copy of the text
+behind a textarea with transparent glyphs — the standard trick — and it broke typing: the caret
+sat behind the last character. Two independently laid-out layers cannot be relied on to agree to
+the pixel across fonts and zoom, **and nothing automated in this repo can see that they have
+stopped agreeing.** The replacement puts the highlight *outside* the input, as chips under it.
+Where a feature's correctness is only visible to a human eye, prefer the design that cannot be
+wrong over the one that looks better when it happens to work.
+
+### Not built, and why (2026-09-02)
+
+The user asked for **Excel** (read and edit macros, trace a cell's value back to its source, attach
+to a *running* Excel session chosen from a list) and **Outlook** (search and read mail from the
+local install). Both are real requests and neither is started. They are Windows COM integrations —
+a platform interface (§4), a picker UI, an approval story for touching a live document someone has
+open and unsaved, and a decision about whether they belong in core or as Python tools (§13), which
+already has `uv` and a worker and would need no new platform code. That decision has not been made;
+**do not start either without making it explicitly.**
 
 ### The most important thing found this session
 

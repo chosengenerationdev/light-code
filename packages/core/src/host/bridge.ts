@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-import { compareMentionCandidates } from '../context/mentionRanking.js'
+import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import {
   coerceFormValue,
@@ -44,6 +44,8 @@ import {
   type ExpertPricing,
   type CodeGenerator,
   createAskExpertTool,
+  createRecallExpertTool,
+  type ExpertConsultationRecord,
   createSearchOpensearchTool,
   createSearchCodebaseTool,
   createSearchDocsTool,
@@ -56,6 +58,7 @@ import {
   loadSkills,
   renderSkillsForPrompt,
   renderSkillsHintForPrompt,
+  renderAlwaysSkills,
   isValidSkillName,
   skillFileName,
   type Skill,
@@ -383,7 +386,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   function watchSkillFolders(): void {
     stopWatchingSkills()
-    for (const dir of skillSearchPath()) {
+    /*
+     * The parent is watched as well as the folder itself.
+     *
+     * `fs.watch` on a path that does not exist throws, so before the first skill is written
+     * there is nothing to watch — and the moment that matters most is the *first* one being
+     * added. Watching `.lightcode` catches `skills/` coming into existence; watching the folder
+     * catches everything after. Duplicates are harmless: the callback is debounced and the
+     * reload is idempotent.
+     */
+    const dirs = skillSearchPath()
+    for (const dir of [...dirs, ...dirs.map((entry) => path.dirname(entry))]) {
       try {
         skillWatchers.push(
           // Recursive, because a skill may be a folder with SKILL.md inside — a non-recursive
@@ -684,6 +697,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Cleared with the task, like the spend it governs. One hard task deserving a bigger budget
    * is a real need; a raised ceiling that silently outlives it is a limit nobody set.
    */
+  /**
+   * Everything the expert has said in this task, kept so it can be re-read for nothing.
+   *
+   * Task-scoped like the session and the spend: advice about one piece of work is not advice
+   * about the next, and offering it there would be worse than not having it.
+   */
+  let expertAdvice: ExpertConsultationRecord[] = []
   let taskExpertLimits: ExpertLimits | undefined
   /** The expert's estimate for this task, cleared with it. */
   let taskExpertEstimate: ExpertEstimate | undefined
@@ -857,6 +877,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * cache nothing will ever read.
      */
     stopKeepAlive()
+    // Left in place: since a raised ceiling is now saved as the standing default, clearing it
+    // here would make the next chat disagree with what the Expert tab says the budget is.
+    expertAdvice = []
     taskExpertLimits = undefined
     taskExpertEstimate = undefined
     postExpertSpend()
@@ -1284,11 +1307,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
     if (expert !== undefined) {
+      // Free by construction: it has no path to the CLI, only to what was already said.
+      combined.register(createRecallExpertTool({ history: () => expertAdvice }))
       combined.register(
         createAskExpertTool({
           cli: expert.cli,
           ...(expert.model !== undefined ? { model: expert.model } : {}),
           onConsultation: recordConsultation,
+          onAdvice: (record) => expertAdvice.push(record),
           // Read at call time, not captured: the user can raise the limit mid-task and the very
           // next consultation should honour it, without starting a new task to pick it up.
           budget: () => checkExpertBudget(expertSpend, effectiveExpertLimits()),
@@ -1655,7 +1681,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * Either the whole list or a count and an instruction to search — never both, and
          * never neither. `renderSkillsHintForPrompt` explains why the count stays.
          */
-        skills: skillsSearchable ? renderSkillsHintForPrompt(skills.length) : renderSkillsForPrompt(turnSkills),
+        /*
+         * A skill marked `always` is included in full down both paths. Retrieval decides whether
+         * the *other* skills are listed or searched for; it does not get to withhold a standing
+         * instruction, which by definition has to be present before the model decides anything.
+         */
+        skills: skillsSearchable
+          ? [renderAlwaysSkills(turnSkills), renderSkillsHintForPrompt(skills.filter((skill) => skill.always !== true).length)]
+              .filter((section) => section.length > 0)
+              .join('\n\n')
+          : renderSkillsForPrompt(turnSkills),
         skillsSearchable,
         canWriteSkills: skillsDir !== undefined,
         /*
@@ -2165,10 +2200,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        *
        * The wider fetch is capped too, because `@` runs on every keystroke.
        */
-      const pattern = query.length > 0 ? `**/*${query}*` : '**/*'
+      /*
+       * The glob asks about the **last path segment only**, and the ranking then judges the
+       * whole path.
+       *
+       * `*` does not cross a separator, so `**\/*src/api*` — the obvious pattern for someone
+       * typing `src/api` — matches almost nothing, and the picker went empty exactly when the
+       * user was being *more* specific. Globbing one segment is something globs do reliably;
+       * everything else is a comparison, and comparisons belong in code where they can be
+       * tested.
+       */
+      const segment = query.slice(query.lastIndexOf('/') + 1)
+      const pattern = segment.length > 0 ? `**/*${segment}*` : '**/*'
       const found = await ui.findFiles(pattern, MENTION_SCAN_LIMIT, mentionExcludes(cachedMentionExcludes))
       const paths = found
         .map((absolute) => path.relative(workspaceRoot, absolute).split(path.sep).join('/'))
+        .filter(matchesMentionQuery(query))
         .sort(compareMentionCandidates(query))
         .slice(0, MENTION_RESULT_LIMIT)
       post({ type: 'mentionCandidates', query, paths })
@@ -3884,6 +3931,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Validated against the same schema the file loader uses, so a bad paste fails here
    * with a readable message rather than at spawn time (§15).
    */
+  /**
+   * Keys present in what the user wrote but absent from what the schema kept.
+   *
+   * Compared per server rather than deeply: a nested difference is almost always a value zod
+   * coerced, and reporting those would bury the one case that matters — a whole field silently
+   * discarded.
+   */
+  function droppedKeys(supplied: unknown, kept: Record<string, unknown>): string[] {
+    if (typeof supplied !== 'object' || supplied === null) return []
+    const missing: string[] = []
+    for (const [server, rawEntry] of Object.entries(supplied as Record<string, unknown>)) {
+      if (typeof rawEntry !== 'object' || rawEntry === null) continue
+      const keptEntry = kept[server]
+      if (typeof keptEntry !== 'object' || keptEntry === null) continue
+      for (const key of Object.keys(rawEntry as Record<string, unknown>)) {
+        if (!(key in (keptEntry as Record<string, unknown>))) missing.push(`${server}.${key}`)
+      }
+    }
+    return missing
+  }
+
   async function handleSaveMcpServers(json: string): Promise<void> {
     let parsed: unknown
     try {
@@ -3905,6 +3973,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const detail = result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')
       post({ type: 'mcpSaveError', message: detail })
       return
+    }
+
+    /*
+     * Say what was thrown away.
+     *
+     * The schema strips keys it does not know, so a config pasted with a field this client does
+     * not support saved "successfully" and did nothing — reported as "edit JSON save didn't
+     * work". Silently discarding part of what someone typed is the worst of both: it neither
+     * works nor complains. `timeout` in particular used to land here.
+     */
+    const dropped = droppedKeys(candidate, result.data)
+    if (dropped.length > 0) {
+      post({
+        type: 'mcpSaveError',
+        message: `Saved, but these were not recognised and have been dropped: ${dropped.join(', ')}.`,
+      })
     }
 
     try {
@@ -4343,14 +4427,43 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setScheduleEnabled') {
       void handleSetScheduleEnabled(message.id, message.enabled)
     } else if (message.type === 'setTaskExpertLimits') {
-      taskExpertLimits =
+      const next =
         message.maxSpendUsd === undefined && message.maxConsultations === undefined
           ? undefined
           : {
               ...(message.maxSpendUsd !== undefined ? { maxSpendUsd: message.maxSpendUsd } : {}),
               ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
             }
+      taskExpertLimits = next
       postExpertSpend()
+
+      /*
+       * Also saved as the standing default.
+       *
+       * The per-chat ceiling was designed to expire with the chat, on the reasoning that one hard
+       * task deserving a bigger budget should not silently raise the limit for ever. In practice
+       * that read as the setting being forgotten: someone raises the budget, opens the next
+       * conversation, and finds their number gone with nothing having told them it would be.
+       *
+       * Persisting it keeps the override *and* keeps it visible — the number is in the Expert
+       * tab, where changing it is one click, rather than in a chat that no longer exists.
+       */
+      if (next !== undefined) {
+        void configManager
+          .load()
+          .then(async ({ config }) => {
+            await configManager.save('user', {
+              ...config,
+              expert: {
+                ...config.expert,
+                ...(next.maxSpendUsd !== undefined ? { maxSpendUsd: next.maxSpendUsd } : {}),
+                ...(next.maxConsultations !== undefined ? { maxConsultations: next.maxConsultations } : {}),
+              },
+            })
+            await postExpert({ redetect: false })
+          })
+          .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+      }
     } else if (message.type === 'setExpertKeepAlive') {
       void configManager
         .load()

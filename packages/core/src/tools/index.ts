@@ -21,6 +21,10 @@ export { applyDiffTool } from './applyDiff/index.js'
 export { executeCommandTool } from './executeCommand.js'
 export { askFollowupQuestionTool } from './askFollowupQuestion.js'
 export {
+  createRecallExpertTool,
+  type ExpertConsultationRecord,
+} from './recallExpert.js'
+export {
   coerceFormValue,
   createAskUserFormTool,
   formFieldSchema,

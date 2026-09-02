@@ -75,22 +75,13 @@ async function toAttachment(file: File): Promise<ImageAttachmentInput | undefine
   return { mediaType: file.type, data: btoa(binary), name: file.name || 'pasted image' }
 }
 
-/**
- * Every property that decides where a glyph lands.
- *
- * Shared by the textarea and the highlight layer drawn behind it, because the two only line up
- * while they agree exactly. Changing padding or line height in one place alone is the bug this
- * constant exists to make impossible.
- */
+/** How the message text is laid out. */
 const composerTextLayout = {
   padding: '5px 6px',
   margin: 0,
   fontFamily,
   fontSize: 13,
   lineHeight: 1.45,
-  // A textarea wraps and preserves runs of spaces; the mirror has to be told to.
-  whiteSpace: 'pre-wrap',
-  overflowWrap: 'break-word',
   border: 'none',
 } as const
 
@@ -103,15 +94,7 @@ export function Composer(props: ComposerProps): ReactElement {
   const [highlighted, setHighlighted] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const mirrorRef = useRef<HTMLDivElement>(null)
-
-  /** Keeps the highlight layer scrolled to wherever the textarea is. */
-  const syncMirrorScroll = (element: HTMLTextAreaElement): void => {
-    const mirror = mirrorRef.current
-    if (mirror === null) return
-    mirror.scrollTop = element.scrollTop
-    mirror.scrollLeft = element.scrollLeft
-  }
+  
 
   /** Grows the box to fit the text, capped, so the send button never drifts out of line. */
   const resize = (element: HTMLTextAreaElement): void => {
@@ -216,6 +199,11 @@ export function Composer(props: ComposerProps): ReactElement {
   // Sending mid-turn queues rather than being refused. Waiting for a long turn to finish
   // before you can even type the follow-up is the thing this exists to fix.
   const canSend = text.trim().length > 0 || images.length > 0 || texts.length > 0
+
+  /** Paths the message refers to, with the `@` and any quoting taken off for display. */
+  const mentionedFiles = splitMentions(text)
+    .filter((segment) => segment.isMention)
+    .map((segment) => segment.text.replace(/^@/, '').replace(/^"|"$/g, ''))
 
   /**
    * Attaching is never blocked on the capability table.
@@ -324,6 +312,44 @@ export function Composer(props: ComposerProps): ReactElement {
         cannot un-attach, and a whole log file silently riding along on the next message is an
         expensive surprise.
       */}
+      {/*
+        The files this message mentions, listed under it.
+
+        The first attempt at making mentions visible painted them *inside* the box, with the
+        textarea's own glyphs turned transparent over a coloured copy of the same text. It looked
+        right and broke typing: the caret sat behind the last character, because two independently
+        laid-out layers cannot be relied upon to agree to the pixel across fonts and zoom levels,
+        and nothing automated can see that they have stopped agreeing.
+
+        So the highlight moved out of the input. Nothing here can touch the caret, it counts the
+        attachments at a glance — which is what the request was actually about in a long prompt —
+        and it reads the same as the file and image chips beside it.
+      */}
+      {mentionedFiles.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '6px 8px 0', alignItems: 'center' }}>
+          <span style={{ color: colors.muted, fontSize: 11 }}>
+            {mentionedFiles.length === 1 ? 'Mentions' : `Mentions (${String(mentionedFiles.length)})`}
+          </span>
+          {mentionedFiles.map((mention, index) => (
+            <span
+              key={`${mention}-${index}`}
+              title={mention}
+              style={{
+                padding: '1px 8px',
+                borderRadius: 8,
+                fontSize: 11,
+                fontFamily: 'var(--vscode-editor-font-family, monospace)',
+                color: colors.accent,
+                border: `1px solid ${colors.accent}`,
+                background: `color-mix(in srgb, ${colors.accent} 12%, transparent)`,
+              }}
+            >
+              {mention}
+            </span>
+          ))}
+        </div>
+      )}
+
       {texts.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '6px 8px 0' }}>
           {texts.map((attachment, index) => (
@@ -421,49 +447,7 @@ export function Composer(props: ComposerProps): ReactElement {
           borderRadius: 12,
         }}
       >
-        {/*
-          The mention highlighter.
-
-          A textarea cannot colour part of its own text, so the text is drawn twice: this
-          layer paints it with the mentions coloured, and the textarea sits exactly on top with
-          transparent glyphs and a visible caret. Everything that affects layout — font, size,
-          line height, padding, wrapping — has to match between the two or the highlight drifts
-          away from the words underneath it, which is why both read from the same constants.
-
-          `aria-hidden`, because a screen reader should hear the textarea once, not twice.
-        */}
-        <div style={{ position: 'relative', flex: 1, display: 'flex' }}>
-          <div
-            ref={mirrorRef}
-            aria-hidden
-            style={{
-              ...composerTextLayout,
-              position: 'absolute',
-              inset: 0,
-              overflow: 'hidden',
-              pointerEvents: 'none',
-              color: colors.inputForeground,
-            }}
-          >
-            {splitMentions(text).map((segment, index) => (
-              <span
-                key={index}
-                style={
-                  segment.isMention
-                    ? { color: colors.accent, fontWeight: 600 }
-                    : undefined
-                }
-              >
-                {segment.text}
-              </span>
-            ))}
-            {/*
-              A trailing newline is not rendered by the browser, so without this the mirror is
-              one line shorter than the textarea and every wrapped line after it sits wrong.
-            */}
-            {text.endsWith('\n') && <span>{'​'}</span>}
-          </div>
-          <textarea
+        <textarea
           ref={textareaRef}
           value={text}
           rows={2}
@@ -472,7 +456,6 @@ export function Composer(props: ComposerProps): ReactElement {
             setText(event.target.value)
             syncMentionQuery(event.target.value, event.target.selectionStart)
             resize(event.target)
-            syncMirrorScroll(event.target)
           }}
           onClick={(event) => syncMentionQuery(text, event.currentTarget.selectionStart)}
           onBlur={() => setMentionQuery(undefined)}
@@ -520,14 +503,10 @@ export function Composer(props: ComposerProps): ReactElement {
             maxHeight: 200,
             overflowY: 'auto',
             // Drawn by the layer beneath; only the caret and the selection stay visible here.
-            color: 'transparent',
-            caretColor: colors.inputForeground,
-            position: 'relative',
+            color: colors.inputForeground,
             background: 'transparent',
           }}
-          onScroll={(event) => syncMirrorScroll(event.currentTarget)}
         />
-        </div>
 
         {/* Always offered. Hiding it for an unrecognised model made attachment look
             unsupported when it was only unknown. */}

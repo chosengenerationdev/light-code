@@ -56,3 +56,36 @@ function rank(candidate: string, needle: string): number {
   if (name.includes(needle)) return 3
   return 4
 }
+
+/**
+ * Whether a candidate is worth showing for a query at all.
+ *
+ * The file index is asked only about the last path segment, because `*` does not cross a
+ * separator and the obvious whole-query glob matches nothing. So a query like `src/api` needs
+ * filtering here, against the full relative path.
+ *
+ * Matching is **subsequence, not substring**. Someone typing `mrank` should find
+ * `mentionRanking.ts`, and someone typing `srcapi` should find `src/api.ts` — people type the
+ * letters they remember, in order, and skip the rest. Ordering then decides which of the matches
+ * is worth being first; this only decides what is plausible at all.
+ */
+export function matchesMentionQuery(query: string): (candidate: string) => boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle.length === 0) return () => true
+
+  // Separators are ignored on both sides, so `src/api`, `srcapi` and `src api` behave alike.
+  const wanted = needle.replace(/[/\\ ]/g, '')
+  return (candidate) => isSubsequence(wanted, candidate.toLowerCase().replace(/[/\\]/g, ''))
+}
+
+function isSubsequence(needle: string, haystack: string): boolean {
+  if (needle.length === 0) return true
+  let index = 0
+  for (const character of haystack) {
+    if (character === needle[index]) {
+      index += 1
+      if (index === needle.length) return true
+    }
+  }
+  return false
+}

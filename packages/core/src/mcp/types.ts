@@ -19,6 +19,17 @@ export const stdioServerSchema = z.object({
   disabled: z.boolean().optional(),
   /** Tool names disabled individually within this server. */
   disabledTools: z.array(z.string()).optional(),
+  /**
+   * How long one tool call from this server may take, in seconds.
+   *
+   * The SDK's own default is a minute, which is short for the things people actually put behind
+   * MCP: a query against a large database, a build, a report. Hitting it looks like the server
+   * being broken rather than like a limit being reached, so it is configurable per server and
+   * the error says which number was exceeded.
+   *
+   * Applies per call, not per session.
+   */
+  timeout: z.number().positive().max(3600).optional(),
 })
 
 export const httpServerSchema = z.object({
@@ -26,6 +37,8 @@ export const httpServerSchema = z.object({
   headers: z.record(z.string(), z.string()).optional(),
   disabled: z.boolean().optional(),
   disabledTools: z.array(z.string()).optional(),
+  /** As above. A remote server is if anything more likely to be slow. */
+  timeout: z.number().positive().max(3600).optional(),
 })
 
 export const mcpServerSchema = z.union([stdioServerSchema, httpServerSchema])

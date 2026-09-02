@@ -131,7 +131,19 @@ export class McpConnection {
 
   async callTool(name: string, args: Record<string, unknown>): Promise<string> {
     if (this.client === undefined) throw new Error(`MCP server "${this.serverName}" is not connected.`)
-    const result = await this.client.callTool({ name, arguments: args })
+    /*
+     * The SDK's own timeout, rather than a race against our own timer.
+     *
+     * Racing would leave the request outstanding on a server that is merely slow, so the reply
+     * arrives later against a call nobody is waiting for. Passing it down means the SDK cancels
+     * the request properly.
+     */
+    const timeoutSeconds = this.config.timeout
+    const result = await this.client.callTool(
+      { name, arguments: args },
+      undefined,
+      timeoutSeconds === undefined ? undefined : { timeout: timeoutSeconds * 1000 },
+    )
     return renderToolResult(result)
   }
 

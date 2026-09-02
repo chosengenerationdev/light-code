@@ -53,7 +53,7 @@ export {
   mentionExcludeGlob,
   mentionExcludes,
 } from './context/mentionExcludes.js'
-export { compareMentionCandidates } from './context/mentionRanking.js'
+export { compareMentionCandidates, matchesMentionQuery } from './context/mentionRanking.js'
 export { GUIDE_STEPS, GUIDE_TITLE, GUIDE_DESCRIPTION, type GuideStep, type GuideTab } from './guide/steps.js'
 export { mergeScopes, USER_SCOPE_ONLY_KEYS, type ScopeMergeResult } from './config/scopes.js'
 export { defaultUserConfigPath, workspaceConfigPath } from './config/paths.js'
@@ -170,6 +170,7 @@ export {
   type ExpertAnswer,
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
+export { createRecallExpertTool, type ExpertConsultationRecord } from './tools/recallExpert.js'
 export { buildExpertBriefing, type BriefingInput } from './expert/briefing.js'
 export { extractEstimate, ESTIMATE_INSTRUCTION, type ExpertEstimate } from './expert/estimate.js'
 export {
@@ -344,6 +345,7 @@ export {
 export {
   loadSkills,
   renderSkillsForPrompt,
+  renderAlwaysSkills,
   renderSkillsHintForPrompt,
   parseFrontmatter,
   renderSkill,

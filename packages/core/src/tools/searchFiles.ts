@@ -7,6 +7,11 @@ const paramsSchema = z.object({
   path: z.string().min(1).default('.').describe('Directory to search, relative to the workspace root.'),
   pattern: z.string().min(1).describe('Regular expression to search for.'),
   filePattern: z.string().optional().describe('Glob to restrict which files are searched, e.g. "*.ts".'),
+  /** See `list_files`: ripgrep honours .gitignore, so `.venv` and `dist` are invisible by default. */
+  includeIgnored: z
+    .boolean()
+    .optional()
+    .describe('Search files excluded by .gitignore too — needed for .venv, dist, and similar folders.'),
 })
 export type SearchFilesParams = z.infer<typeof paramsSchema>
 
@@ -20,8 +25,12 @@ function runRipgrepSearch(
   pattern: string,
   filePattern: string | undefined,
   signal: AbortSignal | undefined,
+  includeIgnored: boolean,
 ): Promise<string> {
   const args = ['--line-number', '--context', '2', '--hidden', '-g', '!.git', '-g', '!node_modules']
+  // Same trap as list_files: ripgrep honours .gitignore, so searching `.venv` finds nothing and
+  // says nothing about why.
+  if (includeIgnored) args.push('--no-ignore-vcs')
   if (filePattern !== undefined) args.push('-g', filePattern)
   args.push('--regexp', pattern, '.')
 
@@ -56,8 +65,15 @@ export const searchFilesTool: Tool<SearchFilesParams> = {
         params.pattern,
         params.filePattern,
         context.signal,
+        params.includeIgnored === true,
       )
-      return { content: output.trim().length > 0 ? output : '(no matches)' }
+      if (output.trim().length > 0) return { content: output }
+      return {
+        content:
+          params.includeIgnored === true
+            ? '(no matches)'
+            : '(no matches — .gitignore-excluded files were not searched; retry with includeIgnored: true)',
+      }
     } catch (error) {
       return { content: `Search failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }

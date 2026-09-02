@@ -184,3 +184,36 @@ describe('validateMcpServerForm', () => {
     expect(validateMcpServerForm('x', { ...BLANK_MCP_FORM, kind: 'http', url: 'not a url' }).url).toMatch(/valid URL/)
   })
 })
+
+/**
+ * Reported two ways at once: "edit JSON save didn't work under mcp server tools" and "mcp tool
+ * level timeout configuration is needed". They were the same thing — the schema dropped keys it
+ * did not know, so a pasted `timeout` vanished and the save appeared to do nothing.
+ */
+describe('a per-server tool timeout', () => {
+  it('survives the round trip through the form', () => {
+    const config = fromMcpServerForm({ ...BLANK_MCP_FORM, kind: 'custom', command: 'srv', timeout: '300' }, 'win32')
+    expect(config).toMatchObject({ timeout: 300 })
+    expect(toMcpServerForm(config).timeout).toBe('300')
+  })
+
+  it('is left off entirely when the field is blank, so the default still applies', () => {
+    const config = fromMcpServerForm({ ...BLANK_MCP_FORM, kind: 'custom', command: 'srv' }, 'win32')
+    expect('timeout' in config).toBe(false)
+  })
+
+  it('applies to an HTTP server too, which is if anything more likely to be slow', () => {
+    const config = fromMcpServerForm({ ...BLANK_MCP_FORM, kind: 'http', url: 'https://x/mcp', timeout: '90' }, 'win32')
+    expect(config).toMatchObject({ timeout: 90 })
+  })
+
+  it('is refused rather than written when it is not a positive number of seconds', () => {
+    const errors = (timeout: string): Record<string, string> =>
+      validateMcpServerForm('srv', { ...BLANK_MCP_FORM, kind: 'custom', command: 'srv', timeout })
+    expect(errors('soon').timeout).toBeDefined()
+    expect(errors('0').timeout).toBeDefined()
+    expect(errors('99999').timeout).toBeDefined()
+    expect(errors('120').timeout).toBeUndefined()
+    expect(errors('').timeout).toBeUndefined()
+  })
+})

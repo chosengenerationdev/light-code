@@ -1,5 +1,50 @@
 # light-code-vscode
 
+## 0.41.0
+
+### Minor Changes
+
+- Five fixes from daily use, and three things that were missing.
+
+  **The `@` picker was asking the wrong question.** A glob's `*` does not cross a path
+  separator, so typing `src/api` matched almost nothing — the picker went emptiest exactly
+  when you were being most specific. It now globs the last segment and judges the whole path
+  in code, matching letters in order rather than as a contiguous run, so `mrank` finds
+  `mentionRanking.ts`.
+
+  **The mention highlight moved out of the input.** Painting colour inside the box meant two
+  independently laid-out layers over each other, and they stopped agreeing: the caret sat
+  behind the last character typed. Mentions are listed as chips under the message instead —
+  nothing there can touch the caret, and a long prompt's attachments are still countable at
+  a glance.
+
+  **A skill added by hand appears immediately.** The watcher could not watch a folder that
+  did not exist yet, which is exactly the moment a first skill is added; the parent is
+  watched too now.
+
+  **The expert budget set from the chat header is kept.** It expired with the conversation,
+  which read as the setting being forgotten.
+
+  **Editing MCP servers as JSON works, and gained a timeout.** Unknown keys were silently
+  dropped, so a pasted `timeout` vanished and the save appeared to do nothing. There is now a
+  real per-server timeout — in the form and in the config — and anything else dropped is
+  reported rather than discarded in silence.
+
+  **Junior mode consults on its own.** The guidance said "consult once, at the start", which
+  a capable model reads as permission to decide it does not need to. Consulting is now the
+  default action with the exceptions named, so the mode stops behaving like Code mode with a
+  larger bill.
+
+  **`recall_expert_advice`** returns advice already given in this task, free, so a plan lost
+  to an error is recovered rather than bought twice.
+
+  **A skill marked `always: true` in its frontmatter goes into every session in full** — the
+  standing instructions a workspace wants followed without being asked.
+
+  **`list_files` and `search_files` can reach ignored folders.** Both go through ripgrep,
+  which honours `.gitignore`, so `.venv` came back empty with no hint that a rule had been
+  applied. `includeIgnored` reaches in, and an empty result now says why it might be empty.
+
 ## 0.40.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { compareMentionCandidates } from './mentionRanking.js'
+import { compareMentionCandidates, matchesMentionQuery } from './mentionRanking.js'
 
 /**
  * Reported as "when I use @ it is not showing some files which I expect to see".
@@ -46,5 +46,48 @@ describe('the @ picker order', () => {
 
   it('ignores case, since nobody types the capitals', () => {
     expect(order('readme', ['docs/notes/readme-template.md', 'README.md'])[0]).toBe('README.md')
+  })
+})
+
+/**
+ * "When I typed @ it is still struggling to find the file I need", after ranking was added.
+ *
+ * The ranking was fine; the *glob* was not. `*` does not cross a path separator, so the obvious
+ * whole-query pattern matched almost nothing the moment someone typed a path — the picker went
+ * emptiest exactly when they were being most specific. The glob now asks about the last segment
+ * only and this decides the rest.
+ */
+describe('which candidates are plausible at all', () => {
+  const keep = (query: string, candidates: string[]): string[] => candidates.filter(matchesMentionQuery(query))
+
+  it('accepts a path fragment spanning a separator', () => {
+    expect(keep('src/api', ['src/api.ts', 'lib/other.ts'])).toEqual(['src/api.ts'])
+  })
+
+  it('ignores separators, so the same query works typed either way', () => {
+    expect(keep('srcapi', ['src/api.ts'])).toEqual(['src/api.ts'])
+    expect(keep('src\\api', ['src/api.ts'])).toEqual(['src/api.ts'])
+  })
+
+  /** People type the letters they remember, in order, and skip the rest. */
+  it('matches letters in order rather than a contiguous run', () => {
+    expect(keep('mrank', ['context/mentionRanking.ts'])).toEqual(['context/mentionRanking.ts'])
+    expect(keep('cfgsch', ['config/schema.ts'])).toEqual(['config/schema.ts'])
+  })
+
+  it('still rejects a file that has nothing to do with the query', () => {
+    expect(keep('mrank', ['docs/hosting.md'])).toEqual([])
+  })
+
+  it('rejects letters that appear only out of order', () => {
+    expect(keep('ba', ['a/b.ts'])).toEqual([])
+  })
+
+  it('keeps everything when nothing has been typed yet', () => {
+    expect(keep('', ['a.ts', 'b.ts'])).toEqual(['a.ts', 'b.ts'])
+  })
+
+  it('ignores case, since nobody types the capitals', () => {
+    expect(keep('readme', ['README.md'])).toEqual(['README.md'])
   })
 })

@@ -447,6 +447,8 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
             onChange={(cwd) => patch({ cwd })}
           />
 
+          <TimeoutField value={form.timeout} error={show('timeout')} onChange={(timeout) => patch({ timeout })} />
+
           <PairEditor
             idPrefix="lc-mcp-env"
             label="Environment variables"
@@ -502,6 +504,37 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
         {props.saving && <span style={{ fontSize: 11, color: colors.muted }}>Saving…</span>}
         {submitted && invalid && <span style={{ fontSize: 11, color: colors.error }}>Fix the fields above.</span>}
       </div>
+    </div>
+  )
+}
+
+/**
+ * How long one tool call from this server may take.
+ *
+ * Offered because the SDK's minute-long default is short for what people actually put behind
+ * MCP — a query over a large table, a build, a report — and hitting it presents as the server
+ * being broken rather than as a limit being reached. Blank keeps the default rather than
+ * meaning zero, which is why it is a text field and not a number input.
+ */
+function TimeoutField(props: { value: string; error: string | undefined; onChange: (value: string) => void }): ReactElement {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label htmlFor="lc-mcp-timeout" style={labelStyle()}>
+        Tool call timeout
+      </label>
+      <input
+        id="lc-mcp-timeout"
+        inputMode="numeric"
+        value={props.value}
+        placeholder="Seconds — blank for the default"
+        onChange={(event) => props.onChange(event.target.value)}
+        style={{ ...textFieldStyle(), ...(props.error !== undefined ? { borderColor: colors.error } : {}) }}
+      />
+      <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+        Applies to each call, not to the session. Raise it for a server that queries something
+        large; a call that exceeds it is cancelled and the error names this number.
+      </span>
+      {props.error !== undefined && <span style={fieldErrorStyle()}>{props.error}</span>}
     </div>
   )
 }
