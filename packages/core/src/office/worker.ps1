@@ -73,6 +73,31 @@ function Get-Worksheet {
     throw "No sheet named '$Name' in $($Workbook.Name)."
 }
 
+# Turns Excel's internal error variants into the text a person sees in the cell.
+#
+# An error arrives over COM as a signed integer - #N/A is -2146826246 - which is meaningless to
+# anyone reading it and, worse, looks like a number a formula produced. The low word is the
+# xlCVError constant, and that maps to the familiar names.
+function Convert-ExcelValue {
+    param($Value)
+
+    if ($Value -isnot [int]) { return $Value }
+    if ($Value -ge 0) { return $Value }
+
+    $code = $Value -band 0xFFFF
+    switch ($code) {
+        2000 { return '#NULL!' }
+        2007 { return '#DIV/0!' }
+        2015 { return '#VALUE!' }
+        2023 { return '#REF!' }
+        2029 { return '#NAME?' }
+        2036 { return '#NUM!' }
+        2042 { return '#N/A' }
+        2043 { return '#GETTING_DATA' }
+        default { return $Value }
+    }
+}
+
 # A cell as the model should see it: what it displays, what it holds, and what computes it.
 function Read-Cell {
     param($Cell)
@@ -86,7 +111,7 @@ function Read-Cell {
     if ($formula -is [string] -and $formula.StartsWith('=')) { $result.formula = $formula }
 
     try {
-        $result.value = $Cell.Value2
+        $result.value = Convert-ExcelValue -Value $Cell.Value2
     } catch {
         # A cell holding an error (#REF!, #DIV/0!) throws on Value2 in some builds. The
         # displayed text still carries the answer, and an error *is* the interesting case here.
@@ -202,11 +227,19 @@ function Invoke-ExcelTrace {
     return @{ workbook = $wb.Name; start = "$($sheet.Name)!$($Request.cell)"; nodes = $script:traceNodes }
 }
 
+# Reaching the VBA project, or explaining why not.
+#
+# Measured: with the Trust Center setting off, `$Workbook.VBProject` does **not** throw in Excel
+# 16 - it returns $null. So the original try/catch never fired and every caller reported "this
+# workbook contains no VBA modules", which is a confident wrong answer to a question about
+# security settings. The null check is the one that actually does the work.
 function Get-VbProject {
     param($Workbook)
 
     try {
-        return $Workbook.VBProject
+        $project = $Workbook.VBProject
+        if ($null -eq $project) { throw 'VBProject is not accessible.' }
+        return $project
     } catch {
         throw ('Excel is not allowing access to the VBA project. Turn on ' +
             'File > Options > Trust Center > Trust Center Settings > Macro Settings > ' +
@@ -278,6 +311,110 @@ function Invoke-ExcelWriteMacro {
 # take a minute, may put a profile chooser on screen, and leaves the user with an application
 # they did not open. The first live test of this hung for the full timeout for exactly that
 # reason. Requiring it to be running already is both faster and honest.
+# Runs a macro and reports what it did, including how it failed.
+#
+# ## Why the before/after snapshot is part of running, not a separate call
+#
+# The point of running a macro during an investigation is to find out what it changes. Asking
+# separately would race the user - they might touch the sheet in between - and would let a caller
+# report "after" values it never had a "before" for.
+#
+# ## What this cannot do
+#
+# COM cannot drive the VBA debugger: there are no breakpoints, no stepping, and no reading of
+# locals while stopped. What it gets is the return value, or the error VBA raised, which is the
+# part people actually need. Anything finer means opening the VBE by hand.
+function Invoke-ExcelRunMacro {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+
+    $before = @()
+    $sheet = $null
+    if ($Request.watchSheet -and $Request.watchRange) {
+        $sheet = Get-Worksheet -Workbook $wb -Name $Request.watchSheet
+        foreach ($cell in $sheet.Range($Request.watchRange)) { $before += Read-Cell -Cell $cell }
+    }
+
+    # Qualified with the workbook so a macro of the same name in another open book cannot be the
+    # one that runs - which would be a very hard mistake to notice afterwards.
+    $qualified = "'$($wb.Name)'!$($Request.macro)"
+
+    $failed = $false
+    $errorText = $null
+    $returned = $null
+    try {
+        $arguments = @()
+        if ($Request.arguments) { $arguments = @($Request.arguments) }
+        switch ($arguments.Count) {
+            0 { $returned = $app.Run($qualified) }
+            1 { $returned = $app.Run($qualified, $arguments[0]) }
+            2 { $returned = $app.Run($qualified, $arguments[0], $arguments[1]) }
+            3 { $returned = $app.Run($qualified, $arguments[0], $arguments[1], $arguments[2]) }
+            default { throw 'At most three arguments can be passed to a macro from here.' }
+        }
+    } catch {
+        # Reported as a result, not thrown: a macro that fails is the *answer* when the reason for
+        # running it was to find out why it fails.
+        $failed = $true
+        $errorText = $_.Exception.Message
+    }
+
+    $after = @()
+    if ($sheet) {
+        foreach ($cell in $sheet.Range($Request.watchRange)) { $after += Read-Cell -Cell $cell }
+    }
+
+    return @{
+        workbook = $wb.Name
+        macro    = $Request.macro
+        failed   = $failed
+        error    = $errorText
+        returned = if ($null -eq $returned) { $null } else { [string]$returned }
+        before   = $before
+        after    = $after
+    }
+}
+
+# Evaluates an expression without writing it anywhere.
+#
+# `Application.Evaluate` computes a formula in the workbook's own context - the same names, the
+# same sheets - and returns the answer without a cell being touched. It is the "what would this
+# give" question, which during an investigation is asked far more often than "change this".
+function Invoke-ExcelEvaluate {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+
+    # Activated so relative references and sheet-scoped names resolve the way they would in a cell
+    # on that sheet. Restored afterwards, because moving the user's selection is a visible change.
+    $previous = $app.ActiveSheet
+    $result = $null
+    $failed = $false
+    $errorText = $null
+    try {
+        $sheet.Activate()
+        $result = $app.Evaluate($Request.expression)
+    } catch {
+        $failed = $true
+        $errorText = $_.Exception.Message
+    } finally {
+        try { $previous.Activate() } catch { }
+    }
+
+    return @{
+        workbook   = $wb.Name
+        sheet      = $sheet.Name
+        expression = $Request.expression
+        failed     = $failed
+        error      = $errorText
+        value      = if ($null -eq $result) { $null } else { [string](Convert-ExcelValue -Value $result) }
+    }
+}
+
 function Get-OutlookNamespace {
     $app = Get-OfficeApp -ProgId 'Outlook.Application' -AttachOnly $true
     return $app.GetNamespace('MAPI')
@@ -434,6 +571,8 @@ function Invoke-Request {
         'excel.listMacros'      { return Invoke-ExcelListMacros -Request $Request }
         'excel.readMacro'       { return Invoke-ExcelReadMacro -Request $Request }
         'excel.writeMacro'      { return Invoke-ExcelWriteMacro -Request $Request }
+        'excel.runMacro'        { return Invoke-ExcelRunMacro -Request $Request }
+        'excel.evaluate'        { return Invoke-ExcelEvaluate -Request $Request }
         'outlook.folders'       { return Invoke-OutlookFolders -Request $Request }
         'outlook.search'        { return Invoke-OutlookSearch -Request $Request }
         'outlook.read'          { return Invoke-OutlookRead -Request $Request }

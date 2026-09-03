@@ -1,5 +1,38 @@
 # @chosengeneration/light-code
 
+## 0.20.0
+
+### Minor Changes
+
+- VBA debugging, with nothing changed unless you approve it.
+
+  `excel_check_macro` reads a module for the faults visible without running it — missing
+  `Option Explicit`, an `On Error Resume Next` that never gets turned off, unclosed blocks,
+  error handlers jumping to labels that do not exist, and references to sheets the workbook no
+  longer has. It changes nothing and reports _every_ fault it finds rather than stopping at the
+  first, which is what running does. A renamed tab is the commonest way a working macro starts
+  failing, and VBA's own error for it — "subscript out of range" — names nothing at all.
+
+  `excel_evaluate` works out what a formula would return, in the workbook's own context, without
+  writing it into any cell. Testing a fix by putting it in a spare cell is a modification nobody
+  asked for.
+
+  `excel_run_macro` executes a macro and reports its result or the VBA error, and can snapshot a
+  range before and after to show exactly which cells moved. It always asks first — no
+  auto-approve setting reaches it, and it is never available to a scheduled run — and the prompt
+  shows **the source that will actually run**, not the macro's name, because "run DoTheThing"
+  tells you nothing about what you are agreeing to.
+
+  What this cannot do, stated plainly: COM cannot drive the VBA debugger, so there are no
+  breakpoints, no stepping, and no reading of locals while stopped.
+
+  Two faults found by running it against real Excel rather than reasoning about it. An Excel
+  error value arrives over COM as a signed integer — `#N/A` is -2146826246 — which reads as a
+  number a formula produced; those are translated back now. And with the Trust Center setting
+  off, `VBProject` returns null rather than throwing, so every caller was reporting "this
+  workbook contains no VBA modules" when the truth was that access was blocked. It now names
+  the exact setting to change.
+
 ## 0.19.0
 
 ### Minor Changes

@@ -19,6 +19,11 @@ import {
   createOutlookReadTool,
 } from '../tools/office.js'
 import {
+  createExcelCheckMacroTool,
+  createExcelEvaluateTool,
+  createExcelRunMacroTool,
+} from '../tools/officeVba.js'
+import {
   coerceFormValue,
   type AskUserFormParams,
   type FormAnswer,
@@ -1370,6 +1375,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createExcelListMacrosTool(officeOptions))
         combined.register(createExcelReadMacroTool(officeOptions))
         combined.register(createExcelWriteMacroTool(officeOptions))
+        combined.register(createExcelCheckMacroTool(officeOptions))
+        combined.register(createExcelEvaluateTool(officeOptions))
+        combined.register(createExcelRunMacroTool(officeOptions))
       }
       if (cachedOffice.outlook === true) {
         combined.register(createOutlookFoldersTool(officeOptions))

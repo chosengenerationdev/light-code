@@ -54,6 +54,13 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * human sees the source once, and no category toggle can stand in for that.
    */
   'excel_write_macro',
+  /*
+   * Running a macro executes somebody else's VBA as the user: it can rewrite the workbook, write
+   * files, or send mail. That is not something a category toggle should ever cover, and the
+   * approval showing the actual source is the only thing standing between "run DoTheThing" and
+   * whatever DoTheThing does.
+   */
+  'excel_run_macro',
 ])
 
 export function decideFromPolicy(

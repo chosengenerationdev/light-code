@@ -58,6 +58,32 @@ describe('the inlined PowerShell worker', () => {
   it('leaves the workbook unsaved after a macro write, and says so', () => {
     expect(OFFICE_WORKER_SOURCE).toMatch(/Deliberately not saved/)
   })
+
+  /**
+   * Measured against Excel 16: with the Trust Center setting off, `VBProject` returns **null**
+   * rather than throwing. The original try/catch therefore never fired and every caller reported
+   * "this workbook contains no VBA modules" — a confident wrong answer to a question that was
+   * really about a security setting.
+   */
+  it('detects blocked VBA access by the null it actually returns', () => {
+    expect(OFFICE_WORKER_SOURCE).toMatch(/\$null -eq \$project/)
+    expect(OFFICE_WORKER_SOURCE).toMatch(/Trust access to the VBA project object model/)
+  })
+
+  /**
+   * An Excel error arrives over COM as a signed integer — #N/A is -2146826246 — which reads as a
+   * number a formula produced. Verified live: evaluating a failing VLOOKUP returned exactly that.
+   */
+  it('turns error variants back into the text a person sees in the cell', () => {
+    expect(OFFICE_WORKER_SOURCE).toMatch(/#DIV\/0!/)
+    expect(OFFICE_WORKER_SOURCE).toMatch(/#N\/A/)
+    expect(OFFICE_WORKER_SOURCE).toMatch(/2042/)
+  })
+
+  /** Running a macro is qualified with its workbook, or one of the same name elsewhere could run. */
+  it('qualifies a macro with the workbook that owns it', () => {
+    expect(OFFICE_WORKER_SOURCE).toMatch(/\$qualified = /)
+  })
 })
 
 describe('platform support', () => {

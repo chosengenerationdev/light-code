@@ -30,6 +30,7 @@ import type { Tool, ToolResult } from './types.js'
  * to run it before keeping it. The tool result says so explicitly.
  */
 
+/** Shared by `officeVba.ts`, which holds the debugging half of the same feature. */
 export interface OfficeToolOptions {
   bridge: OfficeBridge
 }

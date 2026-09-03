@@ -670,6 +670,19 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   its precedents, across sheets, to raw input — the "why is this #DIV/0!" question. Excel's own
   `Precedents` covers only the current sheet, so cross-sheet references are also read out of the
   formula text.
+- **VBA debugging is three tools, ordered by how much they risk** (0.44.0, and the user's
+  constraint was explicit: nothing changes without approval). `excel_check_macro` is static — it
+  changes nothing and reports *every* fault rather than the first, which is all running gives you.
+  `excel_evaluate` computes a formula in the workbook's context without writing it anywhere.
+  `excel_run_macro` executes, so it is `command`, always asks, is never available to a schedule,
+  and its **preview fetches and shows the macro's own source** — invariant 8 applied to somebody
+  else's code rather than to a diff we computed.
+  **COM cannot drive the VBA debugger**: no breakpoints, no stepping, no locals while stopped.
+  Say so rather than implying otherwise.
+- **Two faults that only running it could find**, both now pinned by tests: an Excel error value
+  arrives over COM as a signed integer (`#N/A` is -2146826246) and reads as a number a formula
+  produced; and with the Trust Center setting off `VBProject` returns **null rather than
+  throwing**, so every caller reported "no VBA modules" when the truth was blocked access.
 - **`excel_write_macro` is in `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES`.** VBA runs on
   the machine as the user and nobody reviews a macro afterwards; that is section 13's argument
   exactly. The approval shows the code, and the workbook is left **unsaved** so it can be run
@@ -690,10 +703,16 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   first version listed only the top level, so a nested folder was reachable by path and
   impossible to discover — reachable-but-invisible is the same failure as absent.
 
-**Verified against real Excel 16.0**: sessions, range reads, and a three-level cross-sheet trace
-that correctly identified a zero divisor as the source of a `#DIV/0!`. **Outlook is verified only
-as far as its attach-refusal message** — the search and read paths have never run against a live
-mailbox.
+**Verified against real Excel 16.0**: sessions, range reads, a three-level cross-sheet trace that
+correctly identified a zero divisor as the source of a `#DIV/0!`, and `excel_evaluate` returning
+`#N/A` and `#NAME?` for failing formulas.
+
+**Not verified, and both for the same reason:** `excel_run_macro`, `excel_read_macro` and
+`excel_check_macro` against a real module, because **"Trust access to the VBA project object
+model" is off on the development machine** and turning it on is a change to someone's security
+settings that no build step should make. The blocked-access path *is* verified — it produces the
+message naming the setting. **Outlook's search and read are verified only as far as the
+attach-refusal message**; they have never run against a live mailbox.
 
 ---
 
@@ -1045,14 +1064,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.43.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.43.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.44.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.44.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.19.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.20.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1068,7 +1087,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.43.0, host 0.19.0 — and keep working from
+**Next:** publish the pending versions — extension 0.44.0, host 0.20.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
