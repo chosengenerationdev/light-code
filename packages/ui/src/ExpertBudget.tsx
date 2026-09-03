@@ -23,10 +23,10 @@ export interface ExpertBudgetProps {
   /**
    * The active mode.
    *
-   * Junior mode is the one built around consulting the expert, so it is the only mode where a
-   * budget is worth a permanent place in the header. `ask_expert` is in the `read` group and so
-   * remains callable elsewhere — the limit still applies there, it is simply not something to
-   * put in front of someone who is not using the feature.
+   * Kept for the label — a Junior-mode budget is the one being planned against, and saying so is
+   * worth a word. It no longer decides *whether* the control appears: `ask_expert` is callable in
+   * Code mode too, so hiding the ceiling there meant it could only be set after money had already
+   * been spent under whatever default happened to apply.
    */
   modeId: string
   /** Omitting both clears the override and returns to the configured default. */
@@ -76,12 +76,17 @@ export function ExpertBudget(props: ExpertBudgetProps): ReactElement | null {
   }, [open])
 
   /*
-   * Shown in Junior mode, and anywhere else only once the expert has actually been consulted.
-   * Hiding it outright in other modes would strand a Code-mode session that did spend money
-   * with no way to adjust the ceiling it is about to hit.
+   * Shown wherever the expert can be consulted, which is every mode that has the tool.
+   *
+   * It used to appear in Junior mode only, and elsewhere just once money had already been spent.
+   * That was the wrong way round: `ask_expert` is available in Code mode too, so the ceiling was
+   * hidden precisely while it was still worth setting, and appeared only after the first
+   * consultation had gone through under whatever limit happened to be configured.
+   *
+   * The number it starts from is the one saved in the Expert tab, so a limit set there is what
+   * every conversation begins with, and changing it here changes it from then on.
    */
   if (!props.enabled) return null
-  if (props.modeId !== 'junior' && props.consultations === 0) return null
 
   const numeric = (value: string): number => {
     const parsed = Number(value.trim())

@@ -679,6 +679,11 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   else's code rather than to a diff we computed.
   **COM cannot drive the VBA debugger**: no breakpoints, no stepping, no locals while stopped.
   Say so rather than implying otherwise.
+- **A named line is usable evidence** (0.44.1): `excel_read_macro` returns numbered source in the
+  VBA editor's own numbering with `aroundLine` marking the line, and `excel_check_macro` quotes
+  that line back and ranks findings by distance from it — ranked, never filtered, since the cause
+  is often nowhere near the symptom. Before this the source was an unnumbered blob and the model
+  had to count, which it does badly.
 - **Two faults that only running it could find**, both now pinned by tests: an Excel error value
   arrives over COM as a signed integer (`#N/A` is -2146826246) and reads as a number a formula
   produced; and with the Trust Center setting off `VBProject` returns **null rather than
@@ -1064,14 +1069,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.44.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.44.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.44.2**, built and unpublished:
+`apps/vscode/light-code-vscode-0.44.2.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.20.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.20.2**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1087,7 +1092,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.44.0, host 0.20.0 — and keep working from
+**Next:** publish the pending versions — extension 0.44.2, host 0.20.2 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

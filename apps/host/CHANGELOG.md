@@ -1,5 +1,36 @@
 # @chosengeneration/light-code
 
+## 0.20.2
+
+### Patch Changes
+
+- The expert budget is in the header in every mode, not only Junior.
+
+  `ask_expert` is in the read group, so Code mode can consult and can spend — but the ceiling
+  appeared only in Junior mode, or elsewhere once money had already gone. That was the wrong way
+  round: it was hidden precisely while it was still worth setting, and became visible only after
+  the first consultation had run under whatever default happened to apply.
+
+  It starts from the limit saved in the Expert tab, and changing it in the header saves it as the
+  new default, so the two agree rather than drifting.
+
+## 0.20.1
+
+### Patch Changes
+
+- Telling the assistant which VBA line fails now actually helps it.
+
+  `excel_read_macro` returned an unnumbered blob, so "it fails on line 47" meant the model had
+  to count lines — which it does badly, and being confidently wrong about _which_ line failed is
+  worse than not knowing. The source comes back numbered, in the VBA editor's own numbering, and
+  `aroundLine` shows that part of the module with the line marked. A line past the end of the
+  module says so, because that usually means the failure is in a different one.
+
+  `excel_check_macro` takes `aroundLine` too: it quotes the line back — so a numbering mismatch
+  is visible at once — and lists findings nearest it first. Ranked rather than filtered, because
+  the cause is often nowhere near the symptom: a swallowed error thirty lines earlier is exactly
+  the sort of thing that makes a later line fail quietly.
+
 ## 0.20.0
 
 ### Minor Changes

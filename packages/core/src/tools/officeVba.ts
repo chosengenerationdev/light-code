@@ -174,6 +174,13 @@ export function createExcelEvaluateTool(options: OfficeToolOptions): Tool<z.infe
 const checkMacroSchema = z.object({
   workbook: workbookField,
   module: z.string().min(1).describe('Module name from excel_list_macros.'),
+  /** When the user says which line fails, findings there are the ones worth reading first. */
+  aroundLine: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('The line the user says fails. Findings near it are listed first and the line is quoted.'),
 })
 
 /**
@@ -189,7 +196,8 @@ export function createExcelCheckMacroTool(options: OfficeToolOptions): Tool<z.in
     description:
       'Check a VBA module for the faults visible without running it: missing Option Explicit, ' +
       'swallowed errors, unclosed blocks, error handlers jumping nowhere, and references to sheets ' +
-      'this workbook does not have. Changes nothing. Try this before excel_run_macro.',
+      'this workbook does not have. Changes nothing. Try this before excel_run_macro. When the user ' +
+      'says which line fails, pass aroundLine — the line is quoted back and findings near it come first.',
     parametersSchema: checkMacroSchema,
     async execute(params): Promise<ToolResult> {
       try {
@@ -205,17 +213,52 @@ export function createExcelCheckMacroTool(options: OfficeToolOptions): Tool<z.in
         const sheets = sessions.workbooks.find((entry) => entry.name === module.workbook)?.sheets ?? []
 
         const findings = checkVba({ code: module.code, sheets })
+        const lines = module.code.split(/\r?\n/)
+        const quoted =
+          params.aroundLine === undefined
+            ? []
+            : [
+                `Line ${String(params.aroundLine)} reads:`,
+                `  ${lines[params.aroundLine - 1] ?? '(past the end of this module — is the failure in another one?)'}`,
+                '',
+              ]
+
         if (findings.length === 0) {
           return {
-            content:
+            content: [
+              ...quoted,
               `No static faults found in ${module.module}. That does not mean it works — it means ` +
-              'nothing is wrong in a way that is visible without running it.',
+                'nothing is wrong in a way that is visible without running it.',
+              ...(params.aroundLine === undefined
+                ? []
+                : [
+                    '',
+                    'Nothing here explains a failure on that line, so it is likely a runtime one: a value ' +
+                      'that is not what the code assumes, an object that is Nothing, or a type mismatch. ' +
+                      'excel_read_range on the cells it touches, or excel_evaluate on the expression, will ' +
+                      'usually show it.',
+                  ]),
+            ].join('\n'),
           }
+        }
+
+        /*
+         * Ordered by distance from the line the user named.
+         *
+         * They are telling us where the failure surfaced, so a finding on that line, or a few lines
+         * above it, is the one they need to read first. Sorting rather than filtering: the cause is
+         * often nowhere near the symptom - a swallowed error thirty lines earlier is exactly the
+         * sort of thing that makes a later line fail - so nothing is hidden, only ranked.
+         */
+        if (params.aroundLine !== undefined) {
+          const target = params.aroundLine
+          findings.sort((a, b) => Math.abs(a.line - target) - Math.abs(b.line - target))
         }
 
         const errors = findings.filter((finding) => finding.severity === 'error').length
         return {
           content: [
+            ...quoted,
             `${String(findings.length)} finding(s) in ${module.workbook} / ${module.module}` +
               `${errors > 0 ? ` — ${String(errors)} definitely wrong` : ''}:`,
             '',

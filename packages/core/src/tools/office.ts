@@ -211,19 +211,78 @@ const macroSchema = z.object({
   module: z.string().min(1).describe('Module name from excel_list_macros.'),
 })
 
-export function createExcelReadMacroTool(options: OfficeToolOptions): Tool<z.infer<typeof macroSchema>> {
+const readMacroSchema = macroSchema.extend({
+  /**
+   * The line the user is asking about.
+   *
+   * VBA reports a failure by highlighting a line in the editor, so "it fails on line 47" is how
+   * people describe a problem. Answering that means the numbering has to be the *same* numbering
+   * they are reading, which is the module's own — hence counting from the first line of the
+   * module, blank lines and comments included, exactly as the VBA editor does.
+   */
+  aroundLine: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('Show the module around this line — use it when the user names the line that fails.'),
+  context: z.number().int().min(1).max(200).optional().describe('Lines either side of aroundLine. Default 25.'),
+})
+
+export function createExcelReadMacroTool(options: OfficeToolOptions): Tool<z.infer<typeof readMacroSchema>> {
   return {
     name: 'excel_read_macro',
     group: 'read',
-    description: 'Read the VBA source of one module in an open workbook.',
-    parametersSchema: macroSchema,
+    description:
+      'Read the VBA source of one module in an open workbook, with line numbers matching what the ' +
+      'VBA editor shows. Pass aroundLine when the user says which line fails, to see that part of ' +
+      'the module with its surroundings.',
+    parametersSchema: readMacroSchema,
     async execute(params): Promise<ToolResult> {
       try {
+        const { aroundLine, context, ...request } = params
         const result = await options.bridge.request<{ workbook: string; module: string; code: string }>({
           op: 'excel.readMacro',
-          ...params,
+          ...request,
         })
-        return { content: [`' ${result.workbook} / ${result.module}`, '', result.code].join('\n') }
+
+        const all = result.code.split(/\r?\n/)
+        const span = context ?? 25
+        const from = aroundLine === undefined ? 1 : Math.max(1, aroundLine - span)
+        const to = aroundLine === undefined ? all.length : Math.min(all.length, aroundLine + span)
+
+        if (aroundLine !== undefined && aroundLine > all.length) {
+          // Said rather than shown as an empty window: a line past the end usually means the wrong
+          // module, and silently returning nothing would send the investigation the wrong way.
+          return {
+            content:
+              `${result.module} has only ${String(all.length)} lines, so line ${String(aroundLine)} is not in it. ` +
+              'The failure may be in a different module — excel_list_macros shows them all.',
+            isError: true,
+          }
+        }
+
+        // Numbered, and marked at the line asked about. A model counting lines in a blob of text
+        // gets it wrong, and being wrong about *which* line fails is worse than not knowing.
+        const numbered = all
+          .slice(from - 1, to)
+          .map((line, index) => {
+            const number = from + index
+            const marker = number === aroundLine ? '>>' : '  '
+            return `${marker}${String(number).padStart(4)} | ${line}`
+          })
+          .join('\n')
+
+        return {
+          content: [
+            `' ${result.workbook} / ${result.module}` +
+              (aroundLine === undefined
+                ? ` (${String(all.length)} lines)`
+                : ` — lines ${String(from)}-${String(to)} of ${String(all.length)}, around line ${String(aroundLine)}`),
+            '',
+            numbered,
+          ].join('\n'),
+        }
       } catch (error) {
         return { content: message(error), isError: true }
       }

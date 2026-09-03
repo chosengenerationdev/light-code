@@ -63,22 +63,25 @@ describe('ExpertBudget', () => {
   })
 
   /**
-   * Junior mode is the one built around consulting the expert. Elsewhere the button would be
-   * a permanent reminder of a feature the user is not using.
+   * This used to assert the opposite — hidden outside Junior mode until money had been spent.
+   * That was the wrong way round: `ask_expert` is in the read group, so Code mode can consult and
+   * can spend, and the ceiling was hidden precisely while it was still worth setting. Requested
+   * directly: "add expert budget to code mode too".
    */
-  it('stays out of the header in other modes', () => {
+  it('is in the header in Code mode, before anything has been spent', () => {
     render({ modeId: 'code' })
-    expect(container.textContent).toBe('')
+    expect(container.textContent).toContain('Budget')
   })
 
-  /**
-   * `ask_expert` is in the read group, so Code mode can consult and can spend. Hiding the
-   * control outright would strand such a session with no way to adjust the ceiling it is
-   * about to hit.
-   */
-  it('appears in other modes once the expert has actually been consulted', () => {
+  it('shows the configured ceiling in Code mode once there is spending against it', () => {
     render({ modeId: 'code', consultations: 2, usd: 0.2, maxSpendUsd: 1 })
     expect(container.textContent).toContain('$1.00')
+  })
+
+  /** The expert being off is the one case where there is nothing to budget. */
+  it('is absent in every mode when the expert is not enabled', () => {
+    render({ modeId: 'code', enabled: false })
+    expect(container.textContent).toBe('')
   })
 
   /**
