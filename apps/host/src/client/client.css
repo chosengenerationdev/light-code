@@ -39,8 +39,23 @@
   --vscode-testing-iconPassed: #3d8f3d;
 }
 
+/*
+ * Dark applies in two ways, and both are needed.
+ *
+ * `prefers-color-scheme` follows the **browser's** appearance setting, not the operating
+ * system's — a corporate Edge pinned to light shows a light UI on a dark Windows, and the user
+ * has no way to change it and no clue why. So the media query is guarded: it applies unless the
+ * user has explicitly asked for light, and an explicit `data-theme="dark"` wins regardless.
+ *
+ * Written as two rules over one shared block rather than duplicated, because a colour defined in
+ * only one of them is a bug nobody sees until they toggle.
+ */
+:root:not([data-theme='light']) {
+  color-scheme: light dark;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --vscode-editor-background: #1f1f1f;
     --vscode-sideBar-background: #181818;
     --vscode-foreground: #cccccc;
@@ -66,6 +81,39 @@
     --vscode-inputValidation-errorForeground: #cccccc;
     --vscode-testing-iconPassed: #3fb950;
   }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+    --vscode-editor-background: #1f1f1f;
+    --vscode-sideBar-background: #181818;
+    --vscode-foreground: #cccccc;
+    --vscode-descriptionForeground: #9d9d9d;
+    --vscode-widget-border: #313131;
+    --vscode-panel-border: #2b2b2b;
+    --vscode-input-background: #313131;
+    --vscode-input-foreground: #cccccc;
+    --vscode-input-border: #3c3c3c;
+    --vscode-button-background: #0078d4;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-hoverBackground: #026ec1;
+    --vscode-button-secondaryBackground: #313131;
+    --vscode-button-secondaryForeground: #cccccc;
+    --vscode-button-secondaryHoverBackground: #3c3c3c;
+    --vscode-toolbar-hoverBackground: #2a2a2a;
+    --vscode-errorForeground: #f85149;
+    --vscode-editorWarning-foreground: #cca700;
+    --vscode-focusBorder: #0078d4;
+    --vscode-editor-inactiveSelectionBackground: #2a2a2a;
+    --vscode-inputValidation-errorBackground: #3c1618;
+    --vscode-inputValidation-errorBorder: #be1100;
+    --vscode-inputValidation-errorForeground: #cccccc;
+    --vscode-testing-iconPassed: #3fb950;
+  }
+
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 html,

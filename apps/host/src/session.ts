@@ -159,8 +159,29 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
     },
     // Nothing to reveal: the browser UI is whatever tab the user already has open.
     revealPanel: async () => {},
-    // No editor to open one in. Logged so the content is not simply lost.
-    openDocument: async ({ title }) => post(`[info] ${title} is available in the task history`),
+    /**
+     * The whole document, not a pointer to one.
+     *
+     * There is no editor to open a tab in, and the first version said the content was "available
+     * in the task history" — which for a report written by an unattended run was a message
+     * telling the user their report existed somewhere they could not reach it. Reachable-but-
+     * invisible is the same as absent, and the browser can display text perfectly well.
+     */
+    openDocument: async ({ title, content }) => post([`[info] ${title}`, '', content].join('\n')),
+
+    /**
+     * Reads the file and shows it, since the browser has no editor either.
+     *
+     * Present at all so `notify` can hand over a report by path: without it the host falls back
+     * to the in-memory copy, which is fine until the run that wrote it is long over.
+     */
+    openFile: async (filePath: string) => {
+      try {
+        post([`[info] ${path.basename(filePath)}`, '', await fs.readFile(filePath, 'utf8')].join('\n'))
+      } catch (error) {
+        post(`[warning] Could not read ${filePath}: ${String(error)}`)
+      }
+    },
 
     /**
      * A plain recursive walk, since there is no editor index to borrow. Pruned at the

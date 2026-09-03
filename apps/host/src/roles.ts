@@ -50,6 +50,21 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
    * repointing *another's* gateway, and a per-user profile cannot do that — someone bringing
    * their own key is spending their own money against a host they chose.
    */
+  /*
+   * Creating the standing-instructions skill.
+   *
+   * `open*` is not a mutating prefix, so the verb rule let this through — and it writes a file.
+   * On a shared server there is one workspace, so a skill marked `always: true` is prose injected
+   * into **every user's** prompt on every request. That is exactly what the review queue exists
+   * for, and section 13 requires a human to approve the source. Admin.
+   */
+  'openStandingSkill',
+  /*
+   * Measuring what a consultation costs runs two real consultations and spends real money on the
+   * server's plan. `clear*` was already admin by prefix while `measure*` was not, which had the
+   * two the wrong way round: clearing a number is harmless and spending is not.
+   */
+  'measureExpertCost',
   'saveSharedProfile',
   'deleteSharedProfile',
   'setDefaultProfile',
@@ -143,6 +158,15 @@ const PERSONAL_SETTINGS = new Set([
   'setExpertColor',
   'setMaxIterations',
   'setTaskExpertLimits',
+  /*
+   * Reading what this project has chosen for itself. A read, and about the user's own view.
+   *
+   * Listed rather than left to the verb rule because `request*` is not a mutating prefix today
+   * and might be read as one later; naming it here says the decision was made, not inferred.
+   */
+  'requestProjectSettings',
+  // A form the assistant put in front of this user, answered by this user.
+  'formResponse',
 ])
 
 export function isAdminOnly(messageType: string): boolean {

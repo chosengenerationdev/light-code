@@ -334,8 +334,15 @@ export type UiToHostMessage =
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
   | { type: 'setExpertColor'; value: string }
-  /** Cosmetic; persisted in config so it survives a reload and follows the user. */
-  | { type: 'setAccentColor'; value: string }
+  /**
+   * Light or dark in the browser, or follow the browser's own setting.
+   *
+   * Only meaningful for the Node host — inside VS Code the editor's theme is the answer. It
+   * exists because `prefers-color-scheme` follows the *browser's* appearance setting rather than
+   * the operating system's, so a corporate Edge pinned to light leaves someone with no way to
+   * get a dark UI and no clue why.
+   */
+  | { type: 'setTheme'; theme: 'system' | 'light' | 'dark' }
   | { type: 'revokeAllowedTool'; toolName: string }
   | { type: 'revokeAllowedCommand'; command: string }
   | { type: 'requestMcp' }
@@ -625,6 +632,8 @@ export type HostToUiMessage =
       approvals: WorkspaceApprovals
       maxIterations: number
       accentColor: string
+      /** The browser theme choice. Absent where the host has its own, as VS Code does. */
+      theme?: 'system' | 'light' | 'dark'
       expertColor: string
       /** Folders tools may read beyond the workspace. Reading only — writes stay confined. */
       readRoots: string[]
@@ -646,6 +655,8 @@ export type HostToUiMessage =
        * implemented. That is exactly what shipped in 0.31.0 for the browser.
        */
       nativeGuide: boolean
+      /** True where the host has no theme of its own, so the user picks one. */
+      choosesTheme?: boolean
       /**
        * Where the in-app guide's diagrams are served from, without a trailing slash.
        *

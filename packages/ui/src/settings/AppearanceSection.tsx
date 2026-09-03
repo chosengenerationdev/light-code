@@ -16,6 +16,16 @@ export interface AppearanceSectionProps {
   onChangeAccent: (value: string) => void
   expertColor: string
   onChangeExpert: (value: string) => void
+  /**
+   * Light or dark, where the host has no theme of its own.
+   *
+   * Absent inside VS Code, where the editor's theme is the answer and a second control would
+   * fight it. Present in the browser, because `prefers-color-scheme` follows the *browser's*
+   * appearance setting rather than the operating system's — a corporate Edge pinned to light
+   * shows a light UI on a dark Windows, with no way to change it and no clue why.
+   */
+  theme?: 'system' | 'light' | 'dark'
+  onChangeTheme?: (theme: 'system' | 'light' | 'dark') => void
 }
 
 interface ColourPickerProps {
@@ -130,6 +140,39 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
 
   return (
     <section>
+      {props.onChangeTheme !== undefined && (
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle()}>Theme</label>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+            {(['system', 'light', 'dark'] as const).map((option) => {
+              const selected = (props.theme ?? 'system') === option
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => props.onChangeTheme?.(option)}
+                  style={{
+                    ...textFieldStyle(),
+                    width: 'auto',
+                    cursor: 'pointer',
+                    textTransform: 'capitalize',
+                    ...(selected
+                      ? { borderColor: colors.accent, color: colors.accent, fontWeight: 600 }
+                      : {}),
+                  }}
+                >
+                  {option}
+                </button>
+              )
+            })}
+          </div>
+          <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+            <strong>System</strong> follows your browser&rsquo;s appearance setting — which is the
+            browser&rsquo;s own, not Windows&rsquo;. If your browser is pinned to light by policy,
+            choose Dark here instead.
+          </span>
+        </div>
+      )}
       <ColourPicker
         label="Accent colour"
         description="Buttons, your messages, selections and focus rings."

@@ -543,6 +543,16 @@ export const configSchema = z
          * particular pair reads as two colours or one.
          */
         expertColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #D97757'),
+        /**
+         * Light or dark in the browser, or follow the browser's own setting.
+         *
+         * Only meaningful for the Node host: inside VS Code the editor's theme is the answer and
+         * there is nothing to choose. It exists because `prefers-color-scheme` follows the
+         * *browser's* appearance setting rather than the operating system's, and a corporate
+         * Edge can be pinned to light while Windows is dark — leaving someone with no way to
+         * get a dark UI and no clue why. Reported from exactly that situation.
+         */
+        theme: z.enum(['system', 'light', 'dark']),
       })
       .partial(),
     /**

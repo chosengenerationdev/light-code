@@ -1,5 +1,24 @@
 # light-code-vscode
 
+## 0.48.1
+
+### Patch Changes
+
+- The browser UI can be told to be dark, rather than only inferring it.
+
+  Dark mode existed and followed `prefers-color-scheme` — which follows the **browser's** appearance
+  setting, not the operating system's. A corporate Edge pinned to light therefore shows a light UI
+  on a dark Windows, with no way to change it and no clue why. Reported from exactly that situation.
+
+  Appearance now offers System, Light and Dark in the browser, remembered in config and mirrored to
+  local storage so a reload paints correctly on the first frame instead of flashing light while the
+  connection opens. The choice is absent inside VS Code, where the editor's theme is the answer and
+  a second control would fight it.
+
+  Fixing it turned up the recurring fault again: `settings` was constructed in two places and they
+  had already drifted, so the theme was written to disk and reported back as unset. There is one
+  constructor now, as there is for host capabilities and the expert message.
+
 ## 0.48.0
 
 ### Minor Changes

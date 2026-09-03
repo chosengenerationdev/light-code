@@ -765,6 +765,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // must not depend on the UI package; the UI is authoritative and this is only the value
   // sent before the user has chosen one.
   let cachedAccentColor = '#22C55E'
+  /** Undefined until the user chooses; the browser then follows its own setting. */
+  let cachedTheme: 'system' | 'light' | 'dark' | undefined
   let cachedExpertColor = '#D97757'
   let cachedExpertLimits: ExpertLimits = {}
   /** The stored assessment, so the briefing can carry it without a config read per turn. */
@@ -1114,6 +1116,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
+    cachedTheme = config.ui?.theme
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
     cachedAssessment = config.expert?.assessment
     cachedReportsCost = config.expert?.reportsCost
@@ -1152,21 +1155,38 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     post({ type: 'error', message })
   }
 
+  /**
+   * Everything a `settings` message says, built once.
+   *
+   * There were two of these, constructed separately, and they had already drifted: the theme
+   * reached the one sent after saving approvals and not the one sent by `postSettings`, so a
+   * theme the user picked was written to disk and reported back as unset. That is the third time
+   * this shape has bitten — `hostCapabilities()` and `expertMessageFrom()` exist for the same
+   * reason — and the fix is always the same: one constructor, and pass the whole thing.
+   *
+   * `approvals` is the one part a caller may override, because `saveApprovals` has the new value
+   * in hand before the cache is refreshed.
+   */
+  function settingsMessageFrom(approvals: WorkspaceApprovals = cachedApprovals): Extract<HostToUiMessage, { type: 'settings' }> {
+    return {
+      type: 'settings',
+      modeId: findMode(cachedModeId).id,
+      approvals,
+      maxIterations: cachedMaxIterations,
+      accentColor: cachedAccentColor,
+      expertColor: cachedExpertColor,
+      ...(cachedTheme === undefined ? {} : { theme: cachedTheme }),
+      readRoots: cachedReadRoots,
+      ...(cachedProgrammingProfileId !== undefined ? { programmingProfileId: cachedProgrammingProfileId } : {}),
+      ...hostCapabilities(),
+    }
+  }
+
   async function saveApprovals(next: WorkspaceApprovals): Promise<void> {
     const { config } = await configManager.load()
     await configManager.save('user', { approvals: { ...config.approvals, [approvalsKey]: next } })
     cachedApprovals = next
-    post({
-      type: 'settings',
-      modeId: findMode(cachedModeId).id,
-      approvals: next,
-      maxIterations: cachedMaxIterations,
-      accentColor: cachedAccentColor,
-      expertColor: cachedExpertColor,
-      readRoots: cachedReadRoots,
-      ...(cachedProgrammingProfileId !== undefined ? { programmingProfileId: cachedProgrammingProfileId } : {}),
-      ...hostCapabilities(),
-    })
+    post(settingsMessageFrom(next))
   }
 
   /*
@@ -1177,9 +1197,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * telling the UI to render its own. Two ways of saying the same thing would eventually
    * disagree, and the failure is a button that does nothing.
    */
-  function hostCapabilities(): { nativeGuide: boolean; guideMediaBase?: string; allowProgrammingProfile: boolean } {
+  function hostCapabilities(): {
+    nativeGuide: boolean
+    guideMediaBase?: string
+    allowProgrammingProfile: boolean
+    choosesTheme: boolean
+  } {
     return {
       nativeGuide: ui.openWalkthrough !== undefined,
+      /*
+       * Whether this host has a theme of its own to follow.
+       *
+       * VS Code does — the editor's — so offering a light/dark choice there would be a control
+       * that fights the editor. A browser does not, and `prefers-color-scheme` follows the
+       * browser's own appearance setting rather than the operating system's, so a corporate Edge
+       * pinned to light leaves someone with no way to get a dark UI. Derived from the same signal
+       * as `nativeGuide`: a host with native onboarding is the host with a native theme.
+       */
+      choosesTheme: ui.openWalkthrough === undefined,
       allowProgrammingProfile: services.allowProgrammingProfile === true,
       ...(services.guideMediaBase !== undefined ? { guideMediaBase: services.guideMediaBase } : {}),
     }
@@ -4028,16 +4063,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function postSettings(): Promise<void> {
     await loadSettings()
     announceConfigRecovery()
-    post({
-      type: 'settings',
-      modeId: findMode(cachedModeId).id,
-      approvals: cachedApprovals,
-      maxIterations: cachedMaxIterations,
-      accentColor: cachedAccentColor,
-      expertColor: cachedExpertColor,
-      readRoots: cachedReadRoots,
-      ...hostCapabilities(),
-    })
+    post(settingsMessageFrom())
   }
 
   /** Approve now, and remember it for this workspace. */
@@ -4534,12 +4560,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void configManager
         // Both written together: `save` merges at the top level, so writing `ui` with only
         // one key would drop the other.
-        .save('user', { ui: { accentColor: message.value, expertColor: cachedExpertColor } })
+        .save('user', { ui: { accentColor: message.value, expertColor: cachedExpertColor, ...(cachedTheme === undefined ? {} : { theme: cachedTheme }) } })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setTheme') {
+      void configManager
+        // The whole `ui` block, for the same reason as the colours: `save` merges at the top
+        // level, so writing one key would drop the others.
+        .save('user', { ui: { accentColor: cachedAccentColor, expertColor: cachedExpertColor, theme: message.theme } })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setExpertColor') {
       void configManager
-        .save('user', { ui: { accentColor: cachedAccentColor, expertColor: message.value } })
+        .save('user', { ui: { accentColor: cachedAccentColor, expertColor: message.value, ...(cachedTheme === undefined ? {} : { theme: cachedTheme }) } })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setAutoApprove') {

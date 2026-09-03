@@ -207,3 +207,43 @@ describe('the review queue', () => {
     expect(isAdminOnly('requestReviews')).toBe(false)
   })
 })
+
+/**
+ * Messages added while building the Office tools, forms, reports and per-project settings.
+ *
+ * The verb rule is a safety net, not a decision: it catches `set*`/`save*`/`delete*` and lets
+ * everything else through. Anything added later that mutates under a different verb slips past
+ * it, which is why each of these is checked rather than assumed.
+ */
+describe('what the newer messages default to on a shared server', () => {
+  it('keeps the Office toggles for administrators', () => {
+    // The tools attach to the Excel and Outlook running as the *service account*, so enabling
+    // them lets any user read that account's mail. Not a per-user choice on a shared box.
+    expect(isAdminOnly('setOffice')).toBe(true)
+  })
+
+  it('keeps MCP tool timeouts for administrators, like the servers they belong to', () => {
+    expect(isAdminOnly('setMcpToolTimeout')).toBe(true)
+  })
+
+  /**
+   * `open*` is not a mutating prefix, so this slipped through the net — and it writes a file. On
+   * a shared server there is one workspace, so a skill marked `always: true` is prose injected
+   * into every user's prompt on every request.
+   */
+  it('does not let a normal user create standing instructions for everyone', () => {
+    expect(isAdminOnly('openStandingSkill')).toBe(true)
+  })
+
+  /** Spending is not a personal setting when the plan belongs to the server. */
+  it('does not let a normal user spend the server’s credit measuring prices', () => {
+    expect(isAdminOnly('measureExpertCost')).toBe(true)
+    // And the pair was the wrong way round before: clearing a number was admin, spending was not.
+    expect(isAdminOnly('clearExpertPricing')).toBe(true)
+  })
+
+  it('leaves a user free to answer a form and read their own project settings', () => {
+    expect(isAdminOnly('formResponse')).toBe(false)
+    expect(isAdminOnly('requestProjectSettings')).toBe(false)
+  })
+})

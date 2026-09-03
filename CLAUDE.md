@@ -902,6 +902,20 @@ user who owns their own machine; a role split there would be theatre.
   where every user is already trusted with everything every other user can reach. **Do not soften
   that because roles now exist** — they lock down configuration, not execution.
 
+**The browser picks its own theme** (0.26.0). Dark mode existed and followed
+`prefers-color-scheme`, which follows the **browser's** appearance setting rather than the
+operating system's — a corporate Edge pinned to light shows a light UI on a dark Windows, with no
+way to change it. `ui.theme` (`system`/`light`/`dark`) is offered only where `choosesTheme` is
+true, i.e. where the host has no theme of its own; inside VS Code the editor's theme is the answer
+and a second control would fight it. Mirrored to localStorage so a reload paints on the first
+frame rather than flashing light.
+
+**Two role gaps closed at the same time** (0.25.0). `apps/host/src/roles.ts` catches
+`set*`/`save*`/`delete*` and lets other verbs through, which is the net working as designed — but
+`openStandingSkill` (`open*`) writes a skill that, on a shared server with one workspace, is prose
+injected into *every* user's prompt, and `measureExpertCost` (`measure*`) spends the server's
+credit. Both are admin-only now, each pinned by a test rather than left to the prefix.
+
 **`--guide` serves the operator documentation as a web page**, not as terminal output. It bakes
 `docs/hosting.md` into the bundle at build time (`guideHtml.ts`), so there is no network fetch
 and invariant 4 holds. Note the renderer works on CRLF input: `.` in a JS regex does not match
@@ -1139,14 +1153,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.48.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.48.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.48.1**, built and unpublished:
+`apps/vscode/light-code-vscode-0.48.1.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.24.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.26.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1162,7 +1176,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.48.0, host 0.24.0 — and keep working from
+**Next:** publish the pending versions — extension 0.48.1, host 0.26.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
@@ -1334,6 +1348,15 @@ is **no `skills` and no `filesystem` block at all** — consistent with a config
 having been lost in that corruption.
 
 ### The bug shape that keeps costing the most time
+
+**It happened again on 2026-09-03**, in the same file: two `settings` posts, constructed
+separately, already drifted — a theme the user chose was written to disk and reported back as
+unset. `settingsMessageFrom()` joins `hostCapabilities()` and `expertMessageFrom()`. **Before
+adding a field to any host→UI message, grep for how many places build it.**
+
+A second lesson from the same hunt: the host bundles **core's `dist`**, so a change to
+`packages/core/src` that has not been rebuilt runs as the old code in a live probe. `pnpm build`
+before probing, or the evidence is about the wrong version.
 
 **One fact declared in two places, which drift.** Two more instances since the last handover:
 `retrieval?.dispatcher === true` in two bridge paths where `dispatcherEnabled()` owns the

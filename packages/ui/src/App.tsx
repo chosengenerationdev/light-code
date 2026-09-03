@@ -203,6 +203,11 @@ export function App(props: AppProps): ReactElement {
   const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
   const [scheduleSkills, setScheduleSkills] = useState<{ name: string; description: string }[]>([])
   /** What the open project has chosen for itself. Nothing until the host says otherwise. */
+  /** Whether this host lets the user pick a theme, and which one they picked. */
+  const [themeChoice, setThemeChoice] = useState<{
+    choosesTheme: boolean
+    theme?: 'system' | 'light' | 'dark'
+  }>({ choosesTheme: false })
   const [projectSettings, setProjectSettings] = useState<{ workspaceOpen: boolean; overridden: string[] }>({
     workspaceOpen: false,
     overridden: [],
@@ -324,6 +329,7 @@ export function App(props: AppProps): ReactElement {
         setModeId(message.modeId)
         setProgrammingProfileId(message.programmingProfileId)
         setAllowProgrammingProfile(message.allowProgrammingProfile)
+        setThemeChoice({ choosesTheme: message.choosesTheme === true, ...(message.theme === undefined ? {} : { theme: message.theme }) })
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -1031,6 +1037,14 @@ export function App(props: AppProps): ReactElement {
               setExpertColor(value)
               applyExpert(value)
               props.transport.post({ type: 'setExpertColor', value } satisfies UiToHostMessage)
+            }}
+            {...(themeChoice.choosesTheme ? { choosesTheme: true } : {})}
+            {...(themeChoice.theme === undefined ? {} : { theme: themeChoice.theme })}
+            onSetTheme={(theme) => {
+              // Applied locally as well as saved, so the change is instant rather than waiting
+              // for the round trip that a settings reply would take.
+              setThemeChoice((current) => ({ ...current, theme }))
+              props.transport.post({ type: 'setTheme', theme } satisfies UiToHostMessage)
             }}
             onSetMaxIterations={(value) =>
               props.transport.post({ type: 'setMaxIterations', value } satisfies UiToHostMessage)

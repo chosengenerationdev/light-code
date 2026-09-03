@@ -50,6 +50,10 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetAccentColor: (value: string) => void
   expertColor: string
   onSetExpertColor: (value: string) => void
+  /** Only where the host has no theme of its own — see `AppearanceSectionProps.theme`. */
+  choosesTheme?: boolean
+  theme?: 'system' | 'light' | 'dark'
+  onSetTheme?: (theme: 'system' | 'light' | 'dark') => void
   mcpServers: McpServerState[]
   mcpJson: string
   mcpWarnings: Record<string, string[]>
@@ -252,6 +256,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               onChangeAccent={props.onSetAccentColor}
               expertColor={props.expertColor}
               onChangeExpert={props.onSetExpertColor}
+              {...(props.theme === undefined ? {} : { theme: props.theme })}
+              {...(props.choosesTheme === true && props.onSetTheme !== undefined
+                ? { onChangeTheme: props.onSetTheme }
+                : {})}
             />
           </div>
         ) : shown === 'providers' ? (

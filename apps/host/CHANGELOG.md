@@ -1,5 +1,46 @@
 # @chosengeneration/light-code
 
+## 0.26.0
+
+### Minor Changes
+
+- The browser UI can be told to be dark, rather than only inferring it.
+
+  Dark mode existed and followed `prefers-color-scheme` — which follows the **browser's** appearance
+  setting, not the operating system's. A corporate Edge pinned to light therefore shows a light UI
+  on a dark Windows, with no way to change it and no clue why. Reported from exactly that situation.
+
+  Appearance now offers System, Light and Dark in the browser, remembered in config and mirrored to
+  local storage so a reload paints correctly on the first frame instead of flashing light while the
+  connection opens. The choice is absent inside VS Code, where the editor's theme is the answer and
+  a second control would fight it.
+
+  Fixing it turned up the recurring fault again: `settings` was constructed in two places and they
+  had already drifted, so the theme was written to disk and reported back as unset. There is one
+  constructor now, as there is for host capabilities and the expert message.
+
+## 0.25.0
+
+### Minor Changes
+
+- The Node host catches up with the extension, and two role gaps close.
+
+  Everything built this week reaches the browser through shared core, but three things needed the
+  host itself.
+
+  **A report is shown, not pointed at.** `openDocument` said the content was "available in the task
+  history" — which for a report written by an unattended run told the user it existed somewhere they
+  could not reach. The host now shows the document, and can open a report by path, which is the
+  whole point of writing it to a file.
+
+  **Two messages defaulted to the wrong role on a shared server.** The verb rule catches
+  `set*`/`save*`/`delete*` and lets everything else through, so `openStandingSkill` slipped past it
+  — and on a shared server there is one workspace, so a skill marked `always: true` is prose
+  injected into _every_ user's prompt on every request. That is what the review queue exists for.
+  `measureExpertCost` slipped past too, spending the server's credit on two real consultations,
+  while `clearExpertPricing` was already admin — the two exactly the wrong way round. Both are
+  administrator-only now, and each is pinned by a test rather than left to the net.
+
 ## 0.24.0
 
 ### Minor Changes
