@@ -1,3 +1,4 @@
+import nodePath from 'node:path'
 import type { ApprovalDecision, ApprovalGate, ApprovalRequest } from '../approval/types.js'
 import { ToolRegistry } from '../tools/registry.js'
 import type { Tool } from '../tools/types.js'
@@ -63,6 +64,26 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
  * Enforced in the *registry*, so a forbidden tool is never offered rather than offered and
  * refused: the model cannot spend a turn working around something it was never given.
  */
+/**
+ * Whether a schedule belongs to the project that is open.
+ *
+ * Absent `workspaceRoot` means "any", for schedules written before schedules had one. Compared
+ * the same way every other path in this codebase is: resolved, and case-folded on Windows, where
+ * the same folder arrives spelled two ways depending on how the window was opened.
+ */
+export function scheduleAppliesHere(
+  schedule: { workspaceRoot?: string | undefined },
+  workspaceRoot: string | undefined,
+): boolean {
+  if (schedule.workspaceRoot === undefined) return true
+  if (workspaceRoot === undefined) return false
+  const normalise = (value: string): string => {
+    const resolved = nodePath.resolve(value)
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+  }
+  return normalise(schedule.workspaceRoot) === normalise(workspaceRoot)
+}
+
 export function filterToolsForSchedule(all: readonly Tool[], schedule: Pick<Schedule, 'allowedTools'>): Tool[] {
   const named = new Set(schedule.allowedTools)
   const always = new Set<string>(ALWAYS_AVAILABLE_TO_SCHEDULES)

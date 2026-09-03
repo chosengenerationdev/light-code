@@ -1,9 +1,26 @@
 import type { ConfigScope, ConfigStore } from '../platform/config.js'
 import { ConfigValidationError, parseConfig, type LightCodeConfig } from './schema.js'
+import {
+  applyWorkspaceOverrides,
+  overridesFor,
+  workspaceOverrideKey,
+  type WorkspaceOverrides,
+} from './workspaceOverrides.js'
 import { mergeScopes, type ScopeMergeResult } from './scopes.js'
 
 export class ConfigManager {
-  constructor(private readonly store: ConfigStore) {}
+  /**
+   * @param workspaceRoot Which project is open, so its own settings apply.
+   *
+   * Applied **here** rather than at each call site. Callers read config in dozens of places and
+   * every one of them must see the same answer — a per-project value that reached the agent loop
+   * but not the settings panel is the "one fact in two places" failure this project has paid for
+   * more than any other.
+   */
+  constructor(
+    private readonly store: ConfigStore,
+    private readonly workspaceRoot?: string,
+  ) {}
 
   /**
    * Serialises every save, per scope.
@@ -41,7 +58,20 @@ export class ConfigManager {
       this.readScope('user'),
       this.readScope('workspace'),
     ])
-    return mergeScopes(userConfig, workspaceConfig)
+    const merged = mergeScopes(userConfig, workspaceConfig)
+
+    /*
+     * The project's own settings, last.
+     *
+     * Read from *user* config, never from the workspace file: invariant 5 is about who may write
+     * a value, and that is unchanged. This only lets the user say something different for this
+     * project than for the last one.
+     */
+    const overrides = overridesFor(
+      userConfig.workspaces as Record<string, WorkspaceOverrides> | undefined,
+      this.workspaceRoot,
+    )
+    return { ...merged, config: applyWorkspaceOverrides(merged.config, overrides) }
   }
 
   /**
@@ -92,6 +122,51 @@ export class ConfigManager {
     // save on that scope is dropped.
     this.writes[scope] = queued.catch(() => undefined)
     await queued
+  }
+
+  /**
+   * Saves a value for **this project only**, leaving the user's default alone.
+   *
+   * Goes into user config under the workspace's path, so a repository still cannot write it —
+   * the same shape `approvals` has used since Phase 4. Passing `undefined` for a key removes the
+   * override and the global default applies again, which has to be possible or a project setting
+   * is a one-way door.
+   */
+  async saveForWorkspace(overrides: Partial<WorkspaceOverrides>): Promise<void> {
+    if (this.workspaceRoot === undefined) {
+      throw new Error('No folder is open, so there is no project to save this for.')
+    }
+    const key = workspaceOverrideKey(this.workspaceRoot)
+
+    await this.save('user', {
+      workspaces: await this.mergedOverrides(key, overrides),
+    } as LightCodeConfig)
+  }
+
+  /** Read inside the queued save, so two per-project writes cannot lose each other. */
+  private async mergedOverrides(
+    key: string,
+    overrides: Partial<WorkspaceOverrides>,
+  ): Promise<Record<string, WorkspaceOverrides>> {
+    const existing = (await this.readScope('user')).workspaces as
+      | Record<string, WorkspaceOverrides>
+      | undefined
+    const all = { ...existing }
+    // Whatever spelling this project is already stored under, so a case difference does not
+    // quietly create a second entry that shadows the first.
+    const matching = Object.keys(all).find((candidate) => workspaceOverrideKey(candidate) === key) ?? key
+
+    const next: Record<string, unknown> = { ...(all[matching] ?? {}) }
+    for (const [name, value] of Object.entries(overrides)) {
+      if (value === undefined) delete next[name]
+      else next[name] = value
+    }
+
+    // An empty entry is removed rather than left behind: "this project has no settings of its
+    // own" and "this project has an entry saying nothing" should not be two different states.
+    if (Object.keys(next).length === 0) delete all[matching]
+    else all[matching] = next as WorkspaceOverrides
+    return all
   }
 
   private async saveNow(scope: ConfigScope, patch: LightCodeConfig): Promise<void> {

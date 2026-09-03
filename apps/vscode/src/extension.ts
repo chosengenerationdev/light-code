@@ -123,9 +123,10 @@ export function activate(context: vscode.ExtensionContext): void {
    * when something is actually due does it build the bridge, which then takes over ticking
    * with its own timer.
    */
-  const configManager = new ConfigManager(
-    new VSCodeConfigStore(context, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
-  )
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  // The root is passed so this project's own settings apply — a schedule due here belongs to
+  // this codebase, and so does the vector store it would index into.
+  const configManager = new ConfigManager(new VSCodeConfigStore(context, workspaceRoot), workspaceRoot)
   const poll = setInterval(() => {
     void (async () => {
       try {

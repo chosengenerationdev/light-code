@@ -117,6 +117,7 @@ import {
   NEVER_AVAILABLE_TO_SCHEDULES,
   ScheduledApprovalGate,
   scheduledRunGuidance,
+  scheduleAppliesHere,
   nextFireTime,
   isDue,
   MAX_REMEMBERED_RUNS,
@@ -289,7 +290,9 @@ export interface ChatBridge {
 export function wireChatBridge(services: HostServices): ChatBridge {
   const { transport, secrets, ui, workspaceRoot, storageDir, ripgrepPath } = services
   const logger = new Logger({ level: 'debug', sink: services.logSink })
-  const configManager = new ConfigManager(services.configStore)
+  // Given the open project, so per-project settings apply to every read without each call site
+  // having to remember — one owner, as with every default in this file.
+  const configManager = new ConfigManager(services.configStore, services.workspaceRoot)
   const httpClient = new FetchHttpClient()
   const conversation = new Conversation(workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined)
 
@@ -5303,6 +5306,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }
 
         for (const schedule of Object.values(schedules)) {
+          // A schedule written against another project must not fire here. Its prompt and its
+          // granted tools were chosen for that codebase, not this one.
+          if (!scheduleAppliesHere(schedule, workspaceRoot)) continue
           if (isDue(schedule, now)) {
             await runSchedule(schedule.id, 'due')
             // One per tick: a second would have to wait for the first anyway, and it will be

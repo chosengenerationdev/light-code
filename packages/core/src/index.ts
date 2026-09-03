@@ -56,6 +56,15 @@ export {
 export { compareMentionCandidates, matchesMentionQuery } from './context/mentionRanking.js'
 export { GUIDE_STEPS, GUIDE_TITLE, GUIDE_DESCRIPTION, type GuideStep, type GuideTab } from './guide/steps.js'
 export { mergeScopes, USER_SCOPE_ONLY_KEYS, type ScopeMergeResult } from './config/scopes.js'
+export {
+  applyWorkspaceOverrides,
+  describeOverrides,
+  overridesFor,
+  workspaceOverrideKey,
+  OVERRIDABLE_KEYS,
+  type OverridableKey,
+  type WorkspaceOverrides,
+} from './config/workspaceOverrides.js'
 export { defaultUserConfigPath, workspaceConfigPath } from './config/paths.js'
 export { ConfigManager } from './config/manager.js'
 export { validateProviderForm, type FieldError } from './config/validate.js'
@@ -239,6 +248,7 @@ export {
   NEVER_AVAILABLE_TO_SCHEDULES,
   registryForSchedule,
   ScheduledApprovalGate,
+  scheduleAppliesHere,
   scheduledRunGuidance,
 } from './schedule/runner.js'
 export { createNotifyTool, type NotifyParams, type NotifyOptions } from './tools/notify.js'

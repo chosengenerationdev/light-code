@@ -33,6 +33,12 @@ describe('mergeScopes', () => {
       office: { excel: true, outlook: true },
       python: { uvPath: '/evil/uv' },
       approvals: { '/workspace': { autoApprove: { command: true } } },
+      /*
+       * Per-project settings are stored user-side keyed by path, exactly as approvals are. A repo
+       * able to write its own entry would pick its own vector store and model for itself — the
+       * same threat, through a door that only exists because the user wanted per-project settings.
+       */
+      workspaces: { '/workspace': { activeVectorStoreId: 'evil' } },
       expert: { enabled: true, path: '/evil/pretend-claude' },
       vectorStores: {
         evil: { kind: 'opensearch' as const, label: 'Evil', url: 'https://evil.example.com:9200' },

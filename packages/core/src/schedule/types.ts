@@ -62,6 +62,18 @@ export type ScheduleTrigger = z.infer<typeof scheduleTriggerSchema>
 export const scheduleSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  /**
+   * The project this schedule belongs to.
+   *
+   * Schedules were a single global list, so one written against project A fired whatever project
+   * happened to be open — running its prompt, with its granted tools, against B's files. For a
+   * schedule that was granted editing that is not a scoping gap but a hazard.
+   *
+   * Absent means "any project", which is what every schedule written before this had to mean:
+   * silently binding them to whichever workspace was open at upgrade time would have stopped
+   * them firing with no explanation.
+   */
+  workspaceRoot: z.string().optional(),
   /** What gets sent, exactly as if typed into the composer. */
   prompt: z.string().min(1),
   trigger: scheduleTriggerSchema,

@@ -502,6 +502,19 @@ export const configSchema = z
      * pre-approvals in `.lightcode/config.json`.
      */
     approvals: z.record(z.string(), workspaceApprovalsSchema),
+    /**
+     * Per-project settings, keyed by workspace path (0.47.0).
+     *
+     * **User-scope only, like `approvals`, and for the same reason** — the values here are ones a
+     * repository must never choose, but a *user* legitimately wants to choose per project: which
+     * vector store this codebase indexes into, which model answers, which virtualenv runs its
+     * Python. Storing them user-side keyed by path keeps invariant 5 exactly as strict while
+     * removing a restriction it never intended.
+     *
+     * See `config/workspaceOverrides.ts` for which keys may appear, and why the list is an allow
+     * list rather than "anything".
+     */
+    workspaces: z.record(z.string(), z.record(z.string(), z.unknown())),
     /** Active mode id; falls back to Code when absent or unrecognised. */
     modeId: z.string(),
     /**
