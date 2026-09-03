@@ -704,6 +704,19 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
 - **PowerShell scoping cost a debugging round too:** a nested function assigning to an enclosing
   array creates a local copy, so the first trace returned empty with no error. `$script:` scoped.
 
+- **Enumerating a mailbox must not read item counts** (0.44.3, from the office). The recursive
+  walk read `$Folder.Items.Count` per folder — instant on a cached mailbox, a server round trip
+  each on Exchange online, and past the timeout at a few hundred folders. Counts are opt-in now,
+  the default depth is 2, and the walk is capped and says when it truncated.
+  **The timeout message made it worse by asserting a cause**: it said a dialog was "usually" the
+  reason, the assistant relayed that as fact, and the user went looking for a popup that did not
+  exist — twice. It now offers causes in order and says not to claim a dialog unless one is
+  visible. A confident wrong diagnosis costs the user a search as well as the failure.
+- **The documentation index can be rebuilt per kind** (0.44.3), from wherever each thing changes:
+  Skills tab for skills, MCP tab for tools, Search tab for either. The load-bearing detail is the
+  stale sweep — it deletes everything the freshly built corpus lacks, so an unscoped partial run
+  would delete every skill while reindexing tools. It filters on the `tool:`/`skill:` id prefix,
+  and each kind keeps its own fingerprint. `rag/partialIndex.test.ts` pins both.
 - **Outlook folders are listed recursively** and searching takes `withinMinutes` (0.42.1). The
   first version listed only the top level, so a nested folder was reachable by path and
   impossible to discover — reachable-but-invisible is the same failure as absent.
@@ -1069,14 +1082,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.44.2**, built and unpublished:
-`apps/vscode/light-code-vscode-0.44.2.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.44.3**, built and unpublished:
+`apps/vscode/light-code-vscode-0.44.3.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.20.2**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.20.3**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1092,7 +1105,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.44.2, host 0.20.2 — and keep working from
+**Next:** publish the pending versions — extension 0.44.3, host 0.20.3 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

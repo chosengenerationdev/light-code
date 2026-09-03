@@ -341,7 +341,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               indexing: props.search.dispatcher.indexing,
               result: describeDocsResult(props.search.dispatcher.result),
             }}
-            onIndexDocs={props.search.dispatcher.onIndexDocs}
+            onIndexDocs={() => props.search.dispatcher.onIndexDocs('tool')}
           />
         )}
       </div>

@@ -19,6 +19,16 @@ export interface SkillsTabProps {
   onOpenFile: (path: string) => void
   /** Opens the standing-instructions skill, creating it from a template the first time. */
   onOpenStandingSkill: () => void
+  /**
+   * Reindexes skill documentation only.
+   *
+   * It happens on its own a few seconds after any change, so this is for the times you would
+   * rather not wonder — and it is scoped to skills, so pressing it cannot disturb tools.
+   */
+  onReindex: () => void
+  indexing: boolean
+  /** The last run, as one line. Undefined when nothing has run in this session. */
+  indexResult: string | undefined
   onSaveDirs: (dir: string, paths: string[]) => void
 }
 
@@ -178,6 +188,20 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
           ))
         )}
       </div>
+      {/*
+        Placed with the folders rather than beside each skill: it is about the corpus as a whole,
+        and the automatic reindex already covers the ordinary case a few seconds after a change.
+      */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '12px 0' }}>
+        <button type="button" style={secondaryButtonStyle()} disabled={props.indexing} onClick={props.onReindex}>
+          {props.indexing ? 'Reindexing…' : 'Reindex skills'}
+        </button>
+        <span style={{ color: colors.muted, fontSize: 11 }}>
+          {props.indexResult ??
+            'Reindexed automatically a few seconds after any change. This forces it now, for skills only.'}
+        </span>
+      </div>
+
       <FolderListEditor
         primary={props.configuredDir}
         primaryPlaceholder={props.skillsDir ?? '.lightcode/skills'}

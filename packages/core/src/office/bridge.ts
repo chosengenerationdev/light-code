@@ -72,14 +72,21 @@ export class OfficeBridge {
       const timer = setTimeout(() => {
         this.waiting.delete(id)
         /*
-         * The likeliest cause by far, and worth naming: Excel blocks COM entirely while a modal
-         * dialog is open, so a request that hangs usually means a save prompt is sitting on the
-         * user's screen. "Timed out" alone would send them looking at the wrong thing.
+         * Causes offered, not asserted.
+         *
+         * The first version said a dialog was "usually" the reason. A user in an office hit a
+         * timeout caused by something else entirely - an expensive folder walk over Exchange -
+         * and the assistant relayed the guess as fact, so they went looking for a popup that did
+         * not exist and said so twice. A confident wrong diagnosis is worse than none: it costs
+         * the person a search as well as the failure.
          */
         reject(
           new Error(
             `Excel or Outlook did not answer within ${String(Math.round(timeoutMs / 1000))}s. ` +
-              'This usually means a dialog is open in the application and waiting for a click.',
+              'Possible causes, roughly in order: the request covers more than it can do in that ' +
+              'time (a large mailbox or a wide range — try a smaller scope), the application is ' +
+              'showing a dialog and waiting for a click, or it is busy with something else. ' +
+              'Do not tell the user a dialog is open unless they can see one.',
           ),
         )
       }, timeoutMs)

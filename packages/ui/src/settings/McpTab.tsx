@@ -464,7 +464,7 @@ export function McpTab(props: McpTabProps): ReactElement {
               disabled={props.docsIndex.indexing || !props.docsIndex.ready}
               onClick={props.onIndexDocs}
             >
-              {props.docsIndex.indexing ? 'Indexing…' : 'Reindex now'}
+              {props.docsIndex.indexing ? 'Indexing…' : 'Reindex tool documentation'}
             </button>
             {props.docsIndex.result !== undefined && (
               <span style={{ color: colors.muted, fontSize: 11 }}>{props.docsIndex.result}</span>

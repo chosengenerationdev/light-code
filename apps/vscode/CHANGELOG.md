@@ -1,5 +1,28 @@
 # light-code-vscode
 
+## 0.44.3
+
+### Patch Changes
+
+- Outlook folder listing no longer times out on a corporate mailbox, and separate reindex buttons.
+
+  Reported from a real office: `outlook_folders` failed twice, and the assistant confidently
+  explained that Outlook must be showing a dialog — which it was not. The cause was the previous
+  release's recursive walk reading each folder's item count. On a cached mailbox that is instant;
+  on Exchange in online mode it is a server round trip _per folder_, and a few hundred folders
+  runs past the timeout. Counts are now opt-in, the walk goes two levels by default, and it is
+  capped and says so when it truncates.
+
+  The timeout message offered a guess as fact. It now lists causes in order of likelihood, leads
+  with the one that actually happened, and tells the assistant not to claim a dialog is open
+  unless the user can see one. A confident wrong diagnosis costs someone a search as well as the
+  failure.
+
+  Tools and skills can also be reindexed separately, from where each of them changes: the Skills
+  tab reindexes skills, the MCP tab reindexes tool documentation, and the Search tab does either
+  or both. A partial run sweeps only its own kind — without that, reindexing tools would have
+  deleted every skill in the store, silently.
+
 ## 0.44.2
 
 ### Patch Changes

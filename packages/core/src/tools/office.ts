@@ -347,7 +347,14 @@ export function createExcelWriteMacroTool(options: OfficeToolOptions): Tool<z.in
 }
 
 const foldersSchema = z.object({
-  depth: z.number().int().min(1).max(8).optional().describe('How far to descend into sub-folders. Default 4.'),
+  depth: z.number().int().min(1).max(8).optional().describe('How far to descend into sub-folders. Default 2.'),
+  /**
+   * Item counts, off by default because they are the expensive part.
+   *
+   * On Exchange in online mode counting a folder's items is a server round trip each, and doing
+   * it for a few hundred folders is what made this time out in a real office.
+   */
+  counts: z.boolean().optional().describe('Include how many items each folder holds. Slow on a large mailbox.'),
 })
 
 export function createOutlookFoldersTool(options: OfficeToolOptions): Tool<z.infer<typeof foldersSchema>> {
@@ -356,25 +363,32 @@ export function createOutlookFoldersTool(options: OfficeToolOptions): Tool<z.inf
     group: 'read',
     description:
       'List the mail folders in the local Outlook, including sub-folders, with the full path to ' +
-      'each. Pass a path from here to outlook_search to search one folder.',
+      'each. Pass a path from here to outlook_search to search one folder. Goes two levels deep ' +
+      'by default; raise depth for a deeply filed mailbox, but expect it to take longer.',
     parametersSchema: foldersSchema,
     async execute(params): Promise<ToolResult> {
       try {
         const result = await options.bridge.request<{
-          folders: { name: string; path: string; depth: number; items: number; unread: number }[]
+          folders: { name: string; path: string; depth: number; items?: number; unread?: number }[]
+          depth: number
+          truncated: boolean
         }>({ op: 'outlook.folders', ...params })
 
         if (result.folders.length === 0) return { content: 'Outlook is running but reports no mail folders.' }
         return {
           content: [
             'Mail folders (the full path is what outlook_search wants):',
+            ...(result.truncated
+              ? ['(list truncated — this mailbox has more folders than are shown; narrow with depth)']
+              : []),
             ...result.folders.map(
               (folder) =>
                 // Indented by depth so the shape of the tree is visible, but every line still
                 // carries the whole path: a nested name on its own is not something you can pass
                 // back, and that was the gap - a sub-folder was reachable but undiscoverable.
-                `${'  '.repeat(Math.max(0, folder.depth - 1))}- ${folder.path} ` +
-                `(${String(folder.items)} items, ${String(folder.unread)} unread)`,
+                `${'  '.repeat(Math.max(0, folder.depth - 1))}- ${folder.path}` +
+                (folder.items === undefined ? '' : ` (${String(folder.items)} items)`) +
+                (folder.unread === undefined || folder.unread === 0 ? '' : ` (${String(folder.unread)} unread)`),
             ),
           ].join('\n'),
         }

@@ -12,7 +12,7 @@ export interface DispatcherSectionProps {
   onToggleSkills: (enabled: boolean) => void
   docsIndex?: string | undefined
   onToggle: (enabled: boolean) => void
-  onIndexDocs: () => void
+  onIndexDocs: (kind?: 'tool' | 'skill') => void
   /** Empties the index. Separate from reindexing, which replaces rather than removes. */
   onClearDocsIndex: () => void
   indexing: boolean
@@ -126,9 +126,31 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
               ? 'Embed the tool and skill documentation so search_docs can match by meaning'
               : 'Needs a search connection and an embedding model. Without them search_docs still works, matching names and descriptions.'
           }
-          onClick={props.onIndexDocs}
+          onClick={() => props.onIndexDocs()}
         >
-          {props.indexing ? 'Indexing…' : 'Index documentation'}
+          {props.indexing ? 'Indexing…' : 'Index everything'}
+        </button>
+        {/*
+          Narrower runs, because the two halves change for different reasons and at different
+          times. Each sweeps only its own kind, so reindexing tools cannot disturb skills.
+        */}
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={props.indexing || !props.retrievalReady}
+          title="Reindex tool documentation only, leaving skills untouched"
+          onClick={() => props.onIndexDocs('tool')}
+        >
+          Tools only
+        </button>
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={props.indexing || !props.retrievalReady}
+          title="Reindex skills only, leaving tool documentation untouched"
+          onClick={() => props.onIndexDocs('skill')}
+        >
+          Skills only
         </button>
         {/*
           Clearing is not the same as reindexing, which is why both are here. Reindexing

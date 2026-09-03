@@ -95,6 +95,8 @@ import {
   detectClaudeCli,
   buildExpertBriefing,
   buildDocCorpus,
+  parseDocEntryId,
+  type DocEntryKind,
   createNotifyTool,
   parseNamespacedToolName,
   type ToolCatalogueEntry,
@@ -3040,8 +3042,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * comparing is far cheaper than embedding it — and the embedder model is part of the hash,
    * because changing model makes every stored vector incomparable with new ones.
    */
-  function docsFingerprintPath(index: string, storeId: string): string {
-    return path.join(storageDir, 'index-manifests', `${manifestKey(index, storeId)}.docs.json`)
+  function docsFingerprintPath(index: string, storeId: string, kind?: DocEntryKind): string {
+    // One file per kind, plus the combined one. Sharing a file would mean a tools-only run
+    // recording "everything is current" and a later full run doing nothing.
+    const suffix = kind === undefined ? 'docs' : `docs.${kind}`
+    return path.join(storageDir, 'index-manifests', `${manifestKey(index, storeId)}.${suffix}.json`)
   }
 
   /**
@@ -3062,9 +3067,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return `${index}@${storeId}`
   }
 
-  async function readDocsFingerprint(index: string, storeId: string): Promise<string | undefined> {
+  async function readDocsFingerprint(index: string, storeId: string, kind?: DocEntryKind): Promise<string | undefined> {
     try {
-      const raw = JSON.parse(await fs.readFile(docsFingerprintPath(index, storeId), 'utf8')) as { fingerprint?: unknown }
+      const raw = JSON.parse(await fs.readFile(docsFingerprintPath(index, storeId, kind), 'utf8')) as {
+        fingerprint?: unknown
+      }
       return typeof raw.fingerprint === 'string' ? raw.fingerprint : undefined
     } catch {
       return undefined
@@ -3086,7 +3093,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * documentation should visibly do something even when nothing has changed, whereas the
    * automatic trigger must cost nothing when the catalogue is the same as last time.
    */
-  async function indexDocs(options: { force: boolean }): Promise<DocsIndexOutcome> {
+  /**
+   * Rebuilds the documentation index, optionally for one kind of entry only.
+   *
+   * `kind` exists because the two halves change for different reasons and at different moments:
+   * you add an MCP server and want its tools findable, or you write a skill and want that one
+   * findable. Being made to reindex both is not slow so much as *unclear* — it invites the
+   * question of whether the other half was disturbed.
+   *
+   * The dangerous part is the stale sweep, which deletes anything in the store the freshly built
+   * corpus does not contain. Left unscoped during a partial run it would cheerfully delete every
+   * skill while reindexing tools, since none of them would be in the corpus it built. Hence the
+   * id-prefix filter, and hence a partial run keeping its own fingerprint.
+   */
+  async function indexDocs(options: { force: boolean; kind?: DocEntryKind }): Promise<DocsIndexOutcome> {
     const { config } = await configManager.load()
     const index = docsIndexName(config)
     const search = await resolveSearch(config)
@@ -3103,14 +3123,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * has to describe the catalogue as it will be *used*, not as it happens to be right now.
        */
       const registry = currentToolRegistry(undefined, undefined, undefined, undefined, true)
-      const entries = buildDocCorpus({ dispatchOnlyTools: registry.dispatchOnlyList(), skills })
+      const all = buildDocCorpus({ dispatchOnlyTools: registry.dispatchOnlyList(), skills })
+      const wanted = options.kind
+      const entries = wanted === undefined ? all : all.filter((entry) => entry.kind === wanted)
 
       const fingerprint = createHash('sha256')
-        .update(`${embedder.model}:${String(embedder.dimensions)}`)
+        // Keyed by kind, so a tools-only run cannot mark the whole corpus as current and leave a
+        // later full run believing there is nothing left to do.
+        .update(`${wanted ?? 'all'}:${embedder.model}:${String(embedder.dimensions)}`)
         .update(entries.map((entry) => `${entry.id}\u0000${entry.text}`).join('\u0001'))
         .digest('hex')
 
-      if (!options.force && fingerprint === (await readDocsFingerprint(index, search.id))) {
+      if (!options.force && fingerprint === (await readDocsFingerprint(index, search.id, wanted))) {
         return { unchanged: true, index, indexed: entries.length }
       }
 
@@ -3138,7 +3162,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * offering a tool the model cannot call.
        */
       const keep = new Set(documents.map((document) => document.id))
-      const stale = (await writer.listPaths(index)).filter((existing) => !keep.has(existing))
+      const stale = (await writer.listPaths(index)).filter((existing) => {
+        if (keep.has(existing)) return false
+        // A partial run sweeps only its own kind. See the note on `kind` above: this one line is
+        // the difference between reindexing tools and silently deleting every skill.
+        if (wanted === undefined) return true
+        return parseDocEntryId(existing)?.kind === wanted
+      })
       if (stale.length > 0) await writer.deleteByPaths(index, stale)
       await writer.upsert(index, documents)
 
@@ -3146,9 +3176,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * Written only after the store accepted everything. A fingerprint saved before the
        * write would make a failed run look successful, and nothing would retry it.
        */
-      await fs.mkdir(path.dirname(docsFingerprintPath(index, search.id)), { recursive: true })
+      await fs.mkdir(path.dirname(docsFingerprintPath(index, search.id, wanted)), { recursive: true })
       await fs.writeFile(
-        docsFingerprintPath(index, search.id),
+        docsFingerprintPath(index, search.id, wanted),
         JSON.stringify({ fingerprint, indexedAt: Date.now(), count: documents.length }),
         'utf8',
       )
@@ -3322,7 +3352,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
       const existing = await writer.listPaths(index)
       if (existing.length > 0) await writer.deleteByPaths(index, existing)
-      await fs.rm(docsFingerprintPath(index, search.id), { force: true })
+      // Every fingerprint, so clearing the index cannot leave a partial one claiming currency.
+      await Promise.all(
+        [undefined, 'tool' as const, 'skill' as const].map((kind) =>
+          fs.rm(docsFingerprintPath(index, search.id, kind), { force: true }),
+        ),
+      )
       post({ type: 'docsIndexed', indexed: 0, index })
       logger.info(`cleared ${String(existing.length)} documentation entries from "${index}"`)
     } catch (error) {
@@ -3330,10 +3365,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleIndexDocs(): Promise<void> {
-    const outcome = await indexDocs({ force: true })
+  async function handleIndexDocs(kind?: DocEntryKind): Promise<void> {
+    const outcome = await indexDocs({ force: true, ...(kind === undefined ? {} : { kind }) })
     post({
       type: 'docsIndexed',
+      ...(kind === undefined ? {} : { kind }),
       ...(outcome.indexed !== undefined ? { indexed: outcome.indexed } : {}),
       ...(outcome.index !== undefined ? { index: outcome.index } : {}),
       ...(outcome.error !== undefined ? { error: outcome.error } : {}),
@@ -4506,7 +4542,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'indexDocs') {
-      void handleIndexDocs()
+      void handleIndexDocs(message.kind)
     } else if (message.type === 'runSearchProbe') {
       void handleSearchProbe(message.query, message.target)
     } else if (message.type === 'clearSearchLog') {

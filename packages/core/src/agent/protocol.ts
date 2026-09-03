@@ -366,7 +366,14 @@ export type UiToHostMessage =
   | { type: 'testSearchConnection'; connection: SearchConnectionInput }
   /** Indexing is user-started, never model-started: it is the largest egress in the product. */
   | { type: 'startIndexing' }
-  | { type: 'indexDocs' }
+  /**
+   * Rebuilds the documentation index. `kind` narrows it to tools or skills only.
+   *
+   * Separate because the two halves change for different reasons: adding an MCP server, or
+   * writing a skill. The buttons sit where each of those happens rather than in one place that
+   * does both and leaves you wondering what it touched.
+   */
+  | { type: 'indexDocs'; kind?: 'tool' | 'skill' }
   /** Excel and Outlook, off by default. Windows only. */
   | { type: 'setOffice'; excel: boolean; outlook: boolean }
   /**
@@ -706,7 +713,7 @@ export type HostToUiMessage =
   /** Result of a hand-run query. `text` is what the model would have been given. */
   | { type: 'searchProbe'; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */
-  | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string }
+  | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string; kind?: 'tool' | 'skill' }
   /** Progress and outcome of copying one store into another. */
   | { type: 'storeSync'; running: boolean; copied?: number; error?: string; fromLabel?: string }
   /** Whether tool schemas are being kept out of the prompt, and how many are hidden. */

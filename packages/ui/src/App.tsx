@@ -724,10 +724,10 @@ export function App(props: AppProps): ReactElement {
         setDispatcher((current) => ({ ...current, skills: enabled }))
         props.transport.post({ type: 'setSkillRetrieval', enabled } satisfies UiToHostMessage)
       },
-      onIndexDocs: () => {
+      onIndexDocs: (kind?: 'tool' | 'skill') => {
         setDocsResult(undefined)
         setDocsIndexing(true)
-        props.transport.post({ type: 'indexDocs' } satisfies UiToHostMessage)
+        props.transport.post({ type: 'indexDocs', ...(kind === undefined ? {} : { kind }) } satisfies UiToHostMessage)
       },
       onClearDocsIndex: () => {
         setDocsResult(undefined)
@@ -1063,6 +1063,20 @@ export function App(props: AppProps): ReactElement {
               onOpenFile: openManagedFile,
               onOpenStandingSkill: () =>
                 props.transport.post({ type: 'openStandingSkill' } satisfies UiToHostMessage),
+              // The button sits here because this is where a skill changes. It reindexes skills
+              // only: a run that also swept tools would invite the question of what it touched.
+              onReindex: () => {
+                setDocsResult(undefined)
+                setDocsIndexing(true)
+                props.transport.post({ type: 'indexDocs', kind: 'skill' } satisfies UiToHostMessage)
+              },
+              indexing: docsIndexing,
+              indexResult:
+                docsResult === undefined
+                  ? undefined
+                  : docsResult.error !== undefined
+                    ? `Failed: ${docsResult.error}`
+                    : `Indexed ${String(docsResult.indexed ?? 0)} entries.`,
               onDelete: (name) => props.transport.post({ type: 'deleteSkillFile', name } satisfies UiToHostMessage),
               onSaveDirs: (dir: string, paths: string[]) => {
                 setSkillConfiguredDir(dir)

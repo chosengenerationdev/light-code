@@ -429,24 +429,50 @@ function Get-OutlookNamespace {
 # Depth-capped and script-scoped: a large mailbox nests deeply, and PowerShell's nested-function
 # scoping means an inner assignment to `$folders` would build a local copy and discard it - the
 # same trap that made the Excel trace return empty.
+# Lists mail folders, cheaply enough to finish on a corporate mailbox.
+#
+# ## What went wrong the first time, reported from a real office
+#
+# The first recursive version read `$Folder.Items.Count` for every folder it walked. On a cached
+# local mailbox that is instant; on Exchange in online mode it is a server round trip *per
+# folder*, and with a few hundred folders the whole call ran past the timeout. What the user saw
+# was a tool that failed twice and an assistant confidently blaming a dialog box that did not
+# exist.
+#
+# So the count is gone unless asked for. `UnReadItemCount` stays: it is a stored property on the
+# folder rather than a query over its contents, and it is the number people actually scan for.
+#
+# The walk is also bounded twice over - by depth and by a hard ceiling on how many folders come
+# back - because "how deep does this mailbox go" is not a question worth discovering by hanging.
 function Invoke-OutlookFolders {
     param($Request)
 
     $ns = Get-OutlookNamespace
     $script:folderList = @()
-    $script:folderMaxDepth = 4
+    $script:folderMaxDepth = 2
     if ($Request -and $Request.depth) { $script:folderMaxDepth = [Math]::Min([int]$Request.depth, 8) }
+    $script:folderWithCounts = $false
+    if ($Request -and $Request.counts) { $script:folderWithCounts = $true }
+    $script:folderLimit = 400
 
     function Walk-Folder {
         param($Folder, [string]$Path, [int]$Depth)
 
-        $script:folderList += [ordered]@{
-            name   = $Folder.Name
-            path   = $Path
-            depth  = $Depth
-            items  = $Folder.Items.Count
-            unread = $Folder.UnReadItemCount
+        if ($script:folderList.Count -ge $script:folderLimit) { return }
+
+        $entry = [ordered]@{
+            name  = $Folder.Name
+            path  = $Path
+            depth = $Depth
         }
+        # Stored on the folder, so it costs nothing extra.
+        try { $entry.unread = $Folder.UnReadItemCount } catch { $entry.unread = $null }
+        # A query over the folder's contents, and the reason this used to time out.
+        if ($script:folderWithCounts) {
+            try { $entry.items = $Folder.Items.Count } catch { $entry.items = $null }
+        }
+        $script:folderList += $entry
+
         if ($Depth -ge $script:folderMaxDepth) { return }
         foreach ($child in $Folder.Folders) {
             Walk-Folder -Folder $child -Path "$Path\$($child.Name)" -Depth ($Depth + 1)
@@ -458,7 +484,12 @@ function Invoke-OutlookFolders {
             Walk-Folder -Folder $folder -Path "$($store.Name)\$($folder.Name)" -Depth 1
         }
     }
-    return @{ folders = $script:folderList }
+    return @{
+        folders  = $script:folderList
+        depth    = $script:folderMaxDepth
+        # Said rather than silently cut: a truncated list looks exactly like a complete one.
+        truncated = ($script:folderList.Count -ge $script:folderLimit)
+    }
 }
 
 function Get-OutlookFolder {
