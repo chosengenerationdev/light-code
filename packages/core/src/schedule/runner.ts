@@ -163,5 +163,21 @@ export function scheduledRunGuidance(schedule: Schedule, toolNames: readonly str
     '',
     'Finish with attempt_completion. Keep the answer short: it will be read later, out of',
     'context, possibly as a notification.',
+    ...(toolNames.includes('notify')
+      ? [
+          '',
+          '## Reporting what you found',
+          '',
+          'If this run produces anything worth reading — findings, a list, a table, a comparison —',
+          'call `notify` with a one-line `message` and the whole thing in `details` as Markdown.',
+          '`details` is written to a file and the notification offers to open it, so it survives',
+          'until someone reads it. The one-line message is all that appears on screen, so make it',
+          'say what happened rather than that something happened: "3 of 40 trades failed',
+          'validation", not "the check has finished".',
+          '',
+          'Put the report in `details` rather than in your final answer. The answer is a summary',
+          'kept in the run log; the report is the thing the user actually opens.',
+        ]
+      : []),
   ].join('\n')
 }

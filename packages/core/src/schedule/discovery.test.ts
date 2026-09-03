@@ -1,7 +1,13 @@
 import { z } from 'zod'
 import { describe, expect, it } from 'vitest'
 
-import { filterToolsForSchedule, registryForSchedule, ScheduledApprovalGate } from './runner.js'
+import {
+  filterToolsForSchedule,
+  registryForSchedule,
+  ScheduledApprovalGate,
+  scheduleAppliesHere,
+  scheduledRunGuidance,
+} from './runner.js'
 import { ALWAYS_AVAILABLE_TO_SCHEDULES } from './types.js'
 import type { Tool } from '../tools/types.js'
 
@@ -124,5 +130,74 @@ describe('a granted tool that is dispatch-only in the chat', () => {
   it('leaves call_tool unable to find anything the schedule did not name', () => {
     const registry = registryForSchedule([tool('deploy_service')], { allowedTools: [] })
     expect(registry.get('deploy_service')).toBeUndefined()
+  })
+})
+
+/**
+ * Requested as: a scheduled run should do some work, prepare a report, and put a link to it in
+ * the notification. Most of the machinery existed — what was missing was the run being *told* to
+ * use it, and the report surviving the toast that announced it.
+ */
+describe('what an unattended run is told about reporting', () => {
+  const guidance = (tools: string[]): string =>
+    scheduledRunGuidance({ name: 'Nightly', allowedTools: tools } as never, tools)
+
+  it('asks for the report in details, not in the final answer', () => {
+    const text = guidance(['notify', 'read_file'])
+    expect(text).toMatch(/call `notify`/)
+    expect(text).toMatch(/whole thing in `details`/)
+    expect(text).toMatch(/written to a file/)
+  })
+
+  /**
+   * A one-line notification saying "the check has finished" is the version of this feature that
+   * wastes everyone's morning: it is the only thing on screen, so it has to carry the finding.
+   */
+  it('tells it to say what happened rather than that something happened', () => {
+    expect(guidance(['notify'])).toMatch(/say what happened rather than that something happened/)
+  })
+
+  /** Silence about a tool it does not have is better than instructions it cannot follow. */
+  it('says nothing about reporting when the schedule was not granted notify', () => {
+    const text = guidance(['read_file'])
+    expect(text).not.toMatch(/Reporting what you found/)
+  })
+})
+
+/**
+ * A schedule belongs to the project it was written in.
+ *
+ * They were a single global list, so one written against project A fired whatever project
+ * happened to be open — running its prompt, with its granted tools, against B's files. For a
+ * schedule granted editing that is a hazard rather than a scoping gap.
+ */
+describe('which project a schedule fires in', () => {
+  it('runs in the project it was written in', () => {
+    expect(scheduleAppliesHere({ workspaceRoot: '/repos/alpha' }, '/repos/alpha')).toBe(true)
+  })
+
+  it('does not run in a different one', () => {
+    expect(scheduleAppliesHere({ workspaceRoot: '/repos/alpha' }, '/repos/beta')).toBe(false)
+  })
+
+  /** The same Windows spelling trap that made approvals silently stop applying. */
+  it('is not fooled by how the path happens to be spelled', () => {
+    expect(scheduleAppliesHere({ workspaceRoot: '/repos/alpha/' }, '/repos/alpha')).toBe(true)
+    if (process.platform === 'win32') {
+      expect(scheduleAppliesHere({ workspaceRoot: 'D:\\Repos\\Alpha' }, 'd:\\repos\\alpha')).toBe(true)
+    }
+  })
+
+  /**
+   * Schedules written before this had no project. Binding them to whatever happened to be open
+   * at upgrade time would have stopped them firing with no explanation anywhere.
+   */
+  it('keeps firing anywhere when it predates the binding', () => {
+    expect(scheduleAppliesHere({}, '/repos/beta')).toBe(true)
+    expect(scheduleAppliesHere({}, undefined)).toBe(true)
+  })
+
+  it('does not fire with no folder open when it names one', () => {
+    expect(scheduleAppliesHere({ workspaceRoot: '/repos/alpha' }, undefined)).toBe(false)
   })
 })

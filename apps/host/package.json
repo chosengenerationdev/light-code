@@ -1,6 +1,6 @@
 {
   "name": "@chosengeneration/light-code",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "A minimal agentic coding assistant, served to your browser from a local Node server",
   "license": "MIT",
   "type": "module",

@@ -1,5 +1,48 @@
 # @chosengeneration/light-code
 
+## 0.23.0
+
+### Minor Changes
+
+- 6c193e2: Settings can differ per project, without a repository being able to set them.
+
+  Opening a second codebase on one machine meant it shared the first one's vector store, model,
+  Python environment and read roots. Those are user-scope-only under invariant 5 — but that rule is
+  about **who writes a value**, not about whether it may vary by project. `approvals` has always
+  made exactly that split: scoped per workspace, stored user-side, keyed by path. This generalises
+  it.
+
+  A project may now differ on: which model answers, which model writes tool source, which vector
+  store it indexes into, its mode, its step cap, its documentation index, its embedder index name,
+  its Python paths, its read roots and `@` exclusions, and its skill folders. Everything else —
+  provider list, credentials, TLS, the Office toggles, the expert — stays machine-wide, deliberately,
+  and the list is an allow list so a key added later defaults to global rather than silently gaining
+  a dimension nobody designed.
+
+  **Schedules are now bound to the project they were written in.** They were a single global list,
+  so a schedule written against one codebase fired against whichever happened to be open — running
+  its prompt, with its granted tools, against the wrong repository. For a schedule granted editing
+  that is not a scoping gap but a hazard. Schedules written before this keep firing anywhere, since
+  silently binding them to whatever was open at upgrade time would have stopped them with no
+  explanation.
+
+- Scheduled runs write reports that survive the notification, and cannot run twice at once.
+
+  A run that produced findings put them in a notification and an in-memory document. Both are gone
+  by morning — which is precisely when an unattended run gets read — so the report now goes to a
+  file, the toast offers to open that file, and the run log in the Schedules tab keeps a **Report**
+  button pointing at it. Unattended runs are also told to use it: put the findings in `details` as
+  Markdown, and make the one-line message say what happened rather than that something happened,
+  because that line is all that appears on screen.
+
+  **A schedule can no longer run twice because two windows are open.** Each window has its own
+  timer and its own view of a schedule being due, so on one project both would run it, at the same
+  moment, against the same files. A run now claims its schedule first, with a file created
+  exclusively — one atomic filesystem operation, so two windows racing cannot both win. A claim
+  left behind by a window that crashed is taken over after an hour: a nightly job that stops
+  silently for ever is a worse failure than an occasional double run. Pressing Run by hand is never
+  blocked, since that is an instruction from someone who can see what they are doing.
+
 ## 0.22.0
 
 ### Minor Changes

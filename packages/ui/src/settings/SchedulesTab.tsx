@@ -46,6 +46,14 @@ export interface SchedulesTabProps {
   onQueryMentions: (query: string) => void
   /** Opens a past run's transcript in an editor tab, where a long one is actually readable. */
   onOpenRun: (taskId: string, title: string) => void
+  /**
+   * Opens a report a run wrote.
+   *
+   * The notification that announced it is long gone by the time anyone reads this tab, so the
+   * run log is where a report has to be reachable from — otherwise an unattended run's output
+   * exists but cannot be found, which is the same as not having it.
+   */
+  onOpenReport: (reportPath: string) => void
   /** Whether the timer is alive, and when it last checked. */
   scheduler?: { running: boolean; lastTickAt?: number } | undefined
   onRestartScheduler: () => void
@@ -328,10 +336,32 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
                       document — read, scrolled, searched — and an editor does all of that far
                       better than a panel a third the width.
                     */}
+                    {run.reportPath !== undefined && (
+                      <button
+                        type="button"
+                        style={{
+                          ...secondaryButtonStyle(),
+                          fontSize: 10,
+                          padding: '1px 6px',
+                          marginLeft: 'auto',
+                          color: colors.accent,
+                          borderColor: colors.accent,
+                        }}
+                        title={`Open the report this run wrote — ${run.reportPath}`}
+                        onClick={() => props.onOpenReport(run.reportPath as string)}
+                      >
+                        Report
+                      </button>
+                    )}
                     {run.taskId !== undefined && (
                       <button
                         type="button"
-                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
+                        style={{
+                          ...secondaryButtonStyle(),
+                          fontSize: 10,
+                          padding: '1px 6px',
+                          ...(run.reportPath === undefined ? { marginLeft: 'auto' } : {}),
+                        }}
                         title="Open this run's full transcript in an editor tab"
                         onClick={() =>
                           props.onOpenRun(

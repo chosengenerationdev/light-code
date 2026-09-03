@@ -58,6 +58,7 @@ function render(
         mentionCandidates={[]}
         onQueryMentions={() => {}}
         onOpenRun={() => {}}
+        onOpenReport={() => {}}
         onRestartScheduler={() => {}}
         onClearRuns={() => {}}
         onDeleteRun={() => {}}

@@ -131,6 +131,15 @@ export const scheduleSchema = z.object({
         summary: z.string().optional(),
         /** Absent once the task has been deleted from history. */
         taskId: z.string().optional(),
+        /**
+         * A report this run wrote, if it wrote one.
+         *
+         * Kept as a path because the point of an unattended run is that nobody was watching: the
+         * notification is gone by morning, and an in-memory document dies with the window. The
+         * report has to be somewhere it can still be opened hours later, and findable from the
+         * run that produced it rather than only from a toast that has since disappeared.
+         */
+        reportPath: z.string().optional(),
       }),
     )
     .optional(),

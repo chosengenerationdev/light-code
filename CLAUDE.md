@@ -747,6 +747,41 @@ attach-refusal message**; they have never run against a live mailbox.
 
 ---
 
+## 12d. Per-project settings, and schedules that stay put (0.47.0)
+
+**Settings may vary by project without a repository being able to set them.** Invariant 5 is about
+*who writes a value*, not about whether it may vary — and `approvals` has made exactly that split
+since Phase 4 (scoped per workspace, stored user-side, keyed by path). `config/workspaceOverrides.ts`
+generalises it: `workspaces` in user config, keyed by workspace path, applied in `ConfigManager` so
+every read sees the same answer.
+
+- **`OVERRIDABLE_KEYS` is an allow list**, so a key added later defaults to global rather than
+  silently gaining a per-project dimension nobody designed. Credentials, `profiles`, `tls`,
+  `certDir`, `office` and `expert` are absent on purpose: they describe the machine.
+- Nested blocks merge one level. A project naming its own `python.venvPath` means "this project's
+  interpreter", not "and no uv path at all".
+- Keys are resolved and case-folded, which is the trap `approvals` hit: on Windows one folder
+  arrives spelled two ways and a JSON key is exact.
+
+**Schedules are bound to their project and claimed before they run.** Two separate faults:
+
+- They were one global list, so a schedule written against project A fired in whichever project
+  was open — its prompt, its granted tools, someone else's files. `scheduleAppliesHere` fixes it.
+  An absent `workspaceRoot` still means "anywhere", because binding old schedules to whatever
+  happened to be open at upgrade would have stopped them with no explanation.
+- Two **windows on the same project** each have their own timer, so both ran it at once. A run
+  claims its schedule with a file created `wx` — one atomic operation, so a race has one winner.
+  A claim from a crashed window is taken over after an hour: a nightly job that stops for ever,
+  silently, is worse than an occasional double run. A manual Run is never blocked.
+
+**A scheduled run's report is a file.** `notify`'s `details` used to be an in-memory document,
+which dies with the window — and an unattended run is read in the morning, by which time both the
+toast and the document are gone. It is written to `reports/`, the toast opens *that*, and the run
+log keeps a **Report** button. The guidance tells a run to put findings in `details` and to make
+the one-line message say what happened, since that line is all that appears on screen.
+
+---
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -1095,14 +1130,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.46.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.46.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.47.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.47.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.22.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.23.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1118,7 +1153,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.46.0, host 0.22.0 — and keep working from
+**Next:** publish the pending versions — extension 0.47.0, host 0.23.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

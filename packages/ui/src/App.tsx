@@ -1106,6 +1106,10 @@ export function App(props: AppProps): ReactElement {
               // The same candidates the composer uses; the host does not care who asked.
               mentionCandidates,
               onQueryMentions: queryMentions,
+              // The same path the host already opens skills and Python tools through, confined to the
+              // folders those things live in - a report is one more file the user asked to see.
+              onOpenReport: (reportPath: string) =>
+                props.transport.post({ type: 'openManagedFile', path: reportPath } satisfies UiToHostMessage),
               onOpenRun: (taskId: string, title: string) =>
                 props.transport.post({ type: 'openScheduleRun', taskId, title } satisfies UiToHostMessage),
               scheduler: schedulerState,

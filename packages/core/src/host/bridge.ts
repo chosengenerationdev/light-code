@@ -488,6 +488,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         python.toolsDirectory(),
         ...(skillsDir === undefined ? [] : [skillsDir]),
         ...extraSkillDirs.filter((dir): dir is string => dir !== undefined),
+        // Reports a scheduled run wrote. Confined like everything else here: the path arrives
+        // from the UI, which only ever sends one it was given, and "the UI would not do that"
+        // is not a boundary when the result is opening a file in the user's editor.
+        path.join(storageDir, 'reports'),
       ]
       if (roots.length === 0) return
       const real = await confineToAny(path.resolve(filePath), roots)
@@ -1291,8 +1295,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            */
           if (details !== undefined) {
             void (async () => {
+              /*
+               * Written to disk before the toast, not instead of it.
+               *
+               * The point of an unattended run is that nobody was watching. A notification is
+               * gone by morning and an in-memory document dies with the window, so a report that
+               * existed only in a closure was a report the user could not read — which is most
+               * of the value of having the run at all. The file outlives both.
+               */
+              const saved = await saveReport(message, details)
+              if (saved !== undefined) lastReportPath = saved
+
               const open = await ui.showActionMessage(message, 'Open report', level)
-              if (open) await ui.openDocument({ title: message, content: details })
+              if (!open) return
+              // The file when there is one, so what opens has a path the user can find again.
+              if (saved !== undefined && ui.openFile !== undefined) await ui.openFile(saved)
+              else await ui.openDocument({ title: message, content: details })
             })()
             return
           }
@@ -4841,6 +4859,65 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * skipped rather than queued — a missed reminder is better than two tangled ones.
    */
   let runningScheduleId: string | undefined
+  /**
+   * The report the current run wrote, so the run log can point at it.
+   *
+   * Cleared when a run starts rather than when it ends: a run that writes no report must not
+   * inherit the previous one's, which would be a link to the wrong night's findings — the kind
+   * of wrong that is only discovered after acting on it.
+   */
+  let lastReportPath: string | undefined
+
+  /**
+   * Writes a report where it can still be read tomorrow.
+   *
+   * ## Why a file rather than the in-memory document
+   *
+   * The whole point of a scheduled run is that nobody is watching. The toast is gone by morning
+   * and an untitled document dies with the window, so a report that lived only in a closure was
+   * one the user could not read — and reading it is the reason the run exists.
+   *
+   * ## Naming
+   *
+   * Timestamped first so the folder sorts chronologically, then a slug of the title so a folder
+   * of them is scannable without opening each one.
+   */
+  async function saveReport(title: string, contents: string): Promise<string | undefined> {
+    try {
+      const directory = path.join(storageDir, 'reports')
+      await fs.mkdir(directory, { recursive: true })
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const slug = title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60)
+      const target = path.join(directory, `${stamp}${slug.length > 0 ? `-${slug}` : ''}.md`)
+
+      await fs.writeFile(target, `# ${title}
+
+${contents}
+`, 'utf8')
+      await pruneReports(directory)
+      return target
+    } catch (error) {
+      // A report that could not be written must not take the run down with it: the work is done
+      // either way, and the notification still carries the summary.
+      logger.warn(`could not save the report: ${String(error)}`)
+      return undefined
+    }
+  }
+
+  /** Keeps the folder from growing without limit. Oldest go first; the newest are what get read. */
+  async function pruneReports(directory: string): Promise<void> {
+    const keep = 100
+    const entries = (await fs.readdir(directory)).filter((name) => name.endsWith('.md')).sort()
+    for (const name of entries.slice(0, Math.max(0, entries.length - keep))) {
+      await fs.rm(path.join(directory, name), { force: true })
+    }
+  }
+
   let scheduleTimer: ReturnType<typeof setInterval> | undefined
   /** When the timer last ran, so a stopped scheduler is visible rather than guessed at. */
   let lastScheduleTickAt: number | undefined
@@ -4994,13 +5071,77 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * A separate wrapper because the body has early returns, and a promise recorded only on the
    * paths that actually run would leave a window where a send saw nothing to wait for.
    */
+  /**
+   * Stops the same schedule running twice when several windows are open.
+   *
+   * Two VS Code windows on one project each have their own bridge, their own timer, and their own
+   * view of a schedule being due - so both would run it, at the same moment, against the same
+   * files. Binding a schedule to its project fixes windows on *different* projects and does
+   * nothing for this.
+   *
+   * The claim is a file created with `wx`, which fails if it already exists. That is one atomic
+   * filesystem operation, so two windows racing cannot both win it - no shared lock service, and
+   * nothing to keep running.
+   *
+   * **Stale claims are taken over**, because the alternative is worse: a window that crashed
+   * mid-run would otherwise block that schedule for ever, silently, and the user would have no
+   * idea why their nightly job stopped. An hour is far longer than any run should take and short
+   * enough that a crash costs one cycle.
+   */
+  const CLAIM_STALE_MS = 60 * 60 * 1000
+
+  async function claimSchedule(id: string): Promise<boolean> {
+    const claimPath = path.join(storageDir, 'schedule-claims', `${id}.json`)
+    const mine = JSON.stringify({ pid: process.pid, at: Date.now() })
+    try {
+      await fs.mkdir(path.dirname(claimPath), { recursive: true })
+      await fs.writeFile(claimPath, mine, { encoding: 'utf8', flag: 'wx' })
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        // Could not even attempt the claim. Running is the better failure: a schedule that
+        // silently stops is worse than one that occasionally runs twice.
+        logger.warn(`could not claim schedule ${id}: ${String(error)}`)
+        return true
+      }
+    }
+
+    try {
+      const held = JSON.parse(await fs.readFile(claimPath, 'utf8')) as { at?: unknown }
+      const at = typeof held.at === 'number' ? held.at : 0
+      if (Date.now() - at < CLAIM_STALE_MS) {
+        logger.info(`schedule ${id} is already running in another window`)
+        return false
+      }
+      logger.warn(`taking over a stale claim on schedule ${id}`)
+      await fs.writeFile(claimPath, mine, 'utf8')
+      return true
+    } catch {
+      // An unreadable claim is not evidence that anything is running.
+      await fs.writeFile(claimPath, mine, 'utf8').catch(() => undefined)
+      return true
+    }
+  }
+
+  async function releaseSchedule(id: string): Promise<void> {
+    await fs.rm(path.join(storageDir, 'schedule-claims', `${id}.json`), { force: true }).catch(() => undefined)
+  }
+
   async function runSchedule(id: string, reason: 'due' | 'manual'): Promise<void> {
+    /*
+     * Only for a run that fired on its own. A person pressing Run has decided to run it here, and
+     * refusing because another window happens to hold a claim would be obeying a lock they cannot
+     * see against an instruction they just gave.
+     */
+    if (reason === 'due' && !(await claimSchedule(id))) return
+
     const run = runScheduleInner(id, reason)
     scheduledRunInFlight = run
     try {
       await run
     } finally {
       scheduledRunInFlight = undefined
+      if (reason === 'due') await releaseSchedule(id)
     }
   }
 
@@ -5021,6 +5162,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (schedule === undefined) return
 
     runningScheduleId = id
+    // Cleared at the start, not the end: a run that writes no report must not inherit the
+    // previous one's, which would link the wrong night's findings from this night's entry.
+    lastReportPath = undefined
     runStartedAt = Date.now()
     void postSchedules()
 
@@ -5106,6 +5250,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 durationMs: Date.now() - startedAt,
                 ...(summary.length > 0 ? { summary: summary.slice(0, 300) } : {}),
                 ...(ranAsTask !== undefined ? { taskId: ranAsTask } : {}),
+                ...(lastReportPath === undefined ? {} : { reportPath: lastReportPath }),
               },
               ...(current.runs ?? []),
             ].slice(0, MAX_REMEMBERED_RUNS),
