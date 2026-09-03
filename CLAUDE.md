@@ -704,6 +704,14 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
 - **PowerShell scoping cost a debugging round too:** a nested function assigning to an enclosing
   array creates a local copy, so the first trace returned empty with no error. `$script:` scoped.
 
+- **Mail keeps its colours** (0.45.0, from the office: "it can't see colours in the email
+  content"). `MailItem.Body` is the plain-text rendering and drops all formatting — which in work
+  email is often the message: the red line is the failure, the highlight is the changed cell.
+  Handing over `HTMLBody` would have been worse, since an Outlook body is thousands of tokens of
+  `mso-` markup. `office/mailFormat.ts` extracts the text and annotates **only what departs from
+  the default**, listing the colours once at the top so the notation explains itself.
+  Colours are matched on the **worst channel**, not summed distance: the first version called a
+  brown "grey", and a wrong name defeats the purpose more thoroughly than a hex would.
 - **Enumerating a mailbox must not read item counts** (0.44.3, from the office). The recursive
   walk read `$Folder.Items.Count` per folder — instant on a cached mailbox, a server round trip
   each on Exchange online, and past the timeout at a few hundred folders. Counts are opt-in now,
@@ -1082,14 +1090,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.44.3**, built and unpublished:
-`apps/vscode/light-code-vscode-0.44.3.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.45.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.45.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.20.3**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.21.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1105,7 +1113,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.44.3, host 0.20.3 — and keep working from
+**Next:** publish the pending versions — extension 0.45.0, host 0.21.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

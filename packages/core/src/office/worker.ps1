@@ -579,8 +579,19 @@ function Invoke-OutlookRead {
     $attachments = @()
     foreach ($attachment in $item.Attachments) { $attachments += $attachment.FileName }
 
+    # The HTML body as well as the plain one.
+    #
+    # `Body` is the plain-text rendering and it discards every bit of formatting - which in
+    # corporate mail is often the message itself: the red line is the failure, the highlighted
+    # cell is the one that changed. The caller extracts the text and marks the parts that carried
+    # meaning; sending the HTML straight through would cost thousands of tokens of Outlook markup
+    # to convey a few words of emphasis.
+    $html = $null
+    try { $html = [string]$item.HTMLBody } catch { }
+
     return @{
         subject     = $item.Subject
+        html        = $html
         from        = $item.SenderName
         fromAddress = $item.SenderEmailAddress
         to          = $item.To

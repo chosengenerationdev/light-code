@@ -1,5 +1,27 @@
 # @chosengeneration/light-code
 
+## 0.21.0
+
+### Minor Changes
+
+- Emails keep their colours.
+
+  `MailItem.Body` is the plain-text rendering and discards every bit of formatting — which in work
+  email is frequently the message itself. The red line is the failure, the highlighted cell is the
+  one that changed, the struck-through row is the one to ignore. Flattened, they all read the same
+  and there is no way to tell which one the sender was pointing at.
+
+  Handing over the HTML instead would have been worse: an Outlook body is thousands of tokens of
+  conditional comments, `mso-` declarations and nested layout tables, and the text would drown in
+  it. So the text is extracted as text and formatting is added back **only where it departs from
+  the default** — `[red: FAILED]`, `[highlight yellow: 42]`, bold, struck through. An ordinary
+  message reads exactly as it did before; one that used colour to mean something now says so, and
+  the colours used are listed once at the top so the notation explains itself.
+
+  Colours are named rather than left as hex, matched on the worst channel rather than summed
+  distance — the first version called a brown "grey", and naming a colour something it plainly is
+  not defeats the point.
+
 ## 0.20.3
 
 ### Patch Changes

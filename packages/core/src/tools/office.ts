@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import type { OfficeBridge } from '../office/bridge.js'
+import { annotateHtmlBody } from '../office/mailFormat.js'
 import type { Tool, ToolResult } from './types.js'
 
 /**
@@ -479,8 +480,20 @@ export function createOutlookReadTool(options: OfficeToolOptions): Tool<{ entryI
           cc: string
           received: string
           body: string
+          html: string | null
           attachments: string[]
         }>({ op: 'outlook.read', ...params })
+
+        /*
+         * The formatted body wins when there is one.
+         *
+         * Plain text loses colour, and colour in a work email is often the point of it: the red
+         * line is the failure, the highlighted cell is the one that changed. Flattened, they all
+         * read the same. `annotateHtmlBody` keeps the text readable and marks only what departs
+         * from the default, so an ordinary message reads exactly as it did before.
+         */
+        const annotated =
+          result.html === null || result.html.length === 0 ? undefined : annotateHtmlBody(result.html)
 
         return {
           content: [
@@ -490,8 +503,17 @@ export function createOutlookReadTool(options: OfficeToolOptions): Tool<{ entryI
             ...(result.cc.length > 0 ? [`Cc: ${result.cc}`] : []),
             `Received: ${result.received}`,
             ...(result.attachments.length > 0 ? [`Attachments: ${result.attachments.join(', ')}`] : []),
+            ...(annotated === undefined || annotated.colours.length === 0
+              ? []
+              : [
+                  // Explained once at the top, rather than left to be inferred from the first
+                  // bracket the reader meets halfway down a paragraph.
+                  `Formatting: parts of this message are marked like [red: text]. Used here: ${annotated.colours.join(', ')}.`,
+                ]),
             '',
-            result.body,
+            // Falls back to the plain body when there is no HTML, which is what a plain-text
+            // sender produces — and losing the message to gain formatting would be absurd.
+            annotated === undefined || annotated.text.length === 0 ? result.body : annotated.text,
           ].join('\n'),
         }
       } catch (error) {
