@@ -120,6 +120,10 @@ describe('reading a formatted mail body', () => {
  * a stylesheet in the head, and a table. Checked against a hand-built sample rather than only
  * unit fragments, because the failure that matters is an annotation spilling across a paragraph
  * and that only shows up at length.
+ *
+ * The job names here are invented. Fixtures get read, copied and published, so anything drawn
+ * from a real workplace becomes permanent the moment it is committed - and a plausible-looking
+ * name is exactly the kind of detail nobody thinks to check later.
  */
 describe('a realistic Outlook message', () => {
   const html = [

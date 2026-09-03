@@ -1455,6 +1455,18 @@ behaviour, write that test — `config/retrieval.test.ts` reads `bridge.ts` and 
 read of the key, because a decision that never reaches its owner is invisible to any test of the
 owner.
 
+### Never put anything from the user's workplace into the repository
+
+A screenshot from the office was shared to report a bug, and two internal job names from its
+terminal output ended up in a test fixture (0.45.0), because they were realistic and to hand.
+That is committed, pushed and permanent — and a plausible-looking name is exactly the kind of
+detail nobody thinks to check later. They have been replaced with invented ones.
+
+**Nothing from a screenshot, log or transcript of the user's work goes into a file here.** Not a
+hostname, not a gateway URL, not a person, not a distribution list, not a job or system name.
+Invent fixtures; realism is worth nothing against the cost of publishing somebody's internal
+detail to a public repository.
+
 ### The habit that found all of them
 
 **Read the running system.** The user's `config.json` (`retrieval: {dispatcher: true}`, no vector
