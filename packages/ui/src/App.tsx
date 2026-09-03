@@ -1038,6 +1038,14 @@ export function App(props: AppProps): ReactElement {
             onRestartMcp={restartMcp}
             onSetMcpServerEnabled={setMcpServerEnabled}
             onSetMcpToolPermission={setMcpToolPermission}
+            onSetMcpToolTimeout={(server, tool, seconds) =>
+              props.transport.post({
+                type: 'setMcpToolTimeout',
+                server,
+                tool,
+                ...(seconds === undefined ? {} : { seconds }),
+              } satisfies UiToHostMessage)
+            }
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}

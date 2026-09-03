@@ -356,6 +356,14 @@ export type UiToHostMessage =
   | { type: 'connectMcpServer'; name: string }
   | { type: 'setMcpServerEnabled'; name: string; enabled: boolean }
   | { type: 'setMcpToolPermission'; server: string; tool: string; permission: McpToolPermission }
+  /**
+   * A timeout for one tool, in seconds. `undefined` clears it and the server's applies again.
+   *
+   * Per tool because a server's single number is the wrong shape for the common case: twenty
+   * quick lookups and one report that takes four minutes. Raising the server-wide limit to suit
+   * the slow one means a genuinely hung quick call hangs for four minutes too.
+   */
+  | { type: 'setMcpToolTimeout'; server: string; tool: string; seconds?: number }
   | { type: 'requestProfiles' }
   | { type: 'requestSearch' }
   | { type: 'saveSearchConnection'; connection: SearchConnectionInput }

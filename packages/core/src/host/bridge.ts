@@ -4050,6 +4050,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * `ask` is neither. Switching to one state must clear the other, or a tool could be
    * simultaneously always-allowed and hidden.
    */
+  async function handleSetToolTimeout(server: string, tool: string, seconds?: number): Promise<void> {
+    await updateMcpServer(server, (entry) => {
+      const timeouts = { ...entry.toolTimeouts }
+      // Deleted rather than stored as 0 or null, so "no override" has exactly one representation
+      // and the config file does not accumulate entries meaning nothing.
+      if (seconds === undefined) delete timeouts[tool]
+      else timeouts[tool] = seconds
+      const remaining = Object.keys(timeouts).length
+      return { ...entry, ...(remaining > 0 ? { toolTimeouts: timeouts } : { toolTimeouts: undefined }) }
+    })
+    postMcp()
+  }
+
   async function handleSetToolPermission(server: string, tool: string, permission: McpToolPermission): Promise<void> {
     const namespaced = namespacedToolName(server, tool)
 
@@ -4497,6 +4510,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void mcp.restart(message.name)
     } else if (message.type === 'setMcpServerEnabled') {
       void updateMcpServer(message.name, (entry) => ({ ...entry, disabled: !message.enabled })).then(() => postMcp())
+    } else if (message.type === 'setMcpToolTimeout') {
+      void handleSetToolTimeout(message.server, message.tool, message.seconds)
     } else if (message.type === 'setMcpToolPermission') {
       void handleSetToolPermission(message.server, message.tool, message.permission)
     } else if (message.type === 'requestSearch') {

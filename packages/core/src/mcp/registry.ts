@@ -322,6 +322,9 @@ export class McpRegistry {
           namespacedName: namespacedToolName(name, descriptor.name),
           description: descriptor.description,
           permission: this.permissionFor(name, descriptor.name),
+          ...(config.toolTimeouts?.[descriptor.name] !== undefined
+            ? { timeout: config.toolTimeouts[descriptor.name] }
+            : {}),
         })),
         logs: this.logs.get(name) ?? [],
         ...(error !== undefined ? { error } : {}),

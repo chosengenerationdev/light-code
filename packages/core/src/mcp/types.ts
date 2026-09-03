@@ -30,6 +30,18 @@ export const stdioServerSchema = z.object({
    * Applies per call, not per session.
    */
   timeout: z.number().positive().max(3600).optional(),
+  /**
+   * Per-tool overrides, in seconds, keyed by the tool's bare name.
+   *
+   * A server's timeout is one number for everything it exposes, and that is the wrong shape for
+   * the common case: a server with twenty quick lookups and one report that takes four minutes.
+   * Raising the server-wide limit to suit the slow one means a genuinely hung quick call now
+   * hangs for four minutes too.
+   *
+   * Bare names, matching `disabledTools`, so both halves of a server's per-tool configuration are
+   * keyed the same way and a namespaced name pasted here does not silently fail to match.
+   */
+  toolTimeouts: z.record(z.string(), z.number().positive().max(3600)).optional(),
 })
 
 export const httpServerSchema = z.object({
@@ -39,6 +51,18 @@ export const httpServerSchema = z.object({
   disabledTools: z.array(z.string()).optional(),
   /** As above. A remote server is if anything more likely to be slow. */
   timeout: z.number().positive().max(3600).optional(),
+  /**
+   * Per-tool overrides, in seconds, keyed by the tool's bare name.
+   *
+   * A server's timeout is one number for everything it exposes, and that is the wrong shape for
+   * the common case: a server with twenty quick lookups and one report that takes four minutes.
+   * Raising the server-wide limit to suit the slow one means a genuinely hung quick call now
+   * hangs for four minutes too.
+   *
+   * Bare names, matching `disabledTools`, so both halves of a server's per-tool configuration are
+   * keyed the same way and a namespaced name pasted here does not silently fail to match.
+   */
+  toolTimeouts: z.record(z.string(), z.number().positive().max(3600)).optional(),
 })
 
 export const mcpServerSchema = z.union([stdioServerSchema, httpServerSchema])
@@ -86,6 +110,8 @@ export interface McpToolState {
   namespacedName: string
   description: string
   permission: McpToolPermission
+  /** This tool's own timeout in seconds, when it has one. Undefined means the server's. */
+  timeout?: number
 }
 
 export interface McpServerState {

@@ -68,6 +68,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onRestartMcp: (name: string) => void
   onSetMcpServerEnabled: (name: string, enabled: boolean) => void
   onSetMcpToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
+  onSetMcpToolTimeout: (server: string, tool: string, seconds?: number) => void
   onConnectMcp: (name: string) => void
   expert: ExpertState | undefined
   onRecheckExpert: () => void
@@ -329,6 +330,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRestart={props.onRestartMcp}
             onSetServerEnabled={props.onSetMcpServerEnabled}
             onSetToolPermission={props.onSetMcpToolPermission}
+            onSetToolTimeout={props.onSetMcpToolTimeout}
             onConnect={props.onConnectMcp}
             /*
              * Fed from the Search tab's own props rather than from new state. One source for

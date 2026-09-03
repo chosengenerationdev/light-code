@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.46.0
+
+### Minor Changes
+
+- A timeout per MCP tool, not just per server.
+
+  A server's timeout is one number for everything it exposes, which is the wrong shape for the
+  usual server: twenty quick lookups and one report that takes four minutes. Raising the
+  server-wide limit to suit the slow one means a genuinely hung quick call now hangs for four
+  minutes too — the limit stops doing the job it was there for.
+
+  Each tool in the MCP tab has its own box beside its Always/Ask/Never control. Blank means the
+  server's timeout, which means nothing changes unless you set one. Most specific wins: the
+  tool's own limit, then the server's, then the SDK's default.
+
+  Keyed by the bare tool name, matching `disabledTools`, so both halves of a server's per-tool
+  configuration are keyed the same way and a namespaced name pasted in does not silently fail to
+  match. The value is committed on blur rather than per keystroke — typing "120" would otherwise
+  save 1, then 12, then 120, and the middle ones are real settings that briefly applied.
+
 ## 0.45.0
 
 ### Minor Changes

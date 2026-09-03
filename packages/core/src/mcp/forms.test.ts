@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import type { McpServerConfig } from './types.js'
+import { mcpServerSchema } from './types.js'
 import {
   BLANK_MCP_FORM,
   fromMcpServerForm,
@@ -215,5 +217,48 @@ describe('a per-server tool timeout', () => {
     expect(errors('99999').timeout).toBeDefined()
     expect(errors('120').timeout).toBeUndefined()
     expect(errors('').timeout).toBeUndefined()
+  })
+})
+
+/**
+ * A per-tool timeout, because a server's single number is the wrong shape for the usual server:
+ * twenty quick lookups and one report that takes four minutes. Raising the server-wide limit to
+ * suit the slow one means a genuinely hung quick call hangs for four minutes too.
+ */
+describe('per-tool timeouts', () => {
+  const server = (toolTimeouts?: Record<string, number>): McpServerConfig => ({
+    command: 'srv',
+    timeout: 60,
+    ...(toolTimeouts === undefined ? {} : { toolTimeouts }),
+  })
+
+  it('survives the schema, keyed by the bare tool name', () => {
+    const parsed = mcpServerSchema.parse(server({ generate_report: 600 }))
+    expect(parsed).toMatchObject({ toolTimeouts: { generate_report: 600 } })
+  })
+
+  it('is refused when it is not a positive number of seconds', () => {
+    expect(mcpServerSchema.safeParse(server({ a: 0 })).success).toBe(false)
+    expect(mcpServerSchema.safeParse(server({ a: -5 })).success).toBe(false)
+    expect(mcpServerSchema.safeParse(server({ a: 99999 })).success).toBe(false)
+  })
+
+  /** Absent is the normal case and must stay absent, not become an empty object in the file. */
+  it('is left off entirely when no tool has one', () => {
+    expect('toolTimeouts' in mcpServerSchema.parse(server())).toBe(false)
+  })
+
+  /**
+   * The resolution order the client applies. Written as a table because it is three lines of code
+   * whose correctness is entirely about precedence, and precedence is what a table shows.
+   */
+  it('resolves most-specific-first', () => {
+    const resolve = (config: McpServerConfig, tool: string): number | undefined =>
+      config.toolTimeouts?.[tool] ?? config.timeout
+
+    const config = server({ slow_report: 600 })
+    expect(resolve(config, 'slow_report')).toBe(600)
+    expect(resolve(config, 'quick_lookup')).toBe(60)
+    expect(resolve({ command: 'srv' }, 'anything')).toBeUndefined()
   })
 })

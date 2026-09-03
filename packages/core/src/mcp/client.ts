@@ -138,7 +138,8 @@ export class McpConnection {
      * arrives later against a call nobody is waiting for. Passing it down means the SDK cancels
      * the request properly.
      */
-    const timeoutSeconds = this.config.timeout
+    // Most specific wins: this tool's own limit, then the server's, then the SDK's default.
+    const timeoutSeconds = this.config.toolTimeouts?.[name] ?? this.config.timeout
     const result = await this.client.callTool(
       { name, arguments: args },
       undefined,

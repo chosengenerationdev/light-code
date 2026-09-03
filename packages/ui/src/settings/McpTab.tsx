@@ -36,6 +36,8 @@ export interface McpTabProps {
   onRestart: (name: string) => void
   onSetServerEnabled: (name: string, enabled: boolean) => void
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
+  /** Seconds, or undefined to clear the override and fall back to the server's own timeout. */
+  onSetToolTimeout: (server: string, tool: string, seconds?: number) => void
   onConnect: (name: string) => void
   /*
    * The documentation index, surfaced here as well as in the Search tab.
@@ -119,6 +121,7 @@ function ServerRow(props: {
   onConnect: (name: string) => void
   onSetServerEnabled: (name: string, enabled: boolean) => void
   onSetToolPermission: (server: string, tool: string, permission: McpToolPermission) => void
+  onSetToolTimeout: (server: string, tool: string, seconds?: number) => void
   onEdit: (name: string) => void
   onDelete: (name: string) => void
   onDuplicate: (name: string) => void
@@ -286,6 +289,10 @@ function ServerRow(props: {
                     </span>
                   )}
                 </span>
+                <TimeoutBox
+                  value={tool.timeout}
+                  onChange={(seconds) => props.onSetToolTimeout(server.name, tool.name, seconds)}
+                />
                 <PermissionPicker
                   value={tool.permission}
                   onChange={(permission) => props.onSetToolPermission(server.name, tool.name, permission)}
@@ -363,6 +370,7 @@ export function McpTab(props: McpTabProps): ReactElement {
               onConnect={props.onConnect}
               onSetServerEnabled={props.onSetServerEnabled}
               onSetToolPermission={props.onSetToolPermission}
+              onSetToolTimeout={props.onSetToolTimeout}
               onEdit={setFormFor}
               onDelete={setConfirmDelete}
             onDuplicate={props.onDuplicateServer}
@@ -473,5 +481,64 @@ export function McpTab(props: McpTabProps): ReactElement {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * One tool's own timeout, in seconds.
+ *
+ * A server's timeout is a single number for everything it exposes, which is the wrong shape for
+ * the usual server: twenty quick lookups and one report that takes four minutes. Raising the
+ * server-wide limit to suit the slow one means a genuinely hung quick call now hangs for four
+ * minutes too.
+ *
+ * Committed on blur or Enter rather than per keystroke, because typing "120" would otherwise
+ * save 1, then 12, then 120 — and the middle values are real settings that briefly applied.
+ */
+function TimeoutBox(props: { value: number | undefined; onChange: (seconds?: number) => void }): ReactElement {
+  const [draft, setDraft] = useState(props.value === undefined ? '' : String(props.value))
+  // Resynced when the host confirms, so a rejected value does not linger as though it were saved.
+  useEffect(() => setDraft(props.value === undefined ? '' : String(props.value)), [props.value])
+
+  const commit = (): void => {
+    const trimmed = draft.trim()
+    if (trimmed.length === 0) {
+      props.onChange()
+      return
+    }
+    const seconds = Number(trimmed)
+    // Refused rather than clamped: a typo should not silently become a limit nobody chose.
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600) {
+      setDraft(props.value === undefined ? '' : String(props.value))
+      return
+    }
+    props.onChange(Math.round(seconds))
+  }
+
+  return (
+    <input
+      inputMode="numeric"
+      value={draft}
+      placeholder="server"
+      title="Seconds this tool may take. Blank uses the server's timeout. Raise it for one slow tool rather than raising the server's."
+      aria-label="Timeout in seconds"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur()
+      }}
+      style={{
+        width: 62,
+        flexShrink: 0,
+        background: colors.inputBackground,
+        color: colors.inputForeground,
+        border: `1px solid ${colors.inputBorder}`,
+        borderRadius: 2,
+        padding: '1px 4px',
+        fontFamily,
+        fontSize: 11,
+        textAlign: 'right',
+      }}
+    />
   )
 }
