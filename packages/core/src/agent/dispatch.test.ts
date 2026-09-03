@@ -406,16 +406,29 @@ describe('dispatcher wiring', () => {
   })
 
   /**
-   * **The tradeoff, asserted rather than described.** `call_tool` carries a long description
-   * of its own, so below roughly a dozen tools it costs more prompt than it saves — on top of
-   * models being measurably worse at naming a tool inside a dispatcher than at calling one
-   * listed directly.
+   * **The tradeoff, asserted rather than described — and it moved.**
    *
-   * This is why the setting ships off, and why the Search tab shows the hidden-tool count and
-   * says plainly when the number is too low to bother. Discovered by this test failing at
-   * three tools, which is a better argument than any paragraph.
+   * This used to assert the opposite: at three tools the dispatcher cost *more* than it saved,
+   * because `call_tool` carries a long description of its own. That was true until every tool
+   * gained an optional `why` parameter, which is a fixed cost per **advertised** tool — so
+   * hiding tools now saves that cost too, and the break-even point dropped below three.
+   *
+   * Recorded rather than quietly re-baselined, because the number in the Search tab's copy and
+   * the reason the setting exists both rest on where this line sits. The other half of the
+   * original argument is unchanged and is not measured here: models are worse at naming a tool
+   * inside a dispatcher than at calling one listed directly, which is a reason to leave a small
+   * catalogue visible whatever the byte count says.
    */
-  it('costs more than it saves on a small one', () => {
-    expect(promptSize(catalogue(3, true))).toBeGreaterThan(promptSize(catalogue(3, false)))
+  it('now saves prompt even on a small catalogue, since every advertised tool carries a why', () => {
+    expect(promptSize(catalogue(3, true))).toBeLessThan(promptSize(catalogue(3, false)))
+  })
+
+  /** The fixed cost that moved it, so a future change to `why` shows up here as a number. */
+  it('adds the why parameter to every advertised tool exactly once', () => {
+    const definitions = toToolDefinitions(toolsForMode(catalogue(3, false), CODE_MODE))
+    for (const definition of definitions) {
+      const properties = (definition.parameters as { properties?: Record<string, unknown> }).properties ?? {}
+      expect(Object.keys(properties)).toContain('why')
+    }
   })
 })

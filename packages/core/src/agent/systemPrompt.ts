@@ -86,6 +86,14 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
     '- You must call read_file on a file before editing it with apply_diff or write_to_file.',
     '- Prefer apply_diff over write_to_file for edits to existing files.',
     '- Make one tool call at a time, then wait for its result before deciding the next step.',
+    /*
+     * The person watching sees a list of tool names and nothing else unless this is filled in.
+     * Phrased as what they will read rather than as a field to populate, because a model told to
+     * "set the why parameter" writes "reading a file" - which is the tool name again.
+     */
+    '- Every tool takes an optional `why`: one short sentence, in plain language, saying what you',
+    '  are trying to find out or change with this call. The user sees it beside the tool name, so',
+    '  write it for them — "checking which gateway the profile points at", not "reading a file".',
     '- Paths are relative to the workspace root. You cannot access anything outside it.',
     '- When the task is complete, call attempt_completion with a summary of what you did.',
     '- If you need information only the user can provide, call ask_followup_question.',

@@ -46,6 +46,7 @@ import {
   attachMentions,
   buildSystemPrompt,
   formatToolArguments,
+  toolCallReason,
   CONTROL_TOOLS,
   createAuthStrategy,
   buildCodeGenerationPrompt,
@@ -438,7 +439,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await refreshSkills()
     post({
       type: 'skills',
-      skills: skills.map((skill) => ({ ...skill })),
+      // `body` is deliberately dropped: only an `always` skill carries one, the tab says which
+      // skill it is rather than showing the text, and there is no reason to put a whole standing
+      // instruction on the wire twice.
+      skills: skills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        filePath: skill.filePath,
+        ...(skill.sourceDir !== undefined ? { sourceDir: skill.sourceDir } : {}),
+        ...(skill.always === true ? { always: true } : {}),
+      })),
       issues: skillIssues,
       ...(skillsDir !== undefined ? { skillsDir } : {}),
       extraDirs: extraSkillDirs,
@@ -475,6 +485,42 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
+  }
+
+  /**
+   * Opens the standing-instructions skill, creating it from a template the first time.
+   *
+   * The `always: true` flag was shipped before anything in the UI could show or set it, which
+   * made a feature that costs tokens on every request invisible and hand-edit-only. This is the
+   * smallest honest fix: one button that puts the file in the editor the user already has, with
+   * the frontmatter already correct, since getting `always: true` wrong silently does nothing.
+   */
+  async function handleOpenStandingSkill(): Promise<void> {
+    if (skillsDir === undefined) {
+      ui.showWarning('Open a folder first — skills live in the workspace.')
+      return
+    }
+
+    const existing = skills.find((skill) => skill.always === true)
+    if (existing !== undefined) {
+      await handleOpenManagedFile(existing.filePath)
+      return
+    }
+
+    const target = path.join(skillsDir, 'standing-instructions.md')
+    try {
+      await fs.mkdir(skillsDir, { recursive: true })
+      // Never overwrite: a file already there is the user's, whatever its frontmatter says.
+      await fs.writeFile(target, STANDING_SKILL_TEMPLATE, { encoding: 'utf8', flag: 'wx' })
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST') {
+        post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        return
+      }
+    }
+    await postSkills()
+    await handleOpenManagedFile(target)
   }
 
   async function handleDeletePythonTool(name: string): Promise<void> {
@@ -1937,6 +1983,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               id: toolCall.id,
               name: toolCall.name,
               arguments: formatToolArguments(toolCall.arguments),
+          ...(toolCallReason(toolCall.arguments) === undefined
+            ? {}
+            : { why: toolCallReason(toolCall.arguments) as string }),
             }
             post({ type: 'toolCall', toolCall: summary, ...(expertInformed ? { expertInformed } : {}) })
           },
@@ -1952,6 +2001,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               id: toolCall.id,
               name: toolCall.name,
               arguments: formatToolArguments(toolCall.arguments),
+          ...(toolCallReason(toolCall.arguments) === undefined
+            ? {}
+            : { why: toolCallReason(toolCall.arguments) as string }),
               result: result.content,
               ...(result.isError === true ? { isError: true } : {}),
             }
@@ -4425,6 +4477,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSyncVectorStore(message.fromId)
     } else if (message.type === 'clearDocsIndex') {
       void handleClearDocsIndex()
+    } else if (message.type === 'openStandingSkill') {
+      void handleOpenStandingSkill()
     } else if (message.type === 'setOffice') {
       void configManager
         .load()
@@ -5265,3 +5319,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     },
   }
 }
+
+/**
+ * What a new standing-instructions file starts as.
+ *
+ * Written as a working example rather than an empty file with a heading: the flag that makes it
+ * work is one line of frontmatter, getting it wrong silently does nothing, and nobody should have
+ * to find that out. The warning about length is here because the body is paid for on every
+ * request, and this is the only place someone will read it.
+ */
+const STANDING_SKILL_TEMPLATE = `---
+name: standing-instructions
+description: How this team works. Included in every session.
+always: true
+---
+
+# Standing instructions
+
+Everything in this file goes into every conversation, in full. Keep it short - it is paid for on
+every request, so a page of prose here is a page of prose on every message you send.
+
+Good things to put here:
+
+- conventions nobody writes down, like which internal library to use for what
+- how to run the tests, and what "done" means on this project
+- the mistakes people new to this codebase reliably make
+
+Delete these examples and write your own. Remove \`always: true\` from the frontmatter above and
+this becomes an ordinary skill: listed by name, read only when it looks relevant.
+`

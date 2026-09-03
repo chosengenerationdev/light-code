@@ -1061,6 +1061,8 @@ export function App(props: AppProps): ReactElement {
               extraDirs: skillExtraDirs,
               configuredDir: skillConfiguredDir,
               onOpenFile: openManagedFile,
+              onOpenStandingSkill: () =>
+                props.transport.post({ type: 'openStandingSkill' } satisfies UiToHostMessage),
               onDelete: (name) => props.transport.post({ type: 'deleteSkillFile', name } satisfies UiToHostMessage),
               onSaveDirs: (dir: string, paths: string[]) => {
                 setSkillConfiguredDir(dir)

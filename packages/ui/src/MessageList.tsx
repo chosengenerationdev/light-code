@@ -229,6 +229,32 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
           </span>
         )}
         <span style={{ fontFamily: monospace, color: isConsultation ? colors.expert : undefined }}>{toolCall.name}</span>
+        {/*
+          What the call is for, beside the name.
+
+          A bare tool name says what happened and nothing about why, and most models emit no
+          assistant text alongside a call - so the transcript read as a list of verbs. This is the
+          model's own stated reason, shown in the collapsed row where it is actually useful.
+
+          Truncated rather than wrapped: the row is a heading, and a model that writes a paragraph
+          here should not push the status icon off the end. The full text is the title.
+        */}
+        {toolCall.why !== undefined && (
+          <span
+            title={toolCall.why}
+            style={{
+              color: colors.muted,
+              fontFamily,
+              fontSize: 11,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            {toolCall.why}
+          </span>
+        )}
         {!isConsultation && props.expertInformed === true && (
           <span
             title="Following expert advice"

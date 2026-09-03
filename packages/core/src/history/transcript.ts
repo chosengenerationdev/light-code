@@ -14,9 +14,29 @@ export const CONTROL_TOOLS: ReadonlySet<string> = new Set(['attempt_completion',
 /** Pretty-prints tool arguments; falls back to the raw string if it isn't JSON. */
 export function formatToolArguments(raw: string): string {
   try {
-    return JSON.stringify(JSON.parse(raw.length > 0 ? raw : '{}'), null, 2)
+    const parsed = JSON.parse(raw.length > 0 ? raw : '{}') as unknown
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      // `why` is lifted out and shown beside the tool name, so leaving it here would print it
+      // twice — once as prose and once as an argument the tool never receives.
+      const rest = { ...(parsed as Record<string, unknown>) }
+      delete rest.why
+      return JSON.stringify(rest, null, 2)
+    }
+    return JSON.stringify(parsed, null, 2)
   } catch {
     return raw
+  }
+}
+
+/** The model's stated reason for a call, if it gave one. Never inferred, never invented. */
+export function toolCallReason(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw.length > 0 ? raw : '{}') as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+    const why = (parsed as Record<string, unknown>).why
+    return typeof why === 'string' && why.trim().length > 0 ? why.trim() : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -70,6 +90,9 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
           id: toolCall.id,
           name: toolCall.name,
           arguments: formatToolArguments(toolCall.arguments),
+          ...(toolCallReason(toolCall.arguments) === undefined
+            ? {}
+            : { why: toolCallReason(toolCall.arguments) as string }),
           // A call with no matching result means the task ended mid-flight — a cancel, a
           // crash, or a window closed. Leaving `result` unset renders it as unfinished,
           // which is what actually happened.

@@ -6,7 +6,7 @@ import { DismissableProblems } from './DismissableProblems.js'
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
 export interface SkillsTabProps {
-  skills: { name: string; description: string; filePath: string; sourceDir?: string }[]
+  skills: { name: string; description: string; filePath: string; sourceDir?: string; always?: boolean }[]
   issues: { filePath: string; detail: string }[]
   /** Where new skills are written. Undefined when no folder is open. */
   skillsDir?: string | undefined
@@ -17,6 +17,8 @@ export interface SkillsTabProps {
   onDelete: (name: string) => void
   /** Opens the skill in an editor tab. A skill is markdown; editing it is editing a file. */
   onOpenFile: (path: string) => void
+  /** Opens the standing-instructions skill, creating it from a template the first time. */
+  onOpenStandingSkill: () => void
   onSaveDirs: (dir: string, paths: string[]) => void
 }
 
@@ -49,6 +51,51 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
           </>
         )}
       </p>
+
+      {/*
+        The standing instructions, given their own line.
+
+        A skill with `always: true` behaves differently from every other one — its whole body is in
+        every request rather than its description — and the flag is a line of frontmatter that
+        silently does nothing when mistyped. Neither of those should be discoverable only by
+        reading the source, so the tab states which skill it is, or offers to create it.
+      */}
+      <div
+        style={{
+          margin: '10px 0',
+          padding: 10,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 6,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Standing instructions</div>
+        {(() => {
+          const standing = props.skills.find((skill) => skill.always === true)
+          return standing === undefined ? (
+            <>
+              <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+                One skill can be included in <strong>every</strong> session, in full, rather than
+                offered by name — for the things you would otherwise repeat at the start of each
+                conversation. It is paid for on every request, so keep it short.
+              </p>
+              <button type="button" style={secondaryButtonStyle()} onClick={props.onOpenStandingSkill}>
+                Create standing instructions
+              </button>
+            </>
+          ) : (
+            <>
+              <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+                <strong>{standing.name}</strong> is included in every session, in full. Remove{' '}
+                <code style={{ fontFamily: monospace }}>always: true</code> from its frontmatter to make
+                it an ordinary skill again.
+              </p>
+              <button type="button" style={secondaryButtonStyle()} onClick={props.onOpenStandingSkill}>
+                Edit standing instructions
+              </button>
+            </>
+          )
+        })()}
+      </div>
 
       {/*
         Shown rather than only logged. A skill that is silently not offered is impossible to

@@ -239,6 +239,16 @@ export interface ToolCallSummary {
   name: string
   /** Pretty-printed arguments — ground truth, not the model's description of them (invariant 8). */
   arguments: string
+  /**
+   * One sentence on what this call is for, when the model supplied one.
+   *
+   * Every tool advertises a `why`, so the transcript can say "reading config.json — checking
+   * which gateway is configured" rather than a bare name. It is the model's own account of its
+   * intent, which is why it is shown *beside* the arguments and never instead of them:
+   * invariant 8 is about the approval prompt showing what will happen, and a stated reason is
+   * not that.
+   */
+  why?: string
   result?: string
   isError?: boolean
 }
@@ -359,6 +369,13 @@ export type UiToHostMessage =
   | { type: 'indexDocs' }
   /** Excel and Outlook, off by default. Windows only. */
   | { type: 'setOffice'; excel: boolean; outlook: boolean }
+  /**
+   * Creates the standing-instructions skill and opens it, or just opens it if it exists.
+   *
+   * A button rather than an editor: the body is markdown the user will want to keep working on,
+   * and the editor they already have is better than anything a settings panel could offer.
+   */
+  | { type: 'openStandingSkill' }
   /** Empties the documentation index, so nothing stale can be matched. */
   | { type: 'clearDocsIndex' }
   /** Copies this workspace's index from another store into the active one, vectors and all. */
@@ -766,8 +783,12 @@ export type HostToUiMessage =
     }
   | {
       type: 'skills'
-      /** `sourceDir` says which configured folder it came from — only the first is writable. */
-      skills: { name: string; description: string; filePath: string; sourceDir?: string }[]
+      /**
+        * `sourceDir` says which configured folder it came from — only the first is writable.
+        * `always` marks a standing instruction: included in every session, in full, so the tab
+        * can say so. A cost paid on every request should never be invisible.
+        */
+      skills: { name: string; description: string; filePath: string; sourceDir?: string; always?: boolean }[]
       /** Files that could not be offered, and why. Shown, not just logged. */
       issues: { filePath: string; detail: string }[]
       /** Where skills are written. Undefined when no folder is open, so the tab can say why. */

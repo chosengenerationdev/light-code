@@ -161,6 +161,16 @@ Nine in v1, and more since — see the handover for what exists now:
 | `use_mcp_tool` | mcp | Namespaced; see §11 |
 | `ask_followup_question` | always | Control tool |
 | `ask_user_form` | always | Typed input — string, number, boolean, choice, list. See §6b |
+
+**Every tool advertises an optional `why`** (0.43.0), added once in `toToolDefinitions` and
+stripped in the loop before validation. The transcript showed a bare tool name and nothing else,
+because most models emit no assistant text alongside a call — so the reason had to be part of the
+call to be reliably present. Stripping it is what makes it safe to add to an MCP server's own
+schema (§11 forbids translating one): the server never sees a property it did not declare, and a
+schema shaped in a way `withWhy` does not recognise is left completely alone.
+**It moved a measured tradeoff:** `why` is a fixed cost per *advertised* tool, so the dispatcher
+now saves prompt at three tools where it used to cost. `agent/dispatch.test.ts` records that
+rather than being re-baselined.
 | `attempt_completion` | always | Control tool; terminates the loop |
 
 **Explicitly not in v1:** browser automation, semantic/embedding codebase search,
@@ -733,6 +743,9 @@ Markdown with frontmatter (`name`, `description`).
 - **Only `name` + `description` go in the system prompt.** Bodies are read on demand via
   the existing `read_file` — no dedicated `load_skill` tool needed. This keeps baseline
   cost at a few tokens each and lets skills reference other files and grow arbitrarily.
+- **The Skills tab names the standing-instructions skill, or offers to create it** (0.43.0). The
+  flag shipped with no way to see or set it, which made a per-request cost invisible and
+  hand-edit-only — and `always: true` mistyped does nothing at all, silently.
 - **A skill with `always: true` in its frontmatter is injected in full, every session** (0.41.0,
   user-requested as "a master skill"). It bypasses both the summary list and retrieval, because a
   standing instruction that only arrives once the model suspects it needs one has arrived too
@@ -1032,14 +1045,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.42.1**, built and unpublished:
-`apps/vscode/light-code-vscode-0.42.1.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.43.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.43.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.18.1**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.19.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1055,7 +1068,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.42.1, host 0.18.1 — and keep working from
+**Next:** publish the pending versions — extension 0.43.0, host 0.19.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

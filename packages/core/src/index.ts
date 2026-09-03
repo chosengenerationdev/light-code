@@ -439,7 +439,7 @@ export { JsonTaskStore } from './platform/node/taskStore.js'
 
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'
 export { deriveTitle } from './history/titles.js'
-export { toTranscript, formatToolArguments, CONTROL_TOOLS } from './history/transcript.js'
+export { toTranscript, formatToolArguments, toolCallReason, CONTROL_TOOLS } from './history/transcript.js'
 export { redactTask, redactMessage } from './history/redactTask.js'
 
 export {

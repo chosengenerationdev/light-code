@@ -1,5 +1,28 @@
 # @chosengeneration/light-code
 
+## 0.19.0
+
+### Minor Changes
+
+- Tool calls say what they are for, and the standing-instructions skill has a home in the UI.
+
+  The transcript showed a bare tool name and nothing else — a list of verbs with no account of
+  what any of them was for. Assistant text alongside a tool call would have carried that, but
+  most models emit none, and asking for prose beforehand fails in exactly the cases where it
+  matters. Every tool now advertises an optional `why`: one sentence, shown beside the name in
+  the collapsed row. It is added in one place so built-ins, MCP servers and Python tools all
+  get it identically, and stripped before the tool runs, so a server never sees a property it
+  did not declare.
+
+  A side effect worth knowing: `why` is a fixed cost per _advertised_ tool, so hiding tools now
+  saves that cost too and the dispatcher pays for itself on smaller catalogues than before.
+  The test that measured the old break-even records the change rather than being re-baselined.
+
+  The `always: true` skill shipped without any way to see or create one, which made a feature
+  paid for on every request invisible and hand-edit-only. The Skills tab now names the skill
+  that is included in every session, or offers to create it from a template with the frontmatter
+  already correct.
+
 ## 0.18.1
 
 ### Patch Changes

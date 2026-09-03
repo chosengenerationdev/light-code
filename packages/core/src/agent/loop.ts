@@ -9,7 +9,7 @@ import { CODE_MODE } from '../modes/builtin.js'
 import { toolsForMode } from '../modes/resolve.js'
 import type { Mode } from '../modes/types.js'
 import type { ChatProvider, ChatStreamOptions, ImageAttachment, ToolCall } from '../providers/types.js'
-import { toToolDefinitions } from '../tools/registry.js'
+import { takeWhy, toToolDefinitions } from '../tools/registry.js'
 import { CALL_TOOL_NAME, callToolParamsSchema } from '../tools/callTool.js'
 import type { Tool, ToolExecutionContext, ToolPreview, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { Conversation } from './messages.js'
@@ -137,7 +137,7 @@ async function prepareModelMessages(
 }
 
 type PreparedCall =
-  | { ok: true; tool: Tool; params: Record<string, unknown> }
+  | { ok: true; tool: Tool; params: Record<string, unknown>; why?: string }
   | { ok: false; result: ToolResult }
 
 /**
@@ -234,6 +234,16 @@ function prepareToolCall(original: ToolCall, registry: ToolRegistry, mode: Mode)
     }
   }
 
+  /*
+   * The reason comes off before validation.
+   *
+   * Every tool advertises `why`, and no tool declares it — so leaving it in would fail a strict
+   * schema, and passing it on would send an MCP server a property it never asked for. Taken here,
+   * once, on the single path from a model's call to a tool's arguments.
+   */
+  const { why, rest } = takeWhy((params ?? {}) as Record<string, unknown>)
+  params = rest
+
   const parsed = tool.parametersSchema.safeParse(params)
   if (!parsed.success) {
     return {
@@ -245,7 +255,7 @@ function prepareToolCall(original: ToolCall, registry: ToolRegistry, mode: Mode)
     }
   }
 
-  return { ok: true, tool, params: parsed.data as Record<string, unknown> }
+  return { ok: true, tool, params: parsed.data as Record<string, unknown>, ...(why === undefined ? {} : { why }) }
 }
 
 interface CheckpointTracker {
