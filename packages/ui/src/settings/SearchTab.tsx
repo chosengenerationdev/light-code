@@ -38,7 +38,16 @@ export interface SearchTabProps {
   savedTick: number
   onSave: (connection: SearchConnectionInput) => void
   onDelete: (id: string) => void
-  onSetActive: (id: string | undefined) => void
+  onSetActive: (id: string | undefined, forProject?: boolean) => void
+  /**
+   * Which settings this project has chosen for itself, and whether a project is even open.
+   *
+   * Shown because a value that quietly differs here from everywhere else, with nothing saying so,
+   * is worse than not being able to set one — the user is left wondering why the same product
+   * behaves differently in two folders.
+   */
+  project: { workspaceOpen: boolean; overridden: string[] }
+  onClearProject: () => void
   /** Copies this workspace's index out of another store into the active one. */
   onSyncFrom: (fromId: string) => void
   sync?: { running: boolean; copied?: number; error?: string; fromLabel?: string }
@@ -590,6 +599,34 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
       )}
 
       {/*
+        What this project has chosen for itself.
+
+        Listed rather than implied. Someone who set a store here and later wonders why their
+        other repository behaves differently has no way to find out otherwise — and a setting
+        that cannot be seen cannot be undone.
+      */}
+      {props.project.overridden.length > 0 && (
+        <div
+          style={{
+            padding: 10,
+            marginBottom: 12,
+            borderRadius: 4,
+            border: `1px solid ${colors.accent}`,
+            background: `color-mix(in srgb, ${colors.accent} 10%, transparent)`,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>This project has its own settings</div>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+            {props.project.overridden.join(', ')} — set for this folder only. Everything else follows
+            your defaults, and other projects are unaffected.
+          </p>
+          <button type="button" style={secondaryButtonStyle()} onClick={props.onClearProject}>
+            Use my defaults here again
+          </button>
+        </div>
+      )}
+
+      {/*
         Copying between stores, offered only when there is somewhere to copy *from*.
         Switching backend otherwise means re-embedding the whole repository — minutes to hours,
         and real money where embedding is billed — to produce vectors that already exist.
@@ -674,6 +711,25 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
               >
                 {isActive ? 'Turn off' : 'Use in chat'}
               </button>
+              {/*
+                The same choice, remembered for this project rather than as the default.
+
+                Two buttons instead of a button and a checkbox, because "use this" and "use this
+                here" are two different acts and a checkbox that silently changes what a
+                neighbouring button will do is the kind of control people get wrong once and then
+                distrust. Stored in user config keyed by path, so a repository still cannot pick
+                its own vector store.
+              */}
+              {props.project.workspaceOpen && !isActive && (
+                <button
+                  type="button"
+                  style={secondaryButtonStyle()}
+                  title="Use this store in this project only, leaving your default alone"
+                  onClick={() => props.onSetActive(connection.id, true)}
+                >
+                  Use in this project
+                </button>
+              )}
               <button type="button" style={secondaryButtonStyle()} onClick={() => setEditing(connection)}>
                 Edit
               </button>

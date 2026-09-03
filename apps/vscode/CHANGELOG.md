@@ -1,5 +1,24 @@
 # light-code-vscode
 
+## 0.48.0
+
+### Minor Changes
+
+- Per-project settings can now actually be set, not only hand-edited.
+
+  The previous release added the mechanism and nothing that could reach it — which from the outside
+  is the same as not having it. Each search connection now has a **Use in this project** button
+  beside **Use in chat**, and the Search tab shows what this project has chosen for itself with a
+  way to go back to your defaults.
+
+  Two buttons rather than a button and a checkbox: "use this" and "use this here" are two different
+  acts, and a checkbox that silently changes what a neighbouring button does is the kind of control
+  people get wrong once and then distrust.
+
+  What this project has overridden is listed rather than implied. A value that quietly differs here
+  from everywhere else, with nothing saying so, leaves someone wondering why the same product
+  behaves differently in two folders — and a setting that cannot be seen cannot be undone.
+
 ## 0.47.0
 
 ### Minor Changes

@@ -24,6 +24,12 @@ import {
   createExcelRunMacroTool,
 } from '../tools/officeVba.js'
 import {
+  describeOverrides,
+  overridesFor,
+  OVERRIDABLE_KEYS,
+  type WorkspaceOverrides,
+} from '../config/workspaceOverrides.js'
+import {
   coerceFormValue,
   type AskUserFormParams,
   type FormAnswer,
@@ -2268,7 +2274,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleSetActiveProfile(id: string): Promise<void> {
+  async function handleSetActiveProfile(id: string, forProject?: boolean): Promise<void> {
     try {
       const { config } = await configManager.load()
       const exists = (config.profiles ?? []).some((p) => p.id === id)
@@ -2276,7 +2282,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         post({ type: 'error', message: `Profile "${id}" no longer exists.` })
         return
       }
-      await configManager.save('user', { activeProfileId: id })
+      if (forProject === true) await configManager.saveForWorkspace({ activeProfileId: id })
+      else await configManager.save('user', { activeProfileId: id })
+      await postProjectSettings()
       await postProfiles()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -3982,6 +3990,41 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * What this project has chosen for itself.
+   *
+   * Shown so a per-project setting is visible and reversible. A value that quietly differs here
+   * from everywhere else, with nothing saying so, is worse than not being able to set one — the
+   * user is left wondering why the same product behaves differently in two folders.
+   */
+  async function postProjectSettings(): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const stored = config.workspaces as Record<string, WorkspaceOverrides> | undefined
+      post({
+        type: 'projectSettings',
+        workspaceOpen: workspaceRoot !== undefined,
+        overridden: describeOverrides(overridesFor(stored, workspaceRoot)),
+      })
+    } catch (error) {
+      logger.warn(`could not read this project's settings: ${String(error)}`)
+    }
+  }
+
+  async function handleClearProjectSettings(): Promise<void> {
+    try {
+      // Cleared key by key, so the entry is removed rather than left as an empty object that
+      // reads as "this project has settings" while having none.
+      const cleared = Object.fromEntries(OVERRIDABLE_KEYS.map((key) => [key, undefined]))
+      await configManager.saveForWorkspace(cleared as Partial<WorkspaceOverrides>)
+      await postProjectSettings()
+      await postSearch()
+      await postSettings()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function postSettings(): Promise<void> {
     await loadSettings()
     announceConfigRecovery()
@@ -4546,9 +4589,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'deleteSearchConnection') {
       void handleDeleteSearchConnection(message.id)
     } else if (message.type === 'setActiveSearchConnection') {
-      void configManager
-        .save('user', { activeVectorStoreId: message.id })
-        .then(() => postSearch())
+      void (
+        message.forProject === true
+          ? configManager.saveForWorkspace({ activeVectorStoreId: message.id })
+          : configManager.save('user', { activeVectorStoreId: message.id })
+      )
+        .then(async () => {
+          await postSearch()
+          await postProjectSettings()
+        })
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'requestProjectSettings') {
+      void postProjectSettings()
+    } else if (message.type === 'clearProjectSettings') {
+      void handleClearProjectSettings()
     } else if (message.type === 'requestSearchIndexes') {
       void handleRequestSearchIndexes(message.connection)
     } else if (message.type === 'testSearchConnection') {
@@ -4755,7 +4809,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'deleteProfile') {
       void handleDeleteProfile(message.id)
     } else if (message.type === 'setActiveProfile') {
-      void handleSetActiveProfile(message.id)
+      void handleSetActiveProfile(message.id, message.forProject)
     } else if (message.type === 'exportConfig') {
       void handleExportConfig()
     } else if (message.type === 'importConfig') {

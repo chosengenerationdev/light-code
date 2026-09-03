@@ -202,6 +202,11 @@ export function App(props: AppProps): ReactElement {
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
   const [scheduleSkills, setScheduleSkills] = useState<{ name: string; description: string }[]>([])
+  /** What the open project has chosen for itself. Nothing until the host says otherwise. */
+  const [projectSettings, setProjectSettings] = useState<{ workspaceOpen: boolean; overridden: string[] }>({
+    workspaceOpen: false,
+    overridden: [],
+  })
   const [toolCatalogue, setToolCatalogue] = useState<{
     tools: ToolCatalogueEntry[]
     dispatcher: boolean
@@ -434,6 +439,10 @@ export function App(props: AppProps): ReactElement {
           hiddenSkills: message.hiddenSkills,
           ...(message.docsIndex !== undefined ? { docsIndex: message.docsIndex } : {}),
         })
+      } else if (message.type === 'projectSettings') {
+        // Assigned whole, like every other message here — copying fields is how a field added
+        // later is silently dropped on the last hop.
+        setProjectSettings(message)
       } else if (message.type === 'docsIndexed') {
         setDocsIndexing(false)
         setDocsResult({
@@ -537,6 +546,8 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
+    // Asked for alongside the search state, since that is the tab that shows it.
+    props.transport.post({ type: 'requestProjectSettings' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestPython' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
@@ -663,8 +674,14 @@ export function App(props: AppProps): ReactElement {
       props.transport.post({ type: 'syncVectorStore', fromId } satisfies UiToHostMessage)
     },
     ...(storeSync !== undefined ? { sync: storeSync } : {}),
-    onSetActive: (id: string | undefined) =>
-      props.transport.post({ type: 'setActiveSearchConnection', id } satisfies UiToHostMessage),
+    onSetActive: (id: string | undefined, forProject?: boolean) =>
+      props.transport.post({
+        type: 'setActiveSearchConnection',
+        id,
+        ...(forProject === true ? { forProject: true } : {}),
+      } satisfies UiToHostMessage),
+    project: projectSettings,
+    onClearProject: () => props.transport.post({ type: 'clearProjectSettings' } satisfies UiToHostMessage),
     onListIndexes: (connection: SearchConnectionInput) =>
       props.transport.post({ type: 'requestSearchIndexes', connection } satisfies UiToHostMessage),
     onTest: (connection: SearchConnectionInput) => {

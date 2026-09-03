@@ -60,6 +60,9 @@ const base = {
     activity: { entries: [] },
     indexes: [],
     indexing: { profiles: [], models: [], warnings: [], issues: [] },
+    // No folder open in the fixture, so the per-project controls are correctly absent.
+    project: { workspaceOpen: false, overridden: [] },
+    onClearProject: () => undefined,
     // The MCP tab reads this too, since a new server's tools are indexed and the button to
     // reindex belongs where the server was added. Omitting it here crashed that tab.
     dispatcher: {

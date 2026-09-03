@@ -762,6 +762,15 @@ every read sees the same answer.
   interpreter", not "and no uv path at all".
 - Keys are resolved and case-folded, which is the trap `approvals` hit: on Windows one folder
   arrives spelled two ways and a JSON key is exact.
+- **The mechanism shipped one release before anything could reach it** (0.47.0 → 0.48.0), which
+  from the outside is the same as not having it — the identical gap as the `always: true` skill
+  flag. Each search connection has a **Use in this project** button beside **Use in chat**, and
+  the Search tab lists what this project has overridden with a way back to the defaults. Two
+  buttons rather than a button and a checkbox: "use this" and "use this here" are different acts,
+  and a checkbox that changes what a neighbouring button does is a control people distrust after
+  getting it wrong once.
+  Verified by running it: two folders, one on OpenSearch and one switched to Qdrant, neither
+  affecting the other and the shared store list untouched.
 
 **Schedules are bound to their project and claimed before they run.** Two separate faults:
 
@@ -1130,14 +1139,14 @@ addition to the text input rather than a replacement for it.
 most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.47.0**, built and unpublished:
-`apps/vscode/light-code-vscode-0.47.0.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. The local manifest is **0.48.0**, built and unpublished:
+`apps/vscode/light-code-vscode-0.48.0.vsix` (universal, six ripgrep binaries, smoke test green).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.23.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; the local manifest is **0.24.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1153,7 +1162,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.47.0, host 0.23.0 — and keep working from
+**Next:** publish the pending versions — extension 0.48.0, host 0.24.0 — and keep working from
 what the office deployment reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

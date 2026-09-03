@@ -368,7 +368,14 @@ export type UiToHostMessage =
   | { type: 'requestSearch' }
   | { type: 'saveSearchConnection'; connection: SearchConnectionInput }
   | { type: 'deleteSearchConnection'; id: string }
-  | { type: 'setActiveSearchConnection'; id: string | undefined }
+  /**
+   * `forProject` stores the choice against the open workspace instead of as the default.
+   *
+   * Still written to *user* config, keyed by path — invariant 5 is about who writes a value, not
+   * about whether it may vary by project. Without this the mechanism existed and nothing could
+   * reach it, which from the outside is the same as not having it.
+   */
+  | { type: 'setActiveSearchConnection'; id: string | undefined; forProject?: boolean }
   /** Fetches the index list for a connection, saved or as currently typed. */
   | { type: 'requestSearchIndexes'; connection: SearchConnectionInput }
   | { type: 'testSearchConnection'; connection: SearchConnectionInput }
@@ -382,6 +389,9 @@ export type UiToHostMessage =
    * does both and leaves you wondering what it touched.
    */
   | { type: 'indexDocs'; kind?: 'tool' | 'skill' }
+  /** Removes every per-project override, so this project follows the defaults again. */
+  | { type: 'clearProjectSettings' }
+  | { type: 'requestProjectSettings' }
   /** Excel and Outlook, off by default. Windows only. */
   | { type: 'setOffice'; excel: boolean; outlook: boolean }
   /**
@@ -500,7 +510,7 @@ export type UiToHostMessage =
   | { type: 'duplicateMcpServer'; name: string }
   | { type: 'duplicateSchedule'; id: string }
   | { type: 'deleteProfile'; id: string }
-  | { type: 'setActiveProfile'; id: string }
+  | { type: 'setActiveProfile'; id: string; forProject?: boolean }
   /**
    * Fetch the provider's catalogue for the profile currently *in the form* — which may be
    * unsaved — so the user can pick a model before committing. Secrets stay host-side: the
@@ -722,6 +732,14 @@ export type HostToUiMessage =
   | { type: 'searchProbe'; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */
   | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string; kind?: 'tool' | 'skill' }
+  /**
+   * What this project has chosen for itself, so the UI can show and clear it.
+   *
+   * Shown because a value that quietly differs here from everywhere else, with nothing saying
+   * so, is worse than not being able to set one: the user is left wondering why the same product
+   * behaves differently in two folders.
+   */
+  | { type: 'projectSettings'; workspaceOpen: boolean; overridden: string[] }
   /** Progress and outcome of copying one store into another. */
   | { type: 'storeSync'; running: boolean; copied?: number; error?: string; fromLabel?: string }
   /** Whether tool schemas are being kept out of the prompt, and how many are hidden. */
