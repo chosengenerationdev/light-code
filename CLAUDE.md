@@ -1335,16 +1335,16 @@ first thing to check when someone has Outlook open.
 ### The most important thing found this session
 
 **An ordinary save could destroy `config.json`, and the product could not repair itself.** The
-user hit it: the expert stopped being detected after a junior assessment, and they fixed the JSON
-by hand with Claude in their office. §15 now carries the rule and the reasoning.
+user hit it: the expert stopped being detected after a junior assessment, and the JSON had to be repaired
+by hand. §15 now carries the rule and the reasoning.
 
 Note the *shape* of the report, because it will recur: three separate-sounding complaints — the
 expert gone, approvals asked again, skills missing — were one broken file. **When several
 unrelated settings appear to have been forgotten at once, suspect the file, not the features.**
 
-Their live config is worth knowing: `approvals` holds one key, `d:\Developments\test`, and there
-is **no `skills` and no `filesystem` block at all** — consistent with a configured skills folder
-having been lost in that corruption.
+The state of the config afterwards was itself the evidence: whole blocks simply absent,
+consistent with settings lost in the corruption rather than never set. **Read the running
+system before concluding a feature is broken** — but read it, do not transcribe it here.
 
 ### The bug shape that keeps costing the most time
 
