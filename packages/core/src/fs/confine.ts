@@ -50,14 +50,45 @@ export function isWithinRoot(target: string, root: string): boolean {
  * (e.g. a new file about to be written), so confinement can still be checked before creation.
  */
 /**
- * Codes that mean "this path does not resolve", as opposed to a real I/O failure.
+ * Codes that mean "this path does not resolve here", as opposed to a real I/O failure.
  *
- * `ENOENT` is the ordinary one. The rest are what Windows returns for a UNC path whose host is
- * unreachable or whose share does not exist — `UNKNOWN` in particular, which does not read as a
+ * `ENOENT` is the ordinary one. The next group is what Windows returns for a UNC path whose host
+ * is unreachable or whose share does not exist — `UNKNOWN` in particular, which does not read as a
  * missing-file code at all. Rethrowing those turned "I mistyped the server name" into an
  * unhandled error from inside a tool rather than a sentence about the path.
+ *
+ * ## `EPERM` and `EACCES`, added from a real report: "not able to read the file from shared path,
+ * says not permitted"
+ *
+ * `fs.realpath` opens the file to resolve it, and on a corporate share that open is frequently
+ * refused even where reading the file is not — measured here: an admin share and a protected
+ * system file both give `EPERM: operation not permitted`, which is exactly the phrase the user
+ * reported. Because it was not in this set it escaped `confine` as a raw errno, so
+ * `resolveToolPath` rethrew it, **the out-of-workspace prompt never appeared**, and the user was
+ * refused a file they could perfectly well read.
+ *
+ * ## What treating them as unresolvable costs, stated plainly
+ *
+ * The walk below resolves the nearest ancestor it *can* and appends the rest. For `ENOENT` that
+ * loses nothing, because a path that does not exist cannot be a symlink. For `EPERM` it can: a
+ * symlink whose own resolution is refused but whose target is readable would be judged by where
+ * it sits rather than where it points, which is the check this whole file exists to perform.
+ *
+ * It is accepted because the alternative is worse in both directions. The path still goes through
+ * containment against the allowed roots, still hits the deny list (invariant 6, checked before
+ * anything is offered), and still needs explicit approval if it lands outside — so nothing is
+ * silently allowed. Before this change none of those ran at all, because the error escaped first.
  */
-const UNRESOLVABLE_CODES = new Set(['ENOENT', 'ENOTDIR', 'UNKNOWN', 'ENOTFOUND', 'EHOSTUNREACH', 'ENETUNREACH'])
+const UNRESOLVABLE_CODES = new Set([
+  'ENOENT',
+  'ENOTDIR',
+  'UNKNOWN',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPERM',
+  'EACCES',
+])
 
 async function realpathAllowingMissing(target: string): Promise<string> {
   try {

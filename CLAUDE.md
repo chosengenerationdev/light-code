@@ -717,6 +717,23 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   an open spreadsheet destroys trust in every later answer. If the process is running and still
   unreachable, a privilege-level mismatch is named as the likely cause - offered, not asserted,
   which is the lesson from the Outlook timeout that sent the user hunting a dialog twice.
+- **A path whose *resolution* is refused is not a path that is missing** (0.53.0, reported: "not
+  able to read the file from shared path, says not permitted"). `fs.realpath` opens a file to
+  resolve it, and on a corporate share that open is often refused where *reading* is not. Measured:
+  an admin share and a protected system file both give `EPERM: operation not permitted` - the
+  user's words, verbatim, straight out of Node. `EPERM` was not among `confine`'s unresolvable
+  codes, so it escaped as a raw errno, `resolveToolPath` rethrew it, and **the out-of-workspace
+  prompt never appeared** - the user was refused a file they could have read, with no way to say
+  yes. `EPERM` and `EACCES` now behave like the other unresolvable codes.
+  **The cost is written into `confine.ts` rather than glossed:** the ancestor walk resolves what it
+  can and appends the rest, which for `ENOENT` loses nothing because a missing path cannot be a
+  symlink, but for `EPERM` it can - a link whose resolution is refused is judged by where it sits.
+  Accepted because containment, the deny list and the approval prompt all still run, and before the
+  change *none* of them did: the error escaped first. **Verified: the deny list is still consulted
+  before the user is asked**, so invariant 6 stays absolute.
+  Note UNC itself was never the problem - `realpath`, `normalizeWindowsPath`, `isWithinRoot` and
+  `confine` were all measured working against a real `\\host\share` path, and Excel opens
+  over UNC fine. Check the error code before suspecting the path syntax.
 - **A workbook can be opened by path** (0.52.0, user-requested), and `excel_open_workbook` is the
   **only** thing here allowed to start Excel. The attach-only rule is about refusing to *guess* -
   answering "the spreadsheet I have open" with a second invisible copy holding a file lock. When

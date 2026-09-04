@@ -132,8 +132,20 @@ export function createExcelOpenTool(options: OfficeToolOptions): Tool<z.infer<ty
       'excel_trace_cell work on it as normal.',
     parametersSchema: openSchema,
     async execute(params, context): Promise<ToolResult> {
-      const resolved = await resolveToolPath(context, params.path)
-      if (!resolved.ok) return { content: resolved.message, isError: true }
+      /*
+       * Inside the try, because resolving a path can itself fail in ways that are not a
+       * confinement decision - a share that refuses even to be resolved being the one that
+       * prompted this. A raw errno thrown out of a tool is the shape that reached a user as
+       * 'not permitted' with no prompt and no explanation.
+       */
+      let workbookPath: string
+      try {
+        const resolved = await resolveToolPath(context, params.path)
+        if (!resolved.ok) return { content: resolved.message, isError: true }
+        workbookPath = resolved.realPath
+      } catch (error) {
+        return { content: `Could not work out where "${params.path}" is: ${message(error)}`, isError: true }
+      }
 
       try {
         const result = await options.bridge.request<{
@@ -143,7 +155,7 @@ export function createExcelOpenTool(options: OfficeToolOptions): Tool<z.infer<ty
           opened: boolean
           started: boolean
           readOnly: boolean
-        }>({ op: 'excel.open', path: resolved.realPath, ...(params.readOnly === undefined ? {} : { readOnly: params.readOnly }) })
+        }>({ op: 'excel.open', path: workbookPath, ...(params.readOnly === undefined ? {} : { readOnly: params.readOnly }) })
 
         const how = result.opened
           ? result.started

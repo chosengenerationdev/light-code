@@ -2,7 +2,7 @@ import fsSync from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { confine, confineToAny, isWithinRoot, PathConfinementError } from './confine.js'
 
 // Symlink creation needs a privilege Windows doesn't grant by default (Developer Mode
@@ -166,5 +166,73 @@ describe('containment against a root with a trailing separator', () => {
     const base = path.resolve('/tmp/lc-root')
     expect(contains(base, `${base}-other/a.txt`)).toBe(false)
     expect(contains(base, path.join(base, 'a.txt'))).toBe(true)
+  })
+})
+
+/**
+ * A path whose *resolution* is refused, which is not the same as a path that is not there.
+ *
+ * Reported from real use: "not able to read the file from shared path, says not permitted". On a
+ * corporate share `fs.realpath` is frequently refused even where reading the file is not —
+ * measured on Windows, an admin share and a protected system file both give
+ * `EPERM: operation not permitted`, which is the phrase that reached the user verbatim.
+ *
+ * Because `EPERM` was not among the unresolvable codes it escaped `confine` as a raw errno,
+ * `resolveToolPath` rethrew it, and the out-of-workspace prompt never appeared — so the user was
+ * refused a file they could have read, with no way to say yes to it.
+ *
+ * The failure is injected rather than staged against a real share: the interesting condition is
+ * the error code, and no share can be conjured up in a unit test. Only the *target* is made to
+ * fail, so the roots still resolve exactly as they do in production.
+ */
+describe('a path whose resolution is refused by permissions', () => {
+  let root: string
+  let target: string
+
+  beforeAll(async () => {
+    root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'lc-eperm-root-')))
+    target = path.join(root, 'share', 'book.xlsx')
+  })
+
+  afterAll(async () => {
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function refuseTarget(code: string): void {
+    const real = fs.realpath.bind(fs)
+    vi.spyOn(fs, 'realpath').mockImplementation((async (candidate: string, ...rest: unknown[]) => {
+      if (path.resolve(String(candidate)) === path.resolve(target)) {
+        const error = new Error(`${code}: operation not permitted, realpath '${String(candidate)}'`) as NodeJS.ErrnoException
+        error.code = code
+        throw error
+      }
+      return real(candidate as never, ...(rest as []))
+    }) as never)
+  }
+
+  for (const code of ['EPERM', 'EACCES']) {
+    it(`resolves a contained ${code} path instead of throwing the errno`, async () => {
+      refuseTarget(code)
+      await expect(confine(target, root)).resolves.toBe(target)
+    })
+
+    it(`still refuses a ${code} path outside every root`, async () => {
+      refuseTarget(code)
+      const elsewhere = path.resolve(root, '..', 'lc-eperm-elsewhere', 'book.xlsx')
+      await expect(confine(elsewhere, root)).rejects.toThrow(PathConfinementError)
+    })
+  }
+
+  /**
+   * The line that keeps the change honest: a genuine I/O failure is still an I/O failure. Only
+   * "I cannot resolve this here" becomes a containment decision the caller can act on.
+   */
+  it('does not swallow a real I/O error', async () => {
+    refuseTarget('EIO')
+    await expect(confine(target, root)).rejects.toThrow(/EIO/)
   })
 })

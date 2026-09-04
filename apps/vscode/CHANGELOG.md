@@ -1,5 +1,14 @@
 # light-code-vscode
 
+## 0.52.1
+
+### Patch Changes
+
+- Fixed "not permitted" when reading a file from a network share. Windows often refuses to _resolve_
+  a path on a share even where reading it is allowed, and that refusal was escaping as a raw error
+  instead of asking whether the folder could be read. You now get the usual prompt, and the folder
+  can be allowed permanently under Settings -> Approvals -> Folders it may read.
+
 ## 0.52.0
 
 ### Minor Changes
