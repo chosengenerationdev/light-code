@@ -55,7 +55,7 @@ export interface InstallOptions {
    *
    * §3 treats `uv` resolving PyPI as *our* egress, since it is machinery Light Code chose
    * rather than something the user configured. Pointing it at an internal mirror is
-   * therefore the expected configuration in a corporate deployment, not an edge case.
+   * therefore the expected configuration in a managed environment, not an edge case.
    */
   indexUrl?: string | undefined
   extraIndexUrls?: readonly string[] | undefined

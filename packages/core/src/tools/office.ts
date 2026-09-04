@@ -353,7 +353,7 @@ const foldersSchema = z.object({
    * Item counts, off by default because they are the expensive part.
    *
    * On Exchange in online mode counting a folder's items is a server round trip each, and doing
-   * it for a few hundred folders is what made this time out in a real office.
+   * it for a few hundred folders is what made this time out in real use.
    */
   counts: z.boolean().optional().describe('Include how many items each folder holds. Slow on a large mailbox.'),
 })

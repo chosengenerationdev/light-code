@@ -151,7 +151,7 @@
 
 - Outlook folder listing no longer times out on a corporate mailbox, and separate reindex buttons.
 
-  Reported from a real office: `outlook_folders` failed twice, and the assistant confidently
+  Reported from real use: `outlook_folders` failed twice, and the assistant confidently
   explained that Outlook must be showing a dialog — which it was not. The cause was the previous
   release's recursive walk reading each folder's item count. On a cached mailbox that is instant;
   on Exchange in online mode it is a server round trip _per folder_, and a few hundred folders

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { annotateHtmlBody, describeColour } from './mailFormat.js'
 
 /**
- * Reported from a real office: "it can't see colours in the email content".
+ * Reported from real use: "it can't see colours in the email content".
  *
  * `MailItem.Body` is the plain-text rendering and discards every bit of formatting — which in
  * work email is frequently the message itself. The red line is the failure; the highlighted cell

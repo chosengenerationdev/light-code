@@ -604,8 +604,9 @@ reported in the tool result instead, so nothing is hidden.
   A button in the Expert tab runs two trivial consultations — one cold, one resumed — records
   `coldUsd`/`resumedUsd`, and stores them so Junior mode plans in *this* deployment's numbers. It
   exists because a corporate plan may account for credit differently, and the documented $0.187 is
-  from one machine on one plan. The user's own measurement came back **0.007117 cold / 0.006539
-  resumed** — a ratio of 1.09 against the 19× documented here.
+  from one machine on one plan, and a different plan can price both the cold start and the resume
+  an order of magnitude away from it — which is exactly why the number is measured rather than
+  assumed. **Do not hard-code a ratio anywhere**, and do not treat the figure above as typical.
 - **`resumeWorked` is why that measurement is trustworthy.** If the CLI returns no `session_id`,
   the second sample is also a cold start, and two cold starts look exactly like a session that
   saves nothing. The flag records whether a resume actually happened, and `describePricing()`
@@ -709,15 +710,14 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   four-minute report on the same server, and raising the server limit to suit the slow one meant
   a genuinely hung quick call hung for four minutes too. Keyed by the **bare** tool name, matching
   `disabledTools`, so a server's two per-tool settings are keyed alike.
-- **Mail keeps its colours** (0.45.0, from the office: "it can't see colours in the email
-  content"). `MailItem.Body` is the plain-text rendering and drops all formatting — which in work
+- **Mail keeps its colours** (0.45.0, reported: "it can't see colours in the email content"). `MailItem.Body` is the plain-text rendering and drops all formatting — which in work
   email is often the message: the red line is the failure, the highlight is the changed cell.
   Handing over `HTMLBody` would have been worse, since an Outlook body is thousands of tokens of
   `mso-` markup. `office/mailFormat.ts` extracts the text and annotates **only what departs from
   the default**, listing the colours once at the top so the notation explains itself.
   Colours are matched on the **worst channel**, not summed distance: the first version called a
   brown "grey", and a wrong name defeats the purpose more thoroughly than a hex would.
-- **Enumerating a mailbox must not read item counts** (0.44.3, from the office). The recursive
+- **Enumerating a mailbox must not read item counts** (0.44.3, from real use). The recursive
   walk read `$Folder.Items.Count` per folder — instant on a cached mailbox, a server round trip
   each on Exchange online, and past the timeout at a few hundred folders. Counts are opt-in now,
   the default depth is 2, and the walk is capped and says when it truncated.
@@ -1149,8 +1149,7 @@ no native picker, so `showOpenDialog` returns `undefined` — indistinguishable 
 and every path field stays typeable. That is why the Browse buttons were built as an
 addition to the text input rather than a replacement for it.
 
-**Current phase:** **Shipped and in daily use in a corporate deployment**, which is now where
-most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
+**Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
 the gallery. The local manifest is **0.48.1**, built and unpublished:
@@ -1169,7 +1168,7 @@ on 2026-08-19 and manual upload stays, for both registries.
 `filterType 7` and the extension id. This paragraph was stale for several versions and got
 repeated as fact.
 
-Since release, driven by real use in a corporate deployment: 0.1.1 (VS Code floor lowered to
+Since release, driven by real use: 0.1.1 (VS Code floor lowered to
 1.84), 0.1.2 (CA file and skip-verify for any profile; Qwen/Gemma; inline capability
 overrides; screenshot paste), 0.2.0 (profile selector, Claude CLI expert, model
 self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer layout),
@@ -1177,7 +1176,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.4.0 (changelog).
 
 **Next:** publish the pending versions — extension 0.48.1, host 0.26.0 — and keep working from
-what the office deployment reports. The plan phases are done; changes now come from daily use.
+what real use reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was
 lost, but everything built since `7a04504` existed only on one machine for weeks. Push at the end
@@ -1457,7 +1456,17 @@ owner.
 
 ### Never put anything from the user's workplace into the repository
 
-A screenshot from the office was shared to report a bug, and two internal job names from its
+**Widened 2026-09-04, at the user's request: do not describe their work at all.** Not where they
+use it, not what their deployment reports, not the figures their plan produces, not a plan written
+for their employer. Bug reports are recorded as "reported from real use" and nothing more; a
+measurement is recorded as a reason to measure, never as a number to rely on.
+
+The product's own positioning — that it targets an organisation with an internal gateway, mutual
+TLS, and an internal package index — is design rationale from Phase 0 and stays. That is what the
+software is *for*, and it predates any particular user. The line is between describing the product
+and describing a person's job.
+
+A screenshot was shared to report a bug, and two internal job names from its
 terminal output ended up in a test fixture (0.45.0), because they were realistic and to hand.
 That is committed, pushed and permanent — and a plausible-looking name is exactly the kind of
 detail nobody thinks to check later. They have been replaced with invented ones.
@@ -1487,11 +1496,10 @@ without spending the user's credit. Live two-user servers verified the admin spl
 - **The dispatcher and skill retrieval are on by default**, at the user's request: search for the
   tool first, and find skills the same way.
 - **Expert cost is measured here rather than assumed**, with `resumeWorked` so two cold starts
-  cannot masquerade as a cheap resume; plus a keep-alive so a lunch break does not cost a cold
-  start. Their measured numbers are 0.007117 / 0.006539 — a ratio of 1.09 against the 19× this
-  file documents from a different plan. `docs/office-plan.md` §1 rests on that and may need
-  rewriting once it is known whether their resume actually happened.
-- **Three fixes from office use**, all of which read as the feature being broken:
+  cannot masquerade as a cheap resume; plus a keep-alive so a long break does not cost a cold
+  start. **A plan's own numbers can differ by an order of magnitude from the published rates**,
+  which is the entire reason the measurement exists — do not hard-code a ratio anywhere.
+- **Three fixes from real use**, all of which read as the feature being broken:
   `@` listed every file in `.venv` (a non-null `exclude` **replaces** `files.exclude` rather than
   adding to it — naming one folder turned off every folder the user had already hidden); a skill
   added by hand did not appear until the panel was reopened (the folders are watched now); and
@@ -1756,7 +1764,7 @@ are the pattern to copy for any component with behaviour.
 
 ## Previous handover — 2026-08-14 (fourth), superseded above
 
-**Confirmed working in a real office install:** Python tools and the Skills tab. Those were the
+**Confirmed working in a real install:** Python tools and the Skills tab. Those were the
 two oldest untested paths in the project and they are now closed. The rest of the UI still has
 not been rendered — see below.
 
@@ -1808,7 +1816,7 @@ have run even if someone had written one, which is a large part of why none exis
 `packages/ui/src/Select.test.tsx` is the first, rendered with `react-dom/client` and React's own
 `act` rather than a testing library — one dependency buys the capability, and what is worth
 pinning here is events on real DOM nodes. **Write one for any component with behaviour.** The
-scroll-close bug that reached the office is now covered, and verified non-vacuous by reverting
+scroll-close bug that reached real use is now covered, and verified non-vacuous by reverting
 the fix and watching it fail.
 
 jsdom has no layout, so `scrollIntoView` does not exist on its elements. Stub it in the test

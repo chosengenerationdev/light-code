@@ -100,7 +100,7 @@ describe('McpRegistry enable/disable', () => {
 /**
  * Which config changes justify tearing down a running server.
  *
- * A real bug, found in office use: setting a tool to Always or Never writes `disabledTools`
+ * A real bug, found in real use: setting a tool to Always or Never writes `disabledTools`
  * into the server's entry, the whole-entry comparison saw a difference, and the connection was
  * dropped mid-session. It stayed down until the next turn, so from the outside changing a
  * permission simply killed the server.

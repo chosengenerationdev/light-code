@@ -431,7 +431,7 @@ function Get-OutlookNamespace {
 # same trap that made the Excel trace return empty.
 # Lists mail folders, cheaply enough to finish on a corporate mailbox.
 #
-# ## What went wrong the first time, reported from a real office
+# ## What went wrong the first time, reported from real use
 #
 # The first recursive version read `$Folder.Items.Count` for every folder it walked. On a cached
 # local mailbox that is instant; on Exchange in online mode it is a server round trip *per

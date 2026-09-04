@@ -23,13 +23,13 @@ describe('the expert message and the panel state', () => {
       maxConsultations: 6,
       keepAlive: false,
       reportsCost: true,
-      pricing: { coldUsd: 0.007117, resumedUsd: 0.0065388, measuredAt: 1, reportsCost: true },
+      pricing: { coldUsd: 0.0125, resumedUsd: 0.0031, measuredAt: 1, reportsCost: true },
     }
 
     // Exactly what App does. If ExpertState and the message ever diverge, this stops compiling.
     const state: ExpertState = message
 
-    expect(state.pricing?.coldUsd).toBe(0.007117)
+    expect(state.pricing?.coldUsd).toBe(0.0125)
     expect(state.reportsCost).toBe(true)
     expect(state.keepAlive).toBe(false)
   })

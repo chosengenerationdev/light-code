@@ -74,7 +74,7 @@ export class OfficeBridge {
         /*
          * Causes offered, not asserted.
          *
-         * The first version said a dialog was "usually" the reason. A user in an office hit a
+         * The first version said a dialog was "usually" the reason. A user in a workplace hit a
          * timeout caused by something else entirely - an expensive folder walk over Exchange -
          * and the assistant relayed the guess as fact, so they went looking for a popup that did
          * not exist and said so twice. A confident wrong diagnosis is worse than none: it costs

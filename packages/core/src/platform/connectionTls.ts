@@ -27,7 +27,7 @@ import type { TlsOptions } from './http.js'
  *
  * A client certificate is a credential: presenting it identifies you to whatever you
  * connect to. Sharing one across hosts is therefore a real decision, not a free
- * convenience — but in a corporate deployment there genuinely is one machine certificate
+ * convenience — but in a managed environment there genuinely is one machine certificate
  * for all internal services, and every host here is one the user configured themselves.
  * So it is offered globally, and any connection can override it or opt out with
  * `useGlobalClientCertificate: false`.
