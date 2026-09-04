@@ -232,11 +232,34 @@ function Get-CellAddress {
     return "$letters$Row"
 }
 
-# Walks back from a cell to the cells that feed it, and to the cells that feed those.
-#
-# This is the "why does this cell say that" question. `Precedents` is Excel's own answer and it
-# only covers the current sheet, so cross-sheet references are read out of the formula text as
-# well - a formula pointing at another sheet is exactly the case people cannot trace by eye.
+<#
+  Walks back from a cell to what feeds it, and to what feeds those.
+
+  This is the "why does this cell say that" question. `Precedents` is Excel's own answer and it
+  covers the current sheet only, so cross-sheet references are read out of the formula text too -
+  a formula pointing at another sheet is exactly the case people cannot trace by eye.
+
+  ## Why precedents are grouped rather than enumerated
+
+  The first version walked `Precedents` cell by cell and recursed into every one. On a formula as
+  ordinary as `=SUM(A1:A2000)` that is 2000 precedent cells: measured at **9.3 seconds merely to
+  list them**, before reading four properties off each and asking each for its own precedents. It
+  timed out, and raising the timeout could not help, because the cost was not a slow step but a
+  fan-out.
+
+  `Precedents.Areas` gives the contiguous blocks instead - the same formula is **one** area,
+  `Data!A1:A2000`, in 755ms. The grouped answer is also the better one. Nobody investigating a
+  total wants two thousand nodes; they want to know which block feeds it and whether anything in
+  that block is broken. So a multi-cell area is summarised in a single bulk read.
+
+  ## What is followed and what is described
+
+  A single-cell precedent is followed, because that is the chain an investigation is actually
+  walking: this cell came from that one, which came from that one. A range is described and not
+  entered - its cells are inputs to an aggregate, not steps on a path to a cause, and the summary
+  already answers the question worth asking about it. Node count is capped as well, so a
+  pathological sheet ends with a note instead of a hang.
+#>
 function Invoke-ExcelTrace {
     param($Request)
 
@@ -246,6 +269,7 @@ function Invoke-ExcelTrace {
 
     $script:traceMaxDepth = 3
     if ($Request.depth) { $script:traceMaxDepth = [Math]::Min([int]$Request.depth, 6) }
+    $script:traceNodeLimit = 60
 
     <#
       Script-scoped, not local.
@@ -256,12 +280,15 @@ function Invoke-ExcelTrace {
     #>
     $script:traceSeen = @{}
     $script:traceNodes = @()
+    $script:traceTruncated = $false
+    $script:traceWorkbook = $wb
 
     function Walk {
         param($Sheet, [string]$Address, [int]$Depth)
 
         $key = "$($Sheet.Name)!$Address"
         if ($script:traceSeen.ContainsKey($key) -or $Depth -gt $script:traceMaxDepth) { return }
+        if ($script:traceNodes.Count -ge $script:traceNodeLimit) { $script:traceTruncated = $true; return }
         $script:traceSeen[$key] = $true
 
         $cell = $Sheet.Range($Address)
@@ -270,38 +297,164 @@ function Invoke-ExcelTrace {
         $node.depth = $Depth
 
         $feeders = @()
-        if ($node.Contains('formula')) {
+        $follow = @()
+        $summaries = @()
+
+        if ($node.Contains('formula') -and $Depth -lt $script:traceMaxDepth) {
             try {
-                foreach ($p in $cell.Precedents) {
-                    $feeders += "$($p.Parent.Name)!$($p.Address($false, $false))"
+                # Areas, never cells. See the note above: one call per block, not one per cell.
+                foreach ($area in $cell.Precedents.Areas) {
+                    $areaSheet = $area.Parent
+                    $areaAddress = $area.Address($false, $false)
+                    $areaCount = $area.Count
+                    $feeders += "$($areaSheet.Name)!$areaAddress"
+                    if ($areaCount -eq 1) {
+                        $follow += @{ SheetName = $areaSheet.Name; Address = $areaAddress }
+                    } else {
+                        $summaries += (Get-AreaSummary -Area $area -Count $areaCount -Sheet $areaSheet.Name -Address $areaAddress -Depth ($Depth + 1))
+                    }
                 }
             } catch {
                 # No precedents on this sheet: Excel raises rather than returning an empty range.
             }
-            # Cross-sheet references, which `Precedents` does not report.
-            foreach ($match in [regex]::Matches($node.formula, "(?:'([^']+)'|([A-Za-z0-9_]+))!(\`$?[A-Z]{1,3}\`$?[0-9]{1,7})")) {
+
+            <#
+              Cross-sheet references, which `Precedents` does not report.
+
+              The range half of the alternation is new. The original pattern matched a single cell
+              only, so `=SUM(Data!A1:A500)` was recorded as feeding on nothing at all - a trace
+              that stopped dead at the most common cross-sheet formula there is.
+            #>
+            $pattern = "(?:'([^']+)'|([A-Za-z0-9_]+))!(\`$?[A-Z]{1,3}\`$?[0-9]{1,7}(?::\`$?[A-Z]{1,3}\`$?[0-9]{1,7})?)"
+            foreach ($match in [regex]::Matches($node.formula, $pattern)) {
                 $sheetName = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
-                $feeders += "$sheetName!$($match.Groups[3].Value -replace '\$', '')"
+                $reference = $match.Groups[3].Value -replace '\$', ''
+                $feeders += "$sheetName!$reference"
+                try {
+                    $refSheet = Get-Worksheet -Workbook $script:traceWorkbook -Name $sheetName
+                    $refRange = $refSheet.Range($reference)
+                    $refCount = $refRange.Count
+                    if ($refCount -eq 1) {
+                        $follow += @{ SheetName = $sheetName; Address = $reference }
+                    } else {
+                        $summaries += (Get-AreaSummary -Area $refRange -Count $refCount -Sheet $sheetName -Address $reference -Depth ($Depth + 1))
+                    }
+                } catch {
+                    # A closed workbook or a deleted sheet. Still named among the feeders, because
+                    # "it points at something that is not there" is very often the answer.
+                }
             }
         }
+
         $node.feeds = @($feeders | Select-Object -Unique)
         $script:traceNodes += $node
+        foreach ($summary in $summaries) {
+            $summaryKey = "$($summary.sheet)!$($summary.address)"
+            if ($script:traceSeen.ContainsKey($summaryKey)) { continue }
+            $script:traceSeen[$summaryKey] = $true
+            $script:traceNodes += $summary
+        }
 
-        foreach ($feeder in $node.feeds) {
-            $parts = $feeder -split '!', 2
+        foreach ($next in $follow) {
             try {
-                $next = Get-Worksheet -Workbook $script:traceWorkbook -Name $parts[0]
-                Walk -Sheet $next -Address $parts[1] -Depth ($Depth + 1)
+                $nextSheet = Get-Worksheet -Workbook $script:traceWorkbook -Name $next.SheetName
+                Walk -Sheet $nextSheet -Address $next.Address -Depth ($Depth + 1)
             } catch {
-                # A reference to a closed workbook or a deleted sheet. Recorded by its absence
-                # from the node list rather than failing the whole trace.
+                # Recorded by its absence from the node list rather than failing the whole trace.
             }
         }
     }
 
-    $script:traceWorkbook = $wb
     Walk -Sheet $sheet -Address $Request.cell -Depth 0
-    return @{ workbook = $wb.Name; start = "$($sheet.Name)!$($Request.cell)"; nodes = $script:traceNodes }
+    return @{
+        workbook  = $wb.Name
+        start     = "$($sheet.Name)!$($Request.cell)"
+        nodes     = $script:traceNodes
+        truncated = $script:traceTruncated
+    }
+}
+
+<#
+  Describes a block of cells in one bulk read.
+
+  What an investigation needs to know about a range feeding a total is not its two thousand values
+  but whether something in it is wrong: an error, a blank where a number belongs, text where
+  arithmetic expects a figure. So that is what is counted. `Value2` over the whole block is a
+  single cross-process call where reading each cell is one per cell - the same 315x difference
+  measured for Invoke-ExcelReadRange.
+#>
+function Get-AreaSummary {
+    param($Area, [int]$Count, [string]$Sheet, [string]$Address, [int]$Depth)
+
+    $numbers = 0
+    $errors = 0
+    $blanks = 0
+    $texts = 0
+    $min = $null
+    $max = $null
+    $errorCells = @()
+    $errorLimit = 10
+
+    <#
+      Positions are worked out arithmetically, not asked of Excel.
+
+      Naming the cell is the whole value of this summary - "an error somewhere in A1:A2000" sends
+      someone scrolling, "A57 is #DIV/0!" ends the investigation. But asking each cell for its own
+      `.Address` would put back exactly the per-cell round trip this function exists to avoid, so
+      the block's own origin plus the offset gives the same answer for nothing.
+
+      PowerShell enumerates a two-dimensional COM array row-major, which is what the offset
+      arithmetic below assumes.
+    #>
+    $firstRow = $Area.Row
+    $firstColumn = $Area.Column
+    $columnCount = $Area.Columns.Count
+
+    try {
+        $index = 0
+        foreach ($raw in $Area.Value2) {
+            $rowOffset = [Math]::Floor($index / $columnCount)
+            $columnOffset = $index % $columnCount
+            $index++
+
+            if ($null -eq $raw) { $blanks++; continue }
+            $value = Convert-ExcelValue -Value $raw
+            if ($value -is [string]) {
+                if ($value.StartsWith('#')) {
+                    $errors++
+                    if ($errorCells.Count -lt $errorLimit) {
+                        $where = Get-CellAddress -Row ($firstRow + $rowOffset) -Column ($firstColumn + $columnOffset)
+                        $errorCells += "$where is $value"
+                    }
+                } else {
+                    $texts++
+                }
+                continue
+            }
+            $numbers++
+            $asDouble = [double]$value
+            if ($null -eq $min -or $asDouble -lt $min) { $min = $asDouble }
+            if ($null -eq $max -or $asDouble -gt $max) { $max = $asDouble }
+        }
+    } catch {
+        # An unreadable block is still worth naming; its counts simply stay at zero.
+    }
+
+    $summary = [ordered]@{
+        address = $Address
+        sheet   = $Sheet
+        depth   = $Depth
+        kind    = 'range'
+        cells   = $Count
+        numbers = $numbers
+        errors  = $errors
+        blanks  = $blanks
+        texts   = $texts
+        feeds   = @()
+    }
+    if ($null -ne $min) { $summary.min = $min; $summary.max = $max }
+    if ($errorCells.Count -gt 0) { $summary.errorCells = $errorCells }
+    return $summary
 }
 
 # Reaching the VBA project, or explaining why not.

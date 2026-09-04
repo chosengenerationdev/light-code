@@ -1,5 +1,15 @@
 # @chosengeneration/light-code
 
+## 0.29.0
+
+### Minor Changes
+
+- Excel: tracing a cell now follows blocks rather than individual cells, so investigating a formula
+  over a large range finishes in about a second instead of timing out. A range feeding a formula is
+  summarised — how many cells, how many numeric, and which cells are in error by address — which is
+  usually the answer being looked for. Cross-sheet range references are followed too; previously only
+  single-cell cross-sheet references were.
+
 ## 0.28.0
 
 ### Minor Changes

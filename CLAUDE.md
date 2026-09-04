@@ -713,6 +713,30 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   `Text` has no array form, so exact formatted text is fetched per cell only for a small range and
   derived beyond it — and the result says which happened, because a currency column quietly losing
   its currency should be stated rather than discovered.
+- **Tracing a cell follows blocks, not cells** (0.51.0, reported: "excel investigation still not
+  good, timeout later, even with increased timeout"). The trace enumerated `Precedents` one cell
+  at a time and recursed into every one, so `=SUM(A1:A2000)` — an entirely ordinary formula — was
+  2000 nodes, each costing four property reads and a `Precedents` call of its own. Measured:
+  **9.3 seconds merely to list them**, before any of that.
+  **This is why raising the timeout changed nothing, and the shape of that is worth keeping.** The
+  cost was not a slow step waiting to finish; it was a fan-out, so every extra second bought a few
+  more of thousands of nodes. A timeout is the right instrument for something slow and the wrong
+  one for something that does not terminate in a useful time — when raising it does not help,
+  stop raising it and count the round trips.
+  `Precedents.Areas` returns contiguous **blocks**: the same formula is one area, `Data!A1:A2000`,
+  in 755ms, and the whole five-level trace now runs in about a second.
+  **The grouped answer is also the better answer**, which is the part not to undo. A single-cell
+  precedent is still followed, because that is the chain an investigation walks. A range is
+  described in one bulk `Value2` read — how many cells, how many numeric, and *which cells are in
+  error, by address*. Nobody wanted two thousand nodes; they wanted to know that `A57` is the
+  `#DIV/0!`. So the fix that made it fast is also the one that made it answer the question.
+  Two smaller things went with it: the cross-sheet pattern now matches a **range**, where before it
+  matched a single cell only — so `=SUM(Data!A1:A500)` traced back to nothing at all — and a range
+  node is rendered in its own shape, because a summary carrying no `text` printed as `displays ""`
+  and read as an empty cell.
+  `officeTrace.test.ts` pins the enumeration by reading `worker.ps1`, since a correct-but-unusably-
+  slow trace is invisible to any test of what it returns — the same reasoning as
+  `config/retrieval.test.ts` reading `bridge.ts`.
 - **A timeout can be set on any single tool** (0.50.0), from the row in Settings → Tools, and it
   is **enforced in the agent loop** rather than by each kind of tool — so a built-in, and anything
   added later, is covered without knowing the mechanism exists. It **aborts the tool's signal**

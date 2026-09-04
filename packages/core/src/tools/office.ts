@@ -45,11 +45,52 @@ const sheetField = z.string().optional().describe('Sheet name. Omit for the acti
 
 /** Formats a value for the model without lying about its type. */
 function renderCell(cell: Record<string, unknown>): string {
-  const parts = [`${String(cell.sheet ?? '')}${cell.sheet === undefined ? '' : '!'}${String(cell.address)}`]
+  const where = `${String(cell.sheet ?? '')}${cell.sheet === undefined ? '' : '!'}${String(cell.address)}`
+  if (cell.kind === 'range') return renderRange(where, cell)
+
+  const parts = [where]
   parts.push(`displays "${String(cell.text ?? '')}"`)
   if (cell.formula !== undefined) parts.push(`formula ${String(cell.formula)}`)
   else if (cell.value !== null && cell.value !== undefined) parts.push(`value ${JSON.stringify(cell.value)}`)
   return parts.join(', ')
+}
+
+/**
+ * A block of cells feeding a formula, described rather than listed.
+ *
+ * The worker summarises a multi-cell precedent instead of expanding it — the reasoning is in
+ * `Invoke-ExcelTrace`, and it is about a `=SUM(A1:A2000)` costing 2000 nodes. What matters here is
+ * that the summary must not read like a cell whose text happens to be blank, or the model will
+ * report the range as empty. So it is rendered in its own shape, leading with the count.
+ *
+ * The error addresses come first among the details because they are almost always the answer: a
+ * total showing #DIV/0! is explained by naming the one cell in two thousand that is broken.
+ */
+function renderRange(where: string, node: Record<string, unknown>): string {
+  const cells = Number(node.cells ?? 0)
+  const parts = [`${where} (${String(cells)} cells feeding this)`]
+
+  const errors = Number(node.errors ?? 0)
+  if (errors > 0) {
+    const listed = Array.isArray(node.errorCells) ? (node.errorCells as string[]) : []
+    const shown = listed.join('; ')
+    parts.push(
+      listed.length < errors
+        ? `${String(errors)} in error, including ${shown}`
+        : `${String(errors)} in error: ${shown}`,
+    )
+  }
+
+  const counts: string[] = []
+  if (Number(node.numbers ?? 0) > 0) counts.push(`${String(node.numbers)} numeric`)
+  if (Number(node.texts ?? 0) > 0) counts.push(`${String(node.texts)} text`)
+  if (Number(node.blanks ?? 0) > 0) counts.push(`${String(node.blanks)} blank`)
+  if (counts.length > 0) parts.push(counts.join(', '))
+
+  if (node.min !== undefined && node.min !== null) {
+    parts.push(`range ${JSON.stringify(node.min)} to ${JSON.stringify(node.max)}`)
+  }
+  return parts.join('; ')
 }
 
 export function createExcelSessionsTool(options: OfficeToolOptions): Tool<Record<string, never>> {
@@ -133,7 +174,13 @@ const traceSchema = z.object({
   workbook: workbookField,
   sheet: sheetField,
   cell: z.string().min(1).describe('The cell to explain, e.g. "D14".'),
-  depth: z.number().int().min(1).max(6).optional().describe('How many steps back to follow. Default 3.'),
+  depth: z
+    .number()
+    .int()
+    .min(1)
+    .max(6)
+    .optional()
+    .describe('How many steps back to follow. Default 3, which reaches the cause of most errors.'),
 })
 
 export function createExcelTraceTool(options: OfficeToolOptions): Tool<z.infer<typeof traceSchema>> {
@@ -143,7 +190,10 @@ export function createExcelTraceTool(options: OfficeToolOptions): Tool<z.infer<t
     description:
       'Explain why a cell holds the value it does: its formula, the cells feeding it, their ' +
       'values and formulas, following the chain back. This is the tool for "where does this ' +
-      'number come from" and for finding the source of an error like #REF! or #DIV/0!.',
+      'number come from" and for finding the source of an error like #REF! or #DIV/0!. ' +
+      'A block of cells feeding a formula is summarised rather than listed, and any cells in ' +
+      'error inside it are named — so tracing a bad total usually points straight at the one ' +
+      'broken cell without needing to read the range.',
     parametersSchema: traceSchema,
     async execute(params): Promise<ToolResult> {
       try {
@@ -151,6 +201,7 @@ export function createExcelTraceTool(options: OfficeToolOptions): Tool<z.infer<t
           workbook: string
           start: string
           nodes: Record<string, unknown>[]
+          truncated?: boolean
         }>({ op: 'excel.trace', ...params })
 
         if (result.nodes.length === 0) {
@@ -171,6 +222,15 @@ export function createExcelTraceTool(options: OfficeToolOptions): Tool<z.infer<t
             '',
             'Indentation is distance from the starting cell. A cell with no formula is raw input,',
             'so an unexpected value there is a data problem rather than a formula problem.',
+            'A line giving a cell count is a block feeding a formula, summarised rather than listed;',
+            'any cells in error within it are named, and those are usually the cause.',
+            ...(result.truncated === true
+              ? [
+                  '',
+                  'The trace stopped at its node limit, so this is a partial picture. Trace one of the',
+                  'cells above directly, or use a smaller depth, to follow a particular branch further.',
+                ]
+              : []),
           ].join('\n'),
         }
       } catch (error) {

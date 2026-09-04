@@ -38,10 +38,9 @@ export interface OfficeBridgeOptions {
   /** Where the worker script is written. The host's storage directory. */
   storageDir: string
   logger: Logger
-  /** Per-request ceiling. Excel can block on a modal dialog the user has open. */
   /**
    * Per-request ceiling. Read from a function rather than fixed at construction, so raising the
-   * global tool timeout applies to the very next call instead of after a restart.
+   * tool timeout applies to the very next call instead of after a restart.
    */
   timeoutMs?: () => number | undefined
 }
