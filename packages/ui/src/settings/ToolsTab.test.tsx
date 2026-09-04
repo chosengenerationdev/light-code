@@ -48,6 +48,7 @@ function render(
     onSetOffice?: (excel: boolean, outlook: boolean) => void
     toolTimeoutSeconds?: number
     onSetToolTimeout?: (seconds?: number) => void
+    onSetToolTimeoutFor?: (name: string, seconds?: number) => void
   } = {},
 ): void {
   act(() =>
@@ -59,6 +60,7 @@ function render(
         onSetOffice={props.onSetOffice ?? (() => undefined)}
         {...(props.toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: props.toolTimeoutSeconds })}
         onSetToolTimeout={props.onSetToolTimeout ?? (() => undefined)}
+        onSetToolTimeoutFor={props.onSetToolTimeoutFor ?? (() => undefined)}
       />,
     ),
   )

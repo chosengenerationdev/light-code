@@ -296,3 +296,81 @@ describe('runAgentTurn — the model announces an action and calls nothing', () 
     expect(log.error).toHaveLength(1)
   })
 })
+
+/**
+ * A tool that never finishes used to hang the turn with nothing to stop it — every kind of tool
+ * had its own limit, and anything without one, including anything added later, had none at all.
+ * The loop enforces it now, so a tool written next year is covered without knowing this exists.
+ */
+describe('a tool that runs too long', () => {
+  /** Runs one tool call under a limit, and returns what the model was told. */
+  async function runUnderLimit(
+    tool: Tool,
+    timeoutForTool: (name: string) => number | undefined,
+  ): Promise<ToolResult> {
+    const provider = new ScriptedMultiTurnProvider([
+      [{ type: 'toolCall', toolCall: { id: 'call_1', name: tool.name, arguments: '{}' } }, { type: 'done' }],
+      [{ type: 'text', text: 'finished' }, { type: 'done' }],
+    ])
+    const registry = new ToolRegistry()
+    registry.register(tool)
+    const { events, log } = collectEvents()
+
+    await runAgentTurn(provider, new Conversation(), 'go', registry, fakeToolExecutionContext(), events, {
+      timeoutForTool,
+    })
+    return log.toolResult[0]?.result as ToolResult
+  }
+
+  const watchesSignal = (onAbort?: () => void): Tool =>
+    ({
+      name: 'slow_tool',
+      group: 'read',
+      description: 'never finishes on its own',
+      parametersSchema: z.object({}),
+      execute: (_params: unknown, context: ToolExecutionContext) =>
+        new Promise<ToolResult>((_resolve, reject) => {
+          context.signal?.addEventListener(
+            'abort',
+            () => {
+              onAbort?.()
+              reject(new Error('aborted'))
+            },
+            { once: true },
+          )
+        }),
+    }) as unknown as Tool
+
+  it('is stopped, and says so without claiming the work was undone', async () => {
+    const result = await runUnderLimit(watchesSignal(), () => 1)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('still running after 1s')
+    expect(result.content).toContain('has not been undone')
+  })
+
+  /** The signal is what actually stops the work; without aborting, ripgrep keeps scanning. */
+  it('aborts the tool rather than only abandoning the wait', async () => {
+    let aborted = false
+    await runUnderLimit(
+      watchesSignal(() => {
+        aborted = true
+      }),
+      () => 1,
+    )
+    expect(aborted).toBe(true)
+  })
+
+  it('leaves a tool alone when no limit applies to it', async () => {
+    const quick = {
+      name: 'quick_tool',
+      group: 'read',
+      description: 'finishes',
+      parametersSchema: z.object({}),
+      execute: async () => ({ content: 'done' }),
+    } as unknown as Tool
+
+    const result = await runUnderLimit(quick, () => undefined)
+    expect(result.content).toBe('done')
+    expect(result.isError).toBeUndefined()
+  })
+})

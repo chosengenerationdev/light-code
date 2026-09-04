@@ -19,6 +19,13 @@ export interface ToolsTabProps {
    */
   toolTimeoutSeconds?: number
   onSetToolTimeout: (seconds?: number) => void
+  /**
+   * A limit for one tool, by the name the model calls. Undefined clears it.
+   *
+   * Where it is stored depends on the tool — an MCP tool's goes with its server so it travels
+   * with a pasted config — but that is the host's problem, not the reader's: one box per row.
+   */
+  onSetToolTimeoutFor: (name: string, seconds?: number) => void
 }
 
 const SOURCE_LABELS: Record<ToolCatalogueEntry['source'], string> = {
@@ -151,7 +158,60 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
                   </span>
                 )}
               </div>
-              <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{tool.description}</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
+                <div style={{ color: colors.muted, fontSize: 11, flex: 1, minWidth: 0 }}>{tool.description}</div>
+                {/*
+                  This tool's own limit, showing the number that will actually apply.
+
+                  Placeholder rather than value when the limit is inherited, so "120 because the
+                  server says so" and "120 because I set it here" are visibly different states —
+                  otherwise clearing the box would look like it changed nothing.
+                */}
+                <input
+                  inputMode="numeric"
+                  aria-label={`Timeout for ${tool.name}`}
+                  title={
+                    tool.timeoutSeconds === undefined
+                      ? 'Seconds this tool may take. Blank leaves it to whatever runs it.'
+                      : tool.timeoutIsOwn === true
+                        ? `${String(tool.timeoutSeconds)}s, set on this tool. Clear it to inherit again.`
+                        : `${String(tool.timeoutSeconds)}s, inherited. Type a number to set one just for this tool.`
+                  }
+                  defaultValue={tool.timeoutIsOwn === true ? String(tool.timeoutSeconds) : ''}
+                  placeholder={tool.timeoutSeconds === undefined ? 's' : String(tool.timeoutSeconds)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
+                  onBlur={(event) => {
+                    const raw = event.target.value.trim()
+                    if (raw.length === 0) {
+                      if (tool.timeoutIsOwn === true) props.onSetToolTimeoutFor(tool.name)
+                      return
+                    }
+                    const seconds = Number(raw)
+                    // Refused rather than clamped: a typo must not become a limit nobody chose.
+                    if (!Number.isFinite(seconds) || seconds < 5 || seconds > 3600) {
+                      event.target.value = tool.timeoutIsOwn === true ? String(tool.timeoutSeconds) : ''
+                      return
+                    }
+                    if (seconds !== tool.timeoutSeconds || tool.timeoutIsOwn !== true) {
+                      props.onSetToolTimeoutFor(tool.name, Math.round(seconds))
+                    }
+                  }}
+                  style={{
+                    width: 54,
+                    flexShrink: 0,
+                    background: colors.inputBackground,
+                    color: tool.timeoutIsOwn === true ? colors.accent : colors.inputForeground,
+                    border: `1px solid ${tool.timeoutIsOwn === true ? colors.accent : colors.inputBorder}`,
+                    borderRadius: 2,
+                    padding: '0 4px',
+                    fontFamily,
+                    fontSize: 11,
+                    textAlign: 'right',
+                  }}
+                />
+              </div>
             </div>
           ))}
         </div>

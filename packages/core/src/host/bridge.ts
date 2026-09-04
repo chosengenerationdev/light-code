@@ -23,6 +23,7 @@ import {
   createExcelEvaluateTool,
   createExcelRunMacroTool,
 } from '../tools/officeVba.js'
+import { timeoutForTool, timeoutTargetFor } from '../tools/timeouts.js'
 import {
   describeOverrides,
   overridesFor,
@@ -776,6 +777,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * say it once.
    */
   let cachedToolTimeoutSeconds: number | undefined
+  /** Per-tool limits from `tools.timeouts`, keyed by the name the model calls. */
+  let cachedToolTimeouts: Record<string, number> | undefined
+
+  /** Whether a tool's limit is its own, rather than inherited from a server or the global one. */
+  function ownTimeout(name: string): boolean {
+    const target = timeoutTargetFor(name, mcpConfigs)
+    return target.kind === 'mcp'
+      ? mcpConfigs[target.server]?.toolTimeouts?.[target.tool] !== undefined
+      : cachedToolTimeouts?.[target.name] !== undefined
+  }
+
+  /** One resolution, used by the loop and reported to the Tools tab, so they cannot disagree. */
+  function toolTimeout(name: string): number | undefined {
+    return timeoutForTool(name, {
+      perTool: cachedToolTimeouts,
+      global: cachedToolTimeoutSeconds,
+      mcpServers: mcpConfigs,
+    })
+  }
   let cachedExpertColor = '#D97757'
   let cachedExpertLimits: ExpertLimits = {}
   /** The stored assessment, so the briefing can carry it without a config read per turn. */
@@ -1133,6 +1153,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedTheme = config.ui?.theme
     cachedToolTimeoutSeconds = config.tools?.timeoutSeconds
+    cachedToolTimeouts = config.tools?.timeouts
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
     cachedAssessment = config.expert?.assessment
     cachedReportsCost = config.expert?.reportsCost
@@ -2018,6 +2039,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * MCP tools. The gate below is a second line of defence, not the first.
        */
       const turnRegistry = schedule !== undefined ? registryForSchedule(fullRegistry.list(), schedule) : fullRegistry
+      turnOptions.timeoutForTool = toolTimeout
       if (schedule !== undefined) {
         turnOptions.approvalGate = new ScheduledApprovalGate(schedule)
         /*
@@ -4160,6 +4182,47 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * `ask` is neither. Switching to one state must clear the other, or a tool could be
    * simultaneously always-allowed and hidden.
    */
+  /**
+   * Sets one tool's limit, in whichever store belongs to it.
+   *
+   * An MCP tool's goes inside its server's entry, keyed by the bare name — that is where a config
+   * pasted from another client puts it, and where it survives being exported and pasted again.
+   * Everything else goes to `tools.timeouts`. The user sees one box either way; keeping one store
+   * per kind is what stops the same fact living in two places.
+   */
+  async function handleSetToolTimeoutFor(name: string, seconds?: number): Promise<void> {
+    try {
+      const target = timeoutTargetFor(name, mcpConfigs)
+      if (target.kind === 'mcp') {
+        await updateMcpServer(target.server, (entry) => {
+          const timeouts = { ...entry.toolTimeouts }
+          if (seconds === undefined) delete timeouts[target.tool]
+          else timeouts[target.tool] = seconds
+          const remaining = Object.keys(timeouts).length
+          return { ...entry, ...(remaining > 0 ? { toolTimeouts: timeouts } : { toolTimeouts: undefined }) }
+        })
+        postMcp()
+      } else {
+        const { config } = await configManager.load()
+        const timeouts = { ...config.tools?.timeouts }
+        // Deleted rather than stored as zero, so "no limit set" has one representation and the
+        // config file does not accumulate entries meaning nothing.
+        if (seconds === undefined) delete timeouts[target.name]
+        else timeouts[target.name] = seconds
+        await configManager.save('user', {
+          tools: {
+            ...config.tools,
+            ...(Object.keys(timeouts).length > 0 ? { timeouts } : { timeouts: undefined }),
+          },
+        })
+        await loadSettings()
+      }
+      await postTools()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleSetToolTimeout(server: string, tool: string, seconds?: number): Promise<void> {
     await updateMcpServer(server, (entry) => {
       const timeouts = { ...entry.toolTimeouts }
@@ -4583,6 +4646,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .save('user', { ui: { accentColor: message.value, expertColor: cachedExpertColor, ...(cachedTheme === undefined ? {} : { theme: cachedTheme }) } })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setToolTimeoutFor') {
+      void handleSetToolTimeoutFor(message.name, message.seconds)
     } else if (message.type === 'setToolTimeout') {
       void configManager
         .save('user', { tools: message.seconds === undefined ? {} : { timeoutSeconds: message.seconds } })
@@ -5097,6 +5162,13 @@ ${contents}
             source,
             ...(server !== undefined ? { server } : {}),
             advertised: advertised.has(tool.name),
+            // The number that will actually apply, not the raw setting: the row should not
+            // leave the user to work out which of three limits wins.
+            ...(() => {
+              const seconds = toolTimeout(tool.name)
+              return seconds === undefined ? {} : { timeoutSeconds: seconds }
+            })(),
+            ...(ownTimeout(tool.name) ? { timeoutIsOwn: true } : {}),
           } satisfies ToolCatalogueEntry
         })
         .sort((a, b) => a.name.localeCompare(b.name)),

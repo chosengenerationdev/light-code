@@ -47,6 +47,14 @@ export interface AgentTurnEvents {
 }
 
 export interface RunAgentTurnOptions {
+  /**
+   * How long this tool may take, in seconds, or undefined to leave it to whatever runs it.
+   *
+   * Resolved by the host from the most specific setting that applies — see `tools/timeouts.ts`.
+   * Enforced here rather than in each kind of tool, so a tool added later is covered without
+   * knowing this exists.
+   */
+  timeoutForTool?: (toolName: string) => number | undefined
   signal?: AbortSignal
   /** Default 25 — configurable per CLAUDE.md §5. */
   maxIterations?: number
@@ -324,7 +332,71 @@ async function runOneToolCall(
     }
   }
 
-  return tool.execute(params, context)
+  return runWithTimeout(tool, params, context, options)
+}
+
+/**
+ * Runs a tool under its own time limit, if it has one.
+ *
+ * ## Why the loop, rather than each kind of tool
+ *
+ * Every kind had its own limit and nothing had a limit it did not implement itself — a built-in
+ * tool, or any tool added later, could hang a turn forever with nothing to stop it. Enforcing it
+ * here means one place decides, and a tool written next year is covered without knowing this
+ * exists.
+ *
+ * ## Why it aborts rather than only stops waiting
+ *
+ * A promise race abandons the wait and leaves the work running: the ripgrep process keeps
+ * scanning, the command keeps writing files. So the timeout **aborts the tool's signal**, which
+ * every long-running tool here already honours, and only then reports. What cannot be cancelled
+ * is at least bounded — the turn continues instead of stopping forever — and the result says so
+ * rather than implying the work was undone.
+ */
+async function runWithTimeout(
+  tool: Tool,
+  params: Record<string, unknown>,
+  context: ToolExecutionContext,
+  options: RunAgentTurnOptions,
+): Promise<ToolResult> {
+  const seconds = options.timeoutForTool?.(tool.name)
+  if (seconds === undefined) return tool.execute(params, context)
+
+  const controller = new AbortController()
+  // Chained to the turn's own signal, so cancelling the turn still cancels the tool.
+  const outer = context.signal
+  const abortFromOuter = (): void => controller.abort()
+  if (outer !== undefined) {
+    if (outer.aborted) controller.abort()
+    else outer.addEventListener('abort', abortFromOuter, { once: true })
+  }
+
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, seconds * 1000)
+
+  try {
+    return await tool.execute(params, { ...context, signal: controller.signal })
+  } catch (error) {
+    if (!timedOut) throw error
+    return {
+      content:
+        `"${tool.name}" was still running after ${String(seconds)}s and was stopped. ` +
+        'Raise its timeout in Settings → Tools if this is normal for it, or narrow what you asked ' +
+        'it to do. Anything it had already changed has not been undone.',
+      isError: true,
+    }
+  } finally {
+    clearTimeout(timer)
+    outer?.removeEventListener('abort', abortFromOuter)
+    /*
+     * A tool that ignores its signal resolves normally after the deadline. Reported as a timeout
+     * anyway would be a lie about what happened, so its result stands - the limit bounded the
+     * *turn's* attention, which is what a hung tool actually costs.
+     */
+  }
 }
 
 /**

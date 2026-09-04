@@ -512,7 +512,19 @@ export const configSchema = z
      * Absent means each kind keeps its own default. Raising this cannot make a hung call
      * unnoticeable: it is still bounded, and cancelling the turn still stops it.
      */
-    tools: z.object({ timeoutSeconds: z.number().int().min(5).max(3600) }).partial(),
+    tools: z
+      .object({
+        timeoutSeconds: z.number().int().min(5).max(3600),
+        /**
+         * Per-tool limits, keyed by the name the model calls.
+         *
+         * Beats the global one, because someone saying "this report takes ten minutes" knows
+         * something a machine-wide setting cannot. MCP tools keep theirs inside their server's
+         * entry instead — see `tools/timeouts.ts` for why, and for the resolution order.
+         */
+        timeouts: z.record(z.string(), z.number().int().min(5).max(3600)),
+      })
+      .partial(),
     approvals: z.record(z.string(), workspaceApprovalsSchema),
     /**
      * Per-project settings, keyed by workspace path (0.47.0).

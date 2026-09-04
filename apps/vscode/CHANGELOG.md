@@ -1,5 +1,27 @@
 # light-code-vscode
 
+## 0.50.0
+
+### Minor Changes
+
+- Every tool can have its own timeout, and every tool is actually held to one.
+
+  Settings → Tools now has a timeout box on each tool's row — built-in, MCP, Python, Excel and
+  Outlook alike. It shows the number that will actually apply, and colours it only when that number
+  came from the tool itself, so "120 because the server says so" and "120 because I set it here" are
+  visibly different states.
+
+  The limit is enforced in the agent loop rather than by each kind of tool. That is what makes it
+  universal: a built-in tool had no timeout at all before, and anything added later would have had
+  none either. It **aborts the tool's signal** rather than just giving up on the wait — walking away
+  leaves ripgrep still scanning and the command still writing files — and what cannot be cancelled
+  is at least bounded, with a result that says the work has not been undone rather than implying it
+  has.
+
+  Resolution is most-specific-first: the tool's own limit, then its server's, then the global one.
+  An MCP tool's limit stays inside its server's entry, where a config pasted from another client
+  puts it; everything else goes to a single store. One box either way.
+
 ## 0.49.0
 
 ### Minor Changes

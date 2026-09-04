@@ -713,6 +713,18 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   `Text` has no array form, so exact formatted text is fetched per cell only for a small range and
   derived beyond it — and the result says which happened, because a currency column quietly losing
   its currency should be stated rather than discovered.
+- **A timeout can be set on any single tool** (0.50.0), from the row in Settings → Tools, and it
+  is **enforced in the agent loop** rather than by each kind of tool — so a built-in, and anything
+  added later, is covered without knowing the mechanism exists. It **aborts the tool's signal**
+  rather than only abandoning the wait: a race that walks away leaves ripgrep scanning and the
+  command still writing. What cannot be cancelled is at least bounded, and the message says the
+  work has not been undone rather than implying it has.
+  Resolution is most-specific-first — the tool, its server, the global one — and `timeouts.ts`
+  owns it so the loop and the Tools tab cannot disagree about which number applies. **MCP keeps
+  its own store**, inside the server entry keyed by the bare name, because that is where a pasted
+  config puts it; everything else goes to `tools.timeouts`. One store per kind, not two for one
+  fact. The row shows the *resolved* number, and colours it only when the tool owns it — otherwise
+  clearing the box would look like it changed nothing.
 - **One tool timeout covers everything** (0.49.0): `tools.timeoutSeconds`, the fallback beneath
   per-tool and per-server limits, applying to MCP, Python, Excel and Outlook alike and to whatever
   comes next. "Everything on this machine is slow" is a property of the environment, not of any
@@ -1166,13 +1178,13 @@ addition to the text input rather than a replacement for it.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. **0.48.0 is live as of 2026-09-03.** The local manifest is **0.49.0**.
+the gallery. **0.48.0 is live as of 2026-09-03.** The local manifest is **0.50.0**.
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; **0.26.0 is published.** The local manifest is **0.27.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; **0.26.0 is published.** The local manifest is **0.28.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1188,7 +1200,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.49.0, host 0.27.0 — and keep working from
+**Next:** publish the pending versions — extension 0.50.0, host 0.28.0 — and keep working from
 what real use reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

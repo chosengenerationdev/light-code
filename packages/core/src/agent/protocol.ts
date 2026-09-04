@@ -200,6 +200,16 @@ export interface ToolCatalogueEntry {
   server?: string
   /** False when it is registered but kept out of the system prompt. */
   advertised: boolean
+  /**
+   * Seconds this tool may take, as actually resolved — its own limit, its server's, or the
+   * global one. Undefined means nothing has been set and whatever runs it decides.
+   *
+   * Resolved rather than raw, so the row shows the number that will apply instead of leaving
+   * the user to work out which of three settings wins.
+   */
+  timeoutSeconds?: number
+  /** True when that number came from this tool's own setting rather than from a wider one. */
+  timeoutIsOwn?: boolean
 }
 
 /** Guard rails against a query that could hurt a production cluster. */
@@ -345,6 +355,8 @@ export type UiToHostMessage =
   | { type: 'setTheme'; theme: 'system' | 'light' | 'dark' }
   /** The global tool timeout in seconds, or undefined to go back to each tool's own default. */
   | { type: 'setToolTimeout'; seconds?: number }
+  /** A limit for one tool, by the name the model calls. Undefined clears it. */
+  | { type: 'setToolTimeoutFor'; name: string; seconds?: number }
   | { type: 'revokeAllowedTool'; toolName: string }
   | { type: 'revokeAllowedCommand'; command: string }
   | { type: 'requestMcp' }

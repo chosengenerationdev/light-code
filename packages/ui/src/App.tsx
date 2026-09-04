@@ -1159,6 +1159,12 @@ export function App(props: AppProps): ReactElement {
             tools={{
               ...toolCatalogue,
               ...(toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds }),
+              onSetToolTimeoutFor: (name: string, seconds?: number) =>
+                props.transport.post({
+                  type: 'setToolTimeoutFor',
+                  name,
+                  ...(seconds === undefined ? {} : { seconds }),
+                } satisfies UiToHostMessage),
               onSetToolTimeout: (seconds?: number) =>
                 props.transport.post({
                   type: 'setToolTimeout',
