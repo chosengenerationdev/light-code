@@ -46,13 +46,70 @@ describe('the inlined PowerShell worker', () => {
   })
 
   /**
-   * `New-Object -ComObject Excel.Application` would *launch* Excel. The feature is about the
-   * session someone already has open, and silently starting a second one — invisible, holding a
-   * file lock — is a worse outcome than saying "open it first".
+   * `New-Object -ComObject Excel.Application` *launches* Excel. The feature is about the session
+   * someone already has open, and silently starting a second one — invisible, holding a file lock
+   * — is a worse outcome than saying "open it first".
    */
   it('attaches to a running Excel rather than starting one', () => {
     expect(OFFICE_WORKER_SOURCE).toMatch(/GetActiveObject/)
     expect(OFFICE_WORKER_SOURCE).toMatch(/is not running on this machine\. Open it and try again/)
+  })
+
+  /**
+   * Exactly one place may start Excel: `Invoke-ExcelOpen`, where the user has named a file.
+   *
+   * The rule above is about refusing to *guess*, and this test is what keeps it from eroding —
+   * without it, the launch added for open-by-path reads as permission to launch anywhere, and the
+   * next tool to hit a failed attach would quietly start a second invisible Excel.
+   */
+  it('starts Excel only in the open-by-path routine', () => {
+    const launches = OFFICE_WORKER_SOURCE.split('\n')
+      .map((line, index) => ({ line: line.trim(), index }))
+      .filter((entry) => /New-Object -ComObject/.test(entry.line) && !entry.line.startsWith('#'))
+
+    // `Get-OfficeApp` keeps a generic launch for the non-attach-only case; Outlook never uses it.
+    const functions = OFFICE_WORKER_SOURCE.split('\n')
+    const owning = launches.map((entry) => {
+      for (let index = entry.index; index >= 0; index -= 1) {
+        const match = /^function ([A-Za-z-]+)/.exec(functions[index] ?? '')
+        if (match !== null) return match[1]
+      }
+      return '(top level)'
+    })
+    expect([...new Set(owning)].sort()).toEqual(['Get-OfficeApp', 'Invoke-ExcelOpen'])
+  })
+
+  /**
+   * Opening a workbook can run `Workbook_Open`, so investigating a file would be capable of
+   * executing whatever it carries. 3 is msoAutomationSecurityForceDisable.
+   */
+  it('disables macros while opening a workbook', () => {
+    expect(OFFICE_WORKER_SOURCE).toMatch(/AutomationSecurity = 3/)
+    // And puts the setting back, so a later deliberate macro run is not silently neutered.
+    expect(OFFICE_WORKER_SOURCE).toMatch(/AutomationSecurity = \$previousSecurity/)
+  })
+
+  /**
+   * Excel does not reliably register its Application object in the ROT: measured on a real
+   * machine, with a workbook open, `GetActiveObject` failed with MK_E_UNAVAILABLE and started
+   * working only once a second workbook appeared. The open *workbook* is always registered, so
+   * that is bound instead and its `.Application` taken.
+   *
+   * This is the fallback that makes "there is no open session" stop being reported while a
+   * spreadsheet is plainly on screen.
+   */
+  it('falls back to the running object table when Excel does not advertise itself', () => {
+    expect(OFFICE_WORKER_SOURCE).toMatch(/BindToMoniker/)
+    expect(OFFICE_WORKER_SOURCE).toMatch(/Get-ExcelViaRot/)
+  })
+
+  /**
+   * A confident wrong diagnosis costs the user a search as well as the failure — the lesson from
+   * the Outlook timeout that sent them looking for a dialog that did not exist. If the process is
+   * there and unreachable, the cause is different and is named as likely, not as certain.
+   */
+  it('tells a running-but-unreachable app apart from a closed one', () => {
+    expect(OFFICE_WORKER_SOURCE).toMatch(/different privilege levels/)
   })
 
   it('leaves the workbook unsaved after a macro write, and says so', () => {

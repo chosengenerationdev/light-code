@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import type { OfficeBridge } from '../office/bridge.js'
-import { createExcelTraceTool } from './office.js'
+import { createExcelOpenTool, createExcelTraceTool } from './office.js'
 
 /**
  * Tracing a cell back to its cause, on a workbook of a realistic size.
@@ -138,5 +138,81 @@ describe('rendering a traced range', () => {
     })
     const result = await tool.execute({ cell: 'B2' }, {} as never)
     expect(result.content).toContain('Calc!B2, displays "#DIV/0!", formula =B1*2 <- Calc!B1')
+  })
+})
+
+/**
+ * Opening a workbook by name, which is the one tool here allowed to start Excel.
+ *
+ * The reported symptom that led to this was "it just tells me there is no open session" — Excel
+ * running, a workbook on screen, and nothing reachable. The attach fallback is the fix for that;
+ * this is the other half of the answer, for when the file is not open at all.
+ */
+describe('opening a workbook by path', () => {
+  const context = {
+    workspaceRoot: process.cwd(),
+    denylist: { isDenied: async () => false },
+    requestPathAccess: async () => true,
+  } as never
+
+  function openTool(result: unknown) {
+    return createExcelOpenTool({ bridge: bridgeReturning(result) })
+  }
+
+  /**
+   * A workbook the user already had open was opened under *their* macro settings. Claiming
+   * otherwise would be a confident false assurance about whether code has run — the same class of
+   * mistake as the timeout that asserted a dialog was open.
+   */
+  it('does not claim macros were disabled for a workbook it did not open', async () => {
+    const tool = openTool({
+      workbook: 'Book.xlsx',
+      fullName: 'C:\\x\\Book.xlsx',
+      sheets: ['Data'],
+      opened: false,
+      started: false,
+      readOnly: false,
+    })
+    const result = await tool.execute({ path: 'C:\\x\\Book.xlsx' }, context)
+    expect(result.content).not.toContain('Macros were disabled')
+    expect(result.content).toContain('Already open')
+  })
+
+  it('says so when it had to start Excel, and that macros were held off', async () => {
+    const tool = openTool({
+      workbook: 'Book.xlsx',
+      fullName: 'C:\\x\\Book.xlsx',
+      sheets: ['Data', 'Calc'],
+      opened: true,
+      started: true,
+      readOnly: true,
+    })
+    const result = await tool.execute({ path: 'C:\\x\\Book.xlsx' }, context)
+    expect(result.content).toContain('Started Excel and opened')
+    expect(result.content).toContain('Macros were disabled')
+    expect(result.content).toContain('read-only')
+  })
+
+  /** The deny list is absolute: a key or certificate is never openable, whoever asks. */
+  it('refuses a denied path without going near Excel', async () => {
+    let reached = false
+    const tool = createExcelOpenTool({
+      bridge: {
+        request: async () => {
+          reached = true
+          return {}
+        },
+      } as never,
+    })
+    // Built out rather than spread from `context`: that one is `as never`, and spreading it
+    // is a type error the test run itself cannot see.
+    const deniedContext = {
+      workspaceRoot: process.cwd(),
+      denylist: { isDenied: async () => true },
+      requestPathAccess: async () => true,
+    } as never
+    const result = await tool.execute({ path: 'C:\\certs\\client.key' }, deniedContext)
+    expect(result.isError).toBe(true)
+    expect(reached).toBe(false)
   })
 })

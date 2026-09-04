@@ -705,6 +705,28 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
 - **PowerShell scoping cost a debugging round too:** a nested function assigning to an enclosing
   array creates a local copy, so the first trace returned empty with no error. `$script:` scoped.
 
+- **Attaching to Excel cannot rely on `GetActiveObject`** (0.52.0, reported: "it just tells me
+  there is no open session"). Measured on a real machine with a workbook plainly on screen:
+  `GetActiveObject('Excel.Application')` failed with MK_E_UNAVAILABLE, and then started working
+  once a second workbook was added. Excel registers its **Application** object in the Running
+  Object Table only sometimes; it registers the open **workbook** every time. So the workbook
+  moniker is bound instead and its `.Application` taken, which is the same object by another road.
+  The ROT helper compiles on first use only (696ms, then 15ms a lookup), so the path where
+  `GetActiveObject` works pays nothing for it.
+  **And a failed attach now distinguishes its causes.** "Open it first" said to somebody looking at
+  an open spreadsheet destroys trust in every later answer. If the process is running and still
+  unreachable, a privilege-level mismatch is named as the likely cause - offered, not asserted,
+  which is the lesson from the Outlook timeout that sent the user hunting a dialog twice.
+- **A workbook can be opened by path** (0.52.0, user-requested), and `excel_open_workbook` is the
+  **only** thing here allowed to start Excel. The attach-only rule is about refusing to *guess* -
+  answering "the spreadsheet I have open" with a second invisible copy holding a file lock. When
+  the user names a file there is nothing to guess at, and refusing only means they open it by hand
+  and ask again. Excel is made visible, the file opens read-only by default, and **automation
+  security is forced to disable-all while it opens**, so investigating a workbook cannot execute
+  the `Workbook_Open` macro it may carry; running a macro stays a separately approved act. The path
+  goes through `resolveToolPath`, so the deny list and the out-of-workspace prompt apply as they do
+  to `read_file`. `office.test.ts` pins that `New-Object -ComObject` appears in no other routine.
+
 - **Reading a range is two COM calls, not four per cell** (0.49.0). The first version asked each
   cell for Address, Text, Formula and Value2 — every one a cross-process call. Measured: 400 cells
   took **2.2 seconds** against **7ms** for the same block as array properties, **315× slower**, and

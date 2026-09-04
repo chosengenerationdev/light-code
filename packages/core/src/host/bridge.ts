@@ -8,6 +8,7 @@ import { compareMentionCandidates, matchesMentionQuery } from '../context/mentio
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import {
+  createExcelOpenTool,
   createExcelSessionsTool,
   createExcelReadRangeTool,
   createExcelTraceTool,
@@ -1473,6 +1474,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const officeOptions = { bridge: office() }
       if (cachedOffice.excel === true) {
         combined.register(createExcelSessionsTool(officeOptions))
+        combined.register(createExcelOpenTool(officeOptions))
         combined.register(createExcelReadRangeTool(officeOptions))
         combined.register(createExcelTraceTool(officeOptions))
         combined.register(createExcelListMacrosTool(officeOptions))

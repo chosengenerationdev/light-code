@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import type { OfficeBridge } from '../office/bridge.js'
 import { annotateHtmlBody } from '../office/mailFormat.js'
+import { resolveToolPath } from './paths.js'
 import type { Tool, ToolResult } from './types.js'
 
 /**
@@ -91,6 +92,86 @@ function renderRange(where: string, node: Record<string, unknown>): string {
     parts.push(`range ${JSON.stringify(node.min)} to ${JSON.stringify(node.max)}`)
   }
   return parts.join('; ')
+}
+
+const openSchema = z.object({
+  path: z.string().min(1).describe('Full path to the workbook, e.g. "C:\\\\reports\\\\March.xlsx".'),
+  readOnly: z
+    .boolean()
+    .optional()
+    .describe('Open without taking a write lock. Default true, which is right for investigating.'),
+})
+
+/**
+ * Opens a named workbook, starting Excel if it is not already running.
+ *
+ * ## Why this one is allowed to launch Excel when nothing else is
+ *
+ * Every other tool here refuses to start Excel, because answering "the spreadsheet I have open"
+ * with a second invisible copy holding a file lock is worse than saying "open it first". That rule
+ * is about a *guess*. Here the user has named a file, so there is nothing to guess at — and
+ * refusing would only mean they open it by hand and ask again.
+ *
+ * ## What it will not do
+ *
+ * Macros are disabled while the file opens, so investigating a workbook cannot execute anything it
+ * carries; running a macro stays a separate, separately approved act. It opens read-only by
+ * default, so the user's own copy is never locked out. And the path goes through the same
+ * confinement, deny list and out-of-workspace prompt as `read_file` — a workbook is usually
+ * outside the workspace, which is exactly the case that machinery exists for.
+ */
+export function createExcelOpenTool(options: OfficeToolOptions): Tool<z.infer<typeof openSchema>> {
+  return {
+    name: 'excel_open_workbook',
+    group: 'read',
+    description:
+      'Open a workbook by full path so it can be investigated, starting Excel if it is not already ' +
+      'running. Use this when the user names a file rather than talking about a spreadsheet they ' +
+      'already have open — otherwise call excel_sessions. Opens read-only and with macros ' +
+      'disabled, so it changes nothing and runs nothing. Once it is open, excel_read_range and ' +
+      'excel_trace_cell work on it as normal.',
+    parametersSchema: openSchema,
+    async execute(params, context): Promise<ToolResult> {
+      const resolved = await resolveToolPath(context, params.path)
+      if (!resolved.ok) return { content: resolved.message, isError: true }
+
+      try {
+        const result = await options.bridge.request<{
+          workbook: string
+          fullName: string
+          sheets: string[]
+          opened: boolean
+          started: boolean
+          readOnly: boolean
+        }>({ op: 'excel.open', path: resolved.realPath, ...(params.readOnly === undefined ? {} : { readOnly: params.readOnly }) })
+
+        const how = result.opened
+          ? result.started
+            ? 'Started Excel and opened'
+            : 'Opened'
+          : 'Already open in Excel:'
+        return {
+          content: [
+            `${how} ${result.workbook}${result.readOnly ? ' (read-only)' : ''}`,
+            `  ${result.fullName}`,
+            `  sheets: ${result.sheets.join(', ')}`,
+            '',
+            /*
+             * Only claimed when this actually did the opening. A workbook the user already
+             * had open was opened by them, under their own macro settings - saying otherwise
+             * would be a confident false assurance about whether code has run.
+             */
+            ...(result.opened
+              ? ['Macros were disabled while it opened, so nothing in the file has run.']
+              : ['This was already open, so your own Excel settings applied rather than ours.']),
+            'Use excel_read_range to see data and excel_trace_cell to find where a value comes from.',
+          ].join('\n'),
+        }
+      } catch (error) {
+        return { content: message(error), isError: true }
+      }
+    },
+  }
 }
 
 export function createExcelSessionsTool(options: OfficeToolOptions): Tool<Record<string, never>> {

@@ -23,6 +23,94 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 # could launch a second Excel while the user is looking at the first.
 $script:apps = @{}
 
+<#
+  Enumerating the Running Object Table, so a running Excel can be found when it does not
+  advertise itself.
+
+  ## Why this exists
+
+  `GetActiveObject('Excel.Application')` is the documented way to reach a running Excel, and it is
+  unreliable: measured on this machine, with Excel open and a workbook loaded, it failed with
+  MK_E_UNAVAILABLE - and then began working after a second workbook was added. Excel registers its
+  *Application* object in the ROT only sometimes.
+
+  What it does register, every time, is the open **workbook**. So the workbook moniker is bound
+  instead and its `.Application` taken, which is the same object by another road. Verified against
+  the exact failure: the ROT held the workbook while GetActiveObject was still refusing.
+
+  The helper is compiled on first use only - measured at 696ms to compile and 15ms to enumerate -
+  so the ordinary path where GetActiveObject works pays nothing for it.
+#>
+function Get-RotNames {
+    if (-not $script:rotReady) {
+        $definition = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+public static class LightCodeRot {
+    [DllImport("ole32.dll")] static extern int GetRunningObjectTable(int reserved, out IRunningObjectTable table);
+    [DllImport("ole32.dll")] static extern int CreateBindCtx(int reserved, out IBindCtx context);
+    public static string[] Names() {
+        var found = new List<string>();
+        IRunningObjectTable table; IBindCtx context;
+        if (GetRunningObjectTable(0, out table) != 0) { return found.ToArray(); }
+        if (CreateBindCtx(0, out context) != 0) { return found.ToArray(); }
+        IEnumMoniker moniker;
+        table.EnumRunning(out moniker);
+        moniker.Reset();
+        var one = new IMoniker[1];
+        while (moniker.Next(1, one, IntPtr.Zero) == 0) {
+            string name;
+            try { one[0].GetDisplayName(context, null, out name); found.Add(name); } catch { }
+        }
+        return found.ToArray();
+    }
+}
+'@
+        Add-Type -TypeDefinition $definition
+        $script:rotReady = $true
+    }
+    return [LightCodeRot]::Names()
+}
+
+# Extensions Excel registers a document moniker under. Filtering first means only Excel documents
+# are ever bound - binding an arbitrary ROT entry could reach into another application entirely.
+$script:excelExtensions = @('.xls', '.xlsx', '.xlsm', '.xlsb', '.xlt', '.xltx', '.xltm', '.xlam', '.xla', '.csv')
+
+function Get-ExcelViaRot {
+    try {
+        $names = Get-RotNames
+    } catch {
+        return $null
+    }
+
+    foreach ($name in $names) {
+        $extension = ''
+        try { $extension = [System.IO.Path]::GetExtension($name).ToLowerInvariant() } catch { continue }
+        if ($script:excelExtensions -notcontains $extension) { continue }
+
+        try {
+            $document = [System.Runtime.InteropServices.Marshal]::BindToMoniker($name)
+            $candidate = $document.Application
+            # Touching Workbooks proves it is Excel rather than something else that opened a .csv.
+            $null = $candidate.Workbooks.Count
+            return $candidate
+        } catch {
+            # A stale moniker, or a document belonging to another application. Try the next.
+        }
+    }
+    return $null
+}
+
+<#
+  Reaching a running Office application.
+
+  `AttachOnly` is the rule for everything except opening a named workbook: the feature is about the
+  session someone already has in front of them, and silently starting a second invisible Excel that
+  holds a file lock is a worse outcome than saying "open it first". Outlook is stricter still - a
+  bare New-Object *starts* Outlook, which was measured hanging for a full 60 second timeout.
+#>
 function Get-OfficeApp {
     param([string]$ProgId, [bool]$AttachOnly)
 
@@ -41,13 +129,44 @@ function Get-OfficeApp {
     try {
         $app = [System.Runtime.InteropServices.Marshal]::GetActiveObject($ProgId)
     } catch {
-        if ($AttachOnly) {
-            throw "$ProgId is not running on this machine. Open it and try again - this deliberately will not start it for you, because starting it can take a minute and may put a dialog on your screen."
+        # Excel frequently does not register its Application object even while running. See
+        # Get-ExcelViaRot: the open workbook is registered, and leads to the same application.
+        if ($ProgId -eq 'Excel.Application') { $app = Get-ExcelViaRot }
+
+        if ($null -eq $app) {
+            if ($AttachOnly) { throw (Get-AttachFailureMessage -ProgId $ProgId) }
+            $app = New-Object -ComObject $ProgId
         }
-        $app = New-Object -ComObject $ProgId
     }
     $script:apps[$ProgId] = $app
     return $app
+}
+
+<#
+  Why the attach failed, distinguished rather than guessed.
+
+  Saying "open it first" to somebody who is looking at an open spreadsheet destroys trust in every
+  later answer, and it is exactly what was reported. So the process list is checked: if the
+  application really is running and still cannot be reached, that is a different problem with a
+  different fix, and it is named as the likely one rather than asserted as the certain one.
+#>
+function Get-AttachFailureMessage {
+    param([string]$ProgId)
+
+    $processName = if ($ProgId -eq 'Excel.Application') { 'EXCEL' } else { 'OUTLOOK' }
+    $friendly = if ($ProgId -eq 'Excel.Application') { 'Excel' } else { 'Outlook' }
+
+    $running = $null
+    try { $running = Get-Process -Name $processName -ErrorAction SilentlyContinue } catch { }
+
+    if ($null -ne $running) {
+        return "$friendly is running, but this could not connect to it. The usual cause is that " +
+            "the two are at different privilege levels - if VS Code is running as administrator " +
+            "and $friendly is not, or the other way round, Windows keeps them apart. Starting both " +
+            "the same way normally fixes it. A modal dialog open in $friendly can also block the " +
+            "connection. This deliberately will not start a second copy."
+    }
+    return "$ProgId is not running on this machine. Open it and try again - this deliberately will not start it for you, because starting it can take a minute and may put a dialog on your screen."
 }
 
 function Get-Workbook {
@@ -118,6 +237,92 @@ function Read-Cell {
         $result.value = $null
     }
     return $result
+}
+
+<#
+  Opening a named workbook, which is the one place this is allowed to start Excel.
+
+  ## Why this is not a contradiction of attach-only
+
+  Everything else here refuses to launch Excel, because "look at the spreadsheet I have open" must
+  never be answered by a second invisible copy holding a file lock. That reasoning is about a
+  *guess*. Here the user has named a file and asked for it to be opened, so there is nothing to
+  guess at, and refusing would just mean they open it by hand and ask again.
+
+  ## Macros are disabled while it opens
+
+  A workbook can carry `Workbook_Open`, so opening one is capable of running code. Automation
+  security is forced to disable-all for the duration of the open and put back afterwards, which
+  means opening a file to investigate it cannot execute anything. Running a macro stays an explicit,
+  separately approved act through excel_run_macro.
+
+  Excel is made visible on purpose. An automation-started Excel is hidden by default, and a hidden
+  process holding the user's file is the exact failure the attach-only rule exists to avoid.
+#>
+function Invoke-ExcelOpen {
+    param($Request)
+
+    $path = $Request.path
+    if ([string]::IsNullOrWhiteSpace($path)) { throw 'No path was given.' }
+    if (-not (Test-Path -LiteralPath $path)) { throw "There is no file at '$path'." }
+    $full = (Resolve-Path -LiteralPath $path).ProviderPath
+
+    $readOnly = $true
+    if ($null -ne $Request.readOnly) { $readOnly = [bool]$Request.readOnly }
+
+    $app = $null
+    $started = $false
+    try {
+        $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    } catch {
+        $app = New-Object -ComObject Excel.Application
+        $script:apps['Excel.Application'] = $app
+        $started = $true
+    }
+
+    # Already open is the common case when someone asks twice, and reopening would either be
+    # refused by Excel or quietly discard their unsaved edits.
+    foreach ($existing in $app.Workbooks) {
+        if ($existing.FullName -eq $full) {
+            return @{
+                workbook = $existing.Name
+                fullName = $existing.FullName
+                sheets   = @(Get-SheetNames -Workbook $existing)
+                opened   = $false
+                started  = $false
+                readOnly = [bool]$existing.ReadOnly
+            }
+        }
+    }
+
+    $app.Visible = $true
+    $previousSecurity = $app.AutomationSecurity
+    $wb = $null
+    try {
+        # 3 is msoAutomationSecurityForceDisable: macros do not run, whatever the file asks for.
+        $app.AutomationSecurity = 3
+        # UpdateLinks 0 stops the "update links?" prompt, which nobody is present to answer.
+        $wb = $app.Workbooks.Open($full, 0, $readOnly)
+    } finally {
+        try { $app.AutomationSecurity = $previousSecurity } catch { }
+    }
+
+    return @{
+        workbook = $wb.Name
+        fullName = $wb.FullName
+        sheets   = @(Get-SheetNames -Workbook $wb)
+        opened   = $true
+        started  = $started
+        readOnly = [bool]$wb.ReadOnly
+    }
+}
+
+function Get-SheetNames {
+    param($Workbook)
+
+    $names = @()
+    foreach ($sheet in $Workbook.Worksheets) { $names += $sheet.Name }
+    return $names
 }
 
 function Invoke-ExcelSessions {
@@ -837,6 +1042,7 @@ function Invoke-Request {
 
     switch ($Request.op) {
         'ping'                  { return @{ ok = $true } }
+        'excel.open'            { return Invoke-ExcelOpen -Request $Request }
         'excel.sessions'        { return Invoke-ExcelSessions }
         'excel.readRange'       { return Invoke-ExcelReadRange -Request $Request }
         'excel.trace'           { return Invoke-ExcelTrace -Request $Request }

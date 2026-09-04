@@ -1,5 +1,17 @@
 # light-code-vscode
 
+## 0.52.0
+
+### Minor Changes
+
+- Excel: fixed "there is no open session" being reported while a workbook was open. Excel does not
+  reliably register its Application object with Windows, so a running Excel is now found through the
+  open workbook instead. A failed connection also says which cause is likely rather than always
+  telling you to open Excel first.
+
+  New: `excel_open_workbook` opens a workbook by full path, starting Excel if it is not running. It
+  opens read-only and with macros disabled, so investigating a file changes nothing and runs nothing.
+
 ## 0.51.0
 
 ### Minor Changes
