@@ -1,5 +1,5 @@
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
-import { useMemo, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -11,6 +11,14 @@ export interface ToolsTabProps {
   /** Excel and Outlook on this machine: whether they can be reached, and whether they are on. */
   office: { supported: boolean; excel: boolean; outlook: boolean }
   onSetOffice: (excel: boolean, outlook: boolean) => void
+  /**
+   * How long any one tool call may take, in seconds, when nothing more specific applies.
+   *
+   * Undefined means each kind of tool keeps its own default. This is the fallback, not the rule:
+   * a per-tool timeout wins, then a per-server one, then this.
+   */
+  toolTimeoutSeconds?: number
+  onSetToolTimeout: (seconds?: number) => void
 }
 
 const SOURCE_LABELS: Record<ToolCatalogueEntry['source'], string> = {
@@ -88,6 +96,8 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
           <strong>Search</strong> if you would rather it saw them all.
         </p>
       )}
+
+      <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />
 
       <OfficeSection office={props.office} onSet={props.onSetOffice} />
 
@@ -230,6 +240,66 @@ function OfficeSection(props: {
           </span>
         </span>
       </label>
+    </div>
+  )
+}
+
+/**
+ * One limit for every tool, as a fallback.
+ *
+ * Each kind of tool had its own timeout and there was nowhere to say "everything on this machine
+ * is slow" — which is a property of the environment, not of any one tool: a slow network, a
+ * workbook on a share, an interpreter on a mapped drive. Setting it in three separate places was
+ * the only way to say it once.
+ *
+ * Deliberately a fallback rather than an override. A tool that genuinely needs ten minutes should
+ * say so on its own row; raising the floor for everything would mean a hung call anywhere waits
+ * ten minutes before anyone hears about it.
+ */
+function TimeoutSection(props: { value: number | undefined; onSet: (seconds?: number) => void }): ReactElement {
+  const [draft, setDraft] = useState(props.value === undefined ? '' : String(props.value))
+  useEffect(() => setDraft(props.value === undefined ? '' : String(props.value)), [props.value])
+
+  const commit = (): void => {
+    const trimmed = draft.trim()
+    if (trimmed.length === 0) {
+      props.onSet()
+      return
+    }
+    const seconds = Number(trimmed)
+    // Refused rather than clamped: a typo should not quietly become a limit nobody chose.
+    if (!Number.isFinite(seconds) || seconds < 5 || seconds > 3600) {
+      setDraft(props.value === undefined ? '' : String(props.value))
+      return
+    }
+    props.onSet(Math.round(seconds))
+  }
+
+  return (
+    <div style={{ margin: '12px 0', padding: 10, border: `1px solid ${colors.border}`, borderRadius: 6 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Tool timeout</div>
+      <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+        How long any one tool call may take. Applies to MCP servers, Python tools and the Excel and
+        Outlook tools alike, and to anything added later. Blank leaves each kind at its own default.
+        A timeout set on a particular tool or server still wins over this.
+      </p>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          inputMode="numeric"
+          value={draft}
+          placeholder="seconds"
+          aria-label="Tool timeout in seconds"
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
+          style={{ ...textFieldStyle(), width: 110 }}
+        />
+        <span style={{ color: colors.muted, fontSize: 11 }}>
+          {props.value === undefined ? 'each tool decides' : `${String(props.value)}s for everything`}
+        </span>
+      </div>
     </div>
   )
 }

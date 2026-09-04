@@ -83,6 +83,13 @@ export class McpConnection {
     private readonly onToolsChanged: () => void,
     /** Receives the server's stderr, line by line. */
     private readonly onLog: (line: string) => void = () => {},
+    /**
+     * The global tool timeout, when one is set, as the last fallback before the SDK's own.
+     *
+     * A function rather than a value: raising it should apply to the next call, not after a
+     * restart, and this object outlives any one settings load.
+     */
+    private readonly defaultTimeout: (() => number | undefined) | undefined = undefined,
   ) {}
 
   async connect(): Promise<void> {
@@ -139,7 +146,8 @@ export class McpConnection {
      * the request properly.
      */
     // Most specific wins: this tool's own limit, then the server's, then the SDK's default.
-    const timeoutSeconds = this.config.toolTimeouts?.[name] ?? this.config.timeout
+    // Most specific wins: this tool, then this server, then the global default, then the SDK's.
+    const timeoutSeconds = this.config.toolTimeouts?.[name] ?? this.config.timeout ?? this.defaultTimeout?.()
     const result = await this.client.callTool(
       { name, arguments: args },
       undefined,

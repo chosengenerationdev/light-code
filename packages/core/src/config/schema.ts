@@ -501,6 +501,18 @@ export const configSchema = z
      * user-scope-only (invariant 5) — a repo must not be able to ship its own
      * pre-approvals in `.lightcode/config.json`.
      */
+    /**
+     * How long any one tool call may take, in seconds.
+     *
+     * The fallback, not the rule: a per-tool timeout wins over a per-server one, which wins over
+     * this. It exists because every kind of tool had its own limit and there was nowhere to say
+     * "everything here is slow" — a machine behind a slow network, or a workbook on a share, is a
+     * property of the *environment* rather than of any one tool.
+     *
+     * Absent means each kind keeps its own default. Raising this cannot make a hung call
+     * unnoticeable: it is still bounded, and cancelling the turn still stops it.
+     */
+    tools: z.object({ timeoutSeconds: z.number().int().min(5).max(3600) }).partial(),
     approvals: z.record(z.string(), workspaceApprovalsSchema),
     /**
      * Per-project settings, keyed by workspace path (0.47.0).

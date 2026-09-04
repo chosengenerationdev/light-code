@@ -39,7 +39,11 @@ export interface OfficeBridgeOptions {
   storageDir: string
   logger: Logger
   /** Per-request ceiling. Excel can block on a modal dialog the user has open. */
-  timeoutMs?: number
+  /**
+   * Per-request ceiling. Read from a function rather than fixed at construction, so raising the
+   * global tool timeout applies to the very next call instead of after a restart.
+   */
+  timeoutMs?: () => number | undefined
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -66,7 +70,7 @@ export class OfficeBridge {
     await this.ensureStarted()
 
     const id = String(++this.counter)
-    const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    const timeoutMs = this.options.timeoutMs?.() ?? DEFAULT_TIMEOUT_MS
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -83,6 +87,7 @@ export class OfficeBridge {
         reject(
           new Error(
             `Excel or Outlook did not answer within ${String(Math.round(timeoutMs / 1000))}s. ` +
+              'Raise it in Settings → Tools if this machine is simply slow. ' +
               'Possible causes, roughly in order: the request covers more than it can do in that ' +
               'time (a large mailbox or a wide range — try a smaller scope), the application is ' +
               'showing a dialog and waiting for a click, or it is busy with something else. ' +

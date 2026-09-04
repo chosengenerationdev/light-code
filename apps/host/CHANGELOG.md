@@ -1,5 +1,28 @@
 # @chosengeneration/light-code
 
+## 0.27.0
+
+### Minor Changes
+
+- Excel reads stop timing out, and one timeout setting covers every tool.
+
+  Reading a range asked each cell for its address, text, formula and value — four cross-process
+  calls per cell. Measured against a real workbook: 400 cells took 2.2 seconds, while fetching the
+  same block as array properties took 7 milliseconds. **315 times slower**, and at the cell cap it
+  ran past the timeout entirely. It was reported as Excel timing out and "might be busy"; Excel was
+  neither, it was being asked eight thousand questions one at a time. 720 cells now take 197ms.
+
+  `Text` — the formatted string you see in the cell — has no array equivalent, so it is still read
+  per cell for a small range and derived from the value beyond one. The result says which happened,
+  because a currency column quietly losing its currency is worth being told about rather than
+  noticing later.
+
+  There is also now a single **tool timeout** in Settings → Tools, applying to MCP servers, Python
+  tools and the Excel and Outlook tools alike, and to anything added later. It is a fallback: a
+  timeout set on a particular tool or server still wins. "Everything on this machine is slow" is a
+  property of the environment rather than of any one tool, and until now the only way to say it was
+  to set the same number in three separate places.
+
 ## 0.26.0
 
 ### Minor Changes

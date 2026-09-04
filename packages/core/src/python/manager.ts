@@ -133,6 +133,8 @@ export class PythonManager {
     toolsDir?: string | undefined
     venvPath?: string | undefined
     timeoutSeconds?: number | undefined
+    /** The global tool timeout, used when Python has no limit of its own. */
+    defaultTimeoutSeconds?: number | undefined
     indexUrl?: string | undefined
     extraIndexUrls?: string[] | undefined
     offline?: boolean | undefined
@@ -155,7 +157,14 @@ export class PythonManager {
     }
 
     this.enabled = true
-    this.timeoutMs = (config.timeoutSeconds ?? 30) * 1000
+    /*
+     * Python's own limit, then the global tool timeout, then 30 seconds.
+     *
+     * The middle term is the one that was missing: "everything on this machine is slow" is a
+     * property of the environment rather than of Python, and without it the only way to say so
+     * was to set the same number in three separate places.
+     */
+    this.timeoutMs = (config.timeoutSeconds ?? config.defaultTimeoutSeconds ?? 30) * 1000
     // Inside the workspace by default, deliberately: changes land in git and get reviewed,
     // which is the main real mitigation available (§13).
     this.toolsDir = config.toolsDir ?? path.join(this.options.workspaceRoot, '.lightcode', 'tools')

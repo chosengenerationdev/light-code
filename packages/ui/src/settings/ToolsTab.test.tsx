@@ -46,6 +46,8 @@ function render(
     dispatcher?: boolean
     office?: { supported: boolean; excel: boolean; outlook: boolean }
     onSetOffice?: (excel: boolean, outlook: boolean) => void
+    toolTimeoutSeconds?: number
+    onSetToolTimeout?: (seconds?: number) => void
   } = {},
 ): void {
   act(() =>
@@ -55,6 +57,8 @@ function render(
         dispatcher={props.dispatcher ?? false}
         office={props.office ?? { supported: true, excel: false, outlook: false }}
         onSetOffice={props.onSetOffice ?? (() => undefined)}
+        {...(props.toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: props.toolTimeoutSeconds })}
+        onSetToolTimeout={props.onSetToolTimeout ?? (() => undefined)}
       />,
     ),
   )
@@ -164,5 +168,66 @@ describe('the Excel and Outlook toggles', () => {
     const boxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
     expect(boxes.every((box) => box.disabled)).toBe(true)
     expect(container.textContent).toContain('Windows only')
+  })
+})
+
+/**
+ * One limit for every kind of tool, as a fallback.
+ *
+ * Each kind had its own timeout and there was nowhere to say "everything on this machine is
+ * slow" — a property of the environment, not of any one tool. It is deliberately a fallback:
+ * a tool that genuinely needs ten minutes says so on its own row, because raising the floor for
+ * everything means a hung call anywhere waits ten minutes before anyone hears about it.
+ */
+describe('the global tool timeout', () => {
+  const field = (): HTMLInputElement => {
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Tool timeout in seconds"]')
+    if (input === null) throw new Error('no timeout field')
+    return input
+  }
+
+  const type = (value: string): void => {
+    const input = field()
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+      setter?.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      // React delegates onBlur from focusout: a plain blur event does not bubble and is missed.
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    })
+  }
+
+  it('says each tool decides when nothing is set', () => {
+    render()
+    expect(field().value).toBe('')
+    expect(container.textContent).toContain('each tool decides')
+  })
+
+  it('reports a value the user commits', () => {
+    const calls: (number | undefined)[] = []
+    render({ onSetToolTimeout: (s) => calls.push(s) })
+    type('300')
+    expect(calls).toEqual([300])
+  })
+
+  it('clears back to each tool’s own default when emptied', () => {
+    const calls: (number | undefined)[] = []
+    render({ toolTimeoutSeconds: 300, onSetToolTimeout: (s) => calls.push(s) })
+    type('')
+    expect(calls).toEqual([undefined])
+  })
+
+  /** A typo should not quietly become a limit nobody chose. */
+  it('refuses a value out of range and puts the old one back', () => {
+    const calls: (number | undefined)[] = []
+    render({ toolTimeoutSeconds: 120, onSetToolTimeout: (s) => calls.push(s) })
+    type('99999')
+    expect(calls).toEqual([])
+    expect(field().value).toBe('120')
+  })
+
+  it('says plainly that it applies to everything', () => {
+    render()
+    expect(container.textContent).toContain('MCP servers, Python tools and the Excel and Outlook tools')
   })
 })

@@ -137,6 +137,28 @@ function Invoke-ExcelSessions {
     return @{ workbooks = $sessions; version = $app.Version }
 }
 
+<#
+  Reads a range in two COM calls rather than four per cell.
+
+  ## The measurement that forced this
+
+  The first version walked the range and read Address, Text, Formula and Value2 from each cell.
+  Every one of those is a cross-process call into Excel. Measured on an idle local workbook: 400
+  cells took 2.2 seconds, while fetching the same block as two array properties took 7ms - **315
+  times faster**. At the 2000-cell cap that is the difference between a moment and a minute, and
+  on a workbook backed by a network share or OneDrive it was running past the timeout entirely.
+  Reported as Excel "timing out" and "might be busy"; Excel was neither, it was being asked
+  eight thousand questions one at a time.
+
+  ## What the bulk form costs
+
+  `Value2` and `Formula` come back as 2-D arrays in one call each, but there is no array
+  equivalent of `Text` - the *formatted* string a person sees in the cell. So for a small range
+  the text is still fetched per cell, which is affordable and exact; past that threshold it is
+  derived from the value, losing number formatting but keeping the meaning. The result says which
+  happened, because a currency column silently losing its currency is the kind of difference
+  someone should be told about rather than left to notice.
+#>
 function Invoke-ExcelReadRange {
     param($Request)
 
@@ -145,14 +167,69 @@ function Invoke-ExcelReadRange {
     $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
     $range = $sheet.Range($Request.range)
 
-    $limit = 2000
+    $limit = 5000
     if ($range.Count -gt $limit) {
         throw "That range holds $($range.Count) cells; ask for at most $limit at a time."
     }
 
+    # Below this, exact formatted text is worth four extra calls per cell.
+    $exactTextLimit = 200
+    $withText = ($range.Count -le $exactTextLimit)
+
+    $firstRow = $range.Row
+    $firstColumn = $range.Column
+    $rowCount = $range.Rows.Count
+    $columnCount = $range.Columns.Count
+
+    # One call each. A single cell returns a scalar rather than an array, so both are normalised.
+    $values = $range.Value2
+    $formulas = $range.Formula
+
     $cells = @()
-    foreach ($cell in $range) { $cells += Read-Cell -Cell $cell }
-    return @{ sheet = $sheet.Name; workbook = $wb.Name; cells = $cells }
+    for ($r = 1; $r -le $rowCount; $r++) {
+        for ($c = 1; $c -le $columnCount; $c++) {
+            $value = if ($rowCount -eq 1 -and $columnCount -eq 1) { $values } else { $values[$r, $c] }
+            $formula = if ($rowCount -eq 1 -and $columnCount -eq 1) { $formulas } else { $formulas[$r, $c] }
+            $converted = Convert-ExcelValue -Value $value
+
+            $entry = [ordered]@{
+                address = (Get-CellAddress -Row ($firstRow + $r - 1) -Column ($firstColumn + $c - 1))
+                value   = $converted
+            }
+            if ($formula -is [string] -and $formula.StartsWith('=')) { $entry.formula = $formula }
+            if ($withText) {
+                $entry.text = $sheet.Cells.Item($firstRow + $r - 1, $firstColumn + $c - 1).Text
+            } else {
+                # Derived: the value as a string. Formatting is lost, and the caller is told.
+                $entry.text = if ($null -eq $converted) { '' } else { [string]$converted }
+            }
+            $cells += $entry
+        }
+    }
+
+    return @{
+        sheet     = $sheet.Name
+        workbook  = $wb.Name
+        cells     = $cells
+        exactText = $withText
+    }
+}
+
+# A1-style address from 1-based row and column numbers.
+#
+# Computed rather than asked for: `$cell.Address()` is one more cross-process call per cell, and
+# the arithmetic is the same arithmetic Excel would do.
+function Get-CellAddress {
+    param([int]$Row, [int]$Column)
+
+    $letters = ''
+    $n = $Column
+    while ($n -gt 0) {
+        $remainder = ($n - 1) % 26
+        $letters = [char]([int][char]'A' + $remainder) + $letters
+        $n = [Math]::Floor(($n - 1) / 26)
+    }
+    return "$letters$Row"
 }
 
 # Walks back from a cell to the cells that feed it, and to the cells that feed those.

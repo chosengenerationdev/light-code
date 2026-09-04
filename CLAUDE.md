@@ -705,6 +705,20 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
 - **PowerShell scoping cost a debugging round too:** a nested function assigning to an enclosing
   array creates a local copy, so the first trace returned empty with no error. `$script:` scoped.
 
+- **Reading a range is two COM calls, not four per cell** (0.49.0). The first version asked each
+  cell for Address, Text, Formula and Value2 — every one a cross-process call. Measured: 400 cells
+  took **2.2 seconds** against **7ms** for the same block as array properties, **315× slower**, and
+  at the cell cap it ran past the timeout entirely. Reported as Excel "timing out" and "might be
+  busy"; Excel was neither, it was being asked eight thousand questions one at a time.
+  `Text` has no array form, so exact formatted text is fetched per cell only for a small range and
+  derived beyond it — and the result says which happened, because a currency column quietly losing
+  its currency should be stated rather than discovered.
+- **One tool timeout covers everything** (0.49.0): `tools.timeoutSeconds`, the fallback beneath
+  per-tool and per-server limits, applying to MCP, Python, Excel and Outlook alike and to whatever
+  comes next. "Everything on this machine is slow" is a property of the environment, not of any
+  one tool, and there was nowhere to say it once. Read through a function everywhere, so raising it
+  applies to the next call rather than after a restart — which is when it matters, since the reason
+  anyone raises it is that a call just timed out.
 - **MCP timeouts resolve most-specific-first** (0.46.0): a tool's own limit, then the server's,
   then the SDK's default. Per-server alone was the wrong shape — twenty quick lookups and one
   four-minute report on the same server, and raising the server limit to suit the slow one meant
@@ -1152,14 +1166,13 @@ addition to the text input rather than a replacement for it.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. The local manifest is **0.48.1**, built and unpublished:
-`apps/vscode/light-code-vscode-0.48.1.vsix` (universal, six ripgrep binaries, smoke test green).
+the gallery. **0.48.0 is live as of 2026-09-03.** The local manifest is **0.49.0**.
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; the local manifest is **0.26.0**. The bare name `light-code` belongs to an unrelated
+2026-08-31**; **0.26.0 is published.** The local manifest is **0.27.0**. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -1175,7 +1188,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.48.1, host 0.26.0 — and keep working from
+**Next:** publish the pending versions — extension 0.49.0, host 0.27.0 — and keep working from
 what real use reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

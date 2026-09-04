@@ -767,6 +767,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedAccentColor = '#22C55E'
   /** Undefined until the user chooses; the browser then follows its own setting. */
   let cachedTheme: 'system' | 'light' | 'dark' | undefined
+  /**
+   * The global tool timeout in seconds, when one is set.
+   *
+   * The fallback for every kind of tool: a per-tool limit wins, then a per-server one, then this.
+   * It exists because "everything here is slow" is a property of the environment — a machine on a
+   * slow network, a workbook on a share — rather than of any one tool, and there was nowhere to
+   * say it once.
+   */
+  let cachedToolTimeoutSeconds: number | undefined
   let cachedExpertColor = '#D97757'
   let cachedExpertLimits: ExpertLimits = {}
   /** The stored assessment, so the briefing can carry it without a config read per turn. */
@@ -792,7 +801,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   let officeBridge: OfficeBridge | undefined
   function office(): OfficeBridge {
-    officeBridge ??= new OfficeBridge({ storageDir, logger })
+    officeBridge ??= new OfficeBridge({
+      storageDir,
+      logger,
+      // Read per request, so raising the limit applies to the next call rather than after a
+      // restart — which matters most when someone is raising it *because* a call just timed out.
+      timeoutMs: () => (cachedToolTimeoutSeconds === undefined ? undefined : cachedToolTimeoutSeconds * 1000),
+    })
     return officeBridge
   }
 
@@ -1117,6 +1132,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedTheme = config.ui?.theme
+    cachedToolTimeoutSeconds = config.tools?.timeoutSeconds
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
     cachedAssessment = config.expert?.assessment
     cachedReportsCost = config.expert?.reportsCost
@@ -1176,6 +1192,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
       ...(cachedTheme === undefined ? {} : { theme: cachedTheme }),
+      ...(cachedToolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: cachedToolTimeoutSeconds }),
       readRoots: cachedReadRoots,
       ...(cachedProgrammingProfileId !== undefined ? { programmingProfileId: cachedProgrammingProfileId } : {}),
       ...hostCapabilities(),
@@ -1261,6 +1278,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     },
     logger,
     () => cachedApprovals.allowedTools ?? [],
+    () => cachedToolTimeoutSeconds,
   )
 
   function postMcp(): void {
@@ -3579,6 +3597,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(saved.indexUrl !== undefined ? { indexUrl: saved.indexUrl } : {}),
         ...(saved.offline !== undefined ? { offline: saved.offline } : {}),
         ...(saved.timeoutSeconds !== undefined ? { timeoutSeconds: saved.timeoutSeconds } : {}),
+        // The fallback when Python has no limit of its own.
+        ...(cachedToolTimeoutSeconds !== undefined ? { defaultTimeoutSeconds: cachedToolTimeoutSeconds } : {}),
       },
     })
     // Python tools are part of the corpus, and this fires whenever the registry reloads —
@@ -4561,6 +4581,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // Both written together: `save` merges at the top level, so writing `ui` with only
         // one key would drop the other.
         .save('user', { ui: { accentColor: message.value, expertColor: cachedExpertColor, ...(cachedTheme === undefined ? {} : { theme: cachedTheme }) } })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setToolTimeout') {
+      void configManager
+        .save('user', { tools: message.seconds === undefined ? {} : { timeoutSeconds: message.seconds } })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setTheme') {

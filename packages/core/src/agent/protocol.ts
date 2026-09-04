@@ -343,6 +343,8 @@ export type UiToHostMessage =
    * get a dark UI and no clue why.
    */
   | { type: 'setTheme'; theme: 'system' | 'light' | 'dark' }
+  /** The global tool timeout in seconds, or undefined to go back to each tool's own default. */
+  | { type: 'setToolTimeout'; seconds?: number }
   | { type: 'revokeAllowedTool'; toolName: string }
   | { type: 'revokeAllowedCommand'; command: string }
   | { type: 'requestMcp' }
@@ -634,6 +636,8 @@ export type HostToUiMessage =
       accentColor: string
       /** The browser theme choice. Absent where the host has its own, as VS Code does. */
       theme?: 'system' | 'light' | 'dark'
+      /** The global tool timeout in seconds, when one is set. */
+      toolTimeoutSeconds?: number
       expertColor: string
       /** Folders tools may read beyond the workspace. Reading only — writes stay confined. */
       readRoots: string[]

@@ -107,6 +107,13 @@ export class McpRegistry {
     private readonly logger?: Logger,
     /** Namespaced tool names the workspace always allows — see `WorkspaceApprovals`. */
     private readonly getAlwaysAllowed: () => readonly string[] = () => [],
+    /**
+     * The global tool timeout, when one is set — the last fallback before the SDK's own.
+     *
+     * A function rather than a value, so raising it applies to the next call rather than after a
+     * restart: this registry outlives any one settings load.
+     */
+    private readonly defaultTimeout: (() => number | undefined) | undefined = undefined,
   ) {}
 
   /** Replaces the configured server set, closing any that disappeared or changed. */

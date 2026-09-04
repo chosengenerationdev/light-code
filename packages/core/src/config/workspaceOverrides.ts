@@ -45,6 +45,8 @@ export const OVERRIDABLE_KEYS = [
   'filesystem',
   /** A team's shared skill folder differs per project. */
   'skills',
+  /** One repository on a slow share needs longer than another on local disk. */
+  'tools',
 ] as const
 
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number]

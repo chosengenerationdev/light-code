@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.48.1",
+  "version": "0.49.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {

@@ -208,6 +208,8 @@ export function App(props: AppProps): ReactElement {
     choosesTheme: boolean
     theme?: 'system' | 'light' | 'dark'
   }>({ choosesTheme: false })
+  /** The global tool timeout, when one is set. Undefined leaves each tool at its own default. */
+  const [toolTimeoutSeconds, setToolTimeoutSeconds] = useState<number | undefined>(undefined)
   const [projectSettings, setProjectSettings] = useState<{ workspaceOpen: boolean; overridden: string[] }>({
     workspaceOpen: false,
     overridden: [],
@@ -330,6 +332,7 @@ export function App(props: AppProps): ReactElement {
         setProgrammingProfileId(message.programmingProfileId)
         setAllowProgrammingProfile(message.allowProgrammingProfile)
         setThemeChoice({ choosesTheme: message.choosesTheme === true, ...(message.theme === undefined ? {} : { theme: message.theme }) })
+        setToolTimeoutSeconds(message.toolTimeoutSeconds)
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -1155,6 +1158,12 @@ export function App(props: AppProps): ReactElement {
             }}
             tools={{
               ...toolCatalogue,
+              ...(toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds }),
+              onSetToolTimeout: (seconds?: number) =>
+                props.transport.post({
+                  type: 'setToolTimeout',
+                  ...(seconds === undefined ? {} : { seconds }),
+                } satisfies UiToHostMessage),
               onSetOffice: (excel, outlook) => {
                 setToolCatalogue((current) => ({ ...current, office: { ...current.office, excel, outlook } }))
                 props.transport.post({ type: 'setOffice', excel, outlook } satisfies UiToHostMessage)
