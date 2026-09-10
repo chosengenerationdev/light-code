@@ -3344,6 +3344,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     mailBusy = true
     const signal = beginIndexing('mail')
     reportIndexing('mail', 'Asking Outlook for new messages', { detail: `${String(folders.length)} folder(s)` })
+    // What Outlook could not open. The harvest is the only place that knows.
+    const skipped = new Set<string>()
     try {
       const embedder = await resolveEmbedder(config)
       const search = await resolveMailSearch(config)
@@ -3365,13 +3367,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          */
         retentionMonths: config.mail?.retentionMonths ?? 6,
         ...(config.mail.previewChars !== undefined ? { previewChars: config.mail.previewChars } : {}),
-        harvest: async (requests, limits) =>
-          office().request<{ messages: HarvestedMessage[]; truncated: boolean }>({
+        harvest: async (requests, limits) => {
+          const answer = await office().request<{
+            messages: HarvestedMessage[]
+            truncated: boolean
+            skipped?: string[]
+          }>({
             op: 'outlook.harvest',
             folders: requests,
             limit: limits.limit,
             previewChars: limits.previewChars,
-          }),
+          })
+          for (const path of answer.skipped ?? []) skipped.add(path)
+          return { messages: answer.messages, truncated: answer.truncated }
+        },
         ...(embedder !== undefined && search !== undefined && collection !== undefined
           ? {
               semantic: {
@@ -3401,6 +3410,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         result.added === 0
           ? `No new mail (${reason}).`
           : `Indexed ${String(result.added)} new message(s)${result.more ? ' \u2014 more remain, syncing again shortly' : ''}.`
+      /*
+       * Folders Outlook could not open, named rather than swallowed.
+       *
+       * They were skipped in silence so that one renamed folder could not stop every other
+       * folder indexing - right in itself, but it meant a folder that never resolved simply
+       * never appeared, with nothing anywhere saying so. That is how a whole subtree went
+       * missing and was found by somebody noticing rather than by being told.
+       */
+      if (skipped.size > 0) {
+        mailLastResult += ` ${String(skipped.size)} folder(s) could not be opened and were not indexed: ${[...skipped].join(', ')}.`
+        logger.warn(`mail sync skipped folders: ${[...skipped].join(', ')}`)
+      }
       reportIndexing('mail', 'Finished', { detail: mailLastResult, running: false })
       logger.info(`mail sync: ${mailLastResult}`)
       /*

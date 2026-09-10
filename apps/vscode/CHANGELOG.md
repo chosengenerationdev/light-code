@@ -1,5 +1,18 @@
 # light-code-vscode
 
+## 0.57.1
+
+### Patch Changes
+
+- Folders whose name contains a forward slash were never indexed.
+
+  An Outlook folder may be called `Prod/Test`. The path splitter treated both separators as
+  separators, so that single folder became two path segments, resolved to nothing, and the harvest
+  skipped it in silence — whole subtrees missing with nothing anywhere saying so. Backslash is now
+  tried first, which cannot misread a name; the forgiving reading is kept as a fallback for a path
+  typed by hand. Folders that cannot be opened are named in the status line instead of being
+  swallowed.
+
 ## 0.57.0
 
 ### Minor Changes

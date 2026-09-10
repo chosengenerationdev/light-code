@@ -1348,11 +1348,29 @@ function Invoke-OutlookFolders {
   Step 3 is bounded and only accepts an unambiguous hit. Two mailboxes each with `Inbox\Alerts`
   is a real situation, and silently picking one of them would index the wrong mailbox for months.
 #>
-function Split-FolderPath {
-    param([string]$Path)
+<#
+  Splits a folder path into its parts.
 
-    # Both separators, and blanks dropped so a trailing slash is not an unnamed folder.
-    return @($Path -split '[\\/]+' | Where-Object { $_.Trim().Length -gt 0 } | ForEach-Object { $_.Trim() })
+  ## Why there are two ways to split, and why backslash-only is tried first
+
+  An Outlook folder name may itself contain a forward slash - `Prod/Test` is a perfectly ordinary
+  name somebody has typed into the folder list. Splitting on both separators turned that single
+  folder into two path segments, looked for a `Test` inside a `Prod` that does not exist, found
+  nothing, and the harvest's own error handling skipped it in silence. Reported as some subfolders
+  simply never being indexed, with nothing anywhere saying so.
+
+  So `outlook_folders` emits backslash-separated paths and those are split on backslash alone,
+  which cannot misread a name. The forgiving split stays as a *fallback* for a path a person typed
+  with slashes, tried only once the strict reading has failed to resolve - by which point there is
+  no correct folder left to damage.
+#>
+function Split-FolderPath {
+    param([string]$Path, [switch]$Lenient)
+
+    $pattern = '\\+'
+    if ($Lenient) { $pattern = '[\\/]+' }
+    # Blanks dropped, so a trailing separator is not an unnamed folder.
+    return @($Path -split $pattern | Where-Object { $_.Trim().Length -gt 0 } | ForEach-Object { $_.Trim() })
 }
 
 function Get-ChildFolder {
@@ -1395,8 +1413,37 @@ function Resolve-OutlookFolderPath {
         return @{ folder = $inbox; canonical = "$($inbox.Parent.Name)\$($inbox.Name)"; how = 'default inbox' }
     }
 
-    $parts = Split-FolderPath -Path $Path
-    if ($parts.Count -eq 0) { throw 'That is not a folder path.' }
+    <#
+      Strict first, then lenient.
+
+      The strict reading treats a `/` as part of a folder's name, which is what it is in a path
+      that came from `outlook_folders`. Only if nothing resolves that way is the path re-read with
+      `/` as a separator, for someone who typed it by hand. Attempting them the other way round is
+      what silently lost every folder with a slash in its name.
+    #>
+    foreach ($lenient in @($false, $true)) {
+        $parts = Split-FolderPath -Path $Path -Lenient:$lenient
+        if ($parts.Count -eq 0) { continue }
+        $resolved = Find-OutlookFolderByParts -Namespace $Namespace -Parts $parts
+        if ($null -ne $resolved) { return $resolved }
+        # A path with no slash in it reads identically both ways; do not walk the mailbox twice.
+        if ($Path -notmatch '/') { break }
+    }
+
+    throw "No folder matches '$Path'. Use outlook_folders to see the exact paths, and copy one."
+}
+
+<#
+  Finds a folder from already-split parts, trying each rooting in turn.
+
+  Separated from the splitting so the two readings of a path can share it. The order is the same
+  as before: exactly as `outlook_folders` prints it, then rooted at the default mailbox, then
+  anywhere at all provided it is unambiguous.
+#>
+function Find-OutlookFolderByParts {
+    param($Namespace, $Parts)
+
+    $parts = $Parts
 
     # 1. Store-rooted, exactly as outlook_folders prints it.
     foreach ($store in $Namespace.Folders) {
@@ -1428,12 +1475,16 @@ function Resolve-OutlookFolderPath {
     if ($matches.Count -eq 1) {
         return @{ folder = $matches[0]; canonical = (Get-CanonicalFolderPath -Folder $matches[0]); how = 'matched in one mailbox' }
     }
+    return $null
     if ($matches.Count -gt 1) {
         $where = ($matches | ForEach-Object { Get-CanonicalFolderPath -Folder $_ }) -join ', '
-        throw "'$Path' exists in more than one mailbox ($where). Give the full path starting with the mailbox name."
+        $name = $parts -join '\\'
+        throw "'$name' exists in more than one mailbox ($where). Give the full path starting with the mailbox name."
     }
 
-    throw "No folder matching '$Path'."
+    # Not found is $null rather than an error: the caller may still have another reading of the
+    # path to try, and only it knows whether one is left.
+    return $null
 }
 
 <# The path Outlook itself would print, built by walking back up. #>
@@ -1564,6 +1615,15 @@ function Invoke-OutlookHarvest {
 
     $harvested = @()
     $truncated = $false
+    <#
+      Folders that could not be opened, reported rather than swallowed.
+
+      They were skipped in silence so that one renamed folder could not stop every other one
+      indexing - right in itself, but it meant a folder that never resolved simply never appeared,
+      with nothing anywhere saying so. That is how a whole subtree went missing and was found by
+      someone noticing rather than by being told.
+    #>
+    $skipped = @()
 
     <#
       A share each, rather than first-come-first-served.
@@ -1588,11 +1648,12 @@ function Invoke-OutlookHarvest {
         try {
             $folder = Get-OutlookFolder -Namespace $ns -Path $request.path
         } catch {
-            # A folder that has been renamed or removed since it was configured. Skipped rather
-            # than failing the whole run, which would stop every other folder indexing too.
+            # Renamed, removed, or a path that does not resolve. Skipped rather than failing the
+            # whole run - but recorded, so it is visible.
+            $skipped += [string]$request.path
             continue
         }
-        if ($null -eq $folder) { continue }
+        if ($null -eq $folder) { $skipped += [string]$request.path; continue }
 
         $items = $folder.Items
 
@@ -1684,7 +1745,7 @@ function Invoke-OutlookHarvest {
         }
     }
 
-    return @{ messages = $harvested; truncated = $truncated }
+    return @{ messages = $harvested; truncated = $truncated; skipped = @($skipped | Select-Object -Unique) }
 }
 
 <#
