@@ -231,6 +231,25 @@ export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'
 export { createSearchTeamSkillsTool, type SearchTeamSkillsParams } from './tools/searchTeamSkills.js'
 export {
+  createSearchMailTool,
+  createMailPatternsTool,
+  createOpenEmailTool,
+  type MailToolOptions,
+} from './tools/mail.js'
+export {
+  findNearAnniversaries,
+  findRecurrence,
+  normaliseSubject,
+  parseStatusTag,
+  pruneOlderThan,
+  since as mailSince,
+  type MailRecord,
+  type MailStatus,
+} from './office/mailIndex.js'
+export { MailStore } from './office/mailStore.js'
+export { storeIdFor, type CorpusPurpose, type MailIndexConfig } from './config/schema.js'
+export { syncMail, pruneMail, type MailSyncResult, type HarvestedMessage } from './office/mailSync.js'
+export {
   describeTeamSkillCollision,
   findTeamSkillsNamed,
   indexTeamSkills,

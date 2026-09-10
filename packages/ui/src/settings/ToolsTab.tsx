@@ -1,3 +1,4 @@
+import { MailSection, type MailSectionProps } from './MailSection.js'
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
@@ -10,6 +11,8 @@ export interface ToolsTabProps {
   dispatcher: boolean
   /** Excel and Outlook on this machine: whether they can be reached, and whether they are on. */
   office: { supported: boolean; excel: boolean; outlook: boolean }
+  /** Mail indexing sits here because it is a property of the Outlook connection above it. */
+  mail: MailSectionProps
   onSetOffice: (excel: boolean, outlook: boolean) => void
   /**
    * How long any one tool call may take, in seconds, when nothing more specific applies.
@@ -107,6 +110,7 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
       <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />
 
       <OfficeSection office={props.office} onSet={props.onSetOffice} />
+      <MailSection {...props.mail} />
 
       <div style={{ margin: '10px 0' }}>
         <label htmlFor="lc-tools-search" style={labelStyle()}>

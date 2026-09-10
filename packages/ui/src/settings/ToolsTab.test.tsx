@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { MailSectionProps } from './MailSection.js'
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -49,6 +50,7 @@ function render(
     toolTimeoutSeconds?: number
     onSetToolTimeout?: (seconds?: number) => void
     onSetToolTimeoutFor?: (name: string, seconds?: number) => void
+    mail?: MailSectionProps
   } = {},
 ): void {
   act(() =>
@@ -57,6 +59,14 @@ function render(
         tools={props.tools ?? tools}
         dispatcher={props.dispatcher ?? false}
         office={props.office ?? { supported: true, excel: false, outlook: false }}
+        mail={
+          props.mail ?? {
+            status: undefined,
+            onSave: () => undefined,
+            onSyncNow: () => undefined,
+            onPrune: () => undefined,
+          }
+        }
         onSetOffice={props.onSetOffice ?? (() => undefined)}
         {...(props.toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: props.toolTimeoutSeconds })}
         onSetToolTimeout={props.onSetToolTimeout ?? (() => undefined)}

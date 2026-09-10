@@ -425,6 +425,18 @@ export type UiToHostMessage =
    * tool list changed.
    */
   | { type: 'publishTeamSkills' }
+  /** Collects new mail now, rather than waiting for the timer. */
+  | { type: 'syncMail' }
+  /** Drops indexed mail older than the configured retention, and its vectors. */
+  | { type: 'pruneMail' }
+  | { type: 'requestMailStatus' }
+  | {
+      type: 'saveMailSettings'
+      enabled: boolean
+      folders: string[]
+      syncMinutes: number
+      retentionMonths: number
+    }
   /** Names the pool. Empty removes it, which turns team skill search back off. */
   | { type: 'saveSkillsAlias'; alias: string }
   /**
@@ -892,6 +904,28 @@ export type HostToUiMessage =
   /** `attributed` is how many existing chunks gained an owner; 0 is a real answer, not a failure. */
   | { type: 'teamAliasAttached'; alias?: string; index?: string; attributed?: number; error?: string }
   | { type: 'teamSkillsPublished'; count?: number; collection?: string; error?: string }
+  /**
+   * State of mail indexing.
+   *
+   * `sizeBytes` is here because the user asked to be able to see it growing before deciding to
+   * prune — a retention control with no indication of what it would reclaim is a guess.
+   */
+  | {
+      type: 'mailStatus'
+      enabled: boolean
+      available: boolean
+      folders: string[]
+      syncMinutes: number
+      retentionMonths: number
+      indexed: number
+      oldest?: number
+      newest?: number
+      sizeBytes: number
+      semantic: boolean
+      busy?: boolean
+      lastResult?: string
+      error?: string
+    }
   /** Embedder settings plus what the index currently holds, for Settings → Search. */
   | {
       type: 'embedder'

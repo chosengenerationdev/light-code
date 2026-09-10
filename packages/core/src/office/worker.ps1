@@ -948,6 +948,137 @@ function Get-OutlookFolder {
     throw "No mail store named '$($parts[0])'. Call outlook_folders to see what is available."
 }
 
+<#
+  Collects messages for the index, and reopens one on request.
+
+  ## Why this is not Invoke-OutlookSearch with a bigger limit
+
+  Searching answers a question now; harvesting builds a corpus incrementally, and the difference
+  is entirely in what it must not do. It runs unattended on a timer, so it cannot walk a whole
+  mailbox each time, cannot read a property that costs a server round trip per item, and cannot
+  return bodies large enough to make the transport the bottleneck.
+
+  So the date filter is pushed into Outlook with the same DASL restriction Invoke-OutlookSearch
+  already uses - deliberately the same, because DASL takes an ISO-ish timestamp and is therefore
+  locale-independent, where the Jet syntax parses dates with the machine's own short-date pattern
+  and silently returns the wrong window on a day-first machine.
+
+  Only a preview of the body travels. The full body is never needed here: the model gets metadata
+  and an opening, and opens the real message when the user wants to read it.
+#>
+function Invoke-OutlookHarvest {
+    param($Request)
+
+    $ns = Get-OutlookNamespace
+
+    $limit = 500
+    if ($Request.limit) { $limit = [Math]::Min([int]$Request.limit, 2000) }
+    $previewChars = 400
+    if ($Request.previewChars) { $previewChars = [Math]::Min([int]$Request.previewChars, 2000) }
+
+    $harvested = @()
+    $truncated = $false
+
+    foreach ($request in $Request.folders) {
+        if ($harvested.Count -ge $limit) { $truncated = $true; break }
+
+        $folder = $null
+        try {
+            $folder = Get-OutlookFolder -Namespace $ns -Path $request.path
+        } catch {
+            # A folder that has been renamed or removed since it was configured. Skipped rather
+            # than failing the whole run, which would stop every other folder indexing too.
+            continue
+        }
+        if ($null -eq $folder) { continue }
+
+        $items = $folder.Items
+        $items.Sort('[ReceivedTime]', $true)
+
+        if ($request.sinceMs) {
+            $since = [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$request.sinceMs).LocalDateTime
+            $stamp = $since.ToString('yyyy-MM-dd HH:mm')
+            try {
+                $items = $items.Restrict("@SQL=urn:schemas:httpmail:datereceived >= '$stamp'")
+            } catch {
+                # An unparseable restriction is worse than none: fall back to the sorted
+                # collection and let the count limit do the bounding.
+            }
+        }
+
+        foreach ($item in $items) {
+            if ($harvested.Count -ge $limit) { $truncated = $true; break }
+            # Mail folders hold other things too - meeting requests, delivery reports. 43 is
+            # olMail; anything else has no ReceivedTime worth indexing.
+            $class = 0
+            try { $class = [int]$item.Class } catch { continue }
+            if ($class -ne 43) { continue }
+
+            $received = $null
+            try { $received = $item.ReceivedTime } catch { continue }
+            if ($null -eq $received) { continue }
+
+            $entryId = ''
+            try { $entryId = [string]$item.EntryID } catch { continue }
+            if ([string]::IsNullOrWhiteSpace($entryId)) { continue }
+
+            $subject = ''
+            try { if ($item.Subject) { $subject = [string]$item.Subject } } catch { }
+
+            $sender = ''
+            try {
+                if ($item.SenderName) { $sender = [string]$item.SenderName }
+                if ($item.SenderEmailAddress) { $sender = ($sender + ' <' + [string]$item.SenderEmailAddress + '>').Trim() }
+            } catch { }
+
+            $preview = ''
+            try {
+                if ($item.Body) {
+                    $body = [string]$item.Body
+                    if ($body.Length -gt $previewChars) { $preview = $body.Substring(0, $previewChars) }
+                    else { $preview = $body }
+                }
+            } catch { }
+
+            $harvested += [ordered]@{
+                id         = $entryId
+                subject    = $subject
+                sender     = $sender
+                receivedAt = [int64]([DateTimeOffset]::new($received).ToUnixTimeMilliseconds())
+                folder     = [string]$request.path
+                preview    = $preview
+            }
+        }
+    }
+
+    return @{ messages = $harvested; truncated = $truncated }
+}
+
+<#
+  Shows one message on screen.
+
+  `Display` opens Outlook's own read window - the real message, with its formatting, exactly as
+  the user would see it if they had found it themselves. Nothing is modified and nothing is sent.
+#>
+function Invoke-OutlookDisplay {
+    param($Request)
+
+    $ns = Get-OutlookNamespace
+
+    $item = $null
+    try {
+        $item = $ns.GetItemFromID($Request.id)
+    } catch {
+        throw 'No message with that id is still in the mailbox. It may have been moved or deleted since it was indexed.'
+    }
+    if ($null -eq $item) { throw 'That message could not be opened.' }
+
+    $subject = ''
+    try { if ($item.Subject) { $subject = [string]$item.Subject } } catch { }
+    $item.Display()
+    return @{ subject = $subject; opened = $true }
+}
+
 function Invoke-OutlookSearch {
     param($Request)
 
@@ -1052,6 +1183,8 @@ function Invoke-Request {
         'excel.runMacro'        { return Invoke-ExcelRunMacro -Request $Request }
         'excel.evaluate'        { return Invoke-ExcelEvaluate -Request $Request }
         'outlook.folders'       { return Invoke-OutlookFolders -Request $Request }
+        'outlook.harvest'       { return Invoke-OutlookHarvest -Request $Request }
+        'outlook.display'       { return Invoke-OutlookDisplay -Request $Request }
         'outlook.search'        { return Invoke-OutlookSearch -Request $Request }
         'outlook.read'          { return Invoke-OutlookRead -Request $Request }
         default                 { throw "Unknown operation '$($Request.op)'." }

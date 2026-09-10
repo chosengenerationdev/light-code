@@ -36,6 +36,7 @@ import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { PendingForm } from './FormPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
+import type { MailStatusState } from './settings/MailSection.js'
 import { ModeSelector } from './ModeSelector.js'
 import { Guide } from './guide/Guide.js'
 import type { ReviewItem } from './settings/ReviewsTab.js'
@@ -194,6 +195,8 @@ export function App(props: AppProps): ReactElement {
   const [aliasResult, setAliasResult] = useState<
     { alias?: string; index?: string; attributed?: number; error?: string } | undefined
   >(undefined)
+  /** State of mail indexing, refreshed whenever the host reports it. */
+  const [mailStatus, setMailStatus] = useState<MailStatusState | undefined>(undefined)
   /** The outcome of publishing this machine's skills to the team collection. */
   const [teamSkillsResult, setTeamSkillsResult] = useState<
     { count?: number; collection?: string; error?: string } | undefined
@@ -508,6 +511,21 @@ export function App(props: AppProps): ReactElement {
         setEmbedderSavedTick((tick) => tick + 1)
       } else if (message.type === 'indexProgress') {
         setIndexProgress(message.progress)
+      } else if (message.type === 'mailStatus') {
+        setMailStatus({
+          enabled: message.enabled,
+          available: message.available,
+          folders: message.folders,
+          syncMinutes: message.syncMinutes,
+          retentionMonths: message.retentionMonths,
+          indexed: message.indexed,
+          ...(message.oldest !== undefined ? { oldest: message.oldest } : {}),
+          ...(message.newest !== undefined ? { newest: message.newest } : {}),
+          sizeBytes: message.sizeBytes,
+          semantic: message.semantic,
+          ...(message.busy !== undefined ? { busy: message.busy } : {}),
+          ...(message.lastResult !== undefined ? { lastResult: message.lastResult } : {}),
+        })
       } else if (message.type === 'teamSkillsPublished') {
         setTeamSkillsResult({
           ...(message.count !== undefined ? { count: message.count } : {}),
@@ -576,6 +594,12 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
+    /*
+     * Also what starts the mail timer, if it is configured. The panel opening is the first
+     * moment the bridge is reliably alive with settings loaded, which is the same signal MCP
+     * uses to connect - so nothing that reads mail is started at editor startup.
+     */
+    props.transport.post({ type: 'requestMailStatus' } satisfies UiToHostMessage)
     // Asked for alongside the search state, since that is the tab that shows it.
     props.transport.post({ type: 'requestProjectSettings' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
@@ -1202,6 +1226,13 @@ export function App(props: AppProps): ReactElement {
             }}
             tools={{
               ...toolCatalogue,
+              mail: {
+                status: mailStatus,
+                onSave: (settings) =>
+                  props.transport.post({ type: 'saveMailSettings', ...settings } satisfies UiToHostMessage),
+                onSyncNow: () => props.transport.post({ type: 'syncMail' } satisfies UiToHostMessage),
+                onPrune: () => props.transport.post({ type: 'pruneMail' } satisfies UiToHostMessage),
+              },
               ...(toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds }),
               onSetToolTimeoutFor: (name: string, seconds?: number) =>
                 props.transport.post({

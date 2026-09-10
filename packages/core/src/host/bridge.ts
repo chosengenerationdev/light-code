@@ -104,6 +104,15 @@ import {
   detectClaudeCli,
   buildExpertBriefing,
   buildDocCorpus,
+  MailStore,
+  storeIdFor,
+  type MailIndexConfig,
+  syncMail,
+  pruneMail,
+  createSearchMailTool,
+  createMailPatternsTool,
+  createOpenEmailTool,
+  type HarvestedMessage,
   findTeamSkillsNamed,
   indexTeamSkills,
   createSearchTeamSkillsTool,
@@ -1146,6 +1155,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedProgrammingProfileId: string | undefined
   /** Mirrors config, because the registry is built synchronously and cannot await a load. */
   let cachedOffice: { excel?: boolean | undefined; outlook?: boolean | undefined } = {}
+  /** Mirrors `mail`, for the same reason. */
+  let cachedMail: MailIndexConfig = {}
+  const mailStore = new MailStore(storageDir)
+  /** Set while a sync or prune runs, so two cannot overlap on one mailbox. */
+  let mailBusy = false
+  let mailTimer: ReturnType<typeof setInterval> | undefined
+  let mailLastResult: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
     const { config } = await configManager.load()
@@ -1153,6 +1169,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedCodeGenerator = codeGeneratorFor(config)
     cachedProgrammingProfileId = config.programmingProfileId
     cachedOffice = config.office ?? {}
+    cachedMail = config.mail ?? {}
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
@@ -1350,6 +1367,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * so the tool block stays byte-stable for a whole turn (§12).
      */
     teamSkills?: { searcher: VectorSearcher; embedder: Embedder; collection: string; owner?: string },
+    /**
+     * Semantic ranking for indexed mail, when a store and embedder exist.
+     *
+     * Optional in the strong sense: every temporal question — which is most of them — is
+     * answered from the fact index alone, so mail search works completely without this. It only
+     * reorders what the exact filters already produced.
+     */
+    mailSemantic?: { searcher: VectorSearcher; embedder: Embedder; collection: string },
   ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
@@ -1522,6 +1547,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createExcelRunMacroTool(officeOptions))
       }
       if (cachedOffice.outlook === true) {
+        /*
+         * Mail investigation is offered only once indexing is switched on. Registering it
+         * otherwise would advertise tools that always answer "nothing indexed", and the model
+         * would keep reaching for them instead of `outlook_search`, which reads the live
+         * mailbox and works immediately.
+         */
+        if (cachedMail.enabled === true) {
+          const mailToolOptions = {
+            loadRecords: () => mailStore.load(),
+            ...(mailSemantic !== undefined ? { semantic: mailSemantic } : {}),
+          }
+          combined.register(createSearchMailTool(mailToolOptions))
+          combined.register(createMailPatternsTool(mailToolOptions))
+          combined.register(
+            createOpenEmailTool({
+              display: async (id: string) =>
+                office().request<{ subject: string }>({ op: 'outlook.display', id }),
+            }),
+          )
+        }
         combined.register(createOutlookFoldersTool(officeOptions))
         combined.register(createOutlookSearchTool(officeOptions))
         combined.register(createOutlookReadTool(officeOptions))
@@ -1853,6 +1898,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const embedder = await resolveEmbedder(config)
       const codebaseIndex = codebaseIndexName(config)
       const docsIndex = docsIndexName(config)
+      /*
+       * Mail may live somewhere else entirely — that is the point of `retrieval.stores.mail`.
+       * Resolved only when mail indexing is on, so an install without it pays nothing.
+       */
+      const mailCollection = config.mail?.enabled === true ? mailCollectionName(config) : undefined
+      const mailSearch = mailCollection === undefined ? undefined : await resolveMailSearch(config)
       // Listed once per turn so the tool description can name real indexes; a failure here
       // only costs the model that hint, never the tool.
       const searchIndexes =
@@ -2095,6 +2146,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 collection: config.embedder.skillsAlias,
                 ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
               }
+            : undefined,
+          /*
+           * Mail ranking. Resolved against whichever store `retrieval.stores.mail` names, which
+           * is frequently a local Qdrant while the code goes to a shared cluster — mail is the
+           * corpus people most want kept off a team's infrastructure.
+           */
+          mailCollection !== undefined && mailSearch !== undefined && embedder !== undefined
+            ? { searcher: mailSearch.searcher, embedder, collection: mailCollection }
             : undefined,
       )
 
@@ -3017,7 +3076,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Search tools exist only when a connection is selected — §12 requires the tool set to be
    * stable within a session, so selection is the boundary at which it may change.
    */
-  async function resolveSearch(config: LightCodeConfig): Promise<
+  /**
+   * @param storeId Which connection to use. Defaults to the active one; mail passes its own, so
+   *   a team's code can go to a shared cluster while mail stays in a local Qdrant.
+   */
+  async function resolveSearch(config: LightCodeConfig, storeId?: string): Promise<
     | {
         /** Backend-neutral, for `search_codebase`. */
         searcher: VectorSearcher
@@ -3033,7 +3096,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
     | undefined
   > {
-    const id = config.activeVectorStoreId
+    const id = storeId ?? config.activeVectorStoreId
     if (id === undefined) return undefined
     const store = config.vectorStores?.[id]
     if (store === undefined) return undefined
@@ -3153,6 +3216,193 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         type: 'teamAliasAttached',
         error: error instanceof Error ? error.message : String(error),
       })
+    }
+  }
+
+  /**
+   * Which collection indexed mail goes to, and which connection reaches it.
+   *
+   * Deliberately routed through `retrieval.stores.mail` rather than the active store: the case
+   * this was built for is a team indexing code into a shared cluster while keeping their own
+   * mail in a local Qdrant, and those cannot be one setting. Falls back to the active store when
+   * nothing is named, so a simple install needs no extra configuration.
+   */
+  function mailCollectionName(config?: LightCodeConfig): string | undefined {
+    const base = codebaseIndexName(config)
+    return base === undefined ? undefined : `${base}-mail`
+  }
+
+  /** The connection mail is indexed into, which may differ from the codebase one. */
+  async function resolveMailSearch(config: LightCodeConfig) {
+    const wanted = storeIdFor('mail', config)
+    return resolveSearch(config, wanted)
+  }
+
+  /**
+   * Collects new mail once.
+   *
+   * Guarded by `mailBusy` rather than queued: two passes over one mailbox would fetch the same
+   * messages twice and race on the same file, and the timer firing while a manual sync is still
+   * running is the ordinary way that happens.
+   */
+  async function runMailSync(reason: string): Promise<void> {
+    if (mailBusy) return
+    const config = await loadSettings()
+    if (config.mail?.enabled !== true || cachedOffice.outlook !== true || !officeSupported()) return
+    const folders = config.mail.folders ?? []
+    if (folders.length === 0) return
+
+    mailBusy = true
+    try {
+      const embedder = await resolveEmbedder(config)
+      const search = await resolveMailSearch(config)
+      const collection = mailCollectionName(config)
+
+      const result = await syncMail({
+        store: mailStore,
+        folders,
+        ...(config.mail.previewChars !== undefined ? { previewChars: config.mail.previewChars } : {}),
+        harvest: async (requests, limits) =>
+          office().request<{ messages: HarvestedMessage[]; truncated: boolean }>({
+            op: 'outlook.harvest',
+            folders: requests,
+            limit: limits.limit,
+            previewChars: limits.previewChars,
+          }),
+        ...(embedder !== undefined && search !== undefined && collection !== undefined
+          ? {
+              semantic: {
+                embedder,
+                writer: createVectorIndexWriter(
+                  httpClient,
+                  search.store,
+                  await vectorStoreConnectionFor(search.store, search.id),
+                ),
+                collection,
+              },
+            }
+          : {}),
+      })
+
+      mailLastResult =
+        result.added === 0
+          ? `No new mail (${reason}).`
+          : `Indexed ${String(result.added)} new message(s)${result.more ? ' \u2014 more remain, syncing again shortly' : ''}.`
+      logger.info(`mail sync: ${mailLastResult}`)
+      /*
+       * A truncated pass means the mailbox had more than one batch. Rather than loop here —
+       * which would hold the mailbox for as long as it took — the next tick picks it up, so a
+       * first run over years of mail makes steady progress without blocking anything.
+       */
+      await postMailStatus()
+    } catch (error) {
+      mailLastResult = error instanceof Error ? error.message : String(error)
+      logger.warn(`mail sync failed: ${mailLastResult}`)
+      await postMailStatus()
+    } finally {
+      mailBusy = false
+    }
+  }
+
+  /** Starts, restarts or stops the timer to match the current configuration. */
+  function reconcileMailTimer(config: LightCodeConfig): void {
+    if (mailTimer !== undefined) {
+      clearInterval(mailTimer)
+      mailTimer = undefined
+    }
+    if (config.mail?.enabled !== true || !officeSupported() || config.office?.outlook !== true) return
+
+    const minutes = config.mail.syncMinutes ?? 15
+    mailTimer = setInterval(() => void runMailSync('scheduled'), minutes * 60 * 1000)
+    // `unref` so a pending tick never keeps the process alive in the Node host.
+    mailTimer.unref?.()
+  }
+
+  async function postMailStatus(): Promise<void> {
+    const config = (await configManager.load()).config
+    const records = await mailStore.load()
+    const times = records.map((record) => record.receivedAt)
+    const collection = mailCollectionName(config)
+    const search = await resolveMailSearch(config).catch(() => undefined)
+    const embedder = await resolveEmbedder(config).catch(() => undefined)
+
+    post({
+      type: 'mailStatus',
+      enabled: config.mail?.enabled === true,
+      available: officeSupported() && config.office?.outlook === true,
+      folders: config.mail?.folders ?? [],
+      syncMinutes: config.mail?.syncMinutes ?? 15,
+      retentionMonths: config.mail?.retentionMonths ?? 6,
+      indexed: records.length,
+      ...(times.length > 0 ? { oldest: Math.min(...times), newest: Math.max(...times) } : {}),
+      sizeBytes: await mailStore.sizeBytes(),
+      semantic: collection !== undefined && search !== undefined && embedder !== undefined,
+      busy: mailBusy,
+      ...(mailLastResult !== undefined ? { lastResult: mailLastResult } : {}),
+    })
+  }
+
+  /** Drops indexed mail past the retention window, vectors first so nothing is orphaned. */
+  async function handlePruneMail(): Promise<void> {
+    if (mailBusy) return
+    mailBusy = true
+    try {
+      const config = await loadSettings()
+      const months = config.mail?.retentionMonths ?? 6
+      const collection = mailCollectionName(config)
+      const search = await resolveMailSearch(config)
+
+      const result = await pruneMail({
+        store: mailStore,
+        months,
+        ...(search !== undefined && collection !== undefined
+          ? {
+              semantic: {
+                writer: createVectorIndexWriter(
+                  httpClient,
+                  search.store,
+                  await vectorStoreConnectionFor(search.store, search.id),
+                ),
+                collection,
+              },
+            }
+          : {}),
+      })
+      mailLastResult =
+        result.removed === 0
+          ? `Nothing older than ${String(months)} month(s) to remove.`
+          : `Removed ${String(result.removed)} message(s), kept ${String(result.kept)}.`
+    } catch (error) {
+      mailLastResult = error instanceof Error ? error.message : String(error)
+    } finally {
+      mailBusy = false
+      await postMailStatus()
+    }
+  }
+
+  async function handleSaveMailSettings(settings: {
+    enabled: boolean
+    folders: string[]
+    syncMinutes: number
+    retentionMonths: number
+  }): Promise<void> {
+    try {
+      await configManager.save('user', {
+        mail: {
+          enabled: settings.enabled,
+          folders: settings.folders.filter((folder) => folder.trim().length > 0),
+          syncMinutes: settings.syncMinutes,
+          retentionMonths: settings.retentionMonths,
+        },
+      })
+      const config = await loadSettings()
+      reconcileMailTimer(config)
+      await postMailStatus()
+      // A first sync right away, so switching it on visibly does something rather than waiting
+      // out an interval before the first sign of life.
+      if (config.mail?.enabled === true) void runMailSync('just enabled')
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -5069,6 +5319,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleAttachTeamAlias()
     } else if (message.type === 'publishTeamSkills') {
       void handlePublishTeamSkills()
+    } else if (message.type === 'syncMail') {
+      void runMailSync('requested')
+    } else if (message.type === 'pruneMail') {
+      void handlePruneMail()
+    } else if (message.type === 'requestMailStatus') {
+      /*
+       * Also where the timer is reconciled. The panel opening is the first moment the bridge is
+       * reliably alive with settings loaded, and it is the same signal MCP already uses to
+       * connect - so nothing is spawned at editor startup (§11).
+       */
+      void loadSettings().then((config) => {
+        reconcileMailTimer(config)
+        return postMailStatus()
+      })
+    } else if (message.type === 'saveMailSettings') {
+      void handleSaveMailSettings({
+        enabled: message.enabled,
+        folders: message.folders,
+        syncMinutes: message.syncMinutes,
+        retentionMonths: message.retentionMonths,
+      })
     } else if (message.type === 'saveSkillsAlias') {
       void handleSaveSkillsAlias(message.alias)
     } else if (message.type === 'cancelIndexing') {
@@ -5999,6 +6270,8 @@ ${contents}
       // A pending reindex would otherwise fire after teardown and post to a dead webview.
       if (docsReindexTimer !== undefined) clearTimeout(docsReindexTimer)
       if (scheduleTimer !== undefined) clearInterval(scheduleTimer)
+      // A mail sync reads the user's mailbox. Nothing that does that may outlive the bridge.
+      if (mailTimer !== undefined) clearInterval(mailTimer)
       // Nothing may outlive the bridge, least of all something that spends money.
       stopKeepAlive()
       unsubscribe()

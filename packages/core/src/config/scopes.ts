@@ -14,6 +14,9 @@ export const USER_SCOPE_ONLY_KEYS = [
   'certDir',
   // Reads the user's mail and their open workbooks. A repository must never switch it on.
   'office',
+  // Names folders of the user's mail to read, embed and send to whichever store is configured.
+  // The same threat as `embedder`, with the user's correspondence as the payload.
+  'mail',
   // The whole block, not just uvPath: toolsDir and venvPath also name where code is found
   // and run from, and dynamicTools decides whether model-authored code runs at all.
   'python',

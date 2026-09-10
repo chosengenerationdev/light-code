@@ -523,9 +523,49 @@ export const identityConfigSchema = z
   .partial()
 export type IdentityConfig = z.infer<typeof identityConfigSchema>
 
+/**
+ * Indexing Outlook mail so it can be investigated.
+ *
+ * Off by default and **user-scope only**, like the rest of `office`: this reads the contents of
+ * the user's mailbox, and a repository able to switch it on — or to point it at a different
+ * embedding endpoint by naming a store — would be reading their mail the moment they opened the
+ * folder.
+ */
+export const mailIndexConfigSchema = z
+  .object({
+    /** Nothing is read until this is true. */
+    enabled: z.boolean(),
+    /** Folder paths as they appear in Outlook, e.g. `Inbox/Alerts`. */
+    folders: z.array(z.string().min(1)),
+    /**
+     * How often new mail is collected, in minutes.
+     *
+     * A sync is incremental — it asks Outlook only for what arrived since the last one — so
+     * this is cheap. It is still a timer that reads mail, so it stops when `enabled` goes false
+     * rather than merely being ignored.
+     */
+    syncMinutes: z.number().int().min(5).max(1440),
+    /**
+     * Drop anything older than this many months.
+     *
+     * Retention rather than a size cap, because "keep six months" is a decision someone can
+     * actually make about their own mailbox, and "keep 200MB" is not.
+     */
+    retentionMonths: z.number().int().min(1).max(120),
+    /** Characters of body kept per message, for showing a hit without reopening Outlook. */
+    previewChars: z.number().int().min(0).max(2000),
+  })
+  .partial()
+export type MailIndexConfig = z.infer<typeof mailIndexConfigSchema>
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
+    /**
+     * User-scope only, and among the sharpest entries on that list: it names folders of the
+     * user's mail to read and embed.
+     */
+    mail: mailIndexConfigSchema,
     /**
      * User-scope only: it labels everything this machine writes to a shared index, so a
      * repository able to set it could attribute its own indexed content to someone else.
