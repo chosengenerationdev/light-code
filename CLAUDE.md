@@ -882,6 +882,94 @@ find it in the local as it belongs to different user or project"*.
 
 ---
 
+## 12f. Indexed mail, and the questions embeddings cannot answer (0.54.0)
+
+Requested for a support mailbox where subjects carry `[OK]` or `[ALERT]`: index configured
+Outlook folders, keep them current automatically, and answer *"any alerts in the past N hours"*,
+*"does this alert happen every day around the same time"*, *"was a similar one sent last week on
+the same day"*.
+
+- **The vector store holds meaning; a local sidecar holds facts.** Those questions are
+  **temporal**, and embeddings are actively bad at "between 02:00 and 03:00 on the last four
+  Tuesdays" — a nearest-neighbour search returns something plausible, ranked, and wrong, with
+  nothing to indicate it. So received time, folder, sender and the tag are exact, filtered
+  exactly, and never go through an approximate lookup. A semantic query only **ranks** what the
+  exact filters already produced. It also avoids inventing a range-filter language across three
+  backends, which §11 names as a silent-failure source.
+- **Two tools, not one, and that is what keeps the second honest.** Folded together the model
+  would run a semantic search and eyeball timestamps — which is exactly how "yes, every day at
+  three" gets said about four messages spread over a fortnight. `mail_patterns` counts, and
+  reports a **spread**: a median alone would claim a schedule for something arriving at 03:00 one
+  day and 15:00 the next. Distances are measured **around the clock**, so a midnight job is not
+  reported as having no pattern.
+- **`parseStatusTag` is deliberately narrow.** It knows `[OK]` and `[ALERT]` and nothing else.
+  Guessing that `[WARN]` means alert would silently reclassify a mailbox nobody described, and no
+  status is a better answer than a wrong one.
+- **`normaliseSubject` strips numbers, never words.** Two nightly failures are the same alert at
+  03:14 and 03:16; `Disk 90% on host A` and `host B` are not the same thing.
+- **Syncing is incremental per folder**, not from one global mark — a folder added later would
+  otherwise resume from the newest message in a *different* folder and silently skip everything
+  older. The resume point is **one second early**, because Outlook restricts inclusively at second
+  granularity: re-fetching a few known messages is free, losing one is not.
+- **Embedded before recorded.** Recording first would mark a message done even when the embedding
+  failed, leaving it permanently absent from semantic search with the facts complete and the
+  meaning quietly missing.
+- **Retention is in months**, because "keep six months" is a decision someone can make about
+  their own mailbox and "keep 200MB" is not. Pruning removes **vectors before facts**, so nothing
+  is orphaned. `monthsBefore` clamps to a real date: `setMonth` on 31 March gives **1 October**,
+  not 30 September, which for retention errs towards deleting more than was asked — found by a
+  test rather than reasoned about.
+- **`open_email` is `command` and always asks.** It puts a window on somebody's screen. Small, but
+  not nothing.
+- **`mail` is user-scope only** (invariant 5): it names folders of the user's mail to read and
+  embed — the same threat as `embedder`, with their correspondence as the payload. Off by default,
+  the timer stops entirely when unticked, and the UI states what is sent where *above* the switch.
+
+**Verified against the logic, not against a live mailbox.** The harvest and display paths have
+never run against real Outlook mail; that remains the first thing to check.
+
+---
+
+## 12g. A shared skills pool, and scheduling from the chat (0.54.0)
+
+**Skills get their own collection** rather than sharing the `-docs` index. For one user sharing
+is right — `search_docs` looks through both. It stops being right the moment a team alias points
+at it: tool documentation describes *this install's* registry, is rebuilt wholesale on every
+change, and its stale sweep deletes whatever the fresh corpus lacks, so fanning it across a team
+means one person's reindex racing another's deletions. Skills are authored deliberately and are
+valuable precisely because they came from somebody else.
+
+- Everyone publishes to their **own** collection; `embedder.skillsAlias` makes them searchable
+  together. Separate from `indexAlias` because pooling what you have *taught* the assistant and
+  pooling your *source* are different decisions.
+- **The body is stored**, unlike a codebase chunk. A colleague's skill has no file here to read
+  afterwards, so the index has to be the whole answer — affordable because a skill is a page of
+  prose. `search_team_skills` says so rather than inviting a `read_file` that would fail.
+- **Collision detection matches the name exactly**, not by similarity. "Does this already exist"
+  is an exact question, and a semantic near-miss answering it would tell someone a colleague owns
+  something they do not. It reports **after** the write and never blocks: the ask was to be told,
+  and a team where nobody may name a skill someone else named would be worse than one with two
+  called `deployment`.
+
+**`schedule_prompt` sets one up from the chat**, and the load-bearing rule is §6b's: **the form
+collects, it does not authorise.** What this form collects *is* a list of granted capabilities, so
+reading the ticked boxes as consent would let a persuasively-described form grant a 3am job
+`execute_command`. Two steps instead: the form gathers a proposal during `preview`, and the
+ordinary approval gate shows the **resulting schedule** — prompt, cadence, and every tool it could
+use — computed from what will actually be written.
+
+- A dismissed form creates **nothing**, rather than falling back to a guessed cadence.
+- `schedule_prompt` is itself in `NEVER_AVAILABLE_TO_SCHEDULES`: a run that could create schedules
+  could grant its successor wider tools, turning a bounded allowlist into a ladder.
+- **`multichoice` is `ask_user_form`'s sixth field type**, added for this. §6b requires a reason:
+  the alternatives are a `list` the user types tool names into — where a typo is a silently
+  missing permission — or forty checkboxes, which exceeds the field cap. It carries a **filter**,
+  asked for directly ("else it will be difficult when there are many tools"), and **filtering
+  never changes the selection**: a tick that vanished because you typed would be a permission
+  silently withdrawn, discovered when the job failed overnight.
+
+---
+
 ## 12d. Per-project settings, and schedules that stay put (0.47.0)
 
 **Settings may vary by project without a repository being able to set them.** Invariant 5 is about

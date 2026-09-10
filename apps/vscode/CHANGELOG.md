@@ -1,5 +1,39 @@
 # light-code-vscode
 
+## 0.53.0
+
+### Minor Changes
+
+- Mail indexing. Point it at Outlook folders and it keeps them indexed automatically, so you can
+  ask "any alerts in the last six hours", "does this one happen every day around the same time" and
+  "was a similar one sent last week on the same day". Times and subjects are kept exactly, so those
+  answers are counted rather than estimated. Retention is in months and pruning is a button. The
+  assistant can open a message in Outlook when you ask. Off by default, Windows only.
+
+  Team skills. Publish your skills to a shared collection and search what colleagues have taught
+  theirs. Writing a skill whose name a colleague already uses now tells you, and says who, without
+  stopping you.
+
+  Schedule a prompt from the chat: describe the job, tick which tools it may use from a filterable
+  list, set the cadence in a form, then approve the whole thing before it is created.
+
+  Forms gained a multi-select field with a search box, for picking from long lists.
+
+- e5b2048: Team-wide codebase search. Set a team index alias in Settings -> Search and everyone on the team
+  can search each other's indexed projects with search_codebase scope:"team", while still writing to
+  their own index. Results from someone else are marked as not being in your workspace, checked
+  against the disk rather than assumed, so the assistant does not try to open files that are not
+  there. An existing index can be attached to the alias without re-indexing.
+
+  Each kind of corpus can now go to a different vector store, so team code can live in a shared
+  cluster while other indexes stay local.
+
+  Fixed: opening an older conversation now scrolls to the newest message instead of the oldest, and
+  the reply follows as it streams unless you have scrolled up.
+
+  Fixed: create_python_tool was hidden behind the tool dispatcher, so asking for a tool sometimes
+  produced a plain .py file in the workspace root instead. It is always offered now.
+
 ## 0.52.1
 
 ### Patch Changes
