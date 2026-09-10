@@ -1357,8 +1357,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * That is the design choice that matters: the loop, the approval gate and mode filtering
      * treat py__* like execute_command, with no special-casing upstream — so a model-authored
      * tool is approval-gated for free.
+     *
+     * The split is deliberate. The user's *generated* tools grow without bound, so they are
+     * what the dispatcher hides. The three tools for *creating* them never grow, and hiding
+     * those produced a reported failure: asked for a tool, the model wrote a plain .py file in
+     * the workspace root, because `write_to_file` was advertised and `create_python_tool` was
+     * not. A capability the model has to search for is one it will sometimes not search for.
      */
-    for (const tool of python.tools()) combined.register(tool, { dispatchOnly: dispatcher })
+    for (const tool of python.managementTools()) combined.register(tool)
+    for (const tool of python.generatedTools()) combined.register(tool, { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
     /*
@@ -1910,6 +1917,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * the user to switch on something already switched on would be worse than saying nothing.
          */
         pythonToolsDisabled: config.python?.dynamicTools !== 'on',
+        // And the other half. Saying the capability exists is what stops "create a tool" being
+        // answered with an ordinary file the model happened to have a tool for.
+        pythonToolsAvailable: config.python?.dynamicTools === 'on',
         /*
          * Junior mode's instructions are worse than useless without the expert to delegate
          * to: the model would be told to consult something it has no tool for. The picker

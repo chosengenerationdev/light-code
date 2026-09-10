@@ -1,5 +1,5 @@
 import type { ApprovalDecision, ContextUsage, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
 import { FormPrompt, type PendingForm } from './FormPrompt.js'
 import { Composer } from './Composer.js'
@@ -10,6 +10,14 @@ import { TokenBar } from './TokenBar.js'
 import { WorkingIndicator } from './WorkingIndicator.js'
 import { UndoIcon } from './icons.js'
 import { cls, colors, iconButtonStyle } from './theme.js'
+
+/**
+ * How close to the bottom still counts as "at the bottom", in pixels.
+ *
+ * Not zero: a streaming reply grows the container between frames, so an exact comparison
+ * decides the user has scrolled away when they have not moved at all.
+ */
+const FOLLOW_THRESHOLD_PX = 120
 
 export interface ChatProps {
   messages: DisplayMessage[]
@@ -49,11 +57,53 @@ export interface ChatProps {
   searchConnections: { id: string; label: string }[]
   activeSearchId: string | undefined
   onSelectSearch: (id: string | undefined) => void
+  /**
+   * Which conversation this is. Changes when a task is opened or a new one started.
+   *
+   * The transcript needs to know, because opening an old conversation should land at its end
+   * rather than its beginning — see the scroll effects below.
+   */
+  conversationKey: string
 }
 
 export function Chat(props: ChatProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [promptOutOfView, setPromptOutOfView] = useState(false)
+
+  /*
+   * Open a conversation at its end, not its beginning.
+   *
+   * Reported: "when i switch between chat sessions, vertical scroll bar always goes back to
+   * top, instead it should be pointing the latest chat". There was no scrolling here at all —
+   * a fresh container starts at zero, so every restored transcript opened on its oldest
+   * message and the newest was however many screens below.
+   *
+   * `useLayoutEffect`, so the jump happens before the browser paints. In an effect it would
+   * paint the top first and visibly snap. `behavior: 'auto'` overrides the container's CSS
+   * `scroll-behavior: smooth`, which would otherwise animate a scroll the user never asked
+   * for, through the whole history, on every switch.
+   */
+  useLayoutEffect(() => {
+    const root = scrollRef.current
+    if (root === null) return
+    root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
+  }, [props.conversationKey])
+
+  /*
+   * Follow new content, but only for someone already at the bottom.
+   *
+   * Someone who has scrolled up is reading something, and yanking them back down as a reply
+   * streams in is the behaviour every chat window gets wrong once. The threshold is generous
+   * because a reply can add a line between two frames.
+   */
+  useEffect(() => {
+    const root = scrollRef.current
+    if (root === null) return
+    const distanceFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight
+    if (distanceFromBottom <= FOLLOW_THRESHOLD_PX) {
+      root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
+    }
+  }, [props.messages, props.pendingApproval, props.pendingForm])
 
   /** The newest thing the user asked, for the pin. */
   const latestPrompt = (() => {

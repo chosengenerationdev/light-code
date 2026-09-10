@@ -21,6 +21,13 @@ export interface SystemPromptOptions {
    * trade; costing them only while the feature is off is a better one.
    */
   pythonToolsDisabled?: boolean
+  /**
+   * Set when Python tools are on, so the model is told the capability exists.
+   *
+   * Separate from the negation of `pythonToolsDisabled` on purpose: neither line should appear
+   * when there is no workspace and the feature is simply not in play.
+   */
+  pythonToolsAvailable?: boolean
   /** Set when `write_skill` is offered, so the model knows it can record what it learns. */
   canWriteSkills?: boolean
   /**
@@ -113,6 +120,25 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
       '- Do not write a script and call it a tool.',
       '- If the user asks for a "tool", say it is switched off and let them choose: enable it in',
       '  Settings → Python, or have you write an ordinary script instead.',
+    )
+  } else if (options.pythonToolsAvailable === true) {
+    /*
+     * The positive half, which was missing entirely.
+     *
+     * Reported: asked to create a tool, the model wrote an ordinary .py file into the workspace
+     * root. Two causes, both fixed — the tool was hidden behind the dispatcher (see
+     * `PythonManager.managementTools`), and nothing in the prompt ever said the capability
+     * existed. Guidance for the *off* case had been written and the *on* case assumed to need
+     * none, which is the asymmetry that produced a confident wrong answer.
+     */
+    lines.push(
+      '',
+      'Python tools:',
+      '- `create_python_tool` makes a real, registered, callable tool. Use it whenever the user',
+      '  asks for a "tool", even if writing a script would be easier.',
+      '- Writing a .py file with `write_to_file` does NOT create a tool. It is just a file, and',
+      '  nothing can call it. Never describe that as having created a tool.',
+      '- `update_python_tool` edits one, `delete_python_tool` removes one.',
     )
   }
 

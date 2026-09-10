@@ -1241,13 +1241,14 @@ addition to the text input rather than a replacement for it.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. **0.48.0 is live as of 2026-09-03.** The local manifest is **0.50.0**.
+the gallery. **0.52.0 is live as of 2026-09-05**, published 2026-09-04, queried from the gallery. The local manifest is **0.52.1** (the shared-path EPERM fix, unpublished).
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
-Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.12.1 is live as of
-2026-08-31**; **0.26.0 is published.** The local manifest is **0.28.0**. The bare name `light-code` belongs to an unrelated
+Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.26.0 is live as of
+2026-09-05**, published 2026-09-03, queried from the registry. The local manifest is **0.30.1**,
+so npm is four releases behind while the extension is one. The bare name `light-code` belongs to an unrelated
 package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 

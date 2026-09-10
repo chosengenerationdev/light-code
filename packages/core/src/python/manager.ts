@@ -9,6 +9,7 @@ import {
   createCreatePythonTool,
   createDeletePythonTool,
   createUpdatePythonTool,
+  type PythonToolContext,
 } from './tools.js'
 import { installDependencies } from './deps.js'
 import type { WorkerToolDescription } from './worker.js'
@@ -293,12 +294,56 @@ export class PythonManager {
    * interpreter behind it would advertise something that always fails, and the model would
    * keep trying it instead of using `execute_command`.
    */
+  /**
+   * Every Python tool, management and generated alike. Kept for callers that want the lot.
+   *
+   * The two halves are also available separately, because the dispatcher must treat them
+   * differently — see `managementTools`.
+   */
   tools(): Tool<never>[] {
-    if (!this.enabled || !this.ready || this.worker === undefined) return []
+    return [...this.managementTools(), ...this.generatedTools()]
+  }
+
+  /**
+   * The three fixed tools for *creating* Python tools, as opposed to the ones created.
+   *
+   * These are split out because the dispatcher must never hide them. It is a prompt-size
+   * control, and its entire justification is that a handful of MCP servers can contribute
+   * forty tools each whose schemas sit at the front of every request. There are three of
+   * these, they never grow, and withholding them costs far more than it saves.
+   *
+   * Reported from real use: "it doesn't seem to always remember it has a tool to create python
+   * tools — many times it is trying to create a python file in root folder". That is precisely
+   * what hiding them produces. `create_python_tool` was unadvertised while `write_to_file` was
+   * listed, so "make me a tool" got answered with the tool the model could actually see — and
+   * the result is a script that is not registered, not hash-pinned and not callable.
+   */
+  managementTools(): Tool<never>[] {
+    const context = this.toolContext()
+    if (context === undefined) return []
+    return [
+      createCreatePythonTool(context),
+      createUpdatePythonTool(context),
+      createDeletePythonTool(context),
+    ] as unknown as Tool<never>[]
+  }
+
+  /** The user's own tools. These grow without bound, so these are what the dispatcher hides. */
+  generatedTools(): Tool<never>[] {
+    const worker = this.worker
+    if (this.toolContext() === undefined || worker === undefined) return []
+    return this.registered.map((tool) =>
+      adaptPythonTool(tool, { worker, timeoutMs: this.timeoutMs }),
+    ) as unknown as Tool<never>[]
+  }
+
+  /** What every tool wrapper needs, or undefined when Python is not usable at all. */
+  private toolContext(): PythonToolContext | undefined {
+    if (!this.enabled || !this.ready || this.worker === undefined) return undefined
     const worker = this.worker
     const uv = this.uv
     const generated = this.options.generateSource?.()
-    const context = {
+    return {
       toolsDir: this.toolsDir,
       ...(generated !== undefined ? { generateSource: generated } : {}),
       worker,
@@ -318,14 +363,8 @@ export class PythonManager {
           }
         : {}),
     }
-
-    return [
-      createCreatePythonTool(context),
-      createUpdatePythonTool(context),
-      createDeletePythonTool(context),
-      ...this.registered.map((tool) => adaptPythonTool(tool, { worker, timeoutMs: this.timeoutMs })),
-    ] as unknown as Tool<never>[]
   }
+
 
   status(): PythonStatus {
     return {

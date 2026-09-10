@@ -1264,6 +1264,12 @@ export function App(props: AppProps): ReactElement {
           </div>
         ) : (
           <Chat
+            /*
+             * Identifies the conversation so the transcript can open at its end. A new,
+             * unsaved chat has no id yet, and 'new' is a stable stand-in for it - without one
+             * every keystroke would look like a conversation change and re-pin the scroll.
+             */
+            conversationKey={activeTaskId ?? 'new'}
             messages={messages}
             isStreaming={isStreaming}
             error={error}

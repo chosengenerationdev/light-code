@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Chat, type ChatProps } from './Chat.js'
 import type { DisplayMessage } from './MessageList.js'
+import { installScrollStub } from './testDom.js'
 
 /**
  * The pinned prompt, driven through `Chat` rather than in isolation.
@@ -36,6 +37,8 @@ class StubIntersectionObserver {
 }
 
 beforeEach(() => {
+  // Chat scrolls on mount now, and jsdom has no scrollTo. See testDom.
+  installScrollStub()
   observerCallbacks = []
   Element.prototype.scrollIntoView ??= () => {}
   ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = StubIntersectionObserver
@@ -51,6 +54,7 @@ afterEach(() => {
 
 function chatProps(messages: DisplayMessage[]): ChatProps {
   return {
+    conversationKey: 'test',
     messages,
     isStreaming: false,
     error: undefined,
