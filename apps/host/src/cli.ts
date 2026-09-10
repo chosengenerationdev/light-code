@@ -1,4 +1,15 @@
 #!/usr/bin/env node
+/*
+ * First, and before anything that might read a web global at import time.
+ *
+ * A dependency written against Node 18 that captures `fetch` or `ReadableStream` at module scope
+ * would capture the absence instead, and fail later with a ReferenceError naming nothing in this
+ * repository. `nodeCompat.test.ts` asserts this import stays at the top.
+ */
+import { installNodeCompat } from './nodeCompat.js'
+
+const compat = installNodeCompat()
+
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -181,6 +192,18 @@ async function main(): Promise<void> {
   process.stdout.write(
     `\nLight Code\n  workspace  ${workspaceRoot}\n  data       ${dataDir}\n  listening  ${server.url}\n`,
   )
+  /*
+   * Said only when something was actually supplied, which on Node 18 and above is never.
+   *
+   * A line nobody needs is noise; a session behaving oddly on an old runtime should be
+   * diagnosable from the banner rather than by working out which Node the user has.
+   */
+  if (compat.installed.length > 0) {
+    process.stdout.write(
+      `  node       ${compat.nodeVersion} — supplied ${String(compat.installed.length)} web global(s) Node 18 makes standard
+`,
+    )
+  }
   if (serverMode) {
     const who =
       effectiveAdminIds.length === 0

@@ -172,7 +172,7 @@ Reporting a vulnerability: see [SECURITY.md](SECURITY.md).
 
 ## Building from source
 
-Requires Node 20+ and pnpm.
+Requires Node 17+ and pnpm (Node 20+ to develop; the published package runs on 17).
 
 ```bash
 pnpm install --ignore-scripts   # --ignore-scripts is deliberate; see CLAUDE.md invariant 4

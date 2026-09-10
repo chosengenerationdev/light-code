@@ -27,7 +27,20 @@ pnpm install
 pnpm serve --workspace D:\src\my-repo
 ```
 
-### Before publishing a version
+### Requirements
+
+**Node 17 or newer.** Nothing here needs a current runtime: the newest API Light Code itself uses
+is `structuredClone`, which arrived in Node 17.0. The floor is 17 rather than lower only because
+of that.
+
+One dependency — the MCP SDK — is written against Node 18 and expects `fetch`, the stream types
+and `Blob` on `globalThis`. On Node 17 those all exist but are not global, so the CLI supplies
+them from Node's own modules and from undici before anything else loads, and says so in the
+startup banner when it has done it. On Node 18 and above it does nothing.
+
+Node 20 or newer is still what the repository is developed against.
+
+## Before publishing a version
 
 ```bash
 pnpm verify:npm

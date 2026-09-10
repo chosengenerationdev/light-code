@@ -9,7 +9,7 @@
     "url": "https://github.com/chosengenerationdev/light-code.git"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=17"
   },
   "packageManager": "pnpm@11.18.0",
   "scripts": {

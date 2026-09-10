@@ -32,7 +32,7 @@ await esbuild.build({
   bundle: true,
   platform: 'node',
   format: 'esm',
-  target: 'node20',
+  target: 'node17',
   sourcemap: true,
   // Workspace packages are bundled (they are not published); real dependencies are not.
   external: ['@vscode/ripgrep'],

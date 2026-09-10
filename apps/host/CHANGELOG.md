@@ -1,5 +1,18 @@
 # @chosengeneration/light-code
 
+## 0.33.0
+
+### Minor Changes
+
+- The Node host runs on Node 17 and newer, down from 20.
+
+  Nothing Light Code writes needed a current runtime — the newest API anywhere in core is
+  `structuredClone`, which arrived in Node 17.0 exactly. What did was the dependency floor: undici 8
+  declares Node 22, env-paths 4 declares 20, and the MCP SDK declares 18. The first two are pinned
+  to versions that support 17; the SDK's floor is about the web globals Node 18 promoted, so the CLI
+  supplies those from Node's own modules and from undici before anything else loads, and says so in
+  the banner when it has. On Node 18 and above it does nothing at all.
+
 ## 0.32.0
 
 ### Minor Changes
