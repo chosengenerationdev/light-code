@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { FolderTree, type MailFolderNode } from './FolderTree.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { Select } from '../Select.js'
-import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle, sectionHeadingStyle} from '../theme.js'
 
 export interface MailStatusState {
   enabled: boolean
@@ -54,7 +54,7 @@ function formatSize(bytes: number): string {
 function Section(props: { title: string; hint?: string; children: React.ReactNode }): ReactElement {
   return (
     <section style={{ marginBottom: 18 }}>
-      <h3 style={{ margin: '0 0 2px', fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase', color: colors.muted }}>
+      <h3 style={sectionHeadingStyle()}>
         {props.title}
       </h3>
       {props.hint !== undefined && (

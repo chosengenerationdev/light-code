@@ -116,6 +116,7 @@ import {
   createSearchMailTool,
   createMailPatternsTool,
   createOpenEmailTool,
+  createMailCoverageTool,
   type HarvestedMessage,
   findTeamSkillsNamed,
   indexTeamSkills,
@@ -1628,10 +1629,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         if (cachedMail.enabled === true) {
           const mailToolOptions = {
             loadRecords: () => mailStore.load(),
+            // So `mail_coverage` can say whether a folder has been read all the way back,
+            // rather than quoting its oldest indexed date as if that were the oldest message.
+            loadBackfill: () => mailStore.loadBackfillState(),
             ...(mailSemantic !== undefined ? { semantic: mailSemantic } : {}),
           }
           combined.register(createSearchMailTool(mailToolOptions))
           combined.register(createMailPatternsTool(mailToolOptions))
+          combined.register(createMailCoverageTool(mailToolOptions))
           combined.register(
             createOpenEmailTool({
               display: async (id: string) =>

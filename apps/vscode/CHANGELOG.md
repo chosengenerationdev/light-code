@@ -1,5 +1,19 @@
 # light-code-vscode
 
+## 0.56.0
+
+### Minor Changes
+
+- Mail search stops answering the wrong question quietly.
+
+  A query with no embedding model configured was silently dropped, so "has this been mentioned
+  before" returned the newest twenty messages in the index — a well-formed answer with nothing to
+  do with what was asked. It now matches on words and says so, and a genuine absence is reported as
+  one. Adds `mail_coverage`, so the assistant can tell which folders are indexed and how far back
+  before concluding something is not in your mail, and `open_email` takes several ids at once.
+  Every mail result now states what the index does not hold: colours, images, and anything past the
+  opening of a long message. Settings section headings follow the accent colour.
+
 ## 0.55.0
 
 ### Minor Changes

@@ -218,3 +218,25 @@ export function badgeStyle(kind: 'neutral' | 'warning' = 'neutral'): CSSProperti
     color: kind === 'warning' ? colors.error : colors.muted,
   }
 }
+
+/**
+ * A section heading inside a settings tab.
+ *
+ * In the accent rather than the muted grey, because on a long tab the headings are how you find
+ * the part you came for and grey makes them recede into the body text they are meant to divide.
+ * `accent` follows whatever colour the user chose in Appearance, so this tracks their theme
+ * rather than introducing a second one.
+ *
+ * Defined here rather than repeated inline: it was written out at four call sites and two of them
+ * had already drifted on margin and letter-spacing.
+ */
+export function sectionHeadingStyle(): CSSProperties {
+  return {
+    margin: '0 0 2px',
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: colors.accent,
+  }
+}

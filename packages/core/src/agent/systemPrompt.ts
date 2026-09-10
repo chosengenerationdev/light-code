@@ -224,6 +224,13 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
       '- One exception worth naming: if the user is asking about something that arrived in the',
       '  last few minutes, the index may not have it yet. Say that, and offer to check Outlook',
       '  rather than doing it unasked.',
+      '- **The index holds plain text.** Colours, highlighting and images are not in it. When',
+      '  those could carry meaning — a red line marking a failure, a highlighted cell — use',
+      '  outlook_read_email on the id, which reads the live message and reports the colours.',
+      '  Never conclude a message looks fine from indexed text alone.',
+      '- mail_coverage says which folders are indexed and how far back. Check it before saying',
+      '  something is not in the mail: an empty search over an unindexed folder looks exactly',
+      '  like an empty search over an indexed one.',
     )
   }
 

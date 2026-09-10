@@ -235,6 +235,7 @@ export {
   createSearchMailTool,
   createMailPatternsTool,
   createOpenEmailTool,
+  createMailCoverageTool,
   type MailToolOptions,
 } from './tools/mail.js'
 export {

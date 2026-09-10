@@ -1,6 +1,6 @@
 import type { NetworkSettingsInput, NetworkSettingsSummary } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily, primaryButtonStyle } from '../theme.js'
+import { colors, fontFamily, primaryButtonStyle, sectionHeadingStyle} from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { SecretField } from './SecretField.js'
 
@@ -132,7 +132,7 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
         onChange={setCertDir}
       />
 
-      <h3 style={{ fontSize: 12, textTransform: 'uppercase', color: colors.muted, margin: '24px 0 12px' }}>
+      <h3 style={{ ...sectionHeadingStyle(), margin: '24px 0 12px' }}>
         Trust
       </h3>
 
@@ -163,7 +163,7 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
         </div>
       )}
 
-      <h3 style={{ fontSize: 12, textTransform: 'uppercase', color: colors.muted, margin: '24px 0 12px' }}>
+      <h3 style={{ ...sectionHeadingStyle(), margin: '24px 0 12px' }}>
         Client certificate
       </h3>
       <p style={{ ...hint, marginTop: 0 }}>

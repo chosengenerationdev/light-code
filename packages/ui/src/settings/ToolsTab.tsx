@@ -1,7 +1,7 @@
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle, sectionHeadingStyle} from '../theme.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -122,7 +122,7 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
 
       {props.docsIndex !== undefined && (
         <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
-          <h3 style={{ margin: '0 0 2px', fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase', color: colors.muted }}>
+          <h3 style={sectionHeadingStyle()}>
             Tool documentation index
           </h3>
           <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
