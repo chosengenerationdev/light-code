@@ -437,10 +437,20 @@ export type UiToHostMessage =
    * nothing, which is the sort of failure that gets noticed weeks later.
    */
   | { type: 'validateMailFolder'; path: string }
+  /** The mailbox folder tree, for picking rather than typing. */
+  | { type: 'requestOutlookFolders'; depth?: number }
+  /**
+   * Stops a running index or sync.
+   *
+   * One message for every kind rather than one per feature: they all read something large and
+   * slow, and a user who wants to stop one wants to stop whichever is running.
+   */
+  | { type: 'cancelIndexing'; kind?: 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' }
   | {
       type: 'saveMailSettings'
       enabled: boolean
       folders: string[]
+      includeSubfolders: boolean
       syncMinutes: number
       retentionMonths: number
       /**
@@ -482,7 +492,6 @@ export type UiToHostMessage =
   | { type: 'clearSearchLog' }
   | { type: 'setDispatcher'; enabled: boolean }
   | { type: 'setSkillRetrieval'; enabled: boolean }
-  | { type: 'cancelIndexing' }
   | {
       type: 'saveEmbedder'
       profileId: string
@@ -919,6 +928,26 @@ export type HostToUiMessage =
   | { type: 'teamAliasAttached'; alias?: string; index?: string; attributed?: number; error?: string }
   | { type: 'teamSkillsPublished'; count?: number; collection?: string; error?: string }
   | {
+      type: 'outlookFolders'
+      folders?: { name: string; path: string; depth: number; unread?: number | null }[]
+      error?: string
+    }
+  /**
+   * What a long-running index is doing, and whether it can be stopped.
+   *
+   * Shared by every kind so one component renders them all. Without `total` the bar is
+   * indeterminate, which is honest for a walk that has not finished counting.
+   */
+  | {
+      type: 'indexingProgress'
+      kind: 'codebase' | 'docs' | 'skills' | 'tools' | 'mail'
+      phase: string
+      done?: number
+      total?: number
+      detail?: string
+      running: boolean
+    }
+  | {
       type: 'mailFolderValidated'
       /** What the user typed, so a late reply cannot be shown against a different entry. */
       requested: string
@@ -943,6 +972,7 @@ export type HostToUiMessage =
       enabled: boolean
       available: boolean
       folders: string[]
+      includeSubfolders?: boolean
       syncMinutes: number
       retentionMonths: number
       indexed: number

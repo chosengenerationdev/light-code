@@ -1164,6 +1164,43 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** Set while a sync or prune runs, so two cannot overlap on one mailbox. */
   let mailBusy = false
   let mailTimer: ReturnType<typeof setInterval> | undefined
+  /**
+   * A stop switch per kind of index.
+   *
+   * Separate controllers rather than one, because these run independently: cancelling a mail
+   * sync must not abort a codebase index that happens to be running, and a shared controller
+   * would do exactly that while looking correct.
+   */
+  const indexingAborts = new Map<string, AbortController>()
+
+  /** Starts a cancellable run, replacing any previous controller for that kind. */
+  function beginIndexing(kind: string): AbortSignal {
+    indexingAborts.get(kind)?.abort()
+    const controller = new AbortController()
+    indexingAborts.set(kind, controller)
+    return controller.signal
+  }
+
+  function endIndexing(kind: string): void {
+    indexingAborts.delete(kind)
+  }
+
+  /** Reports what a long run is doing. `running: false` is what clears the bar. */
+  function reportIndexing(
+    kind: 'codebase' | 'docs' | 'skills' | 'tools' | 'mail',
+    phase: string,
+    extra: { done?: number; total?: number; detail?: string; running?: boolean } = {},
+  ): void {
+    post({
+      type: 'indexingProgress',
+      kind,
+      phase,
+      running: extra.running ?? true,
+      ...(extra.done !== undefined ? { done: extra.done } : {}),
+      ...(extra.total !== undefined ? { total: extra.total } : {}),
+      ...(extra.detail !== undefined ? { detail: extra.detail } : {}),
+    })
+  }
   let mailLastResult: string | undefined
 
   async function loadSettings(): Promise<LightCodeConfig> {
@@ -3281,16 +3318,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (mailBusy) return
     const config = await loadSettings()
     if (config.mail?.enabled !== true || cachedOffice.outlook !== true || !officeSupported()) return
-    const folders = config.mail.folders ?? []
-    if (folders.length === 0) return
+    const chosen = config.mail.folders ?? []
+    if (chosen.length === 0) return
+    /*
+     * Subfolders are expanded here, at sync time, rather than when they were ticked. A subfolder
+     * created since then is picked up automatically, which is what "include subfolders" has to
+     * mean if it is to keep being true.
+     */
+    const folders = config.mail.includeSubfolders === false ? chosen : await expandSubfolders(chosen)
 
     mailBusy = true
+    const signal = beginIndexing('mail')
+    reportIndexing('mail', 'Asking Outlook for new messages', { detail: `${String(folders.length)} folder(s)` })
     try {
       const embedder = await resolveEmbedder(config)
       const search = await resolveMailSearch(config)
       const collection = mailCollectionName(config)
 
       const result = await syncMail({
+        signal,
+        onProgress: (done: number, total: number, phase: string) =>
+          reportIndexing('mail', phase, { done, total }),
         store: mailStore,
         folders,
         ...(config.mail.previewChars !== undefined ? { previewChars: config.mail.previewChars } : {}),
@@ -3320,6 +3368,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         result.added === 0
           ? `No new mail (${reason}).`
           : `Indexed ${String(result.added)} new message(s)${result.more ? ' \u2014 more remain, syncing again shortly' : ''}.`
+      reportIndexing('mail', 'Finished', { detail: mailLastResult, running: false })
       logger.info(`mail sync: ${mailLastResult}`)
       /*
        * A truncated pass means the mailbox had more than one batch. Rather than loop here —
@@ -3328,11 +3377,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       await postMailStatus()
     } catch (error) {
-      mailLastResult = error instanceof Error ? error.message : String(error)
-      logger.warn(`mail sync failed: ${mailLastResult}`)
+      const stopped = signal.aborted
+      mailLastResult = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
+      if (!stopped) logger.warn(`mail sync failed: ${mailLastResult}`)
+      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', { detail: mailLastResult, running: false })
       await postMailStatus()
     } finally {
       mailBusy = false
+      endIndexing('mail')
     }
   }
 
@@ -3365,6 +3417,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       folders: config.mail?.folders ?? [],
       syncMinutes: config.mail?.syncMinutes ?? 15,
       retentionMonths: config.mail?.retentionMonths ?? 6,
+      includeSubfolders: config.mail?.includeSubfolders !== false,
       indexed: records.length,
       ...(times.length > 0 ? { oldest: Math.min(...times), newest: Math.max(...times) } : {}),
       sizeBytes: await mailStore.sizeBytes(),
@@ -3389,6 +3442,37 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * is returned and stored in place of what was typed: a folder added as `inbox/alerts` is saved
    * as Outlook spells it, so anything that later compares two paths agrees with itself.
    */
+  /** The mailbox folder tree, so folders can be ticked rather than typed. */
+  /** Every folder at or beneath the chosen ones, as Outlook currently has them. */
+  async function expandSubfolders(chosen: readonly string[]): Promise<string[]> {
+    try {
+      const result = await office().request<{ folders: { path: string }[] }>({
+        op: 'outlook.folders',
+        depth: 8,
+      })
+      const all = result.folders.map((entry) => entry.path)
+      const wanted = new Set<string>(chosen)
+      for (const path of all) {
+        if (chosen.some((root) => path === root || path.startsWith(`${root}\\`))) wanted.add(path)
+      }
+      return [...wanted]
+    } catch {
+      // Listing failed; index exactly what was chosen rather than nothing.
+      return [...chosen]
+    }
+  }
+
+  async function handleRequestOutlookFolders(depth?: number): Promise<void> {
+    try {
+      const result = await office().request<{
+        folders: { name: string; path: string; depth: number; unread?: number | null }[]
+      }>({ op: 'outlook.folders', depth: depth ?? 6 })
+      post({ type: 'outlookFolders', folders: result.folders })
+    } catch (error) {
+      post({ type: 'outlookFolders', error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleValidateMailFolder(requested: string): Promise<void> {
     try {
       const result = await office().request<{
@@ -3460,6 +3544,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function handleSaveMailSettings(settings: {
     enabled: boolean
     folders: string[]
+    includeSubfolders: boolean
     syncMinutes: number
     retentionMonths: number
     storeId?: string
@@ -3480,6 +3565,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         mail: {
           enabled: settings.enabled,
           folders: settings.folders.filter((folder) => folder.trim().length > 0),
+          includeSubfolders: settings.includeSubfolders,
           syncMinutes: settings.syncMinutes,
           retentionMonths: settings.retentionMonths,
         },
@@ -5412,6 +5498,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void runMailSync('requested')
     } else if (message.type === 'pruneMail') {
       void handlePruneMail()
+    } else if (message.type === 'requestOutlookFolders') {
+      void handleRequestOutlookFolders(message.depth)
     } else if (message.type === 'validateMailFolder') {
       void handleValidateMailFolder(message.path)
     } else if (message.type === 'requestMailStatus') {
@@ -5428,6 +5516,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSaveMailSettings({
         enabled: message.enabled,
         folders: message.folders,
+        includeSubfolders: message.includeSubfolders,
         syncMinutes: message.syncMinutes,
         retentionMonths: message.retentionMonths,
         ...(message.storeId !== undefined ? { storeId: message.storeId } : {}),
@@ -5435,7 +5524,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'saveSkillsAlias') {
       void handleSaveSkillsAlias(message.alias)
     } else if (message.type === 'cancelIndexing') {
-      indexingAbort?.abort()
+      // No kind means "whatever is running", which is what a user pressing Stop means.
+      if (message.kind === undefined) {
+        indexingAbort?.abort()
+        for (const controller of indexingAborts.values()) controller.abort()
+      } else if (message.kind === 'codebase') {
+        indexingAbort?.abort()
+      } else {
+        indexingAborts.get(message.kind)?.abort()
+      }
     } else if (message.type === 'saveEmbedder') {
       void handleSaveEmbedder(
         message.profileId,

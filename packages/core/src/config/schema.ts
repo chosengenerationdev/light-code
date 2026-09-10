@@ -535,8 +535,17 @@ export const mailIndexConfigSchema = z
   .object({
     /** Nothing is read until this is true. */
     enabled: z.boolean(),
-    /** Folder paths as they appear in Outlook, e.g. `Inbox/Alerts`. */
+    /** Folder paths as Outlook spells them, picked from the tree rather than typed. */
     folders: z.array(z.string().min(1)),
+    /**
+     * Index everything beneath a chosen folder too.
+     *
+     * Resolved when the sync runs rather than expanded into `folders` when it is ticked. Storing
+     * the expansion would freeze the tree as it was that day, so a subfolder created next month
+     * would silently never be indexed - and "everything under Alerts" would quietly stop meaning
+     * that.
+     */
+    includeSubfolders: z.boolean(),
     /**
      * How often new mail is collected, in minutes.
      *

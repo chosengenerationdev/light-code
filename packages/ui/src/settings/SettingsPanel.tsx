@@ -14,6 +14,7 @@ import { ExpertTab, type ExpertState } from './ExpertTab.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
+import { OutlookTab, type OutlookTabProps } from './OutlookTab.js'
 import { ToolsTab, type ToolsTabProps } from './ToolsTab.js'
 import { ReviewsTab, type ReviewsTabProps } from './ReviewsTab.js'
 import { VariablesTab, type VariablesTabProps } from './VariablesTab.js'
@@ -24,6 +25,7 @@ import { ProvidersTab, type ProvidersTabProps } from './ProvidersTab.js'
 import { AppearanceSection } from './AppearanceSection.js'
 import {
   BookIcon,
+  MailIcon,
   ClockIcon,
   ExpertIcon,
   GlobeIcon,
@@ -92,6 +94,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
   python: PythonTabProps
   tools: ToolsTabProps
+  outlook: Omit<OutlookTabProps, 'onOpenTools'>
   /** Changes which tab is shown. Bumped by the host so the same tab can be asked for twice. */
   requestedTab?: { tab: string; nonce: number } | undefined
   /**
@@ -123,6 +126,7 @@ type TabId =
   | 'network'
   | 'python'
   | 'tools'
+  | 'outlook'
   | 'skills'
   | 'schedules'
   | 'appearance'
@@ -159,6 +163,9 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'python', label: 'Python', Icon: PythonIcon },
   // After the sources it lists, because it is where you go to *read* rather than change.
   { id: 'tools', label: 'Tools', Icon: ToolboxIcon },
+  // Beside Skills rather than beside Tools: both are corpora the assistant reads from, where
+  // Tools is a list of what can act.
+  { id: 'outlook', label: 'Outlook', Icon: MailIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
   { id: 'reviews', label: 'Review', Icon: ShieldIcon },
@@ -301,6 +308,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <SkillsTab {...props.skills} />
         ) : shown === 'tools' ? (
           <ToolsTab {...props.tools} />
+        ) : shown === 'outlook' ? (
+          <OutlookTab {...props.outlook} onOpenTools={() => setActive('tools')} />
         ) : shown === 'python' ? (
           <PythonTab {...props.python} />
         ) : shown === 'network' ? (

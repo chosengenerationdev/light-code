@@ -409,6 +409,12 @@ option:hover {
 
 /* ---- scrollbars, tinted to match ---- */
 
+@keyframes lc-indeterminate {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(140%); }
+  100% { transform: translateX(-100%); }
+}
+
 .lc-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .lc-scroll::-webkit-scrollbar-track { background: transparent; }
 .lc-scroll::-webkit-scrollbar-thumb {

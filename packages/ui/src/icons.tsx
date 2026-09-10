@@ -401,6 +401,16 @@ export function ToolboxIcon({ size = 16 }: IconProps): ReactElement {
 }
 
 /** Skills — a book, for written-down knowledge. */
+/** An envelope, for the mail index. */
+export function MailIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} aria-hidden="true">
+      <rect x="1.5" y="3.5" width="13" height="9" rx="1.5" />
+      <path d="M2 4.5 8 9l6-4.5" />
+    </svg>
+  )
+}
+
 export function BookIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">

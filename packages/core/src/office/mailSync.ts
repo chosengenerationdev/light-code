@@ -42,6 +42,13 @@ export interface MailSyncOptions {
   /** Messages per pass. Bounded so a first run over a large mailbox does not stall the timer. */
   batchLimit?: number
   signal?: AbortSignal
+  /**
+   * Called as messages are embedded.
+   *
+   * Embedding is the slow part by a wide margin - one request per message - so progress that
+   * only reported "harvesting" and then "done" would show nothing for most of the run.
+   */
+  onProgress?: (done: number, total: number, phase: string) => void
 }
 
 export interface HarvestedMessage {
@@ -112,6 +119,10 @@ export async function syncMail(options: MailSyncOptions): Promise<MailSyncResult
 
     const documents: VectorDocument[] = []
     for (const record of fresh) {
+      // Checked between messages rather than only at the boundaries: a mailbox with a thousand
+      // new messages would otherwise ignore Stop for the length of the whole batch.
+      if (options.signal?.aborted === true) throw new Error('Stopped.')
+      options.onProgress?.(documents.length, fresh.length, 'Embedding new messages')
       const text = mailEmbedText(record)
       if (text.trim().length === 0) continue
       documents.push({

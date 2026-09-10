@@ -213,15 +213,43 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
         <label htmlFor="lc-emb-alias" style={labelStyle()}>
           Team index alias <span style={{ color: colors.muted, fontWeight: 'normal' }}>(optional)</span>
         </label>
-        <input
-          id="lc-emb-alias"
-          type="text"
-          value={indexAlias}
-          spellCheck={false}
-          placeholder="e.g. my-team-code"
-          onChange={(event) => setIndexAlias(event.target.value)}
-          style={textFieldStyle()}
-        />
+        {/*
+          Its own Save, beside the field.
+
+          The section's button is labelled "Save embedder" and sits several fields below, which is
+          why "it says to click the save button, but i don't know where it is" was a fair report:
+          nothing connected an alias to a button about embedders. A control that needs saving
+          should have the save next to it.
+        */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            id="lc-emb-alias"
+            type="text"
+            value={indexAlias}
+            spellCheck={false}
+            placeholder="e.g. my-team-code"
+            onChange={(event) => setIndexAlias(event.target.value)}
+            style={{ ...textFieldStyle(), flex: 1 }}
+          />
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            disabled={!aliasUnsaved}
+            title={aliasUnsaved ? 'Save the alias' : 'Already saved'}
+            onClick={() =>
+              props.onSaveEmbedder(
+                profileId,
+                model.trim(),
+                parsedDimensions,
+                indexName.trim(),
+                indexPrefix.trim(),
+                indexAlias.trim(),
+              )
+            }
+          >
+            {aliasUnsaved ? 'Save alias' : 'Saved'}
+          </button>
+        </div>
         <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
           One name pointing at every teammate&rsquo;s index, so <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>search_codebase</code>{' '}
           can be asked to look across the team. Everyone still writes to their own index; set the

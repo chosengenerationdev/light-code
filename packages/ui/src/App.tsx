@@ -36,7 +36,9 @@ import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { PendingForm } from './FormPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
-import type { FolderValidation, MailStatusState } from './settings/MailSection.js'
+import type { MailFolderNode } from './settings/FolderTree.js'
+import type { IndexingProgressState } from './settings/IndexingProgress.js'
+import type { MailStatusState } from './settings/OutlookTab.js'
 import { ModeSelector } from './ModeSelector.js'
 import { Guide } from './guide/Guide.js'
 import type { ReviewItem } from './settings/ReviewsTab.js'
@@ -197,8 +199,13 @@ export function App(props: AppProps): ReactElement {
   >(undefined)
   /** State of mail indexing, refreshed whenever the host reports it. */
   const [mailStatus, setMailStatus] = useState<MailStatusState | undefined>(undefined)
-  /** The answer to the last folder check, matched to its request by path. */
-  const [folderValidation, setFolderValidation] = useState<FolderValidation | undefined>(undefined)
+  /** The mailbox tree, so folders are ticked rather than typed. */
+  const [mailTree, setMailTree] = useState<{ folders: MailFolderNode[]; error?: string; loading: boolean }>({
+    folders: [],
+    loading: false,
+  })
+  /** What a long-running index is doing. One slot: only one runs at a time in practice. */
+  const [indexingProgress, setIndexingProgress] = useState<IndexingProgressState | undefined>(undefined)
   /** The outcome of publishing this machine's skills to the team collection. */
   const [teamSkillsResult, setTeamSkillsResult] = useState<
     { count?: number; collection?: string; error?: string } | undefined
@@ -513,15 +520,20 @@ export function App(props: AppProps): ReactElement {
         setEmbedderSavedTick((tick) => tick + 1)
       } else if (message.type === 'indexProgress') {
         setIndexProgress(message.progress)
-      } else if (message.type === 'mailFolderValidated') {
-        setFolderValidation({
-          requested: message.requested,
-          ok: message.ok,
-          ...(message.canonical !== undefined ? { canonical: message.canonical } : {}),
-          ...(message.how !== undefined ? { how: message.how } : {}),
-          ...(message.items !== undefined ? { items: message.items } : {}),
+      } else if (message.type === 'outlookFolders') {
+        setMailTree({
+          folders: message.folders ?? [],
+          loading: false,
           ...(message.error !== undefined ? { error: message.error } : {}),
-          ...(message.suggestions !== undefined ? { suggestions: message.suggestions } : {}),
+        })
+      } else if (message.type === 'indexingProgress') {
+        setIndexingProgress({
+          kind: message.kind,
+          phase: message.phase,
+          running: message.running,
+          ...(message.done !== undefined ? { done: message.done } : {}),
+          ...(message.total !== undefined ? { total: message.total } : {}),
+          ...(message.detail !== undefined ? { detail: message.detail } : {}),
         })
       } else if (message.type === 'mailStatus') {
         setMailStatus({
@@ -1238,20 +1250,22 @@ export function App(props: AppProps): ReactElement {
                   ...(id === undefined ? {} : { id }),
                 } satisfies UiToHostMessage),
             }}
+            outlook={{
+              status: mailStatus,
+              onSave: (settings) =>
+                props.transport.post({ type: 'saveMailSettings', ...settings } satisfies UiToHostMessage),
+              onSyncNow: () => props.transport.post({ type: 'syncMail' } satisfies UiToHostMessage),
+              onPrune: () => props.transport.post({ type: 'pruneMail' } satisfies UiToHostMessage),
+              tree: mailTree,
+              progress: indexingProgress?.kind === 'mail' ? indexingProgress : undefined,
+              onRefreshFolders: () => {
+                setMailTree((current) => ({ ...current, loading: true }))
+                props.transport.post({ type: 'requestOutlookFolders' } satisfies UiToHostMessage)
+              },
+              onStop: () => props.transport.post({ type: 'cancelIndexing', kind: 'mail' } satisfies UiToHostMessage),
+            }}
             tools={{
               ...toolCatalogue,
-              mail: {
-                status: mailStatus,
-                onSave: (settings) =>
-                  props.transport.post({ type: 'saveMailSettings', ...settings } satisfies UiToHostMessage),
-                onSyncNow: () => props.transport.post({ type: 'syncMail' } satisfies UiToHostMessage),
-                onPrune: () => props.transport.post({ type: 'pruneMail' } satisfies UiToHostMessage),
-                onValidateFolder: (path: string) => {
-                  setFolderValidation(undefined)
-                  props.transport.post({ type: 'validateMailFolder', path } satisfies UiToHostMessage)
-                },
-                validation: folderValidation,
-              },
               ...(toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds }),
               onSetToolTimeoutFor: (name: string, seconds?: number) =>
                 props.transport.post({
