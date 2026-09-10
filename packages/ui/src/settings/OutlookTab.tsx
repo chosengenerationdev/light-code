@@ -245,7 +245,10 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
         )}
       </Section>
 
-      <Section title="Schedule and retention">
+      <Section
+        title="Schedule and retention"
+        hint="Retention is the bound on the whole index, not just a cleanup: history is collected back to this limit and no further, and anything older is removed on the next check."
+      >
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}>
             <label htmlFor="lc-mail-sync" style={labelStyle()}>

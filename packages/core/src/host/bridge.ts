@@ -3354,6 +3354,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           reportIndexing('mail', phase, { done, total }),
         store: mailStore,
         folders,
+        /*
+         * History is collected only as far back as retention keeps it.
+         *
+         * Without this the backfill walked to the beginning of the mailbox, embedding years of
+         * mail that the next prune would delete - and then re-embedding it, because pruning moves
+         * the oldest mark forward and the backfill resumes from there. A permanent loop paying to
+         * embed the same messages.
+         */
+        retentionMonths: config.mail?.retentionMonths ?? 6,
         ...(config.mail.previewChars !== undefined ? { previewChars: config.mail.previewChars } : {}),
         harvest: async (requests, limits) =>
           office().request<{ messages: HarvestedMessage[]; truncated: boolean }>({
@@ -3376,6 +3385,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             }
           : {}),
       })
+
+      /*
+       * Pruned on the sync, not only when somebody presses the button.
+       *
+       * Retention was a setting nobody applied: `pruneMail` ran from the button alone, so an
+       * index left to itself grew for ever while the panel displayed a limit it was not keeping.
+       * This does no work when there is nothing past the horizon - it rewrites the file only if
+       * something is actually removed - so the ordinary case costs one comparison.
+       */
+      await pruneIfDue(config)
 
       mailLastResult =
         result.added === 0
@@ -3694,6 +3713,38 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       mailBusy = false
       endIndexing('mail')
       await postMailStatus()
+    }
+  }
+
+  /** Applies retention, quietly, as part of an ordinary sync. */
+  async function pruneIfDue(config: LightCodeConfig): Promise<void> {
+    const months = config.mail?.retentionMonths
+    if (months === undefined) return
+    try {
+      const collection = mailCollectionName(config)
+      const search = await resolveMailSearch(config)
+      const result = await pruneMail({
+        store: mailStore,
+        months,
+        ...(search !== undefined && collection !== undefined
+          ? {
+              semantic: {
+                writer: createVectorIndexWriter(
+                  httpClient,
+                  search.store,
+                  await vectorStoreConnectionFor(search.store, search.id),
+                ),
+                collection,
+              },
+            }
+          : {}),
+      })
+      if (result.removed > 0) {
+        logger.info(`mail retention: removed ${String(result.removed)} message(s) older than ${String(months)} month(s)`)
+      }
+    } catch (error) {
+      // Never fails the sync: mail that arrived is worth more than mail that did not leave.
+      logger.warn(`mail retention failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

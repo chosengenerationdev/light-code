@@ -1,6 +1,6 @@
 import type { Embedder } from '../rag/embedder.js'
 import type { VectorDocument, VectorIndexWriter } from '../rag/vectorStore.js'
-import { parseStatusTag, pruneOlderThan, type MailRecord } from './mailIndex.js'
+import { monthsBefore, parseStatusTag, pruneOlderThan, type MailRecord } from './mailIndex.js'
 import { folderMarks, withoutKnown, type MailStore } from './mailStore.js'
 
 /**
@@ -39,6 +39,20 @@ export interface MailSyncOptions {
     collection: string
   }
   previewChars?: number
+  /**
+   * How far back history is worth collecting, in months. The retention setting.
+   *
+   * **The backfill must stop here, and it did not.** It walked back to the beginning of the
+   * mailbox regardless, which is wasted embedding cost for mail that retention exists to delete —
+   * and worse, it looped: pruning moved the oldest mark forward, the next backfill re-fetched and
+   * re-embedded exactly what had just been deleted, and pruning removed it again. Every cycle,
+   * for ever, paying to embed the same messages.
+   *
+   * Undefined means no floor, which is what a caller with no retention configured wants.
+   */
+  retentionMonths?: number
+  /** Injectable clock, so the retention horizon can be tested without waiting six months. */
+  now?: number
   /** Messages per pass. Bounded so a first run over a large mailbox does not stall the timer. */
   batchLimit?: number
   signal?: AbortSignal
@@ -180,15 +194,35 @@ export async function syncMail(options: MailSyncOptions): Promise<MailSyncResult
   const completed: string[] = []
   let more = forward.truncated
 
-  // --- backward: history, for folders that still have some ------------------------------------
+  // --- backward: history, back as far as retention wants it ------------------------------------
   const remaining = limit - candidates.length
-  const behind = options.folders.filter((path) => marks.has(path) && backfillDone[path] !== true)
+  /*
+   * The floor, and the folders already standing on it.
+   *
+   * A folder whose oldest message is already past the horizon has nothing left worth collecting:
+   * anything older would be fetched, embedded, and then deleted by the next prune. Treated as
+   * finished rather than skipped, so it is recorded and never asked again.
+   */
+  const floor =
+    options.retentionMonths === undefined
+      ? undefined
+      : monthsBefore(options.now ?? Date.now(), options.retentionMonths)
+
+  const outstanding = options.folders.filter((path) => marks.has(path) && backfillDone[path] !== true)
+  const atFloor =
+    floor === undefined
+      ? []
+      : outstanding.filter((path) => (marks.get(path) as { oldest: number }).oldest <= floor)
+  const behind = outstanding.filter((path) => !atFloor.includes(path))
+  completed.push(...atFloor)
 
   if (remaining > 0 && behind.length > 0 && options.signal?.aborted !== true) {
     const backRequests = behind.map((path) => ({
       path,
       // Strictly older, so the oldest held message is not fetched again every pass.
       beforeMs: (marks.get(path) as { oldest: number }).oldest,
+      // And no older than retention wants. The harvest ANDs the two into one window.
+      ...(floor === undefined ? {} : { sinceMs: floor }),
     }))
     const backward = await options.harvest(backRequests, { limit: remaining, previewChars })
     backfilled = backward.messages.length
@@ -205,13 +239,19 @@ export async function syncMail(options: MailSyncOptions): Promise<MailSyncResult
     for (const path of behind) {
       if (!returnedFor.has(path)) completed.push(path)
     }
-    if (completed.length > 0) {
-      await options.store.saveBackfillState({
-        ...backfillDone,
-        ...Object.fromEntries(completed.map((path) => [path, true])),
-      })
-    }
     if (backward.truncated || backfilled > 0) more = true
+  }
+
+  if (completed.length > 0) {
+    /*
+     * Written outside the backward block, because a folder can reach the floor without a backward
+     * pass ever running — the batch may have been spent on new mail. Leaving it unrecorded there
+     * meant the same folder was re-examined on every single sync.
+     */
+    await options.store.saveBackfillState({
+      ...backfillDone,
+      ...Object.fromEntries(completed.map((path) => [path, true])),
+    })
   }
 
   const fresh = withoutKnown(candidates, known)
