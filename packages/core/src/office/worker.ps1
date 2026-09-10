@@ -169,17 +169,251 @@ function Get-AttachFailureMessage {
     return "$ProgId is not running on this machine. Open it and try again - this deliberately will not start it for you, because starting it can take a minute and may put a dialog on your screen."
 }
 
+<#
+  Transient COM failures, and why retrying is not papering over anything.
+
+  Measured, not assumed: with a cell open for editing - which is the state a person is in
+  whenever they are typing - **every** COM call into Excel fails with
+
+      0x80010001  RPC_E_CALL_REJECTED  "Call was rejected by callee"
+
+  It is not an error in any useful sense. Excel is simply not accepting calls this instant, and
+  the same call a moment later succeeds. Surfacing it reads as the feature being broken, which
+  is exactly how it was reported.
+
+  Three codes are treated this way and no others:
+    0x80010001  RPC_E_CALL_REJECTED         - busy, editing a cell, or a dialog is up
+    0x8001010A  RPC_E_SERVERCALL_RETRYLATER - the message filter says come back
+    0x800AC472  VBA_E_IGNORE                - Excel refusing automation mid-recalculation
+
+  Everything else is a real failure and is raised immediately. A blanket retry would turn a
+  genuine "no such sheet" into four seconds of silence and then the same error.
+#>
+$script:transientComCodes = @('0x80010001', '0x8001010A', '0x800AC472')
+
+function Get-ComErrorCode {
+    param($ErrorRecord)
+
+    $ex = $ErrorRecord.Exception
+    # COM failures arrive wrapped - often twice - and only the innermost carries the HRESULT.
+    $depth = 0
+    while ($null -ne $ex.InnerException -and $depth -lt 8) { $ex = $ex.InnerException; $depth++ }
+    try { return ('0x{0:X8}' -f [int]$ex.HResult) } catch { return '' }
+}
+
+function Invoke-ComWithRetry {
+    param([scriptblock]$Action, [int]$Attempts = 5)
+
+    $delayMs = 200
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            return & $Action
+        } catch {
+            $code = Get-ComErrorCode -ErrorRecord $_
+            if ($attempt -ge $Attempts -or $script:transientComCodes -notcontains $code) { throw }
+            Start-Sleep -Milliseconds $delayMs
+            # Backed off rather than hammered: someone typing a sentence into a cell holds Excel
+            # for seconds, and five rapid attempts inside half a second would all fail.
+            $delayMs = [Math]::Min($delayMs * 2, 2000)
+        }
+    }
+}
+
+<#
+  Turns a COM failure into something a person can act on.
+
+  The default text is unusable: "Call was rejected by callee" tells the user nothing about their
+  spreadsheet, and the previous version of this passed it straight through. Naming the actual
+  cause - and what to do about it - is the whole difference between a bug report and a fix.
+#>
+function Get-ComErrorAdvice {
+    param([string]$Code, [string]$Operation)
+
+    switch ($Code) {
+        '0x80010001' {
+            return "Excel would not accept the request ($Operation). It is busy: most often a cell is open for editing, or a dialog is waiting. Press Escape in Excel, click away from any cell being edited, and try again."
+        }
+        '0x8001010A' {
+            return "Excel is busy and asked to be called back later ($Operation). It may be recalculating or opening a large workbook. Wait for it to settle and try again."
+        }
+        '0x800AC472' {
+            return "Excel refused automation while it was recalculating ($Operation). Let the calculation finish and try again."
+        }
+        '0x800401E3' {
+            return "Excel is not running, or is not reachable from here ($Operation)."
+        }
+        default { return '' }
+    }
+}
+
+<#
+  Every running Excel, not just the one Windows happens to nominate.
+
+  ## The defect this fixes
+
+  Measured with two Excel windows open, each holding a workbook:
+
+      GetActiveObject     -> reached ONE instance, saw Book1 only
+      Running Object Table -> zero Excel documents (unsaved workbooks register nothing)
+
+  So the second workbook was invisible. In an office that is the ordinary case rather than an
+  edge one - a workbook opened from mail gets its own instance, Protected View gets its own
+  instance, and people simply start a second Excel. Asked about a spreadsheet plainly on screen,
+  the tools answered that it was not open.
+
+  ## How this reaches them
+
+  Every top-level `XLMAIN` window is enumerated, and for each the workbook pane two levels down
+  (`XLMAIN > XLDESK > EXCEL7`) is asked for its native object model through
+  `AccessibleObjectFromWindow`. That yields a Window, whose `.Application` is the instance. It is
+  the only approach that finds an instance the ROT never registered.
+
+  `out object` must be marshalled as IUnknown explicitly; without it the call fails with
+  "Specified OLE variant is invalid", which is what the first attempt did.
+#>
+function Initialize-ExcelWindowFinder {
+    if ($script:excelWindowFinderReady) { return }
+    $definition = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class LightCodeExcelWindows {
+    delegate bool EnumProc(IntPtr hwnd, IntPtr param);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr param);
+    [DllImport("user32.dll")] static extern IntPtr FindWindowExA(IntPtr parent, IntPtr after, string cls, string title);
+    [DllImport("user32.dll")] static extern int GetClassNameA(IntPtr hwnd, StringBuilder text, int max);
+    [DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(
+        IntPtr hwnd, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object obj);
+
+    public static List<object> Panes() {
+        var tops = new List<IntPtr>();
+        EnumWindows((hwnd, p) => {
+            var name = new StringBuilder(64);
+            GetClassNameA(hwnd, name, name.Capacity);
+            if (name.ToString() == "XLMAIN") { tops.Add(hwnd); }
+            return true;
+        }, IntPtr.Zero);
+
+        var found = new List<object>();
+        foreach (var top in tops) {
+            IntPtr desk = FindWindowExA(top, IntPtr.Zero, "XLDESK", null);
+            if (desk == IntPtr.Zero) { continue; }
+            IntPtr pane = FindWindowExA(desk, IntPtr.Zero, "EXCEL7", null);
+            if (pane == IntPtr.Zero) { continue; }
+
+            var iid = new Guid("00020400-0000-0000-C000-000000000046");
+            object window;
+            if (AccessibleObjectFromWindow(pane, 0xFFFFFFF0, ref iid, out window) == 0 && window != null) {
+                found.Add(window);
+            }
+        }
+        return found;
+    }
+}
+'@
+    Add-Type -TypeDefinition $definition
+    $script:excelWindowFinderReady = $true
+}
+
+function Get-ExcelInstances {
+    $instances = @()
+    $seen = @{}
+
+    try {
+        Initialize-ExcelWindowFinder
+        foreach ($pane in [LightCodeExcelWindows]::Panes()) {
+            try {
+                $app = $pane.Application
+                $key = [string]$app.Hwnd
+                if ($seen.ContainsKey($key)) { continue }
+                $seen[$key] = $true
+                $instances += $app
+            } catch {
+                # A window mid-teardown, or one that will not hand over its object model.
+            }
+        }
+    } catch {
+        # No window enumeration available. The fallbacks below still find the usual single case.
+    }
+
+    # Fallbacks, in the order they are likely to work. Both reach at most one instance, which is
+    # exactly the limitation the enumeration above exists to remove - but either is better than
+    # none when it fails.
+    if ($instances.Count -eq 0) {
+        try {
+            $app = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
+            $instances += $app
+        } catch { }
+    }
+    if ($instances.Count -eq 0) {
+        $app = Get-ExcelViaRot
+        if ($null -ne $app) { $instances += $app }
+    }
+
+    return $instances
+}
+
+<#
+  Finds a workbook by name across every running Excel.
+
+  Searching one instance was the old behaviour and is why a workbook in a second window reported
+  as not open. Matching is on name or full path, and is case-insensitive because nobody types a
+  file name back exactly as Windows stored it.
+#>
+function Find-ExcelWorkbook {
+    param([string]$Name)
+
+    $instances = Get-ExcelInstances
+    if ($instances.Count -eq 0) { throw (Get-AttachFailureMessage -ProgId 'Excel.Application') }
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        foreach ($app in $instances) {
+            try {
+                if ($app.Workbooks.Count -gt 0) {
+                    $active = $app.ActiveWorkbook
+                    if ($null -ne $active) { return @{ app = $app; workbook = $active } }
+                }
+            } catch { }
+        }
+        throw 'No workbook is open in Excel.'
+    }
+
+    $available = @()
+    foreach ($app in $instances) {
+        try {
+            foreach ($wb in $app.Workbooks) {
+                $available += $wb.Name
+                if ($wb.Name -eq $Name -or $wb.FullName -eq $Name) { return @{ app = $app; workbook = $wb } }
+            }
+        } catch { }
+    }
+    # Second pass, case-insensitively, so a name typed back in lower case still matches.
+    foreach ($app in $instances) {
+        try {
+            foreach ($wb in $app.Workbooks) {
+                if ($wb.Name -ieq $Name -or $wb.FullName -ieq $Name) { return @{ app = $app; workbook = $wb } }
+            }
+        } catch { }
+    }
+
+    $list = if ($available.Count -gt 0) { ' Open now: ' + ($available -join ', ') + '.' } else { ' Nothing is open.' }
+    throw "No open workbook named '$Name'.$list Call excel_sessions to see what is open."
+}
+
+<#
+  A workbook by name, wherever it is open.
+
+  `$App` is accepted and ignored on purpose: every caller already had one to hand, and threading
+  the instance through was how the search came to be confined to a single Excel in the first
+  place. `Find-ExcelWorkbook` looks across all of them - see the note there for the measurement
+  that made that necessary.
+#>
 function Get-Workbook {
     param($App, [string]$Name)
 
-    if ([string]::IsNullOrWhiteSpace($Name)) {
-        if ($App.Workbooks.Count -eq 0) { throw 'No workbook is open in Excel.' }
-        return $App.ActiveWorkbook
-    }
-    foreach ($wb in $App.Workbooks) {
-        if ($wb.Name -eq $Name -or $wb.FullName -eq $Name) { return $wb }
-    }
-    throw "No open workbook named '$Name'. Call excel_sessions to see what is open."
+    return (Find-ExcelWorkbook -Name $Name).workbook
 }
 
 function Get-Worksheet {
@@ -325,21 +559,175 @@ function Get-SheetNames {
     return $names
 }
 
-function Invoke-ExcelSessions {
-    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
-    $sessions = @()
-    foreach ($wb in $app.Workbooks) {
-        $sheets = @()
-        foreach ($sheet in $wb.Worksheets) { $sheets += $sheet.Name }
-        $sessions += [ordered]@{
-            name     = $wb.Name
-            fullName = $wb.FullName
-            saved    = [bool]$wb.Saved
-            sheets   = $sheets
-            active   = ($wb.Name -eq $app.ActiveWorkbook.Name)
+<#
+  Every open workbook, across every running Excel.
+
+  It used to list one instance's workbooks, which is why a spreadsheet plainly on screen could be
+  reported as not open: a workbook opened from mail, or in Protected View, or in a second Excel
+  someone started, lives in a different process entirely. Measured with two instances open,
+  `GetActiveObject` saw one of the two.
+
+  `instance` is carried through so a person can tell two identically named `Book1`s apart, which
+  is exactly what a second Excel gives you.
+#>
+<#
+  A report on why Excel automation is or is not working on this machine.
+
+  Written because the failures that remain are environmental, and an environment cannot be
+  reproduced from a bug report that says it did not work. Every line here answers a question that
+  has actually had to be asked: is Excel even running, how many of it, can we reach each one, is
+  it accepting calls this instant, is the VBA object model reachable, and are we and Excel at the
+  same privilege level.
+
+  It reads state and changes nothing, so it is safe to run at any time - including while Excel is
+  mid-edit, which is a state it specifically reports rather than failing on.
+#>
+function Invoke-ExcelDiagnose {
+    $report = [ordered]@{}
+
+    # --- the process, before any COM at all -------------------------------------------------
+    $processes = @()
+    try { $processes = @(Get-Process -Name 'EXCEL' -ErrorAction SilentlyContinue) } catch { }
+    $report.excelProcesses = $processes.Count
+    $report.windowTitles = @($processes | ForEach-Object { $_.MainWindowTitle } | Where-Object { $_ })
+
+    # --- who we are, since a mismatch is invisible from inside ------------------------------
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        $report.weAreElevated = [bool]$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $report.user = [string]$identity.Name
+    } catch {
+        $report.weAreElevated = $null
+    }
+
+    # --- each route to an instance, reported separately -------------------------------------
+    $report.getActiveObject = 'not tried'
+    try {
+        $null = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
+        $report.getActiveObject = 'reached one instance'
+    } catch {
+        $report.getActiveObject = 'failed: ' + (Get-ComErrorCode -ErrorRecord $_)
+    }
+
+    $rotCount = 0
+    try {
+        foreach ($name in Get-RotNames) {
+            $extension = ''
+            try { $extension = [System.IO.Path]::GetExtension($name).ToLowerInvariant() } catch { continue }
+            if ($script:excelExtensions -contains $extension) { $rotCount++ }
+        }
+    } catch { }
+    $report.rotExcelDocuments = $rotCount
+
+    $instances = @()
+    try { $instances = Get-ExcelInstances } catch { }
+    $report.instancesReached = $instances.Count
+
+    # --- what each instance holds, and whether it is answering right now --------------------
+    $details = @()
+    $index = 0
+    foreach ($app in $instances) {
+        $index++
+        $entry = [ordered]@{ instance = $index }
+        try { $entry.version = [string]$app.Version } catch { $entry.version = 'unreadable' }
+
+        <#
+          One deliberately trivial call, without the retry wrapper.
+
+          The point is to report the *current* state rather than to succeed: if Excel is mid-edit
+          this is exactly the rejection the user is hitting, and saying so is the whole reason
+          this function exists.
+        #>
+        try {
+            $null = $app.Ready
+            $entry.acceptingCalls = $true
+        } catch {
+            $entry.acceptingCalls = $false
+            $entry.rejectionCode = Get-ComErrorCode -ErrorRecord $_
+        }
+
+        try {
+            $books = @()
+            foreach ($wb in $app.Workbooks) { $books += $wb.Name }
+            $entry.workbooks = $books
+        } catch {
+            $entry.workbooks = @()
+            $entry.workbooksUnreadable = $true
+        }
+
+        # Trust Center, which returns *null* rather than throwing when access is off - the trap
+        # that once made every workbook report as having no VBA at all.
+        try {
+            $first = $null
+            try { $first = $app.Workbooks.Item(1) } catch { }
+            if ($null -ne $first) {
+                $project = $null
+                try { $project = $first.VBProject } catch { }
+                $entry.vbaAccessible = ($null -ne $project)
+            }
+        } catch { }
+
+        $details += $entry
+    }
+    $report.instances = $details
+
+    # --- the conclusion, so nobody has to infer it from the fields above --------------------
+    $advice = @()
+    if ($processes.Count -eq 0) {
+        $advice += 'Excel is not running. Open the workbook and try again.'
+    } elseif ($instances.Count -eq 0) {
+        $advice += 'Excel is running but cannot be reached. The usual cause is a privilege mismatch: if VS Code runs as administrator and Excel does not, or the other way round, Windows keeps them apart. Start both the same way.'
+    } elseif ($instances.Count -lt $processes.Count) {
+        $advice += 'Some Excel processes could not be reached. A window in Protected View refuses automation; open the workbook properly (Enable Editing) if it is one of those.'
+    }
+    foreach ($entry in $details) {
+        if ($entry.acceptingCalls -eq $false) {
+            $advice += ('Instance ' + $entry.instance + ' is refusing calls right now (' + $entry.rejectionCode + '). A cell is probably open for editing, or a dialog is waiting. Press Escape in Excel.')
+        }
+        if ($entry.vbaAccessible -eq $false) {
+            $advice += ('Instance ' + $entry.instance + ' will not expose its VBA project. Turn on File > Options > Trust Center > Trust Center Settings > Macro Settings > "Trust access to the VBA project object model" if you need macro tools.')
         }
     }
-    return @{ workbooks = $sessions; version = $app.Version }
+    if ($advice.Count -eq 0) { $advice += 'Excel is reachable and answering. If a specific tool still fails, the problem is in that tool rather than in the connection.' }
+    $report.advice = $advice
+
+    return $report
+}
+
+function Invoke-ExcelSessions {
+    $instances = Get-ExcelInstances
+    if ($instances.Count -eq 0) { throw (Get-AttachFailureMessage -ProgId 'Excel.Application') }
+
+    $sessions = @()
+    $version = ''
+    $index = 0
+    foreach ($app in $instances) {
+        $index++
+        try {
+            if ($version -eq '') { $version = [string]$app.Version }
+            $activeName = ''
+            try { $activeName = [string]$app.ActiveWorkbook.Name } catch { }
+
+            foreach ($wb in $app.Workbooks) {
+                $sheets = @()
+                foreach ($sheet in $wb.Worksheets) { $sheets += $sheet.Name }
+                $sessions += [ordered]@{
+                    name     = $wb.Name
+                    fullName = $wb.FullName
+                    saved    = [bool]$wb.Saved
+                    sheets   = $sheets
+                    active   = ($wb.Name -eq $activeName)
+                    instance = $index
+                    readOnly = [bool]$wb.ReadOnly
+                }
+            }
+        } catch {
+            # One unreachable instance must not hide the others. A Protected View window in
+            # particular refuses most of its object model, and reporting the rest is right.
+        }
+    }
+    return @{ workbooks = $sessions; version = $version; instances = $instances.Count }
 }
 
 <#
@@ -1175,6 +1563,7 @@ function Invoke-Request {
         'ping'                  { return @{ ok = $true } }
         'excel.open'            { return Invoke-ExcelOpen -Request $Request }
         'excel.sessions'        { return Invoke-ExcelSessions }
+        'excel.diagnose'        { return Invoke-ExcelDiagnose }
         'excel.readRange'       { return Invoke-ExcelReadRange -Request $Request }
         'excel.trace'           { return Invoke-ExcelTrace -Request $Request }
         'excel.listMacros'      { return Invoke-ExcelListMacros -Request $Request }
@@ -1200,12 +1589,23 @@ while ($true) {
     try {
         $request = $line | ConvertFrom-Json
         $id = $request.id
-        $result = Invoke-Request -Request $request
+        <#
+          Retried as a whole, rather than each COM call individually.
+
+          A rejected call leaves nothing half-done - Excel declined to start it - so repeating the
+          operation is safe, and wrapping here covers every op including ones added later. The
+          alternative, sprinkling retries through each function, is the shape that gets forgotten
+          exactly once and then fails intermittently for a year.
+        #>
+        $result = Invoke-ComWithRetry -Action { Invoke-Request -Request $request }
         $response = [ordered]@{ id = $id; ok = $true; result = $result }
     } catch {
         # Errors come back as data, never as a crashed process: one bad range should not take
         # down a session that took a second to attach and holds the user's open workbook.
-        $response = [ordered]@{ id = $id; ok = $false; error = $_.Exception.Message }
+        $code = Get-ComErrorCode -ErrorRecord $_
+        $advice = Get-ComErrorAdvice -Code $code -Operation ([string]$request.op)
+        $detail = if ($advice -ne '') { $advice } else { $_.Exception.Message }
+        $response = [ordered]@{ id = $id; ok = $false; error = $detail }
     }
     [Console]::Out.WriteLine(($response | ConvertTo-Json -Depth 12 -Compress))
     [Console]::Out.Flush()

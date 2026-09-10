@@ -10,6 +10,7 @@ import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savin
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import {
   createExcelOpenTool,
+  createExcelDiagnoseTool,
   createExcelSessionsTool,
   createExcelReadRangeTool,
   createExcelTraceTool,
@@ -1563,6 +1564,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const officeOptions = { bridge: office() }
       if (cachedOffice.excel === true) {
         combined.register(createExcelSessionsTool(officeOptions))
+        // Registered alongside sessions rather than behind a flag: the moment it is wanted is
+        // the moment something else has already failed, and a tool nobody can reach then is
+        // worth nothing.
+        combined.register(createExcelDiagnoseTool(officeOptions))
         combined.register(createExcelOpenTool(officeOptions))
         combined.register(createExcelReadRangeTool(officeOptions))
         combined.register(createExcelTraceTool(officeOptions))
@@ -3364,6 +3369,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(times.length > 0 ? { oldest: Math.min(...times), newest: Math.max(...times) } : {}),
       sizeBytes: await mailStore.sizeBytes(),
       semantic: collection !== undefined && search !== undefined && embedder !== undefined,
+      ...(config.retrieval?.stores?.mail !== undefined ? { storeId: config.retrieval.stores.mail } : {}),
+      /*
+       * Every configured connection, so the tab can offer a choice rather than requiring the
+       * config file to be edited by hand. The mail store was reachable only that way for one
+       * release, which from the outside is the same as not existing.
+       */
+      stores: Object.entries(config.vectorStores ?? {}).map(([id, store]) => ({ id, label: store.label })),
       busy: mailBusy,
       ...(mailLastResult !== undefined ? { lastResult: mailLastResult } : {}),
     })
@@ -3412,9 +3424,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     folders: string[]
     syncMinutes: number
     retentionMonths: number
+    storeId?: string
   }): Promise<void> {
     try {
+      const { config: current } = await configManager.load()
+      /*
+       * Merged rather than replaced. `retrieval` also carries the dispatcher and the docs index,
+       * set from a different tab - writing the whole block from here would silently clear them,
+       * which is the drift this project has paid for more than once.
+       */
+      const stores = { ...(current.retrieval?.stores ?? {}) }
+      if (settings.storeId !== undefined && settings.storeId.length > 0) stores.mail = settings.storeId
+      else delete stores.mail
+
       await configManager.save('user', {
+        retrieval: { ...(current.retrieval ?? {}), stores },
         mail: {
           enabled: settings.enabled,
           folders: settings.folders.filter((folder) => folder.trim().length > 0),
@@ -5366,6 +5390,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         folders: message.folders,
         syncMinutes: message.syncMinutes,
         retentionMonths: message.retentionMonths,
+        ...(message.storeId !== undefined ? { storeId: message.storeId } : {}),
       })
     } else if (message.type === 'saveSkillsAlias') {
       void handleSaveSkillsAlias(message.alias)

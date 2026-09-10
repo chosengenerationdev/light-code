@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
+import { Select } from '../Select.js'
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 export interface MailStatusState {
@@ -14,6 +15,10 @@ export interface MailStatusState {
   sizeBytes: number
   /** Whether a vector store and embedder are configured, so meaning-ranking is possible. */
   semantic: boolean
+  /** Which store mail is embedded into. Absent means whichever is active. */
+  storeId?: string
+  /** Every configured connection, so this can be chosen rather than hand-edited. */
+  stores: { id: string; label: string }[]
   busy?: boolean
   lastResult?: string
 }
@@ -25,6 +30,7 @@ export interface MailSectionProps {
     folders: string[]
     syncMinutes: number
     retentionMonths: number
+    storeId: string
   }) => void
   onSyncNow: () => void
   onPrune: () => void
@@ -58,6 +64,7 @@ export function MailSection(props: MailSectionProps): ReactElement {
   const [folders, setFolders] = useState('')
   const [syncMinutes, setSyncMinutes] = useState('15')
   const [retentionMonths, setRetentionMonths] = useState('6')
+  const [storeId, setStoreId] = useState('')
 
   // Resynced rather than seeded once: the host's reply can arrive after this renders.
   useEffect(() => {
@@ -66,6 +73,7 @@ export function MailSection(props: MailSectionProps): ReactElement {
     setFolders(props.status.folders.join('\n'))
     setSyncMinutes(String(props.status.syncMinutes))
     setRetentionMonths(String(props.status.retentionMonths))
+    setStoreId(props.status.storeId ?? '')
   }, [props.status])
 
   const status = props.status
@@ -80,6 +88,7 @@ export function MailSection(props: MailSectionProps): ReactElement {
       folders: parsedFolders,
       syncMinutes: Math.max(5, Math.min(1440, Number(syncMinutes) || 15)),
       retentionMonths: Math.max(1, Math.min(120, Number(retentionMonths) || 6)),
+      storeId,
     })
   }
 
@@ -157,6 +166,28 @@ export function MailSection(props: MailSectionProps): ReactElement {
       <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
         One per line, as the path appears in Outlook. Use outlook_folders in the chat to list them.
       </span>
+
+      <div style={{ marginTop: 8 }}>
+        <label htmlFor="lc-mail-store" style={labelStyle()}>
+          Store mail in
+        </label>
+        <Select
+          id="lc-mail-store"
+          value={storeId}
+          options={[
+            { value: '', label: 'The active search connection' },
+            ...status.stores.map((store) => ({ value: store.id, label: store.label })),
+          ]}
+          onChange={setStoreId}
+          ariaLabel="Vector store for indexed mail"
+        />
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+          Choose a separate connection to keep mail off a shared cluster &mdash; a Qdrant or Chroma
+          container on this machine is the usual answer. Add connections in Settings &rarr; Search.
+          Changing this points at a new, empty collection; the old one keeps its data until you
+          delete it.
+        </span>
+      </div>
 
       <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
         <div style={{ flex: 1 }}>

@@ -186,6 +186,101 @@ export function createExcelOpenTool(options: OfficeToolOptions): Tool<z.infer<ty
   }
 }
 
+interface ExcelDiagnosis {
+  excelProcesses: number
+  windowTitles?: string[]
+  weAreElevated?: boolean | null
+  getActiveObject: string
+  rotExcelDocuments: number
+  instancesReached: number
+  instances: {
+    instance: number
+    version?: string
+    acceptingCalls?: boolean
+    rejectionCode?: string
+    workbooks?: string[]
+    workbooksUnreadable?: boolean
+    vbaAccessible?: boolean
+  }[]
+  advice: string[]
+}
+
+/**
+ * Reports why Excel automation is, or is not, working here.
+ *
+ * The failures that remain are environmental, and an environment cannot be reproduced from a
+ * report that says it did not work. This answers the questions that have actually had to be
+ * asked — is Excel running, how many of it, can each be reached, is it accepting calls this
+ * instant, is the VBA object model exposed, are we and Excel at the same privilege level — and
+ * ends with the conclusion rather than leaving it to be inferred.
+ *
+ * Changes nothing, and is specifically safe to run while Excel is mid-edit, which is a state it
+ * reports rather than failing on.
+ */
+export function createExcelDiagnoseTool(options: OfficeToolOptions): Tool<Record<string, never>> {
+  return {
+    name: 'excel_diagnose',
+    group: 'read',
+    description:
+      'Explain why Excel tools are failing: how many Excel instances are running, which can be ' +
+      'reached, whether one is busy or mid-edit, and whether macros are accessible. Use it when ' +
+      'any other Excel tool behaves unexpectedly, and before telling the user something is wrong ' +
+      'with their spreadsheet.',
+    parametersSchema: z.object({}),
+    async execute(): Promise<ToolResult> {
+      try {
+        const report = await options.bridge.request<ExcelDiagnosis>({ op: 'excel.diagnose' })
+
+        const lines = [
+          `Excel processes running: ${String(report.excelProcesses)}`,
+          `Instances this can reach: ${String(report.instancesReached)}`,
+          `Direct attach: ${report.getActiveObject}`,
+          `Workbooks registered with Windows: ${String(report.rotExcelDocuments)}`,
+          ...(report.weAreElevated === true
+            ? ['This process is running elevated — Excel must be too, or they cannot see each other.']
+            : []),
+          '',
+        ]
+
+        for (const instance of report.instances) {
+          lines.push(
+            `Instance ${String(instance.instance)}${instance.version === undefined ? '' : ` (Excel ${instance.version})`}:`,
+          )
+          lines.push(
+            `  accepting calls: ${instance.acceptingCalls === true ? 'yes' : `no${instance.rejectionCode === undefined ? '' : ` (${instance.rejectionCode})`}`}`,
+          )
+          lines.push(
+            `  workbooks: ${
+              instance.workbooksUnreadable === true
+                ? 'unreadable — likely Protected View'
+                : (instance.workbooks ?? []).join(', ') || 'none'
+            }`,
+          )
+          if (instance.vbaAccessible !== undefined) {
+            lines.push(`  VBA project reachable: ${instance.vbaAccessible ? 'yes' : 'no'}`)
+          }
+        }
+
+        return {
+          content: [...lines, '', 'What this means:', ...report.advice.map((entry) => `- ${entry}`)].join('\n'),
+        }
+      } catch (error) {
+        /*
+         * A diagnosis that cannot run is itself the most informative result available: it means
+         * the PowerShell worker did not start, which is a different problem from Excel refusing.
+         */
+        return {
+          content:
+            `The diagnosis could not run: ${message(error)}\n` +
+            'That points at the PowerShell worker rather than at Excel — Office integration may be ' +
+            'switched off in Settings → Tools, or this may not be Windows.',
+          isError: true,
+        }
+      }
+    },
+  }
+}
+
 export function createExcelSessionsTool(options: OfficeToolOptions): Tool<Record<string, never>> {
   return {
     name: 'excel_sessions',
@@ -198,7 +293,16 @@ export function createExcelSessionsTool(options: OfficeToolOptions): Tool<Record
     async execute(): Promise<ToolResult> {
       try {
         const result = await options.bridge.request<{
-          workbooks: { name: string; fullName: string; saved: boolean; sheets: string[]; active: boolean }[]
+          workbooks: {
+            name: string
+            fullName: string
+            saved: boolean
+            sheets: string[]
+            active: boolean
+            instance?: number
+            readOnly?: boolean
+          }[]
+          instances?: number
         }>({ op: 'excel.sessions' })
 
         if (result.workbooks.length === 0) {
@@ -206,17 +310,37 @@ export function createExcelSessionsTool(options: OfficeToolOptions): Tool<Record
         }
         return {
           content: [
-            `${String(result.workbooks.length)} workbook(s) open:`,
-            ...result.workbooks.map((workbook) =>
-              [
-                `- ${workbook.name}${workbook.active ? ' (active)' : ''}`,
-                `  path: ${workbook.fullName}`,
+            `${String(result.workbooks.length)} workbook(s) open` +
+              /*
+               * Said when there is more than one, because it changes what the user is looking
+               * at: two Excel windows each have their own "active" workbook, and two workbooks
+               * can share a name.
+               */
+              `${(result.instances ?? 1) > 1 ? ` across ${String(result.instances ?? 1)} separate Excel windows` : ''}:`,
+            ...result.workbooks.map((workbook) => {
+              const several = (result.instances ?? 1) > 1
+              // "(active)" on every row is what listing several instances naively produces, and
+              // it reads as a contradiction. Qualified by window when there is more than one.
+              const active = workbook.active
+                ? several
+                  ? ` (active in window ${String(workbook.instance ?? 1)})`
+                  : ' (active)'
+                : ''
+              const where = several ? `  window: ${String(workbook.instance ?? 1)}` : undefined
+              // An unsaved workbook's FullName *is* its name, so printing it as a path invites
+              // the model to try opening a file that does not exist.
+              const location = workbook.fullName === workbook.name ? undefined : `  path: ${workbook.fullName}`
+
+              return [
+                `- ${workbook.name}${active}${workbook.readOnly === true ? ' [read-only]' : ''}`,
+                ...(location === undefined ? ['  never saved to disk'] : [location]),
+                ...(where === undefined ? [] : [where]),
                 // Stated because it changes what is safe to suggest: an unsaved workbook holds
                 // edits that exist nowhere else.
                 `  ${workbook.saved ? 'saved' : 'HAS UNSAVED CHANGES'}`,
                 `  sheets: ${workbook.sheets.join(', ')}`,
-              ].join('\n'),
-            ),
+              ].join('\n')
+            }),
           ].join('\n'),
         }
       } catch (error) {

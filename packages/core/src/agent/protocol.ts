@@ -436,6 +436,13 @@ export type UiToHostMessage =
       folders: string[]
       syncMinutes: number
       retentionMonths: number
+      /**
+       * Which vector store mail is embedded into. Empty means "the active one".
+       *
+       * Chosen here rather than in Search because it is the decision people most want to make
+       * differently: team code in a shared cluster, mail in a container on their own machine.
+       */
+      storeId?: string
     }
   /** Names the pool. Empty removes it, which turns team skill search back off. */
   | { type: 'saveSkillsAlias'; alias: string }
@@ -922,6 +929,9 @@ export type HostToUiMessage =
       newest?: number
       sizeBytes: number
       semantic: boolean
+      /** Which store mail goes to, and what is on offer, so the tab can render a picker. */
+      storeId?: string
+      stores: { id: string; label: string }[]
       busy?: boolean
       lastResult?: string
       error?: string

@@ -230,6 +230,7 @@ export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'
 export { createSearchTeamSkillsTool, type SearchTeamSkillsParams } from './tools/searchTeamSkills.js'
+export { createExcelDiagnoseTool } from './tools/office.js'
 export {
   createSearchMailTool,
   createMailPatternsTool,

@@ -523,6 +523,8 @@ export function App(props: AppProps): ReactElement {
           ...(message.newest !== undefined ? { newest: message.newest } : {}),
           sizeBytes: message.sizeBytes,
           semantic: message.semantic,
+          ...(message.storeId !== undefined ? { storeId: message.storeId } : {}),
+          stores: message.stores,
           ...(message.busy !== undefined ? { busy: message.busy } : {}),
           ...(message.lastResult !== undefined ? { lastResult: message.lastResult } : {}),
         })
