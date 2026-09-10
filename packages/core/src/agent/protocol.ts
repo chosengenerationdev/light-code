@@ -313,7 +313,13 @@ export type UiToHostMessage =
    * Values arrive as raw strings and booleans and are coerced host-side against the field
    * types: the UI validating is for the user's benefit, not the model's guarantee.
    */
-  | { type: 'formResponse'; id: string; submitted: boolean; values: Record<string, string | boolean> }
+  /**
+   * A submitted form. `string[]` is the multichoice case.
+   *
+   * Still only *input*: section 6b's rule holds, and acting on any of this goes through the
+   * approval gate on its own terms. A filled-in form is never a permission.
+   */
+  | { type: 'formResponse'; id: string; submitted: boolean; values: Record<string, string | boolean | string[]> }
   /** Approve *and* remember, so this exact command / this tool stops prompting here. */
   | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' | 'folder' }
   | { type: 'rollback' }

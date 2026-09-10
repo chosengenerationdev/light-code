@@ -1,7 +1,7 @@
 import type { ApprovalDecision, ContextUsage, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
-import { FormPrompt, type PendingForm } from './FormPrompt.js'
+import { FormPrompt, type FormFieldValue, type PendingForm } from './FormPrompt.js'
 import { Composer } from './Composer.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
 import { PinnedPrompt } from './PinnedPrompt.js'
@@ -26,7 +26,7 @@ export interface ChatProps {
   pendingApproval: PendingApproval | undefined
   /** A form the assistant is waiting on. At most one, like an approval. */
   pendingForm: PendingForm | undefined
-  onSubmitForm: (id: string, values: Record<string, string | boolean>) => void
+  onSubmitForm: (id: string, values: Record<string, FormFieldValue>) => void
   onDismissForm: (id: string) => void
   canRollback: boolean
   onSend: (text: string, images: ImageAttachmentInput[]) => void

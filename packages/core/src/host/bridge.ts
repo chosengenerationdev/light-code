@@ -952,7 +952,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   function answerFromResponse(
     fields: readonly FormField[],
-    values: Record<string, string | boolean>,
+    values: Record<string, string | boolean | string[]>,
   ): FormAnswer {
     const coerced: Record<string, FormValue> = {}
     for (const field of fields) {

@@ -20,7 +20,16 @@ export const formFieldSchema = z.object({
     .string()
     .regex(/^[A-Za-z_][A-Za-z0-9_-]*$/, 'A field name must start with a letter and contain no spaces.'),
   label: z.string().min(1).describe('Shown beside the control. Write it as a question or a noun phrase.'),
-  type: z.enum(['string', 'number', 'boolean', 'choice', 'list']),
+  /**
+   * `multichoice` is the sixth, added when scheduling a prompt from the chat needed "tick the
+   * tools this job may use".
+   *
+   * Section 6b says no new field type without a reason, so here is the reason: the alternatives
+   * are a `list` the user types tool names into — where a typo is a silently missing permission
+   * — or forty `boolean` fields, which exceeds the twenty-field cap and reads as a wall. Picking
+   * several from a known set is a distinct shape and neither of those expresses it.
+   */
+  type: z.enum(['string', 'number', 'boolean', 'choice', 'list', 'multichoice']),
   description: z.string().optional().describe('One line under the label, for anything the label cannot carry.'),
   /**
    * Choices, required for `choice` and meaningless elsewhere.
@@ -29,6 +38,10 @@ export const formFieldSchema = z.object({
    * answer stays something the assistant can act on.
    */
   options: z.array(z.object({ value: z.string(), label: z.string().optional() })).optional(),
+  /**
+   * Prefills a `multichoice`. Separate from `defaultValue`, which cannot express a set.
+   */
+  defaultValues: z.array(z.string()).optional(),
   required: z.boolean().optional().describe('Defaults to true. A required field blocks submission until answered.'),
   /** Prefills the control. A good default is the difference between a form and an interrogation. */
   defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
@@ -125,10 +138,13 @@ function validateFields(fields: readonly FormField[]): string | undefined {
     if (seen.has(field.name)) return `Two fields are both named "${field.name}". Field names must be unique.`
     seen.add(field.name)
 
+    if (field.type === 'multichoice' && (field.options === undefined || field.options.length === 0)) {
+      return `Field "${field.name}" is a multichoice and needs options.`
+    }
     if (field.type === 'choice' && (field.options === undefined || field.options.length === 0)) {
       return `Field "${field.name}" is a choice but lists no options.`
     }
-    if (field.type !== 'choice' && field.options !== undefined) {
+    if (field.type !== 'choice' && field.type !== 'multichoice' && field.options !== undefined) {
       return `Field "${field.name}" is a ${field.type}, so it cannot have options. Use type "choice" for a fixed set.`
     }
   }
@@ -159,6 +175,26 @@ export function coerceFormValue(field: FormField, raw: unknown): { value: FormVa
       .filter((item) => item.length > 0)
     if (field.required !== false && items.length === 0) return { error: `"${field.label}" needs at least one value.` }
     return { value: items }
+  }
+
+  if (field.type === 'multichoice') {
+    /*
+     * Every selection has to be one of the offered values.
+     *
+     * Checked host-side as well as in the form for the reason the whole of `coerceFormValue`
+     * exists: the UI is not the authority on what reaches the model. A tool name that was never
+     * offered arriving here would become a granted permission nobody chose.
+     */
+    const allowed = new Set((field.options ?? []).map((option) => option.value))
+    const chosen = Array.isArray(raw) ? raw.map((entry) => String(entry)) : []
+    const unknown = chosen.filter((entry) => !allowed.has(entry))
+    if (unknown.length > 0) return { error: `"${field.label}" does not offer: ${unknown.join(', ')}.` }
+    if (field.required !== false && chosen.length === 0) {
+      return { error: `"${field.label}" needs at least one selection.` }
+    }
+    // Deduplicated and ordered as offered, so the answer does not depend on click order.
+    const order = (field.options ?? []).map((option) => option.value)
+    return { value: order.filter((value) => chosen.includes(value)) }
   }
 
   if (field.type === 'number') {

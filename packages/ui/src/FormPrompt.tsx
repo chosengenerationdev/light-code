@@ -1,6 +1,16 @@
 import type { FormField } from '@light-code/core/browser'
 import { useMemo, useState, type ReactElement } from 'react'
+import { MultiSelect } from './MultiSelect.js'
 import { Select } from './Select.js'
+
+/**
+ * What one field can hold while it is being filled in.
+ *
+ * `string[]` is the multichoice case. Declared once and shared, rather than widened at each
+ * use, so the form, the chat and the transport agree on one shape — two of them disagreeing is
+ * how a submitted value arrives somewhere as the string "[object Object]".
+ */
+export type FormFieldValue = string | boolean | string[]
 import {
   colors,
   fieldErrorStyle,
@@ -19,7 +29,7 @@ export interface PendingForm {
 
 export interface FormPromptProps {
   form: PendingForm
-  onSubmit: (id: string, values: Record<string, string | boolean>) => void
+  onSubmit: (id: string, values: Record<string, FormFieldValue>) => void
   onDismiss: (id: string) => void
 }
 
@@ -44,13 +54,13 @@ export interface FormPromptProps {
  * which it handles by asking in plain text instead.
  */
 export function FormPrompt(props: FormPromptProps): ReactElement {
-  const [values, setValues] = useState<Record<string, string | boolean>>(() => initialValues(props.form.fields))
+  const [values, setValues] = useState<Record<string, FormFieldValue>>(() => initialValues(props.form.fields))
   const [showErrors, setShowErrors] = useState(false)
 
   const errors = useMemo(() => validate(props.form.fields, values), [props.form.fields, values])
   const hasErrors = Object.keys(errors).length > 0
 
-  const set = (name: string, value: string | boolean): void => {
+  const set = (name: string, value: FormFieldValue): void => {
     setValues((current) => ({ ...current, [name]: value }))
   }
 
@@ -107,9 +117,9 @@ export function FormPrompt(props: FormPromptProps): ReactElement {
 
 interface FieldProps {
   field: FormField
-  value: string | boolean
+  value: FormFieldValue
   error: string | undefined
-  onChange: (value: string | boolean) => void
+  onChange: (value: FormFieldValue) => void
 }
 
 function Field(props: FieldProps): ReactElement {
@@ -148,7 +158,17 @@ function Field(props: FieldProps): ReactElement {
         <span style={{ color: colors.muted, fontSize: 11 }}>{field.description}</span>
       )}
 
-      {field.type === 'choice' ? (
+      {field.type === 'multichoice' ? (
+        <MultiSelect
+          options={(field.options ?? []).map((option) => ({
+            value: option.value,
+            ...(option.label !== undefined ? { label: option.label } : {}),
+          }))}
+          selected={Array.isArray(props.value) ? props.value : []}
+          onChange={props.onChange}
+          ariaLabel={field.label}
+        />
+      ) : field.type === 'choice' ? (
         <Select
           id={id}
           value={String(props.value)}
@@ -208,8 +228,8 @@ function describeListCount(text: string): string {
   return count === 1 ? '1 value' : `${String(count)} values`
 }
 
-function initialValues(fields: readonly FormField[]): Record<string, string | boolean> {
-  const values: Record<string, string | boolean> = {}
+function initialValues(fields: readonly FormField[]): Record<string, FormFieldValue> {
+  const values: Record<string, FormFieldValue> = {}
   for (const field of fields) {
     if (field.type === 'boolean') {
       values[field.name] = field.defaultValue === true
@@ -225,7 +245,7 @@ function initialValues(fields: readonly FormField[]): Record<string, string | bo
 }
 
 /** Mirrors `coerceFormValue` in core, which is the authority — this is the immediate half. */
-function validate(fields: readonly FormField[], values: Record<string, string | boolean>): Record<string, string> {
+function validate(fields: readonly FormField[], values: Record<string, FormFieldValue>): Record<string, string> {
   const errors: Record<string, string> = {}
   for (const field of fields) {
     if (field.type === 'boolean') continue
