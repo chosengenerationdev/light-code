@@ -104,6 +104,9 @@ import {
   detectClaudeCli,
   buildExpertBriefing,
   buildDocCorpus,
+  findTeamSkillsNamed,
+  indexTeamSkills,
+  createSearchTeamSkillsTool,
   parseDocEntryId,
   type DocEntryKind,
   createNotifyTool,
@@ -1339,6 +1342,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * from `dispatcher` because it is a separate trade — see `skillRetrievalEnabled`.
      */
     hideSkills = false,
+    /**
+     * The team's shared skills, when an alias is configured and reachable.
+     *
+     * Passed in rather than resolved here for the same reason `codebase` is: building it needs
+     * an embedder and a connection, both of which are awaited, and this function is synchronous
+     * so the tool block stays byte-stable for a whole turn (§12).
+     */
+    teamSkills?: { searcher: VectorSearcher; embedder: Embedder; collection: string; owner?: string },
   ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
@@ -1424,6 +1435,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const context = {
         skillsDir,
         onChanged: refreshSkills,
+        /*
+         * So a new skill can say "a colleague already has one of these".
+         *
+         * A callback rather than the searcher itself: an edit tool has no business holding a
+         * corpus, and the read/write split `VectorSearcher` exists to preserve is not worth
+         * spending for convenience here.
+         */
+        ...(teamSkills !== undefined
+          ? { findTeamSkillsNamed: async (name: string) => findTeamSkillsNamed(teamSkills, name) }
+          : {}),
         ...(services.submitForReview !== undefined
           ? {
               submitForReview: (request: { name: string; content: string; existingContent: string }) =>
@@ -1433,6 +1454,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
       combined.register(createWriteSkillTool(context))
       combined.register(createDeleteSkillTool(context))
+    }
+    /*
+     * Offered only when there is a shared corpus to search. Registering it without one would
+     * advertise a tool that always answers "nothing found", and the model would keep reaching
+     * for it instead of reading the local skills it does have.
+     */
+    if (teamSkills !== undefined) {
+      combined.register(createSearchTeamSkillsTool({ ...teamSkills, observer: searchLog }))
     }
     if (search !== undefined) {
       combined.register(
@@ -2055,6 +2084,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             : undefined,
           dispatcherEnabled(config.retrieval),
           skillsSearchable,
+          /*
+           * The team's shared skills. Needs an alias, a connection and an embedder — without
+           * all three there is nothing to search, and the tool is simply not offered.
+           */
+          config.embedder?.skillsAlias !== undefined && search !== undefined && embedder !== undefined
+            ? {
+                searcher: search.searcher,
+                embedder,
+                collection: config.embedder.skillsAlias,
+                ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
+              }
+            : undefined,
       )
 
       /*
@@ -3134,6 +3175,108 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * *separate* collection because the two corpora have different lifetimes: code changes on
    * every edit, the tool catalogue only when a server or skill is added.
    */
+  /**
+   * Where the team's shared skills live.
+   *
+   * Separate from the documentation index on purpose — see `retrieval.skillsIndex` for why
+   * pointing a team alias at the tool-documentation corpus would have one person's reindex
+   * racing another's stale sweep.
+   */
+  /**
+   * Sends this machine's skills to the collection the team shares.
+   *
+   * Each person writes to their **own** collection and the alias is what makes them searchable
+   * together — exactly as codebase indexes work, and for the same reason: one shared collection
+   * would mean everybody's republish racing everybody else's.
+   *
+   * Skills carry their whole body, unlike a codebase chunk. A colleague has no file on this
+   * machine to open afterwards, so the index has to be the entire answer. Skills are a page of
+   * prose each, which is what makes that affordable.
+   */
+  /**
+   * Names the shared skills pool, or clears it.
+   *
+   * A merge rather than a replace of the embedder block: the alias is set from the Skills tab
+   * while the model and width are set from Search, and writing the whole block from either
+   * would have one tab silently erasing the other's fields.
+   */
+  async function handleSaveSkillsAlias(alias: string): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const trimmed = alias.trim()
+      const embedder = { ...(config.embedder ?? {}) }
+      if (trimmed.length > 0) embedder.skillsAlias = trimmed
+      else delete embedder.skillsAlias
+      await configManager.save('user', { embedder })
+      const { config: next } = await configManager.load()
+      await postEmbedder(next)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handlePublishTeamSkills(): Promise<void> {
+    const config = await loadSettings()
+    const collection = skillsIndexName(config)
+    const search = await resolveSearch(config)
+    const embedder = await resolveEmbedder(config)
+
+    if (collection === undefined || search === undefined || embedder === undefined) {
+      post({
+        type: 'teamSkillsPublished',
+        error: 'Publishing skills needs a search connection and an embedding model in Settings → Search.',
+      })
+      return
+    }
+
+    try {
+      const withBodies: { skill: Skill; body: string }[] = []
+      for (const skill of skills) {
+        let body = ''
+        try {
+          body = await fs.readFile(skill.filePath, 'utf8')
+        } catch {
+          // A skill whose file has gone is skipped rather than published empty: an empty body
+          // in the shared corpus would look to a colleague like a skill that says nothing.
+          continue
+        }
+        withBodies.push({ skill, body })
+      }
+
+      const owner = indexOwner(config)
+      const project = indexProject()
+      const count = await indexTeamSkills({
+        writer: createVectorIndexWriter(
+          httpClient,
+          search.store,
+          await vectorStoreConnectionFor(search.store, search.id),
+        ),
+        embedder,
+        collection,
+        ...(config.embedder?.skillsAlias !== undefined ? { alias: config.embedder.skillsAlias } : {}),
+        skills: withBodies,
+        attribution: {
+          ...(owner !== undefined ? { owner } : {}),
+          ...(project !== undefined ? { project } : {}),
+        },
+      })
+
+      post({ type: 'teamSkillsPublished', count, collection })
+    } catch (error) {
+      post({
+        type: 'teamSkillsPublished',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  function skillsIndexName(config?: LightCodeConfig): string | undefined {
+    const chosen = config?.retrieval?.skillsIndex?.trim()
+    if (chosen !== undefined && chosen.length > 0) return chosen
+    const base = codebaseIndexName(config)
+    return base === undefined ? undefined : `${base}-skills`
+  }
+
   function docsIndexName(config?: LightCodeConfig): string | undefined {
     const chosen = config?.retrieval?.docsIndex?.trim()
     if (chosen !== undefined && chosen.length > 0) return chosen
@@ -3817,6 +3960,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // rather than replacing a blank with the default and looking like it was set.
       ...(config.embedder?.indexPrefix !== undefined ? { indexPrefix: config.embedder.indexPrefix } : {}),
       ...(config.embedder?.indexAlias !== undefined ? { indexAlias: config.embedder.indexAlias } : {}),
+      ...(config.embedder?.skillsAlias !== undefined ? { skillsAlias: config.embedder.skillsAlias } : {}),
       defaultIndexPrefix: DEFAULT_INDEX_PREFIX,
       indexedFiles,
     })
@@ -4923,6 +5067,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleStartIndexing()
     } else if (message.type === 'attachTeamAlias') {
       void handleAttachTeamAlias()
+    } else if (message.type === 'publishTeamSkills') {
+      void handlePublishTeamSkills()
+    } else if (message.type === 'saveSkillsAlias') {
+      void handleSaveSkillsAlias(message.alias)
     } else if (message.type === 'cancelIndexing') {
       indexingAbort?.abort()
     } else if (message.type === 'saveEmbedder') {

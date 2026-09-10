@@ -417,6 +417,17 @@ export type UiToHostMessage =
    */
   | { type: 'attachTeamAlias' }
   /**
+   * Publishes this machine's skills to the team's shared collection.
+   *
+   * An explicit act rather than a side effect of the documentation reindex. Sharing what you
+   * have taught your own assistant is a decision, and one people should be able to make once
+   * and repeat when they have something worth sending — not something that happens because a
+   * tool list changed.
+   */
+  | { type: 'publishTeamSkills' }
+  /** Names the pool. Empty removes it, which turns team skill search back off. */
+  | { type: 'saveSkillsAlias'; alias: string }
+  /**
    * Rebuilds the documentation index. `kind` narrows it to tools or skills only.
    *
    * Separate because the two halves change for different reasons: adding an MCP server, or
@@ -880,6 +891,7 @@ export type HostToUiMessage =
   | { type: 'indexResult'; result?: IndexResult; error?: string }
   /** `attributed` is how many existing chunks gained an owner; 0 is a real answer, not a failure. */
   | { type: 'teamAliasAttached'; alias?: string; index?: string; attributed?: number; error?: string }
+  | { type: 'teamSkillsPublished'; count?: number; collection?: string; error?: string }
   /** Embedder settings plus what the index currently holds, for Settings → Search. */
   | {
       type: 'embedder'
@@ -896,6 +908,8 @@ export type HostToUiMessage =
       defaultIndexPrefix: string
       /** Shared name across the team's indexes, absent when team scope is not set up. */
       indexAlias?: string
+      /** The same for skills, which is a separate decision from sharing code. */
+      skillsAlias?: string
       indexedFiles: number
     }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { confine } from '../fs/confine.js'
+import { describeTeamSkillCollision, type TeamSkillHit } from '../rag/teamSkills.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
 import { isValidSkillName, parseFrontmatter, renderSkill, skillFileName } from './index.js'
 
@@ -33,6 +34,14 @@ export interface SkillToolContext {
   submitForReview?:
     | ((request: { name: string; content: string; existingContent: string }) => Promise<string>)
     | undefined
+  /**
+   * Looks a skill name up across the team's shared skills.
+   *
+   * Absent when no shared index is configured, which is the ordinary solo case — and the reason
+   * this is a callback rather than a searcher: the tool has no business knowing a vector store
+   * exists, and handing it one would put a corpus in reach of an edit tool.
+   */
+  findTeamSkillsNamed?: ((name: string) => Promise<TeamSkillHit[]>) | undefined
 }
 
 const writeParams = z.object({
@@ -75,6 +84,22 @@ async function readIfPresent(filePath: string): Promise<string> {
 }
 
 export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkillParams> {
+  /**
+   * Whether a colleague already has a skill of this name.
+   *
+   * Never fatal. The shared index may be unbuilt, unreachable or simply not configured, and none
+   * of those is a reason to stop someone recording what they just learned — the point of the
+   * check is to *inform*, so failing to inform costs a sentence rather than the write.
+   */
+  const collisionWarning = async (name: string): Promise<string | undefined> => {
+    if (context.findTeamSkillsNamed === undefined) return undefined
+    try {
+      return describeTeamSkillCollision(name, await context.findTeamSkillsNamed(name))
+    } catch {
+      return undefined
+    }
+  }
+
   return {
     name: 'write_skill',
     group: 'edit',
@@ -120,11 +145,24 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
 
         await fs.writeFile(filePath, rendered, 'utf8')
         await context.onChanged()
+
+        /*
+         * Reported *after* the write, deliberately.
+         *
+         * The user asked to be told about a collision, not to be stopped by one — and a team
+         * where nobody may name a skill somebody else already named would be worse than one with
+         * two skills called `deployment`. Yours is stored under your own name and theirs is
+         * untouched, so there is nothing to undo; what is left is a choice, and the model is
+         * told to put it to the user rather than make it.
+         */
+        const collision = existed ? undefined : await collisionWarning(params.name)
+
         return {
           content:
             `${existed ? 'Updated' : 'Recorded'} the skill "${params.name}" at ${filePath}.\n` +
             // Same rule as Python tools, same reason: the prompt prefix is fixed for a turn.
-            'Its summary will appear in your context from the next message onward.',
+            'Its summary will appear in your context from the next message onward.' +
+            (collision === undefined ? '' : `\n\n${collision}`),
           path: filePath,
         }
       } catch (error) {

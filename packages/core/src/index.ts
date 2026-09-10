@@ -229,6 +229,19 @@ export { syncVectorStores, describeSyncMismatch, type SyncResult } from './rag/s
 export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
 export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'
+export { createSearchTeamSkillsTool, type SearchTeamSkillsParams } from './tools/searchTeamSkills.js'
+export {
+  describeTeamSkillCollision,
+  findTeamSkillsNamed,
+  indexTeamSkills,
+  renderTeamSkillHits,
+  searchTeamSkills,
+  teamSkillDocument,
+  teamSkillId,
+  teamSkillText,
+  type TeamSkillHit,
+  type TeamSkillsOptions,
+} from './rag/teamSkills.js'
 export {
   scheduleSchema,
   schedulesSchema,

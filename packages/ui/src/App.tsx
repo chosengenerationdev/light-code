@@ -194,6 +194,10 @@ export function App(props: AppProps): ReactElement {
   const [aliasResult, setAliasResult] = useState<
     { alias?: string; index?: string; attributed?: number; error?: string } | undefined
   >(undefined)
+  /** The outcome of publishing this machine's skills to the team collection. */
+  const [teamSkillsResult, setTeamSkillsResult] = useState<
+    { count?: number; collection?: string; error?: string } | undefined
+  >(undefined)
   const [embedderModels, setEmbedderModels] = useState<string[]>([])
   const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
@@ -504,6 +508,12 @@ export function App(props: AppProps): ReactElement {
         setEmbedderSavedTick((tick) => tick + 1)
       } else if (message.type === 'indexProgress') {
         setIndexProgress(message.progress)
+      } else if (message.type === 'teamSkillsPublished') {
+        setTeamSkillsResult({
+          ...(message.count !== undefined ? { count: message.count } : {}),
+          ...(message.collection !== undefined ? { collection: message.collection } : {}),
+          ...(message.error !== undefined ? { error: message.error } : {}),
+        })
       } else if (message.type === 'teamAliasAttached') {
         setAliasResult({
           ...(message.alias !== undefined ? { alias: message.alias } : {}),
@@ -1121,6 +1131,16 @@ export function App(props: AppProps): ReactElement {
             }}
             search={searchProps}
             skills={{
+              team: {
+                alias: embedder?.skillsAlias,
+                onSaveAlias: (alias: string) =>
+                  props.transport.post({ type: 'saveSkillsAlias', alias } satisfies UiToHostMessage),
+                onPublish: () => {
+                  setTeamSkillsResult(undefined)
+                  props.transport.post({ type: 'publishTeamSkills' } satisfies UiToHostMessage)
+                },
+                result: teamSkillsResult,
+              },
               skills,
               issues: skillIssues,
               skillsDir,

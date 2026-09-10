@@ -13,6 +13,8 @@ export interface EmbedderState {
   defaultIndexPrefix?: string
   /** A name pointing at every team member's index, so they can be searched together. */
   indexAlias?: string
+  /** The same for skills. Shown in the Skills tab rather than here. */
+  skillsAlias?: string
   indexedFiles: number
 }
 

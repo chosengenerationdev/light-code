@@ -338,6 +338,20 @@ export const retrievalConfigSchema = z
      */
     docsIndex: z.string(),
     /**
+     * Where the team's shared skills live, when they are not in the documentation corpus.
+     *
+     * Skills and tool documentation share the `-docs` index for a single user, and for a single
+     * user that is right — `search_docs` looks through both. Sharing stops being right the
+     * moment a team alias points at it. Tool documentation describes *this install's* registry:
+     * it is rebuilt wholesale on every change and its stale sweep deletes whatever the fresh
+     * corpus lacks, so fanning that across a team means one person's reindex racing another's
+     * deletions. Skills are authored deliberately and are valuable precisely because they came
+     * from somebody else, so they get a collection of their own.
+     *
+     * Unset derives `<codebase index>-skills`.
+     */
+    skillsIndex: z.string(),
+    /**
      * Which vector store each kind of corpus goes to, when they should not all share one.
      *
      * Phase 8b always intended stores to be selectable "per data type"; until now a single
@@ -357,6 +371,8 @@ export const retrievalConfigSchema = z
         docs: z.string().min(1),
         /** Indexed mail. Usually local, and deliberately easy to keep separate. */
         mail: z.string().min(1),
+        /** The team's shared skills. Often the same cluster as the code. */
+        skills: z.string().min(1),
       })
       .partial(),
   })
@@ -364,7 +380,7 @@ export const retrievalConfigSchema = z
 export type RetrievalConfig = z.infer<typeof retrievalConfigSchema>
 
 /** The corpora that can each be sent to a different store. */
-export type CorpusPurpose = 'codebase' | 'docs' | 'mail'
+export type CorpusPurpose = 'codebase' | 'docs' | 'mail' | 'skills'
 
 /**
  * Which store a corpus is written to and searched in.
@@ -456,6 +472,20 @@ export const embedderConfigSchema = z
      * a wildcard in one is not something to find out about by accident.
      */
     indexAlias: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9._-]{0,48}$/,
+        'Start with a letter or digit, then lowercase letters, digits, dot, dash or underscore',
+      ),
+    /**
+     * The same idea for skills: one name covering everyone's skills collection.
+     *
+     * Separate from `indexAlias` rather than derived from it, because the two are different
+     * decisions. A team frequently wants to pool what they have *taught* the assistant while
+     * keeping their code indexes to themselves — skills are prose somebody wrote on purpose,
+     * source is not.
+     */
+    skillsAlias: z
       .string()
       .regex(
         /^[a-z0-9][a-z0-9._-]{0,48}$/,

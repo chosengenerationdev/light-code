@@ -1,5 +1,5 @@
-import { useState, type ReactElement } from 'react'
-import { badgeStyle, colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { useEffect, useState, type ReactElement } from 'react'
+import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { FolderListEditor } from './FolderListEditor.js'
 import { DismissableProblems } from './DismissableProblems.js'
 
@@ -30,6 +30,18 @@ export interface SkillsTabProps {
   /** The last run, as one line. Undefined when nothing has run in this session. */
   indexResult: string | undefined
   onSaveDirs: (dir: string, paths: string[]) => void
+  /**
+   * The team's shared skills.
+   *
+   * `alias` is what the team agreed to call the pool; without one there is nothing to publish
+   * to and the section explains that rather than offering a button that cannot work.
+   */
+  team: {
+    alias: string | undefined
+    onSaveAlias: (alias: string) => void
+    onPublish: () => void
+    result: { count?: number; collection?: string; error?: string } | undefined
+  }
 }
 
 /**
@@ -39,6 +51,74 @@ export interface SkillsTabProps {
  * future conversation, so it is not something the user should have to browse the filesystem to
  * discover — and a malformed one was previously dropped with nothing but a log line.
  */
+/**
+ * Pooling skills across a team.
+ *
+ * User-requested and called important: *"eventually i want to collect skills from all the team
+ * members and maintain common skills storage"*. Everyone keeps their own collection and an alias
+ * makes them searchable together — the same shape as codebase indexes, and for the same reason:
+ * one shared collection would have every republish racing every other.
+ *
+ * Publishing is a button rather than something that happens on save. Sending what you have
+ * taught your assistant to colleagues is a decision, and one worth making deliberately.
+ */
+function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
+  const [alias, setAlias] = useState(props.alias ?? '')
+  useEffect(() => setAlias(props.alias ?? ''), [props.alias])
+
+  return (
+    <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
+      <h3 style={{ margin: '0 0 6px', fontSize: 13 }}>Team skills</h3>
+      <p style={{ margin: '0 0 8px', color: colors.muted, fontSize: 11 }}>
+        One name covering every teammate&rsquo;s skills, so the assistant can search what other
+        people have taught theirs. Everyone publishes to their own collection; set the same alias
+        on each machine. Colleagues&rsquo; skills are returned in full, because they have no file
+        on your disk to open. <strong>OpenSearch only.</strong>
+      </p>
+
+      <label htmlFor="lc-skills-alias" style={labelStyle()}>
+        Shared skills alias <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
+      </label>
+      <input
+        id="lc-skills-alias"
+        type="text"
+        value={alias}
+        spellCheck={false}
+        placeholder="e.g. my-team-skills"
+        onChange={(event) => setAlias(event.target.value)}
+        style={textFieldStyle()}
+      />
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+        <button type="button" style={secondaryButtonStyle()} onClick={() => props.onSaveAlias(alias.trim())}>
+          Save alias
+        </button>
+        <button
+          type="button"
+          style={primaryButtonStyle(props.alias === undefined)}
+          disabled={props.alias === undefined}
+          title={props.alias === undefined ? 'Set and save an alias first' : undefined}
+          onClick={props.onPublish}
+        >
+          Publish my skills
+        </button>
+      </div>
+
+      {props.result?.error !== undefined && (
+        <span style={{ display: 'block', color: colors.error, fontSize: 11, marginTop: 6 }}>
+          {props.result.error}
+        </span>
+      )}
+      {props.result?.error === undefined && props.result?.count !== undefined && (
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 6 }}>
+          {`Published ${String(props.result.count)} skill(s) to "${props.result.collection ?? ''}". `}
+          Publishing again replaces your own copies and never touches anyone else&rsquo;s.
+        </span>
+      )}
+    </section>
+  )
+}
+
 export function SkillsTab(props: SkillsTabProps): ReactElement {
   const [confirming, setConfirming] = useState<string | undefined>(undefined)
 
@@ -213,6 +293,7 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         onSave={props.onSaveDirs}
       />
 
+      <TeamSkillsSection {...props.team} />
     </div>
   )
 }

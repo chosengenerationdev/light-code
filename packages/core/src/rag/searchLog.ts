@@ -11,7 +11,7 @@
  * unreachable. Those read identically in the chat.
  */
 
-export type SearchLogSource = 'search_codebase' | 'search_docs' | 'search_opensearch'
+export type SearchLogSource = 'search_codebase' | 'search_docs' | 'search_opensearch' | 'search_team_skills'
 
 export interface SearchLogEntry {
   at: number
