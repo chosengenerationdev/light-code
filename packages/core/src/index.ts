@@ -247,6 +247,12 @@ export {
   type MailStatus,
 } from './office/mailIndex.js'
 export { MailStore } from './office/mailStore.js'
+export {
+  createScheduleFromChatTool,
+  scheduleFormFields,
+  triggerFromAnswers,
+  type ScheduleProposal,
+} from './tools/scheduleFromChat.js'
 export { storeIdFor, type CorpusPurpose, type MailIndexConfig } from './config/schema.js'
 export { syncMail, pruneMail, type MailSyncResult, type HarvestedMessage } from './office/mailSync.js'
 export {

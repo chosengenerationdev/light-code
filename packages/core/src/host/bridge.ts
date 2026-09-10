@@ -109,6 +109,7 @@ import {
   type MailIndexConfig,
   syncMail,
   pruneMail,
+  createScheduleFromChatTool,
   createSearchMailTool,
   createMailPatternsTool,
   createOpenEmailTool,
@@ -143,6 +144,7 @@ import {
   isDue,
   MAX_REMEMBERED_RUNS,
   type Schedule,
+  type ScheduleTrigger,
   createReadToolResultTool,
   deriveTitle,
   findMode,
@@ -1479,6 +1481,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
       combined.register(createWriteSkillTool(context))
       combined.register(createDeleteSkillTool(context))
+    }
+    /*
+     * Scheduling from the chat. Offered only where somebody can answer the form and where there
+     * is a project to bind the job to — a schedule with no workspace fires in whichever project
+     * happens to be open, which is the hazard §12d exists to close.
+     */
+    if (workspaceRoot !== undefined) {
+      combined.register(
+        createScheduleFromChatTool({
+          /*
+           * The host's own policy decides what a schedule may be granted, and it is applied by
+           * filtering the live registry rather than by keeping a second list here. Two lists
+           * would be two things to keep in step.
+           */
+          schedulableTools: () =>
+            filterToolsForSchedule(combined.list(), { allowedTools: combined.list().map((entry) => entry.name) })
+              .filter((entry) => entry.name !== 'schedule_prompt')
+              .map((entry) => ({ name: entry.name, description: entry.description })),
+          requestForm: async (fields, title) => {
+            const answer = await requestForm({ title, fields })
+            return answer.submitted ? answer.values : undefined
+          },
+          create: createScheduleFromProposal,
+        }),
+      )
     }
     /*
      * Offered only when there is a shared corpus to search. Registering it without one would
@@ -5781,6 +5808,43 @@ ${contents}
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
+  }
+
+  /**
+   * Writes a schedule the user approved in the chat.
+   *
+   * Bound to this workspace, which is the whole of §12d's fix: a schedule without one fires in
+   * whichever project happens to be open, running its prompt and its granted tools against
+   * somebody else's files. A job created *from* a project plainly belongs to it.
+   *
+   * Armed here for the same reason `handleSaveSchedule` arms one: a schedule with no `nextRunAt`
+   * never fires, and that failed silently for weeks once already.
+   */
+  async function createScheduleFromProposal(proposal: {
+    name: string
+    prompt: string
+    trigger: ScheduleTrigger
+    allowedTools: string[]
+  }): Promise<{ id: string; nextRunAt?: number }> {
+    const schedules = await loadSchedules()
+    const id = createHash('sha256')
+      .update(`${proposal.name}:${String(Date.now())}`)
+      .digest('hex')
+      .slice(0, 12)
+
+    const schedule: Schedule = {
+      id,
+      name: proposal.name,
+      prompt: proposal.prompt,
+      trigger: proposal.trigger,
+      enabled: true,
+      allowedTools: proposal.allowedTools,
+      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+    }
+    const armed: Schedule = { ...schedule, nextRunAt: nextFireTime(schedule, Date.now()) }
+    await saveSchedules({ ...schedules, [id]: armed })
+    await postSchedules()
+    return { id, ...(armed.nextRunAt !== undefined ? { nextRunAt: armed.nextRunAt } : {}) }
   }
 
   async function handleDeleteSchedule(id: string): Promise<void> {

@@ -47,6 +47,12 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   'delete_python_tool',
   'write_skill',
   'delete_skill',
+  /*
+   * A run that could create schedules could grant *itself* wider tools on the next one, which
+   * turns a bounded allowlist into a ladder. The same reasoning as Python tools and skills:
+   * authorising a capability needs somebody present, and nobody is.
+   */
+  'schedule_prompt',
   // Same reasoning, and sharper unattended: installing a macro is authorising a capability, and
   // section 13 requires approval showing the source, which cannot happen with nobody there.
   'excel_write_macro',
