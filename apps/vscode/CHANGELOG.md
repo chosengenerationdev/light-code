@@ -1,5 +1,20 @@
 # light-code-vscode
 
+## 0.54.0
+
+### Minor Changes
+
+- Settings reorganised. Outlook mail indexing has its own tab, with folders picked from a tree of
+  your real mailbox instead of typed, an include-subfolders option, a progress bar and a Stop button.
+  Tool documentation indexing moved from MCP to Tools, so each index has exactly one place. Team
+  skills moved to the top of the Skills tab and its buttons are named for what they do.
+
+  The assistant now checks this workspace's skills before it plans or answers, and only searches
+  team skills when asked.
+
+  Fixed: the team index alias could not be saved because the button was labelled "Save embedder" and
+  sat several fields away. It has its own Save beside it now.
+
 ## 0.53.2
 
 ### Patch Changes
