@@ -836,6 +836,52 @@ attach-refusal message**; they have never run against a live mailbox.
 
 ---
 
+## 12e. Team-wide codebase search (0.53.0)
+
+A team indexes into one OpenSearch cluster and wants to search each other's work. The
+requirement that shaped it was not the searching — it was the user's second sentence: *"more
+importantly LLM model should not get confused with code it finds in the search and it doesn't
+find it in the local as it belongs to different user or project"*.
+
+- **Everyone still writes to their own index.** `embedder.indexAlias` is added to each index as
+  it is created, and querying the alias fans out across all of them. Sharing one index instead
+  would make every person's re-index disturb everyone else, and there would be nothing to
+  attribute a hit to.
+- **`search_codebase` takes `scope`** — `mine` (default) or `team`.
+- **Locality is checked on the filesystem, never inferred from the owner field.** Every hit is
+  tested for whether that path exists in this workspace; anything absent is marked
+  `NOT IN THIS WORKSPACE` and carries a standing instruction not to call `read_file` on it.
+  Attribution is a *label*: absent on anything indexed before it existed, and wrong the moment
+  two people configure the same index name. Whether `read_file` will succeed is a **fact about
+  this disk**, and twenty-five stat calls settle it. This is invariant 8's habit applied to a
+  search result — report the ground truth rather than the description of it.
+- **Locality is three-valued.** `undefined` means *could not check*, which is the Search tab
+  running the tool with no filesystem. Marking every hit remote there would be a confident false
+  statement of exactly the kind the feature exists to prevent, so only a definite `false` warns.
+- **Owner filtering is pushed into the engine on all three backends**, not applied to results. A
+  post-filter turns a request for ten of your own chunks into however many of the global ten
+  happened to be yours — on a team index frequently none, which is indistinguishable from
+  nothing being indexed. It is applied even against your own index, because two checkouts can
+  be configured to share one.
+- **An existing index does not have to be re-indexed.** A button attaches the alias in place and
+  `attributeUnowned` stamps an owner onto chunks that lack one with `_update_by_query`. The
+  script fills the field **only where it is missing**, which makes it idempotent and means it can
+  never relabel a colleague's code as yours. `conflicts=proceed`, because a long run against a
+  live index will meet a concurrent write and skipping that document is right.
+- **Team scope is OpenSearch-only and absent elsewhere rather than emulated.** Qdrant and Chroma
+  have no alias; fanning a query across collections and merging scores that are not comparable
+  would be a feature that only looks like it works. Same rule `search_opensearch` follows.
+- **`retrieval.stores` sends each corpus to a different store** — `codebase`, `docs`, `mail` —
+  falling back to `activeVectorStoreId`. Phase 8b always said "selectable per data type"; the
+  case that forced it is team code in a shared cluster and personal mail in a local Qdrant.
+  `storeIdFor()` owns the fallback, because the alternative is every call site remembering it
+  and one of them not doing so.
+- **`identity.owner` is user-scope only** (invariant 5), defaulting to the OS user name resolved
+  at the host boundary. A repository able to set it could attribute what it indexed to a
+  colleague — the sort of claim nobody thinks to go and check.
+
+---
+
 ## 12d. Per-project settings, and schedules that stay put (0.47.0)
 
 **Settings may vary by project without a repository being able to set them.** Invariant 5 is about
