@@ -403,6 +403,14 @@ export type UiToHostMessage =
   /** Indexing is user-started, never model-started: it is the largest egress in the product. */
   | { type: 'startIndexing' }
   /**
+   * Joins an index that already exists to the team alias, without re-indexing it.
+   *
+   * For the install that indexed before aliases existed. Re-embedding an entire repository to
+   * gain a label would be an absurd price for a string, so this attaches the alias and fills in
+   * the missing attribution in place.
+   */
+  | { type: 'attachTeamAlias' }
+  /**
    * Rebuilds the documentation index. `kind` narrows it to tools or skills only.
    *
    * Separate because the two halves change for different reasons: adding an MCP server, or
@@ -440,6 +448,8 @@ export type UiToHostMessage =
       indexName?: string
       /** Front of every derived index name. Empty restores the default. */
       indexPrefix?: string
+      /** Shared name covering the whole team's indexes. Empty removes it. */
+      indexAlias?: string
     }
   /**
    * Lists models for an already-saved profile.
@@ -862,6 +872,8 @@ export type HostToUiMessage =
   | { type: 'indexProgress'; progress: IndexProgress }
   /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */
   | { type: 'indexResult'; result?: IndexResult; error?: string }
+  /** `attributed` is how many existing chunks gained an owner; 0 is a real answer, not a failure. */
+  | { type: 'teamAliasAttached'; alias?: string; index?: string; attributed?: number; error?: string }
   /** Embedder settings plus what the index currently holds, for Settings → Search. */
   | {
       type: 'embedder'
@@ -876,6 +888,8 @@ export type HostToUiMessage =
       indexPrefix?: string
       /** What the prefix falls back to, so the field can show it as a placeholder. */
       defaultIndexPrefix: string
+      /** Shared name across the team's indexes, absent when team scope is not set up. */
+      indexAlias?: string
       indexedFiles: number
     }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */

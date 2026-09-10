@@ -123,6 +123,23 @@ export interface IndexerOptions {
   signal?: AbortSignal
   /** Documents per bulk request. Bounded so one failure does not lose a whole run. */
   batchSize?: number
+  /**
+   * Attribution written onto every chunk, so a shared index can say whose a hit is.
+   *
+   * Absent for a private store, where it would be noise. Present the moment several people
+   * write into one cluster, which is what `embedder.indexAlias` is for.
+   */
+  owner?: string
+  /** The project's folder name. Enough to tell two checkouts apart in a list of hits. */
+  project?: string
+  /**
+   * A shared name to point at this index once it exists.
+   *
+   * Applied after the index is created and on every run, since adding an alias that is already
+   * there is a no-op. Silently skipped on a backend with no alias concept — see
+   * `VectorIndexWriter.ensureAlias`.
+   */
+  alias?: string
 }
 
 function hashContent(content: string): string {
@@ -162,6 +179,17 @@ export async function indexWorkspace(options: IndexerOptions): Promise<IndexResu
   }
 
   await writer.ensureCollection(index, embedder.dimensions, signal)
+  /*
+   * The alias, if a team shares one. After creation and on every run: adding an alias that
+   * already points here is a no-op, so there is nothing to track.
+   *
+   * A backend without the concept has no `ensureAlias` at all, and is skipped rather than
+   * emulated — fanning a query across collections and merging scores that are not comparable
+   * would be a feature that only looks like it works.
+   */
+  if (options.alias !== undefined && writer.ensureAlias !== undefined) {
+    await writer.ensureAlias(index, options.alias, signal)
+  }
 
   /*
    * A change to the model, its width, or the chunk shape makes every stored vector
@@ -297,6 +325,10 @@ export async function indexWorkspace(options: IndexerOptions): Promise<IndexResu
           path: relative,
           startLine: chunk.startLine,
           endLine: chunk.endLine,
+          // Omitted rather than written empty, so an unattributed chunk stays distinguishable
+          // from one attributed to nobody.
+          ...(options.owner !== undefined ? { owner: options.owner } : {}),
+          ...(options.project !== undefined ? { project: options.project } : {}),
           vector,
         })
       }

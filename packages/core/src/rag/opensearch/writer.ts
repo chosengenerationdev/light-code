@@ -151,12 +151,84 @@ export class OpenSearchIndexWriter implements VectorIndexWriter {
             path: { type: 'keyword' },
             startLine: { type: 'integer' },
             endLine: { type: 'integer' },
+            /*
+             * Attribution, so a search across a team alias can say whose a hit is.
+             *
+             * `keyword` rather than `text` for both: they are filtered on and never matched
+             * against, and an analysed field would split a name like `a.patel` into two terms
+             * and quietly stop matching it exactly.
+             */
+            owner: { type: 'keyword' },
+            project: { type: 'keyword' },
             vector: { type: 'knn_vector', dimension: dimensions },
           },
         },
       },
       signal,
     )
+  }
+
+  /**
+   * Adds an alias to this index, so a query against the alias reaches it.
+   *
+   * Idempotent: OpenSearch treats adding an alias that already points here as a no-op, so this
+   * runs on every index rather than being tracked.
+   *
+   * The index is checked to be ours first. An alias is a *write-adjacent* name — pointing one
+   * at an index Light Code does not own would let a later write reach it — and the same
+   * wildcard rules apply to it as to an index name, for the same reason.
+   */
+  async ensureAlias(index: string, alias: string, signal?: AbortSignal): Promise<void> {
+    if (!isSafeIndexName(alias)) throw new OpenSearchError(`"${alias}" is not a valid alias name.`)
+    if (alias.includes('*')) throw new OpenSearchError('An alias cannot be a wildcard pattern.')
+    if (alias === index) return
+    await this.assertOwned(index, signal)
+
+    await this.request(
+      '/_aliases',
+      'POST',
+      { actions: [{ add: { index, alias } }] },
+      signal,
+    )
+  }
+
+  /**
+   * Adds `owner` (and `project`) to documents that lack them.
+   *
+   * `_update_by_query` with `conflicts: 'proceed'`: on a large index this runs for a while and
+   * a concurrent re-index would otherwise abort the whole thing over one version conflict, when
+   * skipping that document and carrying on is exactly right — whatever wrote it is writing the
+   * attribution too.
+   *
+   * The script only fills what is missing. That makes it idempotent, and means it can never
+   * relabel a colleague's chunks as yours in an index several people share.
+   */
+  async attributeUnowned(
+    index: string,
+    attribution: { owner: string; project?: string },
+    signal?: AbortSignal,
+  ): Promise<number> {
+    await this.assertOwned(index, signal)
+
+    const result = await this.request<{ updated?: number }>(
+      `/${encodeURIComponent(index)}/_update_by_query?conflicts=proceed&refresh=true`,
+      'POST',
+      {
+        query: { bool: { must_not: [{ exists: { field: 'owner' } }] } },
+        script: {
+          lang: 'painless',
+          source:
+            'if (ctx._source.owner == null) { ctx._source.owner = params.owner; } ' +
+            'if (params.project != null && ctx._source.project == null) { ctx._source.project = params.project; }',
+          params: {
+            owner: attribution.owner,
+            project: attribution.project ?? null,
+          },
+        },
+      },
+      signal,
+    )
+    return typeof result.updated === 'number' ? result.updated : 0
   }
 
   /** The width an existing index was created with, or undefined if it cannot be read. */
@@ -200,6 +272,10 @@ export class OpenSearchIndexWriter implements VectorIndexWriter {
           path: document.path,
           startLine: document.startLine,
           endLine: document.endLine,
+          // Omitted rather than written as null when unknown, so an unattributed chunk stays
+          // distinguishable from one attributed to nobody.
+          ...(document.owner !== undefined ? { owner: document.owner } : {}),
+          ...(document.project !== undefined ? { project: document.project } : {}),
           vector: document.vector,
         }),
       )

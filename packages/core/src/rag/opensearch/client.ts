@@ -256,6 +256,18 @@ export class OpenSearchClient implements VectorSearcher {
     options: VectorSearchOptions,
   ): Promise<VectorMatch[]> {
     const prefix = options.pathPrefix?.trim()
+    /*
+     * Both filters go *inside* the knn clause, not after it.
+     *
+     * OpenSearch applies a knn filter during the search rather than to its output, so asking
+     * for ten hits returns ten matching ones. A post-filter would return however many of the
+     * global ten happened to match — which, searching a team alias for your own code, is
+     * frequently zero, and looks exactly like nothing being indexed.
+     */
+    const clauses: Record<string, unknown>[] = []
+    if (prefix !== undefined && prefix.length > 0) clauses.push({ prefix: { path: prefix } })
+    if (options.owner !== undefined) clauses.push({ term: { owner: options.owner } })
+
     const body: Record<string, unknown> = {
       /*
        * Returning the stored vector would send a 1024-float array per hit — many times the
@@ -271,7 +283,7 @@ export class OpenSearchClient implements VectorSearcher {
              * or a filter can leave fewer than requested.
              */
             k: Math.max(options.size, 10),
-            ...(prefix !== undefined && prefix.length > 0 ? { filter: { prefix: { path: prefix } } } : {}),
+            ...(clauses.length > 0 ? { filter: { bool: { filter: clauses } } } : {}),
           },
         },
       },
@@ -288,6 +300,8 @@ export class OpenSearchClient implements VectorSearcher {
         startLine?: unknown
         endLine?: unknown
         text?: unknown
+        owner?: unknown
+        project?: unknown
       }
       const match: VectorMatch = {
         id: hit.id,
@@ -295,6 +309,10 @@ export class OpenSearchClient implements VectorSearcher {
         text: typeof source.text === 'string' ? source.text : '',
         path: typeof source.path === 'string' ? source.path : hit.id,
       }
+      // Left absent when the chunk predates attribution, so "unknown" stays distinct from
+      // "mine" everywhere downstream.
+      if (typeof source.owner === 'string') match.owner = source.owner
+      if (typeof source.project === 'string') match.project = source.project
       if (typeof source.startLine === 'number') match.startLine = source.startLine
       if (typeof source.endLine === 'number') match.endLine = source.endLine
       return match

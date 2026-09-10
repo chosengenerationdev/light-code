@@ -190,6 +190,10 @@ export function App(props: AppProps): ReactElement {
   const [embedder, setEmbedder] = useState<EmbedderState | undefined>(undefined)
   const [indexProgress, setIndexProgress] = useState<IndexProgress | undefined>(undefined)
   const [indexResult, setIndexResult] = useState<{ result?: IndexResult; error?: string } | undefined>(undefined)
+  /** The outcome of joining an existing index to the team alias. */
+  const [aliasResult, setAliasResult] = useState<
+    { alias?: string; index?: string; attributed?: number; error?: string } | undefined
+  >(undefined)
   const [embedderModels, setEmbedderModels] = useState<string[]>([])
   const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
@@ -500,6 +504,13 @@ export function App(props: AppProps): ReactElement {
         setEmbedderSavedTick((tick) => tick + 1)
       } else if (message.type === 'indexProgress') {
         setIndexProgress(message.progress)
+      } else if (message.type === 'teamAliasAttached') {
+        setAliasResult({
+          ...(message.alias !== undefined ? { alias: message.alias } : {}),
+          ...(message.index !== undefined ? { index: message.index } : {}),
+          ...(message.attributed !== undefined ? { attributed: message.attributed } : {}),
+          ...(message.error !== undefined ? { error: message.error } : {}),
+        })
       } else if (message.type === 'indexResult') {
         setIndexProgress(undefined)
         setIndexResult({
@@ -715,7 +726,14 @@ export function App(props: AppProps): ReactElement {
         setEmbedderModelsLoading(true)
         props.transport.post({ type: 'requestEmbedderModels', profileId } satisfies UiToHostMessage)
       },
-      onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string, indexPrefix: string) => {
+      onSaveEmbedder: (
+        profileId: string,
+        model: string,
+        dimensions: number,
+        indexName: string,
+        indexPrefix: string,
+        indexAlias: string,
+      ) => {
         setError(undefined)
         props.transport.post({
           type: 'saveEmbedder',
@@ -724,8 +742,14 @@ export function App(props: AppProps): ReactElement {
           dimensions,
           ...(indexName.length > 0 ? { indexName } : {}),
           ...(indexPrefix.length > 0 ? { indexPrefix } : {}),
+          ...(indexAlias.length > 0 ? { indexAlias } : {}),
         } satisfies UiToHostMessage)
       },
+      onAttachTeamAlias: () => {
+        setAliasResult(undefined)
+        props.transport.post({ type: 'attachTeamAlias' } satisfies UiToHostMessage)
+      },
+      aliasResult,
       onStartIndexing: () => {
         setIndexResult(undefined)
         props.transport.post({ type: 'startIndexing' } satisfies UiToHostMessage)

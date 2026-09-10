@@ -1,8 +1,9 @@
+import path from 'node:path'
 import { z } from 'zod'
 import type { Embedder } from '../rag/embedder.js'
 import type { SearchObserver } from '../rag/searchLog.js'
 import type { VectorSearcher } from '../rag/vectorStore.js'
-import type { Tool, ToolResult } from './types.js'
+import type { Tool, ToolExecutionContext, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
   query: z
@@ -14,6 +15,15 @@ const paramsSchema = z.object({
     .string()
     .optional()
     .describe('Restrict to a subtree, e.g. "packages/core/src". Omit to search everything indexed.'),
+  scope: z
+    .enum(['mine', 'team'])
+    .optional()
+    .describe(
+      'Whose code to search. "mine" (default) is this workspace only. "team" also searches ' +
+        'colleagues\' indexed projects — use it for "how did anyone solve X", never for ' +
+        'questions about the code in front of you. Team results are NOT on this machine and ' +
+        'cannot be opened or edited.',
+    ),
 })
 export type SearchCodebaseParams = z.infer<typeof paramsSchema>
 
@@ -29,9 +39,37 @@ export interface SearchCodebaseOptions {
   connectionLabel: string
   /** Records the query for the Search tab. A semantic miss is invisible without it. */
   observer?: SearchObserver
+  /**
+   * The name covering every team member's index, when one is configured.
+   *
+   * Absent means team scope is simply unavailable — on a backend with no alias concept, or an
+   * install where nobody set one up. The tool says so rather than pretending.
+   */
+  teamAlias?: string
+  /** Who this machine is, so "mine" stays "mine" even when the index is shared. */
+  owner?: string
 }
 
 const DEFAULT_SIZE = 8
+
+/**
+ * What the model must be told about a hit it cannot open.
+ *
+ * The reported problem: searching a team index returns code that is not on this machine, and
+ * the model then tries to read it, fails, and gets confused about what exists. So a result that
+ * cannot be opened is marked as such and accompanied by this, every time.
+ *
+ * Note what it does *not* say: it does not tell the model to ignore those hits. They are the
+ * entire point of a team search — they just have to be read as quotations rather than as files.
+ */
+const REMOTE_GUIDANCE = [
+  'Some matches are from other people\'s indexed projects and are NOT on this machine.',
+  'For anything marked NOT IN THIS WORKSPACE:',
+  '- Do not call read_file, apply_diff or write_to_file on that path. It does not exist here,',
+  '  and a failure to open it does not mean the code is missing or wrong.',
+  '- The snippet shown is the whole of what you know about that file. Do not infer the rest.',
+  '- If it is relevant, say which project and person it came from so the user can go and look.',
+]
 
 /**
  * Finds code by meaning rather than by name, over the index the user built.
@@ -43,6 +81,60 @@ const DEFAULT_SIZE = 8
  * plausible neighbours rather than nothing, so it must never be the only thing consulted
  * before concluding something does not exist.
  */
+/**
+ * Whether a hit names a file that actually exists in this workspace.
+ *
+ * **Asked of the filesystem, never inferred from the owner field.** Attribution is metadata: it
+ * is absent on anything indexed before it existed, and wrong the moment two people configure
+ * the same index name. Whether `read_file` will succeed is a fact about this disk, and twenty-
+ * five stat calls is nothing.
+ *
+ * Three answers, not two. `undefined` means *could not check* — the Search tab runs this tool
+ * with no filesystem, and marking every hit "NOT IN THIS WORKSPACE" there would be a confident
+ * false statement of exactly the kind this function exists to prevent. Only a definite `false`
+ * produces a warning.
+ */
+async function isPresentHere(
+  relativePath: string,
+  context: ToolExecutionContext | undefined,
+): Promise<boolean | undefined> {
+  // An indexed path is workspace-relative by construction, so anything else did not come from
+  // a workspace walk and cannot be resolved against this one.
+  if (path.isAbsolute(relativePath) || relativePath.includes('..')) return false
+  const fileSystem = context?.fs
+  const root = context?.workspaceRoot
+  if (root === undefined || fileSystem === undefined || typeof fileSystem.exists !== 'function') {
+    return undefined
+  }
+  try {
+    return await fileSystem.exists(path.join(root, relativePath))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * How a hit is labelled with where it came from.
+ *
+ * Says nothing at all for your own work, which is the overwhelming majority — a label on every
+ * line would be noise that trains the model to stop reading them. An unattributed chunk is
+ * reported as unknown rather than assumed to be yours: it predates attribution, and quietly
+ * claiming it is the same class of mistake this is meant to prevent.
+ */
+export function describeOrigin(
+  owner: string | undefined,
+  project: string | undefined,
+  self: string | undefined,
+): string {
+  if (owner === undefined && project === undefined) return ''
+  if (owner !== undefined && self !== undefined && owner === self) {
+    // Own work: the project still distinguishes two checkouts of yours from each other.
+    return project === undefined ? '' : `  [${project}]`
+  }
+  const who = owner ?? 'unknown owner'
+  return project === undefined ? `  [${who}]` : `  [${who} / ${project}]`
+}
+
 export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<SearchCodebaseParams> {
   return {
     name: 'search_codebase',
@@ -51,28 +143,48 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
       'Search the indexed codebase by meaning, for when you do not know the exact name. ' +
       'Returns file paths with line ranges and the matching text; follow up with read_file for full context. ' +
       'Prefer search_files when you know the literal string — this finds things that are similar, ' +
-      'so an empty or weak result does not prove something is absent.',
+      'so an empty or weak result does not prove something is absent. ' +
+      'scope:"team" also searches colleagues\' projects; those files are not on this machine ' +
+      'and results say so — never try to open or edit them.',
     parametersSchema: paramsSchema,
 
-    async execute(params): Promise<ToolResult> {
+    async execute(params, context): Promise<ToolResult> {
       const startedAt = Date.now()
       try {
         const size = params.size ?? DEFAULT_SIZE
+        const wantsTeam = params.scope === 'team'
+        /*
+         * Team scope needs somewhere to look. Rather than fail, it degrades to this
+         * workspace and *says so* — a dead end here would leave the model with nothing, and
+         * silently searching less than asked is the version that produces a confident wrong
+         * "nobody has done this before".
+         */
+        const teamUnavailable = wantsTeam && options.teamAlias === undefined
+        const searchingTeam = wantsTeam && options.teamAlias !== undefined
+        const collection = searchingTeam ? (options.teamAlias as string) : options.index
+
         const vector = await options.embedder.embed(params.query)
 
         // The request shape is the backend's business, not this tool's — see `VectorSearcher`.
-        const hits = await options.searcher.searchByVector(options.index, vector, {
+        const hits = await options.searcher.searchByVector(collection, vector, {
           size,
           ...(params.pathPrefix !== undefined && params.pathPrefix.trim().length > 0
             ? { pathPrefix: params.pathPrefix.trim() }
             : {}),
+          /*
+           * Narrowed to this machine's owner whenever we are not deliberately searching the
+           * team. Applied even against our own index, because two checkouts can be configured
+           * to share one — and "mine" that quietly includes a colleague's is the exact
+           * confusion this whole change exists to remove.
+           */
+          ...(!searchingTeam && options.owner !== undefined ? { owner: options.owner } : {}),
         })
 
         options.observer?.record({
           at: startedAt,
           source: 'search_codebase',
           query: params.query,
-          collection: options.index,
+          collection,
           hits: hits.length,
           elapsedMs: Date.now() - startedAt,
           via: 'index',
@@ -88,19 +200,47 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
           }
         }
 
+        /*
+         * Whether each hit is a file that actually exists here.
+         *
+         * **Checked on disk, never inferred from the owner field.** Attribution is metadata and
+         * can be stale, absent on anything indexed before it existed, or simply wrong if two
+         * people configured the same index name. Whether `read_file` will work is a fact about
+         * this filesystem, and it is cheap to just ask — twenty-five stats at the very most.
+         *
+         * This is invariant 8's habit applied to a search result: report the ground truth, not
+         * the description of it.
+         */
+        const local = await Promise.all(hits.map(async (hit) => isPresentHere(hit.path, context)))
+
         const rendered = hits
           .map((hit, position) => {
             const where = `${hit.path}:${hit.startLine ?? '?'}-${hit.endLine ?? '?'}`
-            return `[${position + 1}] ${where}  (score ${hit.score.toFixed(3)})\n${hit.text}`
+            const attribution = describeOrigin(hit.owner, hit.project, options.owner)
+            // Only when it is *known* absent. Unknown says nothing — see `isPresentHere`.
+            const marker = local[position] === false ? '  — NOT IN THIS WORKSPACE' : ''
+            return `[${position + 1}] ${where}  (score ${hit.score.toFixed(3)})${attribution}${marker}\n${hit.text}`
           })
           .join('\n\n---\n\n')
 
+        const anyRemote = local.some((present) => present === false)
+
         return {
           content: [
-            `${hits.length} match(es) by meaning for: ${params.query}`,
+            `${hits.length} match(es) by meaning for: ${params.query}` +
+              (searchingTeam ? ` (searched the whole team's indexes)` : ''),
             // Said every time, because the failure mode is the model treating a weak
             // semantic hit as authoritative and never opening the file.
             'These are approximate. Read the files before relying on them, and use search_files if you know the exact term.',
+            ...(teamUnavailable
+              ? [
+                  '',
+                  'Team scope was asked for but no shared index is configured, so only this ' +
+                    'workspace was searched. Do not conclude from this that no colleague has ' +
+                    'solved it — their work was not looked at.',
+                ]
+              : []),
+            ...(anyRemote ? ['', ...REMOTE_GUIDANCE] : []),
             '',
             rendered,
           ].join('\n'),

@@ -45,8 +45,22 @@ export interface VectorStoreConnection {
   label?: string
 }
 
+/**
+ * Attribution carried by every chunk, so a shared index can say whose work a hit is.
+ *
+ * Both are optional and both are absent on anything indexed before they existed. That matters
+ * for how they are *read* rather than written: a hit with no owner is not "mine", it is
+ * unknown, and the search path says so rather than guessing.
+ */
+export interface VectorOwnership {
+  /** Who indexed it. See `identityConfigSchema`. */
+  owner?: string
+  /** Which project, as its folder name. Enough to tell two checkouts apart in a hit list. */
+  project?: string
+}
+
 /** A chunk as stored. Identical across backends — the indexer produces exactly this. */
-export interface VectorDocument {
+export interface VectorDocument extends VectorOwnership {
   id: string
   text: string
   path: string
@@ -56,7 +70,7 @@ export interface VectorDocument {
 }
 
 /** A hit, already flattened. Backends disagree about where payload lives; adapters resolve it. */
-export interface VectorMatch {
+export interface VectorMatch extends VectorOwnership {
   id: string
   /** Higher is better, in whatever scale the backend uses. Only the ordering is comparable. */
   score: number
@@ -71,6 +85,14 @@ export interface VectorSearchOptions {
   size: number
   /** Restrict to a subtree, e.g. `packages/core/src`. */
   pathPrefix?: string
+  /**
+   * Restrict to one person's chunks.
+   *
+   * Set when searching a shared alias at "mine" scope. Filtering in the *engine* rather than
+   * discarding afterwards, because a post-filter turns a request for ten hits into however
+   * many of ten happen to be yours — which on a team index is frequently none.
+   */
+  owner?: string
   signal?: AbortSignal
 }
 
@@ -103,6 +125,32 @@ export interface VectorIndexWriter {
    * that never mentions the real cause.
    */
   ensureCollection(collection: string, dimensions: number, signal?: AbortSignal): Promise<void>
+  /**
+   * Points a shared name at this collection, so several people's indexes can be searched
+   * together.
+   *
+   * Optional because only OpenSearch has the concept. Qdrant and Chroma have nothing
+   * equivalent, and emulating one — by fanning a query out across collections and merging
+   * scores that are not comparable — would be a feature that looks like it works. So the team
+   * scope is absent on those backends instead, the same rule `search_opensearch` follows.
+   */
+  ensureAlias?(collection: string, alias: string, signal?: AbortSignal): Promise<void>
+  /**
+   * Stamps an owner onto chunks that have none, without re-embedding anything.
+   *
+   * For the install that already has an index. Attribution and the alias both arrived after
+   * people had indexed their work, and telling them to re-index — paying the embedding cost
+   * again for every file — to gain a label would be an absurd price for a string.
+   *
+   * Only touches documents where the field is *missing*, so it can be run twice and cannot
+   * overwrite somebody else's attribution. Returns how many it changed, because "it worked"
+   * and "it matched nothing" look identical otherwise.
+   */
+  attributeUnowned?(
+    collection: string,
+    attribution: { owner: string; project?: string },
+    signal?: AbortSignal,
+  ): Promise<number>
   /** Upserts by id, so re-indexing a changed file replaces its chunks rather than duplicating. */
   upsert(collection: string, documents: readonly VectorDocument[], signal?: AbortSignal): Promise<void>
   /** Removes the chunks of files that no longer exist. */

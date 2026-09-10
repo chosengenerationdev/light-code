@@ -129,8 +129,80 @@ describe('OpenSearchClient.searchByVector', () => {
 
     const filter = (index: number): unknown =>
       (calls[index]?.body as { query?: { knn?: { vector?: { filter?: unknown } } } }).query?.knn?.vector?.filter
-    expect(filter(0)).toEqual({ prefix: { path: 'packages/core/src' } })
+    expect(filter(0)).toEqual({ bool: { filter: [{ prefix: { path: 'packages/core/src' } }] } })
     expect(filter(1)).toBeUndefined()
+  })
+
+  /**
+   * Restricting a shared alias to one person's chunks.
+   *
+   * A `term`, not a `match`: `owner` is mapped as a keyword precisely so a name like `a.patel`
+   * is one token. Matching it as analysed text would also match `patel` alone, which on a team
+   * index is somebody else's code.
+   */
+  it('filters by owner when one is asked for', async () => {
+    const { http, calls } = recordingHttp(() => hitsResponse)
+    await new OpenSearchClient(http, connection).searchByVector('team-alias', [0.1], {
+      size: 3,
+      owner: 'a.patel',
+    })
+
+    const body = calls[0]?.body as { query?: { knn?: { vector?: { filter?: unknown } } } }
+    expect(body.query?.knn?.vector?.filter).toEqual({ bool: { filter: [{ term: { owner: 'a.patel' } }] } })
+  })
+
+  /**
+   * Both at once, and inside the knn clause rather than after it.
+   *
+   * OpenSearch applies a knn filter *during* the search. Filtering afterwards would return
+   * however many of the global ten happened to match, which when searching a team alias for
+   * your own code is frequently none — indistinguishable from nothing being indexed.
+   */
+  it('combines a prefix and an owner into one filter', async () => {
+    const { http, calls } = recordingHttp(() => hitsResponse)
+    await new OpenSearchClient(http, connection).searchByVector('team-alias', [0.1], {
+      size: 3,
+      pathPrefix: 'src',
+      owner: 'a.patel',
+    })
+
+    const body = calls[0]?.body as { query?: { knn?: { vector?: { filter?: unknown } } } }
+    expect(body.query?.knn?.vector?.filter).toEqual({
+      bool: { filter: [{ prefix: { path: 'src' } }, { term: { owner: 'a.patel' } }] },
+    })
+  })
+
+  /** Attribution travels back with the hit, so a team result can say whose it is. */
+  it('carries owner and project back from the document', async () => {
+    const { http } = recordingHttp(() => ({
+      hits: {
+        total: { value: 1 },
+        hits: [
+          {
+            _index: 'team-alias',
+            _id: 'a',
+            _score: 0.9,
+            _source: { text: 'x', path: 'src/a.ts', owner: 'r.silva', project: 'billing' },
+          },
+        ],
+      },
+    }))
+    const matches = await new OpenSearchClient(http, connection).searchByVector('team-alias', [0.1], { size: 5 })
+
+    expect(matches[0]?.owner).toBe('r.silva')
+    expect(matches[0]?.project).toBe('billing')
+  })
+
+  /**
+   * A chunk indexed before attribution existed. It is *unknown*, not mine — and the two must
+   * stay distinguishable, because the search path decides what to tell the model from this.
+   */
+  it('leaves owner absent when the document has none', async () => {
+    const { http } = recordingHttp(() => hitsResponse)
+    const matches = await new OpenSearchClient(http, connection).searchByVector('lc-index', [0.1], { size: 5 })
+
+    expect(matches[0]?.owner).toBeUndefined()
+    expect(matches[0]?.project).toBeUndefined()
   })
 
   it('flattens hits into backend-neutral matches', async () => {

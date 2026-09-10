@@ -11,6 +11,8 @@ export interface EmbedderState {
   indexNameIsCustom?: boolean
   indexPrefix?: string
   defaultIndexPrefix?: string
+  /** A name pointing at every team member's index, so they can be searched together. */
+  indexAlias?: string
   indexedFiles: number
 }
 
@@ -28,9 +30,19 @@ export interface IndexingSectionProps {
   /** Increments when the host confirms the save reached disk. */
   savedTick: number
   onRequestModels: (profileId: string) => void
-  onSaveEmbedder: (profileId: string, model: string, dimensions: number, indexName: string, indexPrefix: string) => void
+  onSaveEmbedder: (
+    profileId: string,
+    model: string,
+    dimensions: number,
+    indexName: string,
+    indexPrefix: string,
+    indexAlias: string,
+  ) => void
   onStartIndexing: () => void
   onCancelIndexing: () => void
+  /** Joins an already-indexed workspace to the alias without re-embedding it. */
+  onAttachTeamAlias: () => void
+  aliasResult: { alias?: string; index?: string; attributed?: number; error?: string } | undefined
 }
 
 /** Common widths, offered because getting this wrong is a full reindex to discover. */
@@ -50,6 +62,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
   const [dimensions, setDimensions] = useState('')
   const [indexName, setIndexName] = useState('')
   const [indexPrefix, setIndexPrefix] = useState('')
+  const [indexAlias, setIndexAlias] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -61,6 +74,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
     // Only a *chosen* name populates the field; a derived one stays as the placeholder.
     setIndexName(props.embedder?.indexNameIsCustom === true ? (props.embedder.indexName ?? '') : '')
     setIndexPrefix(props.embedder?.indexPrefix ?? '')
+    setIndexAlias(props.embedder?.indexAlias ?? '')
   }, [props.embedder])
 
   /*
@@ -186,6 +200,58 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
       </div>
 
       <div style={{ marginBottom: 10 }}>
+        <label htmlFor="lc-emb-alias" style={labelStyle()}>
+          Team index alias <span style={{ color: colors.muted, fontWeight: 'normal' }}>(optional)</span>
+        </label>
+        <input
+          id="lc-emb-alias"
+          type="text"
+          value={indexAlias}
+          spellCheck={false}
+          placeholder="e.g. my-team-code"
+          onChange={(event) => setIndexAlias(event.target.value)}
+          style={textFieldStyle()}
+        />
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+          One name pointing at every teammate&rsquo;s index, so <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>search_codebase</code>{' '}
+          can be asked to look across the team. Everyone still writes to their own index; set the
+          same alias on each machine. Results from someone else are marked as not being in your
+          workspace, so the assistant does not try to open them. <strong>OpenSearch only</strong> &mdash;
+          Qdrant and Chroma have no equivalent, and team scope is simply unavailable there.
+        </span>
+        {indexAlias.trim().length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            {/*
+              For an index that already exists. Re-embedding a whole repository to gain a label
+              would be an absurd price for a string, so this attaches the alias in place and
+              fills in the attribution that older chunks were written without.
+            */}
+            <button type="button" style={secondaryButtonStyle()} onClick={props.onAttachTeamAlias}>
+              Attach alias to my existing index
+            </button>
+            <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
+              Use this if you indexed before setting an alias. It adds the alias and labels the
+              existing chunks as yours &mdash; no re-indexing, and nothing is re-embedded. Chunks
+              already labelled with someone else are never touched.
+            </span>
+            {props.aliasResult?.error !== undefined && (
+              <span style={{ display: 'block', color: colors.error, fontSize: 11, marginTop: 4 }}>
+                {props.aliasResult.error}
+              </span>
+            )}
+            {props.aliasResult?.error === undefined && props.aliasResult?.alias !== undefined && (
+              <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
+                {`"${props.aliasResult.index ?? ''}" now answers to "${props.aliasResult.alias}". `}
+                {props.aliasResult.attributed === 0
+                  ? 'Every chunk already had an owner.'
+                  : `${String(props.aliasResult.attributed ?? 0)} existing chunk(s) labelled as yours.`}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
         <label htmlFor="lc-emb-prefix" style={labelStyle()}>
           Index name prefix
         </label>
@@ -232,7 +298,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           type="button"
           style={secondaryButtonStyle()}
           disabled={!configured}
-          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim(), indexPrefix.trim())}
+          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim(), indexPrefix.trim(), indexAlias.trim())}
         >
           Save embedder
         </button>

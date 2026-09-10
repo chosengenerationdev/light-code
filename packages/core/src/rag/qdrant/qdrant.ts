@@ -93,6 +93,10 @@ function toMatch(point: QdrantPoint): VectorMatch | undefined {
   }
   if (typeof payload.startLine === 'number') match.startLine = payload.startLine
   if (typeof payload.endLine === 'number') match.endLine = payload.endLine
+  // Absent rather than defaulted, so a chunk written before attribution existed reads as
+  // unknown instead of claiming to be anyone's.
+  if (typeof payload.owner === 'string') match.owner = payload.owner
+  if (typeof payload.project === 'string') match.project = payload.project
   return match
 }
 
@@ -138,6 +142,17 @@ export class QdrantSearcher extends QdrantBase implements VectorSearcher {
        * is filtered out. Capped so a deep subtree cannot pull an unbounded page.
        */
       limit: filtering ? Math.min(options.size * 10, 500) : options.size,
+      /*
+       * Owner, unlike the path prefix, *is* pushed down to the engine.
+       *
+       * It is an exact term match, which Qdrant expresses natively, and it is a correctness
+       * filter rather than a convenience: over-fetching and discarding would mean a request
+       * for ten of your own chunks returning however many of the global ten happened to be
+       * yours. The prefix stays client-side because it would need a full-text payload index.
+       */
+      ...(options.owner !== undefined
+        ? { filter: { must: [{ key: 'owner', match: { value: options.owner } }] } }
+        : {}),
       with_payload: true,
       with_vector: false,
     }
@@ -273,6 +288,8 @@ export class QdrantIndexWriter extends QdrantBase implements VectorIndexWriter {
             text: document.text,
             startLine: document.startLine,
             endLine: document.endLine,
+            ...(document.owner !== undefined ? { owner: document.owner } : {}),
+            ...(document.project !== undefined ? { project: document.project } : {}),
           },
         })),
       },

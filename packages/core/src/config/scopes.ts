@@ -37,6 +37,10 @@ export const USER_SCOPE_ONLY_KEYS = [
   // Adding a trusted root is how interception becomes undetectable, and turning off
   // verification globally is worse. Neither belongs to a repository.
   'tls',
+  // Labels everything this machine writes into a shared index. A repository able to set it
+  // could attribute what it indexed to a colleague, which is the sort of thing nobody would
+  // think to check.
+  'identity',
   // `retrieval.docsIndex` names where the contents of your tool and skill documentation are
   // written. Same threat as `embedder`: a workspace able to set it chooses the destination.
   'retrieval',

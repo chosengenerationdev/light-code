@@ -151,6 +151,13 @@ export class ChromaSearcher extends ChromaBase implements VectorSearcher {
          * seam explicitly allows an adapter to ask its engine for more than it returns.
          */
         n_results: filtering ? Math.min(options.size * 10, 500) : options.size,
+        /*
+         * Owner *is* pushed down, unlike the prefix: it is an exact equality, which is the one
+         * shape `where` expresses directly. It also has to be, because it is a correctness
+         * filter — discarding afterwards would turn a request for ten of your own chunks into
+         * however many of the global ten happened to be yours.
+         */
+        ...(options.owner !== undefined ? { where: { owner: options.owner } } : {}),
         include: ['documents', 'metadatas', 'distances'],
       },
       options.signal,
@@ -183,6 +190,10 @@ export class ChromaSearcher extends ChromaBase implements VectorSearcher {
       }
       if (typeof metadata.startLine === 'number') match.startLine = metadata.startLine
       if (typeof metadata.endLine === 'number') match.endLine = metadata.endLine
+      // Absent rather than defaulted: a chunk written before attribution existed is unknown,
+      // not unowned, and the difference decides what the model is told about it.
+      if (typeof metadata.owner === 'string') match.owner = metadata.owner
+      if (typeof metadata.project === 'string') match.project = metadata.project
       matches.push(match)
       if (matches.length >= options.size) break
     }
@@ -272,6 +283,8 @@ export class ChromaIndexWriter extends ChromaBase implements VectorIndexWriter {
           path: document.path,
           startLine: document.startLine,
           endLine: document.endLine,
+          ...(document.owner !== undefined ? { owner: document.owner } : {}),
+          ...(document.project !== undefined ? { project: document.project } : {}),
         })),
       },
       signal,

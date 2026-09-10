@@ -337,9 +337,48 @@ export const retrievalConfigSchema = z
      * `tools/searchDocs.ts` for why that fallback is load-bearing rather than a nicety.
      */
     docsIndex: z.string(),
+    /**
+     * Which vector store each kind of corpus goes to, when they should not all share one.
+     *
+     * Phase 8b always intended stores to be selectable "per data type"; until now a single
+     * `activeVectorStoreId` served everything. The case that forced it is concrete: a team
+     * indexes its code into a shared OpenSearch cluster, and the same person wants their
+     * **mail** in a Qdrant container on their own machine. Those are different sensitivities
+     * and they cannot be one setting.
+     *
+     * Any purpose left unset falls back to `activeVectorStoreId`, so an install that wants one
+     * store for everything writes nothing here and behaves exactly as before.
+     */
+    stores: z
+      .object({
+        /** Codebase chunks. Usually the shared cluster. */
+        codebase: z.string().min(1),
+        /** Tool and skill documentation, searched by `search_docs`. */
+        docs: z.string().min(1),
+        /** Indexed mail. Usually local, and deliberately easy to keep separate. */
+        mail: z.string().min(1),
+      })
+      .partial(),
   })
   .partial()
 export type RetrievalConfig = z.infer<typeof retrievalConfigSchema>
+
+/** The corpora that can each be sent to a different store. */
+export type CorpusPurpose = 'codebase' | 'docs' | 'mail'
+
+/**
+ * Which store a corpus is written to and searched in.
+ *
+ * One owner for the fallback, because the alternative is every call site remembering to fall
+ * back to `activeVectorStoreId` and one of them not doing it — the bug shape this project has
+ * paid for more than any other.
+ */
+export function storeIdFor(
+  purpose: CorpusPurpose,
+  config: { retrieval?: RetrievalConfig | undefined; activeVectorStoreId?: string | undefined },
+): string | undefined {
+  return config.retrieval?.stores?.[purpose] ?? config.activeVectorStoreId
+}
 
 /**
  * Whether tool schemas are kept out of the prompt.
@@ -400,6 +439,28 @@ export const embedderConfigSchema = z
         /^[a-z0-9][a-z0-9._-]{0,48}$/,
         'Start with a letter or digit, then lowercase letters, digits, dot, dash or underscore',
       ),
+    /**
+     * A name pointing at **every** codebase index written under it, so a team can search each
+     * other's work.
+     *
+     * Each person still writes to their own index — that is what keeps re-indexing cheap and
+     * one person's rebuild from disturbing anyone else. The alias is added to each of those
+     * indexes as they are created, so querying the alias fans out across all of them.
+     *
+     * **OpenSearch only.** Qdrant and Chroma have no equivalent, and rather than emulate one
+     * badly the team scope is simply *absent* on those backends — the same rule
+     * `search_opensearch` follows, and for the same reason: a feature that is missing is
+     * better than one that is present and quietly wrong.
+     *
+     * Same character restriction as `indexPrefix`: an alias is also a write-adjacent name, and
+     * a wildcard in one is not something to find out about by accident.
+     */
+    indexAlias: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9._-]{0,48}$/,
+        'Start with a letter or digit, then lowercase letters, digits, dot, dash or underscore',
+      ),
   })
   .partial()
 
@@ -414,9 +475,32 @@ export const embedderConfigSchema = z
  */
 export const globalTlsSchema = tlsSettingsSchema
 
+/**
+ * Who this machine's indexed work belongs to.
+ *
+ * Only meaningful once several people write into one cluster, which is what `indexAlias`
+ * enables. Every chunk carries it, so a team-wide search can say *whose* code a hit is and,
+ * more importantly, that it is not in the workspace in front of you.
+ *
+ * Defaults to the operating system's user name, resolved at the host boundary rather than
+ * here — core does not get to decide what a user is. Overridable because an OS login is often
+ * not what a team calls each other.
+ */
+export const identityConfigSchema = z
+  .object({
+    owner: z.string().min(1).max(64),
+  })
+  .partial()
+export type IdentityConfig = z.infer<typeof identityConfigSchema>
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
+    /**
+     * User-scope only: it labels everything this machine writes to a shared index, so a
+     * repository able to set it could attribute its own indexed content to someone else.
+     */
+    identity: identityConfigSchema,
     /** User-scope only: a workspace able to add a trusted root could enable interception. */
     tls: globalTlsSchema,
     expert: expertConfigSchema,

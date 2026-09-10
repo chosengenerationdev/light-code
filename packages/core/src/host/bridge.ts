@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
@@ -2029,7 +2030,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            * the prefix, so the tool block stays byte-stable for the whole loop (§12).
            */
           search !== undefined && embedder !== undefined && codebaseIndex !== undefined
-            ? { searcher: search.searcher, embedder, index: codebaseIndex, connectionLabel: search.store.label }
+            ? {
+                searcher: search.searcher,
+                embedder,
+                index: codebaseIndex,
+                connectionLabel: search.store.label,
+                /*
+                 * The team alias and this machine's identity, so `scope: "team"` has somewhere
+                 * to look and every hit can say whose it is. Both absent on a solo install,
+                 * where team scope is simply unavailable and says so.
+                 */
+                ...(config.embedder?.indexAlias !== undefined ? { teamAlias: config.embedder.indexAlias } : {}),
+                ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
+              }
             : undefined,
           /*
            * Retrieval for `search_docs`. Absent leaves it matching lexically over the live
@@ -3003,6 +3016,105 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   const DEFAULT_INDEX_PREFIX = 'light-code'
 
   /** The index Light Code writes this workspace into. User-set or derived; never model-supplied. */
+  /**
+   * Who this machine's indexed chunks are attributed to.
+   *
+   * Config first, then the operating system's user name. Resolved here rather than in core
+   * because "who the user is" is a host concern (section 4) — and overridable because an OS
+   * login is frequently not what a team calls each other.
+   *
+   * Undefined only if both are unavailable, in which case chunks are written unattributed and
+   * read back as *unknown* rather than as anyone's.
+   */
+  function indexOwner(config?: LightCodeConfig): string | undefined {
+    const configured = config?.identity?.owner?.trim()
+    if (configured !== undefined && configured.length > 0) return configured
+    try {
+      const name = os.userInfo().username.trim()
+      return name.length > 0 ? name : undefined
+    } catch {
+      // Some containers have no passwd entry for the running uid.
+      return undefined
+    }
+  }
+
+  /** The project's folder name, which is what distinguishes two checkouts in a hit list. */
+  function indexProject(): string | undefined {
+    return workspaceRoot === undefined ? undefined : path.basename(workspaceRoot)
+  }
+
+  /**
+   * Joins an already-indexed workspace to the team alias, without re-embedding anything.
+   *
+   * The case this exists for: someone has been using Light Code with OpenSearch since before
+   * aliases and attribution existed. Their index is complete and correct; it is simply not
+   * pointed at by the shared name, and its chunks carry no owner. Re-indexing to fix a label
+   * would mean paying the embedding cost for the whole repository again.
+   *
+   * So both are done in place — the alias is added, and documents *missing* an owner are
+   * stamped with one. Never documents that already have a different owner, which is what makes
+   * this safe to run against an index several people write to.
+   */
+  async function handleAttachTeamAlias(): Promise<void> {
+    const config = await loadSettings()
+    const alias = config.embedder?.indexAlias
+    if (alias === undefined) {
+      post({
+        type: 'teamAliasAttached',
+        error: 'Set a team index alias in Settings → Search first — there is nothing to attach to.',
+      })
+      return
+    }
+
+    const index = codebaseIndexName(config)
+    const search = await resolveSearch(config)
+    if (index === undefined || search === undefined) {
+      post({
+        type: 'teamAliasAttached',
+        error: 'Attaching an alias needs a search connection and an index name.',
+      })
+      return
+    }
+
+    try {
+      const writer = createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await vectorStoreConnectionFor(search.store, search.id),
+      )
+      if (writer.ensureAlias === undefined) {
+        post({
+          type: 'teamAliasAttached',
+          error:
+            `${search.store.label} has no concept of an alias — only OpenSearch does. ` +
+            'Team-wide search is unavailable on this backend.',
+        })
+        return
+      }
+
+      await writer.ensureAlias(index, alias)
+
+      // Attribution is a separate, optional step: without it a team search can find these
+      // chunks but cannot say whose they are, which is most of the point.
+      let attributed = 0
+      const owner = indexOwner(config)
+      if (owner !== undefined && writer.attributeUnowned !== undefined) {
+        const project = indexProject()
+        attributed = await writer.attributeUnowned(index, {
+          owner,
+          ...(project !== undefined ? { project } : {}),
+        })
+      }
+
+      post({ type: 'teamAliasAttached', alias, index, attributed })
+    } catch (error) {
+      post({
+        type: 'teamAliasAttached',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   function codebaseIndexName(config?: LightCodeConfig): string | undefined {
     const chosen = config?.embedder?.indexName?.trim()
     if (chosen !== undefined && chosen.length > 0) return chosen
@@ -3576,6 +3688,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     indexingAbort = new AbortController()
     const manifestPath = path.join(storageDir, 'index-manifests', `${manifestKey(index, search.id)}.json`)
+    const owner = indexOwner(config)
+    const project = indexProject()
+    const alias = config.embedder?.indexAlias
     try {
       const manifest = await loadIndexManifest(manifestPath, embedder)
       const isIgnored = await ignoredFilesPredicate()
@@ -3594,6 +3709,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           await fs.writeFile(manifestPath, JSON.stringify(next), 'utf8')
         },
         ...(isIgnored !== undefined ? { isIgnored } : {}),
+        /*
+         * Attribution and the shared alias.
+         *
+         * Each person still writes to their own index — that keeps re-indexing cheap and one
+         * person's rebuild from disturbing anyone else. The alias is what makes them
+         * searchable together, and the owner is what lets a hit say whose it is.
+         */
+        ...(owner !== undefined ? { owner } : {}),
+        ...(project !== undefined ? { project } : {}),
+        ...(alias !== undefined ? { alias } : {}),
         onProgress: (progress: IndexProgress) => post({ type: 'indexProgress', progress }),
         signal: indexingAbort.signal,
       })
@@ -3691,6 +3816,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // The configured value, not the resolved one, so the field round-trips what was typed
       // rather than replacing a blank with the default and looking like it was set.
       ...(config.embedder?.indexPrefix !== undefined ? { indexPrefix: config.embedder.indexPrefix } : {}),
+      ...(config.embedder?.indexAlias !== undefined ? { indexAlias: config.embedder.indexAlias } : {}),
       defaultIndexPrefix: DEFAULT_INDEX_PREFIX,
       indexedFiles,
     })
@@ -3702,6 +3828,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     dimensions: number,
     indexName?: string,
     indexPrefix?: string,
+    indexAlias?: string,
   ): Promise<void> {
     try {
       await configManager.save('user', {
@@ -3713,6 +3840,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // Absent rather than empty when cleared, so the default applies instead of a name
           // beginning with a stray dash.
           ...(indexPrefix !== undefined && indexPrefix.trim().length > 0 ? { indexPrefix: indexPrefix.trim() } : {}),
+          // Same treatment: cleared means absent, which is what turns team scope back off.
+          ...(indexAlias !== undefined && indexAlias.trim().length > 0 ? { indexAlias: indexAlias.trim() } : {}),
         },
       })
       const { config } = await configManager.load()
@@ -4792,6 +4921,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'startIndexing') {
       void handleStartIndexing()
+    } else if (message.type === 'attachTeamAlias') {
+      void handleAttachTeamAlias()
     } else if (message.type === 'cancelIndexing') {
       indexingAbort?.abort()
     } else if (message.type === 'saveEmbedder') {
@@ -4801,6 +4932,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         message.dimensions,
         message.indexName,
         message.indexPrefix,
+        message.indexAlias,
       )
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)
