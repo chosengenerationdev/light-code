@@ -136,6 +136,23 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
 
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily, fontSize: 13, color: colors.foreground }}>
+      {/*
+        At the top, because it is an action rather than a setting.
+
+        It sat under the folder editors, below every skill in the list, so on a workspace with a
+        dozen skills it was off the bottom of the panel entirely - present, and findable only by
+        someone who already knew it was there.
+      */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <button type="button" style={secondaryButtonStyle()} disabled={props.indexing} onClick={props.onReindex}>
+          {props.indexing ? 'Reindexing…' : 'Reindex skills'}
+        </button>
+        <span style={{ color: colors.muted, fontSize: 11 }}>
+          {props.indexResult ??
+            'Reindexed automatically a few seconds after any change. This forces it now, for skills only.'}
+        </span>
+      </div>
+
       {/* First, because it is the part people come here looking for. */}
       <TeamSkillsSection {...props.team} />
       <h3 style={{ margin: '0 0 4px' }}>Skills</h3>
@@ -282,20 +299,6 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
           ))
         )}
       </div>
-      {/*
-        Placed with the folders rather than beside each skill: it is about the corpus as a whole,
-        and the automatic reindex already covers the ordinary case a few seconds after a change.
-      */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '12px 0' }}>
-        <button type="button" style={secondaryButtonStyle()} disabled={props.indexing} onClick={props.onReindex}>
-          {props.indexing ? 'Reindexing…' : 'Reindex skills'}
-        </button>
-        <span style={{ color: colors.muted, fontSize: 11 }}>
-          {props.indexResult ??
-            'Reindexed automatically a few seconds after any change. This forces it now, for skills only.'}
-        </span>
-      </div>
-
       <FolderListEditor
         primary={props.configuredDir}
         primaryPlaceholder={props.skillsDir ?? '.lightcode/skills'}

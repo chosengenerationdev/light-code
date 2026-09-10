@@ -119,7 +119,7 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
 
       <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />
 
-      {props.docsIndex?.enabled === true && (
+      {props.docsIndex !== undefined && (
         <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
           <h3 style={{ margin: '0 0 2px', fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase', color: colors.muted }}>
             Tool documentation index
@@ -128,15 +128,25 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
             Tool schemas are kept out of every request and looked up on demand, so a tool has to be
             indexed before it can be found by meaning. That happens on its own a few seconds after
             anything changes &mdash; this is for when you would rather not wonder.{' '}
-            {props.docsIndex.retrievalReady
-              ? ''
-              : 'No embedding model is configured, so tools are matched on names and descriptions instead. They stay findable either way.'}
+            {props.docsIndex.enabled
+              ? props.docsIndex.retrievalReady
+                ? ''
+                : 'No embedding model is configured, so tools are matched on names and descriptions instead. They stay findable either way. Set one under Search to index by meaning.'
+              : 'Looking tools up on demand is switched off under Search, so every tool is listed in full in each request and there is nothing to index.'}
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button
               type="button"
               style={secondaryButtonStyle()}
-              disabled={props.docsIndex.indexing || !props.docsIndex.retrievalReady}
+              /*
+                Disabled with the reason above it, never hidden.
+
+                The section used to disappear whenever the dispatcher was off, which is how a
+                control becomes invisible to precisely the person hunting for it - the same
+                mistake as the alias button that only worked once something else had been saved.
+                This codebase already settled that question for the Office toggles.
+              */
+              disabled={!props.docsIndex.enabled || props.docsIndex.indexing || !props.docsIndex.retrievalReady}
               onClick={props.onIndexDocs}
             >
               {props.docsIndex.indexing ? 'Indexing…' : 'Reindex tool documentation'}

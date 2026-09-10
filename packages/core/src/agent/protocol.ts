@@ -438,7 +438,7 @@ export type UiToHostMessage =
    */
   | { type: 'validateMailFolder'; path: string }
   /** The mailbox folder tree, for picking rather than typing. */
-  | { type: 'requestOutlookFolders'; depth?: number }
+  | { type: 'requestOutlookFolders'; depth?: number; force?: boolean }
   /**
    * Stops a running index or sync.
    *
@@ -930,6 +930,10 @@ export type HostToUiMessage =
   | {
       type: 'outlookFolders'
       folders?: { name: string; path: string; depth: number; unread?: number | null }[]
+      /** When the mailbox was last walked, so the tab can say how fresh this is. */
+      scannedAt?: number
+      /** True when served from disk rather than freshly scanned. */
+      cached?: boolean
       error?: string
     }
   /**

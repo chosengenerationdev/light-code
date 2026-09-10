@@ -3465,14 +3465,51 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleRequestOutlookFolders(depth?: number): Promise<void> {
+  /**
+   * The mailbox folder tree, cached on disk.
+   *
+   * Walking a mailbox is a server round trip per folder on Exchange, and the tree changes rarely -
+   * somebody adds a folder every few weeks. Rescanning on every visit spends that cost for an
+   * answer that is almost always identical, so it is written to disk and served from there, with
+   * Refresh for the times it has genuinely changed.
+   *
+   * The cache is served *first* even when a refresh follows, so the tab paints immediately and
+   * updates underneath rather than showing an empty box while a mailbox is walked.
+   */
+  async function handleRequestOutlookFolders(depth?: number, force = false): Promise<void> {
+    const cachePath = path.join(storageDir, 'outlook-folders.json')
+
+    let served = false
+    try {
+      const cached = JSON.parse(await fs.readFile(cachePath, 'utf8')) as {
+        scannedAt: number
+        folders: { name: string; path: string; depth: number; unread?: number | null }[]
+      }
+      post({ type: 'outlookFolders', folders: cached.folders, scannedAt: cached.scannedAt, cached: true })
+      served = true
+      if (!force) return
+    } catch {
+      // No cache yet, or unreadable. Scan.
+    }
+
     try {
       const result = await office().request<{
         folders: { name: string; path: string; depth: number; unread?: number | null }[]
       }>({ op: 'outlook.folders', depth: depth ?? 6 })
-      post({ type: 'outlookFolders', folders: result.folders })
+      const scannedAt = Date.now()
+      post({ type: 'outlookFolders', folders: result.folders, scannedAt })
+      try {
+        await fs.mkdir(path.dirname(cachePath), { recursive: true })
+        await fs.writeFile(cachePath, JSON.stringify({ scannedAt, folders: result.folders }), 'utf8')
+      } catch {
+        // A cache that will not write costs a rescan next time, never the answer.
+      }
     } catch (error) {
-      post({ type: 'outlookFolders', error: error instanceof Error ? error.message : String(error) })
+      // Only if nothing was shown: replacing a usable cached tree with an error message would
+      // take away the folders someone was about to tick.
+      if (!served) {
+        post({ type: 'outlookFolders', error: error instanceof Error ? error.message : String(error) })
+      }
     }
   }
 
@@ -5502,7 +5539,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'pruneMail') {
       void handlePruneMail()
     } else if (message.type === 'requestOutlookFolders') {
-      void handleRequestOutlookFolders(message.depth)
+      void handleRequestOutlookFolders(message.depth, message.force === true)
     } else if (message.type === 'validateMailFolder') {
       void handleValidateMailFolder(message.path)
     } else if (message.type === 'requestMailStatus') {

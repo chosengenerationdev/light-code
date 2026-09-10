@@ -495,16 +495,25 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'mcpServerSaved') {
         setMcpSavedTick((tick) => tick + 1)
       } else if (message.type === 'embedder') {
-        setEmbedder({
-          ...(message.profileId !== undefined ? { profileId: message.profileId } : {}),
-          ...(message.model !== undefined ? { model: message.model } : {}),
-          ...(message.dimensions !== undefined ? { dimensions: message.dimensions } : {}),
-          ...(message.indexName !== undefined ? { indexName: message.indexName } : {}),
-          ...(message.indexNameIsCustom !== undefined ? { indexNameIsCustom: message.indexNameIsCustom } : {}),
-          ...(message.indexPrefix !== undefined ? { indexPrefix: message.indexPrefix } : {}),
-          defaultIndexPrefix: message.defaultIndexPrefix,
-          indexedFiles: message.indexedFiles,
-        })
+        /*
+         * Assigned whole, never field by field.
+         *
+         * It was unpacked one field at a time, and it had already drifted: the host sent
+         * `indexAlias` and `skillsAlias` and this dropped both on the floor. Saving a team alias
+         * therefore wrote it to disk correctly, and the panel never heard - so the button never
+         * flipped to "saved", the Publish step stayed disabled, and pressing Save looked like it
+         * did nothing at all.
+         *
+         * This is the same defect as the expert message (CLAUDE.md, "the bug shape that keeps
+         * costing the most time") and it recurred here for the same reason: a field-by-field copy
+         * silently discards whatever is added to the protocol next. `App.embedderMessage.test.ts`
+         * reads this file and fails on the shape rather than waiting for the symptom.
+         */
+        // `type` is the discriminant and is not part of the state; everything else is, whether
+        // or not this file has been taught its name.
+        const { type: embedderDiscriminant, ...embedderState } = message
+        void embedderDiscriminant
+        setEmbedder(embedderState)
       } else if (message.type === 'skills') {
         setSkills(message.skills)
         setSkillIssues(message.issues)
@@ -1261,7 +1270,12 @@ export function App(props: AppProps): ReactElement {
               progress: indexingProgress?.kind === 'mail' ? indexingProgress : undefined,
               onRefreshFolders: () => {
                 setMailTree((current) => ({ ...current, loading: true }))
-                props.transport.post({ type: 'requestOutlookFolders' } satisfies UiToHostMessage)
+                // Forced only once there is something on screen: the first load comes from
+                // the cache, which is what makes opening the tab instant.
+                props.transport.post({
+                  type: 'requestOutlookFolders',
+                  force: mailTree.folders.length > 0,
+                } satisfies UiToHostMessage)
               },
               onStop: () => props.transport.post({ type: 'cancelIndexing', kind: 'mail' } satisfies UiToHostMessage),
             }}

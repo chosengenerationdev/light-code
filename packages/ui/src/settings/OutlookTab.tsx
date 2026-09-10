@@ -25,7 +25,7 @@ export interface MailStatusState {
 
 export interface OutlookTabProps {
   status: MailStatusState | undefined
-  tree: { folders: MailFolderNode[]; error?: string; loading: boolean }
+  tree: { folders: MailFolderNode[]; error?: string; loading: boolean; scannedAt?: number }
   progress: IndexingProgressState | undefined
   onSave: (settings: {
     enabled: boolean
@@ -94,6 +94,16 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
   }, [props.status])
 
   const status = props.status
+
+  /*
+   * Asked for on open, and answered from the cache. Making people press a button before they can
+   * see anything is a step that exists only because it was easier to build.
+   */
+  useEffect(() => {
+    if (props.status?.available === true && props.tree.folders.length === 0 && !props.tree.loading) {
+      props.onRefreshFolders()
+    }
+  }, [props.status?.available])
 
   const save = (): void => {
     props.onSave({
@@ -169,9 +179,19 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
         hint="Tick what to index. Everything here came from Outlook, so nothing can be mistyped."
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+          {/*
+            Rescan, not load. The tree is served from a cache the moment the tab opens, because
+            walking a mailbox is a server round trip per folder on Exchange and the tree changes
+            every few weeks at most. This is for when it has genuinely changed.
+          */}
           <button type="button" style={secondaryButtonStyle()} disabled={props.tree.loading} onClick={props.onRefreshFolders}>
-            {props.tree.loading ? 'Loading…' : 'Refresh folders'}
+            {props.tree.loading ? 'Scanning…' : 'Rescan mailbox'}
           </button>
+          {props.tree.scannedAt !== undefined && (
+            <span style={{ color: colors.muted, fontSize: 11 }}>
+              Scanned {new Date(props.tree.scannedAt).toLocaleString()}
+            </span>
+          )}
           <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer', fontSize: 11 }}>
             <input
               type="checkbox"

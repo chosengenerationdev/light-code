@@ -20,9 +20,11 @@ import type { MailRecord } from './mailIndex.js'
  */
 export class MailStore {
   private readonly filePath: string
+  private readonly progressPath: string
 
   constructor(storageDir: string) {
     this.filePath = path.join(storageDir, 'mail-index.jsonl')
+    this.progressPath = path.join(storageDir, 'mail-progress.json')
   }
 
   /**
@@ -76,8 +78,32 @@ export class MailStore {
     await fs.rename(temporary, this.filePath)
   }
 
+  /**
+   * Which folders have been read all the way back.
+   *
+   * Kept separately because it cannot be derived: "no messages older than the oldest one I have"
+   * and "I have not looked yet" produce identical records. Without it every sync would re-ask
+   * each finished folder for history that is not there - one wasted server round trip per folder,
+   * every fifteen minutes, forever.
+   */
+  async loadBackfillState(): Promise<Record<string, boolean>> {
+    try {
+      return JSON.parse(await fs.readFile(this.progressPath, 'utf8')) as Record<string, boolean>
+    } catch {
+      return {}
+    }
+  }
+
+  async saveBackfillState(state: Record<string, boolean>): Promise<void> {
+    await fs.mkdir(path.dirname(this.progressPath), { recursive: true })
+    const temporary = `${this.progressPath}.tmp`
+    await fs.writeFile(temporary, JSON.stringify(state), 'utf8')
+    await fs.rename(temporary, this.progressPath)
+  }
+
   async clear(): Promise<void> {
     await fs.rm(this.filePath, { force: true })
+    await fs.rm(this.progressPath, { force: true })
   }
 
   /** Size on disk, so the user can see it growing before deciding to prune. */
@@ -91,10 +117,39 @@ export class MailStore {
 }
 
 /**
- * The high-water mark to resume from, per folder.
+ * Where a folder has got to, in both directions.
  *
- * Per folder rather than one global timestamp, because folders are indexed independently and a
- * single mark would silently skip everything older in a folder added later.
+ * **Two marks, not one, and that was a real bug.** The first version kept only the newest
+ * indexed message and asked for anything newer, which is right for keeping up and useless for
+ * catching up: measured against a 2000-message folder with a 500-message batch, it indexed the
+ * newest 500 and then reported `500 -> 500 -> 500 -> 500` forever. The older 1500 were
+ * unreachable, restarting changed nothing, and nothing anywhere said so.
+ *
+ * So `newest` drives the forward pass and `oldest` drives the backfill. Both are derived from
+ * the records rather than stored, so they survive a restart for free and cannot drift out of
+ * step with what is actually indexed.
+ */
+export interface FolderMarks {
+  newest: number
+  oldest: number
+}
+
+export function folderMarks(records: readonly MailRecord[]): Map<string, FolderMarks> {
+  const marks = new Map<string, FolderMarks>()
+  for (const record of records) {
+    const existing = marks.get(record.folder)
+    if (existing === undefined) {
+      marks.set(record.folder, { newest: record.receivedAt, oldest: record.receivedAt })
+      continue
+    }
+    if (record.receivedAt > existing.newest) existing.newest = record.receivedAt
+    if (record.receivedAt < existing.oldest) existing.oldest = record.receivedAt
+  }
+  return marks
+}
+
+/**
+ * The floor for the forward pass, per folder.
  *
  * One second is subtracted: Outlook's restrict is inclusive at second granularity, and messages
  * arriving inside the same second as the previous run's newest would otherwise be missed
@@ -102,11 +157,7 @@ export class MailStore {
  */
 export function resumePoints(records: readonly MailRecord[]): Map<string, number> {
   const marks = new Map<string, number>()
-  for (const record of records) {
-    const existing = marks.get(record.folder)
-    if (existing === undefined || record.receivedAt > existing) marks.set(record.folder, record.receivedAt)
-  }
-  for (const [folder, at] of marks) marks.set(folder, at - 1000)
+  for (const [folder, mark] of folderMarks(records)) marks.set(folder, mark.newest - 1000)
   return marks
 }
 

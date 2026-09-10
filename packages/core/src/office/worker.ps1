@@ -1272,7 +1272,9 @@ function Invoke-OutlookFolders {
 
     $ns = Get-OutlookNamespace
     $script:folderList = @()
-    $script:folderMaxDepth = 2
+    # Deep enough for a real mailbox. Two levels cut off `Inbox\Alerts\Prod`, which is an
+    # entirely ordinary shape, and the cut was silent.
+    $script:folderMaxDepth = 6
     if ($Request -and $Request.depth) { $script:folderMaxDepth = [Math]::Min([int]$Request.depth, 8) }
     $script:folderWithCounts = $false
     if ($Request -and $Request.counts) { $script:folderWithCounts = $true }
@@ -1302,10 +1304,16 @@ function Invoke-OutlookFolders {
         }
     }
 
+    <#
+      The mailbox itself is a node, not just a prefix on its children.
+
+      It used to be skipped, so the tree began at `Inbox` with nothing above it: the level that
+      says *which mailbox* was missing entirely, every folder sat one indent to the left of where
+      it belonged, and with two accounts open there was no way to tell two folders called Alerts
+      apart. Reported as a level not appearing, which is exactly what it was.
+    #>
     foreach ($store in $ns.Folders) {
-        foreach ($folder in $store.Folders) {
-            Walk-Folder -Folder $folder -Path "$($store.Name)\$($folder.Name)" -Depth 1
-        }
+        Walk-Folder -Folder $store -Path "$($store.Name)" -Depth 0
     }
     return @{
         folders  = $script:folderList
@@ -1573,11 +1581,25 @@ function Invoke-OutlookHarvest {
         $items = $folder.Items
         $items.Sort('[ReceivedTime]', $true)
 
+        <#
+          Two bounds, because there are two directions.
+
+          `sinceMs` walks forward from the newest already indexed - keeping up. `beforeMs` walks
+          backward from the oldest - catching up on history. Without the second, a folder with
+          more mail than one batch indexed its newest batch and then never moved again.
+        #>
+        $clauses = @()
         if ($request.sinceMs) {
             $since = [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$request.sinceMs).LocalDateTime
-            $stamp = $since.ToString('yyyy-MM-dd HH:mm')
+            $clauses += "urn:schemas:httpmail:datereceived >= '$($since.ToString('yyyy-MM-dd HH:mm'))'"
+        }
+        if ($request.beforeMs) {
+            $before = [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$request.beforeMs).LocalDateTime
+            $clauses += "urn:schemas:httpmail:datereceived < '$($before.ToString('yyyy-MM-dd HH:mm'))'"
+        }
+        if ($clauses.Count -gt 0) {
             try {
-                $items = $items.Restrict("@SQL=urn:schemas:httpmail:datereceived >= '$stamp'")
+                $items = $items.Restrict('@SQL=' + ($clauses -join ' AND '))
             } catch {
                 # An unparseable restriction is worse than none: fall back to the sorted
                 # collection and let the count limit do the bounding.
