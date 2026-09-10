@@ -34,6 +34,20 @@ export interface MailSectionProps {
   }) => void
   onSyncNow: () => void
   onPrune: () => void
+  /** Checks one path against the live mailbox. The reply arrives as `validation`. */
+  onValidateFolder: (path: string) => void
+  validation: FolderValidation | undefined
+}
+
+export interface FolderValidation {
+  /** What was asked about, so a late reply cannot be shown against a different entry. */
+  requested: string
+  ok: boolean
+  canonical?: string
+  how?: string
+  items?: number
+  error?: string
+  suggestions?: string[]
 }
 
 function formatSize(bytes: number): string {
@@ -61,7 +75,9 @@ function formatSize(bytes: number): string {
  */
 export function MailSection(props: MailSectionProps): ReactElement {
   const [enabled, setEnabled] = useState(false)
-  const [folders, setFolders] = useState('')
+  const [folders, setFolders] = useState<string[]>([])
+  const [draft, setDraft] = useState('')
+  const [checking, setChecking] = useState<string | undefined>(undefined)
   const [syncMinutes, setSyncMinutes] = useState('15')
   const [retentionMonths, setRetentionMonths] = useState('6')
   const [storeId, setStoreId] = useState('')
@@ -70,22 +86,43 @@ export function MailSection(props: MailSectionProps): ReactElement {
   useEffect(() => {
     if (props.status === undefined) return
     setEnabled(props.status.enabled)
-    setFolders(props.status.folders.join('\n'))
+    setFolders(props.status.folders)
     setSyncMinutes(String(props.status.syncMinutes))
     setRetentionMonths(String(props.status.retentionMonths))
     setStoreId(props.status.storeId ?? '')
   }, [props.status])
 
   const status = props.status
-  const parsedFolders = folders
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
+
+  /*
+   * A validated folder is added under the name Outlook uses, not the one that was typed.
+   *
+   * Storing what someone typed would work today and break the first time two paths were compared
+   * - `inbox/alerts` and `mailbox@x\\Inbox\\Alerts` are the same folder and no string
+   * comparison will ever agree.
+   */
+  useEffect(() => {
+    const reply = props.validation
+    if (reply === undefined || checking === undefined) return
+    if (reply.requested !== checking) return
+    setChecking(undefined)
+    if (!reply.ok) return
+    const canonical = reply.canonical ?? reply.requested
+    setFolders((current) => (current.includes(canonical) ? current : [...current, canonical]))
+    setDraft('')
+  }, [props.validation, checking])
+
+  const addFolder = (): void => {
+    const wanted = draft.trim()
+    if (wanted.length === 0) return
+    setChecking(wanted)
+    props.onValidateFolder(wanted)
+  }
 
   const save = (): void => {
     props.onSave({
       enabled,
-      folders: parsedFolders,
+      folders,
       syncMinutes: Math.max(5, Math.min(1440, Number(syncMinutes) || 15)),
       retentionMonths: Math.max(1, Math.min(120, Number(retentionMonths) || 6)),
       storeId,
@@ -151,21 +188,108 @@ export function MailSection(props: MailSectionProps): ReactElement {
         </span>
       </label>
 
-      <label htmlFor="lc-mail-folders" style={labelStyle()}>
+      <label htmlFor="lc-mail-folder-add" style={labelStyle()}>
         Folders to index
       </label>
-      <textarea
-        id="lc-mail-folders"
-        value={folders}
-        rows={3}
-        spellCheck={false}
-        placeholder={'Inbox/Alerts\nInbox/Reports'}
-        onChange={(event) => setFolders(event.target.value)}
-        style={{ ...textFieldStyle(), resize: 'vertical' }}
-      />
+      {/*
+        Checked when it is added rather than when the sync runs.
+
+        A mistyped folder is otherwise invisible: the sync succeeds, indexes nothing from it, and
+        nobody finds out until they ask about mail that should have been there. Validating on the
+        button turns that into an immediate no.
+      */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          id="lc-mail-folder-add"
+          type="text"
+          value={draft}
+          spellCheck={false}
+          placeholder="Inbox\\Alerts"
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              addFolder()
+            }
+          }}
+          style={{ ...textFieldStyle(), flex: 1 }}
+        />
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={draft.trim().length === 0 || checking !== undefined}
+          title="Check this folder exists, then add it"
+          onClick={addFolder}
+        >
+          {checking !== undefined ? 'Checking…' : '+ Add'}
+        </button>
+      </div>
       <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-        One per line, as the path appears in Outlook. Use outlook_folders in the chat to list them.
+        Either slash works, and the mailbox name is optional &mdash; <code>Inbox\\Alerts</code> is
+        enough unless two mailboxes both have one. Use outlook_folders in the chat to list them.
       </span>
+
+      {props.validation !== undefined && props.validation.requested === draft.trim() && !props.validation.ok && (
+        <div style={{ color: colors.error, fontSize: 11, marginTop: 4 }}>
+          <span style={{ display: 'block' }}>{props.validation.error ?? 'That folder was not found.'}</span>
+          {/*
+            Suggestions rather than a bare refusal: told only that it does not exist, someone
+            guesses again; shown that `Inbox\Alerts` does exist, they are finished.
+          */}
+          {(props.validation.suggestions ?? []).length > 0 && (
+            <span style={{ display: 'block', color: colors.muted, marginTop: 2 }}>
+              Did you mean:{' '}
+              {(props.validation.suggestions ?? []).map((suggestion, index) => (
+                <span key={suggestion}>
+                  {index > 0 && ', '}
+                  <button
+                    type="button"
+                    style={{ background: 'none', border: 'none', color: colors.accent, cursor: 'pointer', padding: 0, fontSize: 11 }}
+                    onClick={() => setDraft(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop: 6 }}>
+        {folders.length === 0 ? (
+          <span style={{ color: colors.muted, fontSize: 11 }}>
+            No folders yet. Nothing is indexed until at least one is added.
+          </span>
+        ) : (
+          folders.map((folder) => (
+            <div
+              key={folder}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '3px 0',
+                borderBottom: `1px solid ${colors.border}`,
+              }}
+            >
+              <code style={{ fontSize: 11, fontFamily: 'var(--vscode-editor-font-family, monospace)', minWidth: 0, overflowWrap: 'anywhere' }}>
+                {folder}
+              </code>
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', color: colors.muted, cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
+                title={`Stop indexing ${folder}`}
+                aria-label={`Remove ${folder}`}
+                onClick={() => setFolders((current) => current.filter((entry) => entry !== folder))}
+              >
+                &times;
+              </button>
+            </div>
+          ))
+        )}
+      </div>
 
       <div style={{ marginTop: 8 }}>
         <label htmlFor="lc-mail-store" style={labelStyle()}>

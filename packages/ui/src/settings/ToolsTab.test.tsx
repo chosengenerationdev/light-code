@@ -65,6 +65,8 @@ function render(
             onSave: () => undefined,
             onSyncNow: () => undefined,
             onPrune: () => undefined,
+            onValidateFolder: () => undefined,
+            validation: undefined,
           }
         }
         onSetOffice={props.onSetOffice ?? (() => undefined)}

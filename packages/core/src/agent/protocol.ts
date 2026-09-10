@@ -430,6 +430,13 @@ export type UiToHostMessage =
   /** Drops indexed mail older than the configured retention, and its vectors. */
   | { type: 'pruneMail' }
   | { type: 'requestMailStatus' }
+  /**
+   * Checks one folder path against the live mailbox before it is added.
+   *
+   * A typo in a folder name is otherwise invisible until the sync runs and quietly indexes
+   * nothing, which is the sort of failure that gets noticed weeks later.
+   */
+  | { type: 'validateMailFolder'; path: string }
   | {
       type: 'saveMailSettings'
       enabled: boolean
@@ -911,6 +918,20 @@ export type HostToUiMessage =
   /** `attributed` is how many existing chunks gained an owner; 0 is a real answer, not a failure. */
   | { type: 'teamAliasAttached'; alias?: string; index?: string; attributed?: number; error?: string }
   | { type: 'teamSkillsPublished'; count?: number; collection?: string; error?: string }
+  | {
+      type: 'mailFolderValidated'
+      /** What the user typed, so a late reply cannot be shown against a different entry. */
+      requested: string
+      ok: boolean
+      /** The path as Outlook spells it. Stored in place of what was typed. */
+      canonical?: string
+      /** How it was found - exact, default mailbox, or matched elsewhere. */
+      how?: string
+      items?: number
+      error?: string
+      /** Near misses, because being told only that it does not exist invites another guess. */
+      suggestions?: string[]
+    }
   /**
    * State of mail indexing.
    *

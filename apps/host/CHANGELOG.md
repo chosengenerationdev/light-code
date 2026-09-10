@@ -1,5 +1,22 @@
 # @chosengeneration/light-code
 
+## 0.31.2
+
+### Patch Changes
+
+- Mail folders are added one at a time with an Add button that checks the folder exists in Outlook
+  first, and lists what has been added below with a remove button on each. A mistyped folder is
+  refused immediately, with near matches offered, rather than being accepted and quietly indexing
+  nothing.
+
+  Folder paths now accept either slash and do not need the mailbox name, so Inbox\Alerts works.
+  Previously only the full store-rooted backslash form resolved, which meant the examples the
+  product itself showed matched nothing.
+
+  Fixed: the team index alias could only be attached after saving, but the Attach button appeared as
+  soon as you typed one - clicking it said to set an alias you had just set. It is now disabled until
+  saved, and says why.
+
 ## 0.31.1
 
 ### Patch Changes

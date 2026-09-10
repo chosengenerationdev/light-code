@@ -79,6 +79,14 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
     setIndexAlias(props.embedder?.indexAlias ?? '')
   }, [props.embedder])
 
+  /**
+   * Typed but not yet saved.
+   *
+   * The distinction matters because attaching reads config, not this form. Anything that acts on
+   * the *saved* value has to say so, or it reads as the button being broken.
+   */
+  const aliasUnsaved = indexAlias.trim() !== (props.embedder?.indexAlias ?? '').trim()
+
   /*
    * Fetched on selection rather than behind a button. The user has already told us which
    * profile to use, so making them press Refresh to discover what it offers is a step that
@@ -227,14 +235,24 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
               For an index that already exists. Re-embedding a whole repository to gain a label
               would be an absurd price for a string, so this attaches the alias in place and
               fills in the attribution that older chunks were written without.
+
+              Gated on the *saved* alias rather than the typed one. The host attaches whatever is
+              in config, so offering this against an unsaved box meant clicking it and being told
+              to set an alias you had visibly just set.
             */}
-            <button type="button" style={secondaryButtonStyle()} onClick={props.onAttachTeamAlias}>
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              disabled={aliasUnsaved}
+              title={aliasUnsaved ? 'Press Save first — this attaches the saved alias' : undefined}
+              onClick={props.onAttachTeamAlias}
+            >
               Attach alias to my existing index
             </button>
             <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
-              Use this if you indexed before setting an alias. It adds the alias and labels the
-              existing chunks as yours &mdash; no re-indexing, and nothing is re-embedded. Chunks
-              already labelled with someone else are never touched.
+              {aliasUnsaved
+                ? 'Press Save below first. This attaches whatever alias is saved, not what is typed above.'
+                : 'Use this if you indexed before setting an alias. It adds the alias and labels the existing chunks as yours \u2014 no re-indexing, and nothing is re-embedded. Chunks already labelled with someone else are never touched.'}
             </span>
             {props.aliasResult?.error !== undefined && (
               <span style={{ display: 'block', color: colors.error, fontSize: 11, marginTop: 4 }}>

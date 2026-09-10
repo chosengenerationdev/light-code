@@ -36,7 +36,7 @@ import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { PendingForm } from './FormPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
-import type { MailStatusState } from './settings/MailSection.js'
+import type { FolderValidation, MailStatusState } from './settings/MailSection.js'
 import { ModeSelector } from './ModeSelector.js'
 import { Guide } from './guide/Guide.js'
 import type { ReviewItem } from './settings/ReviewsTab.js'
@@ -197,6 +197,8 @@ export function App(props: AppProps): ReactElement {
   >(undefined)
   /** State of mail indexing, refreshed whenever the host reports it. */
   const [mailStatus, setMailStatus] = useState<MailStatusState | undefined>(undefined)
+  /** The answer to the last folder check, matched to its request by path. */
+  const [folderValidation, setFolderValidation] = useState<FolderValidation | undefined>(undefined)
   /** The outcome of publishing this machine's skills to the team collection. */
   const [teamSkillsResult, setTeamSkillsResult] = useState<
     { count?: number; collection?: string; error?: string } | undefined
@@ -511,6 +513,16 @@ export function App(props: AppProps): ReactElement {
         setEmbedderSavedTick((tick) => tick + 1)
       } else if (message.type === 'indexProgress') {
         setIndexProgress(message.progress)
+      } else if (message.type === 'mailFolderValidated') {
+        setFolderValidation({
+          requested: message.requested,
+          ok: message.ok,
+          ...(message.canonical !== undefined ? { canonical: message.canonical } : {}),
+          ...(message.how !== undefined ? { how: message.how } : {}),
+          ...(message.items !== undefined ? { items: message.items } : {}),
+          ...(message.error !== undefined ? { error: message.error } : {}),
+          ...(message.suggestions !== undefined ? { suggestions: message.suggestions } : {}),
+        })
       } else if (message.type === 'mailStatus') {
         setMailStatus({
           enabled: message.enabled,
@@ -1234,6 +1246,11 @@ export function App(props: AppProps): ReactElement {
                   props.transport.post({ type: 'saveMailSettings', ...settings } satisfies UiToHostMessage),
                 onSyncNow: () => props.transport.post({ type: 'syncMail' } satisfies UiToHostMessage),
                 onPrune: () => props.transport.post({ type: 'pruneMail' } satisfies UiToHostMessage),
+                onValidateFolder: (path: string) => {
+                  setFolderValidation(undefined)
+                  props.transport.post({ type: 'validateMailFolder', path } satisfies UiToHostMessage)
+                },
+                validation: folderValidation,
               },
               ...(toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds }),
               onSetToolTimeoutFor: (name: string, seconds?: number) =>

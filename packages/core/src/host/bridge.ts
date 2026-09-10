@@ -3382,6 +3382,44 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /** Drops indexed mail past the retention window, vectors first so nothing is orphaned. */
+  /**
+   * Checks a folder path against the live mailbox, for the settings box.
+   *
+   * Reads nothing but the folder tree, so it is safe to call on every click. The canonical path
+   * is returned and stored in place of what was typed: a folder added as `inbox/alerts` is saved
+   * as Outlook spells it, so anything that later compares two paths agrees with itself.
+   */
+  async function handleValidateMailFolder(requested: string): Promise<void> {
+    try {
+      const result = await office().request<{
+        ok: boolean
+        canonical?: string
+        how?: string
+        items?: number
+        error?: string
+        suggestions?: string[]
+      }>({ op: 'outlook.validateFolder', path: requested })
+
+      post({
+        type: 'mailFolderValidated',
+        requested,
+        ok: result.ok,
+        ...(result.canonical !== undefined ? { canonical: result.canonical } : {}),
+        ...(result.how !== undefined ? { how: result.how } : {}),
+        ...(result.items !== undefined ? { items: result.items } : {}),
+        ...(result.error !== undefined ? { error: result.error } : {}),
+        ...(result.suggestions !== undefined ? { suggestions: result.suggestions } : {}),
+      })
+    } catch (error) {
+      post({
+        type: 'mailFolderValidated',
+        requested,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   async function handlePruneMail(): Promise<void> {
     if (mailBusy) return
     mailBusy = true
@@ -5374,6 +5412,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void runMailSync('requested')
     } else if (message.type === 'pruneMail') {
       void handlePruneMail()
+    } else if (message.type === 'validateMailFolder') {
+      void handleValidateMailFolder(message.path)
     } else if (message.type === 'requestMailStatus') {
       /*
        * Also where the timer is reconciled. The panel opening is the first moment the bridge is

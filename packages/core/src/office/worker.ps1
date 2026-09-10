@@ -1315,25 +1315,215 @@ function Invoke-OutlookFolders {
     }
 }
 
+<#
+  Resolving a folder path the way a person would write it.
+
+  ## What was wrong
+
+  `outlook_folders` emits store-rooted paths with backslashes - `mailbox@example.com\Inbox\Alerts`
+  - and the original resolver required exactly that. Everything written for mail indexing used
+  `Inbox/Alerts` instead, which matched nothing: the separator was wrong *and* the leading store
+  was missing, so it looked for a mailbox literally called "Inbox/Alerts".
+
+  Someone typing a folder into a settings box will write `Inbox\Alerts`, or paste the forward-slash
+  form out of documentation, and neither is unreasonable. Both now work.
+
+  ## The order, which matters
+
+  Tried most specific first, so an exact store-rooted path can never be shadowed by a lucky match
+  deeper in another mailbox:
+
+    1. store-rooted, exactly as `outlook_folders` prints it
+    2. rooted at the default mail store, so `Inbox\Alerts` means what it obviously means
+    3. anywhere - a subtree in any store whose trailing segments match
+
+  Step 3 is bounded and only accepts an unambiguous hit. Two mailboxes each with `Inbox\Alerts`
+  is a real situation, and silently picking one of them would index the wrong mailbox for months.
+#>
+function Split-FolderPath {
+    param([string]$Path)
+
+    # Both separators, and blanks dropped so a trailing slash is not an unnamed folder.
+    return @($Path -split '[\\/]+' | Where-Object { $_.Trim().Length -gt 0 } | ForEach-Object { $_.Trim() })
+}
+
+function Get-ChildFolder {
+    param($Parent, [string]$Name)
+
+    foreach ($child in $Parent.Folders) {
+        if ($child.Name -eq $Name) { return $child }
+    }
+    foreach ($child in $Parent.Folders) {
+        if ($child.Name -ieq $Name) { return $child }
+    }
+    return $null
+}
+
+function Get-FolderByParts {
+    param($Root, [string[]]$Parts)
+
+    $current = $Root
+    foreach ($part in $Parts) {
+        $next = Get-ChildFolder -Parent $current -Name $part
+        if ($null -eq $next) { return $null }
+        $current = $next
+    }
+    return $current
+}
+
+<#
+  Finds a folder, and reports the canonical path it actually resolved to.
+
+  The canonical form is what gets stored, so a folder added as `inbox/alerts` is saved as
+  `mailbox@example.com\Inbox\Alerts` and matches what Outlook and `outlook_folders` both say.
+  Storing what the user typed instead would work today and break the first time anything compared
+  two paths.
+#>
+function Resolve-OutlookFolderPath {
+    param($Namespace, [string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        $inbox = $Namespace.GetDefaultFolder(6)
+        return @{ folder = $inbox; canonical = "$($inbox.Parent.Name)\$($inbox.Name)"; how = 'default inbox' }
+    }
+
+    $parts = Split-FolderPath -Path $Path
+    if ($parts.Count -eq 0) { throw 'That is not a folder path.' }
+
+    # 1. Store-rooted, exactly as outlook_folders prints it.
+    foreach ($store in $Namespace.Folders) {
+        if ($store.Name -ieq $parts[0]) {
+            $rest = @()
+            if ($parts.Count -gt 1) { $rest = $parts[1..($parts.Length - 1)] }
+            $found = Get-FolderByParts -Root $store -Parts $rest
+            if ($null -ne $found) {
+                return @{ folder = $found; canonical = (Get-CanonicalFolderPath -Folder $found); how = 'store-rooted' }
+            }
+        }
+    }
+
+    # 2. Rooted at the default store, so `Inbox\Alerts` means what it obviously means.
+    try {
+        $defaultStore = $Namespace.GetDefaultFolder(6).Parent
+        $found = Get-FolderByParts -Root $defaultStore -Parts $parts
+        if ($null -ne $found) {
+            return @{ folder = $found; canonical = (Get-CanonicalFolderPath -Folder $found); how = 'default mailbox' }
+        }
+    } catch { }
+
+    # 3. Anywhere, but only if it is unambiguous.
+    $matches = @()
+    foreach ($store in $Namespace.Folders) {
+        $found = Get-FolderByParts -Root $store -Parts $parts
+        if ($null -ne $found) { $matches += $found }
+    }
+    if ($matches.Count -eq 1) {
+        return @{ folder = $matches[0]; canonical = (Get-CanonicalFolderPath -Folder $matches[0]); how = 'matched in one mailbox' }
+    }
+    if ($matches.Count -gt 1) {
+        $where = ($matches | ForEach-Object { Get-CanonicalFolderPath -Folder $_ }) -join ', '
+        throw "'$Path' exists in more than one mailbox ($where). Give the full path starting with the mailbox name."
+    }
+
+    throw "No folder matching '$Path'."
+}
+
+<# The path Outlook itself would print, built by walking back up. #>
+function Get-CanonicalFolderPath {
+    param($Folder)
+
+    $names = @()
+    $current = $Folder
+    $depth = 0
+    while ($null -ne $current -and $depth -lt 32) {
+        $names = ,([string]$current.Name) + $names
+        $parent = $null
+        try { $parent = $current.Parent } catch { }
+        # The store's parent is the Namespace, which has no Name worth using.
+        if ($null -eq $parent -or -not ($parent.PSObject.Properties.Name -contains 'Folders')) { break }
+        try { $null = $parent.Name } catch { break }
+        $current = $parent
+        $depth++
+    }
+    return ($names -join '\')
+}
+
+<#
+  Checks one folder path without indexing anything, for the settings box.
+
+  Suggestions are the point rather than a nicety: told only that a folder does not exist, someone
+  guesses again. Told that `Inbox\Alert` does not exist but `Inbox\Alerts` does, they are finished.
+  Compared on the last segment, which is the part people mistype.
+#>
+function Invoke-OutlookValidateFolder {
+    param($Request)
+
+    $ns = Get-OutlookNamespace
+    try {
+        $resolved = Resolve-OutlookFolderPath -Namespace $ns -Path $Request.path
+        $count = $null
+        # Opt-in, and only for a single folder the user is looking at: Items.Count is a server
+        # round trip on Exchange, which is what once made folder listing time out.
+        try { $count = [int]$resolved.folder.Items.Count } catch { }
+        return @{
+            ok        = $true
+            canonical = $resolved.canonical
+            how       = $resolved.how
+            items     = $count
+        }
+    } catch {
+        $wanted = ''
+        $parts = Split-FolderPath -Path ([string]$Request.path)
+        if ($parts.Count -gt 0) { $wanted = $parts[$parts.Count - 1] }
+
+        $suggestions = @()
+        if ($wanted -ne '') {
+            foreach ($store in $ns.Folders) {
+                foreach ($candidate in (Get-FolderCandidates -Root $store -Depth 0)) {
+                    $name = [string]$candidate.Name
+                    if ($name -ieq $wanted -or $name -like "*$wanted*" -or $wanted -like "*$name*") {
+                        $suggestions += Get-CanonicalFolderPath -Folder $candidate
+                        if ($suggestions.Count -ge 6) { break }
+                    }
+                }
+                if ($suggestions.Count -ge 6) { break }
+            }
+        }
+
+        return @{ ok = $false; error = $_.Exception.Message; suggestions = @($suggestions | Select-Object -Unique) }
+    }
+}
+
+<# Folders worth comparing against, bounded so a large mailbox cannot stall the check. #>
+function Get-FolderCandidates {
+    param($Root, [int]$Depth)
+
+    $found = @()
+    if ($Depth -gt 3) { return $found }
+    try {
+        foreach ($child in $Root.Folders) {
+            $found += $child
+            $found += Get-FolderCandidates -Root $child -Depth ($Depth + 1)
+            if ($found.Count -gt 300) { break }
+        }
+    } catch { }
+    return $found
+}
+
+<#
+  A folder by path, however it was written.
+
+  Delegates to `Resolve-OutlookFolderPath`, which accepts either separator and does not insist on
+  the mailbox name being present. The original required the exact store-rooted backslash form,
+  which meant every `Inbox/Alerts` written for mail indexing resolved to nothing at all - the
+  separator was wrong and the leading store was missing, so it looked for a mailbox literally
+  called "Inbox/Alerts".
+#>
 function Get-OutlookFolder {
     param($Namespace, [string]$Path)
 
-    # The inbox is what people mean when they do not say.
     if ([string]::IsNullOrWhiteSpace($Path)) { return $Namespace.GetDefaultFolder(6) }
-
-    $parts = $Path -split '\\'
-    foreach ($store in $Namespace.Folders) {
-        if ($store.Name -ne $parts[0]) { continue }
-        $current = $store
-        foreach ($part in $parts[1..($parts.Length - 1)]) {
-            $next = $null
-            foreach ($child in $current.Folders) { if ($child.Name -eq $part) { $next = $child; break } }
-            if ($null -eq $next) { throw "No folder '$part' under '$($current.Name)'." }
-            $current = $next
-        }
-        return $current
-    }
-    throw "No mail store named '$($parts[0])'. Call outlook_folders to see what is available."
+    return (Resolve-OutlookFolderPath -Namespace $Namespace -Path $Path).folder
 }
 
 <#
@@ -1572,6 +1762,7 @@ function Invoke-Request {
         'excel.runMacro'        { return Invoke-ExcelRunMacro -Request $Request }
         'excel.evaluate'        { return Invoke-ExcelEvaluate -Request $Request }
         'outlook.folders'       { return Invoke-OutlookFolders -Request $Request }
+        'outlook.validateFolder' { return Invoke-OutlookValidateFolder -Request $Request }
         'outlook.harvest'       { return Invoke-OutlookHarvest -Request $Request }
         'outlook.display'       { return Invoke-OutlookDisplay -Request $Request }
         'outlook.search'        { return Invoke-OutlookSearch -Request $Request }

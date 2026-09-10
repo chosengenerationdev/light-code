@@ -33,7 +33,7 @@ export interface MailRecord {
   sender: string
   /** Epoch milliseconds. The single most important field here. */
   receivedAt: number
-  /** Folder path as `Inbox/Alerts/Prod`. */
+  /** Folder path as Outlook spells it, e.g. `mailbox@example.com\Inbox\Alerts`. */
   folder: string
   /** From the subject convention, when there is one. */
   status?: MailStatus

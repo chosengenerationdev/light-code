@@ -55,7 +55,7 @@ const searchSchema = z.object({
     .enum(['alert', 'ok'])
     .optional()
     .describe('Narrow to messages whose subject carries [ALERT] or [OK].'),
-  folder: z.string().optional().describe('Restrict to a folder path, e.g. "Inbox/Alerts".'),
+  folder: z.string().optional().describe('Restrict to a folder path, e.g. "Inbox\\Alerts".'),
   query: z
     .string()
     .optional()
