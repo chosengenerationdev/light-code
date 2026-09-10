@@ -16,6 +16,7 @@ export interface ToolsTabProps {
    */
   docsIndex: { enabled: boolean; retrievalReady: boolean; indexing: boolean; result: string | undefined } | undefined
   onIndexDocs: () => void
+  onClearDocs: () => void
   progress: IndexingProgressState | undefined
   onStopIndexing: () => void
 
@@ -150,6 +151,19 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
               onClick={props.onIndexDocs}
             >
               {props.docsIndex.indexing ? 'Indexing…' : 'Reindex tool documentation'}
+            </button>
+            {/*
+              Scoped to tools, and the label says so, because tools and skills share one
+              collection - an unscoped clear pressed here would take every skill with it.
+            */}
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              disabled={!props.docsIndex.enabled || props.docsIndex.indexing}
+              title="Removes tool entries from the documentation index. Skills are left alone."
+              onClick={props.onClearDocs}
+            >
+              Clear tool entries
             </button>
             {props.docsIndex.result !== undefined && (
               <span style={{ color: colors.muted, fontSize: 11 }}>{props.docsIndex.result}</span>

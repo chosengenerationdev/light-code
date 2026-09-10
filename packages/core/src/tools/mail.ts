@@ -76,10 +76,14 @@ export function createSearchMailTool(options: MailToolOptions): Tool<SearchMailP
     name: 'search_mail',
     group: 'read',
     description:
-      'Search indexed Outlook mail. Use withinHours for "anything in the last N hours", status ' +
-      'for [ALERT]/[OK] messages, and query to rank by meaning. Time and status are exact ' +
-      'filters applied before any ranking, so a window with nothing in it really is empty. ' +
-      'Returns message ids that open_email can display.',
+      'THE DEFAULT WAY TO ANSWER ANY QUESTION ABOUT EMAIL. Searches the indexed copy of the ' +
+      'the mail. Use withinHours for "anything in the last N hours", status for ' +
+      '[ALERT]/[OK] messages, and query to rank by meaning. Time and status are exact filters ' +
+      'applied before any ranking, so a window with nothing in it really is empty. Returns ' +
+      'message ids that open_email can display. Prefer this over outlook_search every time: it ' +
+      'is far faster, it does not disturb the running Outlook, and it can answer questions ' +
+      'about time and recurrence that a live search cannot. Only reach for outlook_search if ' +
+      'the user has explicitly asked you to look at Outlook itself.',
     parametersSchema: searchSchema,
 
     async execute(params): Promise<ToolResult> {

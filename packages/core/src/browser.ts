@@ -76,6 +76,7 @@ export { lookupModelCapabilities, resolveModelCapabilities, type ModelCapabiliti
 export type {
   UiToHostMessage,
   HostToUiMessage,
+  IndexingKind,
   ProfileSummary,
   ProfileInput,
   ToolCallSummary,

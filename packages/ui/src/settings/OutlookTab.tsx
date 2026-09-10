@@ -38,6 +38,8 @@ export interface OutlookTabProps {
   onRefreshFolders: () => void
   onSyncNow: () => void
   onPrune: () => void
+  onClear: (resync: boolean) => void
+  onRefreshDays: (days: number) => void
   onStop: () => void
   onOpenTools: () => void
 }
@@ -75,6 +77,8 @@ function Section(props: { title: string; hint?: string; children: React.ReactNod
  * tab, so hiding it makes the feature invisible to exactly the person looking for it.
  */
 export function OutlookTab(props: OutlookTabProps): ReactElement {
+  const [confirming, setConfirming] = useState<'clear' | 'reindex' | undefined>(undefined)
+  const [refreshDays, setRefreshDays] = useState('7')
   const [enabled, setEnabled] = useState(false)
   const [folders, setFolders] = useState<string[]>([])
   const [includeSubfolders, setIncludeSubfolders] = useState(true)
@@ -288,6 +292,90 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
             onClick={props.onPrune}
           >
             Remove older than {retentionMonths}m
+          </button>
+        </div>
+
+        {/*
+          Start again, and throw it away.
+
+          Both are here because an index nobody can rebuild is one people stop trusting: a folder
+          list that changed, an embedding model that changed, or simply a suspicion that it has
+          gone stale all leave you with no move to make. Confirmed inline, because both discard
+          work that took a long time to collect.
+        */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+          {confirming !== undefined ? (
+            <>
+              <span style={{ fontSize: 11 }}>
+                {confirming === 'clear'
+                  ? `Throw away all ${String(status.indexed)} indexed message(s)?`
+                  : `Clear ${String(status.indexed)} message(s) and collect them again from Outlook?`}
+              </span>
+              <button
+                type="button"
+                style={primaryButtonStyle(false)}
+                onClick={() => {
+                  props.onClear(confirming === 'reindex')
+                  setConfirming(undefined)
+                }}
+              >
+                {confirming === 'clear' ? 'Clear it' : 'Reindex'}
+              </button>
+              <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(undefined)}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                disabled={status.busy === true || !enabled}
+                title="Clears the index and collects everything again. A large mailbox fills in over several passes."
+                onClick={() => setConfirming('reindex')}
+              >
+                Reindex everything
+              </button>
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                disabled={status.busy === true || status.indexed === 0}
+                title="Removes every indexed message and its vectors"
+                onClick={() => setConfirming('clear')}
+              >
+                Clear index
+              </button>
+            </>
+          )}
+        </div>
+
+        {/*
+          Re-reads a recent window, replacing what is already held.
+
+          Neither existing button could do this. "Sync now" skips anything already indexed - that
+          is what makes it cheap, and exactly why it can never repair a gap - and "Reindex
+          everything" throws away years of history to fix a fortnight. This is the middle one,
+          and it is the shape of the actual complaint: the recent mail is the part that was wrong.
+        */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+          <span style={{ fontSize: 11, color: colors.muted }}>Re-read the last</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={refreshDays}
+            aria-label="Days of mail to re-read"
+            onChange={(event) => setRefreshDays(event.target.value)}
+            style={{ ...textFieldStyle(), width: 56 }}
+          />
+          <span style={{ fontSize: 11, color: colors.muted }}>day(s)</span>
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            disabled={status.busy === true}
+            title="Fetches this window again and replaces what is stored, even where it is already indexed"
+            onClick={() => props.onRefreshDays(Math.max(1, Math.min(365, Number(refreshDays) || 7)))}
+          >
+            Refresh that window
           </button>
         </div>
 

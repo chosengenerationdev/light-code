@@ -60,6 +60,7 @@ function render(
         onSetOffice={props.onSetOffice ?? (() => undefined)}
         docsIndex={undefined}
         onIndexDocs={() => undefined}
+        onClearDocs={() => undefined}
         progress={undefined}
         onStopIndexing={() => undefined}
         {...(props.toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: props.toolTimeoutSeconds })}

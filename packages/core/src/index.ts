@@ -255,7 +255,7 @@ export {
   type ScheduleProposal,
 } from './tools/scheduleFromChat.js'
 export { storeIdFor, type CorpusPurpose, type MailIndexConfig } from './config/schema.js'
-export { syncMail, pruneMail, type MailSyncResult, type HarvestedMessage } from './office/mailSync.js'
+export { syncMail, refreshMail, pruneMail, type MailSyncResult, type HarvestedMessage } from './office/mailSync.js'
 export {
   describeTeamSkillCollision,
   findTeamSkillsNamed,
@@ -463,6 +463,7 @@ export {
 } from './agent/truncate.js'
 export type {
   UiToHostMessage,
+  IndexingKind,
   HostToUiMessage,
   ProfileSummary,
   ProfileInput,

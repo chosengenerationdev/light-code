@@ -217,6 +217,8 @@ export async function indexTeamSkills(options: {
   skills: readonly { skill: Skill; body: string }[]
   attribution: { owner?: string; project?: string }
   signal?: AbortSignal
+  /** Called per skill, because embedding a page of prose each is not instant at forty of them. */
+  onProgress?: (done: number, total: number) => void
 }): Promise<number> {
   await options.writer.ensureCollection(options.collection, options.embedder.dimensions, options.signal)
   if (options.alias !== undefined && options.writer.ensureAlias !== undefined) {
@@ -226,8 +228,11 @@ export async function indexTeamSkills(options: {
 
   const documents: VectorDocument[] = []
   for (const entry of options.skills) {
+    // Checked per skill rather than only around the loop: the whole cost is inside it.
+    if (options.signal?.aborted === true) throw new Error('Stopped.')
     const vector = await options.embedder.embed(teamSkillText(entry.skill, entry.body))
     documents.push(teamSkillDocument(entry.skill, entry.body, vector, options.attribution))
+    options.onProgress?.(documents.length, options.skills.length)
   }
   await options.writer.upsert(options.collection, documents, options.signal)
   return documents.length

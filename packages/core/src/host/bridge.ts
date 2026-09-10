@@ -101,6 +101,7 @@ import {
   createVectorSearcher,
   createVectorIndexWriter,
   type VectorSearcher,
+  type VectorIndexWriter,
   createDefaultToolRegistry,
   detectClaudeCli,
   buildExpertBriefing,
@@ -109,6 +110,7 @@ import {
   storeIdFor,
   type MailIndexConfig,
   syncMail,
+  refreshMail,
   pruneMail,
   createScheduleFromChatTool,
   createSearchMailTool,
@@ -174,6 +176,7 @@ import {
   type OpenSearchConnection,
   type VectorStoreConfig,
   type HostToUiMessage,
+  type IndexingKind,
   type ImageAttachmentInput,
   type LightCodeConfig,
   dispatcherEnabled,
@@ -1187,7 +1190,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Reports what a long run is doing. `running: false` is what clears the bar. */
   function reportIndexing(
-    kind: 'codebase' | 'docs' | 'skills' | 'tools' | 'mail',
+    kind: IndexingKind,
     phase: string,
     extra: { done?: number; total?: number; detail?: string; running?: boolean } = {},
   ): void {
@@ -2044,6 +2047,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         model: profile.model,
         providerLabel: profile.label,
         expertAvailable: expertCliInfo !== undefined,
+        // Named only when there is an index to prefer.
+        mailIndexed: cachedMail.enabled === true && cachedOffice.outlook === true,
         /*
          * Either the whole list or a count and an instruction to search — never both, and
          * never neither. `renderSkillsHintForPrompt` explains why the count stays.
@@ -3544,6 +3549,149 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Throws the mail index away, and optionally starts again.
+   *
+   * **Vectors first, then the facts**, which is `pruneMail`'s ordering and for the same reason:
+   * the sidecar is what names the vectors, so clearing it first would strand every one of them in
+   * the collection with nothing left that knows their ids.
+   *
+   * Reindexing is clear-then-collect rather than a separate path. There is no way to re-embed
+   * what is already held - the record keeps a preview, not the message - so "index it again"
+   * genuinely does mean fetching it from Outlook again, and pretending otherwise would produce a
+   * cheap-looking button that quietly did much less than it said.
+   *
+   * It is a full re-fetch of history, so on a large mailbox it runs over many passes exactly as
+   * the first index did. The result line says so rather than leaving someone watching a bar that
+   * finishes and then starts again.
+   */
+  async function handleClearMailIndex(resync: boolean): Promise<void> {
+    if (mailBusy) return
+    mailBusy = true
+    const signal = beginIndexing('mail')
+    reportIndexing('mail', 'Clearing the index')
+    try {
+      const config = await loadSettings()
+      const collection = mailCollectionName(config)
+      const search = await resolveMailSearch(config)
+      const records = await mailStore.load()
+
+      if (search !== undefined && collection !== undefined && records.length > 0) {
+        const writer = createVectorIndexWriter(
+          httpClient,
+          search.store,
+          await vectorStoreConnectionFor(search.store, search.id),
+        )
+        await deleteInBatches(
+          writer,
+          collection,
+          records.map((record) => `mail:${record.id}`),
+          (done, total) => reportIndexing('mail', 'Removing vectors', { done, total }),
+          signal,
+        )
+      }
+
+      await mailStore.clear()
+      mailLastResult = `Cleared ${String(records.length)} message(s).`
+      reportIndexing('mail', 'Finished', { detail: mailLastResult, running: false })
+    } catch (error) {
+      const stopped = signal.aborted
+      mailLastResult = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
+      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', { detail: mailLastResult, running: false })
+      mailBusy = false
+      endIndexing('mail')
+      await postMailStatus()
+      return
+    }
+
+    // Released before the resync, which takes the guard itself.
+    mailBusy = false
+    endIndexing('mail')
+    await postMailStatus()
+
+    if (resync) {
+      mailLastResult = 'Cleared. Collecting again - a large mailbox fills in over several passes.'
+      await postMailStatus()
+      await runMailSync('reindex')
+    }
+  }
+
+  /**
+   * Re-reads a recent window and replaces what it finds.
+   *
+   * Everything the ordinary sync builds is shared - the same folder expansion, the same harvest,
+   * the same embedding - because a repair that read the mailbox differently from the thing it is
+   * repairing would be its own source of gaps.
+   */
+  async function handleRefreshMail(days: number): Promise<void> {
+    if (mailBusy) return
+    const config = await loadSettings()
+    if (cachedOffice.outlook !== true || !officeSupported()) return
+    const chosen = config.mail?.folders ?? []
+    if (chosen.length === 0) {
+      mailLastResult = 'No folders selected.'
+      await postMailStatus()
+      return
+    }
+    const folders = config.mail?.includeSubfolders === false ? chosen : await expandSubfolders(chosen)
+
+    mailBusy = true
+    const signal = beginIndexing('mail')
+    reportIndexing('mail', `Re-reading the last ${String(days)} day(s)`, {
+      detail: `${String(folders.length)} folder(s)`,
+    })
+    try {
+      const embedder = await resolveEmbedder(config)
+      const search = await resolveMailSearch(config)
+      const collection = mailCollectionName(config)
+
+      const result = await refreshMail({
+        days,
+        signal,
+        onProgress: (done: number, total: number, phase: string) =>
+          reportIndexing('mail', phase, { done, total }),
+        store: mailStore,
+        folders,
+        ...(config.mail?.previewChars !== undefined ? { previewChars: config.mail.previewChars } : {}),
+        harvest: async (requests, limits) =>
+          office().request<{ messages: HarvestedMessage[]; truncated: boolean }>({
+            op: 'outlook.harvest',
+            folders: requests,
+            limit: limits.limit,
+            previewChars: limits.previewChars,
+          }),
+        ...(embedder !== undefined && search !== undefined && collection !== undefined
+          ? {
+              semantic: {
+                embedder,
+                writer: createVectorIndexWriter(
+                  httpClient,
+                  search.store,
+                  await vectorStoreConnectionFor(search.store, search.id),
+                ),
+                collection,
+              },
+            }
+          : {}),
+      })
+
+      mailLastResult =
+        result.added === 0
+          ? `Nothing found in the last ${String(days)} day(s).`
+          : `Re-read ${String(result.added)} message(s) from the last ${String(days)} day(s)` +
+            `${result.more ? ' — the window held more than one batch, so run it again' : ''}.`
+      reportIndexing('mail', 'Finished', { detail: mailLastResult, running: false })
+    } catch (error) {
+      const stopped = signal.aborted
+      mailLastResult = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
+      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', { detail: mailLastResult, running: false })
+    } finally {
+      mailBusy = false
+      endIndexing('mail')
+      await postMailStatus()
+    }
+  }
+
   async function handlePruneMail(): Promise<void> {
     if (mailBusy) return
     mailBusy = true
@@ -3680,6 +3828,28 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Deletes in batches, with progress.
+   *
+   * One request carrying twenty thousand ids is a request no backend enjoys and none of them
+   * documents a limit for. Batching also means the bar moves: clearing a large mail index is the
+   * one destructive action here that takes long enough for silence to read as a hang.
+   */
+  async function deleteInBatches(
+    writer: VectorIndexWriter,
+    collection: string,
+    paths: readonly string[],
+    report: (done: number, total: number) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const size = 500
+    for (let start = 0; start < paths.length; start += size) {
+      if (signal?.aborted === true) throw new Error('Stopped.')
+      await writer.deleteByPaths(collection, paths.slice(start, start + size), signal)
+      report(Math.min(start + size, paths.length), paths.length)
+    }
+  }
+
   async function handlePublishTeamSkills(): Promise<void> {
     const config = await loadSettings()
     const collection = skillsIndexName(config)
@@ -3694,6 +3864,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       return
     }
 
+    const signal = beginIndexing('teamSkills')
+    reportIndexing('teamSkills', 'Reading skills', { detail: `${String(skills.length)} skill(s)` })
     try {
       const withBodies: { skill: Skill; body: string }[] = []
       for (const skill of skills) {
@@ -3720,6 +3892,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         collection,
         ...(config.embedder?.skillsAlias !== undefined ? { alias: config.embedder.skillsAlias } : {}),
         skills: withBodies,
+        signal,
+        onProgress: (done: number, total: number) =>
+          reportIndexing('teamSkills', 'Embedding and sending', { done, total }),
         attribution: {
           ...(owner !== undefined ? { owner } : {}),
           ...(project !== undefined ? { project } : {}),
@@ -3727,11 +3902,76 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       })
 
       post({ type: 'teamSkillsPublished', count, collection })
+      reportIndexing('teamSkills', 'Finished', {
+        detail: `Sent ${String(count)} skill(s).`,
+        running: false,
+      })
     } catch (error) {
+      const stopped = signal.aborted
+      const detail = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
+      post({ type: 'teamSkillsPublished', error: detail })
+      reportIndexing('teamSkills', stopped ? 'Stopped' : 'Failed', { detail, running: false })
+    } finally {
+      endIndexing('teamSkills')
+    }
+  }
+
+  /**
+   * Takes back everything this machine published.
+   *
+   * **Scoped to your own collection, never to the alias**, and that is the whole safety argument:
+   * everyone publishes to a collection of their own, so deleting by name here cannot reach a
+   * colleague's copy even where two people have both written a skill called `deployment`. Issuing
+   * the same delete against the alias would fan out across every teammate's index.
+   *
+   * The names come from `listPaths` rather than from the local skills folder, so a skill that was
+   * published and has since been renamed or deleted here is still removed there. Deriving them
+   * from what is on disk would leave exactly those behind - the ones nobody can see any more and
+   * so nobody thinks to clean up.
+   */
+  async function handleClearTeamSkills(): Promise<void> {
+    const config = await loadSettings()
+    const collection = skillsIndexName(config)
+    const search = await resolveSearch(config)
+
+    if (collection === undefined || search === undefined) {
+      post({ type: 'teamSkillsPublished', error: 'No search connection configured.' })
+      return
+    }
+
+    const signal = beginIndexing('teamSkills')
+    reportIndexing('teamSkills', 'Finding what was published')
+    try {
+      const writer = createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await vectorStoreConnectionFor(search.store, search.id),
+      )
+      const paths = await writer.listPaths(collection, { signal })
+      await deleteInBatches(
+        writer,
+        collection,
+        paths,
+        (done, total) => reportIndexing('teamSkills', 'Removing', { done, total }),
+        signal,
+      )
       post({
         type: 'teamSkillsPublished',
-        error: error instanceof Error ? error.message : String(error),
+        count: 0,
+        cleared: paths.length,
+        collection,
       })
+      reportIndexing('teamSkills', 'Finished', {
+        detail: `Removed ${String(paths.length)} published skill(s).`,
+        running: false,
+      })
+    } catch (error) {
+      const stopped = signal.aborted
+      const detail = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
+      post({ type: 'teamSkillsPublished', error: detail })
+      reportIndexing('teamSkills', stopped ? 'Stopped' : 'Failed', { detail, running: false })
+    } finally {
+      endIndexing('teamSkills')
     }
   }
 
@@ -3903,6 +4143,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return `${index}@${storeId}`
   }
 
+  /** Where that manifest lives. Spelled out at four call sites before this. */
+  function manifestPath(index: string, storeId: string): string {
+    return path.join(storageDir, 'index-manifests', `${manifestKey(index, storeId)}.json`)
+  }
+
   async function readDocsFingerprint(index: string, storeId: string, kind?: DocEntryKind): Promise<string | undefined> {
     try {
       const raw = JSON.parse(await fs.readFile(docsFingerprintPath(index, storeId, kind), 'utf8')) as {
@@ -3942,7 +4187,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * skill while reindexing tools, since none of them would be in the corpus it built. Hence the
    * id-prefix filter, and hence a partial run keeping its own fingerprint.
    */
-  async function indexDocs(options: { force: boolean; kind?: DocEntryKind }): Promise<DocsIndexOutcome> {
+  async function indexDocs(options: {
+    force: boolean
+    kind?: DocEntryKind
+    report?: (phase: string, extra?: { done?: number; total?: number }) => void
+    signal?: AbortSignal
+  }): Promise<DocsIndexOutcome> {
     const { config } = await configManager.load()
     const index = docsIndexName(config)
     const search = await resolveSearch(config)
@@ -3958,6 +4208,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * would be dispatch-only at this moment and the corpus would come out empty — indexing
        * has to describe the catalogue as it will be *used*, not as it happens to be right now.
        */
+      options.report?.('Reading the catalogue')
       const registry = currentToolRegistry(undefined, undefined, undefined, undefined, true)
       const all = buildDocCorpus({ dispatchOnlyTools: registry.dispatchOnlyList(), skills })
       const wanted = options.kind
@@ -3983,7 +4234,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
       await writer.ensureCollection(index, embedder.dimensions)
 
+      /*
+       * Indeterminate on purpose while this runs. `embedBatch` is one call and reports nothing
+       * from inside it, so counting off entries here would be a bar that invents its own
+       * progress - the phase name is the honest answer instead.
+       */
+      options.report?.('Embedding', { total: entries.length })
       const vectors = await embedder.embedBatch(entries.map((entry) => entry.text))
+      if (options.signal?.aborted === true) throw new Error('Stopped.')
       const documents = entries.flatMap((entry, position) => {
         const vector = vectors[position]
         if (vector === undefined) return []
@@ -4005,7 +4263,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         if (wanted === undefined) return true
         return parseDocEntryId(existing)?.kind === wanted
       })
-      if (stale.length > 0) await writer.deleteByPaths(index, stale)
+      if (stale.length > 0) {
+        options.report?.('Removing entries that have gone', { done: 0, total: stale.length })
+        await writer.deleteByPaths(index, stale)
+      }
+      options.report?.('Writing', { done: 0, total: documents.length })
       await writer.upsert(index, documents)
 
       /*
@@ -4141,7 +4403,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       post({ type: 'storeSync', running: true, fromLabel: source.label })
 
-      const sourcePath = path.join(storageDir, 'index-manifests', `${manifestKey(index, fromId)}.json`)
+      const sourcePath = manifestPath(index, fromId)
       const manifest = await fs
         .readFile(sourcePath, 'utf8')
         .then((raw) => JSON.parse(raw) as IndexManifest)
@@ -4159,7 +4421,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // The destination inherits the record of what it now holds, so the next incremental
       // index diffs against the truth rather than re-embedding everything.
       if (manifest !== undefined) {
-        const targetPath = path.join(storageDir, 'index-manifests', `${manifestKey(index, target.id)}.json`)
+        const targetPath = manifestPath(index, target.id)
         await fs.mkdir(path.dirname(targetPath), { recursive: true })
         await fs.writeFile(targetPath, JSON.stringify(manifest), 'utf8')
       }
@@ -4170,7 +4432,68 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleClearDocsIndex(): Promise<void> {
+  /**
+   * Empties the codebase index and forgets what was written.
+   *
+   * **The manifest goes with the vectors, and that ordering is the whole point.** The indexer
+   * decides what to embed by diffing the workspace against that manifest, so clearing the
+   * collection while leaving it behind produces the worst state available: an empty index that
+   * believes it is complete, and an Index button that reports "nothing changed" for ever. Keyed
+   * by `index@storeId` for the reason recorded next to `manifestKey`.
+   */
+  async function handleClearCodebaseIndex(): Promise<void> {
+    const { config } = await configManager.load()
+    const index = codebaseIndexName(config)
+    const search = await resolveSearch(config)
+
+    if (index === undefined || search === undefined) {
+      post({ type: 'indexResult', error: 'Choose a search connection in Settings → Search first.' })
+      return
+    }
+
+    const signal = beginIndexing('codebase')
+    reportIndexing('codebase', 'Finding what is indexed')
+    try {
+      const writer = createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await vectorStoreConnectionFor(search.store, search.id),
+      )
+      const paths = await writer.listPaths(index, { signal })
+      await deleteInBatches(
+        writer,
+        index,
+        paths,
+        (done, total) => reportIndexing('codebase', 'Removing', { done, total }),
+        signal,
+      )
+      await fs.rm(manifestPath(index, search.id), { force: true })
+      post({
+        type: 'indexResult',
+        result: {
+          filesIndexed: 0,
+          filesSkipped: 0,
+          filesRemoved: paths.length,
+          chunksWritten: 0,
+          skipReasons: {},
+        },
+      })
+      reportIndexing('codebase', 'Finished', {
+        detail: `Removed ${String(paths.length)} chunk(s).`,
+        running: false,
+      })
+      logger.info(`cleared codebase index "${index}"`)
+    } catch (error) {
+      const stopped = signal.aborted
+      const detail = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
+      post({ type: 'indexResult', error: detail })
+      reportIndexing('codebase', stopped ? 'Stopped' : 'Failed', { detail, running: false })
+    } finally {
+      endIndexing('codebase')
+    }
+  }
+
+  async function handleClearDocsIndex(kind?: DocEntryKind): Promise<void> {
     const { config } = await configManager.load()
     const index = docsIndexName(config)
     const search = await resolveSearch(config)
@@ -4186,12 +4509,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         search.store,
         await vectorStoreConnectionFor(search.store, search.id),
       )
-      const existing = await writer.listPaths(index)
+      /*
+       * Filtered by kind, exactly as the stale sweep in `indexDocs` is.
+       *
+       * Tools and skills share one collection, so a Clear button on the Tools tab that deleted
+       * every entry would take every skill with it - the same defect `rag/partialIndex.test.ts`
+       * exists to prevent, arriving through the other door.
+       */
+      const all = await writer.listPaths(index)
+      const existing =
+        kind === undefined ? all : all.filter((id) => parseDocEntryId(id)?.kind === kind)
       if (existing.length > 0) await writer.deleteByPaths(index, existing)
-      // Every fingerprint, so clearing the index cannot leave a partial one claiming currency.
+      /*
+       * The full fingerprint always goes, plus this kind's own.
+       *
+       * A scoped clear leaves the *other* kind's fingerprint alone - it is still accurate - but
+       * the unscoped one now describes a corpus that is only half present, so keeping it would
+       * make a later full run decide there was nothing to do.
+       */
       await Promise.all(
-        [undefined, 'tool' as const, 'skill' as const].map((kind) =>
-          fs.rm(docsFingerprintPath(index, search.id, kind), { force: true }),
+        [undefined, ...(kind === undefined ? (['tool', 'skill'] as const) : [kind])].map((each) =>
+          fs.rm(docsFingerprintPath(index, search.id, each), { force: true }),
         ),
       )
       post({ type: 'docsIndexed', indexed: 0, index })
@@ -4201,8 +4539,33 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * The button in the Tools and Skills tabs.
+   *
+   * Reported under the kind that was asked for, so the bar appears on the tab the button was
+   * pressed on. Before this it reported nothing at all: pressing Reindex changed a label to
+   * "Indexing..." and then, some seconds later, back again - which on a slow embedding endpoint
+   * is indistinguishable from a button that does not work.
+   */
   async function handleIndexDocs(kind?: DocEntryKind): Promise<void> {
-    const outcome = await indexDocs({ force: true, ...(kind === undefined ? {} : { kind }) })
+    const reportKind: IndexingKind = kind === 'skill' ? 'skills' : 'tools'
+    const signal = beginIndexing(reportKind)
+    reportIndexing(reportKind, 'Starting')
+    const outcome = await indexDocs({
+      force: true,
+      signal,
+      report: (phase, extra) => reportIndexing(reportKind, phase, extra ?? {}),
+      ...(kind === undefined ? {} : { kind }),
+    })
+    reportIndexing(reportKind, outcome.error === undefined ? 'Finished' : 'Failed', {
+      running: false,
+      ...(outcome.error !== undefined
+        ? { detail: outcome.error }
+        : outcome.indexed !== undefined
+          ? { detail: `${String(outcome.indexed)} entr(ies) indexed.` }
+          : {}),
+    })
+    endIndexing(reportKind)
     post({
       type: 'docsIndexed',
       ...(kind === undefined ? {} : { kind }),
@@ -4295,12 +4658,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     indexingAbort = new AbortController()
-    const manifestPath = path.join(storageDir, 'index-manifests', `${manifestKey(index, search.id)}.json`)
+    const manifestFile = manifestPath(index, search.id)
     const owner = indexOwner(config)
     const project = indexProject()
     const alias = config.embedder?.indexAlias
     try {
-      const manifest = await loadIndexManifest(manifestPath, embedder)
+      const manifest = await loadIndexManifest(manifestFile, embedder)
       const isIgnored = await ignoredFilesPredicate()
 
       const result = await indexWorkspace({
@@ -4313,8 +4676,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         denylist,
         manifest,
         saveManifest: async (next) => {
-          await fs.mkdir(path.dirname(manifestPath), { recursive: true })
-          await fs.writeFile(manifestPath, JSON.stringify(next), 'utf8')
+          await fs.mkdir(path.dirname(manifestFile), { recursive: true })
+          await fs.writeFile(manifestFile, JSON.stringify(next), 'utf8')
         },
         ...(isIgnored !== undefined ? { isIgnored } : {}),
         /*
@@ -4341,9 +4704,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function loadIndexManifest(manifestPath: string, embedder: Embedder): Promise<IndexManifest> {
+  async function loadIndexManifest(file: string, embedder: Embedder): Promise<IndexManifest> {
     try {
-      return JSON.parse(await fs.readFile(manifestPath, 'utf8')) as IndexManifest
+      return JSON.parse(await fs.readFile(file, 'utf8')) as IndexManifest
     } catch {
       // Missing or unreadable both mean "index everything", which is correct and safe —
       // the worst case is re-embedding work that was already done.
@@ -5483,7 +5846,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'syncVectorStore') {
       void handleSyncVectorStore(message.fromId)
     } else if (message.type === 'clearDocsIndex') {
-      void handleClearDocsIndex()
+      void handleClearDocsIndex(message.kind)
+    } else if (message.type === 'clearCodebaseIndex') {
+      void handleClearCodebaseIndex()
     } else if (message.type === 'openStandingSkill') {
       void handleOpenStandingSkill()
     } else if (message.type === 'setOffice') {
@@ -5561,6 +5926,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         retentionMonths: message.retentionMonths,
         ...(message.storeId !== undefined ? { storeId: message.storeId } : {}),
       })
+    } else if (message.type === 'clearTeamSkills') {
+      void handleClearTeamSkills()
+    } else if (message.type === 'refreshMail') {
+      void handleRefreshMail(message.days)
+    } else if (message.type === 'clearMailIndex') {
+      void handleClearMailIndex(message.resync === true)
     } else if (message.type === 'saveSkillsAlias') {
       void handleSaveSkillsAlias(message.alias)
     } else if (message.type === 'cancelIndexing') {

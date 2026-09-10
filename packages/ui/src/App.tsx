@@ -824,6 +824,7 @@ export function App(props: AppProps): ReactElement {
         setIndexResult(undefined)
         props.transport.post({ type: 'startIndexing' } satisfies UiToHostMessage)
       },
+      onClearIndex: () => props.transport.post({ type: 'clearCodebaseIndex' } satisfies UiToHostMessage),
       onCancelIndexing: () => props.transport.post({ type: 'cancelIndexing' } satisfies UiToHostMessage),
     },
     dispatcher: {
@@ -1199,6 +1200,14 @@ export function App(props: AppProps): ReactElement {
                   setTeamSkillsResult(undefined)
                   props.transport.post({ type: 'publishTeamSkills' } satisfies UiToHostMessage)
                 },
+                onClear: () => {
+                  setTeamSkillsResult(undefined)
+                  props.transport.post({ type: 'clearTeamSkills' } satisfies UiToHostMessage)
+                },
+                onStop: () =>
+                  props.transport.post({ type: 'cancelIndexing', kind: 'teamSkills' } satisfies UiToHostMessage),
+                publishing: indexingProgress?.kind === 'teamSkills' && indexingProgress.running,
+                progress: indexingProgress?.kind === 'teamSkills' ? indexingProgress : undefined,
                 result: teamSkillsResult,
               },
               skills,
@@ -1216,6 +1225,13 @@ export function App(props: AppProps): ReactElement {
                 setDocsIndexing(true)
                 props.transport.post({ type: 'indexDocs', kind: 'skill' } satisfies UiToHostMessage)
               },
+              onClearIndex: () => {
+                setDocsResult(undefined)
+                props.transport.post({ type: 'clearDocsIndex', kind: 'skill' } satisfies UiToHostMessage)
+              },
+              indexProgress: indexingProgress?.kind === 'skills' ? indexingProgress : undefined,
+              onStopIndexing: () =>
+                props.transport.post({ type: 'cancelIndexing', kind: 'skills' } satisfies UiToHostMessage),
               indexing: docsIndexing,
               indexResult:
                 docsResult === undefined
@@ -1277,6 +1293,10 @@ export function App(props: AppProps): ReactElement {
                   force: mailTree.folders.length > 0,
                 } satisfies UiToHostMessage)
               },
+              onClear: (resync: boolean) =>
+                props.transport.post({ type: 'clearMailIndex', resync } satisfies UiToHostMessage),
+              onRefreshDays: (days: number) =>
+                props.transport.post({ type: 'refreshMail', days } satisfies UiToHostMessage),
               onStop: () => props.transport.post({ type: 'cancelIndexing', kind: 'mail' } satisfies UiToHostMessage),
             }}
             tools={{
@@ -1288,6 +1308,10 @@ export function App(props: AppProps): ReactElement {
                 result: describeDocsResult(docsResult),
               },
               onIndexDocs: () => props.transport.post({ type: 'indexDocs', kind: 'tool' } satisfies UiToHostMessage),
+              onClearDocs: () => {
+                setDocsResult(undefined)
+                props.transport.post({ type: 'clearDocsIndex', kind: 'tool' } satisfies UiToHostMessage)
+              },
               progress: indexingProgress?.kind === 'tools' ? indexingProgress : undefined,
               onStopIndexing: () =>
                 props.transport.post({ type: 'cancelIndexing', kind: 'tools' } satisfies UiToHostMessage),

@@ -1,3 +1,4 @@
+import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import type { McpPlatform, McpServerConfig, McpServerState, McpServerStatus, McpToolPermission } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { CopyIcon, TrashIcon } from '../icons.js'
@@ -48,6 +49,9 @@ export interface McpTabProps {
    * happened, and no way to make it happen. The control belongs where the change was made.
    */
   docsIndex: { enabled: boolean; ready: boolean; indexing: boolean; result: string | undefined } | undefined
+  onIndexDocs: () => void
+  indexProgress: IndexingProgressState | undefined
+  onStopIndexing: () => void
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -355,6 +359,48 @@ export function McpTab(props: McpTabProps): ReactElement {
         Uses the standard <code style={{ fontFamily: monospace }}>mcpServers</code> shape, so a config from another MCP
         client can be pasted in unchanged.
       </p>
+
+      {/*
+        Here as well as in Tools, and that duplication is deliberate.
+
+        Adding a server already triggers a reindex on connect, but it happens silently a few
+        seconds later in a tab nobody is looking at - so after adding one there was no way to tell
+        whether it had happened. This control was moved out to Tools and immediately missed, for
+        exactly that reason: this is where the change is made. One button, one message, shown in
+        both places.
+      */}
+      {props.docsIndex !== undefined && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            margin: '0 0 12px',
+          }}
+        >
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            disabled={!props.docsIndex.enabled || props.docsIndex.indexing || !props.docsIndex.ready}
+            title={
+              props.docsIndex.enabled
+                ? props.docsIndex.ready
+                  ? 'Reindexes tool documentation so a newly added server is findable now'
+                  : 'Set an embedding model under Search to index by meaning'
+                : 'Looking tools up on demand is switched off under Search'
+            }
+            onClick={props.onIndexDocs}
+          >
+            {props.docsIndex.indexing ? 'Indexing…' : 'Index tool documentation'}
+          </button>
+          <span style={{ color: colors.muted, fontSize: 11 }}>
+            {props.docsIndex.result ??
+              'Runs on its own a few seconds after a server connects. This does it now.'}
+          </span>
+        </div>
+      )}
+      <IndexingProgress progress={props.indexProgress} onStop={props.onStopIndexing} />
 
       {props.servers.length === 0 ? (
         <p style={{ color: colors.muted, fontSize: 12 }}>No servers configured yet.</p>

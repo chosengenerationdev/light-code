@@ -38,6 +38,15 @@ export interface FolderTreeProps {
  */
 export function FolderTree(props: FolderTreeProps): ReactElement {
   const [filter, setFilter] = useState('')
+  /*
+   * Collapsed by path, and collapsing hides descendants rather than the folder itself.
+   *
+   * A real mailbox is hundreds of folders deep in places, and the tree was a flat scroll of all
+   * of them. Note a *ticked* folder is never hidden by a collapse: it would look as though the
+   * selection had been lost, and a setting that appears to have forgotten itself is the one
+   * report this project keeps getting.
+   */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
 
   const selected = useMemo(() => new Set(props.selected), [props.selected])
 
@@ -50,9 +59,38 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
     return undefined
   }
 
+  const hasChildren = useMemo(() => {
+    const parents = new Set<string>()
+    for (const folder of props.folders) {
+      const cut = folder.path.lastIndexOf('\\')
+      if (cut > 0) parents.add(folder.path.slice(0, cut))
+    }
+    return parents
+  }, [props.folders])
+
+  const toggleCollapsed = (path: string): void => {
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    if (needle.length === 0) return props.folders
+    if (needle.length === 0) {
+      if (collapsed.size === 0) return props.folders
+      return props.folders.filter((folder) => {
+        // Kept when ticked, whatever is collapsed above it: a selection that vanished from view
+        // reads as a selection that was lost.
+        if (props.selected.includes(folder.path)) return true
+        for (const parent of collapsed) {
+          if (folder.path.startsWith(`${parent}\\`)) return false
+        }
+        return true
+      })
+    }
     /*
      * A match keeps its ancestors, or the result is a flat list of leaves with no indication of
      * where they live — and two folders called `Alerts` in different mailboxes are indistinguishable.
@@ -65,7 +103,7 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
       for (let index = 1; index < parts.length; index++) keep.add(parts.slice(0, index).join('\\'))
     }
     return props.folders.filter((folder) => keep.has(folder.path))
-  }, [props.folders, filter])
+  }, [props.folders, filter, collapsed, props.selected])
 
   const toggle = (path: string): void => {
     const next = new Set(selected)
@@ -84,6 +122,44 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
 
   return (
     <div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+        {/*
+          Two buttons rather than one that toggles: with a partly-collapsed tree a single control
+          has no honest label, and pressing it does whichever of the two you were not expecting.
+        */}
+        <button
+          type="button"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: colors.accent,
+            cursor: 'pointer',
+            padding: 0,
+            fontSize: 11,
+          }}
+          onClick={() => setCollapsed(new Set(hasChildren))}
+        >
+          Collapse all
+        </button>
+        <button
+          type="button"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: colors.accent,
+            cursor: 'pointer',
+            padding: 0,
+            fontSize: 11,
+          }}
+          onClick={() => setCollapsed(new Set())}
+        >
+          Expand all
+        </button>
+        <span style={{ color: colors.muted, fontSize: 11 }}>
+          {`${String(props.selected.length)} selected of ${String(props.folders.length)}`}
+        </span>
+      </div>
+
       {props.folders.length > 12 && (
         <input
           type="text"
@@ -123,6 +199,34 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
                 opacity: covered === undefined ? 1 : 0.65,
               }}
             >
+              {/*
+                Outside the checkbox's label, so expanding a branch never ticks it. The two are
+                different acts on the same row and one must not perform the other.
+              */}
+              {hasChildren.has(folder.path) ? (
+                <button
+                  type="button"
+                  aria-label={collapsed.has(folder.path) ? `Expand ${folder.name}` : `Collapse ${folder.name}`}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: colors.muted,
+                    cursor: 'pointer',
+                    padding: 0,
+                    width: 12,
+                    fontSize: 10,
+                    lineHeight: '12px',
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    toggleCollapsed(folder.path)
+                  }}
+                >
+                  {collapsed.has(folder.path) ? '▶' : '▼'}
+                </button>
+              ) : (
+                <span style={{ width: 12 }} />
+              )}
               <input
                 type="checkbox"
                 checked={ticked || covered !== undefined}

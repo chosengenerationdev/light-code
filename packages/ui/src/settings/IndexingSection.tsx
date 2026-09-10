@@ -41,6 +41,8 @@ export interface IndexingSectionProps {
     indexAlias: string,
   ) => void
   onStartIndexing: () => void
+  /** Empties the index and forgets the manifest, so the next run rebuilds from nothing. */
+  onClearIndex: () => void
   onCancelIndexing: () => void
   /** Joins an already-indexed workspace to the alias without re-embedding it. */
   onAttachTeamAlias: () => void
@@ -66,6 +68,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
   const [indexPrefix, setIndexPrefix] = useState('')
   const [indexAlias, setIndexAlias] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const [confirmingClear, setConfirmingClear] = useState(false)
   const [saved, setSaved] = useState(false)
 
   // Resynced rather than seeded once: the host's reply can arrive after this renders.
@@ -432,6 +435,45 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           >
             {props.embedder !== undefined && props.embedder.indexedFiles > 0 ? 'Reindex workspace' : 'Index workspace'}
           </button>
+          {/*
+            Clearing is the move nobody had.
+
+            Reindex is incremental - it diffs the workspace against the manifest - so a suspicion
+            that the index has gone wrong had no answer: the button that looks like "build it
+            again" would decide nothing had changed and do nothing. This throws away the vectors
+            *and* the manifest, which is the pair that has to go together: an emptied index with
+            its manifest intact believes it is complete, for ever.
+          */}
+          {confirmingClear ? (
+            <>
+              <span style={{ fontSize: 11 }}>Throw away the whole index?</span>
+              <button
+                type="button"
+                style={primaryButtonStyle(false)}
+                onClick={() => {
+                  setConfirmingClear(false)
+                  props.onClearIndex()
+                }}
+              >
+                Clear it
+              </button>
+              <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirmingClear(false)}>
+                Keep it
+              </button>
+            </>
+          ) : (
+            props.embedder !== undefined &&
+            props.embedder.indexedFiles > 0 && (
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                title="Removes every chunk and forgets what was indexed, so the next run starts from nothing"
+                onClick={() => setConfirmingClear(true)}
+              >
+                Clear index
+              </button>
+            )
+          )}
           {!ready && (
             <span style={{ fontSize: 11, color: colors.muted }}>
               {props.connectionLabel === undefined

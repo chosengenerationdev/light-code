@@ -360,6 +360,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               indexing: props.search.dispatcher.indexing,
               result: describeDocsResult(props.search.dispatcher.result),
             }}
+            // The same message the Tools tab sends. One handler, two places it can be reached.
+            onIndexDocs={() => props.search.dispatcher.onIndexDocs('tool')}
+            indexProgress={props.tools.progress}
+            onStopIndexing={props.tools.onStopIndexing}
           />
         )}
       </div>

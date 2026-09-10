@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react'
+import type { IndexingKind } from '@light-code/core/browser'
 import { colors, secondaryButtonStyle } from '../theme.js'
 
 export interface IndexingProgressState {
-  kind: 'codebase' | 'docs' | 'skills' | 'tools' | 'mail'
+  kind: IndexingKind
   phase: string
   done?: number
   total?: number

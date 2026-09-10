@@ -1,3 +1,4 @@
+import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { useEffect, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { FolderListEditor } from './FolderListEditor.js'
@@ -26,6 +27,10 @@ export interface SkillsTabProps {
    * rather not wonder — and it is scoped to skills, so pressing it cannot disturb tools.
    */
   onReindex: () => void
+  onClearIndex: () => void
+  /** The bar for the skills reindex, which is the one this button starts. */
+  indexProgress: IndexingProgressState | undefined
+  onStopIndexing: () => void
   indexing: boolean
   /** The last run, as one line. Undefined when nothing has run in this session. */
   indexResult: string | undefined
@@ -40,7 +45,11 @@ export interface SkillsTabProps {
     alias: string | undefined
     onSaveAlias: (alias: string) => void
     onPublish: () => void
-    result: { count?: number; collection?: string; error?: string } | undefined
+    onClear: () => void
+    onStop: () => void
+    publishing?: boolean
+    progress: IndexingProgressState | undefined
+    result: { count?: number; collection?: string; cleared?: number; error?: string } | undefined
   }
 }
 
@@ -64,6 +73,7 @@ export interface SkillsTabProps {
  */
 function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
   const [alias, setAlias] = useState(props.alias ?? '')
+  const [confirmingClear, setConfirmingClear] = useState(false)
   useEffect(() => setAlias(props.alias ?? ''), [props.alias])
 
   return (
@@ -108,25 +118,76 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         <button
           type="button"
           style={primaryButtonStyle(props.alias === undefined)}
-          disabled={props.alias === undefined}
+          disabled={props.alias === undefined || props.publishing === true}
           title={props.alias === undefined ? 'Save the name first' : 'Embeds your skills and writes them to the shared collection'}
           onClick={props.onPublish}
         >
-          2. Send my skills to the team
+          {props.publishing === true ? 'Sending…' : '2. Send my skills to the team'}
         </button>
       </div>
+
+      {/*
+        Taking it back is as much a part of publishing as sending it, and there was no way to.
+
+        Confirmed inline rather than done on the first click: this is the one control here that
+        removes something other people can see.
+      */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {confirmingClear ? (
+          <>
+            <span style={{ fontSize: 11 }}>Remove every skill you have published?</span>
+            <button
+              type="button"
+              style={primaryButtonStyle(false)}
+              onClick={() => {
+                setConfirmingClear(false)
+                props.onClear()
+              }}
+            >
+              Remove them
+            </button>
+            <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirmingClear(false)}>
+              Keep them
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              disabled={props.alias === undefined || props.publishing === true}
+              onClick={() => setConfirmingClear(true)}
+            >
+              Remove mine from the pool
+            </button>
+            <span style={{ color: colors.muted, fontSize: 11 }}>
+              Only your own copies. Colleagues publish to their own collections, so this cannot
+              reach theirs.
+            </span>
+          </>
+        )}
+      </div>
+
+      <IndexingProgress progress={props.progress} onStop={props.onStop} />
 
       {props.result?.error !== undefined && (
         <span style={{ display: 'block', color: colors.error, fontSize: 11, marginTop: 6 }}>
           {props.result.error}
         </span>
       )}
-      {props.result?.error === undefined && props.result?.count !== undefined && (
+      {props.result?.error === undefined && props.result?.cleared !== undefined && (
         <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 6 }}>
-          {`Published ${String(props.result.count)} skill(s) to "${props.result.collection ?? ''}". `}
-          Sending again replaces your own copies and never touches anyone else&rsquo;s.
+          {`Removed ${String(props.result.cleared)} published skill(s).`}
         </span>
       )}
+      {props.result?.error === undefined &&
+        props.result?.cleared === undefined &&
+        props.result?.count !== undefined && (
+          <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 6 }}>
+            {`Published ${String(props.result.count)} skill(s) to "${props.result.collection ?? ''}". `}
+            Sending again replaces your own copies and never touches anyone else&rsquo;s.
+          </span>
+        )}
     </section>
   )
 }
@@ -147,11 +208,22 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         <button type="button" style={secondaryButtonStyle()} disabled={props.indexing} onClick={props.onReindex}>
           {props.indexing ? 'Reindexing…' : 'Reindex skills'}
         </button>
+        {/* Scoped to skills: the collection is shared with tool documentation. */}
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={props.indexing}
+          title="Removes skill entries from the documentation index. Tools are left alone."
+          onClick={props.onClearIndex}
+        >
+          Clear skill entries
+        </button>
         <span style={{ color: colors.muted, fontSize: 11 }}>
           {props.indexResult ??
             'Reindexed automatically a few seconds after any change. This forces it now, for skills only.'}
         </span>
       </div>
+      <IndexingProgress progress={props.indexProgress} onStop={props.onStopIndexing} />
 
       {/* First, because it is the part people come here looking for. */}
       <TeamSkillsSection {...props.team} />

@@ -1,5 +1,21 @@
 # light-code-vscode
 
+## 0.55.0
+
+### Minor Changes
+
+- Every index can now be cleared and rebuilt, with a progress bar, and the newest mail actually
+  gets indexed.
+
+  The harvest sorted before restricting, and `Restrict` returns a new collection that does not
+  carry the sort — so the batch limit cut an arbitrary order and the recent mail was what went
+  missing. One folder could also consume the whole batch, starving every folder after it. Adds a
+  "re-read the last N days" repair that replaces what is already held, clear and reindex for mail,
+  clear for the codebase and documentation indexes, publish progress and an "unpublish" for team
+  skills, a collapsible folder tree, and the tool-documentation index button back in the MCP tab.
+  The assistant is now told to answer email questions from the index and to search live Outlook
+  only when asked.
+
 ## 0.54.1
 
 ### Patch Changes

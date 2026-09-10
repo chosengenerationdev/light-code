@@ -707,10 +707,15 @@ export function createOutlookSearchTool(options: OfficeToolOptions): Tool<z.infe
     name: 'outlook_search',
     group: 'read',
     description:
-      'Search mail in the local Outlook, newest first. Give a folder path from outlook_folders to ' +
-      'search one folder, withinMinutes for a recent window (two hours is 120), and limit for how ' +
-      'many of the newest to return. Returns subject, sender, date and a short preview - use ' +
-      'outlook_read_email with the returned id for the full message.',
+      'Searches the LIVE Outlook application, newest first. USE ONLY WHEN THE USER HAS ASKED ' +
+      'FOR IT EXPLICITLY - for anything else use search_mail, which reads the index and is far ' +
+      'faster. This one talks to Outlook over COM: it is slow, it competes with the user for ' +
+      'the application, and on a large mailbox it can time out. It is the right tool when the ' +
+      'user says to check Outlook directly, when a folder has never been indexed, or when they ' +
+      'need something newer than the last sync. Give a folder path from outlook_folders to ' +
+      'search one folder, withinMinutes for a recent window (two hours is 120), and limit for ' +
+      'how many of the newest to return. Returns subject, sender, date and a short preview - ' +
+      'use outlook_read_email with the returned id for the full message.',
     parametersSchema: searchSchema,
     async execute(params): Promise<ToolResult> {
       try {

@@ -60,6 +60,56 @@ export interface HarvestedMessage {
   preview: string
 }
 
+/**
+ * Re-reads a recent window, whether or not it is already indexed.
+ *
+ * Separate from the ordinary sync because it deliberately breaks that one's central rule: a sync
+ * skips what it already holds, which is what makes it cheap, and is also why it can never repair
+ * a gap. Anything already present in the window is replaced rather than skipped, so a message
+ * indexed from a partial harvest is corrected rather than kept forever in its first state.
+ */
+export async function refreshMail(
+  options: Omit<MailSyncOptions, 'batchLimit'> & { days: number; batchLimit?: number },
+): Promise<MailSyncResult> {
+  const known = await options.store.load()
+  const limit = options.batchLimit ?? 2000
+  const previewChars = options.previewChars ?? 400
+  const sinceMs = Date.now() - options.days * 24 * 60 * 60 * 1000
+
+  const harvested = await options.harvest(
+    options.folders.map((path) => ({ path, sinceMs })),
+    { limit, previewChars },
+  )
+  const fetched = harvested.messages.map(toRecord)
+  if (fetched.length === 0) {
+    return { added: 0, more: false, total: known.length, embedded: 0, backfilled: 0, complete: [] }
+  }
+
+  /*
+   * The old copies go, then the new ones are appended.
+   *
+   * `replace` rewrites the whole file, which is the expensive path - but this runs when somebody
+   * has pressed a button because the index is wrong, and correctness there is worth more than the
+   * append-only shortcut. Vectors are upserted by the same id, so they need no deletion.
+   */
+  const refreshedIds = new Set(fetched.map((record) => record.id))
+  await options.store.replace([...known.filter((record) => !refreshedIds.has(record.id)), ...fetched])
+
+  let embedded = 0
+  if (options.semantic !== undefined) {
+    embedded = await embedRecords(fetched, options)
+  }
+
+  return {
+    added: fetched.length,
+    more: harvested.truncated,
+    total: known.filter((record) => !refreshedIds.has(record.id)).length + fetched.length,
+    embedded,
+    backfilled: 0,
+    complete: [],
+  }
+}
+
 export interface MailSyncResult {
   added: number
   /** True when there is more to fetch, so the caller knows to run again. */
@@ -183,33 +233,7 @@ export async function syncMail(options: MailSyncOptions): Promise<MailSyncResult
    * the meaning quietly missing.
    */
   let embedded = 0
-  if (options.semantic !== undefined) {
-    const { embedder, writer, collection } = options.semantic
-    await writer.ensureCollection(collection, embedder.dimensions, options.signal)
-
-    const documents: VectorDocument[] = []
-    for (const record of fresh) {
-      // Checked between messages rather than only at the boundaries: a mailbox with a thousand
-      // new messages would otherwise ignore Stop for the length of the whole batch.
-      if (options.signal?.aborted === true) throw new Error('Stopped.')
-      options.onProgress?.(documents.length, fresh.length, 'Embedding new messages')
-      const text = mailEmbedText(record)
-      if (text.trim().length === 0) continue
-      documents.push({
-        id: `mail:${record.id}`,
-        text,
-        // The id travels in `path`, which is how a hit is joined back to its facts.
-        path: `mail:${record.id}`,
-        startLine: 1,
-        endLine: 1,
-        vector: await embedder.embed(text),
-      })
-    }
-    if (documents.length > 0) {
-      await writer.upsert(collection, documents, options.signal)
-      embedded = documents.length
-    }
-  }
+  if (options.semantic !== undefined) embedded = await embedRecords(fresh, options)
 
   await options.store.append(fresh)
   return {
@@ -252,4 +276,43 @@ export async function pruneMail(options: {
   }
   await options.store.replace(kept)
   return { removed: removed.length, kept: kept.length }
+}
+
+/**
+ * Embeds these records and writes them, reporting as it goes.
+ *
+ * Extracted so the ordinary sync and a forced refresh cannot drift apart on how a message becomes
+ * searchable — the id in `path`, the empty-text skip, the abort check between messages. Two copies
+ * of this is the shape that has cost this project the most, and the second copy was about to be
+ * written.
+ */
+async function embedRecords(
+  records: readonly MailRecord[],
+  options: Pick<MailSyncOptions, 'semantic' | 'signal' | 'onProgress'>,
+): Promise<number> {
+  if (options.semantic === undefined) return 0
+  const { embedder, writer, collection } = options.semantic
+  await writer.ensureCollection(collection, embedder.dimensions, options.signal)
+
+  const documents: VectorDocument[] = []
+  for (const record of records) {
+    // Checked between messages rather than only at the boundaries: a mailbox with a thousand
+    // new messages would otherwise ignore Stop for the length of the whole batch.
+    if (options.signal?.aborted === true) throw new Error('Stopped.')
+    options.onProgress?.(documents.length, records.length, 'Embedding messages')
+    const text = mailEmbedText(record)
+    if (text.trim().length === 0) continue
+    documents.push({
+      id: `mail:${record.id}`,
+      text,
+      // The id travels in `path`, which is how a hit is joined back to its facts.
+      path: `mail:${record.id}`,
+      startLine: 1,
+      endLine: 1,
+      vector: await embedder.embed(text),
+    })
+  }
+  if (documents.length === 0) return 0
+  await writer.upsert(collection, documents, options.signal)
+  return documents.length
 }

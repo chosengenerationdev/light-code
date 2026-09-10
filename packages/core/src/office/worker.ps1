@@ -1565,8 +1565,24 @@ function Invoke-OutlookHarvest {
     $harvested = @()
     $truncated = $false
 
+    <#
+      A share each, rather than first-come-first-served.
+
+      The limit used to be a single pool consumed in order, so the first folder took the whole
+      batch and every folder after it indexed nothing - for as many passes as that folder had
+      history. A busy Inbox therefore starved the alert folders somebody had specifically ticked,
+      and from the outside that is indistinguishable from those folders not being indexed at all.
+
+      The remainder is left in the pool, so one small folder does not waste its share.
+    #>
+    $folderCount = @($Request.folders).Count
+    if ($folderCount -lt 1) { $folderCount = 1 }
+    $share = [Math]::Max(50, [int][Math]::Ceiling($limit / $folderCount))
+
     foreach ($request in $Request.folders) {
         if ($harvested.Count -ge $limit) { $truncated = $true; break }
+        $folderBudget = [Math]::Min($share, $limit - $harvested.Count)
+        $fromThisFolder = 0
 
         $folder = $null
         try {
@@ -1579,7 +1595,6 @@ function Invoke-OutlookHarvest {
         if ($null -eq $folder) { continue }
 
         $items = $folder.Items
-        $items.Sort('[ReceivedTime]', $true)
 
         <#
           Two bounds, because there are two directions.
@@ -1601,13 +1616,30 @@ function Invoke-OutlookHarvest {
             try {
                 $items = $items.Restrict('@SQL=' + ($clauses -join ' AND '))
             } catch {
-                # An unparseable restriction is worse than none: fall back to the sorted
+                # An unparseable restriction is worse than none: fall back to the whole
                 # collection and let the count limit do the bounding.
             }
         }
 
+        <#
+          Sorted AFTER the restriction, and this is the bug that hid the newest mail.
+
+          `Restrict` returns a *new* Items collection and does not carry the sort across, so
+          sorting first and restricting second left the results in arbitrary order. The count
+          limit then cut that arbitrary order, which meant a large folder contributed whichever
+          messages Outlook happened to hand over first - and the ones reliably missing were the
+          recent ones people actually ask about. Reported as "a lot of the latest emails are not
+          in the index", which is exactly what it was.
+        #>
+        try {
+            $items.Sort('[ReceivedTime]', $true)
+        } catch {
+            # Some collections refuse a sort. The restriction still bounds the set.
+        }
+
         foreach ($item in $items) {
             if ($harvested.Count -ge $limit) { $truncated = $true; break }
+            if ($fromThisFolder -ge $folderBudget) { $truncated = $true; break }
             # Mail folders hold other things too - meeting requests, delivery reports. 43 is
             # olMail; anything else has no ReceivedTime worth indexing.
             $class = 0
@@ -1648,6 +1680,7 @@ function Invoke-OutlookHarvest {
                 folder     = [string]$request.path
                 preview    = $preview
             }
+            $fromThisFolder = $fromThisFolder + 1
         }
     }
 

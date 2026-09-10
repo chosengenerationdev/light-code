@@ -6,6 +6,14 @@ export interface SystemPromptOptions {
   /** Set when the Claude CLI expert is available, so `ask_expert` is explained. */
   expertAvailable?: boolean
   /**
+   * Set when mail has been indexed, so the index is named as the default way to answer.
+   *
+   * Gated rather than always present: with mail indexing off there is no index to prefer, and a
+   * standing instruction about one would be paid for on every request by every user who never
+   * turns it on.
+   */
+  mailIndexed?: boolean
+  /**
    * Name + description + path per skill. Bodies are deliberately absent — they are read on
    * demand with `read_file`, so a skill costs a few tokens whether it is short or enormous.
    */
@@ -197,6 +205,25 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
           'skill covers in the words someone would search for — it is a trigger, not a summary.'
         : '- The description line is the only part always in context, so make it say what ' +
           'subject the skill covers — it is a trigger for reading, not a summary.',
+    )
+  }
+
+  if (options.mailIndexed === true) {
+    lines.push(
+      '',
+      'Email:',
+      '- **Always answer questions about email from the index, using search_mail and',
+      '  mail_patterns.** That is what it is for. It is fast, it answers questions about time',
+      '  and recurrence that a live search cannot, and it does not disturb the running Outlook.',
+      '- **Only search Outlook itself when the user asks you to.** "Check Outlook", "look at my',
+      '  actual mailbox", "is it there now" and anything similar are the instruction to use',
+      '  outlook_search. Do not reach for it on your own initiative.',
+      '- If the index has nothing, say so plainly and say when it was last synced. Do not',
+      '  quietly fall back to scanning Outlook - a slow live scan that nobody asked for reads',
+      '  as the assistant having hung.',
+      '- One exception worth naming: if the user is asking about something that arrived in the',
+      '  last few minutes, the index may not have it yet. Say that, and offer to check Outlook',
+      '  rather than doing it unasked.',
     )
   }
 

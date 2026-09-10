@@ -76,6 +76,7 @@ const base = {
       onToggleSkills: () => undefined,
       onIndexDocs: () => undefined,
       onClearDocsIndex: () => undefined,
+      onClearIndex: () => undefined,
     },
   },
   network: { warnings: [], issues: [] },

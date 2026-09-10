@@ -22,6 +22,15 @@ import type { ToolGroup, ToolPreview } from '../tools/types.js'
  * from zod `.optional()` schemas, which under `exactOptionalPropertyTypes` produce exactly
  * that, and a form field cleared to empty legitimately sends `undefined`.
  */
+/**
+ * The long-running builds that report progress and can be stopped.
+ *
+ * Named once because it was written out in four places and had drifted within the hour of the
+ * fourth being added: `teamSkills` could report progress and could not be cancelled, so its Stop
+ * button would have compiled and done nothing.
+ */
+export type IndexingKind = 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills'
+
 export interface ApigeeSummary {
   tokenUrl?: string | undefined
   grantType?: string | undefined
@@ -425,10 +434,26 @@ export type UiToHostMessage =
    * tool list changed.
    */
   | { type: 'publishTeamSkills' }
+  /**
+   * Removes everything this machine published to the shared skills pool.
+   *
+   * Scoped to your own collection, never to the alias: colleagues publish to theirs, so this
+   * cannot reach their copies even where two people named a skill the same thing.
+   */
+  | { type: 'clearTeamSkills' }
   /** Collects new mail now, rather than waiting for the timer. */
   | { type: 'syncMail' }
   /** Drops indexed mail older than the configured retention, and its vectors. */
   | { type: 'pruneMail' }
+  /** Throws away the whole mail index, vectors first. `resync` starts collecting again after. */
+  | { type: 'clearMailIndex'; resync?: boolean }
+  /**
+   * Re-reads the last `days` of mail, replacing what is already held.
+   *
+   * The repair for a window that came out wrong. An ordinary sync cannot do it: it skips what it
+   * already has, which is what makes it cheap and is exactly why it can never fix a gap.
+   */
+  | { type: 'refreshMail'; days: number }
   | { type: 'requestMailStatus' }
   /**
    * Checks one folder path against the live mailbox before it is added.
@@ -445,7 +470,7 @@ export type UiToHostMessage =
    * One message for every kind rather than one per feature: they all read something large and
    * slow, and a user who wants to stop one wants to stop whichever is running.
    */
-  | { type: 'cancelIndexing'; kind?: 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' }
+  | { type: 'cancelIndexing'; kind?: IndexingKind }
   | {
       type: 'saveMailSettings'
       enabled: boolean
@@ -484,7 +509,16 @@ export type UiToHostMessage =
    */
   | { type: 'openStandingSkill' }
   /** Empties the documentation index, so nothing stale can be matched. */
-  | { type: 'clearDocsIndex' }
+  /**
+   * Empties the documentation index, or just one kind of it.
+   *
+   * `kind` matters as much here as it does on `indexDocs`, and for the same reason: tools and
+   * skills share one collection, so an unscoped clear pressed on the Tools tab would delete every
+   * skill as well. That is the defect `rag/partialIndex.test.ts` was written for.
+   */
+  | { type: 'clearDocsIndex'; kind?: 'tool' | 'skill' }
+  /** Throws away the codebase index and its manifest, so the next run rebuilds from nothing. */
+  | { type: 'clearCodebaseIndex' }
   /** Copies this workspace's index from another store into the active one, vectors and all. */
   | { type: 'syncVectorStore'; fromId: string }
   /** Run a query by hand, exactly as the model would, to judge what the index returns. */
@@ -926,7 +960,14 @@ export type HostToUiMessage =
   | { type: 'indexResult'; result?: IndexResult; error?: string }
   /** `attributed` is how many existing chunks gained an owner; 0 is a real answer, not a failure. */
   | { type: 'teamAliasAttached'; alias?: string; index?: string; attributed?: number; error?: string }
-  | { type: 'teamSkillsPublished'; count?: number; collection?: string; error?: string }
+  | {
+      type: 'teamSkillsPublished'
+      count?: number
+      collection?: string
+      /** How many were removed, when this reports a clear rather than a publish. */
+      cleared?: number
+      error?: string
+    }
   | {
       type: 'outlookFolders'
       folders?: { name: string; path: string; depth: number; unread?: number | null }[]
@@ -944,7 +985,7 @@ export type HostToUiMessage =
    */
   | {
       type: 'indexingProgress'
-      kind: 'codebase' | 'docs' | 'skills' | 'tools' | 'mail'
+      kind: IndexingKind
       phase: string
       done?: number
       total?: number
