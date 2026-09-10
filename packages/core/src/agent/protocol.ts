@@ -35,6 +35,8 @@ import type { ToolGroup, ToolPreview } from '../tools/types.js'
  * Named once and shared with the UI, so a target added here cannot be offered by a picker the
  * host does not handle - which would be a dropdown entry that silently does nothing.
  */
+import type { ChartSpec } from '../charts/types.js'
+
 export type ProbeTarget = 'codebase' | 'docs' | 'mail'
 
 export type IndexingKind = 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills'
@@ -162,6 +164,18 @@ export type TranscriptEntry =
   /** The model's reasoning for a step. Rendered collapsed — it is context, not the answer. */
   | { kind: 'reasoning'; content: string }
   | { kind: 'tool'; toolCall: ToolCallSummary; expertInformed?: boolean }
+  /**
+   * A chart, derived from the `show_chart` call that produced it.
+   *
+   * Derived rather than stored, which is the same rule §6b applies to the whole transcript: the
+   * messages are the record, and everything rendered comes back out of them. A chart kept
+   * alongside would be a second copy to drift, and would vanish on reload.
+   *
+   * `invalid` carries the reason when a call could not be read as a chart. Rendering nothing
+   * would leave a silent gap where the model believes it drew something.
+   */
+  | { kind: 'chart'; chart: ChartSpec; expertInformed?: boolean }
+  | { kind: 'chartError'; message: string }
 
 /** Enough to render the history list without loading every transcript. */
 export interface TaskListEntry {

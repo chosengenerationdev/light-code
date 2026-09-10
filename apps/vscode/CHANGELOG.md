@@ -1,5 +1,23 @@
 # light-code-vscode
 
+## 0.59.0
+
+### Minor Changes
+
+- Charts in the conversation, and exact counts to draw them from.
+
+  `show_chart` draws bar, stacked bar, grouped bar, line, multi-line and pie — hand-written SVG, no
+  library, since the webview bundles every byte it serves. A series that does not line up with its
+  categories is refused rather than padded: a chart drawn from misaligned data looks correct and is
+  not, and nobody checks a chart against its figures. Every point can carry `detail` — the subjects
+  counted, the rows measured — so a bar reading 14 can answer "which fourteen?", and every chart
+  offers the numbers it was drawn from.
+
+  `mail_stats` counts indexed mail into buckets — per folder, day, hour, sender or status, with an
+  optional second dimension for a stacked bar — and can read a labelled number out of alerts and
+  track it, or its day-on-day movement, over time. It returns the shape `show_chart` wants, detail
+  included. A Python tool returning the same shape charts the same way.
+
 ## 0.58.0
 
 ### Minor Changes

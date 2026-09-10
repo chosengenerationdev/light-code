@@ -1,3 +1,4 @@
+import { Chart } from './charts/Chart.js'
 import type { ToolCallSummary, TranscriptEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { AgentIcon, CheckIcon, ChevronIcon, CrossIcon, ExpertIcon, SpinnerIcon, UserIcon } from './icons.js'
@@ -16,6 +17,12 @@ export type DisplayMessage =
     })
   | (Extract<TranscriptEntry, { kind: 'reasoning' }> & { pending?: boolean })
   | Extract<TranscriptEntry, { kind: 'tool' }>
+  /*
+   * A chart and its failure, both derived from the `show_chart` call in the transcript. Neither
+   * is stored: they come back out of the messages on reload, like everything else here.
+   */
+  | Extract<TranscriptEntry, { kind: 'chart' }>
+  | Extract<TranscriptEntry, { kind: 'chartError' }>
 
 export interface MessageListProps {
   messages: DisplayMessage[]
@@ -403,6 +410,30 @@ export function MessageList(props: MessageListProps): ReactElement {
       {props.messages.map((message, index) =>
         message.kind === 'tool' ? (
           <ToolBlock key={index} toolCall={message.toolCall} expertInformed={message.expertInformed} />
+        ) : message.kind === 'chart' ? (
+          <Chart key={index} chart={message.chart} />
+        ) : message.kind === 'chartError' ? (
+          /*
+           * Said rather than skipped.
+           *
+           * A refused chart leaves the model believing it drew something, so a silent gap would
+           * make the conversation read as though a picture were on screen. The reason is shown
+           * because it is almost always a fixable mistake — a series that does not line up with
+           * its categories — and naming it is what lets the next attempt be right.
+           */
+          <div
+            key={index}
+            style={{
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              padding: 10,
+              margin: '8px 0',
+              fontSize: 11,
+              color: colors.muted,
+            }}
+          >
+            <strong style={{ color: colors.foreground }}>Chart not drawn.</strong> {message.message}
+          </div>
         ) : message.kind === 'reasoning' ? (
           <ReasoningBlock key={index} content={message.content} pending={message.pending} />
         ) : (

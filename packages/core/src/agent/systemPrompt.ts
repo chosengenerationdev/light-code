@@ -208,6 +208,32 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
     )
   }
 
+  /*
+   * Charting guidance is unconditional: `show_chart` is a built-in, always registered, and the
+   * cost is a dozen lines. Gating it on something would mean deciding what, and there is no
+   * setting that means "this user has no numbers".
+   */
+  lines.push(
+    '',
+    'Charts:',
+    '- **Draw one whenever numbers are easier seen than read** — a count per folder or per day, a',
+    '  value trending over time, a breakdown of a total. Use show_chart; do not print a table of',
+    '  figures where a chart would answer the question faster.',
+    '- **Always fill in `detail`** when the numbers count things that can be named — the subjects,',
+    '  the files, the ids. A bar reading 14 is only useful if "which fourteen?" has an answer, and',
+    '  the detail is what lets the user open the bar instead of asking you to search again.',
+    '- Say in `note` where the numbers came from and what they exclude. A chart is believed',
+    '  without being checked, so its limits have to travel with it.',
+    '- Series must have exactly one value per category. A mismatch is refused rather than padded,',
+    '  because a chart drawn from misaligned data looks correct and is not.',
+    '- After drawing, describe what it shows. Do not recite the numbers again — they are on screen.',
+    '- **A Python tool can produce the data.** Have it return JSON shaped',
+    '  `{"categories": [...], "series": [{"name": ..., "values": [...], "detail": [[...], ...]}]}`',
+    '  and pass that straight to show_chart. That is the intended way to chart anything you have',
+    '  analysed in Python — the tool does the arithmetic, show_chart draws it, and the numbers are',
+    '  never retyped by you in between.',
+  )
+
   if (options.mailIndexed === true) {
     lines.push(
       '',
@@ -231,6 +257,12 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
       '- mail_coverage says which folders are indexed and how far back. Check it before saying',
       '  something is not in the mail: an empty search over an unindexed folder looks exactly',
       '  like an empty search over an indexed one.',
+      '- **Use mail_stats for any question with a number in the answer** — how many alerts per',
+      '  folder, per day, per hour, which senders, whether a figure inside the alerts is climbing.',
+      '  It counts everything the filters matched. Never count search results by eye: search',
+      '  returns a page, so counting what you were shown reports a sample as if it were the total.',
+      '- mail_stats already returns categories, values and detail in the shape show_chart wants.',
+      '  Pass it through rather than retyping the numbers, and keep the detail.',
     )
   }
 

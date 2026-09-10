@@ -236,6 +236,7 @@ export {
   createMailPatternsTool,
   createOpenEmailTool,
   createMailCoverageTool,
+  createMailStatsTool,
   type MailToolOptions,
 } from './tools/mail.js'
 export {
@@ -515,3 +516,7 @@ export {
   type ToolResult,
   type ToolExecutionContext,
 } from './tools/index.js'
+
+export { createShowChartTool } from './tools/showChart.js'
+export { chartSpecSchema, chartTotals, CHART_TYPES, type ChartSpec, type ChartSeries, type ChartType } from './charts/types.js'
+export { countBy, crossTab, numberOverTime, dailyChange, extractNumber } from './office/mailStats.js'

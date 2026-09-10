@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { countBy, crossTab, dailyChange, numberOverTime } from '../office/mailStats.js'
 import {
   findNearAnniversaries,
   findRecurrence,
@@ -670,4 +671,198 @@ function normaliseFolder(path: string): string {
 /** Subject, sender and the indexed opening, lower-cased. What an exact text filter searches. */
 function haystackOf(record: MailRecord): string {
   return `${record.subject}\n${record.sender}\n${record.preview}`.toLowerCase()
+}
+
+const statsSchema = z.object({
+  by: z
+    .enum(['folder', 'day', 'hour', 'sender', 'status'])
+    .describe('What each bar or point represents. `day` and `hour` are in local time.'),
+  splitBy: z
+    .enum(['folder', 'day', 'hour', 'sender', 'status'])
+    .optional()
+    .describe('Optional second dimension, giving one series per value — for a stacked or grouped bar.'),
+  withinHours: z
+    .number()
+    .min(0.1)
+    .max(24 * 365)
+    .optional()
+    .describe('Only mail received in this many hours.'),
+  status: z.enum(['alert', 'ok']).optional().describe('Narrow to [ALERT] or [OK] messages first.'),
+  folder: z.string().optional().describe('Narrow to a folder path first.'),
+  within: z
+    .array(z.string().min(1))
+    .max(500)
+    .optional()
+    .describe('Count only these message ids, from an earlier search_mail result.'),
+  numberLabel: z
+    .string()
+    .optional()
+    .describe(
+      'Instead of counting, read a labelled number out of each message and track it over time. ' +
+        'Give the text that precedes it, e.g. "queue depth" or "rows". A message with no such ' +
+        'label is left out rather than counted as zero.',
+    ),
+  combine: z
+    .enum(['last', 'max', 'sum', 'average'])
+    .optional()
+    .describe('With numberLabel: what several messages in one day mean. Default last.'),
+  change: z
+    .boolean()
+    .optional()
+    .describe('With numberLabel: report the day-on-day movement rather than the value itself.'),
+})
+export type MailStatsParams = z.infer<typeof statsSchema>
+
+/**
+ * Counting indexed mail, exactly, so a chart has something true to draw.
+ *
+ * ## Why it is separate from search_mail
+ *
+ * The same argument §12f made for splitting `mail_patterns` off, and it has the same failure in
+ * mind. Folded into search, the model would fetch twenty messages and count them by eye — which
+ * is how "about forty alerts, mostly from the batch folder" gets said about a set it never saw
+ * the whole of, since search returns a *page*. This counts everything the filters matched, and
+ * the numbers are arithmetic rather than an impression.
+ *
+ * ## Why every bucket carries its rows
+ *
+ * A bar reading 14 is worth drawing only if "which fourteen?" has an answer. The detail comes back
+ * with the counts, ready to hand to `show_chart` as `detail`, so the reader opens a point instead
+ * of running a second search and hoping it returns the same set.
+ */
+export function createMailStatsTool(options: MailToolOptions): Tool<MailStatsParams> {
+  return {
+    name: 'mail_stats',
+    group: 'read',
+    description:
+      'Counts indexed mail into buckets, ready to draw with show_chart. `by` picks the buckets ' +
+      '(folder, day, hour, sender, status) and `splitBy` adds a second dimension for a stacked ' +
+      'or grouped bar - "alerts per folder per day" is by=day, splitBy=folder. Every bucket comes ' +
+      'back with the messages it counted, so pass those straight to show_chart as `detail` and ' +
+      'the user can open a bar to see what is in it. ' +
+      'With `numberLabel` it instead reads a labelled figure out of each message and tracks it ' +
+      'over days - for an alert that carries a count or a percentage - and `change: true` reports ' +
+      'the day-on-day movement instead of the value. These are exact counts over the index, not ' +
+      'a sample and not a semantic guess.',
+    parametersSchema: statsSchema,
+    execute: async (params) => {
+      try {
+        const all = await options.loadRecords()
+        if (all.length === 0) {
+          return {
+            content:
+              'Nothing is indexed, so there is nothing to count. Say so rather than reporting zero ' +
+              'of anything - zero is a finding and this is not one.',
+          }
+        }
+
+        let records = params.withinHours === undefined ? [...all] : since(all, params.withinHours)
+        if (params.status !== undefined) records = records.filter((r) => r.status === params.status)
+        if (params.folder !== undefined) {
+          const wanted = normaliseFolder(params.folder)
+          records = records.filter((r) => normaliseFolder(r.folder).startsWith(wanted))
+        }
+        if (params.within !== undefined && params.within.length > 0) {
+          const keep = new Set(params.within)
+          records = records.filter((r) => keep.has(r.id))
+        }
+
+        if (records.length === 0) {
+          return { content: 'No indexed messages match those filters, so there is nothing to count.' }
+        }
+
+        // ---------------------------------------------------------------- a number over time
+        if (params.numberLabel !== undefined) {
+          const { points, matched, skipped } = numberOverTime(
+            records,
+            params.numberLabel,
+            params.combine ?? 'last',
+          )
+          if (points.length === 0) {
+            return {
+              content:
+                `No message contains a number labelled "${params.numberLabel}". Check the wording ` +
+                'against an actual subject - the label is matched literally, on purpose, so that a ' +
+                'number belonging to something else is never charted as this one.',
+            }
+          }
+
+          const rows =
+            params.change === true
+              ? dailyChange(points).map((entry) => ({
+                  label: entry.label,
+                  value: entry.change,
+                  detail: null as string[] | null,
+                }))
+              : points.map((point) => ({ label: point.label, value: point.value, detail: point.detail }))
+
+          const usable = rows.filter((row) => row.value !== undefined)
+          return {
+            content: [
+              `${String(matched)} message(s) carried a number labelled "${params.numberLabel}"` +
+                `${skipped > 0 ? `, ${String(skipped)} did not and were left out` : ''}.`,
+              params.change === true
+                ? 'Day-on-day movement. The first day has no predecessor and is omitted rather than ' +
+                  'shown as no change.'
+                : `One point per day, taking the ${params.combine ?? 'last'} value where a day had several.`,
+              '',
+              JSON.stringify({
+                categories: usable.map((row) => row.label),
+                series: [
+                  {
+                    name: params.change === true ? `${params.numberLabel} change` : params.numberLabel,
+                    values: usable.map((row) => row.value as number),
+                    ...(params.change === true ? {} : { detail: usable.map((row) => row.detail) }),
+                  },
+                ],
+              }),
+              '',
+              'Pass this to show_chart as a line chart. Keep `detail` on the series so the user can ' +
+                'open a point.',
+            ].join('\n'),
+          }
+        }
+
+        // ---------------------------------------------------------------- counts
+        if (params.splitBy !== undefined) {
+          const table = crossTab(records, params.by, params.splitBy)
+          return {
+            content: [
+              `${String(records.length)} message(s), by ${params.by} and ${params.splitBy}.`,
+              '',
+              JSON.stringify(table),
+              '',
+              'Pass this to show_chart as stackedBar or groupedBar. `detail` is already aligned.',
+            ].join('\n'),
+          }
+        }
+
+        const buckets = countBy(records, params.by, { fillDays: true })
+        return {
+          content: [
+            `${String(records.length)} message(s) in ${String(buckets.length)} bucket(s), by ${params.by}.` +
+              (params.by === 'day'
+                ? ' Days with none are included as zero — a missing day and a day with nothing are ' +
+                  'different claims, and only one of them is true.'
+                : ''),
+            '',
+            JSON.stringify({
+              categories: buckets.map((bucket) => bucket.label),
+              series: [
+                {
+                  name: params.status === undefined ? 'Messages' : params.status.toUpperCase(),
+                  values: buckets.map((bucket) => bucket.count),
+                  detail: buckets.map((bucket) => (bucket.detail.length === 0 ? null : bucket.detail)),
+                },
+              ],
+            }),
+            '',
+            'Pass this to show_chart. Keep `detail` so the user can open a bar and see what is in it.',
+          ].join('\n'),
+        }
+      } catch (error) {
+        return { content: error instanceof Error ? error.message : String(error), isError: true }
+      }
+    },
+  }
 }

@@ -117,6 +117,7 @@ import {
   createMailPatternsTool,
   createOpenEmailTool,
   createMailCoverageTool,
+  createMailStatsTool,
   type HarvestedMessage,
   findTeamSkillsNamed,
   indexTeamSkills,
@@ -1638,6 +1639,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           combined.register(createSearchMailTool(mailToolOptions))
           combined.register(createMailPatternsTool(mailToolOptions))
           combined.register(createMailCoverageTool(mailToolOptions))
+          combined.register(createMailStatsTool(mailToolOptions))
           combined.register(
             createOpenEmailTool({
               display: async (id: string) =>
@@ -6276,6 +6278,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         lines.push(entry.role === 'user' ? `## Prompt\n\n${entry.content}` : `## Reply\n\n${entry.content}`)
       } else if (entry.kind === 'reasoning') {
         lines.push(`## Thinking\n\n${entry.content}`)
+      } else if (entry.kind === 'chart') {
+        /*
+         * A chart becomes a table in a written report.
+         *
+         * The report is markdown somebody reads in the morning, so a picture is not available —
+         * and the numbers were always the substance. Rendering the figures is the honest
+         * translation; saying "a chart was shown" would lose the whole finding.
+         */
+        const chart = entry.chart
+        const header = ['', ...chart.series.map((series) => series.name)]
+        lines.push(
+          [
+            `## ${chart.title ?? 'Chart'}`,
+            '',
+            `| ${header.join(' | ')} |`,
+            `| ${header.map(() => '---').join(' | ')} |`,
+            ...chart.categories.map(
+              (category, index) =>
+                `| ${category} | ${chart.series.map((series) => String(series.values[index] ?? '')).join(' | ')} |`,
+            ),
+            ...(chart.note === undefined ? [] : ['', chart.note]),
+          ].join('\n'),
+        )
+      } else if (entry.kind === 'chartError') {
+        lines.push(`## Chart\n\nCould not be drawn: ${entry.message}`)
       } else {
         const call = entry.toolCall
         lines.push(

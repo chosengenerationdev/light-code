@@ -1,3 +1,4 @@
+import { chartSpecSchema } from '../charts/types.js'
 import type { TranscriptEntry } from '../agent/protocol.js'
 import type { ChatMessage } from '../providers/types.js'
 
@@ -10,6 +11,14 @@ import type { ChatMessage } from '../providers/types.js'
  * copies of this set would eventually disagree about how a task looked.
  */
 export const CONTROL_TOOLS: ReadonlySet<string> = new Set(['attempt_completion', 'ask_followup_question'])
+
+/*
+ * `show_chart` is deliberately NOT in CONTROL_TOOLS.
+ *
+ * A control tool's *result* is the message to the user; a chart's result is a summary for the
+ * model and the picture is built from the call's arguments instead. Adding it here would print
+ * that summary as assistant prose and draw nothing.
+ */
 
 /** Pretty-prints tool arguments; falls back to the raw string if it isn't JSON. */
 export function formatToolArguments(raw: string): string {
@@ -76,6 +85,33 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
     for (const toolCall of message.toolCalls ?? []) {
       const result = resultsByCallId.get(toolCall.id)
 
+      /*
+       * A chart is rendered from its own call, so it survives a reload for free.
+       *
+       * The arguments are the only copy of the data — parsed here rather than trusted, because a
+       * restored transcript can contain anything a past model sent, and a chart that renders
+       * misaligned data looks correct and is not.
+       */
+      if (toolCall.name === 'show_chart') {
+        /*
+         * The arguments arrive as the JSON string a provider sent, not as an object.
+         *
+         * Parsing them as an object "worked" in the sense that it produced a chartError every
+         * time — a chart that never drew, with a message about the wrong thing. Caught by a test
+         * built from a realistic message rather than from what the code expected.
+         */
+        const parsed = chartSpecSchema.safeParse(decodeArguments(toolCall.arguments))
+        entries.push(
+          parsed.success
+            ? { kind: 'chart', chart: parsed.data, ...(expertInformed ? { expertInformed: true } : {}) }
+            : {
+                kind: 'chartError',
+                message: parsed.error.issues.map((issue) => issue.message).join('; '),
+              },
+        )
+        continue
+      }
+
       if (CONTROL_TOOLS.has(toolCall.name)) {
         // The control tool's result *is* the message to the user.
         if (result !== undefined) entries.push({ kind: 'text', role: 'assistant', content: result })
@@ -102,4 +138,15 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
     }
   }
   return entries
+}
+
+/** A tool call's arguments as an object. Providers send them as a JSON string. */
+function decodeArguments(raw: string): unknown {
+  try {
+    return JSON.parse(raw.length > 0 ? raw : '{}')
+  } catch {
+    // Returned as-is so the schema reports "expected object", which is the truth: what arrived
+    // was not one, and inventing an empty object here would hide why.
+    return raw
+  }
 }

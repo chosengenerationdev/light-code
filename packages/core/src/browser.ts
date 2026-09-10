@@ -117,3 +117,5 @@ export { riskyGroupsIn } from './schedule/types.js'
 export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedule/timing.js'
 export type { ScheduleToolInfo } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'
+
+export { chartTotals, CHART_TYPES, type ChartSpec, type ChartSeries, type ChartType } from './charts/types.js'

@@ -1,3 +1,4 @@
+import { createShowChartTool } from './showChart.js'
 import { applyDiffTool } from './applyDiff/index.js'
 import { askFollowupQuestionTool } from './askFollowupQuestion.js'
 import { createAskUserFormTool } from './askUserForm.js'
@@ -51,6 +52,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(executeCommandTool)
   registry.register(askFollowupQuestionTool)
   registry.register(createAskUserFormTool())
+  registry.register(createShowChartTool())
   registry.register(attemptCompletionTool)
   return registry
 }
