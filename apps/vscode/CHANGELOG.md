@@ -1,5 +1,18 @@
 # light-code-vscode
 
+## 0.54.1
+
+### Patch Changes
+
+- Four fixes from real use.
+
+  The team skills alias saved to disk and the panel never heard: the embedder message was unpacked
+  field by field and dropped the two alias fields, so "Save this name" appeared to do nothing and
+  "Send my skills to the team" stayed disabled. The tool documentation index was hidden whenever the
+  dispatcher was off rather than disabled with a reason. "Reindex skills" sat below every skill and
+  both folder editors, off the bottom of the panel. And the Outlook folder tree was missing its top
+  level entirely, because the walk emitted a mailbox's children but never the mailbox.
+
 ## 0.54.0
 
 ### Minor Changes
