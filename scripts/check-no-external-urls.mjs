@@ -40,6 +40,14 @@ const ALLOWED_HOSTS = new Map([
   ['api.anthropic.com', 'provider preset'],
   ['generativelanguage.googleapis.com', 'provider preset (Gemini)'],
 
+  // --- Inside a dependency, never contacted.
+  //
+  // undici's Cache API builds a `new Request("https://a")` as a throwaway object and immediately
+  // replaces its internal state; nothing is ever fetched from it. It appeared when the Node floor
+  // dropped to 17 and undici went from 8 to 5 — worth recording precisely because a *new* host
+  // showing up should be a decision rather than an unnoticed diff, which is what this list is for.
+  ['a', 'undici 5 Cache API placeholder Request — never fetched'],
+
   // --- Placeholders shown as grey text in form fields.
   ['gateway.example.com', 'placeholder in the Apigee token URL field'],
   ['gw.example.com', 'placeholder'],
