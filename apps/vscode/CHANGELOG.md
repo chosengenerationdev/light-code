@@ -1,5 +1,21 @@
 # light-code-vscode
 
+## 0.58.0
+
+### Minor Changes
+
+- Mail searches can be narrowed step by step, and each tab's trial search shows only its own result.
+
+  `search_mail` takes `within` — the ids from an earlier search — plus `subject`, `sender`,
+  `contains`, `exclude`, `before` and `after`. Narrowing by re-running a broader search is not the
+  same operation: semantic ranking reorders the population, so the "narrowed" answer can contain
+  things the first pass never showed. `within` fixes the population, so a refinement is a genuine
+  subset and can be repeated until the list is right; `idsOnly` keeps each step cheap. A date that
+  cannot be parsed is refused rather than silently ignored.
+
+  The trial search result was one piece of state rendered by three panels, so a mail search appeared
+  under Skills and Tools as well. Each result now carries its target, and there is a Clear button.
+
 ## 0.57.1
 
 ### Patch Changes

@@ -67,6 +67,54 @@ const searchSchema = z.object({
     .string()
     .optional()
     .describe('Rank what is left by meaning. Omit to get everything in the window, newest first.'),
+  /*
+   * The narrowing criteria, and `within` is the one that makes the rest recursive.
+   *
+   * A single search is rarely the answer to a real question: you find forty messages that mention
+   * a thing, then want the six of those from one sender, then the two of those in a window. Doing
+   * that by re-running one broad search with more filters is not the same operation — the
+   * semantic ranking changes underneath you, so the second search is over a different forty.
+   *
+   * `within` fixes the population. Everything else applies inside it, so a refinement is a
+   * genuine subset of what was just shown, and refining a refinement terminates.
+   */
+  within: z
+    .array(z.string().min(1))
+    .max(200)
+    .optional()
+    .describe(
+      'Search only these message ids, from an earlier search_mail result. This is how to narrow ' +
+        'a result set: search broadly, then pass the ids you got back with tighter criteria. ' +
+        'Repeatable until the list is what you want.',
+    ),
+  subject: z
+    .string()
+    .optional()
+    .describe('Only messages whose subject contains this text. Exact, case-insensitive, not semantic.'),
+  sender: z
+    .string()
+    .optional()
+    .describe('Only messages from a sender containing this text, e.g. a name or a domain.'),
+  contains: z
+    .string()
+    .optional()
+    .describe('Only messages whose subject, sender or indexed opening contains this text. Exact, not semantic.'),
+  exclude: z
+    .string()
+    .optional()
+    .describe('Drop messages containing this text in the subject, sender or opening. For paring a set down.'),
+  before: z
+    .string()
+    .optional()
+    .describe('Only mail received before this date, as YYYY-MM-DD or any ISO timestamp.'),
+  after: z
+    .string()
+    .optional()
+    .describe('Only mail received on or after this date, as YYYY-MM-DD or any ISO timestamp.'),
+  idsOnly: z
+    .boolean()
+    .optional()
+    .describe('Return just the ids and count. Use when narrowing in steps, to keep the working set cheap.'),
   limit: z.number().int().min(1).max(50).optional().describe('How many to return. Default 20.'),
 })
 export type SearchMailParams = z.infer<typeof searchSchema>
@@ -90,7 +138,12 @@ export function createSearchMailTool(options: MailToolOptions): Tool<SearchMailP
       'message ids that open_email can display. Prefer this over outlook_search every time: it ' +
       'is far faster, it does not disturb the running Outlook, and it can answer questions ' +
       'about time and recurrence that a live search cannot. Only reach for outlook_search if ' +
-      'the user has explicitly asked you to look at Outlook itself.',
+      'the user has explicitly asked you to look at Outlook itself. ' +
+      'TO NARROW A RESULT SET, pass the ids you got back as `within` together with tighter ' +
+      'criteria (subject, sender, contains, exclude, before, after) rather than re-running a ' +
+      'broader search: `within` fixes the population, so the answer is a genuine subset of what ' +
+      'you already saw, and it can be repeated until the list is right. Add idsOnly while ' +
+      'narrowing to keep each step cheap.',
     parametersSchema: searchSchema,
 
     async execute(params): Promise<ToolResult> {
@@ -120,6 +173,67 @@ export function createSearchMailTool(options: MailToolOptions): Tool<SearchMailP
           candidates = candidates.filter((r) => normaliseFolder(r.folder).startsWith(wanted))
         }
 
+        /*
+         * Narrowing, and `within` comes first because it fixes the population.
+         *
+         * Refining by re-running a broad search with more filters is not the same operation: the
+         * semantic ranking shifts underneath, so the second search is over a different set and the
+         * "narrowed" answer can contain things the first pass never showed. Pinning the ids first
+         * makes a refinement a genuine subset of what was just seen, and makes refining a
+         * refinement terminate.
+         */
+        const narrowed: string[] = []
+        if (params.within !== undefined && params.within.length > 0) {
+          const keep = new Set(params.within)
+          candidates = candidates.filter((r) => keep.has(r.id))
+          narrowed.push(`within ${String(params.within.length)} given message(s)`)
+        }
+        if (params.subject !== undefined) {
+          const needle = params.subject.toLowerCase()
+          candidates = candidates.filter((r) => r.subject.toLowerCase().includes(needle))
+          narrowed.push(`subject containing "${params.subject}"`)
+        }
+        if (params.sender !== undefined) {
+          const needle = params.sender.toLowerCase()
+          candidates = candidates.filter((r) => r.sender.toLowerCase().includes(needle))
+          narrowed.push(`from "${params.sender}"`)
+        }
+        if (params.contains !== undefined) {
+          const needle = params.contains.toLowerCase()
+          candidates = candidates.filter((r) => haystackOf(r).includes(needle))
+          narrowed.push(`containing "${params.contains}"`)
+        }
+        if (params.exclude !== undefined) {
+          const needle = params.exclude.toLowerCase()
+          candidates = candidates.filter((r) => !haystackOf(r).includes(needle))
+          narrowed.push(`excluding "${params.exclude}"`)
+        }
+
+        /*
+         * A date that will not parse is refused rather than ignored.
+         *
+         * Silently dropping it would widen the search to everything and report the result as if
+         * the bound had been applied - the same class of quiet wrongness as the dropped query.
+         */
+        for (const [name, value] of [
+          ['after', params.after],
+          ['before', params.before],
+        ] as const) {
+          if (value === undefined) continue
+          const at = Date.parse(value)
+          if (Number.isNaN(at)) {
+            return {
+              content: `Could not read "${value}" as a date for ${name}. Use YYYY-MM-DD, or a full ISO timestamp.`,
+              isError: true,
+            }
+          }
+          candidates =
+            name === 'after'
+              ? candidates.filter((r) => r.receivedAt >= at)
+              : candidates.filter((r) => r.receivedAt < at)
+          narrowed.push(`${name} ${new Date(at).toLocaleString()}`)
+        }
+
         const limit = params.limit ?? 20
         const windowNote =
           params.withinHours === undefined ? '' : ` in the last ${String(params.withinHours)} hour(s)`
@@ -128,7 +242,8 @@ export function createSearchMailTool(options: MailToolOptions): Tool<SearchMailP
           return {
             content:
               `Nothing indexed matches${windowNote}` +
-              `${params.status === undefined ? '' : ` with status ${params.status}`}.\n` +
+              `${params.status === undefined ? '' : ` with status ${params.status}`}` +
+              `${narrowed.length === 0 ? '' : `, ${narrowed.join(', ')}`}.\n` +
               'This is an exact answer over what has been indexed, not an approximate one — but ' +
               'it is only as current as the last sync.',
           }
@@ -204,17 +319,39 @@ export function createSearchMailTool(options: MailToolOptions): Tool<SearchMailP
 
         const shown = ordered.slice(0, limit)
         const alerts = shown.filter((record) => record.status === 'alert').length
+        const criteria = narrowed.length === 0 ? '' : `, ${narrowed.join(', ')}`
+
+        if (params.idsOnly === true) {
+          /*
+           * Ids and nothing else, for narrowing in steps.
+           *
+           * A refinement that is three searches deep does not need forty previews on the way
+           * through - it needs the population to pass to the next call. Returning the full
+           * description each time is how a working set eats the context it was narrowing for.
+           */
+          return {
+            content: [
+              `${String(candidates.length)} message(s)${windowNote}${criteria}.`,
+              ...candidates.slice(0, 200).map((record) => record.id),
+              '',
+              'Pass these back as `within` with tighter criteria to narrow further, or search ' +
+                'again without idsOnly to see them.',
+            ].join('\n'),
+          }
+        }
 
         return {
           content: [
-            `${String(candidates.length)} indexed message(s)${windowNote}${how}` +
+            `${String(candidates.length)} indexed message(s)${windowNote}${criteria}${how}` +
               `${candidates.length > shown.length ? `, showing ${String(shown.length)}` : ''}` +
               `${alerts > 0 ? ` — ${String(alerts)} marked ALERT` : ''}:`,
             '',
             ...shown.map((record) => describe(record)),
             '',
             'Use mail_patterns to find out whether any of these recur. Use open_email with an id ' +
-              'to show one to the user in Outlook.',
+              'to show one to the user in Outlook. To narrow this set rather than search again, ' +
+              'pass these ids back as `within` with tighter criteria - the population stays fixed, ' +
+              'so the result is a genuine subset of what you just saw.',
             /*
              * Said on every search, because the index is a *preview* and the difference matters.
              * "It is not in the index" and "it is not in the mail" are different statements, and
@@ -528,4 +665,9 @@ export function createMailCoverageTool(options: MailToolOptions): Tool<Record<st
 /** Lower-cased with either separator folded to one, so `Inbox/Alerts` finds `Inbox\\Alerts`. */
 function normaliseFolder(path: string): string {
   return path.toLowerCase().replace(/[\\/]+/g, '\\')
+}
+
+/** Subject, sender and the indexed opening, lower-cased. What an exact text filter searches. */
+function haystackOf(record: MailRecord): string {
+  return `${record.subject}\n${record.sender}\n${record.preview}`.toLowerCase()
 }

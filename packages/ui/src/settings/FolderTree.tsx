@@ -39,12 +39,16 @@ export interface FolderTreeProps {
 export function FolderTree(props: FolderTreeProps): ReactElement {
   const [filter, setFilter] = useState('')
   /*
-   * Collapsed by path, and collapsing hides descendants rather than the folder itself.
+   * Collapsed by path, and collapsing hides every descendant.
    *
-   * A real mailbox is hundreds of folders deep in places, and the tree was a flat scroll of all
-   * of them. Note a *ticked* folder is never hidden by a collapse: it would look as though the
-   * selection had been lost, and a setting that appears to have forgotten itself is the one
-   * report this project keeps getting.
+   * **A ticked folder is hidden like any other, and the first version got this wrong.** It kept
+   * ticked folders visible on the theory that a selection vanishing from view reads as a
+   * selection lost — but a tick is the normal state of this tree, so Collapse all left most rows
+   * on screen and simply looked broken. Reported as exactly that.
+   *
+   * The selection is not hidden, it is summarised: the header carries the count, and a collapsed
+   * parent says how many ticked folders are inside it. That answers the worry the exemption was
+   * for without breaking the control it was breaking.
    */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string> | undefined>(undefined)
 
@@ -92,9 +96,6 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
     if (needle.length === 0) {
       if (collapsedNow.size === 0) return props.folders
       return props.folders.filter((folder) => {
-        // Kept when ticked, whatever is collapsed above it: a selection that vanished from view
-        // reads as a selection that was lost.
-        if (props.selected.includes(folder.path)) return true
         for (const parent of collapsedNow) {
           if (folder.path.startsWith(`${parent}\\`)) return false
         }
@@ -114,6 +115,15 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
     }
     return props.folders.filter((folder) => keep.has(folder.path))
   }, [props.folders, filter, collapsedNow, props.selected])
+
+  /**
+   * Ticked folders hidden inside a collapsed branch.
+   *
+   * So collapsing summarises the selection rather than concealing it — which is what the ticked
+   * exemption was trying to achieve, without the exemption's cost.
+   */
+  const hiddenSelected = (path: string): number =>
+    props.selected.filter((entry) => entry !== path && entry.startsWith(`${path}\\`)).length
 
   const toggle = (path: string): void => {
     const next = new Set(selected)
@@ -247,6 +257,11 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
                 {folder.name}
                 {typeof folder.unread === 'number' && folder.unread > 0 && (
                   <span style={{ color: colors.muted }}> ({String(folder.unread)} unread)</span>
+                )}
+                {collapsedNow.has(folder.path) && hiddenSelected(folder.path) > 0 && (
+                  <span style={{ color: colors.accent, fontSize: 11 }}>
+                    {` \u2014 ${String(hiddenSelected(folder.path))} selected inside`}
+                  </span>
                 )}
                 {covered !== undefined && (
                   <span style={{ color: colors.muted, fontSize: 11 }}> — covered by {covered.split('\\').pop()}</span>

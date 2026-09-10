@@ -44,6 +44,7 @@ export interface OutlookTabProps {
   onRefreshDays: (days: number) => void
   probe: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
   onProbe: (query: string, target: ProbeTarget) => void
+  onClearProbe: () => void
   onStop: () => void
   onOpenTools: () => void
 }
@@ -410,6 +411,7 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
           running={props.probe.running}
           result={props.probe.result}
           onProbe={props.onProbe}
+          onClear={props.onClearProbe}
         />
       </Section>
     </div>

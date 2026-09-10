@@ -21,6 +21,7 @@ export interface ToolsTabProps {
   onClearDocs: () => void
   probe: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
   onProbe: (query: string, target: ProbeTarget) => void
+  onClearProbe: () => void
   progress: IndexingProgressState | undefined
   onStopIndexing: () => void
 
@@ -181,6 +182,7 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
             running={props.probe.running}
             result={props.probe.result}
             onProbe={props.onProbe}
+          onClear={props.onClearProbe}
           />
         </section>
       )}

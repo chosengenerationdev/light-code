@@ -153,8 +153,30 @@ export function App(props: AppProps): ReactElement {
   })
   const [docsIndexing, setDocsIndexing] = useState(false)
   const [searchLog, setSearchLog] = useState<SearchLogEntry[]>([])
-  const [searchProbe, setSearchProbe] = useState<{ query: string; text: string; error?: string } | undefined>(undefined)
-  const [searchProbeRunning, setSearchProbeRunning] = useState(false)
+  /*
+   * Keyed by target, because one shared value was rendered by three panels.
+   *
+   * A mail search run from the Outlook tab showed its output under Skills and under Tools too.
+   * That is worse than untidy: a result under the wrong heading reads as an answer about that
+   * index. The message carries its own target now, so each panel takes only what is its own.
+   */
+  const [searchProbes, setSearchProbes] = useState<
+    Partial<Record<ProbeTarget, { query: string; text: string; error?: string }>>
+  >({})
+  const [probeRunning, setProbeRunning] = useState<Partial<Record<ProbeTarget, boolean>>>({})
+
+  /*
+   * Deletes the key rather than setting it to undefined.
+   *
+   * `exactOptionalPropertyTypes` draws a real distinction between "absent" and "present and
+   * undefined", and only the first is what a cleared result is.
+   */
+  const clearProbe = (target: ProbeTarget): void =>
+    setSearchProbes((current) => {
+      const next = { ...current }
+      delete next[target]
+      return next
+    })
   const [docsResult, setDocsResult] = useState<{ indexed?: number; index?: string; error?: string } | undefined>(
     undefined,
   )
@@ -456,12 +478,15 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'searchLog') {
         setSearchLog(message.entries)
       } else if (message.type === 'searchProbe') {
-        setSearchProbeRunning(false)
-        setSearchProbe({
-          query: message.query,
-          text: message.text,
-          ...(message.error !== undefined ? { error: message.error } : {}),
-        })
+        setSearchProbes((current) => ({
+          ...current,
+          [message.target]: {
+            query: message.query,
+            text: message.text,
+            ...(message.error !== undefined ? { error: message.error } : {}),
+          },
+        }))
+        setProbeRunning((current) => ({ ...current, [message.target]: false }))
       } else if (message.type === 'dispatcher') {
         setDispatcher({
           enabled: message.enabled,
@@ -859,16 +884,16 @@ export function App(props: AppProps): ReactElement {
     },
     activity: {
       entries: searchLog,
-      probe: searchProbe,
-      probeRunning: searchProbeRunning,
+      probe: searchProbes.docs,
+      probeRunning: probeRunning.docs === true,
       onProbe: (query: string, target: ProbeTarget) => {
-        setSearchProbe(undefined)
-        setSearchProbeRunning(true)
+        clearProbe(target)
+        setProbeRunning((current) => ({ ...current, [target]: true }))
         props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
       },
       onClear: () => props.transport.post({ type: 'clearSearchLog' } satisfies UiToHostMessage),
       // Local state: the result was never stored host-side, so dismissing it is a UI concern.
-      onClearProbe: () => setSearchProbe(undefined),
+      onClearProbe: () => clearProbe('docs'),
     },
   }
 
@@ -1226,12 +1251,13 @@ export function App(props: AppProps): ReactElement {
                 setDocsIndexing(true)
                 props.transport.post({ type: 'indexDocs', kind: 'skill' } satisfies UiToHostMessage)
               },
-              probe: { running: searchProbeRunning, result: searchProbe },
+              probe: { running: probeRunning.docs === true, result: searchProbes.docs },
               onProbe: (query: string, target: ProbeTarget) => {
-                setSearchProbe(undefined)
-                setSearchProbeRunning(true)
+                clearProbe(target)
+                setProbeRunning((current) => ({ ...current, [target]: true }))
                 props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
               },
+              onClearProbe: () => clearProbe('docs'),
               onClearIndex: () => {
                 setDocsResult(undefined)
                 props.transport.post({ type: 'clearDocsIndex', kind: 'skill' } satisfies UiToHostMessage)
@@ -1302,12 +1328,13 @@ export function App(props: AppProps): ReactElement {
               },
               onClear: (resync: boolean) =>
                 props.transport.post({ type: 'clearMailIndex', resync } satisfies UiToHostMessage),
-              probe: { running: searchProbeRunning, result: searchProbe },
+              probe: { running: probeRunning.mail === true, result: searchProbes.mail },
               onProbe: (query: string, target: ProbeTarget) => {
-                setSearchProbe(undefined)
-                setSearchProbeRunning(true)
+                clearProbe(target)
+                setProbeRunning((current) => ({ ...current, [target]: true }))
                 props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
               },
+              onClearProbe: () => clearProbe('mail'),
               onRefreshDays: (days: number) =>
                 props.transport.post({ type: 'refreshMail', days } satisfies UiToHostMessage),
               onStop: () => props.transport.post({ type: 'cancelIndexing', kind: 'mail' } satisfies UiToHostMessage),
@@ -1321,12 +1348,13 @@ export function App(props: AppProps): ReactElement {
                 result: describeDocsResult(docsResult),
               },
               onIndexDocs: () => props.transport.post({ type: 'indexDocs', kind: 'tool' } satisfies UiToHostMessage),
-              probe: { running: searchProbeRunning, result: searchProbe },
+              probe: { running: probeRunning.docs === true, result: searchProbes.docs },
               onProbe: (query: string, target: ProbeTarget) => {
-                setSearchProbe(undefined)
-                setSearchProbeRunning(true)
+                clearProbe(target)
+                setProbeRunning((current) => ({ ...current, [target]: true }))
                 props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
               },
+              onClearProbe: () => clearProbe('docs'),
               onClearDocs: () => {
                 setDocsResult(undefined)
                 props.transport.post({ type: 'clearDocsIndex', kind: 'tool' } satisfies UiToHostMessage)

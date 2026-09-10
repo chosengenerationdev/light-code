@@ -4398,6 +4398,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         const result = await tool.execute({ query, limit: 25 }, {} as ToolExecutionContext)
         post({
           type: 'searchProbe',
+          target,
           query,
           text: result.content,
           ...(result.isError === true ? { error: 'The search failed.' } : {}),
@@ -4410,6 +4411,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         if (search === undefined || embedder === undefined || index === undefined) {
           post({
             type: 'searchProbe',
+            target,
             query,
             text: '',
             error: 'Searching the codebase needs a connection, an embedding model and an indexed workspace.',
@@ -4426,6 +4428,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         const result = await tool.execute({ query }, {} as ToolExecutionContext)
         post({
           type: 'searchProbe',
+          target,
           query,
           text: result.content,
           ...(result.isError === true ? { error: 'The search failed.' } : {}),
@@ -4451,12 +4454,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const result = await tool.execute({ query }, {} as ToolExecutionContext)
       post({
         type: 'searchProbe',
+        target,
         query,
         text: result.content,
         ...(result.isError === true ? { error: 'The search failed.' } : {}),
       })
     } catch (error) {
-      post({ type: 'searchProbe', query, text: '', error: error instanceof Error ? error.message : String(error) })
+      post({ type: 'searchProbe', target, query, text: '', error: error instanceof Error ? error.message : String(error) })
     }
   }
 

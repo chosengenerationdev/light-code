@@ -10,6 +10,7 @@ export interface IndexProbeProps {
   running: boolean
   result: { query: string; text: string; error?: string } | undefined
   onProbe: (query: string, target: ProbeTarget) => void
+  onClear: () => void
 }
 
 /**
@@ -51,6 +52,23 @@ export function IndexProbe(props: IndexProbeProps): ReactElement {
         <button type="button" style={secondaryButtonStyle()} disabled={props.running} onClick={run}>
           {props.running ? 'Searching…' : 'Search'}
         </button>
+        {/*
+          Clearing is a real need rather than tidiness: a result left on screen from an earlier
+          query is read as the answer to the current one, and there was no way to put it away.
+          It clears the box too, so nothing is left half-associated with output that has gone.
+        */}
+        {(props.result !== undefined || query.length > 0) && (
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            onClick={() => {
+              setQuery('')
+              props.onClear()
+            }}
+          >
+            Clear
+          </button>
+        )}
       </div>
       <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>{props.hint}</span>
 

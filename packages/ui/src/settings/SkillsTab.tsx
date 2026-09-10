@@ -32,6 +32,7 @@ export interface SkillsTabProps {
   onClearIndex: () => void
   probe: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
   onProbe: (query: string, target: ProbeTarget) => void
+  onClearProbe: () => void
   /** The bar for the skills reindex, which is the one this button starts. */
   indexProgress: IndexingProgressState | undefined
   onStopIndexing: () => void
@@ -240,6 +241,7 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         running={props.probe.running}
         result={props.probe.result}
         onProbe={props.onProbe}
+        onClear={props.onClearProbe}
       />
 
       {/* First, because it is the part people come here looking for. */}

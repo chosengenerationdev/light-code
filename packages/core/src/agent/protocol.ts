@@ -860,7 +860,15 @@ export type HostToUiMessage =
       scheduler: { running: boolean; lastTickAt?: number }
     }
   /** Result of a hand-run query. `text` is what the model would have been given. */
-  | { type: 'searchProbe'; query: string; text: string; error?: string }
+  /**
+   * The result of a hand-run search.
+   *
+   * `target` is echoed back deliberately. Three panels render these now, and without it each one
+   * had to guess whether the answer was meant for it — so a mail search appeared under Skills and
+   * under Tools as well. A stale result under the wrong heading reads as an answer about that
+   * index, which is worse than showing nothing.
+   */
+  | { type: 'searchProbe'; target: ProbeTarget; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */
   | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string; kind?: 'tool' | 'skill' }
   /**
