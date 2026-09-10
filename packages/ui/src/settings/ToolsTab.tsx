@@ -1,3 +1,5 @@
+import type { ProbeTarget } from '@light-code/core/browser'
+import { IndexProbe } from './IndexProbe.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
@@ -17,6 +19,8 @@ export interface ToolsTabProps {
   docsIndex: { enabled: boolean; retrievalReady: boolean; indexing: boolean; result: string | undefined } | undefined
   onIndexDocs: () => void
   onClearDocs: () => void
+  probe: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
+  onProbe: (query: string, target: ProbeTarget) => void
   progress: IndexingProgressState | undefined
   onStopIndexing: () => void
 
@@ -170,6 +174,14 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
             )}
           </div>
           <IndexingProgress progress={props.progress} onStop={props.onStopIndexing} />
+          <IndexProbe
+            target="docs"
+            label="Search indexed tool documentation"
+            hint="Runs the same lookup the assistant uses to find a tool. Skills share this index."
+            running={props.probe.running}
+            result={props.probe.result}
+            onProbe={props.onProbe}
+          />
         </section>
       )}
 

@@ -46,7 +46,7 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
    * selection had been lost, and a setting that appears to have forgotten itself is the one
    * report this project keeps getting.
    */
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string> | undefined>(undefined)
 
   const selected = useMemo(() => new Set(props.selected), [props.selected])
 
@@ -68,9 +68,19 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
     return parents
   }, [props.folders])
 
+  /*
+   * Collapsed until told otherwise.
+   *
+   * `undefined` means "not chosen yet" and resolves to every parent collapsed, which is why it is
+   * not simply seeded with `hasChildren`: that is computed from props that arrive after the first
+   * render, so seeding would fix the set while the tree was still empty and expand everything the
+   * moment it loaded.
+   */
+  const collapsedNow = collapsed ?? hasChildren
+
   const toggleCollapsed = (path: string): void => {
     setCollapsed((current) => {
-      const next = new Set(current)
+      const next = new Set(current ?? hasChildren)
       if (next.has(path)) next.delete(path)
       else next.add(path)
       return next
@@ -80,12 +90,12 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     if (needle.length === 0) {
-      if (collapsed.size === 0) return props.folders
+      if (collapsedNow.size === 0) return props.folders
       return props.folders.filter((folder) => {
         // Kept when ticked, whatever is collapsed above it: a selection that vanished from view
         // reads as a selection that was lost.
         if (props.selected.includes(folder.path)) return true
-        for (const parent of collapsed) {
+        for (const parent of collapsedNow) {
           if (folder.path.startsWith(`${parent}\\`)) return false
         }
         return true
@@ -103,7 +113,7 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
       for (let index = 1; index < parts.length; index++) keep.add(parts.slice(0, index).join('\\'))
     }
     return props.folders.filter((folder) => keep.has(folder.path))
-  }, [props.folders, filter, collapsed, props.selected])
+  }, [props.folders, filter, collapsedNow, props.selected])
 
   const toggle = (path: string): void => {
     const next = new Set(selected)
@@ -206,7 +216,7 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
               {hasChildren.has(folder.path) ? (
                 <button
                   type="button"
-                  aria-label={collapsed.has(folder.path) ? `Expand ${folder.name}` : `Collapse ${folder.name}`}
+                  aria-label={collapsedNow.has(folder.path) ? `Expand ${folder.name}` : `Collapse ${folder.name}`}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -222,7 +232,7 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
                     toggleCollapsed(folder.path)
                   }}
                 >
-                  {collapsed.has(folder.path) ? '▶' : '▼'}
+                  {collapsedNow.has(folder.path) ? '▶' : '▼'}
                 </button>
               ) : (
                 <span style={{ width: 12 }} />

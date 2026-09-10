@@ -1,3 +1,4 @@
+import type { ProbeTarget } from '@light-code/core/browser'
 import type { SearchLogEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
@@ -9,7 +10,7 @@ export interface SearchActivityProps {
   entries: SearchLogEntry[]
   probe: { query: string; text: string; error?: string } | undefined
   probeRunning: boolean
-  onProbe: (query: string, target: 'codebase' | 'docs') => void
+  onProbe: (query: string, target: ProbeTarget) => void
   /** Empties the recent-searches log. */
   onClear: () => void
   /** Dismisses the result of the last hand-run query. Separate from the log above it. */
@@ -36,7 +37,7 @@ export interface SearchActivityProps {
  */
 export function SearchActivity(props: SearchActivityProps): ReactElement {
   const [query, setQuery] = useState('')
-  const [target, setTarget] = useState<'codebase' | 'docs'>('docs')
+  const [target, setTarget] = useState<ProbeTarget>('docs')
 
   const run = (): void => {
     if (query.trim().length > 0) props.onProbe(query.trim(), target)
@@ -55,10 +56,11 @@ export function SearchActivity(props: SearchActivityProps): ReactElement {
           compact
           value={target}
           ariaLabel="What to search"
-          onChange={(value) => setTarget(value as 'codebase' | 'docs')}
+          onChange={(value) => setTarget(value as ProbeTarget)}
           options={[
             { value: 'docs', label: 'Tools & skills' },
             { value: 'codebase', label: 'Codebase' },
+            { value: 'mail', label: 'Mail' },
           ]}
         />
         <input

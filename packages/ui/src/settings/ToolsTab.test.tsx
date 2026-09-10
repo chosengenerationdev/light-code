@@ -61,6 +61,8 @@ function render(
         docsIndex={undefined}
         onIndexDocs={() => undefined}
         onClearDocs={() => undefined}
+        probe={{ running: false, result: undefined }}
+        onProbe={() => undefined}
         progress={undefined}
         onStopIndexing={() => undefined}
         {...(props.toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: props.toolTimeoutSeconds })}

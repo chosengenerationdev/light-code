@@ -77,6 +77,7 @@ export type {
   UiToHostMessage,
   HostToUiMessage,
   IndexingKind,
+  ProbeTarget,
   ProfileSummary,
   ProfileInput,
   ToolCallSummary,

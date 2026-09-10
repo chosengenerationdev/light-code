@@ -465,6 +465,7 @@ export {
 export type {
   UiToHostMessage,
   IndexingKind,
+  ProbeTarget,
   HostToUiMessage,
   ProfileSummary,
   ProfileInput,

@@ -177,6 +177,7 @@ import {
   type OpenSearchConnection,
   type VectorStoreConfig,
   type HostToUiMessage,
+  type ProbeTarget,
   type IndexingKind,
   type ImageAttachmentInput,
   type LightCodeConfig,
@@ -4350,11 +4351,38 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * real search would prove something, just not the thing being debugged — the whole reason
    * `runDocsSearch` was split out of the tool is so this cannot drift from it.
    */
-  async function handleSearchProbe(query: string, target: 'codebase' | 'docs'): Promise<void> {
+  async function handleSearchProbe(query: string, target: ProbeTarget): Promise<void> {
     try {
       const { config } = await configManager.load()
       const search = await resolveSearch(config)
       const embedder = await resolveEmbedder(config)
+
+      if (target === 'mail') {
+        /*
+         * Runs the tool the model runs, not a re-implementation of it.
+         *
+         * The whole value of a hand-run search is that it shows what the assistant would get. A
+         * second query path here - however similar - could disagree with the real one, and would
+         * be believed.
+         */
+        const collection = mailCollectionName(config)
+        const mailSearch = await resolveMailSearch(config)
+        const tool = createSearchMailTool({
+          loadRecords: () => mailStore.load(),
+          loadBackfill: () => mailStore.loadBackfillState(),
+          ...(collection !== undefined && mailSearch !== undefined && embedder !== undefined
+            ? { semantic: { searcher: mailSearch.searcher, embedder, collection } }
+            : {}),
+        })
+        const result = await tool.execute({ query, limit: 25 }, {} as ToolExecutionContext)
+        post({
+          type: 'searchProbe',
+          query,
+          text: result.content,
+          ...(result.isError === true ? { error: 'The search failed.' } : {}),
+        })
+        return
+      }
 
       if (target === 'codebase') {
         const index = codebaseIndexName(config)

@@ -77,6 +77,8 @@ const base = {
       onIndexDocs: () => undefined,
       onClearDocsIndex: () => undefined,
       onClearIndex: () => undefined,
+      probe: { running: false, result: undefined },
+      onProbe: () => undefined,
     },
   },
   network: { warnings: [], issues: [] },
@@ -88,8 +90,13 @@ const base = {
     // that cannot honour them.
     office: { supported: false, excel: false, outlook: false },
     onSetOffice: () => undefined,
+    probe: { running: false, result: undefined },
+    onProbe: () => undefined,
   },
-  skills: { skills: [], issues: [], extraDirs: [], configuredDir: '' },
+  skills: { skills: [], issues: [], extraDirs: [], configuredDir: '',
+    probe: { running: false, result: undefined },
+    onProbe: () => undefined,
+  },
   schedules: { schedules: [], runs: [], tools: [], mentionCandidates: [] },
 }
 

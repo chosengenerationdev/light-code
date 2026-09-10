@@ -1,5 +1,19 @@
 # light-code-vscode
 
+## 0.57.0
+
+### Minor Changes
+
+- A search box on every index, a folder tree that starts collapsed, and folder paths that accept
+  either separator.
+
+  An index is invisible: "it found nothing", "nothing is indexed" and "the embedding model is
+  wrong" all look identical from the chat. The hand-run search existed for the codebase and tool
+  documentation but only in the Search tab; it is now on the Outlook, Skills and Tools tabs too,
+  mail included, running the real tool so it shows exactly what the assistant would get. Mail hits
+  carry their received time. Also: `Inbox/Alerts` used to match nothing at all, because Outlook
+  stores backslashes and the filter compared literally.
+
 ## 0.56.0
 
 ### Minor Changes

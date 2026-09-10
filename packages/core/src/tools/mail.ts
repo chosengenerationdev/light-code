@@ -108,8 +108,16 @@ export function createSearchMailTool(options: MailToolOptions): Tool<SearchMailP
         let candidates = params.withinHours === undefined ? [...all] : since(all, params.withinHours)
         if (params.status !== undefined) candidates = candidates.filter((r) => r.status === params.status)
         if (params.folder !== undefined) {
-          const wanted = params.folder.toLowerCase()
-          candidates = candidates.filter((r) => r.folder.toLowerCase().startsWith(wanted))
+          /*
+           * Either separator, because Outlook uses one and everybody types the other.
+           *
+           * Folder paths come back from Outlook spelled with backslashes - `mailbox\\Inbox\\Alerts` -
+           * and a model or a person writing `Inbox/Alerts` matched nothing at all, silently, which
+           * reads exactly like an empty folder. The worker's own path splitter already accepts
+           * both; this filter was the one place that did not.
+           */
+          const wanted = normaliseFolder(params.folder)
+          candidates = candidates.filter((r) => normaliseFolder(r.folder).startsWith(wanted))
         }
 
         const limit = params.limit ?? 20
@@ -515,4 +523,9 @@ export function createMailCoverageTool(options: MailToolOptions): Tool<Record<st
       }
     },
   }
+}
+
+/** Lower-cased with either separator folded to one, so `Inbox/Alerts` finds `Inbox\\Alerts`. */
+function normaliseFolder(path: string): string {
+  return path.toLowerCase().replace(/[\\/]+/g, '\\')
 }

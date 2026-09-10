@@ -1,3 +1,5 @@
+import type { ProbeTarget } from '@light-code/core/browser'
+import { IndexProbe } from './IndexProbe.js'
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { FolderTree, type MailFolderNode } from './FolderTree.js'
@@ -40,6 +42,8 @@ export interface OutlookTabProps {
   onPrune: () => void
   onClear: (resync: boolean) => void
   onRefreshDays: (days: number) => void
+  probe: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
+  onProbe: (query: string, target: ProbeTarget) => void
   onStop: () => void
   onOpenTools: () => void
 }
@@ -393,6 +397,20 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
           </span>
           {status.lastResult !== undefined && <span style={{ display: 'block' }}>{status.lastResult}</span>}
         </div>
+      </Section>
+
+      <Section
+        title="Try a search"
+        hint="Runs the same search the assistant would, against this index. The quickest way to tell an empty index from a search that is not working."
+      >
+        <IndexProbe
+          target="mail"
+          label="Search indexed mail"
+          hint="Each hit shows when it was received, which folder it came from, and its id."
+          running={props.probe.running}
+          result={props.probe.result}
+          onProbe={props.onProbe}
+        />
       </Section>
     </div>
   )

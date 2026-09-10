@@ -1,3 +1,4 @@
+import type { ProbeTarget } from '@light-code/core/browser'
 import {
   DEFAULT_MODE_ID,
   type ApprovalDecision,
@@ -860,7 +861,7 @@ export function App(props: AppProps): ReactElement {
       entries: searchLog,
       probe: searchProbe,
       probeRunning: searchProbeRunning,
-      onProbe: (query: string, target: 'codebase' | 'docs') => {
+      onProbe: (query: string, target: ProbeTarget) => {
         setSearchProbe(undefined)
         setSearchProbeRunning(true)
         props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
@@ -1225,6 +1226,12 @@ export function App(props: AppProps): ReactElement {
                 setDocsIndexing(true)
                 props.transport.post({ type: 'indexDocs', kind: 'skill' } satisfies UiToHostMessage)
               },
+              probe: { running: searchProbeRunning, result: searchProbe },
+              onProbe: (query: string, target: ProbeTarget) => {
+                setSearchProbe(undefined)
+                setSearchProbeRunning(true)
+                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+              },
               onClearIndex: () => {
                 setDocsResult(undefined)
                 props.transport.post({ type: 'clearDocsIndex', kind: 'skill' } satisfies UiToHostMessage)
@@ -1295,6 +1302,12 @@ export function App(props: AppProps): ReactElement {
               },
               onClear: (resync: boolean) =>
                 props.transport.post({ type: 'clearMailIndex', resync } satisfies UiToHostMessage),
+              probe: { running: searchProbeRunning, result: searchProbe },
+              onProbe: (query: string, target: ProbeTarget) => {
+                setSearchProbe(undefined)
+                setSearchProbeRunning(true)
+                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+              },
               onRefreshDays: (days: number) =>
                 props.transport.post({ type: 'refreshMail', days } satisfies UiToHostMessage),
               onStop: () => props.transport.post({ type: 'cancelIndexing', kind: 'mail' } satisfies UiToHostMessage),
@@ -1308,6 +1321,12 @@ export function App(props: AppProps): ReactElement {
                 result: describeDocsResult(docsResult),
               },
               onIndexDocs: () => props.transport.post({ type: 'indexDocs', kind: 'tool' } satisfies UiToHostMessage),
+              probe: { running: searchProbeRunning, result: searchProbe },
+              onProbe: (query: string, target: ProbeTarget) => {
+                setSearchProbe(undefined)
+                setSearchProbeRunning(true)
+                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+              },
               onClearDocs: () => {
                 setDocsResult(undefined)
                 props.transport.post({ type: 'clearDocsIndex', kind: 'tool' } satisfies UiToHostMessage)

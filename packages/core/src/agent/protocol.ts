@@ -29,6 +29,14 @@ import type { ToolGroup, ToolPreview } from '../tools/types.js'
  * fourth being added: `teamSkills` could report progress and could not be cancelled, so its Stop
  * button would have compiled and done nothing.
  */
+/**
+ * What a hand-run search can be pointed at.
+ *
+ * Named once and shared with the UI, so a target added here cannot be offered by a picker the
+ * host does not handle - which would be a dropdown entry that silently does nothing.
+ */
+export type ProbeTarget = 'codebase' | 'docs' | 'mail'
+
 export type IndexingKind = 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills'
 
 export interface ApigeeSummary {
@@ -522,7 +530,7 @@ export type UiToHostMessage =
   /** Copies this workspace's index from another store into the active one, vectors and all. */
   | { type: 'syncVectorStore'; fromId: string }
   /** Run a query by hand, exactly as the model would, to judge what the index returns. */
-  | { type: 'runSearchProbe'; query: string; target: 'codebase' | 'docs' }
+  | { type: 'runSearchProbe'; query: string; target: ProbeTarget }
   | { type: 'clearSearchLog' }
   | { type: 'setDispatcher'; enabled: boolean }
   | { type: 'setSkillRetrieval'; enabled: boolean }

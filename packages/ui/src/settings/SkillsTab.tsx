@@ -1,3 +1,5 @@
+import type { ProbeTarget } from '@light-code/core/browser'
+import { IndexProbe } from './IndexProbe.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { useEffect, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
@@ -28,6 +30,8 @@ export interface SkillsTabProps {
    */
   onReindex: () => void
   onClearIndex: () => void
+  probe: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
+  onProbe: (query: string, target: ProbeTarget) => void
   /** The bar for the skills reindex, which is the one this button starts. */
   indexProgress: IndexingProgressState | undefined
   onStopIndexing: () => void
@@ -224,6 +228,19 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         </span>
       </div>
       <IndexingProgress progress={props.indexProgress} onStop={props.onStopIndexing} />
+
+      {/*
+        Here as well as in Search, because this is where you are when you wonder whether a skill
+        you just wrote can actually be found.
+      */}
+      <IndexProbe
+        target="docs"
+        label="Search indexed tools and skills"
+        hint="Runs the same lookup the assistant uses to find a skill. Covers tool documentation too - they share one index."
+        running={props.probe.running}
+        result={props.probe.result}
+        onProbe={props.onProbe}
+      />
 
       {/* First, because it is the part people come here looking for. */}
       <TeamSkillsSection {...props.team} />
