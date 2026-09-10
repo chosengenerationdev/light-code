@@ -48,7 +48,6 @@ export interface McpTabProps {
    * happened, and no way to make it happen. The control belongs where the change was made.
    */
   docsIndex: { enabled: boolean; ready: boolean; indexing: boolean; result: string | undefined } | undefined
-  onIndexDocs: () => void
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -453,33 +452,6 @@ export function McpTab(props: McpTabProps): ReactElement {
         </div>
       )}
 
-      {props.docsIndex?.enabled === true && (
-        <div style={{ marginTop: 20, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
-          <div style={{ fontSize: 13, marginBottom: 4 }}>Tool documentation index</div>
-          <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
-            Tool schemas are kept out of every request and looked up on demand, so a new server&rsquo;s
-            tools have to be indexed before they can be found by meaning. That happens on its own a
-            few seconds after a server connects &mdash; this button is for when you would rather not
-            wonder.{' '}
-            {props.docsIndex.ready
-              ? ''
-              : 'No embedding model is configured, so tools are matched on names and descriptions instead. They stay findable either way.'}
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              style={secondaryButtonStyle()}
-              disabled={props.docsIndex.indexing || !props.docsIndex.ready}
-              onClick={props.onIndexDocs}
-            >
-              {props.docsIndex.indexing ? 'Indexing…' : 'Reindex tool documentation'}
-            </button>
-            {props.docsIndex.result !== undefined && (
-              <span style={{ color: colors.muted, fontSize: 11 }}>{props.docsIndex.result}</span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

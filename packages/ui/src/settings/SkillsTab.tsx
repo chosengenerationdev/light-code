@@ -89,18 +89,30 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         style={textFieldStyle()}
       />
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-        <button type="button" style={secondaryButtonStyle()} onClick={() => props.onSaveAlias(alias.trim())}>
-          Save alias
+      {/*
+        Two separate acts, and the labels say which is which.
+
+        "Save alias" was doing double duty in people's heads: naming the pool and sending skills
+        to it are different things, and only the second moves any data. Step numbers make the
+        order explicit, because the second cannot work before the first.
+      */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={alias.trim() === (props.alias ?? '')}
+          onClick={() => props.onSaveAlias(alias.trim())}
+        >
+          {alias.trim() === (props.alias ?? '') ? '1. Name saved' : '1. Save this name'}
         </button>
         <button
           type="button"
           style={primaryButtonStyle(props.alias === undefined)}
           disabled={props.alias === undefined}
-          title={props.alias === undefined ? 'Set and save an alias first' : undefined}
+          title={props.alias === undefined ? 'Save the name first' : 'Embeds your skills and writes them to the shared collection'}
           onClick={props.onPublish}
         >
-          Publish my skills
+          2. Send my skills to the team
         </button>
       </div>
 
@@ -112,7 +124,7 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
       {props.result?.error === undefined && props.result?.count !== undefined && (
         <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 6 }}>
           {`Published ${String(props.result.count)} skill(s) to "${props.result.collection ?? ''}". `}
-          Publishing again replaces your own copies and never touches anyone else&rsquo;s.
+          Sending again replaces your own copies and never touches anyone else&rsquo;s.
         </span>
       )}
     </section>
@@ -124,6 +136,8 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
 
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily, fontSize: 13, color: colors.foreground }}>
+      {/* First, because it is the part people come here looking for. */}
+      <TeamSkillsSection {...props.team} />
       <h3 style={{ margin: '0 0 4px' }}>Skills</h3>
       <p style={{ color: colors.muted, fontSize: 11, marginTop: 0 }}>
         Notes the assistant keeps about this workspace — internal libraries, conventions, anything
@@ -293,7 +307,6 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         onSave={props.onSaveDirs}
       />
 
-      <TeamSkillsSection {...props.team} />
     </div>
   )
 }

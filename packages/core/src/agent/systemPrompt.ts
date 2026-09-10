@@ -38,6 +38,8 @@ export interface SystemPromptOptions {
    * mean concluding no skill covers the subject without having looked.
    */
   skillsSearchable?: boolean
+  /** Set when a shared team pool exists, so the prompt can say when to reach for it. */
+  teamSkillsAvailable?: boolean
   /**
    * Extra instructions from the active mode — Junior mode's delegation rules, for instance.
    *
@@ -139,6 +141,35 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
       '- Writing a .py file with `write_to_file` does NOT create a tool. It is just a file, and',
       '  nothing can call it. Never describe that as having created a tool.',
       '- `update_python_tool` edits one, `delete_python_tool` removes one.',
+    )
+  }
+
+  /*
+   * Skills first, and local before team.
+   *
+   * Requested directly: "make the agent always remember to check the skills as first thing (local
+   * skills), if told it can check the global team skills." The ordering is not arbitrary - a
+   * local skill describes *this* project and is authoritative for it, where a colleague's
+   * describes theirs and may be wrong here. Reaching for the team pool unprompted is how a
+   * convention from another team quietly becomes advice about this one.
+   */
+  if (options.skills !== undefined || options.skillsSearchable === true) {
+    lines.push(
+      '',
+      'Skills, before anything else:',
+      '- Check the skills for this workspace before you plan or answer. They record how *this*',
+      '  project works, and they exist because someone was tired of explaining it.',
+      '- A skill that applies overrides your general knowledge. Do not restate a convention it',
+      '  contradicts.',
+      ...(options.teamSkillsAvailable === true
+        ? [
+            '- `search_team_skills` searches what OTHER people have taught their assistants. Use it',
+            '  only when the user asks, or when this workspace plainly has nothing on the subject',
+            '  and the question is about another team\'s system.',
+            '- A team skill describes someone else\'s project. Never apply one to this workspace',
+            '  without saying whose it is and that you are doing so.',
+          ]
+        : []),
     )
   }
 

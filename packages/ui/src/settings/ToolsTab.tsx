@@ -1,11 +1,24 @@
+import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { badgeStyle, colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
+import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
 export interface ToolsTabProps {
   tools: ToolCatalogueEntry[]
+  /**
+   * The tool documentation index, which belongs here rather than in MCP.
+   *
+   * It covers every tool - built-in, MCP and Python alike - so a button living inside the MCP tab
+   * described only part of what it did, and left the other two kinds with no visible control at
+   * all. One index, one place.
+   */
+  docsIndex: { enabled: boolean; retrievalReady: boolean; indexing: boolean; result: string | undefined } | undefined
+  onIndexDocs: () => void
+  progress: IndexingProgressState | undefined
+  onStopIndexing: () => void
+
   /** True when tool schemas are being kept out of the prompt. */
   dispatcher: boolean
   /** Excel and Outlook on this machine: whether they can be reached, and whether they are on. */
@@ -105,6 +118,36 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
       )}
 
       <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />
+
+      {props.docsIndex?.enabled === true && (
+        <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
+          <h3 style={{ margin: '0 0 2px', fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase', color: colors.muted }}>
+            Tool documentation index
+          </h3>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+            Tool schemas are kept out of every request and looked up on demand, so a tool has to be
+            indexed before it can be found by meaning. That happens on its own a few seconds after
+            anything changes &mdash; this is for when you would rather not wonder.{' '}
+            {props.docsIndex.retrievalReady
+              ? ''
+              : 'No embedding model is configured, so tools are matched on names and descriptions instead. They stay findable either way.'}
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              disabled={props.docsIndex.indexing || !props.docsIndex.retrievalReady}
+              onClick={props.onIndexDocs}
+            >
+              {props.docsIndex.indexing ? 'Indexing…' : 'Reindex tool documentation'}
+            </button>
+            {props.docsIndex.result !== undefined && (
+              <span style={{ color: colors.muted, fontSize: 11 }}>{props.docsIndex.result}</span>
+            )}
+          </div>
+          <IndexingProgress progress={props.progress} onStop={props.onStopIndexing} />
+        </section>
+      )}
 
       <OfficeSection office={props.office} onSet={props.onSetOffice} />
 

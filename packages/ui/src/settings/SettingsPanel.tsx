@@ -144,7 +144,7 @@ type TabId =
  * Every icon keeps its label as a tooltip, so nothing is discoverable only by clicking.
  */
 /** The last documentation-index run, as one line. Undefined when nothing has run yet. */
-function describeDocsResult(
+export function describeDocsResult(
   result: { indexed?: number; index?: string; error?: string } | undefined,
 ): string | undefined {
   if (result === undefined) return undefined
@@ -360,7 +360,6 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               indexing: props.search.dispatcher.indexing,
               result: describeDocsResult(props.search.dispatcher.result),
             }}
-            onIndexDocs={() => props.search.dispatcher.onIndexDocs('tool')}
           />
         )}
       </div>

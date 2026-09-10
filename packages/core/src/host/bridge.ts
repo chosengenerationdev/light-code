@@ -2060,6 +2060,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           : renderSkillsForPrompt(turnSkills),
         skillsSearchable,
         canWriteSkills: skillsDir !== undefined,
+        // Only when a pool actually exists: telling the model about a tool it has not been given
+        // is how it comes to report that it looked somewhere it could not reach.
+        teamSkillsAvailable: config.embedder?.skillsAlias !== undefined,
         /*
          * Read from config rather than from the registry, because the prompt is built before the
          * registry is. Only the *off* case is claimed: "on but uv is missing" leaves the model

@@ -58,6 +58,10 @@ function render(
         dispatcher={props.dispatcher ?? false}
         office={props.office ?? { supported: true, excel: false, outlook: false }}
         onSetOffice={props.onSetOffice ?? (() => undefined)}
+        docsIndex={undefined}
+        onIndexDocs={() => undefined}
+        progress={undefined}
+        onStopIndexing={() => undefined}
         {...(props.toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: props.toolTimeoutSeconds })}
         onSetToolTimeout={props.onSetToolTimeout ?? (() => undefined)}
         onSetToolTimeoutFor={props.onSetToolTimeoutFor ?? (() => undefined)}

@@ -36,6 +36,7 @@ import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
 import type { PendingForm } from './FormPrompt.js'
 import type { DisplayMessage } from './MessageList.js'
+import { describeDocsResult } from './settings/SettingsPanel.js'
 import type { MailFolderNode } from './settings/FolderTree.js'
 import type { IndexingProgressState } from './settings/IndexingProgress.js'
 import type { MailStatusState } from './settings/OutlookTab.js'
@@ -1266,6 +1267,16 @@ export function App(props: AppProps): ReactElement {
             }}
             tools={{
               ...toolCatalogue,
+              docsIndex: {
+                enabled: dispatcher.enabled,
+                retrievalReady: activeSearchId !== undefined && embedder?.model !== undefined,
+                indexing: docsIndexing,
+                result: describeDocsResult(docsResult),
+              },
+              onIndexDocs: () => props.transport.post({ type: 'indexDocs', kind: 'tool' } satisfies UiToHostMessage),
+              progress: indexingProgress?.kind === 'tools' ? indexingProgress : undefined,
+              onStopIndexing: () =>
+                props.transport.post({ type: 'cancelIndexing', kind: 'tools' } satisfies UiToHostMessage),
               ...(toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds }),
               onSetToolTimeoutFor: (name: string, seconds?: number) =>
                 props.transport.post({
