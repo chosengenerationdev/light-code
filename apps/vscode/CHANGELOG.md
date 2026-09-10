@@ -1,5 +1,22 @@
 # light-code-vscode
 
+## 0.53.1
+
+### Patch Changes
+
+- Excel: finds every running Excel, not just one. A workbook opened from mail, in Protected View, or
+  in a second Excel window lives in a separate process and was previously invisible - asking about a
+  spreadsheet on screen could be answered with "not open".
+
+  Excel: survives being busy. While a cell is open for editing Excel refuses every automation call;
+  that is now retried briefly, and if it persists the message says a cell is being edited and to
+  press Escape, rather than showing a raw COM error.
+
+  New: excel_diagnose reports why Excel tools are failing - how many instances are running, which
+  can be reached, whether one is busy, and whether macros are accessible.
+
+  The vector store for indexed mail can now be chosen in Settings instead of only in the config file.
+
 ## 0.53.0
 
 ### Minor Changes
