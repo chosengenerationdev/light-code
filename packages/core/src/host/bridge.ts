@@ -63,6 +63,7 @@ import {
   formatToolArguments,
   toolCallReason,
   CONTROL_TOOLS,
+  chartFromToolCall,
   createAuthStrategy,
   buildCodeGenerationPrompt,
   createChatProvider,
@@ -2301,6 +2302,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             cumulativeReasoning = ''
             if (toolCall.name === 'ask_expert') expertInformed = true
             if (CONTROL_TOOLS.has(toolCall.name)) return
+            /*
+             * A chart is not a tool block. It is posted on the result instead, so nothing
+             * collapsed appears in its place while it runs.
+             *
+             * The decision comes from `chartFromToolCall`, which the transcript also uses. It used
+             * to be made only there, so a chart drawn mid-conversation showed as a collapsed
+             * "show_chart ran" — as nothing — and became a picture only after a reload.
+             */
+            if (chartFromToolCall(toolCall.name, toolCall.arguments) !== undefined) return
             const summary: ToolCallSummary = {
               id: toolCall.id,
               name: toolCall.name,
@@ -2317,6 +2327,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             // something the user has to expand a collapsed block to read.
             if (CONTROL_TOOLS.has(toolCall.name)) {
               post({ type: 'textChunk', text: result.content })
+              return
+            }
+            const chart = chartFromToolCall(toolCall.name, toolCall.arguments)
+            if (chart !== undefined) {
+              post(
+                chart.kind === 'chart'
+                  ? { type: 'chart', chart: chart.chart, ...(expertInformed ? { expertInformed } : {}) }
+                  : { type: 'chartError', message: chart.message },
+              )
               return
             }
             const summary: ToolCallSummary = {

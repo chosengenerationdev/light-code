@@ -1,5 +1,17 @@
 # light-code-vscode
 
+## 0.59.1
+
+### Patch Changes
+
+- A chart drawn during a conversation showed as nothing.
+
+  The transcript derived charts from the stored messages, and the live turn posted an ordinary tool
+  call — so `show_chart` rendered as a collapsed "show_chart ran" block while the turn was running,
+  and only became a picture after a reload. Both halves were individually correct, which is the
+  shape that keeps costing this project: one fact decided in two places. `chartFromToolCall` is now
+  the single owner, and a test reads the bridge to make sure the live path keeps asking it.
+
 ## 0.59.0
 
 ### Minor Changes

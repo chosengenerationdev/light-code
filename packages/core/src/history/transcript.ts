@@ -1,4 +1,4 @@
-import { chartSpecSchema } from '../charts/types.js'
+import { chartSpecSchema, type ChartSpec } from '../charts/types.js'
 import type { TranscriptEntry } from '../agent/protocol.js'
 import type { ChatMessage } from '../providers/types.js'
 
@@ -92,22 +92,12 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
        * restored transcript can contain anything a past model sent, and a chart that renders
        * misaligned data looks correct and is not.
        */
-      if (toolCall.name === 'show_chart') {
-        /*
-         * The arguments arrive as the JSON string a provider sent, not as an object.
-         *
-         * Parsing them as an object "worked" in the sense that it produced a chartError every
-         * time — a chart that never drew, with a message about the wrong thing. Caught by a test
-         * built from a realistic message rather than from what the code expected.
-         */
-        const parsed = chartSpecSchema.safeParse(decodeArguments(toolCall.arguments))
+      const asChart = chartFromToolCall(toolCall.name, toolCall.arguments)
+      if (asChart !== undefined) {
         entries.push(
-          parsed.success
-            ? { kind: 'chart', chart: parsed.data, ...(expertInformed ? { expertInformed: true } : {}) }
-            : {
-                kind: 'chartError',
-                message: parsed.error.issues.map((issue) => issue.message).join('; '),
-              },
+          asChart.kind === 'chart'
+            ? { kind: 'chart', chart: asChart.chart, ...(expertInformed ? { expertInformed: true } : {}) }
+            : asChart,
         )
         continue
       }
@@ -138,6 +128,32 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
     }
   }
   return entries
+}
+
+/**
+ * Whether a tool call is a chart, and if so which one.
+ *
+ * **The single owner of that question**, and it exists because there were about to be two. The
+ * transcript derived charts on reload while the live turn posted an ordinary tool block, so a
+ * chart drawn during a conversation appeared as a collapsed "show_chart ran" — that is, as
+ * nothing — and only became a picture after a reload. Reported as exactly that.
+ *
+ * This is the shape CLAUDE.md calls the most expensive in the project: one fact decided in two
+ * places, which drift. `charts/live.test.ts` reads `host/bridge.ts` and fails if the live path
+ * ever decides it again for itself.
+ *
+ * Returns `undefined` for anything that is not `show_chart`, so a caller can fall through to its
+ * ordinary handling.
+ */
+export function chartFromToolCall(
+  name: string,
+  rawArguments: string,
+): { kind: 'chart'; chart: ChartSpec } | { kind: 'chartError'; message: string } | undefined {
+  if (name !== 'show_chart') return undefined
+  const parsed = chartSpecSchema.safeParse(decodeArguments(rawArguments))
+  return parsed.success
+    ? { kind: 'chart', chart: parsed.data }
+    : { kind: 'chartError', message: parsed.error.issues.map((issue) => issue.message).join('; ') }
 }
 
 /** A tool call's arguments as an object. Providers send them as a JSON string. */

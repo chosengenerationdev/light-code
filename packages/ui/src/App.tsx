@@ -477,6 +477,19 @@ export function App(props: AppProps): ReactElement {
         setSchedulerState(message.scheduler)
       } else if (message.type === 'searchLog') {
         setSearchLog(message.entries)
+      } else if (message.type === 'chart') {
+        /*
+         * Appended as its own entry, exactly as a restored transcript derives it.
+         *
+         * The host decides what is a chart, using the same function the transcript uses — this
+         * only places it. Deciding again here is what made a live chart render as nothing.
+         */
+        setMessages((prev) => [
+          ...prev.filter((entry) => !(entry.kind === 'text' && entry.role === 'assistant' && entry.pending === true && entry.content.length === 0)),
+          { kind: 'chart', chart: message.chart, ...(message.expertInformed === true ? { expertInformed: true } : {}) },
+        ])
+      } else if (message.type === 'chartError') {
+        setMessages((prev) => [...prev, { kind: 'chartError', message: message.message }])
       } else if (message.type === 'searchProbe') {
         setSearchProbes((current) => ({
           ...current,

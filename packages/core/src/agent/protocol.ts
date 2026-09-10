@@ -670,6 +670,14 @@ export type HostToUiMessage =
   /** Cumulative reasoning for the current step, same self-correcting rule as `textChunk`. */
   | { type: 'reasoningChunk'; text: string }
   | { type: 'toolCall'; toolCall: ToolCallSummary; expertInformed?: boolean }
+  /**
+   * A chart drawn during the turn, so it appears as it happens rather than only after a reload.
+   *
+   * Built by the same `chartFromToolCall` the transcript uses. Two decisions about what counts as
+   * a chart is precisely the drift that made this necessary.
+   */
+  | { type: 'chart'; chart: ChartSpec; expertInformed?: boolean }
+  | { type: 'chartError'; message: string }
   | { type: 'toolResult'; toolCall: ToolCallSummary; expertInformed?: boolean }
   /** Ground truth for the approval prompt — invariant 8. The UI renders only `preview`. */
   /** A form the assistant is waiting on. Rendered in the transcript, like an approval. */
