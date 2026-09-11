@@ -1,5 +1,21 @@
 # @chosengeneration/light-code
 
+## 0.36.1
+
+### Patch Changes
+
+- The collector picker listed only built-in tools, and it now searches.
+
+  It filtered on the tool's permission group, and a Python tool is registered as `command` because
+  it runs code — so `read` held nothing but the built-in readers. Selected by what a tool _is_ now:
+  the `py__` prefix, or the MCP group. The picker has a search box and groups Python tools above
+  MCP ones, since forty tools from a server would otherwise bury your own collector.
+
+  The schedule is a number and a unit rather than five fixed choices, so "every 90 minutes" and
+  "every 3 days" are both sayable, with "only when I ask" as a separate checkbox. And a failed sync
+  is now shown as a failure — coloured, dated, and saying the records are no longer being kept
+  current — rather than as another line of grey text beside an unchanged record count.
+
 ## 0.36.0
 
 ### Minor Changes

@@ -226,7 +226,7 @@ export function App(props: AppProps): ReactElement {
   const [mailStatus, setMailStatus] = useState<MailStatusState | undefined>(undefined)
   const [datasets, setDatasets] = useState<{
     datasets: DatasetStatus[]
-    tools: { name: string; description: string }[]
+    tools: { name: string; description: string; kind: 'python' | 'mcp' }[]
     semantic: boolean
     guidance: string
   }>({ datasets: [], tools: [], semantic: false, guidance: '' })

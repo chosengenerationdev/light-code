@@ -3632,7 +3632,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   const datasetTimers = new Map<string, ReturnType<typeof setInterval>>()
   const datasetBusy = new Set<string>()
-  const datasetResults = new Map<string, string>()
+  /*
+   * The last outcome per dataset, and whether it was a failure.
+   *
+   * Kept apart from the text rather than inferred from it: "nothing new" and "the source is
+   * unreachable" are both a sentence, and shown alike the broken one reads as the working one.
+   * That is how a dataset stops updating without anybody noticing for a fortnight.
+   */
+  const datasetResults = new Map<string, { detail: string; failed: boolean; at: number }>()
 
   function datasetStoreFor(id: string): DatasetStore {
     return new DatasetStore(storageDir, id)
@@ -3732,21 +3739,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         },
       })
 
-      datasetResults.set(
-        id,
+      const detail =
         result.updated === 0
           ? `No changes (${reason}). ${String(result.total)} record(s) held.`
           : `${String(result.updated)} record(s) updated, ${String(result.embedded)} embedded` +
             `${result.removed > 0 ? `, ${String(result.removed)} removed by retention` : ''}. ` +
-            `${String(result.total)} held.`,
-      )
-      reportIndexing('dataset', 'Finished', { detail: datasetResults.get(id) as string, running: false })
+            `${String(result.total)} held.`
+      datasetResults.set(id, { detail, failed: false, at: Date.now() })
+      reportIndexing('dataset', 'Finished', { detail, running: false })
     } catch (error) {
       const stopped = signal.aborted
+      /*
+       * Reported three ways, because a scheduled sync fails when nobody is looking.
+       *
+       * The panel shows it in the error colour with the time, the output channel keeps it for
+       * afterwards, and the progress bar says Failed rather than merely disappearing — which is
+       * what a silent `running: false` looks like from across the room.
+       */
       const detail = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
-      datasetResults.set(id, detail)
-      // Logged as well as shown: a sync that fails at 3am has nobody watching the panel.
-      if (!stopped) logger.warn(`dataset "${dataset.name}" failed: ${detail}`)
+      datasetResults.set(id, { detail, failed: !stopped, at: Date.now() })
+      if (!stopped) logger.warn(`dataset "${dataset.name}" sync failed: ${detail}`)
       reportIndexing('dataset', stopped ? 'Stopped' : 'Failed', { detail, running: false })
     } finally {
       datasetBusy.delete(id)
@@ -3773,11 +3785,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         onProgress: (done, total, phase) => reportIndexing('dataset', phase, { done, total }),
         ...(semantic !== undefined ? { semantic: { writer: semantic.writer, collection: semantic.collection } } : {}),
       })
-      datasetResults.set(id, `Cleared ${String(removed)} record(s).`)
-      reportIndexing('dataset', 'Finished', { detail: datasetResults.get(id) as string, running: false })
+      const detail = `Cleared ${String(removed)} record(s).`
+      datasetResults.set(id, { detail, failed: false, at: Date.now() })
+      reportIndexing('dataset', 'Finished', { detail, running: false })
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      datasetResults.set(id, detail)
+      datasetResults.set(id, { detail, failed: true, at: Date.now() })
+      logger.warn(`dataset clear failed: ${detail}`)
       reportIndexing('dataset', 'Failed', { detail, running: false })
     } finally {
       datasetBusy.delete(id)
@@ -3825,7 +3839,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             : {}),
           busy: datasetBusy.has(dataset.id),
           ...(datasetResults.get(dataset.id) !== undefined
-            ? { lastResult: datasetResults.get(dataset.id) as string }
+            ? {
+                lastResult: (datasetResults.get(dataset.id) as { detail: string }).detail,
+                lastFailed: (datasetResults.get(dataset.id) as { failed: boolean }).failed,
+                lastAttemptAt: (datasetResults.get(dataset.id) as { at: number }).at,
+              }
             : {}),
           storeLabel: search?.store.label ?? 'none',
         }
@@ -3839,16 +3857,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // rather than meaning — and someone seeing results would otherwise assume it is semantic.
       semantic: collection !== undefined && embedder !== undefined,
       /*
-       * Everything callable, not only Python.
+       * Python tools and MCP tools, selected by what they *are* rather than by group.
        *
-       * An MCP tool is often the integration the user already has, so the picker offers those too.
-       * Control tools are excluded - `attempt_completion` is not a data source - and so is
-       * anything in the `edit` or `command` group, which a collector has no business being.
+       * Filtering on `group` was wrong and showed only the built-ins: a Python tool is registered
+       * as `command`, because it runs code, and an MCP tool as `mcp`. Those two groups also hold
+       * `execute_command` and the tool-authoring tools, which are not data sources — so the test
+       * is the `py__` prefix and the mcp group, not a permission category. Reported as the picker
+       * listing only built-in tools.
        */
       tools: currentToolRegistry()
         .list()
-        .filter((tool) => tool.group === 'read' || tool.group === 'mcp')
-        .map((tool) => ({ name: tool.name, description: tool.description })),
+        .filter((tool) => tool.name.startsWith('py__') || tool.group === 'mcp')
+        .map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          // Grouped in the picker, because "which of these is mine?" is the first question with
+          // forty MCP tools in the list.
+          kind: tool.name.startsWith('py__') ? ('python' as const) : ('mcp' as const),
+        })),
       guidance: COLLECTOR_TOOL_GUIDANCE,
     })
   }

@@ -4,6 +4,7 @@ import type { DatasetConfig, ProbeTarget } from '@light-code/core/browser'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { IndexProbe } from './IndexProbe.js'
 import { Select } from '../Select.js'
+import { SearchableSelect } from '../SearchableSelect.js'
 import {
   colors,
   labelStyle,
@@ -22,13 +23,43 @@ export type DatasetStatus = DatasetConfig & {
   lastSyncedAt?: number
   busy?: boolean
   lastResult?: string
+  lastFailed?: boolean
+  lastAttemptAt?: number
   storeLabel: string
+}
+
+/**
+ * A cadence, as a number and a unit.
+ *
+ * Stored as minutes, because that is what the timer wants and one number cannot disagree with
+ * itself. Shown as two fields, because "every 90 minutes" and "every 3 days" are both things
+ * people mean and a fixed list of five options can express neither.
+ */
+const UNITS: { value: string; label: string; minutes: number }[] = [
+  { value: 'minutes', label: 'minutes', minutes: 1 },
+  { value: 'hours', label: 'hours', minutes: 60 },
+  { value: 'days', label: 'days', minutes: 60 * 24 },
+]
+
+/** The largest unit that divides the interval exactly, so 120 reads as "2 hours", not "120 minutes". */
+export function splitInterval(totalMinutes: number): { every: number; unit: string } {
+  for (const unit of [...UNITS].reverse()) {
+    if (totalMinutes % unit.minutes === 0 && totalMinutes >= unit.minutes) {
+      return { every: totalMinutes / unit.minutes, unit: unit.value }
+    }
+  }
+  return { every: totalMinutes, unit: 'minutes' }
+}
+
+export function joinInterval(every: number, unit: string): number {
+  const found = UNITS.find((entry) => entry.value === unit)
+  return Math.max(1, Math.round(every)) * (found?.minutes ?? 1)
 }
 
 export interface CustomDataTabProps {
   datasets: DatasetStatus[]
   /** Everything callable that could serve as a collector — Python tools and MCP tools alike. */
-  tools: { name: string; description: string }[]
+  tools: { name: string; description: string; kind: 'python' | 'mcp' }[]
   semantic: boolean
   guidance: string
   progress: IndexingProgressState | undefined
@@ -139,49 +170,93 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
             </button>
           </div>
         ) : (
-          <Select
-            id="lc-ds-tool"
+          <SearchableSelect
+            ariaLabel="Collector tool"
             value={editing.toolName}
+            emptyText="No tool matches. Clear the search to see them all."
+            /*
+             * Python first, then MCP. Somebody's own collector is what they are usually looking
+             * for, and a server with forty tools would otherwise bury it.
+             */
             options={[
-              { value: '', label: 'Choose a tool…' },
-              ...props.tools.map((tool) => ({ value: tool.name, label: tool.name })),
+              ...props.tools
+                .filter((tool) => tool.kind === 'python')
+                .map((tool) => ({ value: tool.name, hint: tool.description, group: 'Python tools' })),
+              ...props.tools
+                .filter((tool) => tool.kind === 'mcp')
+                .map((tool) => ({ value: tool.name, hint: tool.description, group: 'MCP tools' })),
             ]}
             onChange={(value) => setEditing({ ...editing, toolName: value })}
-            ariaLabel="Collector tool"
           />
         )}
         <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 12px' }}>
-          {props.tools.find((tool) => tool.name === editing.toolName)?.description ??
-            'Python tools and MCP tools both work. It must return a list of records — see the contract below.'}
+          It must return a list of records &mdash; see the contract on the previous screen. A tool
+          that returns something else is refused when it runs, naming the shape it should have.
         </span>
 
         <label htmlFor="lc-ds-sync" style={labelStyle()}>
           Sync
         </label>
-        <Select
-          id="lc-ds-sync"
-          value={String(editing.syncMinutes ?? 0)}
-          options={[
-            /*
-             * Manual is first and is the default for a new dataset.
-             *
-             * A collector nobody has run yet is far more likely to want trying by hand than
-             * putting on a timer — and some sources are expensive or only change when somebody
-             * does something, where a schedule is simply the wrong shape.
-             */
-            { value: '0', label: 'Only when I ask' },
-            { value: '15', label: 'Every 15 minutes' },
-            { value: '60', label: 'Hourly' },
-            { value: '360', label: 'Every 6 hours' },
-            { value: '1440', label: 'Daily' },
-          ]}
-          onChange={(value) => setEditing({ ...editing, syncMinutes: Number(value) })}
-          ariaLabel="How often to sync"
-        />
+        {/*
+          A number and a unit, not a list of five.
+
+          "Every 90 minutes" and "every 3 days" are both things people mean, and a fixed list can
+          express neither. Manual stays a separate choice rather than "every 0 minutes", because
+          it is a different decision — not a very long interval.
+        */}
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer', marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={(editing.syncMinutes ?? 0) === 0}
+            onChange={(event) =>
+              setEditing({ ...editing, syncMinutes: event.target.checked ? 0 : 60 })
+            }
+          />
+          <span style={{ fontSize: 13 }}>Only when I ask</span>
+        </label>
+
+        {(editing.syncMinutes ?? 0) > 0 && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: colors.muted }}>Every</span>
+            <input
+              id="lc-ds-sync"
+              type="text"
+              inputMode="numeric"
+              aria-label="How often to sync"
+              value={splitInterval(editing.syncMinutes ?? 60).every}
+              onChange={(event) =>
+                setEditing({
+                  ...editing,
+                  syncMinutes: joinInterval(
+                    Number(event.target.value) || 1,
+                    splitInterval(editing.syncMinutes ?? 60).unit,
+                  ),
+                })
+              }
+              style={{ ...textFieldStyle(), width: 70 }}
+            />
+            <div style={{ flex: 1 }}>
+              <Select
+                id="lc-ds-unit"
+                value={splitInterval(editing.syncMinutes ?? 60).unit}
+                options={UNITS.map((unit) => ({ value: unit.value, label: unit.label }))}
+                onChange={(unit) =>
+                  setEditing({
+                    ...editing,
+                    syncMinutes: joinInterval(splitInterval(editing.syncMinutes ?? 60).every, unit),
+                  })
+                }
+                ariaLabel="Interval unit"
+              />
+            </div>
+          </div>
+        )}
         <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 12px' }}>
           {(editing.syncMinutes ?? 0) === 0
             ? 'Nothing runs on its own. Use Sync now on the list, or re-run it after changing the collector.'
-            : 'The collector is called on this timer, and given the time of the last successful sync so it can fetch only what changed.'}
+            : `The collector runs every ${String(editing.syncMinutes ?? 0)} minute(s), and is given the ` +
+              'time of the last successful sync so it can fetch only what changed. A failed run does ' +
+              'not advance that, so nothing is skipped while the source is down.'}
         </span>
 
         <label htmlFor="lc-ds-retention" style={labelStyle()}>
@@ -271,7 +346,37 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
               </div>
 
               {dataset.lastResult !== undefined && (
-                <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{dataset.lastResult}</div>
+                /*
+                 * A failure is coloured and dated, not shown as ordinary muted text.
+                 *
+                 * A sync that stopped working keeps its old records and its old count, so the row
+                 * otherwise looks exactly like a healthy one — which is how a dataset goes stale
+                 * for a fortnight before anybody notices.
+                 */
+                <div
+                  style={{
+                    color: dataset.lastFailed === true ? colors.error : colors.muted,
+                    fontSize: 11,
+                    marginTop: 4,
+                    ...(dataset.lastFailed === true
+                      ? {
+                          border: `1px solid ${colors.error}`,
+                          borderRadius: 4,
+                          padding: '4px 6px',
+                          overflowWrap: 'anywhere' as const,
+                        }
+                      : {}),
+                  }}
+                >
+                  {dataset.lastFailed === true && <strong>Last sync failed. </strong>}
+                  {dataset.lastResult}
+                  {dataset.lastFailed === true && dataset.lastAttemptAt !== undefined && (
+                    <span style={{ display: 'block', marginTop: 2 }}>
+                      {`Attempted ${new Date(dataset.lastAttemptAt).toLocaleString()}. The records ` +
+                        'below are from before that, so they are no longer being kept current.'}
+                    </span>
+                  )}
+                </div>
               )}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>

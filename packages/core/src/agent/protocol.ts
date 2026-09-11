@@ -1064,12 +1064,22 @@ export type HostToUiMessage =
         lastSyncedAt?: number
         busy?: boolean
         lastResult?: string
+        /**
+         * True when `lastResult` is a failure.
+         *
+         * Carried rather than guessed from the text: a sync that could not reach its source and a
+         * sync that found nothing both end with a sentence, and shown alike the broken one reads
+         * as the working one — which is how a dataset silently stops updating.
+         */
+        lastFailed?: boolean
+        /** When that attempt was, which for a failure is the only timestamp that moves. */
+        lastAttemptAt?: number
         storeLabel: string
       })[]
       /** False when there is no embedding model, so the tab can say search is on words only. */
       semantic: boolean
-      /** The Python tools that could serve as collectors. */
-      tools: { name: string; description: string }[]
+      /** Everything that could serve as a collector: Python tools and MCP tools. */
+      tools: { name: string; description: string; kind: 'python' | 'mcp' }[]
       /** The contract a collector must satisfy, so the tab can show it and the model can be told. */
       guidance: string
     }
