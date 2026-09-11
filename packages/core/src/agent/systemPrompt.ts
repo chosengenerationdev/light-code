@@ -1,3 +1,5 @@
+import { COLLECTOR_TOOL_GUIDANCE } from '../dataset/types.js'
+
 export interface SystemPromptOptions {
   /** The model id from the active profile, so the assistant can answer "what model are you?". */
   model?: string
@@ -5,6 +7,16 @@ export interface SystemPromptOptions {
   providerLabel?: string
   /** Set when the Claude CLI expert is available, so `ask_expert` is explained. */
   expertAvailable?: boolean
+  /**
+   * The datasets the user collects themselves, by name.
+   *
+   * Named rather than merely counted, because "search the tickets" only works if the model knows
+   * a dataset called `tickets` exists — and the tool's own description cannot list them, since it
+   * is part of the cached prefix and they change.
+   */
+  datasets?: { name: string; records: number }[]
+  /** True when Python tools are on, so writing a new collector is actually possible. */
+  canWriteCollectors?: boolean
   /**
    * Set when mail has been indexed, so the index is named as the default way to answer.
    *
@@ -233,6 +245,31 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
     '  analysed in Python — the tool does the arithmetic, show_chart draws it, and the numbers are',
     '  never retyped by you in between.',
   )
+
+  if (options.datasets !== undefined && options.datasets.length > 0) {
+    lines.push(
+      '',
+      'Custom datasets:',
+      `- The user collects these themselves: ${options.datasets
+        .map((dataset) => `${dataset.name} (${String(dataset.records)} records)`)
+        .join(', ')}.`,
+      '- **Use search_data for anything about data the organisation collects itself** — tickets,',
+      '  wiki pages, rows from an internal system. It is the only way to reach these; they are not',
+      '  in the codebase and not in the mail index.',
+      '- It searches what has been **synced**, not the live source. If the answer turns on',
+      '  something very recent, say when the dataset was last synced rather than implying it is',
+      '  current. Do not offer to refresh it yourself — syncing is triggered by the user.',
+      ...(options.canWriteCollectors === true
+        ? [
+            '- If they want a dataset you cannot find, you can write the collector: it is an',
+            '  ordinary Python tool returning records. Offer, do not assume — then they configure',
+            '  it in Settings, Custom data. The contract is below.',
+            '',
+            COLLECTOR_TOOL_GUIDANCE,
+          ]
+        : []),
+    )
+  }
 
   if (options.mailIndexed === true) {
     lines.push(

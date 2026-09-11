@@ -34,6 +34,9 @@ export const USER_SCOPE_ONLY_KEYS = [
   // Added for Phase 8b, and the sharpest entries on this list. A workspace able to name a
   // cluster, or repoint the embedder at a profile of its choosing, would exfiltrate
   // whatever gets indexed — and what gets indexed is the source code.
+  // A dataset names a program to run *and* a store to write what it produced into — the `python`
+  // threat and the `embedder` threat in one key, on a timer.
+  'datasets',
   'vectorStores',
   'activeVectorStoreId',
   'embedder',

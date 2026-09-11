@@ -1,5 +1,26 @@
 # light-code-vscode
 
+## 0.61.0
+
+### Minor Changes
+
+- Custom data: corpora you collect yourself, in a tab of their own.
+
+  The data most worth the assistant knowing is rarely on disk — it is in a ticketing system, a wiki,
+  a database, an internal API, reachable only through something that knows how your organisation
+  authenticates. So point at a tool that returns records and Light Code does the rest: embedding
+  them, keeping them current, and searching them with `search_data`.
+
+  The collector is an ordinary Python tool **or an MCP tool you already have** — one function
+  signature rather than a connector per system. You do not have to write it: the assistant has the
+  contract in its prompt and will offer one for you to approve.
+
+  Each dataset has its own schedule, including "only when I ask" — which is the default for a new
+  one and the right answer for a source that is expensive or only changes when somebody does
+  something. Clear, rebuild, a retention window, a progress bar with Stop, and a trial search are
+  all there. A collector that returns everything each run does not duplicate the corpus and does not
+  re-embed what has not changed, which is what makes the simple collector the right one to write.
+
 ## 0.60.0
 
 ### Minor Changes

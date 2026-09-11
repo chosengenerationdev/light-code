@@ -1,3 +1,4 @@
+import type { DatasetStatus } from './settings/CustomDataTab.js'
 import type { ProbeTarget } from '@light-code/core/browser'
 import {
   DEFAULT_MODE_ID,
@@ -223,6 +224,12 @@ export function App(props: AppProps): ReactElement {
   >(undefined)
   /** State of mail indexing, refreshed whenever the host reports it. */
   const [mailStatus, setMailStatus] = useState<MailStatusState | undefined>(undefined)
+  const [datasets, setDatasets] = useState<{
+    datasets: DatasetStatus[]
+    tools: { name: string; description: string }[]
+    semantic: boolean
+    guidance: string
+  }>({ datasets: [], tools: [], semantic: false, guidance: '' })
   /** The mailbox tree, so folders are ticked rather than typed. */
   const [mailTree, setMailTree] = useState<{ folders: MailFolderNode[]; error?: string; loading: boolean }>({
     folders: [],
@@ -584,6 +591,13 @@ export function App(props: AppProps): ReactElement {
           ...(message.total !== undefined ? { total: message.total } : {}),
           ...(message.detail !== undefined ? { detail: message.detail } : {}),
         })
+      } else if (message.type === 'datasetStatus') {
+        setDatasets({
+          datasets: message.datasets,
+          tools: message.tools,
+          semantic: message.semantic,
+          guidance: message.guidance,
+        })
       } else if (message.type === 'mailStatus') {
         setMailStatus({
           enabled: message.enabled,
@@ -675,6 +689,7 @@ export function App(props: AppProps): ReactElement {
      * uses to connect - so nothing that reads mail is started at editor startup.
      */
     props.transport.post({ type: 'requestMailStatus' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestDatasetStatus' } satisfies UiToHostMessage)
     // Asked for alongside the search state, since that is the tab that shows it.
     props.transport.post({ type: 'requestProjectSettings' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
@@ -1321,6 +1336,30 @@ export function App(props: AppProps): ReactElement {
                   type: 'clearScheduleRuns',
                   ...(id === undefined ? {} : { id }),
                 } satisfies UiToHostMessage),
+            }}
+            customData={{
+              datasets: datasets.datasets,
+              tools: datasets.tools,
+              semantic: datasets.semantic,
+              guidance: datasets.guidance,
+              progress: indexingProgress?.kind === 'dataset' ? indexingProgress : undefined,
+              probe: { running: probeRunning.data === true, result: searchProbes.data },
+              onProbe: (query: string, target: ProbeTarget) => {
+                clearProbe(target)
+                setProbeRunning((current) => ({ ...current, [target]: true }))
+                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+              },
+              onClearProbe: () => clearProbe('data'),
+              onSave: (dataset) =>
+                props.transport.post({ type: 'saveDataset', dataset } satisfies UiToHostMessage),
+              onDelete: (id: string) =>
+                props.transport.post({ type: 'deleteDataset', id } satisfies UiToHostMessage),
+              onSync: (id: string) =>
+                props.transport.post({ type: 'syncDataset', id } satisfies UiToHostMessage),
+              onClear: (id: string, resync: boolean) =>
+                props.transport.post({ type: 'clearDataset', id, resync } satisfies UiToHostMessage),
+              onStop: () =>
+                props.transport.post({ type: 'cancelIndexing' } satisfies UiToHostMessage),
             }}
             outlook={{
               status: mailStatus,

@@ -44,6 +44,7 @@ const TABS = [
   'python',
   'tools',
   'skills',
+  'customData',
   'network',
   'appearance',
 ]

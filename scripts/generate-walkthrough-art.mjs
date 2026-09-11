@@ -40,7 +40,28 @@ const THEMES = {
   },
 }
 
-const TABS = ['Providers', 'Approvals', 'MCP', 'Search', 'Expert', 'Schedules', 'Python', 'Tools', 'Skills', 'Network', 'Appearance']
+/*
+ * The tab strip every diagram draws.
+ *
+ * Kept in step with `SettingsPanel`'s own list by hand, and CLAUDE.md's rule about the field specs
+ * applies here just as much: a strip that omits a tab teaches that the panel is smaller than it
+ * is. Outlook was missing from this for several releases, which is exactly how that happens.
+ */
+const TABS = [
+  'Providers',
+  'Approvals',
+  'MCP',
+  'Search',
+  'Expert',
+  'Schedules',
+  'Python',
+  'Tools',
+  'Outlook',
+  'Custom data',
+  'Skills',
+  'Network',
+  'Appearance',
+]
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const FONT = "system-ui,'Segoe UI',Ubuntu,sans-serif"
@@ -447,6 +468,22 @@ const STEPS = {
       { label: 'Extra folders to read', control: 'list', value: 'a shared team folder, read-only', hint: 'PATH-style precedence; a shadowed skill is reported, not silently dropped.' },
       { label: 'Problems', control: 'list', value: 'a file missing its frontmatter is named here' },
       { label: 'Writing one needs approval', control: 'list', value: 'you see the full text first', hint: 'A skill is prose that steers every future turn, so it is never written silently.' },
+    ],
+  },
+
+  customData: {
+    tab: 'customData',
+    note: 'Corpora you collect yourself. Point at a tool that returns records; it does the rest.',
+    rows: [
+      { section: 'datasets' },
+      { label: 'tickets', control: 'chips', value: 'Sync now|Rebuild|Clear|Edit' },
+      { label: '', control: 'list', value: '4,812 records · py__fetch_tickets · hourly · last synced 09:14' },
+      { label: 'wiki', control: 'chips', value: 'Sync now|Rebuild|Clear|Edit' },
+      { label: '', control: 'list', value: '310 records · confluence__search · only when I ask', hint: 'A schedule is the wrong shape for a source that is expensive, or that only changes when somebody does something.' },
+      { section: 'each dataset' },
+      { label: 'Collector', value: 'a Python tool or an MCP tool', hint: 'It returns records with a stable id — that is what makes a re-sync an update rather than a duplication.' },
+      { label: 'Keep records for', value: '90 days', hint: 'Applied on every sync, to records whose collector gave them a timestamp.' },
+      { label: 'Ask the assistant to write one', control: 'list', value: 'it already knows the contract' },
     ],
   },
 

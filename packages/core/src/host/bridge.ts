@@ -119,6 +119,12 @@ import {
   createOpenEmailTool,
   createMailCoverageTool,
   createMailStatsTool,
+  createSearchDataTool,
+  DatasetStore,
+  syncDataset,
+  clearDataset,
+  COLLECTOR_TOOL_GUIDANCE,
+  type DatasetConfig,
   type HarvestedMessage,
   findTeamSkillsNamed,
   indexTeamSkills,
@@ -1199,6 +1205,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedOffice: { excel?: boolean | undefined; outlook?: boolean | undefined } = {}
   /** Mirrors `mail`, for the same reason. */
   let cachedMail: MailIndexConfig = {}
+  let cachedDatasets: DatasetConfig[] = []
+  /*
+   * Names and counts for the system prompt, refreshed with the settings rather than read per
+   * request: the prompt is built every turn and hitting the disk for every dataset each time
+   * would be a file read per turn for something that changes on a timer.
+   */
+  let datasetSummaryForPrompt: { name: string; records: number }[] = []
+  let cachedPythonEnabled = false
   const mailStore = new MailStore(storageDir)
   /** Set while a sync or prune runs, so two cannot overlap on one mailbox. */
   let mailBusy = false
@@ -1249,6 +1263,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedProgrammingProfileId = config.programmingProfileId
     cachedOffice = config.office ?? {}
     cachedMail = config.mail ?? {}
+    cachedDatasets = config.datasets ?? []
+    cachedPythonEnabled = config.python?.dynamicTools === 'on'
+    datasetSummaryForPrompt = await Promise.all(
+      cachedDatasets.map(async (dataset) => ({
+        name: dataset.name,
+        records: (await new DatasetStore(storageDir, dataset.id).load()).length,
+      })),
+    )
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
@@ -1454,6 +1476,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * reorders what the exact filters already produced.
      */
     mailSemantic?: { searcher: VectorSearcher; embedder: Embedder; collection: string },
+    /** Ranking for custom datasets. Absent leaves `search_data` matching on words, which still works. */
+    datasetSemanticForTools?: { searcher: VectorSearcher; embedder: Embedder; collection: string },
   ): ToolRegistry {
     const combined = new ToolRegistry()
     for (const tool of builtinTools.list()) combined.register(tool)
@@ -1610,6 +1634,29 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      */
     if (codebase !== undefined) {
       combined.register(createSearchCodebaseTool({ ...codebase, observer: searchLog }))
+    }
+
+    /*
+     * Offered only once a dataset exists.
+     *
+     * Registering it against nothing would advertise a tool that always answers "no datasets
+     * configured", and the model would keep reaching for it — the same argument that gates the
+     * mail tools on indexing being switched on.
+     */
+    if (cachedDatasets.length > 0) {
+      combined.register(
+        createSearchDataTool({
+          load: async () =>
+            Promise.all(
+              cachedDatasets.map(async (dataset) => ({
+                id: dataset.id,
+                name: dataset.name,
+                records: await new DatasetStore(storageDir, dataset.id).load(),
+              })),
+            ),
+          ...(datasetSemanticForTools !== undefined ? { semantic: datasetSemanticForTools } : {}),
+        }),
+      )
     }
     /*
      * `search_docs` is registered whenever the dispatcher is on, with or without a vector
@@ -2103,6 +2150,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         expertAvailable: expertCliInfo !== undefined,
         // Named only when there is an index to prefer.
         mailIndexed: cachedMail.enabled === true && cachedOffice.outlook === true,
+        // Counted here rather than in the prompt builder, which has no filesystem.
+        datasets: datasetSummaryForPrompt,
+        canWriteCollectors: cachedPythonEnabled,
         /*
          * Either the whole list or a count and an instruction to search — never both, and
          * never neither. `renderSkillsHintForPrompt` explains why the count stays.
@@ -2286,6 +2336,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           mailCollection !== undefined && mailSearch !== undefined && embedder !== undefined
             ? { searcher: mailSearch.searcher, embedder, collection: mailCollection }
             : undefined,
+          /*
+           * Datasets share one collection, resolved against whichever store `retrieval.stores.data`
+           * names — the same per-corpus routing §12e added, for the same reason: somebody's own
+           * collected data is frequently the corpus they most want kept off a shared cluster.
+           */
+          await (async () => {
+            const collection = datasetCollectionName(config)
+            const search = await resolveDatasetSearch(config)
+            return collection !== undefined && search !== undefined && embedder !== undefined
+              ? { searcher: search.searcher, embedder, collection }
+              : undefined
+          })(),
       )
 
       /*
@@ -3558,6 +3620,268 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /** Starts, restarts or stops the timer to match the current configuration. */
+
+  // ================================================================= custom datasets
+  /*
+   * A corpus the user collects with their own Python tool, kept current on a timer.
+   *
+   * One timer per dataset rather than one for all of them: they have different cadences — a
+   * ticket queue every fifteen minutes, a wiki once a day — and a shared timer would run the
+   * slow one at the fast one's rate or the reverse. Each is `unref`'d so a pending tick never
+   * holds the Node host open.
+   */
+  const datasetTimers = new Map<string, ReturnType<typeof setInterval>>()
+  const datasetBusy = new Set<string>()
+  const datasetResults = new Map<string, string>()
+
+  function datasetStoreFor(id: string): DatasetStore {
+    return new DatasetStore(storageDir, id)
+  }
+
+  /** The collection datasets share. One per workspace, like the others, prefixed per record. */
+  function datasetCollectionName(config?: LightCodeConfig): string | undefined {
+    const base = codebaseIndexName(config)
+    return base === undefined ? undefined : `${base}-data`
+  }
+
+  async function resolveDatasetSearch(config: LightCodeConfig, dataset?: DatasetConfig) {
+    const wanted = dataset?.storeId ?? storeIdFor('data', config)
+    return resolveSearch(config, wanted)
+  }
+
+  async function datasetSemantic(config: LightCodeConfig, dataset: DatasetConfig) {
+    const collection = datasetCollectionName(config)
+    const search = await resolveDatasetSearch(config, dataset)
+    const embedder = await resolveEmbedder(config)
+    if (collection === undefined || search === undefined || embedder === undefined) return undefined
+    return {
+      embedder,
+      collection,
+      writer: createVectorIndexWriter(httpClient, search.store, await vectorStoreConnectionFor(search.store, search.id)),
+      searcher: search.searcher,
+    }
+  }
+
+  /**
+   * Runs one dataset's collector and folds the result in.
+   *
+   * Guarded per dataset rather than globally: two datasets are independent corpora in independent
+   * files, so one taking ten minutes must not stop the other from running at all. The guard stops
+   * the *same* dataset overlapping itself, which is what a timer firing during a manual run does.
+   */
+  async function runDatasetSync(id: string, reason: string): Promise<void> {
+    if (datasetBusy.has(id)) return
+    const config = await loadSettings()
+    const dataset = (config.datasets ?? []).find((entry) => entry.id === id)
+    if (dataset === undefined) return
+
+    datasetBusy.add(id)
+    const signal = beginIndexing(`dataset:${id}`)
+    reportIndexing('dataset', `Syncing ${dataset.name}`, { detail: `via ${dataset.toolName}` })
+    try {
+      const semantic = await datasetSemantic(config, dataset)
+      const result = await syncDataset({
+        datasetId: id,
+        store: datasetStoreFor(id),
+        signal,
+        onProgress: (done, total, phase) => reportIndexing('dataset', phase, { done, total }),
+        ...(dataset.retentionDays !== undefined ? { retentionDays: dataset.retentionDays } : {}),
+        ...(semantic !== undefined
+          ? { semantic: { embedder: semantic.embedder, writer: semantic.writer, collection: semantic.collection } }
+          : {}),
+        /*
+         * The collector runs through the ordinary Python tool path, so it is the same code that
+         * validated it, the same worker, the same timeout. A second execution path would be a
+         * second thing to keep in step with tool approval.
+         */
+        collect: async (since) => {
+          /*
+           * Any registered tool, not only a Python one.
+           *
+           * An MCP server is frequently *already* the integration somebody has - a Jira server,
+           * a database server - and requiring a Python wrapper around it would ask them to
+           * rebuild a connector they have running. The bare name is tried first so a namespaced
+           * MCP tool (`jira__search_issues`) works as written, and `py__` second so a Python
+           * tool can be named without its prefix.
+           */
+          const registry = currentToolRegistry()
+          const tool = registry.get(dataset.toolName) ?? registry.get(`py__${dataset.toolName}`)
+          if (tool === undefined) {
+            throw new Error(
+              `The collector tool "${dataset.toolName}" is not registered. A Python tool may have `+
+                'been deleted or Python switched off; an MCP tool may be from a server that is ' +
+                'disconnected or disabled. Settings → Tools lists everything callable.',
+            )
+          }
+          const args = { ...(dataset.arguments ?? {}), ...(since === undefined ? {} : { since }) }
+          const output = await tool.execute(args as never, { signal } as never)
+          if (output.isError === true) throw new Error(String(output.content))
+          /*
+           * A tool result is text. Parsed here rather than asking the tool to return an object,
+           * because every other tool in the product returns text and making this one different
+           * would be a second contract for a worker that already has one.
+           */
+          try {
+            return JSON.parse(typeof output.content === 'string' ? output.content : JSON.stringify(output.content))
+          } catch {
+            throw new Error(
+              'The collector tool did not return JSON. It must return a list of records — see ' +
+                'the guidance in Settings \u2192 Custom data.',
+            )
+          }
+        },
+      })
+
+      datasetResults.set(
+        id,
+        result.updated === 0
+          ? `No changes (${reason}). ${String(result.total)} record(s) held.`
+          : `${String(result.updated)} record(s) updated, ${String(result.embedded)} embedded` +
+            `${result.removed > 0 ? `, ${String(result.removed)} removed by retention` : ''}. ` +
+            `${String(result.total)} held.`,
+      )
+      reportIndexing('dataset', 'Finished', { detail: datasetResults.get(id) as string, running: false })
+    } catch (error) {
+      const stopped = signal.aborted
+      const detail = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
+      datasetResults.set(id, detail)
+      // Logged as well as shown: a sync that fails at 3am has nobody watching the panel.
+      if (!stopped) logger.warn(`dataset "${dataset.name}" failed: ${detail}`)
+      reportIndexing('dataset', stopped ? 'Stopped' : 'Failed', { detail, running: false })
+    } finally {
+      datasetBusy.delete(id)
+      endIndexing(`dataset:${id}`)
+      await postDatasetStatus()
+    }
+  }
+
+  async function handleClearDataset(id: string, resync: boolean): Promise<void> {
+    if (datasetBusy.has(id)) return
+    const config = await loadSettings()
+    const dataset = (config.datasets ?? []).find((entry) => entry.id === id)
+    if (dataset === undefined) return
+
+    datasetBusy.add(id)
+    const signal = beginIndexing(`dataset:${id}`)
+    reportIndexing('dataset', `Clearing ${dataset.name}`)
+    try {
+      const semantic = await datasetSemantic(config, dataset)
+      const { removed } = await clearDataset({
+        datasetId: id,
+        store: datasetStoreFor(id),
+        signal,
+        onProgress: (done, total, phase) => reportIndexing('dataset', phase, { done, total }),
+        ...(semantic !== undefined ? { semantic: { writer: semantic.writer, collection: semantic.collection } } : {}),
+      })
+      datasetResults.set(id, `Cleared ${String(removed)} record(s).`)
+      reportIndexing('dataset', 'Finished', { detail: datasetResults.get(id) as string, running: false })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      datasetResults.set(id, detail)
+      reportIndexing('dataset', 'Failed', { detail, running: false })
+    } finally {
+      datasetBusy.delete(id)
+      endIndexing(`dataset:${id}`)
+      await postDatasetStatus()
+    }
+    // Released before the resync, which takes the guard itself.
+    if (resync) await runDatasetSync(id, 'rebuild')
+  }
+
+  function reconcileDatasetTimers(config: LightCodeConfig): void {
+    for (const timer of datasetTimers.values()) clearInterval(timer)
+    datasetTimers.clear()
+
+    for (const dataset of config.datasets ?? []) {
+      // Zero minutes means "only when asked", which is a real choice for a slow or expensive
+      // collector — not a misconfiguration to correct into a default.
+      const minutes = dataset.syncMinutes ?? 0
+      if (dataset.enabled === false || minutes <= 0) continue
+      const timer = setInterval(() => void runDatasetSync(dataset.id, 'scheduled'), minutes * 60 * 1000)
+      timer.unref?.()
+      datasetTimers.set(dataset.id, timer)
+    }
+  }
+
+  async function postDatasetStatus(): Promise<void> {
+    const config = (await configManager.load()).config
+    const datasets = config.datasets ?? []
+    const collection = datasetCollectionName(config)
+    const embedder = await resolveEmbedder(config).catch(() => undefined)
+
+    const entries = await Promise.all(
+      datasets.map(async (dataset) => {
+        const store = datasetStoreFor(dataset.id)
+        const records = await store.load()
+        const times = records.map((record) => record.timestamp).filter((at): at is number => at !== undefined)
+        const search = await resolveDatasetSearch(config, dataset).catch(() => undefined)
+        return {
+          ...dataset,
+          records: records.length,
+          sizeBytes: await store.sizeBytes(),
+          ...(times.length > 0 ? { oldest: Math.min(...times), newest: Math.max(...times) } : {}),
+          ...((await store.lastSyncedAt()) !== undefined
+            ? { lastSyncedAt: (await store.lastSyncedAt()) as number }
+            : {}),
+          busy: datasetBusy.has(dataset.id),
+          ...(datasetResults.get(dataset.id) !== undefined
+            ? { lastResult: datasetResults.get(dataset.id) as string }
+            : {}),
+          storeLabel: search?.store.label ?? 'none',
+        }
+      }),
+    )
+
+    post({
+      type: 'datasetStatus',
+      datasets: entries,
+      // Said plainly, because a dataset with no embedder still syncs and still searches — on words
+      // rather than meaning — and someone seeing results would otherwise assume it is semantic.
+      semantic: collection !== undefined && embedder !== undefined,
+      /*
+       * Everything callable, not only Python.
+       *
+       * An MCP tool is often the integration the user already has, so the picker offers those too.
+       * Control tools are excluded - `attempt_completion` is not a data source - and so is
+       * anything in the `edit` or `command` group, which a collector has no business being.
+       */
+      tools: currentToolRegistry()
+        .list()
+        .filter((tool) => tool.group === 'read' || tool.group === 'mcp')
+        .map((tool) => ({ name: tool.name, description: tool.description })),
+      guidance: COLLECTOR_TOOL_GUIDANCE,
+    })
+  }
+
+  async function handleSaveDataset(dataset: DatasetConfig): Promise<void> {
+    const { config } = await configManager.load()
+    const existing = config.datasets ?? []
+    const next = existing.some((entry) => entry.id === dataset.id)
+      ? existing.map((entry) => (entry.id === dataset.id ? dataset : entry))
+      : [...existing, dataset]
+    await configManager.save('user', { datasets: next })
+    reconcileDatasetTimers((await configManager.load()).config)
+    await postDatasetStatus()
+  }
+
+  async function handleDeleteDataset(id: string): Promise<void> {
+    const { config } = await configManager.load()
+    /*
+     * The vectors and the local file go too.
+     *
+     * Removing only the config entry would orphan every vector in the shared collection with
+     * nothing left that knows their ids — they would keep being returned by searches of the other
+     * datasets, attributed to a dataset that no longer exists.
+     */
+    await handleClearDataset(id, false)
+    await configManager.save('user', {
+      datasets: (config.datasets ?? []).filter((entry) => entry.id !== id),
+    })
+    datasetResults.delete(id)
+    reconcileDatasetTimers((await configManager.load()).config)
+    await postDatasetStatus()
+  }
+
   function reconcileMailTimer(config: LightCodeConfig): void {
     if (mailTimer !== undefined) {
       clearInterval(mailTimer)
@@ -3953,6 +4277,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       })
       const config = await loadSettings()
       reconcileMailTimer(config)
+      reconcileDatasetTimers(config)
       await postMailStatus()
       // A first sync right away, so switching it on visibly does something rather than waiting
       // out an interval before the first sign of life.
@@ -4492,6 +4817,36 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       const search = await resolveSearch(config)
       const embedder = await resolveEmbedder(config)
+
+      if (target === 'data') {
+        // Runs the tool the model runs, for the reason the mail probe does: a second query path
+        // could disagree with the real one and would be believed.
+        const datasets = config.datasets ?? []
+        const collection = datasetCollectionName(config)
+        const dataSearch = await resolveDatasetSearch(config)
+        const tool = createSearchDataTool({
+          load: async () =>
+            Promise.all(
+              datasets.map(async (dataset) => ({
+                id: dataset.id,
+                name: dataset.name,
+                records: await new DatasetStore(storageDir, dataset.id).load(),
+              })),
+            ),
+          ...(collection !== undefined && dataSearch !== undefined && embedder !== undefined
+            ? { semantic: { searcher: dataSearch.searcher, embedder, collection } }
+            : {}),
+        })
+        const result = await tool.execute({ query, limit: 25 }, {} as ToolExecutionContext)
+        post({
+          type: 'searchProbe',
+          target,
+          query,
+          text: result.content,
+          ...(result.isError === true ? { error: 'The search failed.' } : {}),
+        })
+        return
+      }
 
       if (target === 'mail') {
         /*
@@ -6139,6 +6494,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       void loadSettings().then((config) => {
         reconcileMailTimer(config)
+      reconcileDatasetTimers(config)
         return postMailStatus()
       })
     } else if (message.type === 'saveMailSettings') {
@@ -6154,6 +6510,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleClearTeamSkills()
     } else if (message.type === 'refreshMail') {
       void handleRefreshMail(message.days)
+    } else if (message.type === 'requestDatasetStatus') {
+      void postDatasetStatus()
+    } else if (message.type === 'saveDataset') {
+      void handleSaveDataset(message.dataset)
+    } else if (message.type === 'deleteDataset') {
+      void handleDeleteDataset(message.id)
+    } else if (message.type === 'syncDataset') {
+      void runDatasetSync(message.id, 'manual')
+    } else if (message.type === 'clearDataset') {
+      void handleClearDataset(message.id, message.resync === true)
     } else if (message.type === 'clearMailIndex') {
       void handleClearMailIndex(message.resync === true)
     } else if (message.type === 'saveSkillsAlias') {

@@ -1,3 +1,4 @@
+import { CustomDataTab, type CustomDataTabProps } from './CustomDataTab.js'
 import type {
   ApprovableGroup,
   McpPlatform,
@@ -26,6 +27,7 @@ import { AppearanceSection } from './AppearanceSection.js'
 import {
   BookIcon,
   MailIcon,
+  DatabaseIcon,
   ClockIcon,
   ExpertIcon,
   GlobeIcon,
@@ -92,6 +94,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   ) => void
   search: SearchTabProps
   network: Omit<NetworkTabProps, 'onBrowse' | 'pickedPath'>
+  customData: Omit<CustomDataTabProps, 'onOpenPython'>
   python: PythonTabProps
   tools: ToolsTabProps
   outlook: Omit<OutlookTabProps, 'onOpenTools'>
@@ -127,6 +130,7 @@ type TabId =
   | 'python'
   | 'tools'
   | 'outlook'
+  | 'customData'
   | 'skills'
   | 'schedules'
   | 'appearance'
@@ -166,6 +170,8 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   // Beside Skills rather than beside Tools: both are corpora the assistant reads from, where
   // Tools is a list of what can act.
   { id: 'outlook', label: 'Outlook', Icon: MailIcon },
+  // Beside Outlook, because both are corpora collected from outside the workspace on a timer.
+  { id: 'customData', label: 'Custom data', Icon: DatabaseIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
   { id: 'reviews', label: 'Review', Icon: ShieldIcon },
@@ -312,6 +318,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <ToolsTab {...props.tools} />
         ) : shown === 'outlook' ? (
           <OutlookTab {...props.outlook} onOpenTools={() => setActive('tools')} />
+        ) : shown === 'customData' ? (
+          <CustomDataTab {...props.customData} onOpenPython={() => setActive('python')} />
         ) : shown === 'python' ? (
           <PythonTab {...props.python} />
         ) : shown === 'network' ? (

@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.60.0",
+  "version": "0.61.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -215,6 +215,23 @@
                 "hcLight": "walkthrough/media/skills-light.svg"
               },
               "altText": "The Skills tab, showing two skills, a note that they are found by searching rather than listing, the writable skills folder, extra read-only folders, the problems list, and the approval note."
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "customData",
+            "title": "Custom data - bring your own corpus",
+            "description": "The data you most want the assistant to know is rarely on disk. It is in a ticketing system, a wiki, a database, an internal API - reachable, but only through something that knows how your organisation authenticates.\n\nSo you point at a tool that returns records, and Light Code does the rest: embedding them, keeping them current, and searching them with `search_data`. The collector is an ordinary Python tool or an MCP tool you already have - one function signature rather than a connector per system.\n\nYou do not have to write it. Tell the assistant where the data lives and ask for a collector; it already has the contract and will offer one for you to approve.\n\nEach dataset has its own schedule - including **only when I ask**, which is the right answer for a source that is expensive or that only changes when somebody does something. Clear, rebuild and a retention window are all here, and a progress bar with a Stop for the first sync of something large.\n\n[Open the CustomData tab](command:lightCode.openSettings?%5B%22customData%22%5D)",
+            "media": {
+              "image": {
+                "light": "walkthrough/media/customData-light.svg",
+                "dark": "walkthrough/media/customData-dark.svg",
+                "hc": "walkthrough/media/customData-dark.svg",
+                "hcLight": "walkthrough/media/customData-light.svg"
+              },
+              "altText": "The Custom data tab, showing a dataset with its collector tool, record count, schedule and last sync, alongside buttons for syncing, rebuilding and clearing it."
             },
             "completionEvents": [
               "onStepSelected"

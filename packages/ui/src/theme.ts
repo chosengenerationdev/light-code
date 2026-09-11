@@ -240,3 +240,11 @@ export function sectionHeadingStyle(): CSSProperties {
     color: colors.accent,
   }
 }
+
+/**
+ * The editor's own monospace family.
+ *
+ * Named once here because it was written out inline in half a dozen components, each spelling the
+ * fallback slightly differently.
+ */
+export const monospaceFamily = 'var(--vscode-editor-font-family, monospace)'

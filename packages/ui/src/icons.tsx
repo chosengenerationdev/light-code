@@ -448,3 +448,14 @@ export function PauseIcon({ size = 14 }: IconProps): ReactElement {
     </svg>
   )
 }
+
+/** Stacked discs. The conventional glyph for a store of records. */
+export function DatabaseIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <ellipse cx="8" cy="3.5" rx="5.5" ry="2.2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 3.5v9c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2v-9" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  )
+}

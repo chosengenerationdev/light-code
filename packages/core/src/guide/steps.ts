@@ -28,6 +28,7 @@ export type GuideTab =
   | 'python'
   | 'tools'
   | 'skills'
+  | 'customData'
   | 'network'
   | 'appearance'
 
@@ -156,6 +157,20 @@ export const GUIDE_STEPS: readonly GuideStep[] = [
       'By default the summaries are not in the prompt either: the assistant searches for a relevant note with `search_docs`, the same way it finds tools. What stays is a count and an instruction to look, so it still knows notes exist - a description nobody sees is a note nobody reads. Switch it off in **Search** if you would rather every summary sat in the prompt.',
       'This is the answer to "it does not know about our internal libraries". It offers to write one when you explain something durable, and offers to correct one when something contradicts it - a stale skill is worse than a missing one.',
       'You get a writable folder plus any number of read-only ones, such as a shared team folder, with PATH-style precedence and shadowing reported rather than silently applied. Writing a skill needs approval too: it is prose that steers every future turn.',
+    ],
+  },
+  {
+    id: 'customData',
+    title: 'Custom data - bring your own corpus',
+    tab: 'customData',
+    completionEvents: ['onStepSelected'],
+    altText:
+      'The Custom data tab, showing a dataset with its collector tool, record count, schedule and last sync, alongside buttons for syncing, rebuilding and clearing it.',
+    body: [
+      'The data you most want the assistant to know is rarely on disk. It is in a ticketing system, a wiki, a database, an internal API - reachable, but only through something that knows how your organisation authenticates.',
+      'So you point at a tool that returns records, and Light Code does the rest: embedding them, keeping them current, and searching them with `search_data`. The collector is an ordinary Python tool or an MCP tool you already have - one function signature rather than a connector per system.',
+      'You do not have to write it. Tell the assistant where the data lives and ask for a collector; it already has the contract and will offer one for you to approve.',
+      'Each dataset has its own schedule - including **only when I ask**, which is the right answer for a source that is expensive or that only changes when somebody does something. Clear, rebuild and a retention window are all here, and a progress bar with a Stop for the first sync of something large.',
     ],
   },
   {

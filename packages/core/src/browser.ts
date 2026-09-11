@@ -120,3 +120,4 @@ export type { ScheduleToolInfo } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'
 
 export { chartTotals, CHART_TYPES, type ChartSpec, type ChartSeries, type ChartType } from './charts/types.js'
+export type { DatasetConfig, DatasetRecord } from './dataset/types.js'

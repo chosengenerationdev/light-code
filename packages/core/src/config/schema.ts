@@ -1,3 +1,4 @@
+import { datasetConfigSchema } from '../dataset/types.js'
 import { z } from 'zod'
 import { mcpServersSchema } from '../mcp/types.js'
 import { schedulesSchema } from '../schedule/types.js'
@@ -15,6 +16,16 @@ import { providerProfileSchema, type TlsSettings, tlsSettingsSchema } from '../p
  * program is found or run from, so a workspace able to set them would execute code of its
  * choosing the moment the panel opened.
  */
+/**
+ * Corpora the user collects themselves, each by running a Python tool on a schedule.
+ *
+ * **User-scope only** (invariant 5), and it earns that on both counts at once: an entry names a
+ * program to run *and* a vector store to write what it produced into. A workspace able to add one
+ * would run code of its choosing on a timer and ship the result to an endpoint of its choosing —
+ * the `python` threat and the `embedder` threat in a single key.
+ */
+export const datasetsConfigSchema = z.array(datasetConfigSchema)
+
 export const pythonConfigSchema = z
   .object({
     /**
@@ -384,6 +395,14 @@ export const retrievalConfigSchema = z
         mail: z.string().min(1),
         /** The team's shared skills. Often the same cluster as the code. */
         skills: z.string().min(1),
+        /**
+         * Corpora the user collects themselves.
+         *
+         * Routed separately for the same reason mail is: somebody's own collected data —
+         * tickets, extracts from an internal system — is frequently the thing they most want
+         * kept off a cluster their team shares.
+         */
+        data: z.string().min(1),
       })
       .partial(),
   })
@@ -391,7 +410,7 @@ export const retrievalConfigSchema = z
 export type RetrievalConfig = z.infer<typeof retrievalConfigSchema>
 
 /** The corpora that can each be sent to a different store. */
-export type CorpusPurpose = 'codebase' | 'docs' | 'mail' | 'skills'
+export type CorpusPurpose = 'codebase' | 'docs' | 'mail' | 'skills' | 'data'
 
 /**
  * Which store a corpus is written to and searched in.
@@ -670,6 +689,7 @@ export const configSchema = z
     programmingProfileId: z.string(),
     certDir: z.string(),
     python: pythonConfigSchema,
+    datasets: datasetsConfigSchema,
     /**
      * Keyed by workspace path. Per-workspace in *behaviour* (§8) but stored user-side and
      * user-scope-only (invariant 5) — a repo must not be able to ship its own

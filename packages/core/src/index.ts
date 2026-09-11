@@ -522,3 +522,14 @@ export { chartSpecSchema, chartTotals, CHART_TYPES, type ChartSpec, type ChartSe
 export { countBy, crossTab, numberOverTime, dailyChange, extractNumber } from './office/mailStats.js'
 export { resolveSecretRef, describeSecretRef, describeMissingSecret, ENV_REF_PREFIX } from './providers/auth/secretRef.js'
 export { TokenCommandAuthStrategy, type TokenCommandSettings } from './providers/auth/tokenCommand.js'
+export { DatasetStore, partitionByAge } from './dataset/store.js'
+export { syncDataset, clearDataset, datasetEmbedText, datasetVectorId } from './dataset/sync.js'
+export {
+  datasetConfigSchema,
+  datasetRecordSchema,
+  parseDatasetPayload,
+  COLLECTOR_TOOL_GUIDANCE,
+  type DatasetConfig,
+  type DatasetRecord,
+} from './dataset/types.js'
+export { createSearchDataTool } from './tools/searchData.js'

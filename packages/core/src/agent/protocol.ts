@@ -35,11 +35,12 @@ import type { ToolGroup, ToolPreview } from '../tools/types.js'
  * Named once and shared with the UI, so a target added here cannot be offered by a picker the
  * host does not handle - which would be a dropdown entry that silently does nothing.
  */
+import type { DatasetConfig } from '../dataset/types.js'
 import type { ChartSpec } from '../charts/types.js'
 
-export type ProbeTarget = 'codebase' | 'docs' | 'mail'
+export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data'
 
-export type IndexingKind = 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills'
+export type IndexingKind = 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills' | 'dataset'
 
 export interface ApigeeSummary {
   tokenUrl?: string | undefined
@@ -510,6 +511,12 @@ export type UiToHostMessage =
   | { type: 'pruneMail' }
   /** Throws away the whole mail index, vectors first. `resync` starts collecting again after. */
   | { type: 'clearMailIndex'; resync?: boolean }
+  | { type: 'requestDatasetStatus' }
+  | { type: 'saveDataset'; dataset: DatasetConfig }
+  | { type: 'deleteDataset'; id: string }
+  | { type: 'syncDataset'; id: string }
+  /** Throws one dataset away. `resync` runs the collector again straight after. */
+  | { type: 'clearDataset'; id: string; resync?: boolean }
   /**
    * Re-reads the last `days` of mail, replacing what is already held.
    *
@@ -1046,6 +1053,25 @@ export type HostToUiMessage =
       /** How many were removed, when this reports a clear rather than a publish. */
       cleared?: number
       error?: string
+    }
+  | {
+      type: 'datasetStatus'
+      datasets: (DatasetConfig & {
+        records: number
+        sizeBytes: number
+        oldest?: number
+        newest?: number
+        lastSyncedAt?: number
+        busy?: boolean
+        lastResult?: string
+        storeLabel: string
+      })[]
+      /** False when there is no embedding model, so the tab can say search is on words only. */
+      semantic: boolean
+      /** The Python tools that could serve as collectors. */
+      tools: { name: string; description: string }[]
+      /** The contract a collector must satisfy, so the tab can show it and the model can be told. */
+      guidance: string
     }
   | {
       type: 'outlookFolders'
