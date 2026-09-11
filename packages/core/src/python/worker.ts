@@ -50,6 +50,16 @@ export interface PythonWorkerOptions {
   /** Minimal by construction — see `minimalPythonEnv`. Never `process.env`. */
   env: NodeJS.ProcessEnv
   logger: Logger
+  /**
+   * Runs another tool on a Python tool's behalf.
+   *
+   * Supplied by the host, which is the only place that can see the registry, the approval gate
+   * and whether anybody is present to answer one. Absent means the feature is off for this
+   * session — an unattended scheduled run, where a prompt would never be answered.
+   */
+  callTool?:
+    | ((name: string, args: Record<string, unknown>, caller: string) => Promise<unknown>)
+    | undefined
   /** Per-call budget. A tool that hangs must not hang the turn. */
   timeoutMs?: number
 }
@@ -110,7 +120,18 @@ export class PythonWorker {
   }
 
   private onLine(line: string): void {
-    let frame: { id?: unknown; ok?: unknown; value?: unknown; error?: unknown; traceback?: unknown }
+    let frame: {
+      id?: unknown
+      ok?: unknown
+      value?: unknown
+      error?: unknown
+      traceback?: unknown
+      callback?: unknown
+      method?: unknown
+      name?: unknown
+      arguments?: unknown
+      caller?: unknown
+    }
     try {
       frame = JSON.parse(line) as typeof frame
     } catch {
@@ -119,6 +140,18 @@ export class PythonWorker {
       this.options.logger.debug('python worker output', line)
       return
     }
+    /*
+     * A request coming *up* the pipe, from a tool calling another tool.
+     *
+     * The worker is otherwise a strict request/response loop, so this is the one frame that is
+     * not an answer to something we asked. It is answered and the pending call is left alone —
+     * the tool is still running, blocked on this reply.
+     */
+    if (typeof frame.callback === 'string') {
+      void this.serveCallback(frame.callback, frame.name, frame.arguments, frame.caller)
+      return
+    }
+
     if (typeof frame.id !== 'number') return
     const entry = this.pending.get(frame.id)
     if (entry === undefined) return
@@ -133,6 +166,55 @@ export class PythonWorker {
           typeof frame.traceback === 'string' ? frame.traceback : undefined,
         ),
       )
+    }
+  }
+
+  /**
+   * Runs a tool on a Python tool's behalf and writes the answer back.
+   *
+   * The rules live in `options.callTool`, which the host supplies — this only carries the
+   * message. Refusing here would put a policy decision in the transport, where nothing can see
+   * the registry, the approval gate or whether anybody is present to answer.
+   */
+  private async serveCallback(
+    token: string,
+    name: unknown,
+    args: unknown,
+    caller: unknown,
+  ): Promise<void> {
+    const reply = (payload: Record<string, unknown>): void => {
+      // Best effort: a worker that died mid-call has nothing to tell, and throwing here would
+      // replace a tool's own error with a write failure on a closed pipe.
+      try {
+        this.child?.stdin?.write(`${JSON.stringify({ callback: token, ...payload })}\n`)
+      } catch {
+        this.options.logger.debug('python worker: could not answer a callback')
+      }
+    }
+
+    if (this.options.callTool === undefined) {
+      reply({
+        ok: false,
+        error:
+          'This session cannot call other tools from a Python tool. That is the case during an ' +
+          'unattended scheduled run, where nobody is present to approve one.',
+      })
+      return
+    }
+    if (typeof name !== 'string') {
+      reply({ ok: false, error: 'call_tool needs the name of a tool.' })
+      return
+    }
+
+    try {
+      const value = await this.options.callTool(
+        name,
+        (args ?? {}) as Record<string, unknown>,
+        typeof caller === 'string' ? caller : 'a Python tool',
+      )
+      reply({ ok: true, value })
+    } catch (error) {
+      reply({ ok: false, error: error instanceof Error ? error.message : String(error) })
     }
   }
 

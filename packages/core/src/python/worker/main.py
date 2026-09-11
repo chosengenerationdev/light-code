@@ -23,6 +23,7 @@ import json
 import re
 import sys
 import traceback
+import types
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
@@ -42,10 +43,115 @@ def _respond(payload: dict[str, Any]) -> None:
 
 
 _REAL_STDOUT = sys.stdout
+_REAL_STDIN = sys.stdin
+
+# Counts nested calls out to the host, so a loop is stopped rather than left to fill the pipe.
+_CALL_DEPTH = 0
+_MAX_DEPTH = 4
+_CURRENT_TOOL = ""
+_CALL_SEQ = 0
+
+
+class ToolError(RuntimeError):
+    """A tool this one called came back with a failure."""
+
+
+def call_tool(name: str, **arguments: Any) -> Any:
+    """Calls another tool and returns its result.
+
+    Available to every tool as ``light_code.call_tool``. Only other Python tools and MCP
+    tools can be reached; see the host for why.
+
+    This blocks the worker, which is correct: the tool asked for something and cannot
+    continue without it. The host may prompt the user before running it, so it can take as
+    long as a person takes to answer.
+    """
+    global _CALL_DEPTH
+    if _CALL_DEPTH >= _MAX_DEPTH:
+        raise ToolError(
+            f"tool calls are nested {_MAX_DEPTH} deep, which is almost certainly a loop - "
+            "a tool calling itself, or two calling each other"
+        )
+
+    global _CALL_SEQ
+    _CALL_SEQ += 1
+    # A counter, not ``id()``: CPython reuses an address the moment the object is collected, so
+    # two calls in a row could be handed the same token.
+    token = f"cb{_CALL_SEQ}"
+    _CALL_DEPTH += 1
+    try:
+        _respond(
+            {
+                "callback": token,
+                "method": "call_tool",
+                "name": name,
+                "arguments": arguments,
+                "caller": _CURRENT_TOOL,
+            }
+        )
+        # Read until the answer to *this* call arrives. Anything else on the stream would be a
+        # protocol error rather than something to skip, so it is reported rather than ignored.
+        while True:
+            line = _REAL_STDIN.readline()
+            if not line:
+                raise ToolError("the host closed the connection while waiting for " + name)
+            line = line.strip()
+            if not line:
+                continue
+            frame = json.loads(line)
+
+            if frame.get("callback") == token:
+                if frame.get("ok"):
+                    return frame.get("value")
+                raise ToolError(frame.get("error") or f"{name} failed")
+
+            # An ordinary request, arriving while this tool is blocked.
+            #
+            # It happens for real: the tool this one called is *another Python tool*, so the host
+            # sends it down the same pipe while we are still waiting. Skipping it would deadlock —
+            # the host waits for a reply that nobody is reading for — and treating it as an
+            # out-of-order answer, which the first version did, fails every nested call between
+            # two Python tools. So it is served here and the wait resumes.
+            if "method" in frame:
+                request_id = frame.get("id")
+                try:
+                    _respond({"id": request_id, "ok": True, "value": _handle(frame)})
+                except Exception as error:  # noqa: BLE001 - every failure goes back as a result
+                    _respond(
+                        {
+                            "id": request_id,
+                            "ok": False,
+                            "error": f"{type(error).__name__}: {error}",
+                            "traceback": traceback.format_exc(),
+                        }
+                    )
+                continue
+
+            raise ToolError(
+                "unexpected frame while waiting for " + name + "; this is a bug in Light Code"
+            )
+    finally:
+        _CALL_DEPTH -= 1
+
+
+def _install_helper_module() -> None:
+    """Publishes ``light_code`` so a tool can ``import light_code`` and call other tools.
+
+    A real module in ``sys.modules`` rather than a builtin or an injected global: a tool is
+    an ordinary Python file that must also be readable, lintable and runnable on its own
+    terms, and magic names appearing from nowhere break every one of those.
+    """
+    if "light_code" in sys.modules:
+        return
+    module = types.ModuleType("light_code")
+    module.call_tool = call_tool  # type: ignore[attr-defined]
+    module.ToolError = ToolError  # type: ignore[attr-defined]
+    sys.modules["light_code"] = module
 
 
 def _load(name: str, path: str) -> Any:
     """Imports a tool module from an explicit path, replacing any previous version."""
+    _install_helper_module()
     spec = importlib.util.spec_from_file_location(f"light_code_tool_{name}", path)
     if spec is None or spec.loader is None:
         raise ImportError(f"could not load {path}")
@@ -169,6 +275,10 @@ def _handle(request: dict[str, Any]) -> dict[str, Any]:
 
     if method == "call":
         name = params["name"]
+        # Recorded so a nested call can say *who* is asking. An approval prompt naming only the
+        # callee is the prompt people click through.
+        global _CURRENT_TOOL
+        _CURRENT_TOOL = name
         module = _MODULES.get(name)
         if module is None:
             module = _load(name, params["path"])

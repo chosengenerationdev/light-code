@@ -346,7 +346,13 @@ export function createCreatePythonTool(context: PythonToolContext): Tool<CreateP
       'callable as py__<name> from the next message onwards. Use this — not write_to_file — for anything described ' +
       'as a "tool", and for work awkward in shell commands: parsing, data transformation, anything needing a library. ' +
       'Define a `run` function with type hints; the schema and description are derived from the code, so there is no ' +
-      'metadata to keep in sync. The user must approve the source before it is saved.',
+      'metadata to keep in sync. The user must approve the source before it is saved. ' +
+      'A tool can call other tools: `import light_code` then ' +
+      '`light_code.call_tool("py__other", x=1)` or `light_code.call_tool("server__tool", ...)`. ' +
+      'Only other Python tools and MCP tools can be reached that way — running commands, editing ' +
+      'files and creating tools are deliberately out of reach from inside a tool body. The user ' +
+      'approves each nested call as they would any other, so use it for composing work rather ' +
+      'than for slipping past a prompt.',
   })
 }
 

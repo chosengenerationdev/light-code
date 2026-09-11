@@ -119,6 +119,9 @@ import {
   createOpenEmailTool,
   createMailCoverageTool,
   createMailStatsTool,
+  mayPythonToolCall,
+  describeNestedCall,
+  PYTHON_CALL_DENIED,
   createSearchDataTool,
   DatasetStore,
   syncDataset,
@@ -185,6 +188,7 @@ import {
   type OpenSearchConnection,
   type VectorStoreConfig,
   type HostToUiMessage,
+  type ToolPreview,
   resolveSecretRef,
   describeSecretRef,
   type ProbeTarget,
@@ -388,6 +392,85 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     workspaceRoot,
     storageDir,
     logger,
+    /*
+     * Lets one Python tool call another, or an MCP tool.
+     *
+     * Here rather than in the Python package because this is the only place that can see all
+     * three things the decision needs: the registry, the approval gate, and whether there is
+     * anybody present to answer a prompt. `callPolicy.ts` holds the rule and the reasoning.
+     */
+    callTool: async (name, args, caller) => {
+      if (!pythonNestedCallsAllowed) {
+        throw new Error(
+          'This run cannot call other tools from a Python tool: it is unattended, so nobody is ' +
+            'here to approve one.',
+        )
+      }
+
+      const registry = currentToolRegistry()
+      const tool = registry.get(name) ?? registry.get(`py__${name}`)
+      if (tool === undefined) {
+        throw new Error(
+          `There is no tool called "${name}". Settings \u2192 Tools lists everything callable; an ` +
+            'MCP tool is named with its server, like `filesystem__read_file`.',
+        )
+      }
+      if (!mayPythonToolCall(tool.name, tool.group)) throw new Error(PYTHON_CALL_DENIED)
+
+      /*
+       * Approved exactly as the model's own call would be, showing the tool's own preview.
+       *
+       * Invariant 8 does not stop applying because the caller is a program rather than a model —
+       * if anything it matters more, since nobody read the Python source as carefully as they
+       * read a diff. The prompt names the asking tool, because "allow filesystem__write_file?"
+       * with no indication of who wants it is the prompt people click through.
+       */
+      const context = pythonNestedContext
+      if (context === undefined) {
+        throw new Error('No turn is in progress, so there is nothing to run this against.')
+      }
+
+      /*
+       * Previewed from the tool itself, never from anything the caller said about it.
+       *
+       * Invariant 8 does not stop applying because the caller is a program: if anything it
+       * matters more, since nobody reads a Python file as carefully as they read a diff. A
+       * preview that throws degrades to text rather than becoming implicit approval.
+       */
+      let preview: ToolPreview
+      try {
+        preview = (await tool.preview?.(args as never, context)) ?? {
+          kind: 'text',
+          text: `${tool.name}(${JSON.stringify(args, null, 2)})`,
+        }
+      } catch (error) {
+        preview = {
+          kind: 'text',
+          text:
+            `${tool.name}(${JSON.stringify(args, null, 2)})\n\n` +
+            `Could not preview this: ${error instanceof Error ? error.message : String(error)}`,
+        }
+      }
+
+      const decision = await approvalGate.requestApproval({
+        id: `py-nested-${String(Date.now())}-${tool.name}`,
+        toolName: tool.name,
+        group: tool.group,
+        preview: {
+          ...preview,
+          // Says who is asking. "Allow filesystem__write_file?" with no indication of who wants
+          // it is exactly the prompt people click through.
+          ...(preview.kind === 'text'
+            ? { text: `${describeNestedCall(caller, tool.name)}\n\n${preview.text}` }
+            : {}),
+        },
+      })
+      if (decision !== 'approve') throw new Error(`The user did not allow "${tool.name}" to run.`)
+
+      const result = await tool.execute(args as never, context)
+      if (result.isError === true) throw new Error(String(result.content))
+      return result.content
+    },
     // Read at worker spawn, so a changed variable applies to the next worker rather than being
     // frozen at construction. Added to the allowlist in minimalPythonEnv, never a way past it.
     ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv } : {}),
@@ -776,6 +859,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Set while a scheduled run is in flight, so a user message can wait for it rather than interleave. */
   let scheduledRunInFlight: Promise<void> | undefined
+  /*
+   * What a nested call from a Python tool needs, captured when a turn starts.
+   *
+   * The manager is built once, at bridge construction, but a nested call has to run against the
+   * *current* turn's context — its abort signal, its read set, its session variables. Holding
+   * them here is what lets one long-lived callback serve every turn without the manager knowing
+   * anything about turns.
+   */
+  let pythonNestedContext: ToolExecutionContext | undefined
+  /** False during an unattended run: nobody is there to approve a nested call. */
+  let pythonNestedCallsAllowed = false
 
   /**
    * Approvals are keyed by workspace path but stored user-side (invariant 5) — a repo
@@ -2241,6 +2335,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // lives in the VSIX, so resolving it is a host concern (§4).
         ...(ripgrepPath !== undefined ? { ripgrepPath } : {}),
       }
+
+      /*
+       * Published for the duration of the turn, so a Python tool's nested call runs against this
+       * turn rather than a stale one. Cleared in the same `finally` that restores everything else.
+       */
+      pythonNestedContext = toolContext
+      pythonNestedCallsAllowed = schedule === undefined
 
       // `@`-mentions are resolved here, not by the model: the user named these paths
       // explicitly, so there is nothing to decide and nothing to approve. Confinement and

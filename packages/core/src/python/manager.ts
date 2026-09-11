@@ -75,6 +75,14 @@ export interface PythonStatus {
 
 export interface PythonManagerOptions {
   workspaceRoot: string | undefined
+  /**
+   * Lets a Python tool call another tool. Supplied by the host, absent where nobody can approve.
+   *
+   * See `worker.ts` for the transport and `bridge.ts` for the rules.
+   */
+  callTool?:
+    | ((name: string, args: Record<string, unknown>, caller: string) => Promise<unknown>)
+    | undefined
   /** Per-user storage; the venv lives here, outside the workspace. */
   storageDir: string
   logger: Logger
@@ -240,6 +248,14 @@ export class PythonManager {
         env,
         logger: this.options.logger,
         timeoutMs: this.timeoutMs,
+        /*
+         * Passed through rather than resolved here.
+         *
+         * The manager has no registry and no approval gate; the host has both. Threading the
+         * function means the rules are decided once, where the information is, instead of this
+         * file growing an opinion about which tools a tool may call.
+         */
+        ...(this.options.callTool !== undefined ? { callTool: this.options.callTool } : {}),
       })
       await this.refresh()
       this.ready = true
@@ -438,6 +454,14 @@ export class PythonManager {
         env,
         logger: this.options.logger,
         timeoutMs: this.timeoutMs,
+        /*
+         * Passed through rather than resolved here.
+         *
+         * The manager has no registry and no approval gate; the host has both. Threading the
+         * function means the rules are decided once, where the information is, instead of this
+         * file growing an opinion about which tools a tool may call.
+         */
+        ...(this.options.callTool !== undefined ? { callTool: this.options.callTool } : {}),
       })
       await this.refresh()
       this.ready = true

@@ -1,5 +1,21 @@
 # @chosengeneration/light-code
 
+## 0.38.0
+
+### Minor Changes
+
+- A Python tool can call other Python tools and MCP tools.
+
+  `import light_code` then `light_code.call_tool("py__other", x=1)`, or an MCP tool by its namespaced
+  name. The reachable set is exactly that — deliberately. A tool body is model-authored, which §13
+  calls the sharpest surface in the project, so approving one tool must not silently grant command
+  execution, file editing, or the ability to author the next tool. Everything dangerous is excluded
+  by construction rather than by a list somebody must remember to extend, and each nested call still
+  goes through the ordinary approval gate, naming the tool that is asking.
+
+  Absent in an unattended scheduled run, where nobody is there to approve one, and capped at four
+  levels so a tool calling itself fails with a sentence rather than consuming the worker.
+
 ## 0.37.3
 
 ### Patch Changes
