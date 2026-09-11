@@ -56,6 +56,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetExpertColor: (value: string) => void
   /** Only where the host has no theme of its own — see `AppearanceSectionProps.theme`. */
   choosesTheme?: boolean
+  /** False where this host has no Excel, Outlook or mail index — the tab is then not listed. */
+  offersOffice?: boolean
   theme?: 'system' | 'light' | 'dark'
   onSetTheme?: (theme: 'system' | 'light' | 'dark') => void
   mcpServers: McpServerState[]
@@ -86,6 +88,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onMeasureCost: () => void
   onClearPricing: () => void
   onSetKeepAlive: (enabled: boolean) => void
+  /** Saves the profile-based expert, where the host has one. */
+  onSaveProfileExpert?: (enabled: boolean, profileId: string) => void
   onSaveExpert: (
     enabled: boolean,
     path: string,
@@ -199,6 +203,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const present: Record<string, boolean> = {
     variables: props.variables !== undefined,
     reviews: props.reviews !== undefined,
+    // Absent rather than present-and-apologising where the host does not offer it. Same rule the
+    // tools follow, applied to the navigation.
+    outlook: props.offersOffice !== false,
   }
   const visible = TABS.filter((tab) => present[tab.id] ?? true)
   const shown = visible.some((tab) => tab.id === active) ? active : 'providers'
@@ -214,7 +221,12 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
       <div
         role="tablist"
         className="lc-scroll"
-        style={{ display: 'flex', borderBottom: `1px solid ${colors.border}`, flexShrink: 0, overflowX: 'auto' }}
+        style={{
+          display: 'flex',
+          borderBottom: `1px solid ${colors.border}`,
+          flexShrink: 0,
+          overflowX: 'auto',
+        }}
       >
         {/*
           Filtered rather than disabled. The Variables tab only exists where the host has the
@@ -255,9 +267,13 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             </button>
           )
         })}
-        </div>
+      </div>
       {/* Keyed on the tab so a switch re-mounts and replays the entry animation. */}
-      <div key={shown} className="lc-scroll lc-panel" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div
+        key={shown}
+        className="lc-scroll lc-panel"
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}
+      >
         {shown === 'reviews' && props.reviews !== undefined ? (
           <ReviewsTab {...props.reviews} />
         ) : shown === 'variables' && props.variables !== undefined ? (
@@ -279,7 +295,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <ProvidersTab
             onBrowse={props.onBrowse}
             {...(props.pickedPath === undefined ? {} : { pickedPath: props.pickedPath })}
-            {...(props.sharedProfileIds !== undefined ? { sharedProfileIds: props.sharedProfileIds } : {})}
+            {...(props.sharedProfileIds !== undefined
+              ? { sharedProfileIds: props.sharedProfileIds }
+              : {})}
             profiles={props.profiles}
             activeProfileId={props.activeProfileId}
             onSave={props.onSave}
@@ -328,6 +346,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <ExpertTab
             expert={props.expert}
             onSave={props.onSaveExpert}
+            {...(props.onSaveProfileExpert !== undefined
+              ? { onSaveProfileExpert: props.onSaveProfileExpert }
+              : {})}
             onRecheck={props.onRecheckExpert}
             onAssess={props.onAssessJunior}
             onClearAssessment={props.onClearAssessment}

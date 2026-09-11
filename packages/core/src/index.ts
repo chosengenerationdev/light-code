@@ -7,7 +7,12 @@ export type { ConfigStore, ConfigScope } from './platform/config.js'
 export type { Transport } from './platform/transport.js'
 export type { HttpClient, HttpRequestOptions, HttpResponse } from './platform/http.js'
 export { FetchHttpClient } from './platform/http.js'
-export { resolveConnectionTls, TlsConfigError, type TlsFileSettings, type ResolveTlsOptions } from './platform/connectionTls.js'
+export {
+  resolveConnectionTls,
+  TlsConfigError,
+  type TlsFileSettings,
+  type ResolveTlsOptions,
+} from './platform/connectionTls.js'
 
 export type { LightCodeConfig } from './config/schema.js'
 export { configSchema, parseConfig, ConfigValidationError } from './config/schema.js'
@@ -54,7 +59,13 @@ export {
   mentionExcludes,
 } from './context/mentionExcludes.js'
 export { compareMentionCandidates, matchesMentionQuery } from './context/mentionRanking.js'
-export { GUIDE_STEPS, GUIDE_TITLE, GUIDE_DESCRIPTION, type GuideStep, type GuideTab } from './guide/steps.js'
+export {
+  GUIDE_STEPS,
+  GUIDE_TITLE,
+  GUIDE_DESCRIPTION,
+  type GuideStep,
+  type GuideTab,
+} from './guide/steps.js'
 export { mergeScopes, USER_SCOPE_ONLY_KEYS, type ScopeMergeResult } from './config/scopes.js'
 export {
   applyWorkspaceOverrides,
@@ -95,7 +106,11 @@ export {
   type CertConfigInput,
   type ApigeeMtlsSettingsInput,
 } from './providers/types.js'
-export { resolveActiveProfile, NoActiveProfileError, ProfileNotFoundError } from './providers/registry.js'
+export {
+  resolveActiveProfile,
+  NoActiveProfileError,
+  ProfileNotFoundError,
+} from './providers/registry.js'
 export { ApiKeyAuthStrategy, NoAuthStrategy } from './providers/auth/apiKey.js'
 export {
   createAuthStrategy,
@@ -110,7 +125,12 @@ export {
   defaultTokenUrl,
   type ApigeeMtlsSettings,
 } from './providers/auth/apigeeMtls.js'
-export { buildCaBundle, buildConnectOptions, readNodeExtraCaCerts, type ConnectOptions } from './platform/tls.js'
+export {
+  buildCaBundle,
+  buildConnectOptions,
+  readNodeExtraCaCerts,
+  type ConnectOptions,
+} from './platform/tls.js'
 export {
   loadCerts,
   checkExpiry,
@@ -138,7 +158,12 @@ export { OpenAIProvider } from './providers/openai.js'
 export { AnthropicProvider, toAnthropicMessages } from './providers/anthropic.js'
 export { GeminiProvider, toGeminiContents } from './providers/gemini.js'
 export { createChatProvider } from './providers/factory.js'
-export { toOpenAITools, toAnthropicTools, toGeminiTools, normalizeObjectSchema } from './providers/schema.js'
+export {
+  toOpenAITools,
+  toAnthropicTools,
+  toGeminiTools,
+  normalizeObjectSchema,
+} from './providers/schema.js'
 export { providerPresets, type ProviderPreset } from './providers/presets.js'
 
 export {
@@ -151,7 +176,12 @@ export {
   type ReportedUsage,
 } from './context/budget.js'
 export { dropSupersededReads, type SupersedeResult } from './context/supersede.js'
-export { dropEvictedDocs, EVICTED_MARKER, FORGET_DOCS_TOOL, type EvictionResult } from './context/evict.js'
+export {
+  dropEvictedDocs,
+  EVICTED_MARKER,
+  FORGET_DOCS_TOOL,
+  type EvictionResult,
+} from './context/evict.js'
 export { createForgetDocsTool, type ForgetDocsParams } from './tools/forgetDocs.js'
 export {
   parseMentions,
@@ -179,6 +209,16 @@ export {
   type ExpertAnswer,
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
+export {
+  createAskProviderExpertTool,
+  type AskProviderExpertParams,
+} from './tools/askProviderExpert.js'
+export {
+  buildExpertPrompt,
+  type ProviderExpert,
+  type ProviderExpertRequest,
+  type ProviderExpertResult,
+} from './expert/providerExpert.js'
 export { createRecallExpertTool, type ExpertConsultationRecord } from './tools/recallExpert.js'
 export { buildExpertBriefing, type BriefingInput } from './expert/briefing.js'
 export { extractEstimate, ESTIMATE_INSTRUCTION, type ExpertEstimate } from './expert/estimate.js'
@@ -214,7 +254,11 @@ export {
   DEFAULT_QUERY_LIMITS,
   type QueryLimits,
 } from './rag/opensearch/query.js'
-export { OpenSearchIndexWriter, OWNED_INDEX_MARKER, type IndexedDocument } from './rag/opensearch/writer.js'
+export {
+  OpenSearchIndexWriter,
+  OWNED_INDEX_MARKER,
+  type IndexedDocument,
+} from './rag/opensearch/writer.js'
 export {
   VectorStoreError,
   type VectorDocument,
@@ -227,9 +271,15 @@ export {
 export { createVectorSearcher, createVectorIndexWriter } from './rag/vectorStoreFactory.js'
 export { syncVectorStores, describeSyncMismatch, type SyncResult } from './rag/syncStores.js'
 export { Embedder, EmbedderError, type EmbedderConfig } from './rag/embedder.js'
-export { createSearchOpensearchTool, type SearchOpensearchParams } from './tools/searchOpensearch.js'
+export {
+  createSearchOpensearchTool,
+  type SearchOpensearchParams,
+} from './tools/searchOpensearch.js'
 export { createSearchCodebaseTool, type SearchCodebaseParams } from './tools/searchCodebase.js'
-export { createSearchTeamSkillsTool, type SearchTeamSkillsParams } from './tools/searchTeamSkills.js'
+export {
+  createSearchTeamSkillsTool,
+  type SearchTeamSkillsParams,
+} from './tools/searchTeamSkills.js'
 export { createExcelDiagnoseTool } from './tools/office.js'
 export {
   createSearchMailTool,
@@ -257,7 +307,13 @@ export {
   type ScheduleProposal,
 } from './tools/scheduleFromChat.js'
 export { storeIdFor, type CorpusPurpose, type MailIndexConfig } from './config/schema.js'
-export { syncMail, refreshMail, pruneMail, type MailSyncResult, type HarvestedMessage } from './office/mailSync.js'
+export {
+  syncMail,
+  refreshMail,
+  pruneMail,
+  type MailSyncResult,
+  type HarvestedMessage,
+} from './office/mailSync.js'
 export {
   describeTeamSkillCollision,
   findTeamSkillsNamed,
@@ -305,9 +361,27 @@ export {
   type DocumentKind,
 } from './documents/extract.js'
 export { ZipArchive, ZipError } from './documents/zip.js'
-export { readTail, readLineWindow, countLines, formatBytes, SMALL_FILE_BYTES, type FilePart } from './tools/largeFile.js'
-export { SearchLog, type SearchLogEntry, type SearchLogSource, type SearchObserver } from './rag/searchLog.js'
-export { chunkFile, looksLikeText, DEFAULT_CHUNK_OPTIONS, type Chunk, type ChunkOptions } from './rag/chunk.js'
+export {
+  readTail,
+  readLineWindow,
+  countLines,
+  formatBytes,
+  SMALL_FILE_BYTES,
+  type FilePart,
+} from './tools/largeFile.js'
+export {
+  SearchLog,
+  type SearchLogEntry,
+  type SearchLogSource,
+  type SearchObserver,
+} from './rag/searchLog.js'
+export {
+  chunkFile,
+  looksLikeText,
+  DEFAULT_CHUNK_OPTIONS,
+  type Chunk,
+  type ChunkOptions,
+} from './rag/chunk.js'
 export {
   indexWorkspace,
   chunkSignatureFor,
@@ -405,7 +479,11 @@ export {
   type Skill,
   type LoadedSkills,
 } from './skills/index.js'
-export { createWriteSkillTool, createDeleteSkillTool, type SkillToolContext } from './skills/tools.js'
+export {
+  createWriteSkillTool,
+  createDeleteSkillTool,
+  type SkillToolContext,
+} from './skills/tools.js'
 
 export { PythonManager, type PythonStatus, type PythonManagerOptions } from './python/manager.js'
 export {
@@ -434,7 +512,12 @@ export {
 
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
 export { toolsForMode } from './modes/resolve.js'
-export { createCallToolTool, callToolParamsSchema, CALL_TOOL_NAME, type CallToolParams } from './tools/callTool.js'
+export {
+  createCallToolTool,
+  callToolParamsSchema,
+  CALL_TOOL_NAME,
+  type CallToolParams,
+} from './tools/callTool.js'
 export {
   createSearchDocsTool,
   runDocsSearch,
@@ -492,7 +575,13 @@ export { JsonTaskStore } from './platform/node/taskStore.js'
 
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'
 export { deriveTitle } from './history/titles.js'
-export { toTranscript, formatToolArguments, toolCallReason, CONTROL_TOOLS, chartFromToolCall } from './history/transcript.js'
+export {
+  toTranscript,
+  formatToolArguments,
+  toolCallReason,
+  CONTROL_TOOLS,
+  chartFromToolCall,
+} from './history/transcript.js'
 export { redactTask, redactMessage } from './history/redactTask.js'
 
 export {
@@ -518,10 +607,31 @@ export {
 } from './tools/index.js'
 
 export { createShowChartTool } from './tools/showChart.js'
-export { chartSpecSchema, chartTotals, CHART_TYPES, type ChartSpec, type ChartSeries, type ChartType } from './charts/types.js'
-export { countBy, crossTab, numberOverTime, dailyChange, extractNumber } from './office/mailStats.js'
-export { resolveSecretRef, describeSecretRef, describeMissingSecret, ENV_REF_PREFIX } from './providers/auth/secretRef.js'
-export { TokenCommandAuthStrategy, type TokenCommandSettings } from './providers/auth/tokenCommand.js'
+export {
+  chartSpecSchema,
+  chartTotals,
+  CHART_TYPES,
+  type ChartSpec,
+  type ChartSeries,
+  type ChartType,
+} from './charts/types.js'
+export {
+  countBy,
+  crossTab,
+  numberOverTime,
+  dailyChange,
+  extractNumber,
+} from './office/mailStats.js'
+export {
+  resolveSecretRef,
+  describeSecretRef,
+  describeMissingSecret,
+  ENV_REF_PREFIX,
+} from './providers/auth/secretRef.js'
+export {
+  TokenCommandAuthStrategy,
+  type TokenCommandSettings,
+} from './providers/auth/tokenCommand.js'
 export { DatasetStore, partitionByAge } from './dataset/store.js'
 export { syncDataset, clearDataset, datasetEmbedText, datasetVectorId } from './dataset/sync.js'
 export {

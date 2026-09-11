@@ -1,9 +1,23 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
-import { describePricing, type ExpertPricing, type ExpertSavings, type JuniorAssessment } from '@light-code/core/browser'
+import {
+  describePricing,
+  type ExpertPricing,
+  type ExpertSavings,
+  type JuniorAssessment,
+} from '@light-code/core/browser'
 import { SavingsPanel } from './SavingsPanel.js'
-import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import {
+  badgeStyle,
+  colors,
+  fontFamily,
+  labelStyle,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  textFieldStyle,
+} from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
+import { ExpertProfilePanel } from './ExpertProfilePanel.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -24,6 +38,15 @@ const EXPERT_MODELS = [
 ] as const
 
 export interface ExpertState {
+  /**
+   * Which kind of expert this host has. Absent means the Claude CLI.
+   *
+   * `profile` renders an entirely different panel rather than hiding fields in this one — see
+   * `ExpertProfilePanel` for what is missing from it and why that is the point.
+   */
+  mode?: 'cli' | 'profile'
+  profileId?: string
+  profiles?: { id: string; label: string }[]
   enabled: boolean
   available: boolean
   path: string
@@ -67,6 +90,8 @@ export interface ExpertTabProps {
     model: string,
     limits: { maxSpendUsd: number; maxConsultations: number },
   ) => void
+  /** Saves the profile-based expert. Only ever called in `profile` mode. */
+  onSaveProfileExpert?: (enabled: boolean, profileId: string) => void
 }
 
 /**
@@ -77,6 +102,28 @@ export interface ExpertTabProps {
  * to make them rare is to be honest about the trade rather than presenting a free upgrade.
  */
 export function ExpertTab(props: ExpertTabProps): ReactElement {
+  /*
+   * A whole different panel, chosen before any of this tab's state exists.
+   *
+   * Branching inside the render instead would mean the CLI fields keep their state, their
+   * resync effect and their save handler in a host that has no CLI — a save away from writing
+   * `path: 'claude'` into the config of a server that has no such binary.
+   */
+  if (props.expert?.mode === 'profile') {
+    return (
+      <ExpertProfilePanel
+        enabled={props.expert.enabled}
+        profileId={props.expert.profileId}
+        profiles={props.expert.profiles ?? []}
+        onSave={(enabled, profileId) => props.onSaveProfileExpert?.(enabled, profileId)}
+      />
+    )
+  }
+  return <ExpertCliTab {...props} />
+}
+
+/** The Claude CLI expert, unchanged. Everything about cost and budget belongs to this one. */
+function ExpertCliTab(props: ExpertTabProps): ReactElement {
   const [enabled, setEnabled] = useState(props.expert?.enabled ?? false)
   const [path, setPath] = useState(props.expert?.path ?? 'claude')
   const [model, setModel] = useState(props.expert?.model ?? '')
@@ -120,10 +167,10 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
       </div>
 
       <p style={{ color: colors.muted, fontSize: 12, fontFamily, margin: '0 0 12px' }}>
-        Lets your everyday model consult Claude on hard problems — planning a change across
-        several files, diagnosing a bug it has already failed to fix, or weighing two designs.
-        It decides when the question is worth it, and each consultation appears in the
-        transcript with what it cost.
+        Lets your everyday model consult Claude on hard problems — planning a change across several
+        files, diagnosing a bug it has already failed to fix, or weighing two designs. It decides
+        when the question is worth it, and each consultation appears in the transcript with what it
+        cost.
       </p>
 
       <div
@@ -149,7 +196,12 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           */}
           <button
             type="button"
-            style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
+            style={{
+              ...secondaryButtonStyle(),
+              fontSize: 10,
+              padding: '1px 6px',
+              marginLeft: 'auto',
+            }}
             title="Look for the Claude CLI again"
             onClick={props.onRecheck}
           >
@@ -163,7 +215,15 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         )}
       </div>
 
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 12, fontSize: 12 }}>
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 6,
+          marginBottom: 12,
+          fontSize: 12,
+        }}
+      >
         <input
           type="checkbox"
           style={{ marginTop: 2 }}
@@ -173,8 +233,8 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         <span style={{ color: colors.foreground }}>
           Enable Claude as the expert
           <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 2 }}>
-            Consultations are billed to your Claude account at its usual rates. Off by
-            default; nothing runs and nothing is spent until you turn this on.
+            Consultations are billed to your Claude account at its usual rates. Off by default;
+            nothing runs and nothing is spent until you turn this on.
           </span>
         </span>
       </label>
@@ -257,7 +317,9 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
             aria-label="Maximum consultations per task"
             style={{ ...textFieldStyle(), width: 70 }}
           />
-          <span style={{ color: colors.muted, fontSize: 11 }}>consultations — whichever comes first.</span>
+          <span style={{ color: colors.muted, fontSize: 11 }}>
+            consultations — whichever comes first.
+          </span>
         </div>
 
         {/*
@@ -274,14 +336,18 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           Those numbers are what the budget is set from and what the expert is told when it plans
           to fit, so being wrong about them is not cosmetic.
         */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+        <div
+          style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}
+        >
           <button
             type="button"
             style={secondaryButtonStyle()}
             disabled={props.expert?.available !== true || props.expert.measuringStep !== undefined}
             onClick={props.onMeasureCost}
           >
-            {props.expert?.measuringStep !== undefined ? 'Measuring…' : 'Measure what a consultation costs'}
+            {props.expert?.measuringStep !== undefined
+              ? 'Measuring…'
+              : 'Measure what a consultation costs'}
           </button>
           {props.expert?.pricing !== undefined && (
             <button type="button" style={secondaryButtonStyle()} onClick={props.onClearPricing}>
@@ -291,7 +357,9 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         </div>
 
         {props.expert?.measuringStep !== undefined && (
-          <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>{props.expert.measuringStep}</p>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0 0' }}>
+            {props.expert.measuringStep}
+          </p>
         )}
 
         {/*
@@ -348,7 +416,9 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
             style={{ marginTop: 2 }}
           />
           <span>
-            <span style={{ display: 'block', fontSize: 13 }}>Keep the session warm during a task</span>
+            <span style={{ display: 'block', fontSize: 13 }}>
+              Keep the session warm during a task
+            </span>
             <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
               The expert&rsquo;s cache lasts an hour, so a long break means the next consultation
               pays full price again. This sends one trivial consultation every fifty minutes while a
@@ -363,8 +433,8 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         {props.expert?.reportsCost === false && (
           <p style={{ color: colors.error, fontSize: 11, margin: '6px 0 0' }}>
             <strong>Your plan does not report a cost per consultation</strong>, so the spending
-            limit above can never be reached — the running total stays at zero. Use the
-            consultation limit instead; it is checked first and works on any plan.
+            limit above can never be reached — the running total stays at zero. Use the consultation
+            limit instead; it is checked first and works on any plan.
           </p>
         )}
         {props.expert !== undefined && props.expert.reportsCost === undefined && (
@@ -374,10 +444,10 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           </p>
         )}
         <span style={{ color: colors.muted, fontSize: 11 }}>
-          0 means no limit. When a limit is reached the expert stops being offered for that task
-          and the assistant carries on alone; starting a new task resets it. A count limit is
-          worth setting even if you set a spend limit, because the CLI does not always report a
-          price and an unpriced consultation still costs money.
+          0 means no limit. When a limit is reached the expert stops being offered for that task and
+          the assistant carries on alone; starting a new task resets it. A count limit is worth
+          setting even if you set a spend limit, because the CLI does not always report a price and
+          an unpriced consultation still costs money.
         </span>
       </div>
 
@@ -393,17 +463,26 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
       >
         <strong style={{ color: colors.foreground }}>What the expert may do:</strong> read and
         search this workspace, so it can gather its own context. It cannot edit files or run
-        commands. Every change still goes through Light Code&rsquo;s own tools and your
-        approval, so nothing reaches your repository without passing the usual prompt.
+        commands. Every change still goes through Light Code&rsquo;s own tools and your approval, so
+        nothing reaches your repository without passing the usual prompt.
       </div>
 
       {/*
         The assessment sits below the settings because it is a *result*, not a setting — and
         above Save so it is not mistaken for something Save applies to.
       */}
-      <div style={{ marginBottom: 16, border: `1px solid ${colors.border}`, borderRadius: 3, padding: 8 }}>
+      <div
+        style={{
+          marginBottom: 16,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 3,
+          padding: 8,
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <strong style={{ fontSize: 12, color: colors.foreground }}>How good is the junior?</strong>
+          <strong style={{ fontSize: 12, color: colors.foreground }}>
+            How good is the junior?
+          </strong>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             <button
               type="button"
@@ -438,15 +517,23 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         </p>
 
         {props.expert?.assessing === true && (
-          <p style={{ color: colors.muted, fontSize: 11, marginBottom: 0 }}>{props.expert.assessmentStep ?? 'Working…'}</p>
+          <p style={{ color: colors.muted, fontSize: 11, marginBottom: 0 }}>
+            {props.expert.assessmentStep ?? 'Working…'}
+          </p>
         )}
 
         {props.expert?.assessment !== undefined && (
-          <AssessmentView assessment={props.expert.assessment} currentModel={props.expert.model ?? model} />
+          <AssessmentView
+            assessment={props.expert.assessment}
+            currentModel={props.expert.model ?? model}
+          />
         )}
       </div>
 
-      <button type="button" style={primaryButtonStyle(false)}         onClick={() =>
+      <button
+        type="button"
+        style={primaryButtonStyle(false)}
+        onClick={() =>
           props.onSave(enabled, path.trim(), model.trim(), {
             maxSpendUsd: numeric(maxSpend),
             maxConsultations: Math.round(numeric(maxCalls)),
@@ -466,7 +553,10 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
  * and the only way for the user to judge whether it is fair is to read what the junior actually
  * said. Hiding that would make it an oracle; showing it makes it an argument.
  */
-function AssessmentView(props: { assessment: JuniorAssessment; currentModel: string }): ReactElement {
+function AssessmentView(props: {
+  assessment: JuniorAssessment
+  currentModel: string
+}): ReactElement {
   const [open, setOpen] = useState(false)
   const { assessment } = props
   /*
@@ -477,14 +567,19 @@ function AssessmentView(props: { assessment: JuniorAssessment; currentModel: str
 
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', fontSize: 11 }}>
+      <div
+        style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', fontSize: 11 }}
+      >
         <span style={{ fontFamily: monospace, color: colors.foreground }}>{assessment.model}</span>
         <span style={{ color: colors.muted }}>
           via {assessment.profileLabel} · {new Date(assessment.assessedAt).toLocaleDateString()}
           {assessment.costUsd !== undefined ? ` · $${assessment.costUsd.toFixed(4)}` : ''}
         </span>
         {stale && (
-          <span style={{ ...badgeStyle('warning'), fontSize: 9 }} title="Assessed for a different model than the one now active">
+          <span
+            style={{ ...badgeStyle('warning'), fontSize: 9 }}
+            title="Assessed for a different model than the one now active"
+          >
             different model
           </span>
         )}
@@ -527,7 +622,9 @@ function AssessmentView(props: { assessment: JuniorAssessment; currentModel: str
                 borderRadius: 3,
               }}
             >
-              {probe.error !== undefined ? `No answer — ${probe.error}` : probe.answer.trim() || '(empty)'}
+              {probe.error !== undefined
+                ? `No answer — ${probe.error}`
+                : probe.answer.trim() || '(empty)'}
             </pre>
           </div>
         ))}

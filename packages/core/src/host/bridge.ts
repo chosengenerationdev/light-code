@@ -8,6 +8,7 @@ import path from 'node:path'
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
+import { buildExpertPrompt, type ProviderExpert } from '../expert/providerExpert.js'
 import {
   createExcelOpenTool,
   createExcelDiagnoseTool,
@@ -74,6 +75,7 @@ import {
   type ExpertPricing,
   type CodeGenerator,
   createAskExpertTool,
+  createAskProviderExpertTool,
   createRecallExpertTool,
   type ExpertConsultationRecord,
   createSearchOpensearchTool,
@@ -1326,6 +1328,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Rebuilt on every settings load, so a profile change reaches the next turn. */
   let cachedCodeGenerator: CodeGenerator | undefined
+  /** Resolved with the rest of settings, so changing the profile takes effect on the next turn. */
+  let cachedProviderExpert: { consult: ProviderExpert; label: string } | undefined
   /** Undefined means the defaults; an empty array means the user cleared the list. */
   let cachedMentionExcludes: string[] | undefined
   /** Undefined until a consultation has told us. See `recordConsultation`. */
@@ -1394,6 +1398,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const { config } = await configManager.load()
     cachedApprovals = approvalsFrom(config.approvals)
     cachedCodeGenerator = codeGeneratorFor(config)
+    cachedProviderExpert = providerExpertFor(config)
     cachedProgrammingProfileId = config.programmingProfileId
     cachedOffice = config.office ?? {}
     cachedMail = config.mail ?? {}
@@ -1512,6 +1517,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     guideMediaBase?: string
     allowProgrammingProfile: boolean
     choosesTheme: boolean
+    offersOffice: boolean
   } {
     return {
       nativeGuide: ui.openWalkthrough !== undefined,
@@ -1525,9 +1531,29 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * as `nativeGuide`: a host with native onboarding is the host with a native theme.
        */
       choosesTheme: ui.openWalkthrough === undefined,
+      /*
+       * So the Outlook tab is *absent* rather than present and explaining itself.
+       *
+       * A tab that exists only to say the feature is not available here teaches that the product
+       * is bigger than it is, and it is the first thing anybody clicks. Same rule the tools
+       * follow: absent beats present-and-failing.
+       */
+      offersOffice: officeAvailable(),
       allowProgrammingProfile: services.allowProgrammingProfile === true,
       ...(services.guideMediaBase !== undefined ? { guideMediaBase: services.guideMediaBase } : {}),
     }
+  }
+
+  /**
+   * Whether Excel, Outlook and the mail index exist in this host.
+   *
+   * Two questions in one place: is this Windows, and does this host want the feature. They were
+   * one question asked in six places, which was fine while the answer was only ever the platform
+   * — the moment a second term appeared, six call sites would have had to learn about it, and the
+   * one that did not would have left a tab, a timer or a tool behind.
+   */
+  function officeAvailable(): boolean {
+    return officeSupported() && services.offersOffice !== false
   }
 
   const userGate = new WebviewApprovalGate(post)
@@ -1879,7 +1905,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      */
     // Constructed only when something will use it: a bridge object built for a feature nobody
     // switched on is a disposal path that has to stay correct for no benefit.
-    if (officeSupported() && (cachedOffice.excel === true || cachedOffice.outlook === true)) {
+    if (officeAvailable() && (cachedOffice.excel === true || cachedOffice.outlook === true)) {
       const officeOptions = { bridge: office() }
       if (cachedOffice.excel === true) {
         combined.register(createExcelSessionsTool(officeOptions))
@@ -1952,9 +1978,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }),
       )
     }
+    /*
+     * A provider profile answering instead, where the host says that is what it has.
+     *
+     * Checked before the CLI branch and returning early, so the two can never both register a
+     * tool called `ask_expert` — whichever won would depend on registration order, which is the
+     * kind of thing that works until somebody reorders two lines.
+     */
+    const providerExpert = cachedProviderExpert
+    if (providerExpert !== undefined) {
+      combined.register(createRecallExpertTool({ history: () => expertAdvice }))
+      combined.register(
+        createAskProviderExpertTool({
+          consult: providerExpert.consult,
+          label: providerExpert.label,
+          onAdvice: (record) => expertAdvice.push(record),
+        }),
+      )
+    }
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
-    if (expert !== undefined) {
+    else if (expert !== undefined) {
       // Free by construction: it has no path to the CLI, only to what was already said.
       combined.register(createRecallExpertTool({ history: () => expertAdvice }))
       combined.register(
@@ -3171,12 +3215,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * was showing. Losing a freshly finished assessment that way is exactly the reported
        * bug. So config is read again, and only availability is reported as unknown.
        */
-      const settings = await configManager.load().then(
-        (loaded) => loaded.config.expert,
+      const loaded = await configManager.load().then(
+        (result) => result.config,
         () => undefined,
       )
+      const settings = loaded?.expert
       post({
-        ...expertMessageFrom(settings),
+        // The whole thing, profiles included. Passing only half of what the constructor takes is
+        // the same mistake as having two constructors, and this failure path is where the last
+        // one hid: it runs rarely, so a field missing here is noticed much later than elsewhere.
+        ...expertMessageFrom(settings, loaded?.profiles),
         available: false,
         path: settings?.path ?? expertCliPath ?? 'claude',
         reason: `Could not check whether the Claude CLI is available: ${reason}`,
@@ -3194,9 +3242,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   function expertMessageFrom(
     settings: LightCodeConfig['expert'],
+    profiles?: ProviderProfile[],
   ): Extract<HostToUiMessage, { type: 'expert' }> {
     return {
       type: 'expert',
+      /*
+       * Sent from here and nowhere else. CLAUDE.md records what happened the last time two
+       * `expert` messages were built separately: measured pricing reached the success path and
+       * not the failure path, and the panel showed a dash for something that had been measured.
+       */
+      ...(services.expertMode === 'profile'
+        ? {
+            mode: 'profile' as const,
+            profiles: (profiles ?? []).map((profile) => ({ id: profile.id, label: profile.label })),
+            ...(settings?.profileId !== undefined ? { profileId: settings.profileId } : {}),
+          }
+        : {}),
       enabled: settings?.enabled === true,
       available: false,
       path: settings?.path ?? expertCliPath ?? 'claude',
@@ -3237,7 +3298,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     post({
       // Everything from settings comes from one place, so the two paths cannot drift again.
-      ...expertMessageFrom(config.expert),
+      ...expertMessageFrom(config.expert, config.profiles),
       available: detected.available,
       path: configured,
       ...(detected.version !== undefined ? { version: detected.version } : {}),
@@ -3591,7 +3652,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     enabled: boolean,
     cliPath?: string,
     model?: string,
-    limits?: { maxSpendUsd?: number; maxConsultations?: number },
+    limits?: { maxSpendUsd?: number; maxConsultations?: number; profileId?: string },
   ): Promise<void> {
     try {
       const { config } = await configManager.load()
@@ -3604,6 +3665,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...(limits?.maxSpendUsd !== undefined ? { maxSpendUsd: limits.maxSpendUsd } : {}),
           ...(limits?.maxConsultations !== undefined
             ? { maxConsultations: limits.maxConsultations }
+            : {}),
+          /*
+           * Cleared means cleared. With the spread of `config.expert` above, omitting an empty
+           * value would keep the old one, so choosing "none" in the picker would appear to do
+           * nothing — the same three-way distinction the Python block had to learn.
+           */
+          ...(limits?.profileId !== undefined
+            ? limits.profileId.length > 0
+              ? { profileId: limits.profileId }
+              : { profileId: undefined }
             : {}),
         },
       })
@@ -3864,7 +3935,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function runMailSync(reason: string): Promise<void> {
     if (mailBusy) return
     const config = await loadSettings()
-    if (config.mail?.enabled !== true || cachedOffice.outlook !== true || !officeSupported()) return
+    if (config.mail?.enabled !== true || cachedOffice.outlook !== true || !officeAvailable()) return
     const chosen = config.mail.folders ?? []
     if (chosen.length === 0) return
     /*
@@ -4303,7 +4374,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       clearInterval(mailTimer)
       mailTimer = undefined
     }
-    if (config.mail?.enabled !== true || !officeSupported() || config.office?.outlook !== true)
+    if (config.mail?.enabled !== true || !officeAvailable() || config.office?.outlook !== true)
       return
 
     const minutes = config.mail.syncMinutes ?? 15
@@ -4323,7 +4394,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     post({
       type: 'mailStatus',
       enabled: config.mail?.enabled === true,
-      available: officeSupported() && config.office?.outlook === true,
+      available: officeAvailable() && config.office?.outlook === true,
       folders: config.mail?.folders ?? [],
       syncMinutes: config.mail?.syncMinutes ?? 15,
       retentionMonths: config.mail?.retentionMonths ?? 6,
@@ -4548,7 +4619,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function handleRefreshMail(days: number): Promise<void> {
     if (mailBusy) return
     const config = await loadSettings()
-    if (cachedOffice.outlook !== true || !officeSupported()) return
+    if (cachedOffice.outlook !== true || !officeAvailable()) return
     const chosen = config.mail?.folders ?? []
     if (chosen.length === 0) {
       mailLastResult = 'No folders selected.'
@@ -6439,6 +6510,62 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * one config key this adds, and the key is absent by default, so nothing changes for anyone who
    * does not set it.
    */
+  /**
+   * The expert, when this host consults a provider profile rather than the Claude CLI.
+   *
+   * Deliberately the same shape as `codeGeneratorFor` below, because it is the same act: one
+   * request to a *different* configured profile, no tools offered, the text that comes back. The
+   * differences from the CLI expert are all absences — no budget, no cost, no session — and they
+   * are absences in this function rather than options set to zero somewhere.
+   */
+  function providerExpertFor(
+    config: LightCodeConfig,
+  ): { consult: ProviderExpert; label: string } | undefined {
+    if (services.expertMode !== 'profile') return undefined
+    if (config.expert?.enabled !== true) return undefined
+
+    const id = config.expert.profileId
+    if (id === undefined || id.length === 0) return undefined
+
+    const profile = config.profiles?.find((candidate) => candidate.id === id)
+    /*
+     * A named profile that no longer exists means no expert, said out loud.
+     *
+     * Not a fallback to the chat model: the whole point is a *second opinion*, and quietly
+     * asking the same model that is stuck would be advice the user had no reason to distrust.
+     */
+    if (profile === undefined) {
+      logger.warn(
+        `the expert profile "${id}" is configured but no such profile exists; the expert is unavailable`,
+      )
+      return undefined
+    }
+
+    return {
+      label: profile.label,
+      consult: async (request) => {
+        const provider = createChatProvider(
+          profile,
+          httpClient,
+          authStrategyFor(config, profile),
+          logger,
+        )
+        let text = ''
+        for await (const chunk of provider.streamChat(
+          [{ role: 'user', content: buildExpertPrompt(request) }],
+          {
+            // No tools offered: it is being asked for judgement, and offering tools invites it to
+            // reach for one it has no way to run.
+            ...(request.signal !== undefined ? { signal: request.signal } : {}),
+          },
+        )) {
+          if (chunk.type === 'text') text += chunk.text
+        }
+        return { advice: text, producedBy: profile.label }
+      },
+    }
+  }
+
   function codeGeneratorFor(config: LightCodeConfig): CodeGenerator | undefined {
     /*
      * Off unless the host offers it. Checked here rather than only in the UI: the tool's
@@ -7485,6 +7612,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(message.maxConsultations !== undefined
           ? { maxConsultations: message.maxConsultations }
           : {}),
+        ...(message.profileId !== undefined ? { profileId: message.profileId } : {}),
       })
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
@@ -7755,7 +7883,7 @@ ${contents}
       type: 'tools',
       dispatcher,
       office: {
-        supported: officeSupported(),
+        supported: officeAvailable(),
         excel: cachedOffice.excel === true,
         outlook: cachedOffice.outlook === true,
       },

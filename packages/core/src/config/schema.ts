@@ -143,6 +143,16 @@ export const expertConfigSchema = z
     /** Overrides the model the CLI would otherwise choose. */
     model: z.string(),
     /**
+     * Which provider profile answers as the expert, where the host consults one.
+     *
+     * Named rather than duplicated: the expert is a profile the user has already set up, with
+     * its own base URL, auth and TLS. A second copy of those fields here would be a second place
+     * to rotate a credential, and the one nobody remembers is the one that breaks.
+     *
+     * Ignored by a host that consults the Claude CLI, which is selected by `path` and `model`.
+     */
+    profileId: z.string(),
+    /**
      * Dollars the expert may cost within one task. 0 means no limit.
      *
      * Per task rather than per day: it matches the expert session's own scope, and a total

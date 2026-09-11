@@ -296,6 +296,13 @@ export function App(props: AppProps): ReactElement {
     choosesTheme: boolean
     theme?: 'system' | 'light' | 'dark'
   }>({ choosesTheme: false })
+  /**
+   * Whether this host offers Excel, Outlook and the mail index.
+   *
+   * Defaults to true so nothing disappears while the first `settings` message is in flight — a
+   * tab that appears a moment after the panel opens is less alarming than one that vanishes.
+   */
+  const [offersOffice, setOffersOffice] = useState(true)
   /** The global tool timeout, when one is set. Undefined leaves each tool at its own default. */
   const [toolTimeoutSeconds, setToolTimeoutSeconds] = useState<number | undefined>(undefined)
   const [projectSettings, setProjectSettings] = useState<{
@@ -432,6 +439,7 @@ export function App(props: AppProps): ReactElement {
         setModeId(message.modeId)
         setProgrammingProfileId(message.programmingProfileId)
         setAllowProgrammingProfile(message.allowProgrammingProfile)
+        setOffersOffice(message.offersOffice !== false)
         setThemeChoice({
           choosesTheme: message.choosesTheme === true,
           ...(message.theme === undefined ? {} : { theme: message.theme }),
@@ -1006,6 +1014,17 @@ export function App(props: AppProps): ReactElement {
     },
   }
 
+  /**
+   * Saving the profile-based expert.
+   *
+   * Deliberately not folded into `saveExpert`: that one writes `path`, `model` and two spend
+   * caps, none of which mean anything to a host that consults a provider profile — and one of
+   * them would write `path: 'claude'` into the config of a server with no such binary.
+   */
+  const saveProfileExpert = (enabled: boolean, profileId: string): void => {
+    props.transport.post({ type: 'setExpert', enabled, profileId } satisfies UiToHostMessage)
+  }
+
   const saveExpert = (
     enabled: boolean,
     path: string,
@@ -1141,7 +1160,13 @@ export function App(props: AppProps): ReactElement {
             may spend are the same thought, and both belong to this conversation rather than to
             the application.
           */}
-          {view === 'chat' && (
+          {/*
+            Absent where the expert is a provider profile.
+            Nothing meters a profile per call, so a spend figure would be a zero that reads as
+            "this has cost you nothing yet" rather than "nothing is counting" — and a cap over
+            it would look like protection while binding on nothing.
+          */}
+          {view === 'chat' && expert?.mode !== 'profile' && (
             <ExpertBudget
               enabled={expertEnabled}
               modeId={modeId}
@@ -1323,6 +1348,7 @@ export function App(props: AppProps): ReactElement {
               applyExpert(value)
               props.transport.post({ type: 'setExpertColor', value } satisfies UiToHostMessage)
             }}
+            offersOffice={offersOffice}
             {...(themeChoice.choosesTheme ? { choosesTheme: true } : {})}
             {...(themeChoice.theme === undefined ? {} : { theme: themeChoice.theme })}
             onSetTheme={(theme) => {
@@ -1365,6 +1391,7 @@ export function App(props: AppProps): ReactElement {
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}
+            onSaveProfileExpert={saveProfileExpert}
             onAssessJunior={() =>
               props.transport.post({ type: 'assessJunior' } satisfies UiToHostMessage)
             }

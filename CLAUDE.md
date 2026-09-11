@@ -1117,6 +1117,82 @@ The installed command is still `light-code`. Scoped packages default to restrict
 `publishConfig.access: "public"` is set — without it the first publish 402s asking for a
 paid plan, which reads as a billing problem rather than a missing flag.
 
+### The host has a smaller feature set than the extension (2026-09-11)
+
+Asked for directly, and the fence is theirs: *"i want to reduce features in node"*, *"please all
+these changes are only for node host only"*, *"please dont touch extension, they are in good
+shape"*. So none of this is a deletion. `packages/core` and `packages/ui` are shared, and a
+deletion would reach the extension, where these features are in daily use.
+
+**The mechanism is that a host declares what it offers, and absent means offered.** Three optional
+`HostServices` fields (`httpClient`, `offersOffice`, `expertMode`) which the extension supplies
+none of, so its behaviour is byte-identical to before. `apps/host/src/noOffice.test.ts` and
+`providerExpert.test.ts` each end by asserting the extension declares neither — that is the half
+that keeps "node only" true as this grows.
+
+- **No Excel, no Outlook, no mail index** (`offersOffice: false`). Both attach over COM to an
+  application on somebody's *desktop*, which a service account has no route to even on Windows,
+  and a mailbox belongs to a person rather than to the account the process runs as. The tools are
+  not registered and the Outlook tab is **not listed** — absent beats present-and-apologising, the
+  same rule the tools already followed.
+  **Six `officeSupported()` calls became one `officeAvailable()`**, because the platform check was
+  one question asked in six places. That was fine while the answer was only ever "is this
+  Windows"; a second term makes six call sites that must each learn about it, and the one that did
+  not would leave a tab, a timer or a tool behind.
+- **The expert is a configured provider profile** (`expertMode: 'profile'`), not the Claude CLI —
+  *"claude may not be the expert any more, it could be any LLM that is configured as expert"*.
+  There is no `claude` binary on a server, and the gateway answering the chat already has a
+  stronger model behind it. `expert.profileId` names it; a profile that no longer exists means **no
+  expert**, never a fall back to the chat model, because the point of an expert is a *second*
+  opinion and asking the model that is already stuck produces advice with nothing to distrust.
+- **All of §12b's cost machinery belongs to the CLI expert alone.** No budget, no per-consultation
+  cost, no savings figure, no session resume, no keep-alive, no pricing measurement — *"cost is no
+  longer an issue"*. Every one of those exists because the CLI charges per call and prices a cold
+  start an order of magnitude above a resumed one. **Rendering them zeroed would be worse than
+  omitting them:** a spend cap over something nothing meters looks like protection and is not, and
+  a savings figure derived from a price nobody measured is a number that gets believed. That is
+  §12b's own rule about reporting a floor rather than a guess, applied by leaving the controls out.
+- **Two tools rather than one with a flag**, and it is the descriptions that force it. The CLI
+  expert reads the workspace, continues one conversation, and costs a measurable amount — so it
+  tells the model to spend carefully and that a follow-up is cheap. None of that is true of a
+  profile, and a description carrying it would make the model hoard consultations that cost
+  nothing and expect a memory that does not exist. The *name* stays `ask_expert`, because the
+  approval gate, the transcript, `recall_expert_advice` and the Junior guidance all refer to it.
+
+### The Node host's stability, and four ways a reply could vanish (2026-09-11)
+
+Reported together from a Linux server: the model list said "Loading…" for ever, Test Connection
+said "Testing…", Save closed its dialog and saved nothing, and the UI said disconnected every few
+minutes until the server was restarted. Four separate defects, and between them they explain all
+of it. `apps/host/src/streamResume.test.ts` drives a **running server** rather than asserting
+about source, because every claim here is about behaviour across two connections and a gap.
+
+- **A session must outlive the event stream carrying it.** `/api/events` built a whole session —
+  bridge, MCP connections, Python worker, schedule timer — after disposing the previous one, and
+  the client reconnects one second after any drop, in a loop. **This is the bug the extension
+  already fixed once** (§19: the bridge was created per `resolveWebviewView`, so hiding the panel
+  destroyed the conversation). A stream now *attaches* to a session. Replies produced while
+  nothing is attached are buffered, bounded, and flushed on reconnect — previously written into a
+  dead socket, which is a control that spins for ever.
+- **A rejected POST must be reported.** `fetch(...).catch(...)` fires only for a *network* error;
+  401, 403 and the server's own 409 all resolve happily and were dropped on the floor. That is
+  "Save closed the window and saved nothing" exactly. A 409 is retried — it only means the stream
+  is not up yet — and every other status is surfaced with the server's reason.
+- **A request with no deadline cannot fail, and something that cannot fail cannot report.** A
+  connect to a host that *drops* packets rather than refusing them waits for the kernel, and a
+  spinner is indistinguishable from a slow answer. `withHeadersDeadline` bounds the wait for
+  response *headers* and **never the body** — a streamed completion legitimately takes minutes, so
+  a deadline on the whole exchange would cancel long generations, a worse bug than the one fixed.
+- **Two ways the process could hang or die**: `server.close()` waited on an event stream that never
+  ends, and a `write` to a departed socket emits an error event that with no listener ends the
+  process. A server that dies when a browser tab closes is not stable.
+- **SSE needs `Cache-Control: no-transform` and `X-Accel-Buffering: no`.** A proxy that buffers a
+  response holds every event until it has "enough", which for a stream is for ever. Neither is
+  needed on loopback, which is exactly why their absence survived until this ran on a server.
+  **The test found a live bug on its own**: `securityHeaders()` sets its own `Cache-Control` and
+  object spread is last-one-wins, so the header added *before* it was silently dropped. Only
+  reading the real response showed that.
+
 ### Admin and user modes — **`apps/host` only** (2026-08-2x)
 
 User-requested, and the scope fence is theirs and explicit: *"this is only for node version"*,

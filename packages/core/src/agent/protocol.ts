@@ -742,6 +742,14 @@ export type UiToHostMessage =
       model?: string
       maxSpendUsd?: number
       maxConsultations?: number
+      /**
+       * Which profile answers as the expert, where the host consults one.
+       *
+       * Empty means none chosen, which leaves the expert unavailable rather than falling back to
+       * the chat model — the point of an expert is a *second* opinion, and quietly asking the
+       * model that is already stuck would produce advice with nothing to distrust about it.
+       */
+      profileId?: string
     }
   | { type: 'saveProfile'; profile: ProfileInput }
   | { type: 'duplicateProfile'; id: string }
@@ -899,6 +907,14 @@ export type HostToUiMessage =
       nativeGuide: boolean
       /** True where the host has no theme of its own, so the user picks one. */
       choosesTheme?: boolean
+      /**
+       * Whether this host offers Excel, Outlook and the mail index.
+       *
+       * False makes the Outlook tab *absent* rather than present and explaining that the feature
+       * is not available here — a tab whose only content is an apology teaches that the product
+       * is bigger than it is, and it is the first thing anybody clicks.
+       */
+      offersOffice?: boolean
       /**
        * Where the in-app guide's diagrams are served from, without a trailing slash.
        *
@@ -1254,6 +1270,20 @@ export type HostToUiMessage =
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
   | {
       type: 'expert'
+      /**
+       * Which kind of expert this host has.
+       *
+       * `cli` is the Claude command line, with everything that follows from being charged per
+       * call: a budget, a measured price, a savings figure, a resumable session. `profile` is a
+       * configured provider profile, which has none of those and must not render controls for
+       * them — a budget box over something nothing meters is a promise the product cannot keep.
+       *
+       * Absent means `cli`, so the extension is unaffected.
+       */
+      mode?: 'cli' | 'profile'
+      /** In `profile` mode: which profile answers, and what there is to choose from. */
+      profileId?: string
+      profiles?: { id: string; label: string }[]
       enabled: boolean
       available: boolean
       path: string
