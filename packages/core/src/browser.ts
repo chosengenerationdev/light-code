@@ -90,6 +90,7 @@ export type {
   NetworkSettingsSummary,
   TestConnectionStep,
   PythonSettings,
+  PythonEnvVariable,
   SearchConnectionSummary,
   ToolCatalogueEntry,
   SearchConnectionInput,

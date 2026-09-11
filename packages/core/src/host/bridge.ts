@@ -41,6 +41,7 @@ import {
   type FormValue,
 } from '../tools/askUserForm.js'
 import { confineToAny, normalizeForComparison } from '../fs/confine.js'
+import { isValidEnvName, pythonEnvEntries, pythonEnvSecretRef } from '../python/env.js'
 import { approveTool, forgetTool, isValidToolName, toolFileName } from '../python/registry.js'
 import { isTranscriptMessage } from './backgroundMessages.js'
 import {
@@ -304,8 +305,10 @@ async function toSummary(profile: ProviderProfile, secrets: SecretStore): Promis
     const { passphraseRef, ...certs } = profile.auth.certs
     summary.apigee = apigee
     summary.certs = certs
-    summary.hasClientSecret = clientSecretRef !== undefined && (await secrets.get(clientSecretRef)) !== undefined
-    summary.hasCertPassphrase = passphraseRef !== undefined && (await secrets.get(passphraseRef)) !== undefined
+    summary.hasClientSecret =
+      clientSecretRef !== undefined && (await secrets.get(clientSecretRef)) !== undefined
+    summary.hasCertPassphrase =
+      passphraseRef !== undefined && (await secrets.get(passphraseRef)) !== undefined
   }
   return summary
 }
@@ -370,7 +373,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // having to remember — one owner, as with every default in this file.
   const configManager = new ConfigManager(services.configStore, services.workspaceRoot)
   const httpClient = new FetchHttpClient()
-  const conversation = new Conversation(workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined)
+  const conversation = new Conversation(
+    workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined,
+  )
 
   // Wrapped so the current task knows which spilled results it owns — deleting a task has
   // to delete its spilled output, and only this layer sees the handles.
@@ -393,6 +398,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     workspaceRoot,
     storageDir,
     logger,
+    // Read at spawn, never held: a variable the user declared secret has its value fetched when
+    // a child is about to start, so rotating it reaches the next worker with nothing to clear.
+    secrets,
     /*
      * Lets one Python tool call another, or an MCP tool.
      *
@@ -477,7 +485,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv } : {}),
     ...(services.submitForReview !== undefined
       ? {
-          submitForReview: (request: { name: string; content: string; existingContent: string; producedBy?: string }) =>
+          submitForReview: (request: {
+            name: string
+            content: string
+            existingContent: string
+            producedBy?: string
+          }) =>
             services.submitForReview?.({ kind: 'python-tool', ...request }) ?? Promise.resolve(''),
         }
       : {}),
@@ -515,7 +528,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * injects into its own future context, and plain markdown in git is the main thing
    * standing between that and an unreviewed instruction (§13).
    */
-  const defaultSkillsDir = workspaceRoot !== undefined ? path.join(workspaceRoot, '.lightcode', 'skills') : undefined
+  const defaultSkillsDir =
+    workspaceRoot !== undefined ? path.join(workspaceRoot, '.lightcode', 'skills') : undefined
 
   /**
    * Where skills are written, and the ordered list of folders they are read from.
@@ -736,7 +750,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const source = await fs.readFile(filePath, 'utf8')
       const described = await python.describe(name, filePath)
       if (described === undefined) {
-        throw new Error(`"${name}" could not be loaded, so it was not approved. Fix the file and try again.`)
+        throw new Error(
+          `"${name}" could not be loaded, so it was not approved. Fix the file and try again.`,
+        )
       }
 
       await approveTool(dir, name, source, described)
@@ -764,7 +780,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * no idea why.
        */
       const existing = skills.find((skill) => skill.name === name)
-      if (existing !== undefined && existing.sourceDir !== undefined && existing.sourceDir !== skillsDir) {
+      if (
+        existing !== undefined &&
+        existing.sourceDir !== undefined &&
+        existing.sourceDir !== skillsDir
+      ) {
         throw new Error(
           `"${name}" lives in ${existing.sourceDir}, which is a read-only skills folder. Delete the file there, or remove the folder in Settings.`,
         )
@@ -916,7 +936,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return key === '__no_workspace__' ? key : normalizeForComparison(path.resolve(key))
   }
 
-  function approvalsFrom(stored: Record<string, WorkspaceApprovals> | undefined): WorkspaceApprovals {
+  function approvalsFrom(
+    stored: Record<string, WorkspaceApprovals> | undefined,
+  ): WorkspaceApprovals {
     if (stored === undefined) return {}
     const exact = stored[approvalsKey]
     if (exact !== undefined) return exact
@@ -994,7 +1016,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       logger,
       // Read per request, so raising the limit applies to the next call rather than after a
       // restart — which matters most when someone is raising it *because* a call just timed out.
-      timeoutMs: () => (cachedToolTimeoutSeconds === undefined ? undefined : cachedToolTimeoutSeconds * 1000),
+      timeoutMs: () =>
+        cachedToolTimeoutSeconds === undefined ? undefined : cachedToolTimeoutSeconds * 1000,
     })
     return officeBridge
   }
@@ -1151,7 +1174,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * — a search that returns confident neighbours for a query it misunderstood looks exactly
    * like one that worked — so the queries have to be visible somewhere to be judged at all.
    */
-  const searchLog = new SearchLog(50, () => post({ type: 'searchLog', entries: [...searchLog.list()] }))
+  const searchLog = new SearchLog(50, () =>
+    post({ type: 'searchLog', entries: [...searchLog.list()] }),
+  )
 
   let expertSpend = { usd: 0, consultations: 0, unpriced: 0, keepAlives: 0 }
 
@@ -1286,7 +1311,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     void configManager
       .load()
       .then(async ({ config }) => {
-        await configManager.save('user', { ...config, expert: { ...config.expert, reportsCost: learned } })
+        await configManager.save('user', {
+          ...config,
+          expert: { ...config.expert, reportsCost: learned },
+        })
         await postExpert()
       })
       .catch(() => {
@@ -1391,14 +1419,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Switched off mid-task, the timer goes with it rather than waiting for its next tick.
     if (!cachedKeepAlive) stopKeepAlive()
     cachedExpertLimits = {
-      ...(config.expert?.maxSpendUsd !== undefined ? { maxSpendUsd: config.expert.maxSpendUsd } : {}),
-      ...(config.expert?.maxConsultations !== undefined ? { maxConsultations: config.expert.maxConsultations } : {}),
+      ...(config.expert?.maxSpendUsd !== undefined
+        ? { maxSpendUsd: config.expert.maxSpendUsd }
+        : {}),
+      ...(config.expert?.maxConsultations !== undefined
+        ? { maxConsultations: config.expert.maxConsultations }
+        : {}),
     }
     cachedMentionExcludes = config.filesystem?.excludeFromMentions
     cachedReadRoots = (config.filesystem?.readRoots ?? [])
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
-    skillsDir = (config.skills?.dir !== undefined ? resolveSkillDir(config.skills.dir) : undefined) ?? defaultSkillsDir
+    skillsDir =
+      (config.skills?.dir !== undefined ? resolveSkillDir(config.skills.dir) : undefined) ??
+      defaultSkillsDir
     extraSkillDirs = (config.skills?.paths ?? [])
       .map(resolveSkillDir)
       .filter((dir): dir is string => dir !== undefined)
@@ -1415,7 +1449,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   function announceConfigRecovery(): void {
     const recovery = configManager.takeRecovery()
     if (recovery === undefined) return
-    const where = recovery.quarantinedTo === undefined ? '' : ` The damaged file was kept as ${recovery.quarantinedTo}.`
+    const where =
+      recovery.quarantinedTo === undefined
+        ? ''
+        : ` The damaged file was kept as ${recovery.quarantinedTo}.`
     const message = `Your ${recovery.scope} settings file could not be read and was restored from the last good copy.${where} Anything changed immediately before this may need setting again.`
     logger.warn(message)
     post({ type: 'error', message })
@@ -1433,7 +1470,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * `approvals` is the one part a caller may override, because `saveApprovals` has the new value
    * in hand before the cache is refreshed.
    */
-  function settingsMessageFrom(approvals: WorkspaceApprovals = cachedApprovals): Extract<HostToUiMessage, { type: 'settings' }> {
+  function settingsMessageFrom(
+    approvals: WorkspaceApprovals = cachedApprovals,
+  ): Extract<HostToUiMessage, { type: 'settings' }> {
     return {
       type: 'settings',
       modeId: findMode(cachedModeId).id,
@@ -1442,9 +1481,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
       ...(cachedTheme === undefined ? {} : { theme: cachedTheme }),
-      ...(cachedToolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds: cachedToolTimeoutSeconds }),
+      ...(cachedToolTimeoutSeconds === undefined
+        ? {}
+        : { toolTimeoutSeconds: cachedToolTimeoutSeconds }),
       readRoots: cachedReadRoots,
-      ...(cachedProgrammingProfileId !== undefined ? { programmingProfileId: cachedProgrammingProfileId } : {}),
+      ...(cachedProgrammingProfileId !== undefined
+        ? { programmingProfileId: cachedProgrammingProfileId }
+        : {}),
       ...hostCapabilities(),
     }
   }
@@ -1555,7 +1598,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   function currentToolRegistry(
     expert?: { cli: ClaudeCliInfo; model?: string },
     search?: { client: OpenSearchClient; store: VectorStoreConfig; indexes: string[] },
-    codebase?: { searcher: VectorSearcher; embedder: Embedder; index: string; connectionLabel: string },
+    codebase?: {
+      searcher: VectorSearcher
+      embedder: Embedder
+      index: string
+      connectionLabel: string
+    },
     /** Retrieval for `search_docs`, when a store, an embedder and an indexed corpus exist. */
     docs?: { searcher: VectorSearcher; embedder: Embedder; index: string },
     /**
@@ -1575,7 +1623,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * an embedder and a connection, both of which are awaited, and this function is synchronous
      * so the tool block stays byte-stable for a whole turn (§12).
      */
-    teamSkills?: { searcher: VectorSearcher; embedder: Embedder; collection: string; owner?: string },
+    teamSkills?: {
+      searcher: VectorSearcher
+      embedder: Embedder
+      collection: string
+      owner?: string
+    },
     /**
      * Semantic ranking for indexed mail, when a store and embedder exist.
      *
@@ -1638,7 +1691,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }) as unknown as Parameters<typeof combined.register>[0],
       )
     }
-    for (const tool of python.generatedTools()) combined.register(tool, { dispatchOnly: dispatcher })
+    for (const tool of python.generatedTools())
+      combined.register(tool, { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
     /*
@@ -1708,8 +1762,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           : {}),
         ...(services.submitForReview !== undefined
           ? {
-              submitForReview: (request: { name: string; content: string; existingContent: string }) =>
-                services.submitForReview?.({ kind: 'skill' as const, ...request }) ?? Promise.resolve(''),
+              submitForReview: (request: {
+                name: string
+                content: string
+                existingContent: string
+              }) =>
+                services.submitForReview?.({ kind: 'skill' as const, ...request }) ??
+                Promise.resolve(''),
             }
           : {}),
       }
@@ -1730,7 +1789,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            * would be two things to keep in step.
            */
           schedulableTools: () =>
-            filterToolsForSchedule(combined.list(), { allowedTools: combined.list().map((entry) => entry.name) })
+            filterToolsForSchedule(combined.list(), {
+              allowedTools: combined.list().map((entry) => entry.name),
+            })
               .filter((entry) => entry.name !== 'schedule_prompt')
               .map((entry) => ({ name: entry.name, description: entry.description })),
           requestForm: async (fields, title) => {
@@ -1754,7 +1815,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         createSearchOpensearchTool({
           client: search.client,
           connectionLabel: search.store.label,
-          ...(search.store.defaultIndex !== undefined ? { defaultIndex: search.store.defaultIndex } : {}),
+          ...(search.store.defaultIndex !== undefined
+            ? { defaultIndex: search.store.defaultIndex }
+            : {}),
           availableIndexes: search.indexes,
           ...(search.store.limits !== undefined ? { limits: search.store.limits } : {}),
         }),
@@ -1908,7 +1971,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            * units rather than from what it believes consultations cost in general.
            */
           budgetSummary: () =>
-            describeExpertBudget(expertSpend, effectiveExpertLimits(), pricingForPrompt(cachedPricing)),
+            describeExpertBudget(
+              expertSpend,
+              effectiveExpertLimits(),
+              pricingForPrompt(cachedPricing),
+            ),
           onEstimate: (estimate) => {
             taskExpertEstimate = estimate
             postExpertSpend()
@@ -1957,7 +2024,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   async function postProfiles(): Promise<void> {
     const { config } = await configManager.load()
-    const profiles = await Promise.all((config.profiles ?? []).map((profile) => toSummary(profile, secrets)))
+    const profiles = await Promise.all(
+      (config.profiles ?? []).map((profile) => toSummary(profile, secrets)),
+    )
     post({ type: 'profiles', profiles, activeProfileId: config.activeProfileId })
   }
 
@@ -1990,7 +2059,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * here would make "Test Connection passed but chat fails" possible, which would destroy
    * the whole point of that button (§10).
    */
-  function buildAuthContext(config: LightCodeConfig, profile: ProviderProfile): AuthStrategyContext {
+  function buildAuthContext(
+    config: LightCodeConfig,
+    profile: ProviderProfile,
+  ): AuthStrategyContext {
     return {
       secrets,
       http: httpClient,
@@ -2002,9 +2074,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       // Invariant 6: whatever the loader actually read becomes unreadable to file tools.
       onCertPaths: (paths) => {
-        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch((error: unknown) => {
-          logger.warn('could not add cert path to the deny list', String(error))
-        })
+        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(
+          (error: unknown) => {
+            logger.warn('could not add cert path to the deny list', String(error))
+          },
+        )
       },
       onExpiryWarning: (warning) => {
         if (warnedExpiries.has(warning.message)) return
@@ -2025,7 +2099,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function knownSecretValues(): Promise<string[]> {
     try {
       const { config } = await configManager.load()
-      const refs = (config.profiles ?? []).flatMap((profile) => SECRET_REFS_PER_PROFILE.map((refFor) => refFor(profile.id)))
+      const refs = (config.profiles ?? []).flatMap((profile) =>
+        SECRET_REFS_PER_PROFILE.map((refFor) => refFor(profile.id)),
+      )
       /*
        * References a profile names directly, not just the ones this product wrote.
        *
@@ -2040,7 +2116,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const values = await Promise.all(
         [...new Set([...refs, ...named])].map((ref) => resolveSecretRef(ref, { secrets })),
       )
-      cachedSecretValues = values.filter((value): value is string => value !== undefined && value.length > 0)
+      cachedSecretValues = values.filter(
+        (value): value is string => value !== undefined && value.length > 0,
+      )
       return [...cachedSecretValues]
     } catch (error) {
       // Redaction must never be the reason a transcript fails to save; the pattern-based
@@ -2178,7 +2256,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     schedule?: Schedule,
   ): Promise<void> {
     if (workspaceRoot === undefined) {
-      post({ type: 'error', message: 'Open a folder in VS Code before using Light Code — tools need a workspace root.' })
+      post({
+        type: 'error',
+        message: 'Open a folder in VS Code before using Light Code — tools need a workspace root.',
+      })
       return
     }
 
@@ -2197,7 +2278,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       const profile = resolveActiveProfile(config)
       // The wire adapter is chosen per profile; auth composes with any of them (§10).
-      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+      const provider = createChatProvider(
+        profile,
+        httpClient,
+        authStrategyFor(config, profile),
+        logger,
+      )
       const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
       const expertCliInfo = await resolveExpert(config)
       const search = await resolveSearch(config)
@@ -2214,7 +2300,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // only costs the model that hint, never the tool.
       const searchIndexes =
         search?.opensearch !== undefined
-          ? await search.opensearch.listIndexes().then((list) => list.map((i) => i.name)).catch(() => [])
+          ? await search.opensearch
+              .listIndexes()
+              .then((list) => list.map((i) => i.name))
+              .catch(() => [])
           : []
 
       // Rebuilt whenever the profile or expert availability changes, so the model can
@@ -2247,7 +2336,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ? undefined
           : scheduledRunGuidance(
               schedule,
-              filterToolsForSchedule(currentToolRegistry(undefined, undefined, undefined, undefined, false).list(), schedule)
+              filterToolsForSchedule(
+                currentToolRegistry(undefined, undefined, undefined, undefined, false).list(),
+                schedule,
+              )
                 .map((tool) => tool.name)
                 .filter((name) => name !== 'attempt_completion'),
             )
@@ -2274,8 +2366,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * searchable instead would quietly reach past the choice.
        */
       const skillsSearchable =
-        skillRetrievalEnabled(config.retrieval) && (schedule === undefined || schedule.allowedSkills === undefined)
-      const turnSkills = schedule === undefined ? skills : skillsForSchedule(skills, schedule.allowedSkills)
+        skillRetrievalEnabled(config.retrieval) &&
+        (schedule === undefined || schedule.allowedSkills === undefined)
+      const turnSkills =
+        schedule === undefined ? skills : skillsForSchedule(skills, schedule.allowedSkills)
 
       const desiredPrompt = buildSystemPrompt(workspaceRoot, {
         model: profile.model,
@@ -2296,7 +2390,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * instruction, which by definition has to be present before the model decides anything.
          */
         skills: skillsSearchable
-          ? [renderAlwaysSkills(turnSkills), renderSkillsHintForPrompt(skills.filter((skill) => skill.always !== true).length)]
+          ? [
+              renderAlwaysSkills(turnSkills),
+              renderSkillsHintForPrompt(skills.filter((skill) => skill.always !== true).length),
+            ]
               .filter((section) => section.length > 0)
               .join('\n\n')
           : renderSkillsForPrompt(turnSkills),
@@ -2323,7 +2420,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          */
         ...(() => {
           const parts: string[] = []
-          if (activeMode.guidance !== undefined && (activeMode.requiresExpert !== true || expertCliInfo !== undefined)) {
+          if (
+            activeMode.guidance !== undefined &&
+            (activeMode.requiresExpert !== true || expertCliInfo !== undefined)
+          ) {
             parts.push(activeMode.guidance)
           }
           if (scheduledGuidance !== undefined) parts.push(scheduledGuidance)
@@ -2396,7 +2496,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Silently dropping an image on a text-only model would look like the model ignoring
       // it; the composer already hides attachment, so this is the backstop.
       if (images !== undefined && images.length > 0 && capabilities.supportsVision) {
-        turnOptions.images = images.map((image) => ({ mediaType: image.mediaType, data: image.data }))
+        turnOptions.images = images.map((image) => ({
+          mediaType: image.mediaType,
+          data: image.data,
+        }))
       } else if (images !== undefined && images.length > 0) {
         post({
           type: 'error',
@@ -2420,74 +2523,79 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // derived — so the live view and a reopened task mark the same work.
       let expertInformed = false
       const fullRegistry = currentToolRegistry(
-          expertCliInfo !== undefined
-            ? { cli: expertCliInfo, ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}) }
-            : undefined,
-          search?.opensearch !== undefined
-            ? { client: search.opensearch, store: search.store, indexes: searchIndexes }
-            : undefined,
-          /*
-           * Only when all three exist. Resolved once per turn like everything else feeding
-           * the prefix, so the tool block stays byte-stable for the whole loop (§12).
-           */
-          search !== undefined && embedder !== undefined && codebaseIndex !== undefined
-            ? {
-                searcher: search.searcher,
-                embedder,
-                index: codebaseIndex,
-                connectionLabel: search.store.label,
-                /*
-                 * The team alias and this machine's identity, so `scope: "team"` has somewhere
-                 * to look and every hit can say whose it is. Both absent on a solo install,
-                 * where team scope is simply unavailable and says so.
-                 */
-                ...(config.embedder?.indexAlias !== undefined ? { teamAlias: config.embedder.indexAlias } : {}),
-                ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
-              }
-            : undefined,
-          /*
-           * Retrieval for `search_docs`. Absent leaves it matching lexically over the live
-           * registry, which is deliberately still useful — the dispatcher must not depend on
-           * a vector store existing, or turning it on without one would hide every MCP tool
-           * behind a search that could never find them.
-           */
-          search !== undefined && embedder !== undefined && docsIndex !== undefined
-            ? { searcher: search.searcher, embedder, index: docsIndex }
-            : undefined,
-          dispatcherEnabled(config.retrieval),
-          skillsSearchable,
-          /*
-           * The team's shared skills. Needs an alias, a connection and an embedder — without
-           * all three there is nothing to search, and the tool is simply not offered.
-           */
-          config.embedder?.skillsAlias !== undefined && search !== undefined && embedder !== undefined
-            ? {
-                searcher: search.searcher,
-                embedder,
-                collection: config.embedder.skillsAlias,
-                ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
-              }
-            : undefined,
-          /*
-           * Mail ranking. Resolved against whichever store `retrieval.stores.mail` names, which
-           * is frequently a local Qdrant while the code goes to a shared cluster — mail is the
-           * corpus people most want kept off a team's infrastructure.
-           */
-          mailCollection !== undefined && mailSearch !== undefined && embedder !== undefined
-            ? { searcher: mailSearch.searcher, embedder, collection: mailCollection }
-            : undefined,
-          /*
-           * Datasets share one collection, resolved against whichever store `retrieval.stores.data`
-           * names — the same per-corpus routing §12e added, for the same reason: somebody's own
-           * collected data is frequently the corpus they most want kept off a shared cluster.
-           */
-          await (async () => {
-            const collection = datasetCollectionName(config)
-            const search = await resolveDatasetSearch(config)
-            return collection !== undefined && search !== undefined && embedder !== undefined
-              ? { searcher: search.searcher, embedder, collection }
-              : undefined
-          })(),
+        expertCliInfo !== undefined
+          ? {
+              cli: expertCliInfo,
+              ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
+            }
+          : undefined,
+        search?.opensearch !== undefined
+          ? { client: search.opensearch, store: search.store, indexes: searchIndexes }
+          : undefined,
+        /*
+         * Only when all three exist. Resolved once per turn like everything else feeding
+         * the prefix, so the tool block stays byte-stable for the whole loop (§12).
+         */
+        search !== undefined && embedder !== undefined && codebaseIndex !== undefined
+          ? {
+              searcher: search.searcher,
+              embedder,
+              index: codebaseIndex,
+              connectionLabel: search.store.label,
+              /*
+               * The team alias and this machine's identity, so `scope: "team"` has somewhere
+               * to look and every hit can say whose it is. Both absent on a solo install,
+               * where team scope is simply unavailable and says so.
+               */
+              ...(config.embedder?.indexAlias !== undefined
+                ? { teamAlias: config.embedder.indexAlias }
+                : {}),
+              ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
+            }
+          : undefined,
+        /*
+         * Retrieval for `search_docs`. Absent leaves it matching lexically over the live
+         * registry, which is deliberately still useful — the dispatcher must not depend on
+         * a vector store existing, or turning it on without one would hide every MCP tool
+         * behind a search that could never find them.
+         */
+        search !== undefined && embedder !== undefined && docsIndex !== undefined
+          ? { searcher: search.searcher, embedder, index: docsIndex }
+          : undefined,
+        dispatcherEnabled(config.retrieval),
+        skillsSearchable,
+        /*
+         * The team's shared skills. Needs an alias, a connection and an embedder — without
+         * all three there is nothing to search, and the tool is simply not offered.
+         */
+        config.embedder?.skillsAlias !== undefined && search !== undefined && embedder !== undefined
+          ? {
+              searcher: search.searcher,
+              embedder,
+              collection: config.embedder.skillsAlias,
+              ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
+            }
+          : undefined,
+        /*
+         * Mail ranking. Resolved against whichever store `retrieval.stores.mail` names, which
+         * is frequently a local Qdrant while the code goes to a shared cluster — mail is the
+         * corpus people most want kept off a team's infrastructure.
+         */
+        mailCollection !== undefined && mailSearch !== undefined && embedder !== undefined
+          ? { searcher: mailSearch.searcher, embedder, collection: mailCollection }
+          : undefined,
+        /*
+         * Datasets share one collection, resolved against whichever store `retrieval.stores.data`
+         * names — the same per-corpus routing §12e added, for the same reason: somebody's own
+         * collected data is frequently the corpus they most want kept off a shared cluster.
+         */
+        await (async () => {
+          const collection = datasetCollectionName(config)
+          const search = await resolveDatasetSearch(config)
+          return collection !== undefined && search !== undefined && embedder !== undefined
+            ? { searcher: search.searcher, embedder, collection }
+            : undefined
+        })(),
       )
 
       /*
@@ -2496,7 +2604,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * prompt and the model is never told it exists — the same layering §11 uses for disabled
        * MCP tools. The gate below is a second line of defence, not the first.
        */
-      const turnRegistry = schedule !== undefined ? registryForSchedule(fullRegistry.list(), schedule) : fullRegistry
+      const turnRegistry =
+        schedule !== undefined ? registryForSchedule(fullRegistry.list(), schedule) : fullRegistry
       turnOptions.timeoutForTool = toolTimeout
       if (schedule !== undefined) {
         turnOptions.approvalGate = new ScheduledApprovalGate(schedule)
@@ -2526,7 +2635,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             // tool call it should have made — and a banner between them would explain a seam the
             // user cannot otherwise see. It belongs in the log, where a model doing this every
             // turn becomes visible as a pattern.
-            logger.warn('the model described an action without calling a tool; asked it to continue')
+            logger.warn(
+              'the model described an action without calling a tool; asked it to continue',
+            )
           },
           onQueuedMessageConsumed: (text) => {
             // Shown as an ordinary user turn: that is exactly what it became in the
@@ -2537,7 +2648,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           },
           onTextChunk: (chunk) => {
             cumulativeText += chunk
-            post({ type: 'textChunk', text: cumulativeText, ...(expertInformed ? { expertInformed } : {}) })
+            post({
+              type: 'textChunk',
+              text: cumulativeText,
+              ...(expertInformed ? { expertInformed } : {}),
+            })
           },
           onReasoningChunk: (chunk) => {
             cumulativeReasoning += chunk
@@ -2562,11 +2677,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               id: toolCall.id,
               name: toolCall.name,
               arguments: formatToolArguments(toolCall.arguments),
-          ...(toolCallReason(toolCall.arguments) === undefined
-            ? {}
-            : { why: toolCallReason(toolCall.arguments) as string }),
+              ...(toolCallReason(toolCall.arguments) === undefined
+                ? {}
+                : { why: toolCallReason(toolCall.arguments) as string }),
             }
-            post({ type: 'toolCall', toolCall: summary, ...(expertInformed ? { expertInformed } : {}) })
+            post({
+              type: 'toolCall',
+              toolCall: summary,
+              ...(expertInformed ? { expertInformed } : {}),
+            })
           },
           onToolResult: (toolCall, result) => {
             // The control tools aren't work being done — they're the model addressing the
@@ -2580,7 +2699,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             if (chart !== undefined) {
               post(
                 chart.kind === 'chart'
-                  ? { type: 'chart', chart: chart.chart, ...(expertInformed ? { expertInformed } : {}) }
+                  ? {
+                      type: 'chart',
+                      chart: chart.chart,
+                      ...(expertInformed ? { expertInformed } : {}),
+                    }
                   : { type: 'chartError', message: chart.message },
               )
               return
@@ -2589,13 +2712,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               id: toolCall.id,
               name: toolCall.name,
               arguments: formatToolArguments(toolCall.arguments),
-          ...(toolCallReason(toolCall.arguments) === undefined
-            ? {}
-            : { why: toolCallReason(toolCall.arguments) as string }),
+              ...(toolCallReason(toolCall.arguments) === undefined
+                ? {}
+                : { why: toolCallReason(toolCall.arguments) as string }),
               result: result.content,
               ...(result.isError === true ? { isError: true } : {}),
             }
-            post({ type: 'toolResult', toolCall: summary, ...(expertInformed ? { expertInformed } : {}) })
+            post({
+              type: 'toolResult',
+              toolCall: summary,
+              ...(expertInformed ? { expertInformed } : {}),
+            })
           },
           onCheckpoint: (checkpoint) => {
             taskCheckpoint = checkpoint
@@ -2699,7 +2826,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .map((header) => ({
           name: header.name.trim(),
           valueRef: header.valueRef.trim(),
-          ...(header.prefix !== undefined && header.prefix.length > 0 ? { prefix: header.prefix } : {}),
+          ...(header.prefix !== undefined && header.prefix.length > 0
+            ? { prefix: header.prefix }
+            : {}),
         }))
         .filter((header) => header.name.length > 0 && header.valueRef.length > 0)
       /*
@@ -2723,8 +2852,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (input.authType === 'tokenCommand') {
       // Refused before anything is written, so a restricted session cannot leave a half-saved
       // profile behind — and told why, rather than silently dropping to `none`.
-      if (services.executableAuthRefusal !== undefined) throw new Error(services.executableAuthRefusal)
-      const existing = (await configManager.load()).config.profiles?.find((profile) => profile.id === id)
+      if (services.executableAuthRefusal !== undefined)
+        throw new Error(services.executableAuthRefusal)
+      const existing = (await configManager.load()).config.profiles?.find(
+        (profile) => profile.id === id,
+      )
       if (input.tokenCommand === undefined || input.tokenCommand.command.length === 0) {
         // Nothing sent means the form did not edit it — keep what is there rather than replacing a
         // working credential with `none`, which would fail only once the current token expired.
@@ -2754,7 +2886,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await secrets.delete(apiKeyRefFor(id))
       return { type: 'apiKey', apiKeyRef: typed }
     }
-    const existing = (await configManager.load()).config.profiles?.find((profile) => profile.id === id)
+    const existing = (await configManager.load()).config.profiles?.find(
+      (profile) => profile.id === id,
+    )
     if (
       typed.length === 0 &&
       existing?.auth.type === 'apiKey' &&
@@ -2818,7 +2952,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const connectionTls = stripEmpty(input.connectionTls ?? {})
       if (Object.keys(connectionTls).length > 0) saved.tls = connectionTls
 
-      const nextProfiles = existing ? profiles.map((p) => (p.id === id ? saved : p)) : [...profiles, saved]
+      const nextProfiles = existing
+        ? profiles.map((p) => (p.id === id ? saved : p))
+        : [...profiles, saved]
       // The very first profile ever created becomes active automatically.
       const activeProfileId = config.activeProfileId ?? (nextProfiles.length === 1 ? id : undefined)
       await configManager.save('user', { profiles: nextProfiles, activeProfileId })
@@ -2868,12 +3004,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         const copiedPassphrase = await copySecret(passphraseRef, certPassphraseRefFor(newId))
         auth = {
           type: 'apigeeMtls',
-          certs: { ...certs, ...(copiedPassphrase ? { passphraseRef: certPassphraseRefFor(newId) } : {}) },
-          apigee: { ...apigee, ...(copiedSecret ? { clientSecretRef: clientSecretRefFor(newId) } : {}) },
+          certs: {
+            ...certs,
+            ...(copiedPassphrase ? { passphraseRef: certPassphraseRefFor(newId) } : {}),
+          },
+          apigee: {
+            ...apigee,
+            ...(copiedSecret ? { clientSecretRef: clientSecretRefFor(newId) } : {}),
+          },
         }
       }
 
-      const duplicate: ProviderProfile = { ...source, id: newId, label: `${source.label} (copy)`, auth }
+      const duplicate: ProviderProfile = {
+        ...source,
+        id: newId,
+        label: `${source.label} (copy)`,
+        auth,
+      }
       await configManager.save('user', { profiles: [...profiles, duplicate] })
       await postProfiles()
     } catch (error) {
@@ -2922,7 +3069,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * and Test Connection work before the profile is saved. Secrets are read from the store
    * under the form's profile id; a not-yet-saved profile therefore tests only what it can.
    */
-  async function profileFromForm(input: ProfileInput): Promise<{ profile: ProviderProfile; auth: Auth } | undefined> {
+  async function profileFromForm(
+    input: ProfileInput,
+  ): Promise<{ profile: ProviderProfile; auth: Auth } | undefined> {
     const baseUrl = input.baseUrl.trim()
     if (baseUrl.length === 0) {
       post({ type: 'error', message: 'Enter a base URL first.' })
@@ -2980,7 +3129,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       const segment = query.slice(query.lastIndexOf('/') + 1)
       const pattern = segment.length > 0 ? `**/*${segment}*` : '**/*'
-      const found = await ui.findFiles(pattern, MENTION_SCAN_LIMIT, mentionExcludes(cachedMentionExcludes))
+      const found = await ui.findFiles(
+        pattern,
+        MENTION_SCAN_LIMIT,
+        mentionExcludes(cachedMentionExcludes),
+      )
       const paths = found
         .map((absolute) => path.relative(workspaceRoot, absolute).split(path.sep).join('/'))
         .filter(matchesMentionQuery(query))
@@ -3039,7 +3192,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * one and not the other — and the failure is always the same shape: a panel that shows nothing
    * where something was just saved, with no error to explain it.
    */
-  function expertMessageFrom(settings: LightCodeConfig['expert']): Extract<HostToUiMessage, { type: 'expert' }> {
+  function expertMessageFrom(
+    settings: LightCodeConfig['expert'],
+  ): Extract<HostToUiMessage, { type: 'expert' }> {
     return {
       type: 'expert',
       enabled: settings?.enabled === true,
@@ -3073,7 +3228,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * which is when the probe is most likely to time out and report the CLI as missing.
      */
     const detected =
-      !redetect && expertCli !== undefined && expertCliPath === configured ? expertCli : await detectClaudeCli(configured)
+      !redetect && expertCli !== undefined && expertCliPath === configured
+        ? expertCli
+        : await detectClaudeCli(configured)
     // Cache the probe so the next turn does not re-spawn it.
     expertCli = detected
     expertCliPath = configured
@@ -3255,7 +3412,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       let resumeWorked = false
       const samples: (number | undefined)[] = []
 
-      for (const [index, label] of ['first consultation', 'follow-up in the same session'].entries()) {
+      for (const [index, label] of [
+        'first consultation',
+        'follow-up in the same session',
+      ].entries()) {
         measuringStep = `Measuring the ${label} (${String(index + 1)}/2)…`
         await postExpert({ redetect: false })
 
@@ -3331,12 +3491,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       const cli = await resolveExpert(config)
       if (cli === undefined) {
-        post({ type: 'error', message: 'Enable the expert first — the assessment is its judgement, not ours.' })
+        post({
+          type: 'error',
+          message: 'Enable the expert first — the assessment is its judgement, not ours.',
+        })
         return
       }
 
       const profile = resolveActiveProfile(config)
-      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+      const provider = createChatProvider(
+        profile,
+        httpClient,
+        authStrategyFor(config, profile),
+        logger,
+      )
 
       const results: ProbeResult[] = []
       for (const [index, probe] of ASSESSMENT_PROBES.entries()) {
@@ -3350,7 +3518,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            * not the scaffolding around it — and a probe that could call `read_file` would
            * measure whether the harness works.
            */
-          for await (const chunk of provider.streamChat([{ role: 'user', content: probe.prompt }])) {
+          for await (const chunk of provider.streamChat([
+            { role: 'user', content: probe.prompt },
+          ])) {
             if (chunk.type === 'text') answer += chunk.text
             // A provider that streams an error rather than throwing is still a failed probe.
             if (chunk.type === 'error') throw new Error(chunk.error)
@@ -3380,7 +3550,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       // Counted like any other consultation: it spent the user's money, and a total that
       // quietly omitted it would understate the spend.
-      recordConsultation({ isError: graded.isError, ...(graded.costUsd !== undefined ? { costUsd: graded.costUsd } : {}) })
+      recordConsultation({
+        isError: graded.isError,
+        ...(graded.costUsd !== undefined ? { costUsd: graded.costUsd } : {}),
+      })
 
       if (graded.isError) {
         post({ type: 'error', message: `The expert could not assess the junior: ${graded.text}` })
@@ -3429,7 +3602,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...(cliPath !== undefined && cliPath.length > 0 ? { path: cliPath } : {}),
           ...(model !== undefined && model.length > 0 ? { model } : { model: undefined }),
           ...(limits?.maxSpendUsd !== undefined ? { maxSpendUsd: limits.maxSpendUsd } : {}),
-          ...(limits?.maxConsultations !== undefined ? { maxConsultations: limits.maxConsultations } : {}),
+          ...(limits?.maxConsultations !== undefined
+            ? { maxConsultations: limits.maxConsultations }
+            : {}),
         },
       })
       // Reloaded so the cap applies to the next consultation rather than to the next task.
@@ -3459,11 +3634,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Settings → Network covers the gateway, the token endpoint, the embedder and the vector
    * store alike, and a per-connection CA adds to it rather than replacing it (§19).
    */
-  async function vectorStoreConnectionFor(store: VectorStoreConfig, id: string): Promise<OpenSearchConnection> {
+  async function vectorStoreConnectionFor(
+    store: VectorStoreConfig,
+    id: string,
+  ): Promise<OpenSearchConnection> {
     const connection: OpenSearchConnection = { url: store.url, label: store.label }
 
-    const username = store.usernameRef !== undefined ? await secrets.get(searchUserRefFor(id)) : undefined
-    const password = store.passwordRef !== undefined ? await secrets.get(searchPasswordRefFor(id)) : undefined
+    const username =
+      store.usernameRef !== undefined ? await secrets.get(searchUserRefFor(id)) : undefined
+    const password =
+      store.passwordRef !== undefined ? await secrets.get(searchPasswordRefFor(id)) : undefined
     if (username !== undefined) connection.username = username
     if (password !== undefined) connection.password = password
 
@@ -3478,16 +3658,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
       ...(passphraseRef !== undefined ? { passphrase: await secrets.get(passphraseRef) } : {}),
       onPaths: (paths) => {
-        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch((error: unknown) => {
-          logger.warn('could not add cert path to the deny list', String(error))
-        })
+        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(
+          (error: unknown) => {
+            logger.warn('could not add cert path to the deny list', String(error))
+          },
+        )
       },
     })
     if (tls !== undefined) connection.tls = tls as NonNullable<OpenSearchConnection['tls']>
     return connection
   }
 
-  async function openSearchClientFor(store: VectorStoreConfig, id: string): Promise<OpenSearchClient> {
+  async function openSearchClientFor(
+    store: VectorStoreConfig,
+    id: string,
+  ): Promise<OpenSearchClient> {
     return new OpenSearchClient(httpClient, await vectorStoreConnectionFor(store, id))
   }
 
@@ -3506,7 +3691,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * @param storeId Which connection to use. Defaults to the active one; mail passes its own, so
    *   a team's code can go to a shared cluster while mail stays in a local Qdrant.
    */
-  async function resolveSearch(config: LightCodeConfig, storeId?: string): Promise<
+  async function resolveSearch(
+    config: LightCodeConfig,
+    storeId?: string,
+  ): Promise<
     | {
         /** Backend-neutral, for `search_codebase`. */
         searcher: VectorSearcher
@@ -3529,7 +3717,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     try {
       return {
         searcher: await vectorSearcherFor(store, id),
-        ...(store.kind === 'opensearch' ? { opensearch: await openSearchClientFor(store, id) } : {}),
+        ...(store.kind === 'opensearch'
+          ? { opensearch: await openSearchClientFor(store, id) }
+          : {}),
         store,
         id,
       }
@@ -3682,11 +3872,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * created since then is picked up automatically, which is what "include subfolders" has to
      * mean if it is to keep being true.
      */
-    const folders = config.mail.includeSubfolders === false ? chosen : await expandSubfolders(chosen)
+    const folders =
+      config.mail.includeSubfolders === false ? chosen : await expandSubfolders(chosen)
 
     mailBusy = true
     const signal = beginIndexing('mail')
-    reportIndexing('mail', 'Asking Outlook for new messages', { detail: `${String(folders.length)} folder(s)` })
+    reportIndexing('mail', 'Asking Outlook for new messages', {
+      detail: `${String(folders.length)} folder(s)`,
+    })
     // What Outlook could not open. The harvest is the only place that knows.
     const skipped = new Set<string>()
     try {
@@ -3709,7 +3902,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * embed the same messages.
          */
         retentionMonths: config.mail?.retentionMonths ?? 6,
-        ...(config.mail.previewChars !== undefined ? { previewChars: config.mail.previewChars } : {}),
+        ...(config.mail.previewChars !== undefined
+          ? { previewChars: config.mail.previewChars }
+          : {}),
         harvest: async (requests, limits) => {
           const answer = await office().request<{
             messages: HarvestedMessage[]
@@ -3777,7 +3972,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const stopped = signal.aborted
       mailLastResult = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
       if (!stopped) logger.warn(`mail sync failed: ${mailLastResult}`)
-      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', { detail: mailLastResult, running: false })
+      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', {
+        detail: mailLastResult,
+        running: false,
+      })
       await postMailStatus()
     } finally {
       mailBusy = false
@@ -3830,7 +4028,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return {
       embedder,
       collection,
-      writer: createVectorIndexWriter(httpClient, search.store, await vectorStoreConnectionFor(search.store, search.id)),
+      writer: createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await vectorStoreConnectionFor(search.store, search.id),
+      ),
       searcher: search.searcher,
     }
   }
@@ -3860,7 +4062,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         onProgress: (done, total, phase) => reportIndexing('dataset', phase, { done, total }),
         ...(dataset.retentionDays !== undefined ? { retentionDays: dataset.retentionDays } : {}),
         ...(semantic !== undefined
-          ? { semantic: { embedder: semantic.embedder, writer: semantic.writer, collection: semantic.collection } }
+          ? {
+              semantic: {
+                embedder: semantic.embedder,
+                writer: semantic.writer,
+                collection: semantic.collection,
+              },
+            }
           : {}),
         /*
          * The collector runs through the ordinary Python tool path, so it is the same code that
@@ -3881,7 +4089,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           const tool = registry.get(dataset.toolName) ?? registry.get(`py__${dataset.toolName}`)
           if (tool === undefined) {
             throw new Error(
-              `The collector tool "${dataset.toolName}" is not registered. A Python tool may have `+
+              `The collector tool "${dataset.toolName}" is not registered. A Python tool may have ` +
                 'been deleted or Python switched off; an MCP tool may be from a server that is ' +
                 'disconnected or disabled. Settings → Tools lists everything callable.',
             )
@@ -3895,7 +4103,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            * would be a second contract for a worker that already has one.
            */
           try {
-            return JSON.parse(typeof output.content === 'string' ? output.content : JSON.stringify(output.content))
+            return JSON.parse(
+              typeof output.content === 'string' ? output.content : JSON.stringify(output.content),
+            )
           } catch {
             throw new Error(
               'The collector tool did not return JSON. It must return a list of records — see ' +
@@ -3949,7 +4159,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         store: datasetStoreFor(id),
         signal,
         onProgress: (done, total, phase) => reportIndexing('dataset', phase, { done, total }),
-        ...(semantic !== undefined ? { semantic: { writer: semantic.writer, collection: semantic.collection } } : {}),
+        ...(semantic !== undefined
+          ? { semantic: { writer: semantic.writer, collection: semantic.collection } }
+          : {}),
       })
       const detail = `Cleared ${String(removed)} record(s).`
       datasetResults.set(id, { detail, failed: false, at: Date.now() })
@@ -3977,7 +4189,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // collector — not a misconfiguration to correct into a default.
       const minutes = dataset.syncMinutes ?? 0
       if (dataset.enabled === false || minutes <= 0) continue
-      const timer = setInterval(() => void runDatasetSync(dataset.id, 'scheduled'), minutes * 60 * 1000)
+      const timer = setInterval(
+        () => void runDatasetSync(dataset.id, 'scheduled'),
+        minutes * 60 * 1000,
+      )
       timer.unref?.()
       datasetTimers.set(dataset.id, timer)
     }
@@ -3993,7 +4208,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       datasets.map(async (dataset) => {
         const store = datasetStoreFor(dataset.id)
         const records = await store.load()
-        const times = records.map((record) => record.timestamp).filter((at): at is number => at !== undefined)
+        const times = records
+          .map((record) => record.timestamp)
+          .filter((at): at is number => at !== undefined)
         const search = await resolveDatasetSearch(config, dataset).catch(() => undefined)
         return {
           ...dataset,
@@ -4031,9 +4248,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * is the `py__` prefix and the mcp group, not a permission category. Reported as the picker
        * listing only built-in tools.
        */
-      stores: Object.entries(config.vectorStores ?? {}).map(([id, store]) => ({ id, label: store.label })),
+      stores: Object.entries(config.vectorStores ?? {}).map(([id, store]) => ({
+        id,
+        label: store.label,
+      })),
       // Resolved here, where the fallback chain lives. See the note on the message.
-      defaultStoreLabel: (await resolveDatasetSearch(config).catch(() => undefined))?.store.label ?? 'none',
+      defaultStoreLabel:
+        (await resolveDatasetSearch(config).catch(() => undefined))?.store.label ?? 'none',
       tools: currentToolRegistry()
         .list()
         .filter((tool) => tool.name.startsWith('py__') || tool.group === 'mcp')
@@ -4082,7 +4303,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       clearInterval(mailTimer)
       mailTimer = undefined
     }
-    if (config.mail?.enabled !== true || !officeSupported() || config.office?.outlook !== true) return
+    if (config.mail?.enabled !== true || !officeSupported() || config.office?.outlook !== true)
+      return
 
     const minutes = config.mail.syncMinutes ?? 15
     mailTimer = setInterval(() => void runMailSync('scheduled'), minutes * 60 * 1000)
@@ -4110,13 +4332,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(times.length > 0 ? { oldest: Math.min(...times), newest: Math.max(...times) } : {}),
       sizeBytes: await mailStore.sizeBytes(),
       semantic: collection !== undefined && search !== undefined && embedder !== undefined,
-      ...(config.retrieval?.stores?.mail !== undefined ? { storeId: config.retrieval.stores.mail } : {}),
+      ...(config.retrieval?.stores?.mail !== undefined
+        ? { storeId: config.retrieval.stores.mail }
+        : {}),
       /*
        * Every configured connection, so the tab can offer a choice rather than requiring the
        * config file to be edited by hand. The mail store was reachable only that way for one
        * release, which from the outside is the same as not existing.
        */
-      stores: Object.entries(config.vectorStores ?? {}).map(([id, store]) => ({ id, label: store.label })),
+      stores: Object.entries(config.vectorStores ?? {}).map(([id, store]) => ({
+        id,
+        label: store.label,
+      })),
       busy: mailBusy,
       ...(mailLastResult !== undefined ? { lastResult: mailLastResult } : {}),
     })
@@ -4170,7 +4397,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         scannedAt: number
         folders: { name: string; path: string; depth: number; unread?: number | null }[]
       }
-      post({ type: 'outlookFolders', folders: cached.folders, scannedAt: cached.scannedAt, cached: true })
+      post({
+        type: 'outlookFolders',
+        folders: cached.folders,
+        scannedAt: cached.scannedAt,
+        cached: true,
+      })
       served = true
       if (!force) return
     } catch {
@@ -4185,7 +4417,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       post({ type: 'outlookFolders', folders: result.folders, scannedAt })
       try {
         await fs.mkdir(path.dirname(cachePath), { recursive: true })
-        await fs.writeFile(cachePath, JSON.stringify({ scannedAt, folders: result.folders }), 'utf8')
+        await fs.writeFile(
+          cachePath,
+          JSON.stringify({ scannedAt, folders: result.folders }),
+          'utf8',
+        )
       } catch {
         // A cache that will not write costs a rescan next time, never the answer.
       }
@@ -4193,7 +4429,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Only if nothing was shown: replacing a usable cached tree with an error message would
       // take away the folders someone was about to tick.
       if (!served) {
-        post({ type: 'outlookFolders', error: error instanceof Error ? error.message : String(error) })
+        post({
+          type: 'outlookFolders',
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
     }
   }
@@ -4277,7 +4516,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch (error) {
       const stopped = signal.aborted
       mailLastResult = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
-      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', { detail: mailLastResult, running: false })
+      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', {
+        detail: mailLastResult,
+        running: false,
+      })
       mailBusy = false
       endIndexing('mail')
       await postMailStatus()
@@ -4313,7 +4555,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await postMailStatus()
       return
     }
-    const folders = config.mail?.includeSubfolders === false ? chosen : await expandSubfolders(chosen)
+    const folders =
+      config.mail?.includeSubfolders === false ? chosen : await expandSubfolders(chosen)
 
     mailBusy = true
     const signal = beginIndexing('mail')
@@ -4332,7 +4575,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           reportIndexing('mail', phase, { done, total }),
         store: mailStore,
         folders,
-        ...(config.mail?.previewChars !== undefined ? { previewChars: config.mail.previewChars } : {}),
+        ...(config.mail?.previewChars !== undefined
+          ? { previewChars: config.mail.previewChars }
+          : {}),
         harvest: async (requests, limits) =>
           office().request<{ messages: HarvestedMessage[]; truncated: boolean }>({
             op: 'outlook.harvest',
@@ -4364,7 +4609,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch (error) {
       const stopped = signal.aborted
       mailLastResult = stopped ? 'Stopped.' : error instanceof Error ? error.message : String(error)
-      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', { detail: mailLastResult, running: false })
+      reportIndexing('mail', stopped ? 'Stopped' : 'Failed', {
+        detail: mailLastResult,
+        running: false,
+      })
     } finally {
       mailBusy = false
       endIndexing('mail')
@@ -4396,11 +4644,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           : {}),
       })
       if (result.removed > 0) {
-        logger.info(`mail retention: removed ${String(result.removed)} message(s) older than ${String(months)} month(s)`)
+        logger.info(
+          `mail retention: removed ${String(result.removed)} message(s) older than ${String(months)} month(s)`,
+        )
       }
     } catch (error) {
       // Never fails the sync: mail that arrived is worth more than mail that did not leave.
-      logger.warn(`mail retention failed: ${error instanceof Error ? error.message : String(error)}`)
+      logger.warn(
+        `mail retention failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
 
@@ -4457,7 +4709,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * which is the drift this project has paid for more than once.
        */
       const stores = { ...(current.retrieval?.stores ?? {}) }
-      if (settings.storeId !== undefined && settings.storeId.length > 0) stores.mail = settings.storeId
+      if (settings.storeId !== undefined && settings.storeId.length > 0)
+        stores.mail = settings.storeId
       else delete stores.mail
 
       await configManager.save('user', {
@@ -4489,7 +4742,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Derived from the workspace path so two projects on one cluster do not collide, and
     // so the same project reindexes into the same place. Hashed because an index name
     // cannot contain most path characters.
-    const digest = createHash('sha256').update(path.resolve(workspaceRoot).toLowerCase()).digest('hex').slice(0, 16)
+    const digest = createHash('sha256')
+      .update(path.resolve(workspaceRoot).toLowerCase())
+      .digest('hex')
+      .slice(0, 16)
     return `${config?.embedder?.indexPrefix ?? DEFAULT_INDEX_PREFIX}-${digest}`
   }
 
@@ -4572,7 +4828,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (collection === undefined || search === undefined || embedder === undefined) {
       post({
         type: 'teamSkillsPublished',
-        error: 'Publishing skills needs a search connection and an embedding model in Settings → Search.',
+        error:
+          'Publishing skills needs a search connection and an embedding model in Settings → Search.',
       })
       return
     }
@@ -4603,7 +4860,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ),
         embedder,
         collection,
-        ...(config.embedder?.skillsAlias !== undefined ? { alias: config.embedder.skillsAlias } : {}),
+        ...(config.embedder?.skillsAlias !== undefined
+          ? { alias: config.embedder.skillsAlias }
+          : {}),
         skills: withBodies,
         signal,
         onProgress: (done: number, total: number) =>
@@ -4710,7 +4969,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function resolveEmbedder(config: LightCodeConfig): Promise<Embedder | undefined> {
     const settings = config.embedder
-    if (settings?.profileId === undefined || settings.model === undefined || settings.dimensions === undefined) {
+    if (
+      settings?.profileId === undefined ||
+      settings.model === undefined ||
+      settings.dimensions === undefined
+    ) {
       return undefined
     }
     const profile = config.profiles?.find((candidate) => candidate.id === settings.profileId)
@@ -4738,7 +5001,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (workspaceRoot === undefined || ripgrepPath === undefined) return undefined
     try {
       const listed = await new Promise<string>((resolve, reject) => {
-        const child = spawn(ripgrepPath, ['--files', '--hidden', '--glob', '!.git'], { cwd: workspaceRoot })
+        const child = spawn(ripgrepPath, ['--files', '--hidden', '--glob', '!.git'], {
+          cwd: workspaceRoot,
+        })
         let out = ''
         child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')))
         child.on('error', reject)
@@ -4756,7 +5021,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // gitignore semantics this delegation exists to avoid. The per-file check is enough.
       return (relative) => !relative.endsWith('/') && !allowed.has(relative)
     } catch (error) {
-      logger.warn('could not list files with ripgrep; indexing will use its own skip list only', String(error))
+      logger.warn(
+        'could not list files with ripgrep; indexing will use its own skip list only',
+        String(error),
+      )
       return undefined
     }
   }
@@ -4779,7 +5047,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Reading the merged config is correct because `retrieval` is user-scope only (invariant 5),
    * so the merged view and the user file agree by construction.
    */
-  async function saveRetrieval(patch: Partial<NonNullable<LightCodeConfig['retrieval']>>): Promise<void> {
+  async function saveRetrieval(
+    patch: Partial<NonNullable<LightCodeConfig['retrieval']>>,
+  ): Promise<void> {
     const { config } = await configManager.load()
     await configManager.save('user', { retrieval: { ...config.retrieval, ...patch } })
   }
@@ -4799,7 +5069,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const enabled = dispatcherEnabled(config.retrieval)
     // Counted with the dispatcher forced on, so the number answers "how many *would* be
     // hidden" while it is still switched off.
-    const hidden = currentToolRegistry(undefined, undefined, undefined, undefined, true, true).dispatchOnlyList().length
+    const hidden = currentToolRegistry(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+    ).dispatchOnlyList().length
     const index = docsIndexName(config)
     post({
       type: 'dispatcher',
@@ -4861,9 +5138,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return path.join(storageDir, 'index-manifests', `${manifestKey(index, storeId)}.json`)
   }
 
-  async function readDocsFingerprint(index: string, storeId: string, kind?: DocEntryKind): Promise<string | undefined> {
+  async function readDocsFingerprint(
+    index: string,
+    storeId: string,
+    kind?: DocEntryKind,
+  ): Promise<string | undefined> {
     try {
-      const raw = JSON.parse(await fs.readFile(docsFingerprintPath(index, storeId, kind), 'utf8')) as {
+      const raw = JSON.parse(
+        await fs.readFile(docsFingerprintPath(index, storeId, kind), 'utf8'),
+      ) as {
         fingerprint?: unknown
       }
       return typeof raw.fingerprint === 'string' ? raw.fingerprint : undefined
@@ -4911,9 +5194,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const search = await resolveSearch(config)
     const embedder = await resolveEmbedder(config)
 
-    if (index === undefined) return { error: 'Open a folder first — the documentation index is named after it.' }
-    if (search === undefined) return { error: 'Choose a search connection in Settings → Search first.' }
-    if (embedder === undefined) return { error: 'Configure an embedding model in Settings → Search first.' }
+    if (index === undefined)
+      return { error: 'Open a folder first — the documentation index is named after it.' }
+    if (search === undefined)
+      return { error: 'Choose a search connection in Settings → Search first.' }
+    if (embedder === undefined)
+      return { error: 'Configure an embedding model in Settings → Search first.' }
 
     try {
       /*
@@ -4960,7 +5246,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         if (vector === undefined) return []
         // `path` carries the qualified id — see rag/toolDocs.ts for why that field is reused
         // rather than adding a second collection shape across every backend.
-        return [{ id: entry.id, text: entry.text, path: entry.id, startLine: 1, endLine: 1, vector }]
+        return [
+          { id: entry.id, text: entry.text, path: entry.id, startLine: 1, endLine: 1, vector },
+        ]
       })
 
       /*
@@ -4987,7 +5275,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * Written only after the store accepted everything. A fingerprint saved before the
        * write would make a failed run look successful, and nothing would retry it.
        */
-      await fs.mkdir(path.dirname(docsFingerprintPath(index, search.id, wanted)), { recursive: true })
+      await fs.mkdir(path.dirname(docsFingerprintPath(index, search.id, wanted)), {
+        recursive: true,
+      })
       await fs.writeFile(
         docsFingerprintPath(index, search.id, wanted),
         JSON.stringify({ fingerprint, indexedAt: Date.now(), count: documents.length }),
@@ -5079,7 +5369,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             target,
             query,
             text: '',
-            error: 'Searching the codebase needs a connection, an embedding model and an indexed workspace.',
+            error:
+              'Searching the codebase needs a connection, an embedding model and an indexed workspace.',
           })
           return
         }
@@ -5125,7 +5416,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(result.isError === true ? { error: 'The search failed.' } : {}),
       })
     } catch (error) {
-      post({ type: 'searchProbe', target, query, text: '', error: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'searchProbe',
+        target,
+        query,
+        text: '',
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -5164,14 +5461,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         return
       }
       if (fromId === target.id) {
-        post({ type: 'storeSync', running: false, error: 'That is the store you are already using.' })
+        post({
+          type: 'storeSync',
+          running: false,
+          error: 'That is the store you are already using.',
+        })
         return
       }
 
       const index = codebaseIndexName(config)
       const embedder = await resolveEmbedder(config)
       if (index === undefined || embedder === undefined) {
-        post({ type: 'storeSync', running: false, error: 'Configure an embedding model in Settings → Search first.' })
+        post({
+          type: 'storeSync',
+          running: false,
+          error: 'Configure an embedding model in Settings → Search first.',
+        })
         return
       }
 
@@ -5184,12 +5489,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .catch(() => undefined)
 
       const result = await syncVectorStores({
-        from: createVectorIndexWriter(httpClient, source, await vectorStoreConnectionFor(source, fromId)),
-        to: createVectorIndexWriter(httpClient, target.store, await vectorStoreConnectionFor(target.store, target.id)),
+        from: createVectorIndexWriter(
+          httpClient,
+          source,
+          await vectorStoreConnectionFor(source, fromId),
+        ),
+        to: createVectorIndexWriter(
+          httpClient,
+          target.store,
+          await vectorStoreConnectionFor(target.store, target.id),
+        ),
         collection: index,
         manifest,
         current: { model: embedder.model, dimensions: embedder.dimensions },
-        onProgress: (progress) => post({ type: 'storeSync', running: true, copied: progress.copied, fromLabel: source.label }),
+        onProgress: (progress) =>
+          post({
+            type: 'storeSync',
+            running: true,
+            copied: progress.copied,
+            fromLabel: source.label,
+          }),
       })
 
       // The destination inherits the record of what it now holds, so the next incremental
@@ -5202,7 +5521,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       post({ type: 'storeSync', running: false, copied: result.copied, fromLabel: source.label })
     } catch (error) {
-      post({ type: 'storeSync', running: false, error: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'storeSync',
+        running: false,
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -5393,7 +5716,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           if (outcome.error !== undefined) {
             logger.warn(`documentation reindex failed (${reason}): ${outcome.error}`)
           } else if (outcome.unchanged !== true) {
-            logger.info(`documentation reindexed (${reason}): ${String(outcome.indexed ?? 0)} entries`)
+            logger.info(
+              `documentation reindexed (${reason}): ${String(outcome.indexed ?? 0)} entries`,
+            )
             post({
               type: 'docsIndexed',
               ...(outcome.indexed !== undefined ? { indexed: outcome.indexed } : {}),
@@ -5446,7 +5771,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         embedder,
         // The one place a writer is built. Not reachable from any tool — a user starts this
         // from Settings, which is what keeps the model unable to write to a cluster at all.
-        writer: createVectorIndexWriter(httpClient, search.store, await vectorStoreConnectionFor(search.store, search.id)),
+        writer: createVectorIndexWriter(
+          httpClient,
+          search.store,
+          await vectorStoreConnectionFor(search.store, search.id),
+        ),
         denylist,
         manifest,
         saveManifest: async (next) => {
@@ -5484,12 +5813,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch {
       // Missing or unreadable both mean "index everything", which is correct and safe —
       // the worst case is re-embedding work that was already done.
-      return { model: embedder.model, dimensions: embedder.dimensions, chunkSignature: chunkSignatureFor(undefined), files: {} }
+      return {
+        model: embedder.model,
+        dimensions: embedder.dimensions,
+        chunkSignature: chunkSignatureFor(undefined),
+        files: {},
+      }
     }
   }
 
   async function postPython(): Promise<void> {
-    const saved = (await configManager.load().then((loaded) => loaded.config.python, () => undefined)) ?? {}
+    const saved =
+      (await configManager.load().then(
+        (loaded) => loaded.config.python,
+        () => undefined,
+      )) ?? {}
     post({
       type: 'python',
       status: python.status(),
@@ -5504,8 +5842,28 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(saved.indexUrl !== undefined ? { indexUrl: saved.indexUrl } : {}),
         ...(saved.offline !== undefined ? { offline: saved.offline } : {}),
         ...(saved.timeoutSeconds !== undefined ? { timeoutSeconds: saved.timeoutSeconds } : {}),
+        /*
+         * Names and literals, plus whether a secret one actually has a value stored.
+         *
+         * The `hasValue` question needs the secret store, which is why it is answered here rather
+         * than in the tab: a variable marked secret with nothing behind it looks identical in
+         * config to one that is set, and that is exactly the state somebody lands in after
+         * declaring the variable and not filling it in.
+         */
+        env: await Promise.all(
+          pythonEnvEntries(saved.env).map(async (entry) => ({
+            name: entry.name,
+            ...(entry.secret ? {} : { value: entry.value ?? '' }),
+            secret: entry.secret,
+            ...(entry.secret
+              ? { hasValue: (await secrets.get(pythonEnvSecretRef(entry.name))) !== undefined }
+              : {}),
+          })),
+        ),
         // The fallback when Python has no limit of its own.
-        ...(cachedToolTimeoutSeconds !== undefined ? { defaultTimeoutSeconds: cachedToolTimeoutSeconds } : {}),
+        ...(cachedToolTimeoutSeconds !== undefined
+          ? { defaultTimeoutSeconds: cachedToolTimeoutSeconds }
+          : {}),
       },
     })
     // Python tools are part of the corpus, and this fires whenever the registry reloads —
@@ -5526,7 +5884,58 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * across two tabs for the same reason. Anything nested and edited from more than one place has
    * to be merged, and `python` is now such a block whether or not it looks like one.
    */
-  async function handleSetPython(input: Extract<UiToHostMessage, { type: 'setPython' }>): Promise<void> {
+  /**
+   * Writes the variables: the declaration to config, a secret value to secret storage.
+   *
+   * Three things have to be true at once and none of them is the obvious default.
+   *
+   * A secret's value is **kept** when the form sends none. The form was never given it
+   * (invariant 7), so "no value" means "unchanged" — read as "clear it", every save from the
+   * tab would wipe every token on the way past.
+   *
+   * A variable that disappears from the list has its secret **deleted**, not orphaned. §15 is
+   * explicit that namespaced keys exist so removal is real; a secret nothing references is one
+   * nobody will ever find to clear.
+   *
+   * And a variable that stops being secret gives up its stored value, because leaving it would
+   * mean a later re-tick silently resurrecting a value the user believes they replaced.
+   */
+  async function persistPythonEnv(
+    existing:
+      | Record<string, string | { value?: string | undefined; secret?: boolean | undefined }>
+      | undefined,
+    incoming: { name: string; value?: string; secret: boolean }[],
+  ): Promise<Record<string, string | { value?: string; secret?: boolean }>> {
+    const kept = new Set<string>()
+    const out: Record<string, string | { value?: string; secret?: boolean }> = {}
+
+    for (const variable of incoming) {
+      const name = variable.name.trim()
+      if (!isValidEnvName(name)) continue
+      kept.add(name)
+      if (variable.secret) {
+        if (variable.value !== undefined && variable.value.length > 0) {
+          await secrets.set(pythonEnvSecretRef(name), variable.value)
+        }
+        out[name] = { secret: true }
+      } else {
+        // A secret demoted to a literal must not leave its old value behind.
+        await secrets.delete(pythonEnvSecretRef(name))
+        out[name] = variable.value ?? ''
+      }
+    }
+
+    for (const entry of pythonEnvEntries(existing)) {
+      if (!kept.has(entry.name) && entry.secret)
+        await secrets.delete(pythonEnvSecretRef(entry.name))
+    }
+
+    return out
+  }
+
+  async function handleSetPython(
+    input: Extract<UiToHostMessage, { type: 'setPython' }>,
+  ): Promise<void> {
     try {
       const existing = (await configManager.load()).config.python ?? {}
       await configManager.save('user', {
@@ -5569,6 +5978,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               : { indexUrl: undefined }
             : {}),
           ...(input.offline !== undefined ? { offline: input.offline } : {}),
+          ...(input.env !== undefined
+            ? { env: await persistPythonEnv(existing.env, input.env) }
+            : {}),
         },
       })
       const { config } = await configManager.load()
@@ -5598,13 +6010,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       type: 'embedder',
       ...(config.embedder?.profileId !== undefined ? { profileId: config.embedder.profileId } : {}),
       ...(config.embedder?.model !== undefined ? { model: config.embedder.model } : {}),
-      ...(config.embedder?.dimensions !== undefined ? { dimensions: config.embedder.dimensions } : {}),
+      ...(config.embedder?.dimensions !== undefined
+        ? { dimensions: config.embedder.dimensions }
+        : {}),
       ...(index !== undefined ? { indexName: index } : {}),
       // The configured value, not the resolved one, so the field round-trips what was typed
       // rather than replacing a blank with the default and looking like it was set.
-      ...(config.embedder?.indexPrefix !== undefined ? { indexPrefix: config.embedder.indexPrefix } : {}),
-      ...(config.embedder?.indexAlias !== undefined ? { indexAlias: config.embedder.indexAlias } : {}),
-      ...(config.embedder?.skillsAlias !== undefined ? { skillsAlias: config.embedder.skillsAlias } : {}),
+      ...(config.embedder?.indexPrefix !== undefined
+        ? { indexPrefix: config.embedder.indexPrefix }
+        : {}),
+      ...(config.embedder?.indexAlias !== undefined
+        ? { indexAlias: config.embedder.indexAlias }
+        : {}),
+      ...(config.embedder?.skillsAlias !== undefined
+        ? { skillsAlias: config.embedder.skillsAlias }
+        : {}),
       defaultIndexPrefix: DEFAULT_INDEX_PREFIX,
       indexedFiles,
     })
@@ -5624,12 +6044,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           profileId,
           model,
           dimensions,
-          ...(indexName !== undefined && indexName.trim().length > 0 ? { indexName: indexName.trim() } : {}),
+          ...(indexName !== undefined && indexName.trim().length > 0
+            ? { indexName: indexName.trim() }
+            : {}),
           // Absent rather than empty when cleared, so the default applies instead of a name
           // beginning with a stray dash.
-          ...(indexPrefix !== undefined && indexPrefix.trim().length > 0 ? { indexPrefix: indexPrefix.trim() } : {}),
+          ...(indexPrefix !== undefined && indexPrefix.trim().length > 0
+            ? { indexPrefix: indexPrefix.trim() }
+            : {}),
           // Same treatment: cleared means absent, which is what turns team scope back off.
-          ...(indexAlias !== undefined && indexAlias.trim().length > 0 ? { indexAlias: indexAlias.trim() } : {}),
+          ...(indexAlias !== undefined && indexAlias.trim().length > 0
+            ? { indexAlias: indexAlias.trim() }
+            : {}),
         },
       })
       const { config } = await configManager.load()
@@ -5666,7 +6092,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch (error) {
       // Never fatal: a gateway that publishes no catalogue is normal, and free-text entry
       // has to keep working regardless (§9).
-      post({ type: 'embedderModels', models: [], warning: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'embedderModels',
+        models: [],
+        warning: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -5707,7 +6137,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
 
       const tls = stripEmpty(input.tls) as NonNullable<LightCodeConfig['tls']>
-      if ((await secrets.get(GLOBAL_PASSPHRASE_REF)) !== undefined) tls.passphraseRef = GLOBAL_PASSPHRASE_REF
+      if ((await secrets.get(GLOBAL_PASSPHRASE_REF)) !== undefined)
+        tls.passphraseRef = GLOBAL_PASSPHRASE_REF
 
       await configManager.save('user', {
         certDir: certDir !== undefined && certDir.length > 0 ? certDir : undefined,
@@ -5732,7 +6163,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         url: store.url,
         ...(store.defaultIndex !== undefined ? { defaultIndex: store.defaultIndex } : {}),
         ...(store.caFile !== undefined ? { caFile: store.caFile } : {}),
-        ...(store.rejectUnauthorized !== undefined ? { rejectUnauthorized: store.rejectUnauthorized } : {}),
+        ...(store.rejectUnauthorized !== undefined
+          ? { rejectUnauthorized: store.rejectUnauthorized }
+          : {}),
         ...(store.limits !== undefined ? { limits: store.limits } : {}),
         // Booleans only — the values never cross the bridge (invariant 7).
         hasUsername: (await secrets.get(searchUserRefFor(id))) !== undefined,
@@ -5746,17 +6179,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** Builds a client from unsaved form state, so Test and index listing work before saving. */
   async function clientFromInput(input: SearchConnectionInput): Promise<OpenSearchClient> {
     const id = input.id ?? '__unsaved__'
-    if (input.username !== undefined && input.username.length > 0) await secrets.set(searchUserRefFor(id), input.username)
-    if (input.password !== undefined && input.password.length > 0) await secrets.set(searchPasswordRefFor(id), input.password)
+    if (input.username !== undefined && input.username.length > 0)
+      await secrets.set(searchUserRefFor(id), input.username)
+    if (input.password !== undefined && input.password.length > 0)
+      await secrets.set(searchPasswordRefFor(id), input.password)
 
     const store: VectorStoreConfig = {
       kind: 'opensearch',
       label: input.label.length > 0 ? input.label : 'Untitled',
       url: input.url,
-      ...((await secrets.get(searchUserRefFor(id))) !== undefined ? { usernameRef: searchUserRefFor(id) } : {}),
-      ...((await secrets.get(searchPasswordRefFor(id))) !== undefined ? { passwordRef: searchPasswordRefFor(id) } : {}),
+      ...((await secrets.get(searchUserRefFor(id))) !== undefined
+        ? { usernameRef: searchUserRefFor(id) }
+        : {}),
+      ...((await secrets.get(searchPasswordRefFor(id))) !== undefined
+        ? { passwordRef: searchPasswordRefFor(id) }
+        : {}),
       ...(input.caFile !== undefined && input.caFile.length > 0 ? { caFile: input.caFile } : {}),
-      ...(input.rejectUnauthorized !== undefined ? { rejectUnauthorized: input.rejectUnauthorized } : {}),
+      ...(input.rejectUnauthorized !== undefined
+        ? { rejectUnauthorized: input.rejectUnauthorized }
+        : {}),
     }
     return openSearchClientFor(store, id)
   }
@@ -5770,20 +6211,30 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       const id = input.id ?? randomUUID()
 
-      if (input.username !== undefined && input.username.length > 0) await secrets.set(searchUserRefFor(id), input.username)
-      if (input.password !== undefined && input.password.length > 0) await secrets.set(searchPasswordRefFor(id), input.password)
+      if (input.username !== undefined && input.username.length > 0)
+        await secrets.set(searchUserRefFor(id), input.username)
+      if (input.password !== undefined && input.password.length > 0)
+        await secrets.set(searchPasswordRefFor(id), input.password)
 
       const store: VectorStoreConfig = {
         kind: input.kind ?? 'opensearch',
         label: input.label.trim().length > 0 ? input.label.trim() : 'OpenSearch',
         url: input.url.trim(),
-        ...((await secrets.get(searchUserRefFor(id))) !== undefined ? { usernameRef: searchUserRefFor(id) } : {}),
-        ...((await secrets.get(searchPasswordRefFor(id))) !== undefined ? { passwordRef: searchPasswordRefFor(id) } : {}),
+        ...((await secrets.get(searchUserRefFor(id))) !== undefined
+          ? { usernameRef: searchUserRefFor(id) }
+          : {}),
+        ...((await secrets.get(searchPasswordRefFor(id))) !== undefined
+          ? { passwordRef: searchPasswordRefFor(id) }
+          : {}),
         ...(input.defaultIndex !== undefined && input.defaultIndex.trim().length > 0
           ? { defaultIndex: input.defaultIndex.trim() }
           : {}),
-        ...(input.caFile !== undefined && input.caFile.trim().length > 0 ? { caFile: input.caFile.trim() } : {}),
-        ...(input.rejectUnauthorized !== undefined ? { rejectUnauthorized: input.rejectUnauthorized } : {}),
+        ...(input.caFile !== undefined && input.caFile.trim().length > 0
+          ? { caFile: input.caFile.trim() }
+          : {}),
+        ...(input.rejectUnauthorized !== undefined
+          ? { rejectUnauthorized: input.rejectUnauthorized }
+          : {}),
         ...(input.limits !== undefined ? { limits: input.limits } : {}),
       }
 
@@ -5816,7 +6267,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch (error) {
       // Never fatal: `_cat` is often denied to a low-privilege account while `_search`
       // is allowed, so free-text entry has to keep working (§9).
-      post({ type: 'searchIndexes', indexes: [], warning: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'searchIndexes',
+        indexes: [],
+        warning: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -5829,7 +6284,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         detail: `Connected to ${info.clusterName ?? 'the cluster'}${info.version !== undefined ? ` (OpenSearch ${info.version})` : ''}.`,
       })
     } catch (error) {
-      post({ type: 'searchTestResult', ok: false, detail: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'searchTestResult',
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -5859,10 +6318,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       const strategy = authStrategyFor(config, built.profile)
       const result = await listModels(httpClient, built.profile, strategy)
-      post({ type: 'models', models: result.ids, ...(result.warning !== undefined ? { warning: result.warning } : {}) })
+      post({
+        type: 'models',
+        models: result.ids,
+        ...(result.warning !== undefined ? { warning: result.warning } : {}),
+      })
     } catch (error) {
       // listModels itself never throws; this catches config/secret failures above it.
-      post({ type: 'models', models: [], warning: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'models',
+        models: [],
+        warning: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -5872,13 +6339,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (built === undefined) return
 
       const { config } = await configManager.load()
-      const result = await testConnection(built.profile, buildAuthContext(config, built.profile), httpClient)
+      const result = await testConnection(
+        built.profile,
+        buildAuthContext(config, built.profile),
+        httpClient,
+      )
       post({ type: 'testConnectionResult', ok: result.ok, steps: result.steps })
     } catch (error) {
       post({
         type: 'testConnectionResult',
         ok: false,
-        steps: [{ step: 'certificates', status: 'failed', detail: error instanceof Error ? error.message : String(error) }],
+        steps: [
+          {
+            step: 'certificates',
+            status: 'failed',
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        ],
       })
     }
   }
@@ -5887,7 +6364,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function handleExportConfig(): Promise<void> {
     try {
       const { config } = await configManager.load()
-      const target = await ui.showSaveDialog({ defaultName: 'light-code-config.json', extensions: ['json'] })
+      const target = await ui.showSaveDialog({
+        defaultName: 'light-code-config.json',
+        extensions: ['json'],
+      })
       if (target === undefined) return
       await fs.writeFile(target, JSON.stringify(config, null, 2), 'utf8')
       ui.showInfo(`Config exported to ${target}`)
@@ -5984,12 +6464,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     return async (request) => {
-      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+      const provider = createChatProvider(
+        profile,
+        httpClient,
+        authStrategyFor(config, profile),
+        logger,
+      )
       let text = ''
-      for await (const chunk of provider.streamChat([{ role: 'user', content: buildCodeGenerationPrompt(request) }], {
-        // No tools offered: it is being asked for a file, and offering tools invites it to use one.
-        ...(request.signal !== undefined ? { signal: request.signal } : {}),
-      })) {
+      for await (const chunk of provider.streamChat(
+        [{ role: 'user', content: buildCodeGenerationPrompt(request) }],
+        {
+          // No tools offered: it is being asked for a file, and offering tools invites it to use one.
+          ...(request.signal !== undefined ? { signal: request.signal } : {}),
+        },
+      )) {
         if (chunk.type === 'text') text += chunk.text
       }
       return { source: text, producedBy: profile.label }
@@ -6038,7 +6526,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /** Approve now, and remember it for this workspace. */
-  async function handleAlwaysAllow(id: string, scope: 'tool' | 'command' | 'folder'): Promise<void> {
+  async function handleAlwaysAllow(
+    id: string,
+    scope: 'tool' | 'command' | 'folder',
+  ): Promise<void> {
     const request = userGate.getRequest(id)
     const pathRequest = pendingPathApprovals.get(id)
     userGate.resolve(id, 'approve')
@@ -6067,7 +6558,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Remembers the exact string from ground truth, not from the model's arguments.
       await saveApprovals({
         ...cachedApprovals,
-        allowedCommands: addToAllowlist(request.preview.command, cachedApprovals.allowedCommands ?? []),
+        allowedCommands: addToAllowlist(
+          request.preview.command,
+          cachedApprovals.allowedCommands ?? [],
+        ),
       })
       return
     }
@@ -6128,7 +6622,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           if (seconds === undefined) delete timeouts[target.tool]
           else timeouts[target.tool] = seconds
           const remaining = Object.keys(timeouts).length
-          return { ...entry, ...(remaining > 0 ? { toolTimeouts: timeouts } : { toolTimeouts: undefined }) }
+          return {
+            ...entry,
+            ...(remaining > 0 ? { toolTimeouts: timeouts } : { toolTimeouts: undefined }),
+          }
         })
         postMcp()
       } else {
@@ -6152,7 +6649,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleSetToolTimeout(server: string, tool: string, seconds?: number): Promise<void> {
+  async function handleSetToolTimeout(
+    server: string,
+    tool: string,
+    seconds?: number,
+  ): Promise<void> {
     await updateMcpServer(server, (entry) => {
       const timeouts = { ...entry.toolTimeouts }
       // Deleted rather than stored as 0 or null, so "no override" has exactly one representation
@@ -6160,12 +6661,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (seconds === undefined) delete timeouts[tool]
       else timeouts[tool] = seconds
       const remaining = Object.keys(timeouts).length
-      return { ...entry, ...(remaining > 0 ? { toolTimeouts: timeouts } : { toolTimeouts: undefined }) }
+      return {
+        ...entry,
+        ...(remaining > 0 ? { toolTimeouts: timeouts } : { toolTimeouts: undefined }),
+      }
     })
     postMcp()
   }
 
-  async function handleSetToolPermission(server: string, tool: string, permission: McpToolPermission): Promise<void> {
+  async function handleSetToolPermission(
+    server: string,
+    tool: string,
+    permission: McpToolPermission,
+  ): Promise<void> {
     const namespaced = namespacedToolName(server, tool)
 
     await updateMcpServer(server, (entry) => {
@@ -6176,7 +6684,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     })
 
     const allowed = cachedApprovals.allowedTools ?? []
-    const nextAllowed = permission === 'always' ? addToAllowlist(namespaced, allowed) : removeFromAllowlist(namespaced, allowed)
+    const nextAllowed =
+      permission === 'always'
+        ? addToAllowlist(namespaced, allowed)
+        : removeFromAllowlist(namespaced, allowed)
     if (nextAllowed.length !== allowed.length) {
       await saveApprovals({ ...cachedApprovals, allowedTools: nextAllowed })
     }
@@ -6219,7 +6730,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     try {
       parsed = JSON.parse(json)
     } catch (error) {
-      post({ type: 'mcpSaveError', message: `Not valid JSON: ${error instanceof Error ? error.message : String(error)}` })
+      post({
+        type: 'mcpSaveError',
+        message: `Not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      })
       return
     }
 
@@ -6232,7 +6746,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     const result = mcpServersSchema.safeParse(candidate)
     if (!result.success) {
-      const detail = result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')
+      const detail = result.error.issues
+        .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+        .join('; ')
       post({ type: 'mcpSaveError', message: detail })
       return
     }
@@ -6263,7 +6779,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // withholding feedback on something just configured.
       await mcp.ensureConnected()
     } catch (error) {
-      post({ type: 'mcpSaveError', message: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'mcpSaveError',
+        message: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -6289,7 +6808,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       const result = mcpServersSchema.safeParse(servers)
       if (!result.success) {
-        const detail = result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')
+        const detail = result.error.issues
+          .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+          .join('; ')
         post({ type: 'mcpSaveError', message: detail })
         return
       }
@@ -6340,7 +6861,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (named.length > 0) {
         const found = await search(named)
         if (found !== undefined) {
-          post({ type: 'pythonEnvProbe', interpreter: found, venvDir: named, detail: `Found ${found}` })
+          post({
+            type: 'pythonEnvProbe',
+            interpreter: found,
+            venvDir: named,
+            detail: `Found ${found}`,
+          })
           return
         }
         post({
@@ -6352,7 +6878,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       const scriptPath = script.trim()
       if (scriptPath.length === 0) {
-        post({ type: 'pythonEnvProbe', detail: 'Enter a virtualenv folder or a script path first.' })
+        post({
+          type: 'pythonEnvProbe',
+          detail: 'Enter a virtualenv folder or a script path first.',
+        })
         return
       }
 
@@ -6364,7 +6893,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           const candidate = path.join(dir, name)
           const found = await search(candidate)
           if (found !== undefined) {
-            post({ type: 'pythonEnvProbe', interpreter: found, venvDir: candidate, detail: `Found ${found}` })
+            post({
+              type: 'pythonEnvProbe',
+              interpreter: found,
+              venvDir: candidate,
+              detail: `Found ${found}`,
+            })
             return
           }
         }
@@ -6377,7 +6911,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         detail: `No ${VENV_DIR_NAMES.join(', ')} folder found near the script. Name the virtualenv folder, or set the interpreter directly.`,
       })
     } catch (error) {
-      post({ type: 'pythonEnvProbe', detail: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'pythonEnvProbe',
+        detail: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -6388,7 +6925,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * tedious and the most common way to end up with a server that will not start. Cancelling
    * sends nothing, so a dismissed dialog leaves the field exactly as it was.
    */
-  async function handleBrowseForPath(purpose: string, kind: 'file' | 'folder', extensions?: string[]): Promise<void> {
+  async function handleBrowseForPath(
+    purpose: string,
+    kind: 'file' | 'folder',
+    extensions?: string[],
+  ): Promise<void> {
     const picked = await ui.showOpenDialog({
       kind,
       // Opens where the user is already working rather than at some unrelated default.
@@ -6560,7 +7101,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setReadRoots') {
       void configManager
         .save('user', {
-          filesystem: { readRoots: message.roots.map((root) => root.trim()).filter((root) => root.length > 0) },
+          filesystem: {
+            readRoots: message.roots.map((root) => root.trim()).filter((root) => root.length > 0),
+          },
         })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
@@ -6572,26 +7115,46 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void configManager
         // Both written together: `save` merges at the top level, so writing `ui` with only
         // one key would drop the other.
-        .save('user', { ui: { accentColor: message.value, expertColor: cachedExpertColor, ...(cachedTheme === undefined ? {} : { theme: cachedTheme }) } })
+        .save('user', {
+          ui: {
+            accentColor: message.value,
+            expertColor: cachedExpertColor,
+            ...(cachedTheme === undefined ? {} : { theme: cachedTheme }),
+          },
+        })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setToolTimeoutFor') {
       void handleSetToolTimeoutFor(message.name, message.seconds)
     } else if (message.type === 'setToolTimeout') {
       void configManager
-        .save('user', { tools: message.seconds === undefined ? {} : { timeoutSeconds: message.seconds } })
+        .save('user', {
+          tools: message.seconds === undefined ? {} : { timeoutSeconds: message.seconds },
+        })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setTheme') {
       void configManager
         // The whole `ui` block, for the same reason as the colours: `save` merges at the top
         // level, so writing one key would drop the others.
-        .save('user', { ui: { accentColor: cachedAccentColor, expertColor: cachedExpertColor, theme: message.theme } })
+        .save('user', {
+          ui: {
+            accentColor: cachedAccentColor,
+            expertColor: cachedExpertColor,
+            theme: message.theme,
+          },
+        })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setExpertColor') {
       void configManager
-        .save('user', { ui: { accentColor: cachedAccentColor, expertColor: message.value, ...(cachedTheme === undefined ? {} : { theme: cachedTheme }) } })
+        .save('user', {
+          ui: {
+            accentColor: cachedAccentColor,
+            expertColor: message.value,
+            ...(cachedTheme === undefined ? {} : { theme: cachedTheme }),
+          },
+        })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setAutoApprove') {
@@ -6604,7 +7167,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'revokeAllowedCommand') {
       void saveApprovals({
         ...cachedApprovals,
-        allowedCommands: removeFromAllowlist(message.command, cachedApprovals.allowedCommands ?? []),
+        allowedCommands: removeFromAllowlist(
+          message.command,
+          cachedApprovals.allowedCommands ?? [],
+        ),
       })
     } else if (message.type === 'requestMcp') {
       void handleRequestMcp()
@@ -6625,7 +7191,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'restartMcpServer') {
       void mcp.restart(message.name)
     } else if (message.type === 'setMcpServerEnabled') {
-      void updateMcpServer(message.name, (entry) => ({ ...entry, disabled: !message.enabled })).then(() => postMcp())
+      void updateMcpServer(message.name, (entry) => ({
+        ...entry,
+        disabled: !message.enabled,
+      })).then(() => postMcp())
     } else if (message.type === 'setMcpToolTimeout') {
       void handleSetToolTimeout(message.server, message.tool, message.seconds)
     } else if (message.type === 'setMcpToolPermission') {
@@ -6671,7 +7240,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void configManager
         .load()
         .then(async () => {
-          await configManager.save('user', { office: { excel: message.excel, outlook: message.outlook } })
+          await configManager.save('user', {
+            office: { excel: message.excel, outlook: message.outlook },
+          })
           await loadSettings()
           await postTools()
           /*
@@ -6731,7 +7302,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       void loadSettings().then((config) => {
         reconcileMailTimer(config)
-      reconcileDatasetTimers(config)
+        reconcileDatasetTimers(config)
         return postMailStatus()
       })
     } else if (message.type === 'saveMailSettings') {
@@ -6802,7 +7373,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ? undefined
           : {
               ...(message.maxSpendUsd !== undefined ? { maxSpendUsd: message.maxSpendUsd } : {}),
-              ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
+              ...(message.maxConsultations !== undefined
+                ? { maxConsultations: message.maxConsultations }
+                : {}),
             }
       taskExpertLimits = next
       postExpertSpend()
@@ -6827,7 +7400,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               expert: {
                 ...config.expert,
                 ...(next.maxSpendUsd !== undefined ? { maxSpendUsd: next.maxSpendUsd } : {}),
-                ...(next.maxConsultations !== undefined ? { maxConsultations: next.maxConsultations } : {}),
+                ...(next.maxConsultations !== undefined
+                  ? { maxConsultations: next.maxConsultations }
+                  : {}),
               },
             })
             await postExpert({ redetect: false })
@@ -6838,7 +7413,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void configManager
         .load()
         .then(async ({ config }) => {
-          await configManager.save('user', { ...config, expert: { ...config.expert, keepAlive: message.enabled } })
+          await configManager.save('user', {
+            ...config,
+            expert: { ...config.expert, keepAlive: message.enabled },
+          })
           await postExpert({ redetect: false })
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
@@ -6904,7 +7482,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setExpert') {
       void handleSetExpert(message.enabled, message.path, message.model, {
         ...(message.maxSpendUsd !== undefined ? { maxSpendUsd: message.maxSpendUsd } : {}),
-        ...(message.maxConsultations !== undefined ? { maxConsultations: message.maxConsultations } : {}),
+        ...(message.maxConsultations !== undefined
+          ? { maxConsultations: message.maxConsultations }
+          : {}),
       })
     } else if (message.type === 'requestProfiles') {
       void postProfiles()
@@ -6942,7 +7522,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await syncMcpFromConfig(config)
       await mcp.ensureConnected()
     } catch (error) {
-      logger.warn(`Could not start MCP servers: ${error instanceof Error ? error.message : String(error)}`)
+      logger.warn(
+        `Could not start MCP servers: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   })()
 
@@ -6954,11 +7536,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await restoreActiveTaskOnLoad()
       await postTasks()
     } catch (error) {
-      logger.warn(`Could not restore the previous task: ${error instanceof Error ? error.message : String(error)}`)
+      logger.warn(
+        `Could not restore the previous task: ${error instanceof Error ? error.message : String(error)}`,
+      )
       post({ type: 'taskRestored', taskId: undefined, entries: [] })
     }
   })()
-
 
   /**
    * Notifies, and opens the run's transcript if the user takes the action.
@@ -6967,7 +7550,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * posts to a webview that is not there — the click would silently do nothing, which is worse
    * than not offering it.
    */
-  async function openFromNotification(message: string, level: 'info' | 'warning', taskId: string): Promise<void> {
+  async function openFromNotification(
+    message: string,
+    level: 'info' | 'warning',
+    taskId: string,
+  ): Promise<void> {
     const open = await ui.showActionMessage(message, 'Open', level)
     if (!open) return
     await ui.revealPanel()
@@ -6984,14 +7571,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function openRunTranscript(taskId: string, title: string): Promise<void> {
     const task = await taskStore.load(taskId)
     if (task === undefined) {
-      ui.showWarning('That run\'s transcript is no longer stored — task history may have been cleared.')
+      ui.showWarning(
+        "That run's transcript is no longer stored — task history may have been cleared.",
+      )
       return
     }
 
     const lines: string[] = []
     for (const entry of toTranscript(task.messages)) {
       if (entry.kind === 'text') {
-        lines.push(entry.role === 'user' ? `## Prompt\n\n${entry.content}` : `## Reply\n\n${entry.content}`)
+        lines.push(
+          entry.role === 'user' ? `## Prompt\n\n${entry.content}` : `## Reply\n\n${entry.content}`,
+        )
       } else if (entry.kind === 'reasoning') {
         lines.push(`## Thinking\n\n${entry.content}`)
       } else if (entry.kind === 'chart') {
@@ -7087,10 +7678,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .slice(0, 60)
       const target = path.join(directory, `${stamp}${slug.length > 0 ? `-${slug}` : ''}.md`)
 
-      await fs.writeFile(target, `# ${title}
+      await fs.writeFile(
+        target,
+        `# ${title}
 
 ${contents}
-`, 'utf8')
+`,
+        'utf8',
+      )
       await pruneReports(directory)
       return target
     } catch (error) {
@@ -7118,16 +7713,18 @@ ${contents}
 
   /** Every tool that exists, for the picker. Built with everything on so nothing is hidden. */
   function allToolsForPicker(): { name: string; description: string; group: string }[] {
-    return currentToolRegistry(undefined, undefined, undefined, undefined, false)
-      .list()
-      /*
-       * The ones a schedule can never be granted are not offered. A picker that lists a tool
-       * the run will refuse teaches the wrong thing twice — once when it is ticked, and again
-       * when the run reports it as unavailable.
-       */
-      .filter((tool) => !NEVER_AVAILABLE_TO_SCHEDULES.includes(tool.name))
-      .map((tool) => ({ name: tool.name, description: tool.description, group: tool.group }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+    return (
+      currentToolRegistry(undefined, undefined, undefined, undefined, false)
+        .list()
+        /*
+         * The ones a schedule can never be granted are not offered. A picker that lists a tool
+         * the run will refuse teaches the wrong thing twice — once when it is ticked, and again
+         * when the run reports it as unavailable.
+         */
+        .filter((tool) => !NEVER_AVAILABLE_TO_SCHEDULES.includes(tool.name))
+        .map((tool) => ({ name: tool.name, description: tool.description, group: tool.group }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    )
   }
 
   /**
@@ -7168,8 +7765,14 @@ ${contents}
           // Source is taken from the registries that produced them rather than guessed from
           // the name: a built-in could one day contain `__`, and a server could be called
           // `py`. Asking the thing that owns the tool cannot be wrong in either case.
-          const server = mcpNames.has(tool.name) ? parseNamespacedToolName(tool.name)?.serverName : undefined
-          const source = pythonNames.has(tool.name) ? 'python' : mcpNames.has(tool.name) ? 'mcp' : 'built-in'
+          const server = mcpNames.has(tool.name)
+            ? parseNamespacedToolName(tool.name)?.serverName
+            : undefined
+          const source = pythonNames.has(tool.name)
+            ? 'python'
+            : mcpNames.has(tool.name)
+              ? 'mcp'
+              : 'built-in'
           return {
             name: tool.name,
             description: tool.description,
@@ -7223,7 +7826,13 @@ ${contents}
       const schedules = await loadSchedules()
       // A blank id means "new". Generated here rather than in the UI so two panels cannot
       // mint the same one.
-      const id = schedule.id.length > 0 ? schedule.id : createHash('sha256').update(`${schedule.name}:${String(Date.now())}`).digest('hex').slice(0, 12)
+      const id =
+        schedule.id.length > 0
+          ? schedule.id
+          : createHash('sha256')
+              .update(`${schedule.name}:${String(Date.now())}`)
+              .digest('hex')
+              .slice(0, 12)
       /*
        * Re-armed on every save. An edited trigger must take effect now rather than after the
        * next run, and a schedule created without this would have no `nextRunAt` and never fire.
@@ -7360,7 +7969,9 @@ ${contents}
   }
 
   async function releaseSchedule(id: string): Promise<void> {
-    await fs.rm(path.join(storageDir, 'schedule-claims', `${id}.json`), { force: true }).catch(() => undefined)
+    await fs
+      .rm(path.join(storageDir, 'schedule-claims', `${id}.json`), { force: true })
+      .catch(() => undefined)
   }
 
   async function runSchedule(id: string, reason: 'due' | 'manual'): Promise<void> {
@@ -7441,7 +8052,11 @@ ${contents}
        */
       const failedTask = activeTaskId
       if (failedTask !== undefined) {
-        void openFromNotification(`Scheduled run "${schedule.name}" failed: ${summary}`, 'warning', failedTask)
+        void openFromNotification(
+          `Scheduled run "${schedule.name}" failed: ${summary}`,
+          'warning',
+          failedTask,
+        )
       } else {
         ui.showWarning(`Scheduled run "${schedule.name}" failed: ${summary}`)
       }
@@ -7547,7 +8162,10 @@ ${contents}
     const copy: Schedule = {
       ...source,
       id: newId,
-      name: uniqueName(`${source.name} copy`, Object.values(schedules).map((entry) => entry.name)),
+      name: uniqueName(
+        `${source.name} copy`,
+        Object.values(schedules).map((entry) => entry.name),
+      ),
       enabled: false,
     }
     delete copy.runs
@@ -7596,7 +8214,11 @@ ${contents}
     const messages = conversation.toArray()
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]
-      if (message?.role === 'assistant' && typeof message.content === 'string' && message.content.trim().length > 0) {
+      if (
+        message?.role === 'assistant' &&
+        typeof message.content === 'string' &&
+        message.content.trim().length > 0
+      ) {
         return message.content.trim()
       }
     }
@@ -7636,7 +8258,9 @@ ${contents}
          * firing blind. Logged so a failing tick is diagnosable from the output channel
          * rather than inferred from schedules that never run.
          */
-        logger.warn(`schedule tick failed: ${error instanceof Error ? error.message : String(error)}`)
+        logger.warn(
+          `schedule tick failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
       })
     }, SCHEDULE_TICK_MS)
     // Immediately, too: a schedule that came due while the timer was down should not wait out
@@ -7646,8 +8270,8 @@ ${contents}
 
   async function runScheduleTick(): Promise<void> {
     await (async () => {
-        // Recorded before the early return so the UI can tell a busy scheduler from a dead
-        // one — both look identical from the outside otherwise.
+      // Recorded before the early return so the UI can tell a busy scheduler from a dead
+      // one — both look identical from the outside otherwise.
       lastScheduleTickAt = Date.now()
       if (runningScheduleId !== undefined) {
         /*
@@ -7658,45 +8282,47 @@ ${contents}
          * scheduler that is silently dead.
          */
         if (runStartedAt !== undefined && Date.now() - runStartedAt > STUCK_RUN_MS) {
-          logger.warn(`schedule "${runningScheduleId}" has been running for too long — releasing the scheduler`)
+          logger.warn(
+            `schedule "${runningScheduleId}" has been running for too long — releasing the scheduler`,
+          )
           runningScheduleId = undefined
           runStartedAt = undefined
           void postSchedules()
         }
         return
       }
-        const now = Date.now()
-        const schedules = await loadSchedules()
+      const now = Date.now()
+      const schedules = await loadSchedules()
 
-        /*
-         * Arm anything enabled that has no target — a schedule written before this field
-         * existed, or one whose config was hand-edited. Without it such a schedule is
-         * permanently not-due and silently never runs, which is the failure this whole
-         * mechanism replaced.
-         */
-        const unarmed = Object.values(schedules).filter(
-          (schedule) => schedule.enabled && schedule.nextRunAt === undefined,
-        )
-        if (unarmed.length > 0) {
-          const armed = { ...schedules }
-          for (const schedule of unarmed) {
-            armed[schedule.id] = { ...schedule, nextRunAt: nextFireTime(schedule, now) }
-          }
-          await saveSchedules(armed)
+      /*
+       * Arm anything enabled that has no target — a schedule written before this field
+       * existed, or one whose config was hand-edited. Without it such a schedule is
+       * permanently not-due and silently never runs, which is the failure this whole
+       * mechanism replaced.
+       */
+      const unarmed = Object.values(schedules).filter(
+        (schedule) => schedule.enabled && schedule.nextRunAt === undefined,
+      )
+      if (unarmed.length > 0) {
+        const armed = { ...schedules }
+        for (const schedule of unarmed) {
+          armed[schedule.id] = { ...schedule, nextRunAt: nextFireTime(schedule, now) }
+        }
+        await saveSchedules(armed)
+        return
+      }
+
+      for (const schedule of Object.values(schedules)) {
+        // A schedule written against another project must not fire here. Its prompt and its
+        // granted tools were chosen for that codebase, not this one.
+        if (!scheduleAppliesHere(schedule, workspaceRoot)) continue
+        if (isDue(schedule, now)) {
+          await runSchedule(schedule.id, 'due')
+          // One per tick: a second would have to wait for the first anyway, and it will be
+          // due again on the next pass.
           return
         }
-
-        for (const schedule of Object.values(schedules)) {
-          // A schedule written against another project must not fire here. Its prompt and its
-          // granted tools were chosen for that codebase, not this one.
-          if (!scheduleAppliesHere(schedule, workspaceRoot)) continue
-          if (isDue(schedule, now)) {
-            await runSchedule(schedule.id, 'due')
-            // One per tick: a second would have to wait for the first anyway, and it will be
-            // due again on the next pass.
-            return
-          }
-        }
+      }
     })()
   }
 
@@ -7741,7 +8367,9 @@ ${contents}
           await postSettings()
           await postSchedules()
         } catch (error) {
-          logger.warn(`Could not resync the view: ${error instanceof Error ? error.message : String(error)}`)
+          logger.warn(
+            `Could not resync the view: ${error instanceof Error ? error.message : String(error)}`,
+          )
         }
       })()
     },

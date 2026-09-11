@@ -2,6 +2,8 @@ import { checkCollector } from '../dataset/checkCollector.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Logger } from '../logging/logger.js'
+import type { SecretStore } from '../platform/secrets.js'
+import { pythonEnvEntries, resolvePythonEnv, type PythonEnvEntry } from './env.js'
 import type { Tool } from '../tools/types.js'
 import type { CodeGenerator } from './codeGenerator.js'
 import { describeIssue, loadRegistry, type RegisteredTool, type ToolLoadIssue } from './registry.js'
@@ -58,6 +60,14 @@ export interface PythonStatus {
   ready: boolean
   /** Why it is not ready, phrased for a human. */
   detail: string
+  /**
+   * Variables declared as secrets whose value is not in storage.
+   *
+   * Surfaced rather than logged, for the same reason refused tools are: the tool that needs the
+   * variable fails with whatever its library says about a missing credential, which points at the
+   * tool. Naming the variable points at the thing that is actually wrong, and the fix is one box.
+   */
+  missingEnv?: string[]
   tools: { name: string; description: string; filePath: string }[]
   /**
    * Refused tools, surfaced rather than logged — see `registry.ts`.
@@ -83,8 +93,7 @@ export interface PythonManagerOptions {
    * See `worker.ts` for the transport and `bridge.ts` for the rules.
    */
   callTool?:
-    | ((name: string, args: Record<string, unknown>, caller: string) => Promise<unknown>)
-    | undefined
+    ((name: string, args: Record<string, unknown>, caller: string) => Promise<unknown>) | undefined
   /** Per-user storage; the venv lives here, outside the workspace. */
   storageDir: string
   logger: Logger
@@ -109,6 +118,13 @@ export interface PythonManagerOptions {
    * unchanged: what arrives here is what a human deliberately declared.
    */
   sessionEnv?: () => Record<string, string>
+  /**
+   * Reads the values of variables the user declared as secrets, at spawn time.
+   *
+   * Optional so a host without one simply has no secret-valued variables rather than failing to
+   * start; the names are still reported as missing, so the difference is visible.
+   */
+  secrets?: SecretStore | undefined
   /**
    * The programming provider, if one is configured, resolved when the tool list is built.
    *
@@ -136,6 +152,16 @@ export class PythonManager {
   private extraIndexUrls: string[] = []
   private offline = false
   private timeoutMs = 30_000
+  /**
+   * The *declaration*, not the values: names, and which are secret. Values are read at spawn.
+   *
+   * Held because the worker outlives a save, and `envFingerprint` is what tells `configure` that
+   * a save changed them — a worker's environment is fixed when it is spawned, so without this a
+   * changed variable would apply at the next window rather than the next call.
+   */
+  private envEntries: PythonEnvEntry[] = []
+  private envFingerprint = ''
+  private missingEnv: string[] = []
 
   constructor(private readonly options: PythonManagerOptions) {}
 
@@ -158,6 +184,10 @@ export class PythonManager {
     indexUrl?: string | undefined
     extraIndexUrls?: string[] | undefined
     offline?: boolean | undefined
+    /** Variables to run every tool with. See `env.ts` for the shape config holds. */
+    env?:
+      | Record<string, string | { value?: string | undefined; secret?: boolean | undefined }>
+      | undefined
   }): Promise<void> {
     const enabled = config.dynamicTools === 'on'
     if (!enabled) {
@@ -177,6 +207,26 @@ export class PythonManager {
     }
 
     this.enabled = true
+
+    /*
+     * A changed variable means the running worker is wrong, so it goes.
+     *
+     * `PythonWorker` takes its environment at construction — that is how a child process works —
+     * and the worker is deliberately long-lived. Without this, saving a variable would appear to
+     * do nothing until the window was reopened, which is indistinguishable from the setting not
+     * working at all. Disposing here is safe because `configure` runs between turns, never during
+     * one, and the next call spawns a fresh worker.
+     */
+    this.envEntries = pythonEnvEntries(config.env)
+    const fingerprint = JSON.stringify(this.envEntries)
+    if (fingerprint !== this.envFingerprint) {
+      this.envFingerprint = fingerprint
+      if (this.worker !== undefined) {
+        this.options.logger.info('Python environment variables changed; restarting the worker.')
+        await this.dispose()
+      }
+    }
+
     /*
      * Python's own limit, then the global tool timeout, then 30 seconds.
      *
@@ -209,7 +259,7 @@ export class PythonManager {
     }
 
     try {
-      const env = minimalPythonEnv(this.options.sessionEnv?.() ?? {})
+      const env = await this.childEnv()
 
       /*
        * Prefer an environment the project already has. That is where the user's internal
@@ -371,7 +421,12 @@ export class PythonManager {
        */
       ...(worker === undefined
         ? []
-        : [createCollectorTool({ ...context, checkCollector: (name, filePath) => checkCollector(worker, name, filePath) })]),
+        : [
+            createCollectorTool({
+              ...context,
+              checkCollector: (name, filePath) => checkCollector(worker, name, filePath),
+            }),
+          ]),
     ] as unknown as Tool<never>[]
   }
 
@@ -412,7 +467,7 @@ export class PythonManager {
         : {}),
       ...(uv !== undefined
         ? {
-            installDeps: (packages: readonly string[]) =>
+            installDeps: async (packages: readonly string[]) =>
               installDependencies({
                 uv,
                 pythonPath: this.interpreter,
@@ -420,13 +475,12 @@ export class PythonManager {
                 ...(this.indexUrl !== undefined ? { indexUrl: this.indexUrl } : {}),
                 extraIndexUrls: this.extraIndexUrls,
                 offline: this.offline,
-                env: minimalPythonEnv(this.options.sessionEnv?.() ?? {}),
+                env: await this.childEnv(),
               }),
           }
         : {}),
     }
   }
-
 
   /**
    * Starts against an interpreter we did not create and do not own.
@@ -453,7 +507,7 @@ export class PythonManager {
     }
 
     try {
-      const env = minimalPythonEnv(this.options.sessionEnv?.() ?? {})
+      const env = await this.childEnv()
       this.interpreter = bare.path
       this.venvPath = ''
       this.venvSource = 'interpreter'
@@ -504,6 +558,7 @@ export class PythonManager {
       venvIsUvManaged: this.venvIsUvManaged,
       ready: this.ready,
       detail: this.detail,
+      ...(this.missingEnv.length > 0 ? { missingEnv: [...this.missingEnv] } : {}),
       tools: this.registered.map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -518,6 +573,24 @@ export class PythonManager {
         recoverable: issue.kind === 'hash-mismatch' || issue.kind === 'unapproved',
       })),
     }
+  }
+
+  /**
+   * The environment every Python child gets — the worker, `uv venv`, and a dependency install.
+   *
+   * **One owner, deliberately.** The expression was written out at three spawn sites, which is
+   * the shape of bug that has cost this project the most: a fourth site, or a change made at two
+   * of the three, silently gives some Python a different environment from the rest. A test reads
+   * this file and fails if `minimalPythonEnv` is called anywhere but here.
+   *
+   * The user's own variables are applied last and therefore win. That is the point of declaring
+   * them, and it is also why the whole `python` block is user-scope only: the names that can be
+   * set include `PATH`, so a repository able to write here could choose which interpreter ran.
+   */
+  private async childEnv(): Promise<NodeJS.ProcessEnv> {
+    const resolved = await resolvePythonEnv(this.envEntries, this.options.secrets)
+    this.missingEnv = resolved.missing
+    return minimalPythonEnv({ ...(this.options.sessionEnv?.() ?? {}), ...resolved.env })
   }
 
   async dispose(): Promise<void> {

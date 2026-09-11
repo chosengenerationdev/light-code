@@ -68,6 +68,37 @@ export const pythonConfigSchema = z
     offline: z.boolean(),
     /** Per-call budget in seconds. A tool that hangs must not hang the turn. */
     timeoutSeconds: z.number().int().min(1).max(600),
+    /**
+     * Environment variables every Python tool is run with.
+     *
+     * A tool that reaches an internal system needs to be told where it is and who is asking, and
+     * the alternative people reach for is hard-coding the host and the token into the tool source
+     * — which lands in the workspace, gets committed, and has to be edited in every tool when it
+     * changes. One declaration, applied to every tool, is the shape that matches the problem.
+     *
+     * A value may be a plain string, or `{ secret: true }` — which means the value lives in
+     * secret storage under `python:env:NAME` and never in this file (§15). The string form exists
+     * because this file is hand-edited as often as it is written by the UI, and
+     * `{"API_HOST": "<the address>"}` is what somebody doing that will type. Note the example
+     * carries no URL on purpose: comments survive into the bundle, and invariant 4's check reads
+     * the bundle rather than the source.
+     *
+     * User-scope only, with the rest of the `python` block, and that is load-bearing here rather
+     * than incidental: these values are handed to model-authored code, and `PATH` is among the
+     * names a repository could otherwise set.
+     */
+    env: z.record(
+      z.string(),
+      z.union([
+        z.string(),
+        z.object({
+          /** The literal value. Absent when `secret` is true. */
+          value: z.string().optional(),
+          /** True when the value is held in secret storage rather than here. */
+          secret: z.boolean().optional(),
+        }),
+      ]),
+    ),
   })
   .partial()
 
@@ -126,22 +157,24 @@ export const expertConfigSchema = z
      * there is one, for the model that was assessed, and it records which that was so a stale
      * one is recognisable rather than silently applied to a different model.
      */
-    assessment: z.object({
-      model: z.string(),
-      profileLabel: z.string(),
-      assessedAt: z.number(),
-      verdict: z.string(),
-      costUsd: z.number().optional(),
-      probes: z.array(
-        z.object({
-          id: z.string(),
-          measures: z.string(),
-          prompt: z.string(),
-          answer: z.string(),
-          error: z.string().optional(),
-        }),
-      ),
-    }).optional(),
+    assessment: z
+      .object({
+        model: z.string(),
+        profileLabel: z.string(),
+        assessedAt: z.number(),
+        verdict: z.string(),
+        costUsd: z.number().optional(),
+        probes: z.array(
+          z.object({
+            id: z.string(),
+            measures: z.string(),
+            prompt: z.string(),
+            answer: z.string(),
+            error: z.string().optional(),
+          }),
+        ),
+      })
+      .optional(),
     /**
      * Consultations allowed within one task. 0 means no limit.
      *
@@ -284,7 +317,9 @@ export type VectorStoreConfig = z.infer<typeof vectorStoreSchema>
 export function vectorStoreTls(store: VectorStoreConfig): TlsSettings | undefined {
   const merged: TlsSettings = {
     ...(store.caFile !== undefined ? { caFile: store.caFile } : {}),
-    ...(store.rejectUnauthorized !== undefined ? { rejectUnauthorized: store.rejectUnauthorized } : {}),
+    ...(store.rejectUnauthorized !== undefined
+      ? { rejectUnauthorized: store.rejectUnauthorized }
+      : {}),
     ...(store.tls ?? {}),
   }
   return Object.keys(merged).length > 0 ? merged : undefined
@@ -752,7 +787,9 @@ export const configSchema = z
      */
     ui: z
       .object({
-        accentColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #22C55E'),
+        accentColor: z
+          .string()
+          .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #22C55E'),
         /**
          * Marks text that came from the Claude CLI expert (§12b) rather than from the
          * primary model. Separate from the accent because one colour cannot mean both
@@ -760,7 +797,9 @@ export const configSchema = z
          * close to an amber or rose accent, and only the user can see whether their
          * particular pair reads as two colours or one.
          */
-        expertColor: z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #D97757'),
+        expertColor: z
+          .string()
+          .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Must be a hex colour like #D97757'),
         /**
          * Light or dark in the browser, or follow the browser's own setting.
          *

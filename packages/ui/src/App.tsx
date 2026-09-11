@@ -82,7 +82,12 @@ function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
   if (last === undefined || last.kind !== 'text' || !last.pending) return settled
   return [
     ...settled.slice(0, -1),
-    { kind: 'text', role: last.role, content: last.content, ...(last.expertInformed === true ? { expertInformed: true } : {}) },
+    {
+      kind: 'text',
+      role: last.role,
+      content: last.content,
+      ...(last.expertInformed === true ? { expertInformed: true } : {}),
+    },
   ]
 }
 
@@ -137,7 +142,14 @@ export function App(props: AppProps): ReactElement {
     maxConsultations: number
     overridden: boolean
     estimate?: { consultations?: number; usd?: number }
-  }>({ usd: 0, consultations: 0, unpriced: 0, maxSpendUsd: 0, maxConsultations: 0, overridden: false })
+  }>({
+    usd: 0,
+    consultations: 0,
+    unpriced: 0,
+    maxSpendUsd: 0,
+    maxConsultations: 0,
+    overridden: false,
+  })
   const [dispatcher, setDispatcher] = useState<{
     enabled: boolean
     hiddenTools: number
@@ -178,9 +190,9 @@ export function App(props: AppProps): ReactElement {
       delete next[target]
       return next
     })
-  const [docsResult, setDocsResult] = useState<{ indexed?: number; index?: string; error?: string } | undefined>(
-    undefined,
-  )
+  const [docsResult, setDocsResult] = useState<
+    { indexed?: number; index?: string; error?: string } | undefined
+  >(undefined)
   const [mcpServers, setMcpServers] = useState<McpServerState[]>([])
   const [mcpJson, setMcpJson] = useState('{\n  "mcpServers": {}\n}')
   const [mcpWarnings, setMcpWarnings] = useState<Record<string, string[]>>({})
@@ -188,15 +200,19 @@ export function App(props: AppProps): ReactElement {
   const [mcpConfigs, setMcpConfigs] = useState<Record<string, McpServerConfig>>({})
   const [mcpPlatform, setMcpPlatform] = useState<McpPlatform>('posix')
   const [mcpSavedTick, setMcpSavedTick] = useState(0)
-  const [pickedPath, setPickedPath] = useState<{ purpose: string; path: string } | undefined>(undefined)
-  const [pythonProbe, setPythonProbe] = useState<{ interpreter?: string; venvDir?: string; detail: string } | undefined>(
+  const [pickedPath, setPickedPath] = useState<{ purpose: string; path: string } | undefined>(
     undefined,
   )
+  const [pythonProbe, setPythonProbe] = useState<
+    { interpreter?: string; venvDir?: string; detail: string } | undefined
+  >(undefined)
   const [models, setModels] = useState<string[]>([])
   const [modelsWarning, setModelsWarning] = useState<string | undefined>(undefined)
   const [modelsLoading, setModelsLoading] = useState(false)
   const [testRunning, setTestRunning] = useState(false)
-  const [testResult, setTestResult] = useState<{ ok: boolean; steps: TestConnectionStep[] } | undefined>(undefined)
+  const [testResult, setTestResult] = useState<
+    { ok: boolean; steps: TestConnectionStep[] } | undefined
+  >(undefined)
   const [tasks, setTasks] = useState<TaskListEntry[]>([])
   const [activeTaskId, setActiveTaskId] = useState<string | undefined>(undefined)
   const [usage, setUsage] = useState<ContextUsage | undefined>(undefined)
@@ -210,14 +226,18 @@ export function App(props: AppProps): ReactElement {
   const [activeSearchId, setActiveSearchId] = useState<string | undefined>(undefined)
   const [searchIndexes, setSearchIndexes] = useState<SearchIndex[]>([])
   const [searchIndexesWarning, setSearchIndexesWarning] = useState<string | undefined>(undefined)
-  const [searchTestResult, setSearchTestResult] = useState<{ ok: boolean; detail: string } | undefined>(undefined)
+  const [searchTestResult, setSearchTestResult] = useState<
+    { ok: boolean; detail: string } | undefined
+  >(undefined)
   const [searchSavedTick, setSearchSavedTick] = useState(0)
   const [storeSync, setStoreSync] = useState<
     { running: boolean; copied?: number; error?: string; fromLabel?: string } | undefined
   >(undefined)
   const [embedder, setEmbedder] = useState<EmbedderState | undefined>(undefined)
   const [indexProgress, setIndexProgress] = useState<IndexProgress | undefined>(undefined)
-  const [indexResult, setIndexResult] = useState<{ result?: IndexResult; error?: string } | undefined>(undefined)
+  const [indexResult, setIndexResult] = useState<
+    { result?: IndexResult; error?: string } | undefined
+  >(undefined)
   /** The outcome of joining an existing index to the team alias. */
   const [aliasResult, setAliasResult] = useState<
     { alias?: string; index?: string; attributed?: number; error?: string } | undefined
@@ -231,14 +251,27 @@ export function App(props: AppProps): ReactElement {
     defaultStoreLabel: string
     semantic: boolean
     guidance: string
-  }>({ datasets: [], tools: [], stores: [], defaultStoreLabel: 'none', semantic: false, guidance: '' })
+  }>({
+    datasets: [],
+    tools: [],
+    stores: [],
+    defaultStoreLabel: 'none',
+    semantic: false,
+    guidance: '',
+  })
   /** The mailbox tree, so folders are ticked rather than typed. */
-  const [mailTree, setMailTree] = useState<{ folders: MailFolderNode[]; error?: string; loading: boolean }>({
+  const [mailTree, setMailTree] = useState<{
+    folders: MailFolderNode[]
+    error?: string
+    loading: boolean
+  }>({
     folders: [],
     loading: false,
   })
   /** What a long-running index is doing. One slot: only one runs at a time in practice. */
-  const [indexingProgress, setIndexingProgress] = useState<IndexingProgressState | undefined>(undefined)
+  const [indexingProgress, setIndexingProgress] = useState<IndexingProgressState | undefined>(
+    undefined,
+  )
   /** The outcome of publishing this machine's skills to the team collection. */
   const [teamSkillsResult, setTeamSkillsResult] = useState<
     { count?: number; collection?: string; error?: string } | undefined
@@ -249,7 +282,9 @@ export function App(props: AppProps): ReactElement {
   const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
   const [pythonStatus, setPythonStatus] = useState<PythonStatus | undefined>(undefined)
   const [pythonSettings, setPythonSettings] = useState<PythonSettings | undefined>(undefined)
-  const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>([])
+  const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>(
+    [],
+  )
   const [skillIssues, setSkillIssues] = useState<{ filePath: string; detail: string }[]>([])
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
   const [schedules, setSchedules] = useState<Schedule[]>([])
@@ -263,7 +298,10 @@ export function App(props: AppProps): ReactElement {
   }>({ choosesTheme: false })
   /** The global tool timeout, when one is set. Undefined leaves each tool at its own default. */
   const [toolTimeoutSeconds, setToolTimeoutSeconds] = useState<number | undefined>(undefined)
-  const [projectSettings, setProjectSettings] = useState<{ workspaceOpen: boolean; overridden: string[] }>({
+  const [projectSettings, setProjectSettings] = useState<{
+    workspaceOpen: boolean
+    overridden: string[]
+  }>({
     workspaceOpen: false,
     overridden: [],
   })
@@ -278,9 +316,9 @@ export function App(props: AppProps): ReactElement {
     // on a machine that cannot honour them.
     office: { supported: false, excel: false, outlook: false },
   })
-  const [schedulerState, setSchedulerState] = useState<{ running: boolean; lastTickAt?: number } | undefined>(
-    undefined,
-  )
+  const [schedulerState, setSchedulerState] = useState<
+    { running: boolean; lastTickAt?: number } | undefined
+  >(undefined)
   const [runningScheduleId, setRunningScheduleId] = useState<string | undefined>(undefined)
   const [skillExtraDirs, setSkillExtraDirs] = useState<string[]>([])
   // What the user typed, not the resolved absolute path — the field must round-trip a
@@ -315,14 +353,22 @@ export function App(props: AppProps): ReactElement {
         // before any pending assistant text rather than after it.
         setMessages((prev) => {
           const index = prev.findIndex((m) => m.kind === 'reasoning' && m.pending === true)
-          const updated: DisplayMessage = { kind: 'reasoning', content: message.text, pending: true }
+          const updated: DisplayMessage = {
+            kind: 'reasoning',
+            content: message.text,
+            pending: true,
+          }
           if (index === -1) return [...prev, updated]
           return [...prev.slice(0, index), updated, ...prev.slice(index + 1)]
         })
       } else if (message.type === 'toolCall') {
         setMessages((prev) => [
           ...finalizePendingMessage(prev),
-          { kind: 'tool', toolCall: message.toolCall, ...(message.expertInformed === true ? { expertInformed: true } : {}) },
+          {
+            kind: 'tool',
+            toolCall: message.toolCall,
+            ...(message.expertInformed === true ? { expertInformed: true } : {}),
+          },
         ])
       } else if (message.type === 'toolResult') {
         // Replace the pending entry for this call rather than appending a second one.
@@ -332,7 +378,9 @@ export function App(props: AppProps): ReactElement {
             toolCall: message.toolCall,
             ...(message.expertInformed === true ? { expertInformed: true } : {}),
           }
-          const index = prev.findIndex((m) => m.kind === 'tool' && m.toolCall.id === message.toolCall.id)
+          const index = prev.findIndex(
+            (m) => m.kind === 'tool' && m.toolCall.id === message.toolCall.id,
+          )
           if (index === -1) return [...prev, entry]
           return [...prev.slice(0, index), entry, ...prev.slice(index + 1)]
         })
@@ -384,7 +432,10 @@ export function App(props: AppProps): ReactElement {
         setModeId(message.modeId)
         setProgrammingProfileId(message.programmingProfileId)
         setAllowProgrammingProfile(message.allowProgrammingProfile)
-        setThemeChoice({ choosesTheme: message.choosesTheme === true, ...(message.theme === undefined ? {} : { theme: message.theme }) })
+        setThemeChoice({
+          choosesTheme: message.choosesTheme === true,
+          ...(message.theme === undefined ? {} : { theme: message.theme }),
+        })
         setToolTimeoutSeconds(message.toolTimeoutSeconds)
         setGuide({
           native: message.nativeGuide,
@@ -461,7 +512,10 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'queuedMessageConsumed') {
         // Enters the transcript as an ordinary user turn — which is what it became in the
         // conversation, so a reopened task renders it identically.
-        setMessages((prev) => [...finalizePendingMessage(prev), { kind: 'text', role: 'user', content: message.text }])
+        setMessages((prev) => [
+          ...finalizePendingMessage(prev),
+          { kind: 'text', role: 'user', content: message.text },
+        ])
       } else if (message.type === 'mentionCandidates') {
         setMentionCandidates(message.paths)
       } else if (message.type === 'capabilities') {
@@ -494,8 +548,20 @@ export function App(props: AppProps): ReactElement {
          * only places it. Deciding again here is what made a live chart render as nothing.
          */
         setMessages((prev) => [
-          ...prev.filter((entry) => !(entry.kind === 'text' && entry.role === 'assistant' && entry.pending === true && entry.content.length === 0)),
-          { kind: 'chart', chart: message.chart, ...(message.expertInformed === true ? { expertInformed: true } : {}) },
+          ...prev.filter(
+            (entry) =>
+              !(
+                entry.kind === 'text' &&
+                entry.role === 'assistant' &&
+                entry.pending === true &&
+                entry.content.length === 0
+              ),
+          ),
+          {
+            kind: 'chart',
+            chart: message.chart,
+            ...(message.expertInformed === true ? { expertInformed: true } : {}),
+          },
         ])
       } else if (message.type === 'chartError') {
         setMessages((prev) => [...prev, { kind: 'chartError', message: message.message }])
@@ -724,7 +790,10 @@ export function App(props: AppProps): ReactElement {
     // The transcript shows what the user typed, mentions unexpanded — the host attaches
     // the file contents on the way to the model, and echoing them here would bury the
     // question under the source it refers to.
-    const shown = images.length > 0 ? `${text}${text.length > 0 ? '\n' : ''}[${images.length} image(s) attached]` : text
+    const shown =
+      images.length > 0
+        ? `${text}${text.length > 0 ? '\n' : ''}[${images.length} image(s) attached]`
+        : text
     setMessages((prev) => [...prev, { kind: 'text', role: 'user', content: shown }])
     setIsStreaming(true)
     const outgoing: UiToHostMessage =
@@ -816,7 +885,8 @@ export function App(props: AppProps): ReactElement {
       setError(undefined)
       props.transport.post({ type: 'saveSearchConnection', connection } satisfies UiToHostMessage)
     },
-    onDelete: (id: string) => props.transport.post({ type: 'deleteSearchConnection', id } satisfies UiToHostMessage),
+    onDelete: (id: string) =>
+      props.transport.post({ type: 'deleteSearchConnection', id } satisfies UiToHostMessage),
     onSyncFrom: (fromId: string) => {
       setStoreSync({ running: true })
       props.transport.post({ type: 'syncVectorStore', fromId } satisfies UiToHostMessage)
@@ -829,7 +899,8 @@ export function App(props: AppProps): ReactElement {
         ...(forProject === true ? { forProject: true } : {}),
       } satisfies UiToHostMessage),
     project: projectSettings,
-    onClearProject: () => props.transport.post({ type: 'clearProjectSettings' } satisfies UiToHostMessage),
+    onClearProject: () =>
+      props.transport.post({ type: 'clearProjectSettings' } satisfies UiToHostMessage),
     onListIndexes: (connection: SearchConnectionInput) =>
       props.transport.post({ type: 'requestSearchIndexes', connection } satisfies UiToHostMessage),
     onTest: (connection: SearchConnectionInput) => {
@@ -839,7 +910,8 @@ export function App(props: AppProps): ReactElement {
     indexing: {
       embedder,
       profiles,
-      connectionLabel: searchConnections.find((connection) => connection.id === activeSearchId)?.label,
+      connectionLabel: searchConnections.find((connection) => connection.id === activeSearchId)
+        ?.label,
       progress: indexProgress,
       lastResult: indexResult,
       models: embedderModels,
@@ -882,8 +954,10 @@ export function App(props: AppProps): ReactElement {
         setIndexResult(undefined)
         props.transport.post({ type: 'startIndexing' } satisfies UiToHostMessage)
       },
-      onClearIndex: () => props.transport.post({ type: 'clearCodebaseIndex' } satisfies UiToHostMessage),
-      onCancelIndexing: () => props.transport.post({ type: 'cancelIndexing' } satisfies UiToHostMessage),
+      onClearIndex: () =>
+        props.transport.post({ type: 'clearCodebaseIndex' } satisfies UiToHostMessage),
+      onCancelIndexing: () =>
+        props.transport.post({ type: 'cancelIndexing' } satisfies UiToHostMessage),
     },
     dispatcher: {
       enabled: dispatcher.enabled,
@@ -906,7 +980,10 @@ export function App(props: AppProps): ReactElement {
       onIndexDocs: (kind?: 'tool' | 'skill') => {
         setDocsResult(undefined)
         setDocsIndexing(true)
-        props.transport.post({ type: 'indexDocs', ...(kind === undefined ? {} : { kind }) } satisfies UiToHostMessage)
+        props.transport.post({
+          type: 'indexDocs',
+          ...(kind === undefined ? {} : { kind }),
+        } satisfies UiToHostMessage)
       },
       onClearDocsIndex: () => {
         setDocsResult(undefined)
@@ -944,7 +1021,11 @@ export function App(props: AppProps): ReactElement {
       maxConsultations: limits.maxConsultations,
     } satisfies UiToHostMessage)
   }
-  const saveMcpServer = (name: string, previousName: string | undefined, config: McpServerConfig): void => {
+  const saveMcpServer = (
+    name: string,
+    previousName: string | undefined,
+    config: McpServerConfig,
+  ): void => {
     setError(undefined)
     props.transport.post({
       type: 'saveMcpServer',
@@ -957,7 +1038,11 @@ export function App(props: AppProps): ReactElement {
   const openManagedFile = (filePath: string): void => {
     props.transport.post({ type: 'openManagedFile', path: filePath } satisfies UiToHostMessage)
   }
-  const browseForPath = (request: { purpose: string; kind: 'file' | 'folder'; extensions?: string[] }): void => {
+  const browseForPath = (request: {
+    purpose: string
+    kind: 'file' | 'folder'
+    extensions?: string[]
+  }): void => {
     // Cleared first so picking the same path twice in a row still registers as a change.
     setPickedPath(undefined)
     props.transport.post({ type: 'browseForPath', ...request } satisfies UiToHostMessage)
@@ -980,8 +1065,17 @@ export function App(props: AppProps): ReactElement {
   const connectMcp = (name: string): void => {
     props.transport.post({ type: 'connectMcpServer', name } satisfies UiToHostMessage)
   }
-  const setMcpToolPermission = (server: string, tool: string, permission: McpToolPermission): void => {
-    props.transport.post({ type: 'setMcpToolPermission', server, tool, permission } satisfies UiToHostMessage)
+  const setMcpToolPermission = (
+    server: string,
+    tool: string,
+    permission: McpToolPermission,
+  ): void => {
+    props.transport.post({
+      type: 'setMcpToolPermission',
+      server,
+      tool,
+      permission,
+    } satisfies UiToHostMessage)
   }
 
   const rollback = (): void => {
@@ -1035,7 +1129,12 @@ export function App(props: AppProps): ReactElement {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <strong>Light Code</strong>
           {view === 'chat' && (
-            <ModeSelector modeId={modeId} disabled={isStreaming} onChange={changeMode} expertAvailable={expertEnabled} />
+            <ModeSelector
+              modeId={modeId}
+              disabled={isStreaming}
+              onChange={changeMode}
+              expertAvailable={expertEnabled}
+            />
           )}
           {/*
             Beside the mode selector because choosing Junior mode and deciding what the expert
@@ -1055,7 +1154,10 @@ export function App(props: AppProps): ReactElement {
               {...(expertSpend.usage !== undefined ? { usage: expertSpend.usage } : {})}
               {...(expertSpend.exhausted !== undefined ? { exhausted: expertSpend.exhausted } : {})}
               onSetLimits={(limits) =>
-                props.transport.post({ type: 'setTaskExpertLimits', ...limits } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'setTaskExpertLimits',
+                  ...limits,
+                } satisfies UiToHostMessage)
               }
             />
           )}
@@ -1072,10 +1174,22 @@ export function App(props: AppProps): ReactElement {
             >
               <NewTaskIcon />
             </button>
-            <button type="button" aria-label="History" title="History" style={iconButtonStyle('ghost')} onClick={openHistory}>
+            <button
+              type="button"
+              aria-label="History"
+              title="History"
+              style={iconButtonStyle('ghost')}
+              onClick={openHistory}
+            >
               <HistoryIcon />
             </button>
-            <button type="button" aria-label="Settings" title="Settings" style={iconButtonStyle('ghost')} onClick={openSettings}>
+            <button
+              type="button"
+              aria-label="Settings"
+              title="Settings"
+              style={iconButtonStyle('ghost')}
+              onClick={openSettings}
+            >
               <SettingsIcon />
             </button>
             {/*
@@ -1102,7 +1216,13 @@ export function App(props: AppProps): ReactElement {
             </button>
           </div>
         ) : (
-          <button type="button" aria-label="Back" title="Back" style={iconButtonStyle('ghost')} onClick={() => setView('chat')}>
+          <button
+            type="button"
+            aria-label="Back"
+            title="Back"
+            style={iconButtonStyle('ghost')}
+            onClick={() => setView('chat')}
+          >
             <BackIcon />
           </button>
         )}
@@ -1126,7 +1246,8 @@ export function App(props: AppProps): ReactElement {
             gap: 8,
             color: 'var(--vscode-inputValidation-errorForeground, var(--vscode-foreground))',
             background: 'var(--vscode-inputValidation-errorBackground, transparent)',
-            border: '1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground))',
+            border:
+              '1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground))',
           }}
         >
           <span style={{ flex: 1 }}>{error}</span>
@@ -1134,7 +1255,13 @@ export function App(props: AppProps): ReactElement {
             type="button"
             aria-label="Dismiss"
             onClick={() => setError(undefined)}
-            style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'inherit',
+              cursor: 'pointer',
+              padding: 0,
+            }}
           >
             ✕
           </button>
@@ -1179,7 +1306,9 @@ export function App(props: AppProps): ReactElement {
             onRevokeCommand={revokeCommand}
             maxIterations={maxIterations}
             readRoots={readRoots}
-            onSetReadRoots={(roots) => props.transport.post({ type: 'setReadRoots', roots } satisfies UiToHostMessage)}
+            onSetReadRoots={(roots) =>
+              props.transport.post({ type: 'setReadRoots', roots } satisfies UiToHostMessage)
+            }
             accentColor={accentColor}
             onSetAccentColor={(value) => {
               // Applied locally first so dragging through swatches is instant; config catches
@@ -1236,13 +1365,24 @@ export function App(props: AppProps): ReactElement {
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}
-            onAssessJunior={() => props.transport.post({ type: 'assessJunior' } satisfies UiToHostMessage)}
-            onMeasureCost={() => props.transport.post({ type: 'measureExpertCost' } satisfies UiToHostMessage)}
-            onClearPricing={() => props.transport.post({ type: 'clearExpertPricing' } satisfies UiToHostMessage)}
-            onSetKeepAlive={(enabled) =>
-              props.transport.post({ type: 'setExpertKeepAlive', enabled } satisfies UiToHostMessage)
+            onAssessJunior={() =>
+              props.transport.post({ type: 'assessJunior' } satisfies UiToHostMessage)
             }
-            onClearAssessment={() => props.transport.post({ type: 'clearAssessment' } satisfies UiToHostMessage)}
+            onMeasureCost={() =>
+              props.transport.post({ type: 'measureExpertCost' } satisfies UiToHostMessage)
+            }
+            onClearPricing={() =>
+              props.transport.post({ type: 'clearExpertPricing' } satisfies UiToHostMessage)
+            }
+            onSetKeepAlive={(enabled) =>
+              props.transport.post({
+                type: 'setExpertKeepAlive',
+                enabled,
+              } satisfies UiToHostMessage)
+            }
+            onClearAssessment={() =>
+              props.transport.post({ type: 'clearAssessment' } satisfies UiToHostMessage)
+            }
             onRecheckExpert={() => {
               // Cleared first so the tab visibly restarts rather than showing a stale answer.
               setExpert(undefined)
@@ -1253,7 +1393,10 @@ export function App(props: AppProps): ReactElement {
               team: {
                 alias: embedder?.skillsAlias,
                 onSaveAlias: (alias: string) =>
-                  props.transport.post({ type: 'saveSkillsAlias', alias } satisfies UiToHostMessage),
+                  props.transport.post({
+                    type: 'saveSkillsAlias',
+                    alias,
+                  } satisfies UiToHostMessage),
                 onPublish: () => {
                   setTeamSkillsResult(undefined)
                   props.transport.post({ type: 'publishTeamSkills' } satisfies UiToHostMessage)
@@ -1263,7 +1406,10 @@ export function App(props: AppProps): ReactElement {
                   props.transport.post({ type: 'clearTeamSkills' } satisfies UiToHostMessage)
                 },
                 onStop: () =>
-                  props.transport.post({ type: 'cancelIndexing', kind: 'teamSkills' } satisfies UiToHostMessage),
+                  props.transport.post({
+                    type: 'cancelIndexing',
+                    kind: 'teamSkills',
+                  } satisfies UiToHostMessage),
                 publishing: indexingProgress?.kind === 'teamSkills' && indexingProgress.running,
                 progress: indexingProgress?.kind === 'teamSkills' ? indexingProgress : undefined,
                 result: teamSkillsResult,
@@ -1287,16 +1433,26 @@ export function App(props: AppProps): ReactElement {
               onProbe: (query: string, target: ProbeTarget) => {
                 clearProbe(target)
                 setProbeRunning((current) => ({ ...current, [target]: true }))
-                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'runSearchProbe',
+                  query,
+                  target,
+                } satisfies UiToHostMessage)
               },
               onClearProbe: () => clearProbe('docs'),
               onClearIndex: () => {
                 setDocsResult(undefined)
-                props.transport.post({ type: 'clearDocsIndex', kind: 'skill' } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'clearDocsIndex',
+                  kind: 'skill',
+                } satisfies UiToHostMessage)
               },
               indexProgress: indexingProgress?.kind === 'skills' ? indexingProgress : undefined,
               onStopIndexing: () =>
-                props.transport.post({ type: 'cancelIndexing', kind: 'skills' } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'cancelIndexing',
+                  kind: 'skills',
+                } satisfies UiToHostMessage),
               indexing: docsIndexing,
               indexResult:
                 docsResult === undefined
@@ -1304,10 +1460,15 @@ export function App(props: AppProps): ReactElement {
                   : docsResult.error !== undefined
                     ? `Failed: ${docsResult.error}`
                     : `Indexed ${String(docsResult.indexed ?? 0)} entries.`,
-              onDelete: (name) => props.transport.post({ type: 'deleteSkillFile', name } satisfies UiToHostMessage),
+              onDelete: (name) =>
+                props.transport.post({ type: 'deleteSkillFile', name } satisfies UiToHostMessage),
               onSaveDirs: (dir: string, paths: string[]) => {
                 setSkillConfiguredDir(dir)
-                props.transport.post({ type: 'saveSkillDirs', dir, paths } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'saveSkillDirs',
+                  dir,
+                  paths,
+                } satisfies UiToHostMessage)
               },
             }}
             schedules={{
@@ -1315,26 +1476,45 @@ export function App(props: AppProps): ReactElement {
               tools: scheduleTools,
               skills: scheduleSkills,
               runningId: runningScheduleId,
-              onSave: (schedule) => props.transport.post({ type: 'saveSchedule', schedule } satisfies UiToHostMessage),
-              onDelete: (id) => props.transport.post({ type: 'deleteSchedule', id } satisfies UiToHostMessage),
+              onSave: (schedule) =>
+                props.transport.post({ type: 'saveSchedule', schedule } satisfies UiToHostMessage),
+              onDelete: (id) =>
+                props.transport.post({ type: 'deleteSchedule', id } satisfies UiToHostMessage),
               onDuplicate: (id) =>
                 props.transport.post({ type: 'duplicateSchedule', id } satisfies UiToHostMessage),
               onToggle: (id, enabled) =>
-                props.transport.post({ type: 'setScheduleEnabled', id, enabled } satisfies UiToHostMessage),
-              onRunNow: (id) => props.transport.post({ type: 'runScheduleNow', id } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'setScheduleEnabled',
+                  id,
+                  enabled,
+                } satisfies UiToHostMessage),
+              onRunNow: (id) =>
+                props.transport.post({ type: 'runScheduleNow', id } satisfies UiToHostMessage),
               // The same candidates the composer uses; the host does not care who asked.
               mentionCandidates,
               onQueryMentions: queryMentions,
               // The same path the host already opens skills and Python tools through, confined to the
               // folders those things live in - a report is one more file the user asked to see.
               onOpenReport: (reportPath: string) =>
-                props.transport.post({ type: 'openManagedFile', path: reportPath } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'openManagedFile',
+                  path: reportPath,
+                } satisfies UiToHostMessage),
               onOpenRun: (taskId: string, title: string) =>
-                props.transport.post({ type: 'openScheduleRun', taskId, title } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'openScheduleRun',
+                  taskId,
+                  title,
+                } satisfies UiToHostMessage),
               scheduler: schedulerState,
-              onRestartScheduler: () => props.transport.post({ type: 'restartScheduler' } satisfies UiToHostMessage),
+              onRestartScheduler: () =>
+                props.transport.post({ type: 'restartScheduler' } satisfies UiToHostMessage),
               onDeleteRun: (id, at) =>
-                props.transport.post({ type: 'deleteScheduleRun', id, at } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'deleteScheduleRun',
+                  id,
+                  at,
+                } satisfies UiToHostMessage),
               onClearRuns: (id) =>
                 props.transport.post({
                   type: 'clearScheduleRuns',
@@ -1353,7 +1533,11 @@ export function App(props: AppProps): ReactElement {
               onProbe: (query: string, target: ProbeTarget) => {
                 clearProbe(target)
                 setProbeRunning((current) => ({ ...current, [target]: true }))
-                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'runSearchProbe',
+                  query,
+                  target,
+                } satisfies UiToHostMessage)
               },
               onClearProbe: () => clearProbe('data'),
               /*
@@ -1371,14 +1555,21 @@ export function App(props: AppProps): ReactElement {
               onSync: (id: string) =>
                 props.transport.post({ type: 'syncDataset', id } satisfies UiToHostMessage),
               onClear: (id: string, resync: boolean) =>
-                props.transport.post({ type: 'clearDataset', id, resync } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'clearDataset',
+                  id,
+                  resync,
+                } satisfies UiToHostMessage),
               onStop: () =>
                 props.transport.post({ type: 'cancelIndexing' } satisfies UiToHostMessage),
             }}
             outlook={{
               status: mailStatus,
               onSave: (settings) =>
-                props.transport.post({ type: 'saveMailSettings', ...settings } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'saveMailSettings',
+                  ...settings,
+                } satisfies UiToHostMessage),
               onSyncNow: () => props.transport.post({ type: 'syncMail' } satisfies UiToHostMessage),
               onPrune: () => props.transport.post({ type: 'pruneMail' } satisfies UiToHostMessage),
               tree: mailTree,
@@ -1398,12 +1589,20 @@ export function App(props: AppProps): ReactElement {
               onProbe: (query: string, target: ProbeTarget) => {
                 clearProbe(target)
                 setProbeRunning((current) => ({ ...current, [target]: true }))
-                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'runSearchProbe',
+                  query,
+                  target,
+                } satisfies UiToHostMessage)
               },
               onClearProbe: () => clearProbe('mail'),
               onRefreshDays: (days: number) =>
                 props.transport.post({ type: 'refreshMail', days } satisfies UiToHostMessage),
-              onStop: () => props.transport.post({ type: 'cancelIndexing', kind: 'mail' } satisfies UiToHostMessage),
+              onStop: () =>
+                props.transport.post({
+                  type: 'cancelIndexing',
+                  kind: 'mail',
+                } satisfies UiToHostMessage),
             }}
             tools={{
               ...toolCatalogue,
@@ -1413,22 +1612,34 @@ export function App(props: AppProps): ReactElement {
                 indexing: docsIndexing,
                 result: describeDocsResult(docsResult),
               },
-              onIndexDocs: () => props.transport.post({ type: 'indexDocs', kind: 'tool' } satisfies UiToHostMessage),
+              onIndexDocs: () =>
+                props.transport.post({ type: 'indexDocs', kind: 'tool' } satisfies UiToHostMessage),
               probe: { running: probeRunning.docs === true, result: searchProbes.docs },
               onProbe: (query: string, target: ProbeTarget) => {
                 clearProbe(target)
                 setProbeRunning((current) => ({ ...current, [target]: true }))
-                props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'runSearchProbe',
+                  query,
+                  target,
+                } satisfies UiToHostMessage)
               },
               onClearProbe: () => clearProbe('docs'),
-              onRefreshTools: () => props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage),
+              onRefreshTools: () =>
+                props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage),
               onClearDocs: () => {
                 setDocsResult(undefined)
-                props.transport.post({ type: 'clearDocsIndex', kind: 'tool' } satisfies UiToHostMessage)
+                props.transport.post({
+                  type: 'clearDocsIndex',
+                  kind: 'tool',
+                } satisfies UiToHostMessage)
               },
               progress: indexingProgress?.kind === 'tools' ? indexingProgress : undefined,
               onStopIndexing: () =>
-                props.transport.post({ type: 'cancelIndexing', kind: 'tools' } satisfies UiToHostMessage),
+                props.transport.post({
+                  type: 'cancelIndexing',
+                  kind: 'tools',
+                } satisfies UiToHostMessage),
               ...(toolTimeoutSeconds === undefined ? {} : { toolTimeoutSeconds }),
               onSetToolTimeoutFor: (name: string, seconds?: number) =>
                 props.transport.post({
@@ -1442,8 +1653,15 @@ export function App(props: AppProps): ReactElement {
                   ...(seconds === undefined ? {} : { seconds }),
                 } satisfies UiToHostMessage),
               onSetOffice: (excel, outlook) => {
-                setToolCatalogue((current) => ({ ...current, office: { ...current.office, excel, outlook } }))
-                props.transport.post({ type: 'setOffice', excel, outlook } satisfies UiToHostMessage)
+                setToolCatalogue((current) => ({
+                  ...current,
+                  office: { ...current.office, excel, outlook },
+                }))
+                props.transport.post({
+                  type: 'setOffice',
+                  excel,
+                  outlook,
+                } satisfies UiToHostMessage)
               },
             }}
             {...(reviews !== undefined
@@ -1465,9 +1683,15 @@ export function App(props: AppProps): ReactElement {
                   variables: {
                     ...variables,
                     onSaveUser: (next) =>
-                      props.transport.post({ type: 'saveUserVariables', variables: next } satisfies UiToHostMessage),
+                      props.transport.post({
+                        type: 'saveUserVariables',
+                        variables: next,
+                      } satisfies UiToHostMessage),
                     onSaveAdmin: (next) =>
-                      props.transport.post({ type: 'saveAdminVariables', variables: next } satisfies UiToHostMessage),
+                      props.transport.post({
+                        type: 'saveAdminVariables',
+                        variables: next,
+                      } satisfies UiToHostMessage),
                     onSaveAdminIds: (ids) =>
                       props.transport.post({ type: 'saveAdminIds', ids } satisfies UiToHostMessage),
                   },
@@ -1486,10 +1710,16 @@ export function App(props: AppProps): ReactElement {
               ...(allowProgrammingProfile
                 ? {
                     programming: {
-                      profiles: profiles.map((profile) => ({ id: profile.id, label: profile.label })),
+                      profiles: profiles.map((profile) => ({
+                        id: profile.id,
+                        label: profile.label,
+                      })),
                       selectedId: programmingProfileId,
                       onSelect: (id) =>
-                        props.transport.post({ type: 'setProgrammingProfile', id } satisfies UiToHostMessage),
+                        props.transport.post({
+                          type: 'setProgrammingProfile',
+                          id,
+                        } satisfies UiToHostMessage),
                     },
                   }
                 : {}),
@@ -1527,11 +1757,15 @@ export function App(props: AppProps): ReactElement {
                   timeoutSeconds: settings.timeoutSeconds,
                   indexUrl: settings.indexUrl,
                   offline: settings.offline,
+                  // Same reasoning as `venvPath` above, which was dropped here once and cost a
+                  // user their configured virtualenv: every field the tab collects is sent.
+                  env: settings.env,
                 } satisfies UiToHostMessage),
             }}
             network={{
               ...(network !== undefined ? { settings: network } : { settings: undefined }),
-              onSave: (settings) => props.transport.post({ type: 'saveNetwork', settings } satisfies UiToHostMessage),
+              onSave: (settings) =>
+                props.transport.post({ type: 'saveNetwork', settings } satisfies UiToHostMessage),
             }}
           />
         ) : view === 'history' ? (
@@ -1564,11 +1798,21 @@ export function App(props: AppProps): ReactElement {
             pendingForm={pendingForm}
             onSubmitForm={(id, values) => {
               setPendingForm(undefined)
-              props.transport.post({ type: 'formResponse', id, submitted: true, values } satisfies UiToHostMessage)
+              props.transport.post({
+                type: 'formResponse',
+                id,
+                submitted: true,
+                values,
+              } satisfies UiToHostMessage)
             }}
             onDismissForm={(id) => {
               setPendingForm(undefined)
-              props.transport.post({ type: 'formResponse', id, submitted: false, values: {} } satisfies UiToHostMessage)
+              props.transport.post({
+                type: 'formResponse',
+                id,
+                submitted: false,
+                values: {},
+              } satisfies UiToHostMessage)
             }}
             canRollback={canRollback}
             onSend={send}
@@ -1587,10 +1831,16 @@ export function App(props: AppProps): ReactElement {
             expertEnabled={expertEnabled}
             queued={queued}
             onUnqueue={unqueue}
-            searchConnections={searchConnections.map((connection) => ({ id: connection.id, label: connection.label }))}
+            searchConnections={searchConnections.map((connection) => ({
+              id: connection.id,
+              label: connection.label,
+            }))}
             activeSearchId={activeSearchId}
             onSelectSearch={(id) =>
-              props.transport.post({ type: 'setActiveSearchConnection', id } satisfies UiToHostMessage)
+              props.transport.post({
+                type: 'setActiveSearchConnection',
+                id,
+              } satisfies UiToHostMessage)
             }
           />
         )}

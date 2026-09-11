@@ -1,6 +1,13 @@
-import type { PythonSettings, PythonStatus } from '@light-code/core/browser'
+import type { PythonEnvVariable, PythonSettings, PythonStatus } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import {
+  colors,
+  fontFamily,
+  labelStyle,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  textFieldStyle,
+} from '../theme.js'
 import { Select } from '../Select.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 
@@ -21,6 +28,13 @@ export interface PythonTabProps {
     timeoutSeconds: number
     indexUrl: string
     offline: boolean
+    /**
+     * Every variable, always — which is what makes removing one possible.
+     *
+     * A secret with no `value` means "keep what is stored": the form was never shown it, so it
+     * has nothing to send back and must not be read as clearing it.
+     */
+    env: { name: string; value?: string; secret: boolean }[]
   }) => void
   /** Opens a tool's source in an editor tab, which is where editing belongs. */
   onOpenFile: (path: string) => void
@@ -38,6 +52,30 @@ export interface PythonTabProps {
   onDeleteTool: (name: string) => void
   /** Re-pins a tool the user has edited by hand — see the hash pin in `registry.ts`. */
   onApproveTool: (name: string) => void
+}
+
+/**
+ * A variable as this form holds it.
+ *
+ * `value` is always a string here even for a secret, where it starts empty and means "unchanged".
+ * Modelling it as optional would put the "did the user type something" question in two places —
+ * the field and the flag — which is the drift this project keeps paying for.
+ */
+interface EnvRow {
+  name: string
+  value: string
+  secret: boolean
+  /** Whether storage already holds a value, so the box can say "Set — replace?" honestly. */
+  hasValue: boolean
+}
+
+function toRow(variable: PythonEnvVariable): EnvRow {
+  return {
+    name: variable.name,
+    value: variable.secret ? '' : (variable.value ?? ''),
+    secret: variable.secret,
+    hasValue: variable.hasValue === true,
+  }
 }
 
 /**
@@ -59,6 +97,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   const [timeout, setTimeoutSeconds] = useState('30')
   const [indexUrl, setIndexUrl] = useState('')
   const [offline, setOffline] = useState(false)
+  const [envVars, setEnvVars] = useState<EnvRow[]>([])
   const [saved, setSaved] = useState(false)
 
   // Routed by purpose, not by focus: the native dialog takes focus while it is open.
@@ -66,7 +105,8 @@ export function PythonTab(props: PythonTabProps): ReactElement {
     if (props.pickedPath?.purpose === 'python.uvPath') setUvPath(props.pickedPath.path)
     if (props.pickedPath?.purpose === 'python.toolsDir') setToolsDir(props.pickedPath.path)
     if (props.pickedPath?.purpose === 'python.venvPath') setVenvPath(props.pickedPath.path)
-    if (props.pickedPath?.purpose === 'python.interpreterPath') setInterpreterPath(props.pickedPath.path)
+    if (props.pickedPath?.purpose === 'python.interpreterPath')
+      setInterpreterPath(props.pickedPath.path)
   }, [props.pickedPath])
 
   /*
@@ -87,18 +127,20 @@ export function PythonTab(props: PythonTabProps): ReactElement {
     setInterpreterPath(saved.interpreterPath ?? '')
     setIndexUrl(saved.indexUrl ?? '')
     setOffline(saved.offline === true)
+    setEnvVars((saved.env ?? []).map(toRow))
     setTimeoutSeconds(String(saved.timeoutSeconds ?? 30))
     // Any answer from the host supersedes an optimistic "Saved." from a previous click.
     setSaved(false)
   }, [props.settings])
 
   return (
-    <div style={{ padding: 12, overflowY: 'auto', fontFamily, fontSize: 13, color: colors.foreground }}>
+    <div
+      style={{ padding: 12, overflowY: 'auto', fontFamily, fontSize: 13, color: colors.foreground }}
+    >
       <h3 style={{ margin: '0 0 4px' }}>Python tools</h3>
       <p style={{ color: colors.muted, fontSize: 11, marginTop: 0 }}>
-        Lets the model write small Python tools and call them in the same conversation — useful
-        for parsing, data wrangling, or anything needing a library that a shell command handles
-        badly.
+        Lets the model write small Python tools and call them in the same conversation — useful for
+        parsing, data wrangling, or anything needing a library that a shell command handles badly.
       </p>
 
       {/*
@@ -117,16 +159,28 @@ export function PythonTab(props: PythonTabProps): ReactElement {
           lineHeight: 1.5,
         }}
       >
-        This is the sharpest feature in Light Code. Elsewhere you approve a tool <em>call</em>;
-        here you approve a tool&apos;s <strong>source code</strong>, which then runs whenever the
-        model uses it. Every create and update shows you the full diff first, and a file changed
+        This is the sharpest feature in Light Code. Elsewhere you approve a tool <em>call</em>; here
+        you approve a tool&apos;s <strong>source code</strong>, which then runs whenever the model
+        uses it. Every create and update shows you the full diff first, and a file changed
         afterwards — by anything — is refused rather than loaded. Tools live in your workspace so
-        they land in git and get reviewed like any other code. There is no sandbox: a tool runs
-        with your privileges.
+        they land in git and get reviewed like any other code. There is no sandbox: a tool runs with
+        your privileges.
       </div>
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer' }}>
-        <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+          cursor: 'pointer',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => setEnabled(event.target.checked)}
+        />
         <span>Let the model create and run Python tools</span>
       </label>
 
@@ -182,7 +236,11 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             id="lc-py-interpreter"
             label="Interpreter to use without uv"
             value={interpreterPath}
-            placeholder={status?.venvSource === 'interpreter' ? status.venvPath || 'python' : 'python3, then python, from PATH'}
+            placeholder={
+              status?.venvSource === 'interpreter'
+                ? status.venvPath || 'python'
+                : 'python3, then python, from PATH'
+            }
             hint="Only used when uv is not installed. Nothing is installed into it — a tool needing a package it does not already have is refused, naming the package."
             browse={{ purpose: 'python.interpreterPath', kind: 'file' }}
             onBrowse={props.onBrowse}
@@ -200,11 +258,15 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                 onChange={props.programming.onSelect}
                 options={[
                   { value: '', label: 'The model you are chatting with' },
-                  ...props.programming.profiles.map((profile) => ({ value: profile.id, label: profile.label })),
+                  ...props.programming.profiles.map((profile) => ({
+                    value: profile.id,
+                    label: profile.label,
+                  })),
                 ]}
               />
               <p style={{ color: colors.muted, fontSize: 11, margin: '4px 0 0' }}>
-                {props.programming.selectedId === undefined || props.programming.selectedId === '' ? (
+                {props.programming.selectedId === undefined ||
+                props.programming.selectedId === '' ? (
                   <>
                     The assistant writes the Python itself. Pick a different profile and it will
                     describe the tool instead, leaving the file to a model chosen for code.
@@ -234,14 +296,29 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               style={{ ...textFieldStyle(), fontFamily: monospace }}
             />
             <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-              Where a tool&apos;s declared dependencies are fetched from. Point this at your internal
-              mirror to make company packages installable — and to avoid reaching public PyPI at all.
+              Where a tool&apos;s declared dependencies are fetched from. Point this at your
+              internal mirror to make company packages installable — and to avoid reaching public
+              PyPI at all.
             </span>
           </div>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer' }}>
-            <input type="checkbox" checked={offline} onChange={(event) => setOffline(event.target.checked)} />
-            <span style={{ fontSize: 12 }}>Offline — never fetch a package, use only what is already installed</span>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 10,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={offline}
+              onChange={(event) => setOffline(event.target.checked)}
+            />
+            <span style={{ fontSize: 12 }}>
+              Offline — never fetch a package, use only what is already installed
+            </span>
           </label>
 
           <div style={{ marginBottom: 12 }}>
@@ -262,6 +339,142 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               cannot hold up the conversation.
             </span>
           </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <span style={labelStyle()}>Environment variables</span>
+            <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginBottom: 6 }}>
+              Set for every tool, every time one runs — the worker, and the commands that build the
+              environment. Use them for the host, account or token a tool needs to reach an internal
+              system, instead of writing those into the tool&apos;s source where they get committed
+              and have to be changed in every tool at once.
+            </span>
+
+            {envVars.length === 0 && (
+              <span
+                style={{ display: 'block', color: colors.muted, fontSize: 11, marginBottom: 6 }}
+              >
+                None. Tools run with a minimal environment: no API keys, and nothing inherited that
+                is not needed to start Python.
+              </span>
+            )}
+
+            {envVars.map((row, index) => (
+              <div
+                key={index}
+                style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 6 }}
+              >
+                <input
+                  type="text"
+                  value={row.name}
+                  spellCheck={false}
+                  placeholder="API_HOST"
+                  aria-label="Variable name"
+                  onChange={(event) =>
+                    setEnvVars((rows) =>
+                      rows.map((existing, at) =>
+                        at === index ? { ...existing, name: event.target.value } : existing,
+                      ),
+                    )
+                  }
+                  style={{ ...textFieldStyle(), fontFamily: monospace, flex: '0 0 34%' }}
+                />
+                <div style={{ flex: 1 }}>
+                  <input
+                    type={row.secret ? 'password' : 'text'}
+                    value={row.value}
+                    spellCheck={false}
+                    placeholder={
+                      row.secret ? (row.hasValue ? 'Set — type to replace' : 'Value') : 'Value'
+                    }
+                    aria-label="Variable value"
+                    onChange={(event) =>
+                      setEnvVars((rows) =>
+                        rows.map((existing, at) =>
+                          at === index ? { ...existing, value: event.target.value } : existing,
+                        ),
+                      )
+                    }
+                    style={{ ...textFieldStyle(), fontFamily: monospace, width: '100%' }}
+                  />
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      cursor: 'pointer',
+                      marginTop: 4,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={row.secret}
+                      onChange={(event) =>
+                        setEnvVars((rows) =>
+                          rows.map((existing, at) =>
+                            /*
+                             * Switching either way clears the box.
+                             *
+                             * Becoming a secret, because what was typed is about to be written to
+                             * storage and the field must stop showing it. Ceasing to be one,
+                             * because the stored value is deleted on save and leaving the old text
+                             * would offer to re-save a secret as a literal in the config file.
+                             */
+                            at === index
+                              ? {
+                                  ...existing,
+                                  secret: event.target.checked,
+                                  value: '',
+                                  hasValue: false,
+                                }
+                              : existing,
+                          ),
+                        )
+                      }
+                    />
+                    <span style={{ fontSize: 11, color: colors.muted }}>
+                      Secret — keep the value in secret storage, never in the config file
+                    </span>
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  style={secondaryButtonStyle()}
+                  aria-label={`Remove ${row.name.length > 0 ? row.name : 'variable'}`}
+                  onClick={() => setEnvVars((rows) => rows.filter((_, at) => at !== index))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              onClick={() =>
+                setEnvVars((rows) => [
+                  ...rows,
+                  { name: '', value: '', secret: false, hasValue: false },
+                ])
+              }
+            >
+              Add variable
+            </button>
+
+            {/*
+              Named, because the alternative is a credential error inside somebody's tool.
+              A variable declared secret with nothing stored is a state you land in by ticking the
+              box and saving before typing the value, which is an easy and invisible mistake.
+            */}
+            {status !== undefined &&
+              status.missingEnv !== undefined &&
+              status.missingEnv.length > 0 && (
+                <p style={{ color: colors.error, fontSize: 11, margin: '8px 0 0' }}>
+                  No value is stored for {status.missingEnv.join(', ')}. Tools run without{' '}
+                  {status.missingEnv.length > 1 ? 'those variables' : 'that variable'} until one is
+                  set.
+                </p>
+              )}
+          </div>
         </>
       )}
 
@@ -280,6 +493,20 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               timeoutSeconds: Number.isFinite(parsed) ? parsed : 30,
               indexUrl: indexUrl.trim(),
               offline,
+              env: envVars
+                .filter((row) => row.name.trim().length > 0)
+                .map((row) => ({
+                  name: row.name.trim(),
+                  secret: row.secret,
+                  /*
+                   * A blank secret box is "unchanged", not "empty".
+                   *
+                   * It is blank because nothing was ever put in it — a stored value cannot cross
+                   * toward the UI (invariant 7) — so sending it would clear the token on every
+                   * save from this tab, including saves that were about something else entirely.
+                   */
+                  ...(row.secret && row.value.length === 0 ? {} : { value: row.value }),
+                })),
             })
             setSaved(true)
           }}
@@ -375,7 +602,10 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               </p>
             ) : (
               status.tools.map((tool) => (
-                <div key={tool.name} style={{ padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}>
+                <div
+                  key={tool.name}
+                  style={{ padding: '6px 0', borderBottom: `1px solid ${colors.border}` }}
+                >
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span style={{ fontFamily: monospace, fontSize: 12 }}>py__{tool.name}</span>
                     <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -402,14 +632,31 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                     </span>
                   </div>
                   {tool.description.length > 0 && (
-                    <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>{tool.description}</span>
+                    <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+                      {tool.description}
+                    </span>
                   )}
-                  <span style={{ display: 'block', color: colors.muted, fontSize: 10, fontFamily: monospace }}>
+                  <span
+                    style={{
+                      display: 'block',
+                      color: colors.muted,
+                      fontSize: 10,
+                      fontFamily: monospace,
+                    }}
+                  >
                     {tool.filePath}
                   </span>
 
                   {confirming === tool.name && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 6,
+                        fontSize: 12,
+                      }}
+                    >
                       <span>Delete this tool and its approval?</span>
                       <button
                         type="button"
@@ -421,7 +668,11 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                       >
                         Delete
                       </button>
-                      <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(undefined)}>
+                      <button
+                        type="button"
+                        style={secondaryButtonStyle()}
+                        onClick={() => setConfirming(undefined)}
+                      >
                         Cancel
                       </button>
                     </div>

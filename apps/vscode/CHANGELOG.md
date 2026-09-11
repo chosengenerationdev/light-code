@@ -1,5 +1,23 @@
 # light-code-vscode
 
+## 0.65.0
+
+### Minor Changes
+
+- Give every Python tool the same environment variables
+
+  A tool that reaches an internal system has to be told where it is and who is asking,
+  and until now the only place to put that was the tool's own source — which lands in
+  the workspace, gets committed, and has to be changed in every tool at once.
+
+  Settings → Python now has an Environment variables list. Whatever is declared there is
+  applied to every Python tool, every time one runs. A value can be marked secret, in
+  which case it is kept in secret storage and never written to the config file.
+
+  Saving restarts the worker, so a change applies to the next call rather than the next
+  window. A variable marked secret with nothing stored behind it is named in the tab,
+  instead of surfacing later as a credential error inside somebody's tool.
+
 ## 0.64.0
 
 ### Minor Changes

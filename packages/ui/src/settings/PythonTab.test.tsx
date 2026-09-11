@@ -96,10 +96,14 @@ describe('the Python tab', () => {
     const onSave = vi.fn()
     render({ status, settings: { dynamicTools: 'on', venvPath: 'D:\\env' }, onSave })
 
-    const save = [...container.querySelectorAll('button')].find((element) => element.textContent === 'Save')
+    const save = [...container.querySelectorAll('button')].find(
+      (element) => element.textContent === 'Save',
+    )
     act(() => save?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ dynamicTools: 'on', venvPath: 'D:\\env' }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ dynamicTools: 'on', venvPath: 'D:\\env' }),
+    )
   })
 
   it('follows the host when settings change underneath it', () => {
@@ -159,5 +163,153 @@ describe('where the picker is offered', () => {
   it('is absent when the host does not offer it, even with profiles configured', () => {
     render({ status, settings: { dynamicTools: 'on' } })
     expect(container.textContent).not.toContain('Which model writes the code')
+  })
+})
+
+describe('environment variables for every tool', () => {
+  function rows(): HTMLInputElement[] {
+    return [...container.querySelectorAll<HTMLInputElement>('input[aria-label="Variable name"]')]
+  }
+
+  function valueBox(index: number): HTMLInputElement {
+    const found = [
+      ...container.querySelectorAll<HTMLInputElement>('input[aria-label="Variable value"]'),
+    ][index]
+    if (found === undefined) throw new Error(`no value box at ${String(index)}`)
+    return found
+  }
+
+  function type(input: HTMLInputElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    act(() => {
+      setter?.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
+  function click(label: string, at = 0): void {
+    const button = [...container.querySelectorAll('button')].filter((b) => b.textContent === label)[
+      at
+    ]
+    act(() => button?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  }
+
+  function save(): void {
+    click('Save')
+  }
+
+  it('shows what is saved, and never a stored secret value', () => {
+    render({
+      status,
+      settings: {
+        dynamicTools: 'on',
+        env: [
+          { name: 'API_HOST', value: 'https://internal', secret: false },
+          { name: 'API_TOKEN', secret: true, hasValue: true },
+        ],
+      },
+    })
+
+    expect(rows().map((input) => input.value)).toEqual(['API_HOST', 'API_TOKEN'])
+    expect(valueBox(0).value).toBe('https://internal')
+    // Invariant 7: the host never sent it, so there is nothing here to show.
+    expect(valueBox(1).value).toBe('')
+    expect(valueBox(1).placeholder).toContain('Set')
+    expect(valueBox(1).type).toBe('password')
+  })
+
+  /**
+   * The rule that would otherwise destroy a token on the way past.
+   *
+   * The secret box is blank because a stored value cannot cross toward the UI, not because the
+   * user emptied it. Sending that blank would clear the secret on every save from this tab —
+   * including a save about the timeout, which is how it would actually happen.
+   */
+  it('omits a secret the user did not retype, so saving something else keeps it', () => {
+    const onSave = vi.fn()
+    render({
+      status,
+      settings: { dynamicTools: 'on', env: [{ name: 'API_TOKEN', secret: true, hasValue: true }] },
+      onSave,
+    })
+    save()
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ env: [{ name: 'API_TOKEN', secret: true }] }),
+    )
+  })
+
+  it('sends a secret the user did retype', () => {
+    const onSave = vi.fn()
+    render({
+      status,
+      settings: { dynamicTools: 'on', env: [{ name: 'API_TOKEN', secret: true, hasValue: true }] },
+      onSave,
+    })
+    type(valueBox(0), 'new-token')
+    save()
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ env: [{ name: 'API_TOKEN', value: 'new-token', secret: true }] }),
+    )
+  })
+
+  it('adds and removes, and a removal actually reaches the host', () => {
+    const onSave = vi.fn()
+    render({
+      status,
+      settings: {
+        dynamicTools: 'on',
+        env: [
+          { name: 'ONE', value: '1', secret: false },
+          { name: 'TWO', value: '2', secret: false },
+        ],
+      },
+      onSave,
+    })
+
+    click('Remove', 0)
+    expect(rows().map((input) => input.value)).toEqual(['TWO'])
+
+    click('Add variable')
+    type(rows()[1] as HTMLInputElement, 'THREE')
+    type(valueBox(1), '3')
+    save()
+
+    // The whole set, not a delta — which is what makes the removal expressible at all.
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: [
+          { name: 'TWO', value: '2', secret: false },
+          { name: 'THREE', value: '3', secret: false },
+        ],
+      }),
+    )
+  })
+
+  /*
+   * Ticking the box is about to send what was typed to secret storage, so the field must stop
+   * showing it — otherwise a plaintext token sits visible in a box that claims to be secret.
+   */
+  it('clears the box when a variable becomes a secret', () => {
+    render({
+      status,
+      settings: { dynamicTools: 'on', env: [{ name: 'T', value: 'plain', secret: false }] },
+    })
+
+    const secretToggle = [
+      ...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((box) => box.parentElement?.textContent?.includes('Secret'))
+    if (secretToggle === undefined) throw new Error('no Secret checkbox')
+    act(() => secretToggle.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+    expect(valueBox(0).value).toBe('')
+    expect(valueBox(0).type).toBe('password')
+  })
+
+  /** A credential error inside somebody's tool points at the tool. This points at the variable. */
+  it('names a secret variable with nothing stored behind it', () => {
+    render({ status: { ...status, missingEnv: ['API_TOKEN'] }, settings: { dynamicTools: 'on' } })
+    expect(container.textContent).toContain('No value is stored for API_TOKEN')
   })
 })

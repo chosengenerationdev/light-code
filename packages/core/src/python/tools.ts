@@ -35,7 +35,8 @@ export interface PythonToolContext {
    * unavailable, and a tool declaring any is rejected with that said plainly rather than
    * failing later on an ImportError nobody can trace back to here.
    */
-  installDeps?: ((packages: readonly string[]) => Promise<{ installed: string[]; error?: string }>) | undefined
+  installDeps?:
+    ((packages: readonly string[]) => Promise<{ installed: string[]; error?: string }>) | undefined
   /**
    * Why installing is unavailable, when it is.
    *
@@ -82,13 +83,18 @@ export interface PythonToolContext {
 const createParams = z.object({
   name: z
     .string()
-    .describe('Tool name: lowercase letters, digits and underscores. Becomes py__<name> and <name>.py.'),
+    .describe(
+      'Tool name: lowercase letters, digits and underscores. Becomes py__<name> and <name>.py.',
+    ),
   source: z
     .string()
     .describe(
       'The complete Python file. Must define `run`. Use type hints — the parameter schema is derived from them. ' +
         'The module docstring becomes the tool description; document parameters in a Google-style Args: block. ' +
-        'Declare dependencies in a PEP 723 inline block if you need any.',
+        'Declare dependencies in a PEP 723 inline block if you need any. ' +
+        'Read a host, account or token from os.environ rather than writing it into the file — ' +
+        'the user sets those once in Settings → Python and every tool gets them. Say which ' +
+        'variable you expect if it is not already set.',
     ),
 })
 export type CreatePythonToolParams = z.infer<typeof createParams>
@@ -107,7 +113,9 @@ export type CreatePythonToolParams = z.infer<typeof createParams>
 const specifyParams = z.object({
   name: z
     .string()
-    .describe('Tool name: lowercase letters, digits and underscores. Becomes py__<name> and <name>.py.'),
+    .describe(
+      'Tool name: lowercase letters, digits and underscores. Becomes py__<name> and <name>.py.',
+    ),
   specification: z
     .string()
     .describe(
@@ -189,7 +197,9 @@ function makeWriteTool(
    */
   const pending = new Map<string, Promise<{ source: string; producedBy?: string }>>()
 
-  const sourceFor = async (params: CreatePythonToolParams & { specification?: string }): Promise<{ source: string; producedBy?: string }> => {
+  const sourceFor = async (
+    params: CreatePythonToolParams & { specification?: string },
+  ): Promise<{ source: string; producedBy?: string }> => {
     if (generator === undefined || params.specification === undefined) {
       return { source: params.source }
     }
@@ -216,7 +226,9 @@ function makeWriteTool(
     name: options.name,
     group: 'edit',
     description: options.description,
-    parametersSchema: (generator !== undefined ? specifyParams : createParams) as unknown as typeof createParams,
+    parametersSchema: (generator !== undefined
+      ? specifyParams
+      : createParams) as unknown as typeof createParams,
 
     /**
      * A real diff of the real file: its current content against exactly the bytes that
@@ -248,7 +260,10 @@ function makeWriteTool(
         const before = await readIfPresent(filePath)
 
         if (options.mustExist && before.length === 0) {
-          return { content: `There is no tool called "${params.name}" to update. Use create_python_tool.`, isError: true }
+          return {
+            content: `There is no tool called "${params.name}" to update. Use create_python_tool.`,
+            isError: true,
+          }
         }
         if (!options.mustExist && before.length > 0) {
           return {
@@ -325,7 +340,10 @@ function makeWriteTool(
           const message = error instanceof Error ? error.message : String(error)
           const traceback = (error as { traceback?: string }).traceback
           // The traceback is the payload: it is what lets the model fix its own code.
-          return { content: `The tool was not saved.\n\n${message}\n\n${traceback ?? ''}`.trim(), isError: true }
+          return {
+            content: `The tool was not saved.\n\n${message}\n\n${traceback ?? ''}`.trim(),
+            isError: true,
+          }
         }
 
         /*
@@ -420,13 +438,15 @@ export function createCreatePythonTool(context: PythonToolContext): Tool<CreateP
  * A collector that legitimately returns nothing on an empty source passes: `[]` is a successful
  * sync, not a failure, and refusing it would force people to fake data to get a tool saved.
  */
-export function createCollectorTool(context: PythonToolContext & {
-  /** Runs the freshly written tool and reports what is wrong with its output, if anything. */
-  checkCollector: (
-    name: string,
-    filePath: string,
-  ) => Promise<{ reject?: string; warn?: string } | undefined>
-}): Tool<CreatePythonToolParams> {
+export function createCollectorTool(
+  context: PythonToolContext & {
+    /** Runs the freshly written tool and reports what is wrong with its output, if anything. */
+    checkCollector: (
+      name: string,
+      filePath: string,
+    ) => Promise<{ reject?: string; warn?: string } | undefined>
+  },
+): Tool<CreatePythonToolParams> {
   return makeWriteTool(context, {
     name: 'create_collector_tool',
     mustExist: false,
@@ -437,7 +457,7 @@ export function createCollectorTool(context: PythonToolContext & {
       'tickets, wiki pages, rows from an internal system, anything behind a library or an API. ' +
       'The tool must return a LIST OF DICTS, each with a stable `id` and a `text` to index, and ' +
       'optionally `title`, `url`, `timestamp` (epoch MILLIseconds) and `tags` (flat strings). ' +
-      '`id` must be the source\'s own identifier and stable across runs, or every sync duplicates ' +
+      "`id` must be the source's own identifier and stable across runs, or every sync duplicates " +
       'the corpus instead of updating it. `text` is what gets embedded — put the meaning in it, ' +
       'not an id and a status code. Do NOT return a formatted report, a summary, or a string: a ' +
       'collector returns something a search can index, not something a person reads. It is called ' +
@@ -498,13 +518,21 @@ export function createDeletePythonTool(context: PythonToolContext): Tool<DeleteP
  * other thing that does, and Ask mode excludes it.
  */
 export function adaptPythonTool(
-  registered: { name: string; description: string; schema: Record<string, unknown>; filePath: string },
+  registered: {
+    name: string
+    description: string
+    schema: Record<string, unknown>
+    filePath: string
+  },
   context: { worker: PythonWorker; timeoutMs?: number },
 ): Tool<Record<string, unknown>> {
   return {
     name: `py__${registered.name}`,
     group: 'command',
-    description: registered.description.length > 0 ? registered.description : `Python tool "${registered.name}".`,
+    description:
+      registered.description.length > 0
+        ? registered.description
+        : `Python tool "${registered.name}".`,
     // Permissive locally; the schema the model sees is the derived one, passed through
     // untouched rather than round-tripped through zod, which would drop keywords (§11).
     parametersSchema: z.record(z.string(), z.unknown()),
@@ -526,12 +554,16 @@ export function adaptPythonTool(
           ...(context.timeoutMs !== undefined ? { timeoutMs: context.timeoutMs } : {}),
         })
         const printed = call.stdout.trim()
-        const value = typeof call.result === 'string' ? call.result : JSON.stringify(call.result, null, 2)
+        const value =
+          typeof call.result === 'string' ? call.result : JSON.stringify(call.result, null, 2)
         return { content: printed.length > 0 ? `${value}\n\n--- stdout ---\n${printed}` : value }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         const traceback = (error as { traceback?: string }).traceback
-        return { content: traceback !== undefined ? `${message}\n\n${traceback}` : message, isError: true }
+        return {
+          content: traceback !== undefined ? `${message}\n\n${traceback}` : message,
+          isError: true,
+        }
       }
     },
   }

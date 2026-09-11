@@ -40,7 +40,8 @@ import type { ChartSpec } from '../charts/types.js'
 
 export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data'
 
-export type IndexingKind = 'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills' | 'dataset'
+export type IndexingKind =
+  'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills' | 'dataset'
 
 export interface ApigeeSummary {
   tokenUrl?: string | undefined
@@ -263,6 +264,24 @@ export interface PythonSettings {
   indexUrl?: string
   offline?: boolean
   timeoutSeconds?: number
+  /**
+   * Environment variables every tool runs with, as the tab edits them.
+   *
+   * `hasValue` rather than the value for a secret one — invariant 7 is absolute, and a masked
+   * value round-tripped from the host is a value that crossed the bridge. The form says
+   * "Set — replace?" over it, exactly as `SecretField` does for an API key.
+   */
+  env?: PythonEnvVariable[]
+}
+
+/** One declared variable. A secret's value never crosses toward the UI. */
+export interface PythonEnvVariable {
+  name: string
+  /** The literal value, present only when this is not a secret. */
+  value?: string
+  secret: boolean
+  /** For a secret: whether storage actually holds one. False means it needs typing in. */
+  hasValue?: boolean
 }
 
 /**
@@ -403,7 +422,12 @@ export type UiToHostMessage =
    * Still only *input*: section 6b's rule holds, and acting on any of this goes through the
    * approval gate on its own terms. A filled-in form is never a permission.
    */
-  | { type: 'formResponse'; id: string; submitted: boolean; values: Record<string, string | boolean | string[]> }
+  | {
+      type: 'formResponse'
+      id: string
+      submitted: boolean
+      values: Record<string, string | boolean | string[]>
+    }
   /** Approve *and* remember, so this exact command / this tool stops prompting here. */
   | { type: 'approvalResponseAlways'; id: string; scope: 'tool' | 'command' | 'folder' }
   | { type: 'rollback' }
@@ -698,6 +722,15 @@ export type UiToHostMessage =
       timeoutSeconds?: number
       indexUrl?: string
       offline?: boolean
+      /**
+       * The complete set of variables, or absent to leave them alone.
+       *
+       * Complete rather than a delta because removal has to be expressible, and a message that
+       * can only add is one where deleting a variable silently does nothing. A secret whose
+       * `value` is undefined keeps the value already in storage — the form was never given it,
+       * so it cannot send it back.
+       */
+      env?: { name: string; value?: string; secret: boolean }[]
     }
   | { type: 'requestNetwork' }
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
@@ -959,7 +992,13 @@ export type HostToUiMessage =
    */
   | { type: 'searchProbe'; target: ProbeTarget; query: string; text: string; error?: string }
   /** Result of indexing the tool and skill documentation corpus. */
-  | { type: 'docsIndexed'; indexed?: number; index?: string; error?: string; kind?: 'tool' | 'skill' }
+  | {
+      type: 'docsIndexed'
+      indexed?: number
+      index?: string
+      error?: string
+      kind?: 'tool' | 'skill'
+    }
   /**
    * What this project has chosen for itself, so the UI can show and clear it.
    *
@@ -1022,7 +1061,11 @@ export type HostToUiMessage =
       activeConnectionId: string | undefined
     }
   /** `warning` with an empty list is normal: `_cat/indices` is often denied (§9). */
-  | { type: 'searchIndexes'; indexes: { name: string; docsCount?: number; storeSize?: string }[]; warning?: string }
+  | {
+      type: 'searchIndexes'
+      indexes: { name: string; docsCount?: number; storeSize?: string }[]
+      warning?: string
+    }
   | { type: 'searchTestResult'; ok: boolean; detail: string }
   /** The save reached disk. The form stays open until this arrives, so a failure keeps the typed values. */
   | { type: 'searchConnectionSaved'; id: string }
@@ -1045,11 +1088,17 @@ export type HostToUiMessage =
   | {
       type: 'skills'
       /**
-        * `sourceDir` says which configured folder it came from — only the first is writable.
-        * `always` marks a standing instruction: included in every session, in full, so the tab
-        * can say so. A cost paid on every request should never be invisible.
-        */
-      skills: { name: string; description: string; filePath: string; sourceDir?: string; always?: boolean }[]
+       * `sourceDir` says which configured folder it came from — only the first is writable.
+       * `always` marks a standing instruction: included in every session, in full, so the tab
+       * can say so. A cost paid on every request should never be invisible.
+       */
+      skills: {
+        name: string
+        description: string
+        filePath: string
+        sourceDir?: string
+        always?: boolean
+      }[]
       /** Files that could not be offered, and why. Shown, not just logged. */
       issues: { filePath: string; detail: string }[]
       /** Where skills are written. Undefined when no folder is open, so the tab can say why. */
@@ -1064,7 +1113,13 @@ export type HostToUiMessage =
   /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */
   | { type: 'indexResult'; result?: IndexResult; error?: string }
   /** `attributed` is how many existing chunks gained an owner; 0 is a real answer, not a failure. */
-  | { type: 'teamAliasAttached'; alias?: string; index?: string; attributed?: number; error?: string }
+  | {
+      type: 'teamAliasAttached'
+      alias?: string
+      index?: string
+      attributed?: number
+      error?: string
+    }
   | {
       type: 'teamSkillsPublished'
       count?: number

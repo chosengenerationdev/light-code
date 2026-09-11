@@ -1049,6 +1049,33 @@ injected instruction can create a persistent, later-auto-approved code path.
 - **Tools directory defaults inside the workspace** (`.lightcode/tools/`) so changes land
   in git and get code-reviewed. This is a real mitigation.
 - **Never pass provider API keys into the Python environment.** Minimal inherited env.
+- **`python.env` declares what a tool *is* given** (0.65.0, requested: tools need to be told where
+  an internal system is and who is asking). Names and values applied to every Python child — the
+  worker, `uv venv`, and a dependency install — so one declaration covers every tool instead of
+  each tool carrying a host and a token in its source, where they land in the workspace, get
+  committed, and have to be edited in all of them at once when one changes.
+  - **It adds to the allowlist and never replaces it.** A real Python child was measured seeing
+    the declared variables and *not* a planted `OPENAI_API_KEY` (`envWorker.test.ts`) — worth
+    checking by running it, because a feature whose job is to put things into that environment is
+    exactly the one that could quietly widen it.
+  - **One owner, `PythonManager.childEnv()`.** The expression was written out at three spawn
+    sites already; a fourth, or a change made at two of the three, gives some Python a different
+    environment from the rest with nothing to see. `env.test.ts` reads `manager.ts` and fails if
+    `minimalPythonEnv` is called anywhere else — the defect is a *missing call*, so no test of
+    the owner can see it.
+  - **A value may be a secret**, held in secret storage under `python:env:NAME` and never in
+    config (§15). Same reasoning that removed `env` from `TokenCommandInput`: env vars for tools
+    are overwhelmingly credentials, so offering only plaintext is inviting a token into
+    `config.json`. It is write-only across the bridge (invariant 7), which makes "the box is
+    blank" mean *unchanged* rather than *cleared* — read the other way, every save from the tab
+    would wipe every token on the way past, including a save about the timeout.
+  - **The worker restarts when the declaration changes.** A child takes its environment at
+    construction, and this worker is deliberately long-lived, so without that a saved variable
+    would apply at the next window — which from the outside is the setting not working.
+  - **A secret with nothing stored is named** in the tab. Otherwise it surfaces as whatever the
+    tool's library says about a missing credential, which points at the tool.
+  - Covered by invariant 5 already, and load-bearing rather than incidental: `PATH` is among the
+    names, so a repository able to write here could choose which interpreter ran.
 - `uvPath`, `toolsDir`, `venvPath` are user-scope only (invariant 5).
 - Network egress from tool code is uncontrollable without a real sandbox. Document it.
 - **Opt-in by default**, with `dynamicTools: "off"` supported.
