@@ -170,6 +170,16 @@ async function main(): Promise<void> {
    */
   const identityTool = valueOf(args, '--identity-tool')
   const identityPython = valueOf(args, '--identity-python') ?? 'python3'
+  /*
+   * Where credentials come from, when the environment's own libraries hold them.
+   *
+   * A secret store source rather than a tool the assistant can call: the places that need a
+   * credential are the gateway key, a search cluster's username and password, a certificate
+   * passphrase and an MCP server's environment, and every one of those already resolves through
+   * `SecretStore`. A tool the model called would put the password in the transcript.
+   */
+  const credentialTool = valueOf(args, '--credential-tool')
+  const credentialPython = valueOf(args, '--credential-python') ?? identityPython
   const workspaceRoot = path.resolve(valueOf(args, '--workspace') ?? process.cwd())
   const dataDir = valueOf(args, '--data-dir') ?? envPaths('light-code', { suffix: '' }).data
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
@@ -282,6 +292,9 @@ async function main(): Promise<void> {
     dataDir,
     clientDir: path.join(here, 'client'),
     ripgrepPath: resolveRipgrep(),
+    ...(credentialTool !== undefined
+      ? { credentialTool: { interpreter: credentialPython, file: credentialTool } }
+      : {}),
     handoffSeconds,
     noToken,
     allowHosts,
@@ -380,6 +393,18 @@ async function main(): Promise<void> {
     }
   }
 
+  /*
+   * Said when one is configured, because "where do my passwords come from" should not have to be
+   * deduced from which flags were typed. The file it names, not its contents: this line goes to a
+   * terminal and frequently into a log.
+   */
+  if (credentialTool !== undefined) {
+    process.stdout.write(
+      `  secrets    ${path.basename(credentialTool)} — values stored as tool:<name> are fetched from it
+`,
+    )
+  }
+
   if (serverMode) {
     const who =
       effectiveAdminIds.length === 0
@@ -471,6 +496,8 @@ const KNOWN_FLAGS = new Set([
   '--user-header',
   '--identity-tool',
   '--identity-python',
+  '--credential-tool',
+  '--credential-python',
   '--bind',
   '--guide',
 ])
@@ -547,6 +574,10 @@ Usage: light-code [options]
   --identity-tool <f> Python file defining run() -> str, returning the current user id.
                       Settings, secrets and history are filed under whatever it returns.
   --identity-python <p>  Interpreter to run it with (default python3)
+  --credential-tool <f>  Python file defining run(name) -> str or dict. A secret stored as
+                      tool:<name> is fetched from it instead of being kept on disk; use
+                      tool:<name>#field to pick one field of a dict.
+  --credential-python <p>  Interpreter for it (defaults to --identity-python)
   --bind <address>    Interface to listen on (default: 127.0.0.1). Use 0.0.0.0 to
                       reach it from another machine; it then answers to this
                       machine's own hostname and addresses as well as localhost

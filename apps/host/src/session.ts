@@ -18,6 +18,7 @@ import {
   type Transport,
   type WorkspaceState,
 } from '@light-code/core'
+import { ToolBackedSecretStore } from './credentialTool.js'
 import { FileSecretStore } from './fileSecretStore.js'
 import { withHeadersDeadline } from './httpDeadline.js'
 import { RoutedSecretStore, SharedProfileConfigStore } from './sharedProfiles.js'
@@ -232,6 +233,20 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
   }
 }
 
+/**
+ * Wraps the store so `tool:` pointers resolve, when a credential function is configured.
+ *
+ * Outermost deliberately, including outside the shared/personal routing: which *file* a reference
+ * belongs to and whether its value is a pointer are separate questions, and an administrator's
+ * shared credential is exactly as likely to come from the vault as a personal one.
+ */
+function withCredentialTool(store: SecretStore, options: SessionOptions): SecretStore {
+  if (options.credentialTool === undefined) return store
+  return new ToolBackedSecretStore(store, options.credentialTool, (problem) =>
+    options.logSink(`[credentials] ${problem}`),
+  )
+}
+
 export interface SessionOptions {
   principal: Principal
   transport: Transport
@@ -240,6 +255,15 @@ export interface SessionOptions {
   dataDir: string
   ripgrepPath: string | undefined
   logSink: (line: string) => void
+  /**
+   * A Python function that fetches credentials, when the operator configured one.
+   *
+   * Layered in front of the file store rather than replacing it: a stored value of `tool:<name>`
+   * is a pointer and is resolved through this, anything else is an ordinary secret. So a
+   * deployment can mix the two, and the secrets file holds no passwords at all where it does not
+   * need to.
+   */
+  credentialTool?: { interpreter: string; file: string }
   /**
    * The administrator's provider profiles and default, read fresh.
    *
@@ -345,13 +369,15 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
      * A shared profile's API key belongs to the administrator and lives beside the shared config;
      * everything else is this user's. Routed by the reference, which is all a secret store gets.
      */
-    secrets:
+    secrets: withCredentialTool(
       options.sharedSecrets === undefined
         ? new FileSecretStore(path.join(userDir, 'secrets.json'))
         : new RoutedSecretStore(
             new FileSecretStore(path.join(userDir, 'secrets.json')),
             options.sharedSecrets,
           ),
+      options,
+    ),
     configStore:
       options.sharedProfiles === undefined
         ? new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot)

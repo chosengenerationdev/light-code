@@ -86,6 +86,8 @@ export interface ServerOptions {
   /** Directory holding the built browser bundle. */
   clientDir: string
   ripgrepPath: string | undefined
+  /** A Python function that fetches credentials, when one is configured. See `credentialTool.ts`. */
+  credentialTool?: { interpreter: string; file: string }
   identity?: IdentityProvider
   /**
    * Called when a handoff token was presented too late, or twice.
@@ -321,6 +323,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       dataDir: options.dataDir,
       ripgrepPath: options.ripgrepPath,
       logSink: log,
+      // Passed straight through: the server owns no opinion about credentials, it only knows
+      // whether the operator configured a source for them.
+      ...(options.credentialTool !== undefined ? { credentialTool: options.credentialTool } : {}),
       /*
        * Read at use, not captured: an administrator saving a variable must reach a session that
        * is already open. `SharedConfigStore` caches, so this is a map lookup rather than a read.
