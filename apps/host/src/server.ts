@@ -13,6 +13,7 @@ import {
   sessionVariablesSchema,
   type Transport,
 } from '@light-code/core'
+import { reachableHosts, reachableOrigins } from './reachableHosts.js'
 import { OpenIdentity, SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
@@ -95,6 +96,16 @@ export interface ServerOptions {
    * up — Origin and Host are still enforced, which is what actually stops a hostile page.
    */
   noToken?: boolean
+  /**
+   * Extra names this server answers to, beyond the ones it can work out for itself.
+   *
+   * For a reverse proxy, a container alias, or a DNS record pointing here — anything not
+   * derivable from the machine. Declared rather than guessed: a guess wide enough to cover those
+   * would be wide enough to cover an attacker's domain, which is the thing the check is for.
+   */
+  allowHosts?: readonly string[]
+  /** Extra origins allowed to call it, e.g. the app embedding it in an iframe. */
+  allowOrigins?: readonly string[]
   /**
    * Loopback only unless deliberately changed. Binding the literal address rather than
    * `localhost` matters: the name resolves differently per machine and can dual-stack onto
@@ -669,7 +680,19 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const authority = `${bindAddress}:${address.port}`
   // Both checks are pinned to the address actually bound, which is why this is set after
   // listening rather than guessed from the options.
-  policy = { allowedHosts: [authority, `localhost:${address.port}`], allowedOrigins: [`http://${authority}`] }
+  /*
+   * Derived from what this machine *is*, not from what it bound to.
+   *
+   * `0.0.0.0` is not a name anybody browses to, so deriving the allowlist from the bind address
+   * meant a public bind answered only to `localhost` — measured against the running server, and
+   * the reason `reachableHosts` exists. Rebinding is still blocked, because an attacker's domain
+   * is not one of this machine's names.
+   */
+  const allowedHosts = reachableHosts(bindAddress, address.port, options.allowHosts ?? [])
+  policy = {
+    allowedHosts,
+    allowedOrigins: reachableOrigins(allowedHosts, options.allowOrigins ?? []),
+  }
 
   return {
     url: `http://${authority}`,

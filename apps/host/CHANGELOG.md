@@ -1,5 +1,20 @@
 # @chosengeneration/light-code
 
+## 0.40.0
+
+### Minor Changes
+
+- `--bind 0.0.0.0` now actually works from another machine.
+
+  The allowed-host list was derived from the bind address, and `0.0.0.0` is not a name anybody
+  browses to — so a public bind answered only to `localhost`, refusing the machine's own hostname,
+  its LAN address, and even `127.0.0.1` with a 421. Measured against the running server. It now
+  derives from what the machine _is_: loopback, its hostname, and each external address. A foreign
+  domain is still refused, which is the whole point of checking Host at all.
+
+  `--allow-host` and `--allow-origin` (both repeatable) declare anything not derivable — a reverse
+  proxy, a container alias, or the app embedding this in an iframe.
+
 ## 0.39.1
 
 ### Patch Changes

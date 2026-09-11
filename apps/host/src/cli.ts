@@ -163,6 +163,14 @@ async function main(): Promise<void> {
    * machine driving the agent, which §3 already declines to guarantee.
    */
   const noToken = args.includes('--no-token')
+  /*
+   * Names and origins to answer to beyond the ones the machine can work out for itself.
+   *
+   * Repeatable, like `--admin-id`. Needed for anything not derivable from this machine — a
+   * reverse proxy, a container alias, or the app embedding this in an iframe.
+   */
+  const allowHosts = valuesOf(args, '--allow-host')
+  const allowOrigins = valuesOf(args, '--allow-origin')
   const handoffSeconds = Math.min(
     600,
     Math.max(1, Number.parseInt(valueOf(args, '--handoff-seconds') ?? '10', 10) || 10),
@@ -226,6 +234,8 @@ async function main(): Promise<void> {
     ripgrepPath: resolveRipgrep(),
     handoffSeconds,
     noToken,
+    allowHosts,
+    allowOrigins,
     /*
      * A lapsed link is replaced rather than ending the session.
      *
@@ -368,6 +378,8 @@ const KNOWN_FLAGS = new Set([
   '--data-dir',
   '--no-open',
   '--no-token',
+  '--allow-host',
+  '--allow-origin',
   '--server',
   '--admin',
   '--admin-id',
