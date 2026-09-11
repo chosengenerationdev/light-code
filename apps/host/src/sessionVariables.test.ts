@@ -42,7 +42,10 @@ describe('a user’s own variables', () => {
    */
   it('survive a file that is broken elsewhere', () => {
     const file = path.join(dir, 'variables.json')
-    fs.writeFileSync(file, '{ "variables": [ { "name": "OK", "value": "1" } ], "profiles": NOT_JSON }')
+    fs.writeFileSync(
+      file,
+      '{ "variables": [ { "name": "OK", "value": "1" } ], "profiles": NOT_JSON }',
+    )
     expect(readVariablesFile(file)).toEqual([])
   })
 
@@ -55,7 +58,10 @@ describe('a user’s own variables', () => {
 describe('the administrator’s shared store', () => {
   it('round-trips variables and administrator ids', async () => {
     const store = new SharedConfigStore(path.join(dir, 'shared.json'))
-    await store.save({ variables: [{ name: 'PROXY', value: 'http://proxy:8080' }], adminIds: ['entra-alice'] })
+    await store.save({
+      variables: [{ name: 'PROXY', value: 'http://proxy:8080' }],
+      adminIds: ['entra-alice'],
+    })
 
     const reread = new SharedConfigStore(path.join(dir, 'shared.json'))
     const loaded = await reread.load()
@@ -64,7 +70,16 @@ describe('the administrator’s shared store', () => {
   })
 
   it('starts empty rather than failing when there is no file', async () => {
-    expect(await new SharedConfigStore(path.join(dir, 'none.json')).load()).toEqual({ variables: [], adminIds: [], profiles: [] })
+    // Every collection, empty. Asserted whole rather than field by field on purpose: a new
+    // shared collection that forgot its empty default would hand callers `undefined` where they
+    // expect something iterable, and this is the one place that would notice.
+    expect(await new SharedConfigStore(path.join(dir, 'none.json')).load()).toEqual({
+      variables: [],
+      adminIds: [],
+      profiles: [],
+      vectorStores: {},
+      mcpServers: {},
+    })
   })
 
   /**
@@ -72,7 +87,10 @@ describe('the administrator’s shared store', () => {
    * unrelated list is a bad failure to design in.
    */
   it('keeps the administrator ids when the variables are malformed', async () => {
-    fs.writeFileSync(path.join(dir, 'shared.json'), JSON.stringify({ adminIds: ['alice'], variables: 'broken' }))
+    fs.writeFileSync(
+      path.join(dir, 'shared.json'),
+      JSON.stringify({ adminIds: ['alice'], variables: 'broken' }),
+    )
     const loaded = await new SharedConfigStore(path.join(dir, 'shared.json')).load()
     expect(loaded.adminIds).toEqual(['alice'])
     expect(loaded.variables).toEqual([])
@@ -106,7 +124,9 @@ describe('what a session ends up handing to a command', () => {
     })
 
     const shared = await store.load()
-    const env = toEnvironment(resolveSessionVariables(shared.variables, readVariablesFile(userFile)))
+    const env = toEnvironment(
+      resolveSessionVariables(shared.variables, readVariablesFile(userFile)),
+    )
 
     expect(env).toEqual({
       REGISTRY: 'https://pypi.internal/simple',
@@ -126,7 +146,10 @@ describe('what a session ends up handing to a command', () => {
  */
 describe('the reason variables live in a file of their own', () => {
   it('would be silently discarded by the config schema', () => {
-    const parsed = configSchema.safeParse({ modeId: 'code', variables: [{ name: 'A', value: '1' }] })
+    const parsed = configSchema.safeParse({
+      modeId: 'code',
+      variables: [{ name: 'A', value: '1' }],
+    })
     expect(parsed.success).toBe(true)
     expect((parsed as { data: Record<string, unknown> }).data['variables']).toBeUndefined()
   })

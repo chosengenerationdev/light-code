@@ -1,7 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { providerProfileSchema, sessionVariablesSchema, type ProviderProfile, type SessionVariable } from '@light-code/core'
+import {
+  providerProfileSchema,
+  sessionVariablesSchema,
+  type ProviderProfile,
+  type SessionVariable,
+} from '@light-code/core'
 
 /**
  * Settings an administrator sets once, for everyone.
@@ -35,6 +40,19 @@ export interface SharedConfig {
    */
   defaultProgrammingProfileId?: string
   /**
+   * Search connections everyone gets, keyed by id.
+   *
+   * The case this was asked for: one cluster, one service account, configured once rather than by
+   * every person separately — which in practice means a password passed around in a message.
+   *
+   * Keyed by the *bare* id here and presented with the `shared:` prefix, so the file an
+   * administrator reads is not full of prefixes while routing still works everywhere else. See
+   * `sharedEntries.ts` for why the prefix rather than a separate list of what is shared.
+   */
+  vectorStores: Record<string, unknown>
+  /** MCP servers everyone gets, keyed by name. Same mechanism, same reasoning. */
+  mcpServers: Record<string, unknown>
+  /**
    * Identity ids treated as administrators.
    *
    * Seeded from `--admin-id` and editable in the admin interface, so adding a colleague does not
@@ -45,7 +63,20 @@ export interface SharedConfig {
   adminIds: string[]
 }
 
-const EMPTY: SharedConfig = { variables: [], adminIds: [], profiles: [] }
+const EMPTY: SharedConfig = {
+  variables: [],
+  adminIds: [],
+  profiles: [],
+  vectorStores: {},
+  mcpServers: {},
+}
+
+/** A keyed collection, or an empty one — never something that will throw when iterated. */
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
 
 export class SharedConfigStore {
   private cache: SharedConfig | undefined
@@ -66,18 +97,32 @@ export class SharedConfigStore {
         ? raw['adminIds'].filter((id): id is string => typeof id === 'string')
         : []
       /*
-        * Profiles are validated as a whole rather than entry by entry: a half-valid profile is a
-        * gateway with no credentials or a credential with no gateway, and offering it to every
-        * user would produce a failure that looks like an outage.
-        */
+       * Profiles are validated as a whole rather than entry by entry: a half-valid profile is a
+       * gateway with no credentials or a credential with no gateway, and offering it to every
+       * user would produce a failure that looks like an outage.
+       */
       const profiles = z.array(providerProfileSchema).safeParse(raw['profiles'])
-      const defaultProfileId = typeof raw['defaultProfileId'] === 'string' ? raw['defaultProfileId'] : undefined
+      const defaultProfileId =
+        typeof raw['defaultProfileId'] === 'string' ? raw['defaultProfileId'] : undefined
       const defaultProgrammingProfileId =
-        typeof raw['defaultProgrammingProfileId'] === 'string' ? raw['defaultProgrammingProfileId'] : undefined
+        typeof raw['defaultProgrammingProfileId'] === 'string'
+          ? raw['defaultProgrammingProfileId']
+          : undefined
+      /*
+       * Kept as opaque records rather than validated against the config schema.
+       *
+       * They are merged into a user's config file and validated there, by the same loader that
+       * validates everything else — which is the point: one schema, one set of messages, and a bad
+       * shared entry fails exactly as a bad personal one does. Parsing them twice would mean two
+       * definitions of a valid connection, and the one nobody updated would start rejecting
+       * something the other accepts.
+       */
       this.cache = {
         variables: variables.success ? variables.data : [],
         adminIds,
         profiles: profiles.success ? profiles.data : [],
+        vectorStores: asRecord(raw['vectorStores']),
+        mcpServers: asRecord(raw['mcpServers']),
         ...(defaultProfileId !== undefined ? { defaultProfileId } : {}),
         ...(defaultProgrammingProfileId !== undefined ? { defaultProgrammingProfileId } : {}),
       }
@@ -96,7 +141,10 @@ export class SharedConfigStore {
     // Written whole and atomically enough for a file this size: a torn write here would lose the
     // administrator list, and rewriting it is the one thing they may be unable to do.
     const temporary = `${this.filePath}.tmp`
-    await fs.writeFile(temporary, JSON.stringify(merged, null, 2), { encoding: 'utf8', mode: 0o600 })
+    await fs.writeFile(temporary, JSON.stringify(merged, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
     await fs.rename(temporary, this.filePath)
     this.cache = merged
     return merged

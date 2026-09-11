@@ -1,4 +1,5 @@
 import type { ConfigScope, ConfigStore, ProviderProfile, SecretStore } from '@light-code/core'
+import { isSharedSecretReference } from './sharedEntries.js'
 
 /**
  * Administrator-provided provider profiles, merged into every user's list.
@@ -37,7 +38,14 @@ export function fromSharedProfileId(id: string): string {
  * reference and nothing else — it cannot ask which profile is being saved.
  */
 export function isSharedSecretRef(ref: string): boolean {
-  return ref.startsWith(`profile:${SHARED_PREFIX}`)
+  /*
+   * Delegated, so profiles and every other shared collection answer this the same way.
+   *
+   * It used to test `profile:shared:` literally, which was right while profiles were the only
+   * shared thing. A second collection would have routed its credentials to the wrong file —
+   * silently, and the symptom would be one person's password written into another's.
+   */
+  return isSharedSecretReference(ref)
 }
 
 /** The shared profiles as a user sees them: prefixed, and therefore recognisable as not theirs. */
@@ -97,7 +105,8 @@ export class SharedProfileConfigStore implements ConfigStore {
      */
     const merged = [...presented, ...own.filter((profile) => !isSharedProfileId(profile.id))]
 
-    const activeId = typeof parsed['activeProfileId'] === 'string' ? parsed['activeProfileId'] : undefined
+    const activeId =
+      typeof parsed['activeProfileId'] === 'string' ? parsed['activeProfileId'] : undefined
     /*
      * The administrator's default applies to someone who has not chosen — which is every new
      * user. It does not override a choice, and it is dropped if it names a profile that no longer
@@ -107,7 +116,9 @@ export class SharedProfileConfigStore implements ConfigStore {
       activeId !== undefined && merged.some((profile) => profile.id === activeId)
         ? activeId
         : shared.defaultProfileId !== undefined &&
-            merged.some((profile) => profile.id === toSharedProfileId(shared.defaultProfileId ?? ''))
+            merged.some(
+              (profile) => profile.id === toSharedProfileId(shared.defaultProfileId ?? ''),
+            )
           ? toSharedProfileId(shared.defaultProfileId)
           : activeId
 
@@ -117,7 +128,9 @@ export class SharedProfileConfigStore implements ConfigStore {
      * gone — otherwise removing one would point every session at nothing.
      */
     const ownProgramming =
-      typeof parsed['programmingProfileId'] === 'string' ? parsed['programmingProfileId'] : undefined
+      typeof parsed['programmingProfileId'] === 'string'
+        ? parsed['programmingProfileId']
+        : undefined
     const sharedProgramming =
       shared.defaultProgrammingProfileId !== undefined
         ? toSharedProfileId(shared.defaultProgrammingProfileId)
@@ -125,7 +138,8 @@ export class SharedProfileConfigStore implements ConfigStore {
     const resolvedProgramming =
       ownProgramming !== undefined && merged.some((profile) => profile.id === ownProgramming)
         ? ownProgramming
-        : sharedProgramming !== undefined && merged.some((profile) => profile.id === sharedProgramming)
+        : sharedProgramming !== undefined &&
+            merged.some((profile) => profile.id === sharedProgramming)
           ? sharedProgramming
           : ownProgramming
 

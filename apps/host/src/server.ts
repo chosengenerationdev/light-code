@@ -193,7 +193,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
    * person who reads it is not the person who filled it.
    */
   const reviews = new ReviewQueue(path.join(options.dataDir, 'reviews.json'))
-  let sharedCache: SharedConfig = { variables: [], adminIds: [], profiles: [] }
+  let sharedCache: SharedConfig = {
+    variables: [],
+    adminIds: [],
+    profiles: [],
+    vectorStores: {},
+    mcpServers: {},
+  }
 
   const bindAddress = options.bindAddress ?? '127.0.0.1'
   if (sharedStore !== undefined) sharedCache = await sharedStore.load()
@@ -331,6 +337,14 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
        * is already open. `SharedConfigStore` caches, so this is a map lookup rather than a read.
        */
       adminVariables: () => sharedCache.variables,
+      /*
+       * Read at use, like the variables above: an administrator publishing a connection must
+       * reach sessions that are already open, not only the next one to start.
+       */
+      sharedEntries: () => ({
+        vectorStores: sharedCache.vectorStores,
+        mcpServers: sharedCache.mcpServers,
+      }),
       /*
        * Only for someone who cannot approve their own work. An administrator keeps the ordinary
        * in-chat prompt — the same mechanism with the approver already at the screen — so this is

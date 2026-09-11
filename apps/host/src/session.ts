@@ -19,6 +19,7 @@ import {
   type WorkspaceState,
 } from '@light-code/core'
 import { ToolBackedSecretStore } from './credentialTool.js'
+import { SharedEntriesConfigStore } from './sharedEntries.js'
 import { FileSecretStore } from './fileSecretStore.js'
 import { withHeadersDeadline } from './httpDeadline.js'
 import { RoutedSecretStore, SharedProfileConfigStore } from './sharedProfiles.js'
@@ -247,6 +248,35 @@ function withCredentialTool(store: SecretStore, options: SessionOptions): Secret
   )
 }
 
+/**
+ * The administrator's shared search connections and MCP servers, folded into this user's config.
+ *
+ * Outside the profile wrapper rather than inside it: they are independent collections, and
+ * composing two small wrappers keeps each one's merge readable. A host that shares nothing gets
+ * the store untouched.
+ */
+function withSharedEntries(store: ConfigStore, options: SessionOptions): ConfigStore {
+  if (options.sharedEntries === undefined) return store
+  return new SharedEntriesConfigStore(store, SHARED_COLLECTIONS, options.sharedEntries)
+}
+
+/**
+ * What can be published to everyone, and how each one's credentials are named.
+ *
+ * `vectorStores` is the case this was asked for. `mcpServers` follows the identical path and is
+ * listed here rather than later so the two cannot diverge into two mechanisms — which is how a
+ * second collection ends up with its own half-correct copy of this logic.
+ */
+const SHARED_COLLECTIONS = [
+  {
+    key: 'vectorStores',
+    refFields: ['usernameRef', 'passwordRef'],
+    refFor: (id: string, field: string) =>
+      `search:${id}:${field === 'usernameRef' ? 'username' : 'password'}`,
+  },
+  { key: 'mcpServers' },
+] as const
+
 export interface SessionOptions {
   principal: Principal
   transport: Transport
@@ -255,6 +285,13 @@ export interface SessionOptions {
   dataDir: string
   ripgrepPath: string | undefined
   logSink: (line: string) => void
+  /**
+   * The administrator's shared entries, read fresh so a change reaches an open session.
+   *
+   * Keyed by collection, then by the bare id. See `sharedEntries.ts` for why the scope lives in
+   * the key rather than in a list of what is shared.
+   */
+  sharedEntries?: () => Record<string, Record<string, unknown>>
   /**
    * A Python function that fetches credentials, when the operator configured one.
    *
@@ -378,13 +415,15 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
           ),
       options,
     ),
-    configStore:
+    configStore: withSharedEntries(
       options.sharedProfiles === undefined
         ? new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot)
         : new SharedProfileConfigStore(
             new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot),
             options.sharedProfiles,
           ),
+      options,
+    ),
     workspaceState,
     ui: createBrowserUi(options.workspaceRoot, options.logSink),
     workspaceRoot: options.workspaceRoot,
