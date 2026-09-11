@@ -3280,8 +3280,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function postExpertInner(redetect: boolean): Promise<void> {
     // Read here rather than at construction: the panel opening is the first moment anything
     // needs it, and nothing should touch the disk just because a window opened.
-    await loadExpertEvents()
     const { config } = await configManager.load()
+
+    /*
+     * Nothing here applies where the expert is a provider profile.
+     *
+     * Every line below probes for a `claude` binary and reads the spend log that binary writes.
+     * On a host that consults a profile the probe spawns a process that is never going to be
+     * there, on every panel open, to fill fields the panel no longer renders — and reports
+     * `available: false` with a reason about a CLI the user was never offered.
+     */
+    if (services.expertMode === 'profile') {
+      post({
+        ...expertMessageFrom(config.expert, config.profiles),
+        // Usable when a profile is chosen, which is the only thing availability can mean here.
+        available:
+          config.expert?.enabled === true &&
+          config.expert.profileId !== undefined &&
+          config.profiles?.some((profile) => profile.id === config.expert?.profileId) === true,
+      })
+      return
+    }
+
+    // Read here rather than at construction: the panel opening is the first moment anything
+    // needs it, and nothing should touch the disk just because a window opened.
+    await loadExpertEvents()
     const configured = config.expert?.path ?? 'claude'
     /*
      * Re-probing spawns a process. After an assessment we have just used the CLI successfully,

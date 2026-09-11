@@ -1186,6 +1186,18 @@ about source, because every claim here is about behaviour across two connections
 - **Two ways the process could hang or die**: `server.close()` waited on an event stream that never
   ends, and a `write` to a departed socket emits an error event that with no listener ends the
   process. A server that dies when a browser tab closes is not stable.
+- **The session must exist before the response headers go out.** A streamed `fetch` resolves for
+  the client the moment headers arrive, so the page sends its opening requests immediately — and
+  while the session was built *after* writing them, the first POST of every page load landed in a
+  window answered `409 No event stream open`. **That is what "there is no dark mode or light mode
+  option any more" was**: `choosesTheme` rides on the settings reply, the request for it was
+  refused, and the client dropped the refusal silently. Found by running the built server and
+  printing what the UI is told — and the probe that found it was itself posting without checking
+  its own status, which is the same mistake one layer up. A window the server can simply not have
+  beats one the client recovers from.
+- **The expert probe is skipped entirely in profile mode.** It spawned a `claude` that was never
+  going to be there, on every panel open, to fill fields the panel no longer renders — and
+  reported `available: false` with a reason about a CLI the user was never offered.
 - **SSE needs `Cache-Control: no-transform` and `X-Accel-Buffering: no`.** A proxy that buffers a
   response holds every event until it has "enough", which for a stream is for ever. Neither is
   needed on loopback, which is exactly why their absence survived until this ran on a server.

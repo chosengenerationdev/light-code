@@ -131,6 +131,35 @@ describe('an event stream that drops and comes back', () => {
   }, 30_000)
 
   /**
+   * The very first request a page makes must not be refused.
+   *
+   * A streamed `fetch` resolves for the client the moment headers arrive, and the page sends its
+   * opening requests immediately. While the session was created *after* those headers, the first
+   * POST landed in a window answered `409 No event stream open` — and the client dropped the
+   * refusal silently, so the reply simply never came.
+   *
+   * That window is what "there is no dark mode option any more" was: `choosesTheme` rides on the
+   * settings reply, the request for it was refused, and nothing said so. Measured against a
+   * running server, not reasoned about — the probe that found it was posting without checking
+   * its own status, which is the same mistake one layer up.
+   */
+  it('accepts a message sent the instant the stream opens', async () => {
+    const url = await start()
+    const stream = await openStream(url)
+
+    // No wait: this is the race, and sleeping first would test the absence of one.
+    const posted = await fetch(`${url}/api/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: url },
+      body: JSON.stringify({ type: 'requestSettings' }),
+    })
+    expect(posted.status).toBe(202)
+
+    expect(await until(() => stream.frames.join('').includes('"type":"settings"'))).toBe(true)
+    stream.abort()
+  }, 30_000)
+
+  /**
    * A proxy that buffers a response holds every event until it has "enough", which for a stream is
    * for ever: the page connects, renders, and then every reply appears to vanish. Neither header
    * is needed on loopback, which is exactly why their absence survived until this ran on a server.

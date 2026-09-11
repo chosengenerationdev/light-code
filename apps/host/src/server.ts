@@ -469,6 +469,29 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
 
     if (url.pathname === '/api/events' && request.method === 'GET') {
+      /*
+       * The session is ready **before** the response headers go out. That ordering is the whole
+       * point of these lines.
+       *
+       * A streamed `fetch` resolves for the client the moment headers arrive, and the page then
+       * sends its opening requests immediately. Creating the session after writing them left a
+       * window in which those requests were answered `409 No event stream open` — measured
+       * against a running server, and it is the first POST every page makes that lands in it.
+       *
+       * That is what "there is no dark mode option any more" was: the settings reply carries
+       * `choosesTheme`, the request for it was refused, and the client dropped the refusal
+       * silently. The client retries a 409 now, but a window the server can simply not have is
+       * better than one something else recovers from.
+       *
+       * It also means a session that fails to build reports as a failed request rather than as a
+       * 200 that goes quiet.
+       */
+      let connection = connections.get(principal.id)
+      if (connection === undefined) {
+        connection = await openConnection(principal)
+        connections.set(principal.id, connection)
+      }
+
       response.writeHead(200, {
         'Content-Type': 'text/event-stream',
         Connection: 'keep-alive',
@@ -511,17 +534,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       else adminConnections.delete(principal.id)
 
       /*
-       * The session is found, not made.
-       *
-       * Rebuilding it here is what made a dropped stream cost the conversation, the MCP
-       * connections, the Python worker and the schedule timer — every one of them torn down and
-       * started again, a second after any blip, in a loop.
+       * Attached, not built. Rebuilding here is what made a dropped stream cost the conversation,
+       * the MCP connections, the Python worker and the schedule timer — every one of them torn
+       * down and started again, a second after any blip, in a loop.
        */
-      let connection = connections.get(principal.id)
-      if (connection === undefined) {
-        connection = await openConnection(principal)
-        connections.set(principal.id, connection)
-      }
       connection.attach(response)
 
       /*

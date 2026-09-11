@@ -1,5 +1,47 @@
 # @chosengeneration/light-code
 
+## 0.43.1
+
+### Patch Changes
+
+- Answer the first request a page makes
+
+  The browser's event stream resolves as soon as its headers arrive, and the page
+  sends its opening requests straight away — but the session behind the stream was
+  built after those headers were written. The first message of every page load
+  landed in that window and was answered "no event stream open".
+
+  That is why the light/dark theme control had disappeared: the setting that says
+  the browser picks its own theme rides on the settings reply, the request for it
+  was refused, and nothing said so.
+
+  The session is now ready before the stream is acknowledged, so there is no window
+  to land in. A server that consults a provider profile as its expert also no longer
+  probes for the Claude CLI on every panel open.
+
+## 0.43.0
+
+### Minor Changes
+
+- afb9a1e: A smaller, steadier server
+
+  The Node host now offers a deliberately smaller feature set than the extension.
+
+  Excel, Outlook and the mail index are gone from it. Both attach over COM to an
+  application running on somebody's desktop, which a service account has no route
+  to, and a mailbox belongs to a person rather than to the account this process
+  runs as. The Outlook tab is no longer listed rather than being present and
+  explaining itself.
+
+  The expert is now any provider profile you have already configured, chosen in
+  Settings → Expert. There is no Claude CLI on a server, and the gateway answering
+  the chat already has a stronger model behind it. Everything that existed to
+  manage what the CLI charged — the per-task budget, the measured price, the
+  savings panel, the keep-alive, the session resume — is not part of it. A spend
+  cap over something nothing meters would look like protection without being any.
+
+  None of this changes the VS Code extension, which keeps all of it.
+
 ## 0.42.0
 
 ### Minor Changes
