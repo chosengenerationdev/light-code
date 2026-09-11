@@ -1,12 +1,41 @@
 import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactElement } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+  type ReactElement,
+} from 'react'
 import { AttachIcon, CrossIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
-import { activeMentionQuery, insertMention as insertMentionInto, splitMentions } from './mentions.js'
+import {
+  activeMentionQuery,
+  insertMention as insertMentionInto,
+  splitMentions,
+} from './mentions.js'
 import { Select } from './Select.js'
-import { badgeStyle, colors, fontFamily, iconButtonStyle } from './theme.js'
+import {
+  badgeStyle,
+  colors,
+  fontFamily,
+  iconButtonStyle,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  textFieldStyle,
+} from './theme.js'
 
 export interface ComposerProps {
   isStreaming: boolean
+  /**
+   * The plan for this conversation, as the host holds it. Empty means none is set.
+   *
+   * Shown under the composer rather than tucked in Settings: it constrains *this* chat, and a
+   * constraint you cannot see is one you forget you imposed — which turns "why did it refuse to
+   * fix that?" into a mystery rather than a glance.
+   */
+  plan: string
+  onSetPlan: (plan: string) => void
   onSend: (text: string, images: ImageAttachmentInput[]) => void
   onCancel: () => void
   /** Hides attachment entirely when the active model has no vision support (§9). */
@@ -86,15 +115,26 @@ const composerTextLayout = {
 } as const
 
 /** The `@` token the caret currently sits in, or undefined when it is not in one. */
+/** The first non-empty line, for the collapsed strip. A plan is usually a list; its head is the gist. */
+function firstPlanLine(plan: string): string {
+  const line =
+    plan
+      .split('\n')
+      .find((candidate) => candidate.trim().length > 0)
+      ?.trim() ?? ''
+  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line
+}
+
 export function Composer(props: ComposerProps): ReactElement {
   const [text, setText] = useState('')
+  const [planOpen, setPlanOpen] = useState(false)
+  const [planDraft, setPlanDraft] = useState(props.plan)
   const [images, setImages] = useState<ImageAttachmentInput[]>([])
   const [texts, setTexts] = useState<TextAttachment[]>([])
   const [mentionQuery, setMentionQuery] = useState<string | undefined>(undefined)
   const [highlighted, setHighlighted] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  
 
   /** Grows the box to fit the text, capped, so the send button never drifts out of line. */
   const resize = (element: HTMLTextAreaElement): void => {
@@ -292,13 +332,21 @@ export function Composer(props: ComposerProps): ReactElement {
                 paddingLeft: 6,
               }}
             >
-              <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message}</span>
+              <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {message}
+              </span>
               <button
                 type="button"
                 title="Remove from the queue"
                 aria-label="Remove from the queue"
                 onClick={() => props.onUnqueue(index)}
-                style={{ background: 'transparent', border: 'none', color: colors.muted, cursor: 'pointer', padding: 0 }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: colors.muted,
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
               >
                 ×
               </button>
@@ -326,9 +374,19 @@ export function Composer(props: ComposerProps): ReactElement {
         and it reads the same as the file and image chips beside it.
       */}
       {mentionedFiles.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '6px 8px 0', alignItems: 'center' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            flexWrap: 'wrap',
+            padding: '6px 8px 0',
+            alignItems: 'center',
+          }}
+        >
           <span style={{ color: colors.muted, fontSize: 11 }}>
-            {mentionedFiles.length === 1 ? 'Mentions' : `Mentions (${String(mentionedFiles.length)})`}
+            {mentionedFiles.length === 1
+              ? 'Mentions'
+              : `Mentions (${String(mentionedFiles.length)})`}
           </span>
           {mentionedFiles.map((mention, index) => (
             <span
@@ -367,14 +425,18 @@ export function Composer(props: ComposerProps): ReactElement {
               }}
               title={`${attachment.name} — ${String(Math.max(1, Math.round(attachment.text.length / 1024)))}KB of text, included in your next message`}
             >
-              <span style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>{attachment.name}</span>
+              <span style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>
+                {attachment.name}
+              </span>
               <span>{Math.max(1, Math.round(attachment.text.length / 1024))}KB</span>
               <button
                 type="button"
                 title="Remove"
                 aria-label={`Remove ${attachment.name}`}
                 style={iconButtonStyle('ghost')}
-                onClick={() => setTexts((current) => current.filter((_, position) => position !== index))}
+                onClick={() =>
+                  setTexts((current) => current.filter((_, position) => position !== index))
+                }
               >
                 <CrossIcon size={11} />
               </button>
@@ -404,14 +466,27 @@ export function Composer(props: ComposerProps): ReactElement {
                 alt=""
                 style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 2 }}
               />
-              <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span
+                style={{
+                  maxWidth: 120,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {image.name}
               </span>
               <button
                 type="button"
                 aria-label={`Remove ${image.name}`}
                 onClick={() => setImages((previous) => previous.filter((_, i) => i !== index))}
-                style={{ background: 'transparent', border: 'none', color: colors.muted, cursor: 'pointer', padding: 0 }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: colors.muted,
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
               >
                 ×
               </button>
@@ -420,12 +495,14 @@ export function Composer(props: ComposerProps): ReactElement {
         </div>
       )}
 
-      {notice !== undefined && <div style={{ padding: '4px 10px 0', fontSize: 11, color: colors.error }}>{notice}</div>}
+      {notice !== undefined && (
+        <div style={{ padding: '4px 10px 0', fontSize: 11, color: colors.error }}>{notice}</div>
+      )}
 
       {images.length > 0 && !props.supportsVision && (
         <div style={{ padding: '4px 10px 0', fontSize: 11, color: colors.error }}>
-          This model is not known to accept images. If it does, tick “Supports images” in
-          Settings → Providers → Edit → Model capability overrides.
+          This model is not known to accept images. If it does, tick “Supports images” in Settings →
+          Providers → Edit → Model capability overrides.
         </div>
       )}
 
@@ -451,7 +528,11 @@ export function Composer(props: ComposerProps): ReactElement {
           ref={textareaRef}
           value={text}
           rows={2}
-          placeholder={props.isStreaming ? "Add a message — it joins the current turn" : "Message Light Code…  @ to attach a file"}
+          placeholder={
+            props.isStreaming
+              ? 'Add a message — it joins the current turn'
+              : 'Message Light Code…  @ to attach a file'
+          }
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             setText(event.target.value)
             syncMentionQuery(event.target.value, event.target.selectionStart)
@@ -469,7 +550,10 @@ export function Composer(props: ComposerProps): ReactElement {
               }
               if (event.key === 'ArrowUp') {
                 event.preventDefault()
-                setHighlighted((current) => (current - 1 + props.mentionCandidates.length) % props.mentionCandidates.length)
+                setHighlighted(
+                  (current) =>
+                    (current - 1 + props.mentionCandidates.length) % props.mentionCandidates.length,
+                )
                 return
               }
               if (event.key === 'Enter' || event.key === 'Tab') {
@@ -537,7 +621,13 @@ export function Composer(props: ComposerProps): ReactElement {
         </button>
 
         {props.isStreaming ? (
-          <button type="button" title="Cancel" aria-label="Cancel" style={iconButtonStyle('secondary')} onClick={props.onCancel}>
+          <button
+            type="button"
+            title="Cancel"
+            aria-label="Cancel"
+            style={iconButtonStyle('secondary')}
+            onClick={props.onCancel}
+          >
             <StopIcon />
           </button>
         ) : (
@@ -557,26 +647,121 @@ export function Composer(props: ComposerProps): ReactElement {
 
       {/* Which model is about to answer, switchable without leaving the chat. Below the
           input rather than in the header because it belongs to the message being sent. */}
+      {/*
+        The plan, under the input where the work is described.
+
+        Collapsed to a single line when set, because it is context rather than content: you need
+        to know it is there and roughly what it says, and the full text only when editing it.
+      */}
+      <div style={{ padding: '0 10px 6px' }}>
+        {planOpen ? (
+          <div>
+            <textarea
+              value={planDraft}
+              rows={6}
+              spellCheck={false}
+              aria-label="Plan for this conversation"
+              placeholder={
+                'What this conversation is for.\n\n' +
+                'Example:\n1. Fix the retry logic in http.ts\n2. Add a test for the timeout path\n' +
+                'Do not touch anything else.'
+              }
+              onChange={(event) => setPlanDraft(event.target.value)}
+              style={{ ...textFieldStyle(), width: '100%', resize: 'vertical', fontFamily }}
+            />
+            <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
+              <button
+                type="button"
+                style={primaryButtonStyle(false)}
+                onClick={() => {
+                  props.onSetPlan(planDraft)
+                  setPlanOpen(false)
+                }}
+              >
+                Set plan
+              </button>
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                onClick={() => setPlanOpen(false)}
+              >
+                Cancel
+              </button>
+              {props.plan.length > 0 && (
+                <button
+                  type="button"
+                  style={secondaryButtonStyle()}
+                  onClick={() => {
+                    setPlanDraft('')
+                    props.onSetPlan('')
+                    setPlanOpen(false)
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+              <span style={{ color: colors.muted, fontSize: 11 }}>
+                Kept in front of the assistant for the whole conversation.
+              </span>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            style={{
+              ...secondaryButtonStyle(),
+              width: '100%',
+              textAlign: 'left',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              ...(props.plan.length > 0 ? { borderColor: colors.accent } : {}),
+            }}
+            title={props.plan.length > 0 ? props.plan : 'Set what this conversation is for'}
+            onClick={() => {
+              setPlanDraft(props.plan)
+              setPlanOpen(true)
+            }}
+          >
+            <span style={{ color: props.plan.length > 0 ? colors.accent : colors.muted }}>
+              {props.plan.length > 0 ? 'Plan' : 'Set a plan'}
+            </span>
+            <span
+              style={{
+                color: colors.muted,
+                fontSize: 11,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: 1,
+              }}
+            >
+              {props.plan.length > 0 ? firstPlanLine(props.plan) : 'keeps the assistant on the job'}
+            </span>
+          </button>
+        )}
+      </div>
+
       {/* Rendered whenever there is anything to report. Previously the whole row hung off
           `profiles.length > 0`, which hid the expert indicator too — so "is the expert
           actually on?" was unanswerable without opening Settings. */}
       {(props.profiles.length > 0 || props.expertEnabled) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px 8px' }}>
           {props.profiles.length > 0 && (
-          <Select
-            compact
-            ariaLabel="Provider profile"
-            title="Which provider answers the next message"
-            value={props.activeProfileId ?? ''}
-            disabled={props.isStreaming}
-            onChange={props.onSelectProfile}
-            style={{ maxWidth: '60%' }}
-            options={props.profiles.map((profile) => ({
-              value: profile.id,
-              label: profile.label,
-              detail: profile.model,
-            }))}
-          />
+            <Select
+              compact
+              ariaLabel="Provider profile"
+              title="Which provider answers the next message"
+              value={props.activeProfileId ?? ''}
+              disabled={props.isStreaming}
+              onChange={props.onSelectProfile}
+              style={{ maxWidth: '60%' }}
+              options={props.profiles.map((profile) => ({
+                value: profile.id,
+                label: profile.label,
+                detail: profile.model,
+              }))}
+            />
           )}
           {props.searchConnections.length > 0 && (
             <Select
@@ -591,14 +776,23 @@ export function Composer(props: ComposerProps): ReactElement {
                 // Off is a real choice, and the default one: no connection means the search
                 // tools are not offered at all.
                 { value: '', label: 'No search' },
-                ...props.searchConnections.map((connection) => ({ value: connection.id, label: connection.label })),
+                ...props.searchConnections.map((connection) => ({
+                  value: connection.id,
+                  label: connection.label,
+                })),
               ]}
             />
           )}
           {props.expertEnabled && (
             <span
               title="Claude is available as an expert. Ask it directly — say “ask Claude …”."
-              style={{ ...badgeStyle(), marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              style={{
+                ...badgeStyle(),
+                marginLeft: 'auto',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
             >
               <ExpertIcon size={11} />
               expert

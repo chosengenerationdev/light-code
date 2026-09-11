@@ -25,6 +25,9 @@ import { cls, colors, iconButtonStyle } from './theme.js'
 const FOLLOW_THRESHOLD_PX = 120
 
 export interface ChatProps {
+  /** The plan for this conversation, and how to change it. See `agent/plan.ts`. */
+  plan: string
+  onSetPlan: (plan: string) => void
   messages: DisplayMessage[]
   isStreaming: boolean
   error: string | undefined
@@ -270,6 +273,8 @@ export function Chat(props: ChatProps): ReactElement {
       <ExpertSpend {...props.expertSpend} />
       <TokenBar usage={props.usage} />
       <Composer
+        plan={props.plan}
+        onSetPlan={props.onSetPlan}
         isStreaming={props.isStreaming}
         onSend={props.onSend}
         onCancel={props.onCancel}

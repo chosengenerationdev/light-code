@@ -796,6 +796,9 @@ export type UiToHostMessage =
     }
   | { type: 'setAgentColor'; role: string; color: string }
   | { type: 'requestAgents' }
+  /** Sets the plan for the open chat. Empty clears it. */
+  | { type: 'setPlan'; plan: string }
+  | { type: 'requestPlan' }
   | {
       type: 'setExpert'
       enabled: boolean
@@ -1334,6 +1337,13 @@ export type HostToUiMessage =
       indexedFiles: number
     }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
+  /**
+   * The plan for the open chat, as the composer shows it.
+   *
+   * Sent on open and after every change, so the strip under the composer and the editor cannot
+   * disagree about what the assistant has actually been told.
+   */
+  | { type: 'plan'; plan: string }
   | {
       type: 'agents'
       /** Every role, in a fixed order, whether or not anybody is assigned to it. */

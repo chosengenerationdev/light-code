@@ -1,4 +1,5 @@
 import { COLLECTOR_TOOL_GUIDANCE } from '../dataset/types.js'
+import { buildPlanGuidance } from './plan.js'
 
 export interface SystemPromptOptions {
   /** The model id from the active profile, so the assistant can answer "what model are you?". */
@@ -68,6 +69,8 @@ export interface SystemPromptOptions {
    * Prefix-safe because mode is resolved once per turn (§12).
    */
   modeGuidance?: string
+  /** The plan the user set for this chat. See `agent/plan.ts`. */
+  plan?: string
 }
 
 /**
@@ -86,7 +89,10 @@ export interface SystemPromptOptions {
  * selected. Behind a gateway that renames models it is wrong essentially always. Telling
  * it the configured id is the only way the answer can be accurate.
  */
-export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOptions = {}): string {
+export function buildSystemPrompt(
+  workspaceRoot: string,
+  options: SystemPromptOptions = {},
+): string {
   const lines = [
     "You are Light Code, a coding assistant working inside a user's VS Code workspace.",
     '',
@@ -185,8 +191,8 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
         ? [
             '- `search_team_skills` searches what OTHER people have taught their assistants. Use it',
             '  only when the user asks, or when this workspace plainly has nothing on the subject',
-            '  and the question is about another team\'s system.',
-            '- A team skill describes someone else\'s project. Never apply one to this workspace',
+            "  and the question is about another team's system.",
+            "- A team skill describes someone else's project. Never apply one to this workspace",
             '  without saying whose it is and that you are doing so.',
           ]
         : []),
@@ -205,18 +211,18 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
       '  conversation. A one-off instruction for the current task is not a skill.',
       options.skillsSearchable === true
         ? '- Before writing a new skill, search for one with search_docs: if a note already ' +
-          'covers the subject, read it and update that instead of creating a near-duplicate.'
+            'covers the subject, read it and update that instead of creating a near-duplicate.'
         : '- Before writing a new skill, check the list above: if one already covers the ' +
-          'subject, read it and update that instead of creating a near-duplicate.',
+            'subject, read it and update that instead of creating a near-duplicate.',
       '- When you learn something *corrects* an existing skill, say so and offer to update',
       '  it. A stale skill is worse than a missing one, because it is trusted.',
       '- Write for a reader who has none of this conversation: name the package, the import',
       '  path, the function, and show a short example. Avoid "as discussed" and "the usual".',
       options.skillsSearchable === true
         ? '- The description line is what search matches on, so make it say what subject the ' +
-          'skill covers in the words someone would search for — it is a trigger, not a summary.'
+            'skill covers in the words someone would search for — it is a trigger, not a summary.'
         : '- The description line is the only part always in context, so make it say what ' +
-          'subject the skill covers — it is a trigger for reading, not a summary.',
+            'subject the skill covers — it is a trigger for reading, not a summary.',
     )
   }
 
@@ -353,6 +359,17 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
   if (options.modeGuidance !== undefined && options.modeGuidance.length > 0) {
     lines.push('', options.modeGuidance)
   }
+
+  /*
+   * After the mode, and therefore last of everything.
+   *
+   * The plan is the most specific instruction in the prompt — it is about *this* conversation,
+   * where a mode is about a way of working — so it narrows the mode rather than the other way
+   * round. Recency helps too: what is nearest the end is what a model weighs most when deciding
+   * its next step, which is exactly the moment drift happens.
+   */
+  const plan = buildPlanGuidance(options.plan)
+  if (plan.length > 0) lines.push('', plan)
 
   return lines.join('\n')
 }

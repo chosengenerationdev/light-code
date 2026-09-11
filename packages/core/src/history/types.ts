@@ -24,6 +24,14 @@ export interface Task {
    * these too or the spill directory grows without bound.
    */
   resultHandles: string[]
+  /**
+   * The plan the user set for this chat, when they set one.
+   *
+   * On the task rather than in config: it is about *this* conversation, and reopening one from
+   * history has to reopen the plan with it — a restored chat whose assistant had forgotten what it
+   * was for would be worse than no plan at all.
+   */
+  plan?: string
 }
 
 /** Enough to render the history list without loading every transcript. */

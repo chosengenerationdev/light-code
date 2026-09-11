@@ -10,6 +10,7 @@ import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savin
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildExpertPrompt, type ProviderExpert } from '../expert/providerExpert.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
+import { PLAN_LIMIT } from '../agent/plan.js'
 import { buildAgentBriefing } from '../agents/briefing.js'
 import { allRoles, buildAgentPrompt, defaultPromptFor, isAgentRole } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
@@ -894,6 +895,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   const ACTIVE_TASK_KEY = 'lightCode.activeTaskId'
   let activeTaskId: string | undefined = services.workspaceState.get(ACTIVE_TASK_KEY)
+  /**
+   * The plan the user set for the open chat.
+   *
+   * Held here and saved with the task, so reopening a conversation from history reopens what it
+   * was for. A restored chat whose assistant had forgotten the plan would be worse than no plan:
+   * the user would believe it was still bound by something it had never been told.
+   */
+  let activePlan: string | undefined
   let activeTaskCreatedAt = Date.now()
 
   async function setActiveTaskId(id: string | undefined): Promise<void> {
@@ -2276,6 +2285,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       updatedAt: Date.now(),
       messages,
       resultHandles: truncationStore.spilledHandles(),
+      ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
     }
 
     try {
@@ -2323,9 +2333,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     taskCheckpoint = undefined
     activeTaskCreatedAt = task.createdAt
     truncationStore.startTask(task.resultHandles)
+    /*
+     * The plan comes back with the conversation it belongs to.
+     *
+     * Leaving the previous chat's plan in place would be the worst of both: the assistant bound by
+     * something this conversation never agreed, and the user with no reason to suspect it.
+     */
+    activePlan = task.plan
     await setActiveTaskId(task.id)
 
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
+    post({ type: 'plan', plan: activePlan ?? '' })
     await postTasks()
   }
 
@@ -2337,9 +2355,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     taskCheckpoint = undefined
     activeTaskCreatedAt = Date.now()
     truncationStore.startTask()
+    // A new conversation is a new job. Carrying the last one's plan forward would silently
+    // constrain work nobody had scoped yet.
+    activePlan = undefined
     await setActiveTaskId(undefined)
 
     post({ type: 'taskRestored', taskId: undefined, entries: [] })
+    post({ type: 'plan', plan: '' })
     await postTasks()
   }
 
@@ -2528,6 +2550,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           : renderSkillsForPrompt(turnSkills),
         skillsSearchable,
         canWriteSkills: skillsDir !== undefined,
+        // Last in the prompt, and the most specific thing in it — see `agent/plan.ts`.
+        ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
         // Only when a pool actually exists: telling the model about a tool it has not been given
         // is how it comes to report that it looked somewhere it could not reach.
         teamSkillsAvailable: config.embedder?.skillsAlias !== undefined,
@@ -7919,6 +7943,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSaveNetwork(message.settings)
     } else if (message.type === 'requestExpert') {
       void postExpert()
+    } else if (message.type === 'setPlan') {
+      const plan = message.plan.slice(0, PLAN_LIMIT).trim()
+      activePlan = plan.length > 0 ? plan : undefined
+      /*
+       * Saved immediately rather than at the end of the next turn.
+       *
+       * Somebody who sets a plan and then closes the window has still set a plan, and a plan that
+       * survives only if you happen to send a message is one people would stop trusting after the
+       * first time it vanished.
+       */
+      void persistActiveTask()
+      post({ type: 'plan', plan: activePlan ?? '' })
+    } else if (message.type === 'requestPlan') {
+      post({ type: 'plan', plan: activePlan ?? '' })
     } else if (message.type === 'requestAgents') {
       void postAgents()
     } else if (message.type === 'setAgentRole') {

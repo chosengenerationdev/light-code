@@ -41,7 +41,8 @@ beforeEach(() => {
   installScrollStub()
   observerCallbacks = []
   Element.prototype.scrollIntoView ??= () => {}
-  ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = StubIntersectionObserver
+  ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver =
+    StubIntersectionObserver
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -54,6 +55,8 @@ afterEach(() => {
 
 function chatProps(messages: DisplayMessage[]): ChatProps {
   return {
+    plan: '',
+    onSetPlan: () => undefined,
     conversationKey: 'test',
     messages,
     isStreaming: false,
@@ -69,7 +72,14 @@ function chatProps(messages: DisplayMessage[]): ChatProps {
     onAlwaysAllow: () => {},
     onRollback: () => {},
     usage: undefined,
-    expertSpend: { usd: 0, consultations: 0, unpriced: 0, maxSpendUsd: 0, maxConsultations: 0, overridden: false },
+    expertSpend: {
+      usd: 0,
+      consultations: 0,
+      unpriced: 0,
+      maxSpendUsd: 0,
+      maxConsultations: 0,
+      overridden: false,
+    },
     supportsVision: false,
     mentionCandidates: [],
     onQueryMentions: () => {},

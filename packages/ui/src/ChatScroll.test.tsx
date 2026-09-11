@@ -47,6 +47,8 @@ function messages(count: number): DisplayMessage[] {
 
 function props(overrides: Partial<ChatProps>): ChatProps {
   return {
+    plan: '',
+    onSetPlan: () => undefined,
     conversationKey: 'one',
     messages: messages(6),
     isStreaming: false,
@@ -114,7 +116,9 @@ describe('opening a conversation', () => {
     const element = transcript()
     const { scrolls } = giveGeometry(element, 0)
 
-    act(() => root.render(<Chat {...props({ conversationKey: 'second', messages: messages(20) })} />))
+    act(() =>
+      root.render(<Chat {...props({ conversationKey: 'second', messages: messages(20) })} />),
+    )
 
     expect(lastTop(scrolls)).toBe(1000)
   })
@@ -123,7 +127,11 @@ describe('opening a conversation', () => {
   it('jumps rather than animating', () => {
     act(() => root.render(<Chat {...props({ conversationKey: 'first' })} />))
     const element = transcript()
-    const { scrolls } = giveScrollGeometry(element, { scrollHeight: 1000, clientHeight: 400, scrollTop: 0 })
+    const { scrolls } = giveScrollGeometry(element, {
+      scrollHeight: 1000,
+      clientHeight: 400,
+      scrollTop: 0,
+    })
 
     act(() => root.render(<Chat {...props({ conversationKey: 'second' })} />))
 

@@ -332,6 +332,13 @@ export function App(props: AppProps): ReactElement {
    * Defaults to true so nothing disappears while the first `settings` message is in flight — a
    * tab that appears a moment after the panel opens is less alarming than one that vanishes.
    */
+  /**
+   * The plan for the open conversation, as the host holds it.
+   *
+   * Held here rather than in the composer so it survives the composer being re-rendered, and so a
+   * task switch can replace it — the host posts `plan` whenever the conversation changes.
+   */
+  const [plan, setPlan] = useState('')
   const [offersOffice, setOffersOffice] = useState(true)
   /** The global tool timeout, when one is set. Undefined leaves each tool at its own default. */
   const [toolTimeoutSeconds, setToolTimeoutSeconds] = useState<number | undefined>(undefined)
@@ -769,6 +776,8 @@ export function App(props: AppProps): ReactElement {
         setSearchSavedTick((tick) => tick + 1)
       } else if (message.type === 'network') {
         setNetwork(message.settings)
+      } else if (message.type === 'plan') {
+        setPlan(message.plan)
       } else if (message.type === 'agents') {
         /*
          * The whole message, not field by field.
@@ -824,6 +833,7 @@ export function App(props: AppProps): ReactElement {
      * that is never sent is invisible to any test of the thing that would have answered it.
      */
     props.transport.post({ type: 'requestAgents' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestPlan' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
     /*
      * Also what starts the mail timer, if it is configured. The panel opening is the first
@@ -1915,6 +1925,13 @@ export function App(props: AppProps): ReactElement {
              * unsaved chat has no id yet, and 'new' is a stable stand-in for it - without one
              * every keystroke would look like a conversation change and re-pin the scroll.
              */
+            plan={plan}
+            onSetPlan={(next) => {
+              // Optimistic, then confirmed by the host's own `plan` message — the strip must not
+              // lag a click behind the thing it describes.
+              setPlan(next)
+              props.transport.post({ type: 'setPlan', plan: next } satisfies UiToHostMessage)
+            }}
             conversationKey={activeTaskId ?? 'new'}
             messages={messages}
             isStreaming={isStreaming}
