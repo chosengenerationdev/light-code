@@ -219,6 +219,27 @@ export {
   createAskProviderExpertTool,
   type AskProviderExpertParams,
 } from './tools/askProviderExpert.js'
+export { createAskAgentTool, type AskAgentParams } from './tools/askAgent.js'
+export {
+  AGENT_ROLES,
+  allRoles,
+  buildAgentPrompt,
+  defaultPromptFor,
+  isAgentRole,
+  roleInfo,
+  type AgentRole,
+  type AgentRoleInfo,
+} from './agents/roles.js'
+export {
+  availableAgents,
+  budgetMatters,
+  resolveTeam,
+  type AgentAssignment,
+  type AgentTeamConfig,
+  type ResolvedAgent,
+  type TeamContext,
+} from './agents/team.js'
+export { DEFAULT_TEAM_GUIDANCE, buildTeamGuidance } from './agents/guidance.js'
 export {
   buildExpertPrompt,
   type ProviderExpert,
@@ -517,7 +538,14 @@ export {
   type ToolLoadIssue,
 } from './python/registry.js'
 
-export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
+export {
+  AGENT_TEAM_MODE,
+  BUILTIN_MODES,
+  CODE_MODE,
+  ASK_MODE,
+  DEFAULT_MODE_ID,
+  findMode,
+} from './modes/builtin.js'
 export { toolsForMode } from './modes/resolve.js'
 export {
   createCallToolTool,

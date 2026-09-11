@@ -9,6 +9,10 @@ import { compareMentionCandidates, matchesMentionQuery } from '../context/mentio
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildExpertPrompt, type ProviderExpert } from '../expert/providerExpert.js'
+import { buildTeamGuidance } from '../agents/guidance.js'
+import { buildAgentPrompt } from '../agents/roles.js'
+import { resolveTeam, type ResolvedAgent } from '../agents/team.js'
+import type { Tool } from '../tools/types.js'
 import {
   createExcelOpenTool,
   createExcelDiagnoseTool,
@@ -75,6 +79,7 @@ import {
   type ExpertPricing,
   type CodeGenerator,
   createAskExpertTool,
+  createAskAgentTool,
   createAskProviderExpertTool,
   createRecallExpertTool,
   type ExpertConsultationRecord,
@@ -166,6 +171,7 @@ import {
   type ScheduleTrigger,
   createReadToolResultTool,
   deriveTitle,
+  AGENT_TEAM_MODE,
   findMode,
   listModels,
   mcpServersSchema,
@@ -1330,6 +1336,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedCodeGenerator: CodeGenerator | undefined
   /** Resolved with the rest of settings, so changing the profile takes effect on the next turn. */
   let cachedProviderExpert: { consult: ProviderExpert; label: string } | undefined
+  /**
+   * The specialists, resolved once per settings load.
+   *
+   * Held rather than recomputed per call because the mode guidance and the tool both need the
+   * same answer, and two resolutions of "who is the reviewer" would be two chances to disagree.
+   */
+  let cachedTeam: ResolvedAgent[] = []
+  let cachedTeamGuidance: string | undefined
   /** Undefined means the defaults; an empty array means the user cleared the list. */
   let cachedMentionExcludes: string[] | undefined
   /** Undefined until a consultation has told us. See `recordConsultation`. */
@@ -1399,6 +1413,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedApprovals = approvalsFrom(config.approvals)
     cachedCodeGenerator = codeGeneratorFor(config)
     cachedProviderExpert = providerExpertFor(config)
+
+    /*
+     * The team is resolved from config plus what was detected, in one place.
+     *
+     * `expertCli?.available` rather than "is a path configured": a role assigned to Claude on a
+     * machine where it is not installed must report as unavailable rather than be offered and
+     * fail, which is the rule every other tool here follows.
+     */
+    const teamContext = {
+      config: config.agents,
+      profiles: (config.profiles ?? []).map((profile) => ({
+        id: profile.id,
+        label: profile.label,
+      })),
+      cliAvailable: expertCli?.available === true,
+    }
+    cachedTeam = resolveTeam(teamContext)
+    cachedTeamGuidance = config.agents?.teamGuidance
     cachedProgrammingProfileId = config.programmingProfileId
     cachedOffice = config.office ?? {}
     cachedMail = config.mail ?? {}
@@ -1985,6 +2017,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * tool called `ask_expert` — whichever won would depend on registration order, which is the
      * kind of thing that works until somebody reorders two lines.
      */
+    /*
+     * The whole team, behind one tool.
+     *
+     * Registered whenever anybody is assigned — including alongside the CLI expert below, since
+     * `ask_agent` and `ask_expert` answer different questions: one names a role, the other is the
+     * established name that the transcript, `recall_expert_advice` and older guidance all use.
+     */
+    if (cachedTeam.some((agent) => agent.available)) {
+      combined.register(
+        createAskAgentTool({
+          agents: () => cachedTeam,
+          onAdvice: (record) => expertAdvice.push(record),
+          consult: async (agent, request) => consultAgent(agent, request),
+        }) as unknown as Tool<never>,
+      )
+    }
+
     const providerExpert = cachedProviderExpert
     if (providerExpert !== undefined) {
       combined.register(createRecallExpertTool({ history: () => expertAdvice }))
@@ -2464,7 +2513,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          */
         ...(() => {
           const parts: string[] = []
-          if (
+          /*
+           * Agent team builds its instruction from the configured team rather than carrying a
+           * fixed one, so it names the roles that exist on *this* machine. A model told to
+           * consult a reviewer nobody assigned spends a step being refused and then trusts the
+           * rest of the instruction less.
+           */
+          if (activeMode.id === AGENT_TEAM_MODE.id) {
+            parts.push(
+              buildTeamGuidance(
+                cachedTeam.filter((agent) => agent.available),
+                cachedTeamGuidance,
+              ),
+            )
+          } else if (
             activeMode.guidance !== undefined &&
             (activeMode.requiresExpert !== true || expertCliInfo !== undefined)
           ) {
@@ -6541,6 +6603,63 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * differences from the CLI expert are all absences — no budget, no cost, no session — and they
    * are absences in this function rather than options set to zero somewhere.
    */
+  /**
+   * Sends one question to one specialist, whichever kind it is.
+   *
+   * The two paths differ only in *who* answers: the role's prompt, the question and the named
+   * files are assembled identically, so a reviewer behaves the same whether it is Claude or a
+   * gateway. Folding that into one function is what keeps it true — two assemblies would drift,
+   * and the symptom would be a role subtly better on one backend than the other.
+   */
+  async function consultAgent(
+    agent: ResolvedAgent,
+    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined },
+  ): Promise<{ advice: string; label: string }> {
+    const prompt = buildAgentPrompt({
+      prompt: agent.prompt,
+      question: request.question,
+      ...(request.files !== undefined ? { files: request.files } : {}),
+    })
+
+    if (agent.kind === 'cli') {
+      const cli = expertCli
+      if (cli === undefined || !cli.available) throw new Error('The Claude CLI is not available.')
+      const answer = await consultExpert(cli, {
+        question: prompt,
+        /*
+         * The workspace, so Claude's own Read/Grep resolve against the project rather than
+         * wherever this process was started. Falls back to the process directory when no folder
+         * is open — the consultation is still worth having without one.
+         */
+        cwd: workspaceRoot ?? process.cwd(),
+        ...(request.signal !== undefined ? { signal: request.signal } : {}),
+      })
+      if (answer.isError) throw new Error(answer.text)
+      return { advice: answer.text, label: agent.label }
+    }
+
+    const { config } = await configManager.load()
+    const profile = config.profiles?.find((candidate) => candidate.id === agent.profileId)
+    if (profile === undefined) {
+      throw new Error(`No profile "${agent.profileId ?? ''}" exists any more.`)
+    }
+
+    const provider = createChatProvider(
+      profile,
+      httpClient,
+      authStrategyFor(config, profile),
+      logger,
+    )
+    let text = ''
+    for await (const chunk of provider.streamChat([{ role: 'user', content: prompt }], {
+      // No tools offered: it is being asked for judgement and has no way to run one.
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
+    })) {
+      if (chunk.type === 'text') text += chunk.text
+    }
+    return { advice: text, label: agent.label }
+  }
+
   function providerExpertFor(
     config: LightCodeConfig,
   ): { consult: ProviderExpert; label: string } | undefined {

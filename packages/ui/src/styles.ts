@@ -89,7 +89,8 @@ interface Rgb {
 /** Accepts `#rgb` and `#rrggbb`. Returns undefined for anything else, so bad input falls back. */
 export function parseHex(hex: string): Rgb | undefined {
   const value = hex.trim().replace(/^#/, '')
-  const full = value.length === 3 ? value.replace(/./g, (character) => character + character) : value
+  const full =
+    value.length === 3 ? value.replace(/./g, (character) => character + character) : value
   if (!/^[0-9a-fA-F]{6}$/.test(full)) return undefined
   return {
     r: Number.parseInt(full.slice(0, 2), 16),
@@ -195,6 +196,46 @@ export function applyAccent(hex: string): void {
  */
 export function applyExpert(hex: string): void {
   writeTokens('expert', hex, DEFAULT_EXPERT)
+}
+
+/**
+ * One colour per specialist, for the same reason the expert has one.
+ *
+ * The expert's colour marks **authorship** — these words came from somewhere other than the model
+ * you are talking to. With a team, "somewhere else" stops being one place: a review and a test
+ * plan arriving in the same colour are two voices presented as one, and the thing a reader most
+ * needs to know is which specialist said it.
+ *
+ * The defaults are picked to stay apart from each other *and* from the green accent, since the
+ * accent already means "this is Light Code" and must not be confused with any of them. They are
+ * only defaults: whether a particular pair reads as two colours on a particular editor theme is
+ * something only the person looking at it can judge, which is why every one is configurable.
+ */
+export const DEFAULT_AGENT_COLORS: Record<string, string> = {
+  // The expert keeps its established coral, so nobody's screen changes colour on upgrade.
+  expert: DEFAULT_EXPERT,
+  programmer: '#8B7FD4',
+  reviewer: '#3B9EDB',
+  tester: '#D4A72C',
+  librarian: '#59B89C',
+}
+
+/** Writes one role's family, as `--lc-agent-<role>*`. */
+export function applyAgentColor(role: string, hex: string): void {
+  writeTokens(`agent-${role}`, hex, DEFAULT_AGENT_COLORS[role] ?? DEFAULT_EXPERT)
+}
+
+/**
+ * Writes every role's family, filling in the defaults for any the user has not chosen.
+ *
+ * All of them, always — not only the configured ones. A token that is never written resolves to
+ * nothing and paints transparent, so a role assigned later would render as invisible text until
+ * something else happened to rewrite the palette.
+ */
+export function applyAgentColors(colors: Record<string, string> | undefined): void {
+  for (const [role, fallback] of Object.entries(DEFAULT_AGENT_COLORS)) {
+    applyAgentColor(role, colors?.[role] ?? fallback)
+  }
 }
 
 /*
@@ -474,6 +515,9 @@ export function installStyles(): void {
     sheet.replaceSync(CSS)
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
   } catch (error) {
-    console.error('Light Code: the stylesheet failed to parse, so the UI will have no transitions.', error)
+    console.error(
+      'Light Code: the stylesheet failed to parse, so the UI will have no transitions.',
+      error,
+    )
   }
 }

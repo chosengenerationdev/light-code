@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { buildSystemPrompt } from '../agent/systemPrompt.js'
-import { ASK_MODE, BUILTIN_MODES, CODE_MODE, findMode, JUNIOR_MODE } from '../modes/builtin.js'
+import { AGENT_TEAM_MODE, ASK_MODE, BUILTIN_MODES, CODE_MODE, findMode } from '../modes/builtin.js'
 import type { Skill } from '../skills/index.js'
 import type { Tool } from '../tools/types.js'
 import { createAskExpertTool } from '../tools/askExpert.js'
@@ -9,7 +9,13 @@ import type { ToolExecutionContext } from '../tools/types.js'
 import { buildExpertBriefing } from './briefing.js'
 
 function tool(name: string, description: string): Tool {
-  return { name, group: 'read', description, parametersSchema: z.object({}), execute: async () => ({ content: '' }) }
+  return {
+    name,
+    group: 'read',
+    description,
+    parametersSchema: z.object({}),
+    execute: async () => ({ content: '' }),
+  }
 }
 
 function skill(name: string, description: string): Skill {
@@ -17,15 +23,24 @@ function skill(name: string, description: string): Skill {
 }
 
 describe('Junior mode', () => {
-  it('is offered, and needs the expert', () => {
-    expect(BUILTIN_MODES).toContain(JUNIOR_MODE)
-    expect(findMode('junior')).toBe(JUNIOR_MODE)
-    expect(JUNIOR_MODE.requiresExpert).toBe(true)
+  it('is offered as Agent team, and needs somebody to consult', () => {
+    expect(BUILTIN_MODES).toContain(AGENT_TEAM_MODE)
+    expect(AGENT_TEAM_MODE.requiresExpert).toBe(true)
+  })
+
+  /**
+   * The id is written into every existing config file and every per-project override, and an
+   * unknown id falls back to Code — so dropping it would silently move people to a different
+   * mode, with nothing to say why their assistant had stopped consulting anyone.
+   */
+  it('still answers to the old id, so nobody is silently moved to Code', () => {
+    expect(findMode('junior')).toBe(AGENT_TEAM_MODE)
+    expect(findMode('agent-team')).toBe(AGENT_TEAM_MODE)
   })
 
   /** It is the hands: it has to be able to edit and run things, unlike Ask mode. */
-  it('keeps every tool group, because the junior does the work', () => {
-    expect(JUNIOR_MODE.groups).toEqual(CODE_MODE.groups)
+  it('keeps every tool group, because the assistant still does the work', () => {
+    expect(AGENT_TEAM_MODE.groups).toEqual(CODE_MODE.groups)
   })
 
   /**
@@ -34,58 +49,20 @@ describe('Junior mode', () => {
    * that decide that, so a future reword cannot quietly drop them.
    */
   /**
-   * Reported as "junior not automatically taking help from expert when needed, I need to tell
-   * it to take help — else it becomes similar to code mode". The guidance *is* the feature, so
-   * the fix is in the words: consulting has to be the default action, with the exceptions named
-   * rather than the rule.
-   */
-  it('makes consulting the default rather than something to be justified', () => {
-    const guidance = JUNIOR_MODE.guidance ?? ''
-    expect(guidance).toMatch(/your first action is `ask_expert`/i)
-    expect(guidance).toMatch(/when in doubt, consult/i)
-    // Named cases, so "not trivial" is not left to the model's own sense of its competence.
-    expect(guidance).toMatch(/more than one file/i)
-    expect(guidance).toMatch(/your first attempt failed/i)
-  })
-
-  it('still tells it not to repeat context, which is where the saving comes from', () => {
-    const guidance = JUNIOR_MODE.guidance ?? ''
-    expect(guidance).toMatch(/remembers/i)
-    expect(guidance).toMatch(/failed twice/i)
-  })
-
-  it('warns that the expert cannot call the junior tools', () => {
-    expect(JUNIOR_MODE.guidance ?? '').toMatch(/cannot call any of your tools/i)
-  })
-
-  /**
-   * The checkpoint loop is a cost measure, and the guidance has to say so.
+   * Where the lesson from those tests went.
    *
-   * Read as a quality ritual it produces a review after every edit, which spends more than the
-   * mistakes it catches — the opposite of the point. The reasoning is the feature here, exactly
-   * as the session-resume finding was.
+   * They asserted the wording of Junior mode's guidance, and the sharpest of them came from a real
+   * report — "not automatically taking help from expert when needed, I need to tell it to take
+   * help, else it becomes similar to code mode". The guidance *was* the feature, so the fix was in
+   * the words.
+   *
+   * That mode is gone and its text with it, but the lesson is not: `agents/team.test.ts` asserts
+   * the replacement still tells the assistant to consult unprompted, and names the moments. What
+   * did *not* survive is the rationing — pages about making one consultation count, because every
+   * one was a cold start on a metered command line. A role answered by a gateway has no such
+   * shape, and the checkpoint loop that existed to justify its cost is now simply "ask the
+   * reviewer when you have finished something".
    */
-  it('describes the implement-review-continue loop', () => {
-    const guidance = JUNIOR_MODE.guidance ?? ''
-    expect(guidance).toMatch(/checkpoint/i)
-    expect(guidance).toMatch(/implement one checkpoint/i)
-    expect(guidance).toMatch(/until the work is complete/i)
-  })
-
-  it('frames checkpoints as saving money, and says when not to review', () => {
-    const guidance = JUNIOR_MODE.guidance ?? ''
-    expect(guidance).toMatch(/cost measure/i)
-    // Both halves matter: too small wastes money, too large defeats the purpose.
-    expect(guidance).toMatch(/review costs more than the mistake/i)
-    expect(guidance).toMatch(/Skip the review/i)
-    expect(guidance).toMatch(/Report the delta, never the context/i)
-  })
-
-  it('tells the junior what happens when the budget runs out', () => {
-    // The guidance is wrapped, so the phrase spans a line break.
-    expect((JUNIOR_MODE.guidance ?? '').replace(/\s+/g, ' ')).toMatch(/finish the work alone/i)
-  })
-
   it('carries no guidance on the other modes, so their prompts are unchanged', () => {
     expect(CODE_MODE.guidance).toBeUndefined()
     expect(ASK_MODE.guidance).toBeUndefined()
@@ -94,7 +71,10 @@ describe('Junior mode', () => {
 
 describe('mode guidance in the system prompt', () => {
   it('is appended last, so a mode can narrow what came before it', () => {
-    const prompt = buildSystemPrompt('/ws', { expertAvailable: true, modeGuidance: 'MODE-RULES-HERE' })
+    const prompt = buildSystemPrompt('/ws', {
+      expertAvailable: true,
+      modeGuidance: 'MODE-RULES-HERE',
+    })
     expect(prompt).toContain('MODE-RULES-HERE')
     expect(prompt.indexOf('MODE-RULES-HERE')).toBeGreaterThan(prompt.indexOf('Expert consultation'))
   })
@@ -105,7 +85,10 @@ describe('mode guidance in the system prompt', () => {
 })
 
 describe('the expert briefing', () => {
-  const promptTools = [tool('read_file', 'Read a file from the workspace.'), tool('apply_diff', 'Edit a file.')]
+  const promptTools = [
+    tool('read_file', 'Read a file from the workspace.'),
+    tool('apply_diff', 'Edit a file.'),
+  ]
 
   it('states plainly that the expert cannot run or call anything', () => {
     const briefing = buildExpertBriefing({ promptTools })
@@ -144,7 +127,9 @@ describe('the expert briefing', () => {
 
   it('points at search_docs for exact arguments when retrieval exists', () => {
     expect(buildExpertBriefing({ promptTools, retrievalAvailable: true })).toContain('search_docs')
-    expect(buildExpertBriefing({ promptTools, retrievalAvailable: false })).not.toContain('search_docs')
+    expect(buildExpertBriefing({ promptTools, retrievalAvailable: false })).not.toContain(
+      'search_docs',
+    )
   })
 
   /** A server description can run to a paragraph; forty of those defeats the purpose. */
@@ -157,7 +142,10 @@ describe('the expert briefing', () => {
   })
 
   it('lists skills by name and says the bodies are fetched on request', () => {
-    const briefing = buildExpertBriefing({ promptTools, skills: [skill('deployment', 'How we ship to production.')] })
+    const briefing = buildExpertBriefing({
+      promptTools,
+      skills: [skill('deployment', 'How we ship to production.')],
+    })
     expect(briefing).toContain('deployment')
     expect(briefing).toMatch(/read the full text/i)
     expect(briefing).toMatch(/override your/i)

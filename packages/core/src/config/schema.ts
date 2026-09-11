@@ -102,6 +102,49 @@ export const pythonConfigSchema = z
   })
   .partial()
 
+export const agentAssignmentSchema = z
+  .object({
+    /** `cli` is the Claude command line; `profile` names one of the user's provider profiles. */
+    kind: z.enum(['cli', 'profile']),
+    profileId: z.string().optional(),
+    /**
+     * The role's system prompt, stored only when the user has edited it.
+     *
+     * Absent means "use the default", which is what lets an improved default reach somebody who
+     * has looked at the tab without editing anything. Storing the default verbatim would pin
+     * every user to whatever it said the day they first opened it.
+     */
+    prompt: z.string().optional(),
+  })
+  .strict()
+
+/**
+ * The team: who answers each role.
+ *
+ * User-scope only (invariant 5), and for two reasons rather than one. It names provider profiles,
+ * so a workspace able to write it could route a consultation through a gateway of its choosing —
+ * the same threat as `activeProfileId`. And it carries *prompts*, which are prose injected into a
+ * model that is then asked to advise on this repository's own code: a hostile repo could tell the
+ * reviewer what to approve.
+ */
+export const agentsConfigSchema = z
+  .object({
+    roles: z.record(z.string(), agentAssignmentSchema),
+    /** Whether what a consultation costs is worth managing. See `agents/team.ts`. */
+    budgetMatters: z.boolean(),
+    /** The Agent team mode instruction, when edited. The roster is always generated. */
+    teamGuidance: z.string(),
+    /**
+     * A colour per role, for marking whose words a piece of advice is.
+     *
+     * Here rather than under `appearance` because it is keyed by role, and the roles are defined
+     * here — splitting them would mean adding a role in one place and remembering to give it a
+     * colour in another, which is the drift this project keeps paying for.
+     */
+    colors: z.record(z.string(), z.string()),
+  })
+  .partial()
+
 export const autoApproveSchema = z
   .object({
     read: z.boolean(),
@@ -658,6 +701,7 @@ export const configSchema = z
     /** User-scope only: a workspace able to add a trusted root could enable interception. */
     tls: globalTlsSchema,
     expert: expertConfigSchema,
+    agents: agentsConfigSchema,
     /**
      * User-scope only (invariant 5). A workspace able to name a cluster or repoint the
      * embedder would exfiltrate whatever gets indexed — sharper than the existing entries,
