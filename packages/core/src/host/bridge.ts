@@ -823,16 +823,42 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let expertCli: ClaudeCliInfo | undefined
   let expertCliPath: string | undefined
 
+  /**
+   * Detects the Claude CLI once per configured path, and tells the Agents tab when it has.
+   *
+   * **One owner**, because there were two and they disagreed about when to run. The old one only
+   * probed when `expert.enabled` was true — correct while the expert *was* the feature, and wrong
+   * the moment Agents offered Claude as one choice among several: somebody who had never switched
+   * the old feature on was told Claude was absent on a machine where it is installed. That is
+   * exactly how it was reported.
+   *
+   * Probing is still not something that happens at startup. It happens when something asks — a
+   * turn that needs the expert, or the Agents tab being opened — which is the same "panel open is
+   * a signal of intent" rule §11 applies to MCP. `claude --version` is a local process that costs
+   * nothing and spends nothing.
+   */
+  async function detectCli(configured: string): Promise<ClaudeCliInfo> {
+    if (expertCli !== undefined && expertCliPath === configured) return expertCli
+    expertCliPath = configured
+    expertCli = await detectClaudeCli(configured)
+    if (!expertCli.available) logger.warn('expert unavailable', expertCli.reason ?? '')
+    /*
+     * Pushed because detection is asynchronous and the panel asked before it finished.
+     *
+     * The Agents tab requests its state when it mounts, which is before any process has been
+     * spawned and answered, so its first answer always says Claude is absent. Without this
+     * nothing ever corrects it.
+     */
+    void postAgents()
+    return expertCli
+  }
+
   async function resolveExpert(config: LightCodeConfig): Promise<ClaudeCliInfo | undefined> {
-    // Nothing is spawned unless the user turned it on (§13's opt-in posture).
+    // Nothing is spawned for a *turn* unless the user turned it on (§13's opt-in posture). The
+    // Agents tab probes on its own account, because being opened is the request.
     if (config.expert?.enabled !== true) return undefined
-    const configured = config.expert.path ?? 'claude'
-    if (expertCli === undefined || expertCliPath !== configured) {
-      expertCliPath = configured
-      expertCli = await detectClaudeCli(configured)
-      if (!expertCli.available) logger.warn('expert unavailable', expertCli.reason ?? '')
-    }
-    return expertCli.available ? expertCli : undefined
+    const detected = await detectCli(config.expert.path ?? 'claude')
+    return detected.available ? detected : undefined
   }
 
   /**
@@ -3070,6 +3096,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       post({ type: 'profileSaved' })
       await postProfiles()
+      // The Agents tab lists these as the models a role can be given, so it goes stale the moment
+      // the list changes — a provider added and then not offered reads as the tab being broken.
+      await postAgents()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -3129,6 +3158,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
       await configManager.save('user', { profiles: [...profiles, duplicate] })
       await postProfiles()
+      // The Agents tab lists these as the models a role can be given, so it goes stale the moment
+      // the list changes — a provider added and then not offered reads as the tab being broken.
+      await postAgents()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -3148,6 +3180,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         config.activeProfileId === id ? remaining[0]?.id : config.activeProfileId
       await configManager.save('user', { profiles: remaining, activeProfileId })
       await postProfiles()
+      // The Agents tab lists these as the models a role can be given, so it goes stale the moment
+      // the list changes — a provider added and then not offered reads as the tab being broken.
+      await postAgents()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -3165,6 +3200,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       else await configManager.save('user', { activeProfileId: id })
       await postProjectSettings()
       await postProfiles()
+      // The Agents tab lists these as the models a role can be given, so it goes stale the moment
+      // the list changes — a provider added and then not offered reads as the tab being broken.
+      await postAgents()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -3348,13 +3386,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function postAgents(): Promise<void> {
     const { config } = await configManager.load()
+    /*
+     * Detected here rather than read from whatever a turn happened to leave behind.
+     *
+     * `detectCli` caches, so this spawns a process at most once per configured path — and it must
+     * happen on this path, because the tab offering Claude as a choice is the only thing that
+     * will ask on a machine where the old expert feature was never enabled.
+     */
+    const cli = await detectCli(config.expert?.path ?? 'claude').catch(() => undefined)
     const teamContext = {
       config: config.agents,
       profiles: (config.profiles ?? []).map((profile) => ({
         id: profile.id,
         label: profile.label,
       })),
-      cliAvailable: expertCli?.available === true,
+      cliAvailable: cli?.available === true,
     }
 
     /*
@@ -3386,9 +3432,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       roles,
       profiles: teamContext.profiles,
       cliAvailable: teamContext.cliAvailable,
-      ...(expertCli?.available === false && expertCli.reason !== undefined
-        ? { cliReason: expertCli.reason }
-        : {}),
+      ...(cli?.available === false && cli.reason !== undefined ? { cliReason: cli.reason } : {}),
       budgetMatters: budgetMatters(teamContext),
       teamGuidance: guidance ?? DEFAULT_TEAM_GUIDANCE,
       defaultTeamGuidance: DEFAULT_TEAM_GUIDANCE,
@@ -3460,6 +3504,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Cache the probe so the next turn does not re-spawn it.
     expertCli = detected
     expertCliPath = configured
+    // The Agents tab is told too, since this path can be the one that first learns the answer.
+    void postAgents()
 
     post({
       // Everything from settings comes from one place, so the two paths cannot drift again.
@@ -6636,6 +6682,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       await configManager.save('user', { ...imported, profiles: reconciled })
       await postProfiles()
+      // The Agents tab lists these as the models a role can be given, so it goes stale the moment
+      // the list changes — a provider added and then not offered reads as the tab being broken.
+      await postAgents()
 
       ui.showInfo(
         needKeys.length > 0

@@ -798,6 +798,13 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestSettings' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestMcp' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestExpert' } satisfies UiToHostMessage)
+    /*
+     * Without this the Agents tab renders its initial empty state for ever: no roles, no
+     * providers to assign, and Claude reported as absent — which is what was reported, three
+     * symptoms of one missing line. `agentsRequested.test.ts` reads this file, because a request
+     * that is never sent is invisible to any test of the thing that would have answered it.
+     */
+    props.transport.post({ type: 'requestAgents' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSearch' } satisfies UiToHostMessage)
     /*
      * Also what starts the mail timer, if it is configured. The panel opening is the first
