@@ -1503,13 +1503,29 @@ export function App(props: AppProps): ReactElement {
               onApproveTool: (name: string) =>
                 props.transport.post({ type: 'approvePythonTool', name } satisfies UiToHostMessage),
               onSave: (settings) =>
+                /*
+                 * Every field, always — empty included.
+                 *
+                 * **`venvPath` was simply absent from this message.** The tab collected it, and
+                 * this dropped it on the floor: the field had never worked, and because the host
+                 * wrote the whole `python` block from what arrived, saving anything at all erased
+                 * a virtualenv configured by hand. Reported as a venv disappearing after an
+                 * update, which is when somebody next opened the tab and pressed Save.
+                 *
+                 * Omitting an *empty* field is the second half of the same mistake. The host
+                 * merges now, so absent means "leave it alone" — which would make clearing a box
+                 * do nothing at all. Sent empty, it means "remove this", and the two are
+                 * different things the message has to be able to say.
+                 */
                 props.transport.post({
                   type: 'setPython',
                   dynamicTools: settings.dynamicTools,
-                  ...(settings.uvPath.length > 0 ? { uvPath: settings.uvPath } : {}),
-                  ...(settings.toolsDir.length > 0 ? { toolsDir: settings.toolsDir } : {}),
+                  uvPath: settings.uvPath,
+                  toolsDir: settings.toolsDir,
+                  venvPath: settings.venvPath,
+                  interpreterPath: settings.interpreterPath,
                   timeoutSeconds: settings.timeoutSeconds,
-                  ...(settings.indexUrl.length > 0 ? { indexUrl: settings.indexUrl } : {}),
+                  indexUrl: settings.indexUrl,
                   offline: settings.offline,
                 } satisfies UiToHostMessage),
             }}

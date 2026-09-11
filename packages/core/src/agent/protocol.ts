@@ -254,6 +254,8 @@ export interface SearchConnectionSummary {
 
 /** What is saved under `python` in config, as opposed to what was resolved from it. */
 export interface PythonSettings {
+  /** A Python to borrow when there is no uv. Distinct from `venvPath`, which names one to manage. */
+  interpreterPath?: string
   dynamicTools: 'off' | 'on'
   uvPath?: string
   toolsDir?: string
@@ -685,6 +687,14 @@ export type UiToHostMessage =
        * want usually has the `python.exe` to hand, not the folder two levels above it.
        */
       venvPath?: string
+      /**
+       * A Python to run tools with directly, when there is no uv and no virtualenv.
+       *
+       * Separate from `venvPath` because the two answer different questions: that one names an
+       * environment to manage, this one names an interpreter to borrow — and borrowing means
+       * nothing is installed into it.
+       */
+      interpreterPath?: string
       timeoutSeconds?: number
       indexUrl?: string
       offline?: boolean

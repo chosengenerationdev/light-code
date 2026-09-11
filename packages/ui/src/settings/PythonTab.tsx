@@ -17,6 +17,7 @@ export interface PythonTabProps {
     uvPath: string
     toolsDir: string
     venvPath: string
+    interpreterPath: string
     timeoutSeconds: number
     indexUrl: string
     offline: boolean
@@ -51,6 +52,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   const status = props.status
   const [confirming, setConfirming] = useState<string | undefined>(undefined)
   const [venvPath, setVenvPath] = useState('')
+  const [interpreterPath, setInterpreterPath] = useState('')
   const [enabled, setEnabled] = useState(false)
   const [uvPath, setUvPath] = useState('')
   const [toolsDir, setToolsDir] = useState('')
@@ -64,6 +66,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
     if (props.pickedPath?.purpose === 'python.uvPath') setUvPath(props.pickedPath.path)
     if (props.pickedPath?.purpose === 'python.toolsDir') setToolsDir(props.pickedPath.path)
     if (props.pickedPath?.purpose === 'python.venvPath') setVenvPath(props.pickedPath.path)
+    if (props.pickedPath?.purpose === 'python.interpreterPath') setInterpreterPath(props.pickedPath.path)
   }, [props.pickedPath])
 
   /*
@@ -81,6 +84,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
     setUvPath(saved.uvPath ?? '')
     setToolsDir(saved.toolsDir ?? '')
     setVenvPath(saved.venvPath ?? '')
+    setInterpreterPath(saved.interpreterPath ?? '')
     setIndexUrl(saved.indexUrl ?? '')
     setOffline(saved.offline === true)
     setTimeoutSeconds(String(saved.timeoutSeconds ?? 30))
@@ -163,6 +167,26 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             browse={{ purpose: 'python.venvPath', kind: 'folder' }}
             onBrowse={props.onBrowse}
             onChange={setVenvPath}
+          />
+
+          {/*
+            The other way to answer "which Python", and a different question from the one above.
+
+            `venvPath` names an environment to *manage* — tool dependencies install into it. This
+            names an interpreter to *borrow*, used only when uv is absent, with nothing installed
+            into it because it belongs to whatever set it up. Both fields exist because both
+            situations are real: a project with its own virtualenv, and an application that
+            launched Light Code inside an environment it already built.
+          */}
+          <PathField
+            id="lc-py-interpreter"
+            label="Interpreter to use without uv"
+            value={interpreterPath}
+            placeholder={status?.venvSource === 'interpreter' ? status.venvPath || 'python' : 'python3, then python, from PATH'}
+            hint="Only used when uv is not installed. Nothing is installed into it — a tool needing a package it does not already have is refused, naming the package."
+            browse={{ purpose: 'python.interpreterPath', kind: 'file' }}
+            onBrowse={props.onBrowse}
+            onChange={setInterpreterPath}
           />
 
           {props.programming !== undefined && props.programming.profiles.length > 0 && (
@@ -252,6 +276,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               uvPath: uvPath.trim(),
               toolsDir: toolsDir.trim(),
               venvPath: venvPath.trim(),
+              interpreterPath: interpreterPath.trim(),
               timeoutSeconds: Number.isFinite(parsed) ? parsed : 30,
               indexUrl: indexUrl.trim(),
               offline,

@@ -246,6 +246,27 @@ export function buildSystemPrompt(workspaceRoot: string, options: SystemPromptOp
     '  never retyped by you in between.',
   )
 
+  /*
+   * The collector contract is included whenever tools can be written, not only once a dataset
+   * exists.
+   *
+   * Gating it on `datasets.length > 0` was exactly backwards and was reported as such: you need
+   * the contract to write the *first* collector, and at that moment there are no datasets, so the
+   * guidance was absent precisely when it was needed and present only afterwards.
+   */
+  if (options.canWriteCollectors === true && (options.datasets ?? []).length === 0) {
+    lines.push(
+      '',
+      'Custom datasets:',
+      '- None are configured yet. The user sets one up in Settings, Custom data, by pointing at a',
+      '  tool that returns records — and can ask you to write that tool. If they do, it is an',
+      '  ordinary Python tool and the contract is below. Follow it exactly: a collector returning',
+      '  the wrong shape is refused when it runs, not when it is written.',
+      '',
+      COLLECTOR_TOOL_GUIDANCE,
+    )
+  }
+
   if (options.datasets !== undefined && options.datasets.length > 0) {
     lines.push(
       '',

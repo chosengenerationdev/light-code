@@ -1,5 +1,24 @@
 # @chosengeneration/light-code
 
+## 0.38.1
+
+### Patch Changes
+
+- A configured virtualenv was erased whenever Python settings were saved.
+
+  The Python tab collected `venvPath` and the panel never put it in the message — so the field had
+  never worked — and the host wrote the whole `python` block from what arrived, which erased
+  whatever was in config. Saving anything at all from that tab lost the setting. Both halves are
+  fixed: every field is sent, empty included, and the host merges rather than replaces. A field the
+  form does not send is kept; a field it sends empty is removed. `interpreterPath` is now editable
+  there too.
+
+  Collectors are also more robust. The contract only reached the model once a dataset existed —
+  backwards, since you need it to write the _first_ one — and it now arrives whenever tools can be
+  written, with a worked example. The parser accepts every shape with one sensible reading (a list
+  under any obvious noun, a lone dict, JSON returned as a string, `key` for `id`, a timestamp in
+  seconds) and refuses the rest by name, quoting the keys the offending item actually had.
+
 ## 0.38.0
 
 ### Minor Changes

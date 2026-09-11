@@ -5472,6 +5472,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(saved.uvPath !== undefined ? { uvPath: saved.uvPath } : {}),
         ...(saved.toolsDir !== undefined ? { toolsDir: saved.toolsDir } : {}),
         ...(saved.venvPath !== undefined ? { venvPath: saved.venvPath } : {}),
+        ...(saved.interpreterPath !== undefined ? { interpreterPath: saved.interpreterPath } : {}),
+        // Sent so nothing the form cannot edit is invisible *and* silently rewritten.
+        ...(saved.extraIndexUrls !== undefined ? { extraIndexUrls: saved.extraIndexUrls } : {}),
         ...(saved.indexUrl !== undefined ? { indexUrl: saved.indexUrl } : {}),
         ...(saved.offline !== undefined ? { offline: saved.offline } : {}),
         ...(saved.timeoutSeconds !== undefined ? { timeoutSeconds: saved.timeoutSeconds } : {}),
@@ -5484,22 +5487,61 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     scheduleDocsReindex('Python tools changed')
   }
 
+  /**
+   * Saves what the Python tab edited, and nothing else.
+   *
+   * **A merge, not a replace, and that distinction cost somebody their virtualenv.** `save`
+   * replaces whichever top-level keys it is given, so writing the whole `python` object from a
+   * form silently erased every key the form did not happen to send. `extraIndexUrls` had no field
+   * and was being dropped on every save already; adding `interpreterPath` made a second one, and
+   * the report — a configured venv gone after an update — is what that looks like from outside.
+   *
+   * Exactly the reasoning `handleSaveSkillsAlias` records for the embedder block, which is split
+   * across two tabs for the same reason. Anything nested and edited from more than one place has
+   * to be merged, and `python` is now such a block whether or not it looks like one.
+   */
   async function handleSetPython(input: Extract<UiToHostMessage, { type: 'setPython' }>): Promise<void> {
     try {
+      const existing = (await configManager.load()).config.python ?? {}
       await configManager.save('user', {
         python: {
+          ...existing,
           dynamicTools: input.dynamicTools,
-          ...(input.uvPath !== undefined && input.uvPath.length > 0 ? { uvPath: input.uvPath } : {}),
+          ...(input.uvPath !== undefined
+            ? input.uvPath.length > 0
+              ? { uvPath: input.uvPath }
+              : { uvPath: undefined }
+            : {}),
           // Absent rather than empty when cleared, so the manager falls back to
           // `.lightcode/tools` instead of resolving an empty string against the workspace.
-          ...(input.toolsDir !== undefined && input.toolsDir.trim().length > 0
-            ? { toolsDir: input.toolsDir.trim() }
+          ...(input.toolsDir !== undefined
+            ? input.toolsDir.trim().length > 0
+              ? { toolsDir: input.toolsDir.trim() }
+              : { toolsDir: undefined }
             : {}),
-          ...(input.venvPath !== undefined && input.venvPath.trim().length > 0
-            ? { venvPath: input.venvPath.trim() }
+          /*
+           * Cleared means cleared, which is why each of these deletes rather than omitting.
+           *
+           * With the spread of `existing` above, omitting a blank field would *keep* the old
+           * value — so emptying the box would appear to do nothing. The three-way distinction
+           * matters: a field the form did not send is kept, a field it sent empty is removed.
+           */
+          ...(input.venvPath !== undefined
+            ? input.venvPath.trim().length > 0
+              ? { venvPath: input.venvPath.trim() }
+              : { venvPath: undefined }
+            : {}),
+          ...(input.interpreterPath !== undefined
+            ? input.interpreterPath.trim().length > 0
+              ? { interpreterPath: input.interpreterPath.trim() }
+              : { interpreterPath: undefined }
             : {}),
           ...(input.timeoutSeconds !== undefined ? { timeoutSeconds: input.timeoutSeconds } : {}),
-          ...(input.indexUrl !== undefined && input.indexUrl.length > 0 ? { indexUrl: input.indexUrl } : {}),
+          ...(input.indexUrl !== undefined
+            ? input.indexUrl.length > 0
+              ? { indexUrl: input.indexUrl }
+              : { indexUrl: undefined }
+            : {}),
           ...(input.offline !== undefined ? { offline: input.offline } : {}),
         },
       })
