@@ -26,6 +26,8 @@ export interface ProviderFormValues {
   model: string
   authType: AuthType
   hasApiKey: boolean
+  /** Set when the key comes from the environment. The variable's name, not its value. */
+  apiKeyEnvVar?: string | undefined
   hasClientSecret: boolean
   hasCertPassphrase: boolean
   apigee?: ApigeeSummary
@@ -187,7 +189,30 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
 
       {authType === 'apiKey' && (
         <div onBlur={maybeAutoFetchModels}>
-          <SecretField id="lc-api-key" label="API key" hasValue={props.initial.hasApiKey} value={apiKey} onChange={setApiKey} />
+          <SecretField
+            id="lc-api-key"
+            label="API key"
+            hasValue={props.initial.hasApiKey}
+            value={apiKey}
+            onChange={setApiKey}
+            {...(props.initial.apiKeyEnvVar === undefined ? {} : { envVar: props.initial.apiKeyEnvVar })}
+          />
+          {/*
+            Said where the key is typed, because it is not discoverable anywhere else.
+
+            A parent process that launches Light Code — a Streamlit app, a wrapper script — often
+            already holds the credential, and the environment is the only thing it can hand a
+            child. Without this the user pastes a token their own launcher already has, by hand,
+            and it goes stale the moment it rotates.
+          */}
+          <span
+            style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: -10, marginBottom: 16 }}
+          >
+            Enter <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>env:API_TOKEN</code> to read the key from
+            that environment variable instead of storing it. It is read fresh on every request, and
+            must be exported before Light Code starts &mdash; a child process cannot see a variable
+            its parent set afterwards.
+          </span>
         </div>
       )}
 

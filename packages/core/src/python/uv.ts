@@ -205,3 +205,86 @@ export async function discoverWorkspaceVenv(workspaceRoot: string): Promise<Disc
   }
   return undefined
 }
+
+/**
+ * A plain Python interpreter, with no virtualenv and no uv.
+ *
+ * ## Why this exists
+ *
+ * Light Code is increasingly launched *inside* an environment somebody else has already built —
+ * a Streamlit app, a container, a conda environment — and that environment is the whole point: it
+ * has the internal libraries the user's tools need to import. Demanding `uv` there asks them to
+ * install a package manager in order to use an interpreter that is already running, and creating
+ * a virtualenv would produce an empty one, so every tool importing an internal package fails in a
+ * way that looks like a bug here rather than a missing install.
+ *
+ * ## What is given up, and why that is the right trade
+ *
+ * **Dependencies are not installed.** PEP 723 blocks are read and reported, never acted on: `pip
+ * install` into an ambient interpreter mutates an environment Light Code does not own — quite
+ * possibly the one serving the application that launched it. A tool whose imports are already
+ * satisfied works; one needing a new package fails naming the package, which the user installs
+ * the way they install everything else there.
+ *
+ * That is deliberately the *opposite* trade from the uv path, and it follows from who owns the
+ * environment. Ours to manage: install freely. Somebody else's: touch nothing.
+ */
+export interface BareInterpreter {
+  path: string
+  version: string
+}
+
+/** Tried in order. `python3` first, because on many Linux images `python` is Python 2 or absent. */
+export const BARE_PYTHON_CANDIDATES = ['python3', 'python'] as const
+
+export async function detectBareInterpreter(configuredPath?: string): Promise<BareInterpreter | undefined> {
+  const candidates =
+    configuredPath !== undefined && configuredPath.trim().length > 0
+      ? [configuredPath.trim()]
+      : [...BARE_PYTHON_CANDIDATES]
+
+  for (const candidate of candidates) {
+    try {
+      const version = await pythonVersion(candidate)
+      if (version !== undefined) return { path: candidate, version }
+    } catch {
+      // Next candidate. A missing interpreter is the ordinary case on a machine without Python,
+      // and the caller reports it once rather than once per candidate.
+    }
+  }
+  return undefined
+}
+
+/**
+ * Asks the interpreter what it is, and refuses Python 2.
+ *
+ * The worker is modern Python, so a Python 2 `python` on PATH would get past detection and then
+ * fail with a syntax error from inside the worker — an error pointing at our code for a problem
+ * that is entirely about which interpreter was found.
+ */
+async function pythonVersion(program: string): Promise<string | undefined> {
+  const { spawn } = await import('node:child_process')
+  return new Promise((resolve) => {
+    const child = spawn(program, ['-c', 'import sys; print("%d.%d.%d" % sys.version_info[:3])'], {
+      shell: false,
+      env: minimalPythonEnv(),
+    })
+    let out = ''
+    child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()))
+    child.on('error', () => resolve(undefined))
+    const timer = setTimeout(() => {
+      child.kill()
+      resolve(undefined)
+    }, 10_000)
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      const version = out.trim()
+      if (code !== 0 || !/^\d+\.\d+\.\d+$/.test(version)) {
+        resolve(undefined)
+        return
+      }
+      const major = Number(version.split('.')[0])
+      resolve(major >= 3 ? version : undefined)
+    })
+  })
+}

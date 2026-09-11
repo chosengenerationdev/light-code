@@ -37,6 +37,16 @@ export interface PythonToolContext {
    */
   installDeps?: ((packages: readonly string[]) => Promise<{ installed: string[]; error?: string }>) | undefined
   /**
+   * Why installing is unavailable, when it is.
+   *
+   * There are two quite different reasons and the advice is opposite. Without uv on a machine
+   * that wanted it, the fix is to install uv. Running against an ambient interpreter — a
+   * Streamlit app, a container — installing is *deliberately* withheld, because the environment
+   * belongs to whatever launched us, and telling that user to configure uv sends them to change
+   * the one thing that is working as intended.
+   */
+  installUnavailableReason?: string | undefined
+  /**
    * Reloads the registry after a successful create/update/delete. Awaited, so `status()`
    * is accurate the moment the tool returns rather than a tick later.
    */
@@ -270,9 +280,11 @@ function makeWriteTool(
             await restore()
             return {
               content:
-                `This tool declares dependencies (${declared.join(', ')}) but dependency installation is ` +
-                'not available — uv could not be found. Rewrite it using only the standard library, ' +
-                'or ask the user to configure uv in Settings → Python.',
+                `This tool declares dependencies (${declared.join(', ')}) but they cannot be installed. ` +
+                (context.installUnavailableReason ??
+                  'uv could not be found. Ask the user to configure uv in Settings → Python.') +
+                ' Rewrite the tool using only the standard library and whatever is already importable, ' +
+                'or ask the user to install the package themselves.',
               isError: true,
             }
           }

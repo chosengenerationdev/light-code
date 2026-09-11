@@ -118,8 +118,17 @@ export interface ProfileSummary {
   wireFormat: WireFormat
   baseUrl: string
   model: string
-  authType: 'none' | 'apiKey' | 'apigeeMtls'
+  authType: 'none' | 'apiKey' | 'tokenCommand' | 'apigeeMtls'
+  /**
+   * Whether a credential is actually resolvable — not merely whether config names one.
+   *
+   * For an `env:` reference that means the variable is set *right now*, in this process. A
+   * launcher that forgot to export it is the likeliest failure of the whole arrangement, and
+   * reporting it as "Set" would hide the one thing worth seeing.
+   */
   hasApiKey: boolean
+  /** Set when the key comes from the environment, so the panel can name the variable. */
+  apiKeyEnvVar?: string
   hasClientSecret: boolean
   hasCertPassphrase: boolean
   apigee?: ApigeeSummary
@@ -138,7 +147,7 @@ export interface ProfileInput {
   wireFormat: WireFormat
   baseUrl: string
   model: string
-  authType: 'none' | 'apiKey' | 'apigeeMtls'
+  authType: 'none' | 'apiKey' | 'tokenCommand' | 'apigeeMtls'
   apiKey: string
   apigee?: ApigeeSummary
   /** Write-only, like `apiKey`. */

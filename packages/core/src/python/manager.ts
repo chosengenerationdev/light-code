@@ -15,6 +15,7 @@ import { installDependencies } from './deps.js'
 import type { WorkerToolDescription } from './worker.js'
 import {
   detectUv,
+  detectBareInterpreter,
   discoverWorkspaceVenv,
   ensureVenv,
   minimalPythonEnv,
@@ -44,7 +45,13 @@ export interface PythonStatus {
    * Which environment is in use and why. Surfaced because "where did my dependency go?" is
    * otherwise unanswerable — reusing the project venv means installs land in *their* project.
    */
-  venvSource: 'workspace' | 'configured' | 'created' | 'none'
+  /**
+   * Which environment is in use.
+   *
+   * `interpreter` means an ambient Python with no virtualenv at all — see
+   * `detectBareInterpreter`. It is distinct from `none` because `none` means nothing is running.
+   */
+  venvSource: 'workspace' | 'configured' | 'created' | 'interpreter' | 'none'
   venvIsUvManaged: boolean
   ready: boolean
   /** Why it is not ready, phrased for a human. */
@@ -133,6 +140,8 @@ export class PythonManager {
     uvPath?: string | undefined
     toolsDir?: string | undefined
     venvPath?: string | undefined
+    /** A Python to use directly, when there is no uv and no virtualenv. */
+    interpreterPath?: string | undefined
     timeoutSeconds?: number | undefined
     /** The global tool timeout, used when Python has no limit of its own. */
     defaultTimeoutSeconds?: number | undefined
@@ -174,9 +183,18 @@ export class PythonManager {
     this.offline = config.offline === true
 
     if (this.uv === undefined) this.uv = await detectUv(config.uvPath)
+
+    /*
+     * No uv is no longer the end of it.
+     *
+     * Light Code is often started inside an environment somebody else built — a Streamlit app, a
+     * container, a conda env — where the interpreter already has the libraries the tools need and
+     * installing a package manager to reach it makes no sense. So an ambient interpreter is used
+     * as it is: nothing created, nothing installed. `detectBareInterpreter` says why that is the
+     * right trade there and the wrong one when the environment is ours.
+     */
     if (this.uv === undefined) {
-      this.ready = false
-      this.detail = 'uv was not found. Install it and set the path in Settings → Python, or add it to PATH.'
+      await this.startWithoutUv(config, this.options.workspaceRoot)
       return
     }
 
@@ -348,6 +366,21 @@ export class PythonManager {
       ...(generated !== undefined ? { generateSource: generated } : {}),
       worker,
       onChanged: () => this.refresh(),
+      /*
+       * No installing against an interpreter we do not own.
+       *
+       * Absent rather than failing, so the refusal happens before a file is written and names the
+       * package. The reason travels with it because the advice differs: install uv, versus
+       * install the package into the environment you already have.
+       */
+      ...(this.venvSource === 'interpreter'
+        ? {
+            installUnavailableReason:
+              `Light Code is using the Python interpreter at ${this.interpreter} directly, with no ` +
+              'virtualenv, so it does not install or remove packages there — that environment ' +
+              'belongs to whatever started it.',
+          }
+        : {}),
       ...(uv !== undefined
         ? {
             installDeps: (packages: readonly string[]) =>
@@ -365,6 +398,64 @@ export class PythonManager {
     }
   }
 
+
+  /**
+   * Starts against an interpreter we did not create and do not own.
+   *
+   * Deliberately parallel to the uv path rather than folded into it: the two differ on the one
+   * decision that matters — whether installing a package is allowed — and a single path with a
+   * flag threaded through it is how that decision ends up being made in the wrong place.
+   */
+  private async startWithoutUv(
+    config: { interpreterPath?: string | undefined },
+    workspaceRoot: string,
+  ): Promise<void> {
+    const bare = await detectBareInterpreter(config.interpreterPath)
+    if (bare === undefined) {
+      this.ready = false
+      this.detail =
+        config.interpreterPath !== undefined && config.interpreterPath.trim().length > 0
+          ? `The configured interpreter could not be run: ${config.interpreterPath}. ` +
+            'Give the full path to a Python 3 executable, or clear the field to search the PATH.'
+          : 'No Python was found. Either install uv (Settings \u2192 Python) so Light Code can ' +
+            'manage an environment for you, or make a Python 3 interpreter available on PATH \u2014 ' +
+            'if one is already installed, give its full path in Settings \u2192 Python.'
+      return
+    }
+
+    try {
+      const env = minimalPythonEnv(this.options.sessionEnv?.() ?? {})
+      this.interpreter = bare.path
+      this.venvPath = ''
+      this.venvSource = 'interpreter'
+      this.venvIsUvManaged = false
+
+      const workerScript = await this.writeWorkerScript()
+      this.worker ??= new PythonWorker({
+        pythonPath: bare.path,
+        workerScript,
+        cwd: workspaceRoot,
+        env,
+        logger: this.options.logger,
+        timeoutMs: this.timeoutMs,
+      })
+      await this.refresh()
+      this.ready = true
+      /*
+       * States the limitation up front rather than leaving it to be discovered by a tool that
+       * fails to import something. "Where did my dependency go?" is the question §13's venv
+       * reporting exists to answer, and the answer here is that it was never installed.
+       */
+      this.detail =
+        `Ready \u2014 using Python ${bare.version} at ${bare.path}, with no virtualenv. ` +
+        'Tools run against whatever that interpreter can already import; declared dependencies ' +
+        'are NOT installed. Install uv if you want Light Code to manage an environment.'
+    } catch (error) {
+      this.ready = false
+      this.detail = error instanceof Error ? error.message : String(error)
+      this.options.logger.warn('python environment failed to start', this.detail)
+    }
+  }
 
   status(): PythonStatus {
     return {

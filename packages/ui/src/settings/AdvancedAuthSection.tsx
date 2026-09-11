@@ -4,7 +4,15 @@ import { Select } from '../Select.js'
 import { colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
 import { SecretField } from './SecretField.js'
 
-export type AuthType = 'none' | 'apiKey' | 'apigeeMtls'
+/**
+ * `tokenCommand` is representable but not offered in the picker.
+ *
+ * It runs a program the user names, so it is configured in the config file rather than typed into
+ * a panel — the same treatment `certDir` had before it earned a field. The form still has to
+ * *know* about it: a profile using it must render without breaking, and must survive being saved
+ * from a form that cannot construct one.
+ */
+export type AuthType = 'none' | 'apiKey' | 'tokenCommand' | 'apigeeMtls'
 
 export interface AdvancedAuthSectionProps {
   authType: AuthType

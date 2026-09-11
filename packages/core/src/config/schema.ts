@@ -36,6 +36,17 @@ export const pythonConfigSchema = z
      */
     venvPath: z.string(),
     /**
+     * A Python interpreter to use directly, with no virtualenv and no uv.
+     *
+     * For an environment somebody else already built — a Streamlit app, a container, a conda env
+     * — where the interpreter has the internal libraries the tools need and installing a package
+     * manager to reach it makes no sense. Left unset, uv is preferred and this is the fallback:
+     * `python3`, then `python`, from PATH.
+     *
+     * User-scope only for the same reason as `uvPath`: it names a program that gets run.
+     */
+    interpreterPath: z.string(),
+    /**
      * Package index for tool dependencies. §3 treats `uv` resolving PyPI as *our* egress
      * rather than the user's, so pointing it at an internal mirror is the expected
      * corporate configuration, not an edge case.

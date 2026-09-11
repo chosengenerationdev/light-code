@@ -520,3 +520,5 @@ export {
 export { createShowChartTool } from './tools/showChart.js'
 export { chartSpecSchema, chartTotals, CHART_TYPES, type ChartSpec, type ChartSeries, type ChartType } from './charts/types.js'
 export { countBy, crossTab, numberOverTime, dailyChange, extractNumber } from './office/mailStats.js'
+export { resolveSecretRef, describeSecretRef, describeMissingSecret, ENV_REF_PREFIX } from './providers/auth/secretRef.js'
+export { TokenCommandAuthStrategy, type TokenCommandSettings } from './providers/auth/tokenCommand.js'

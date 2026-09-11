@@ -1,5 +1,14 @@
 # light-code-vscode
 
+## 0.59.2
+
+### Patch Changes
+
+- Picks up the shared core changes made for the Node host: an API key may be written as
+  `env:API_TOKEN` and read from the process environment, and Python works against a bare interpreter
+  when uv is absent. Neither is Node-specific in the code, so the extension gets both rather than
+  letting the two bundles drift.
+
 ## 0.59.1
 
 ### Patch Changes

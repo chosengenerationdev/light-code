@@ -1,3 +1,4 @@
+import { TokenCommandAuthStrategy } from './tokenCommand.js'
 import { resolveConnectionTls, type TlsFileSettings } from '../../platform/connectionTls.js'
 import type { HttpClient, TlsOptions } from '../../platform/http.js'
 import type { SecretStore } from '../../platform/secrets.js'
@@ -174,6 +175,21 @@ function createBaseAuthStrategy(auth: Auth, context: AuthStrategyContext): AuthS
       return new ApiKeyAuthStrategy(context.secrets, auth.apiKeyRef, {
         name: context.apiKeyHeaderName ?? derived.name,
         prefix: context.apiKeyHeaderPrefix ?? derived.prefix,
+      })
+    }
+    case 'tokenCommand': {
+      /*
+       * The credential stays with whatever launched us.
+       *
+       * Header defaults follow the wire format like an API key's do, because a gateway fronting
+       * Anthropic still wants `x-api-key` whoever fetched the token — getting that wrong is a 401
+       * that reads as a bad credential rather than a misplaced header.
+       */
+      const derived = defaultApiKeyHeader(context.wireFormat ?? 'openai')
+      return new TokenCommandAuthStrategy({
+        ...auth.tokenCommand,
+        headerName: auth.tokenCommand.headerName ?? context.apiKeyHeaderName ?? derived.name,
+        headerPrefix: auth.tokenCommand.headerPrefix ?? context.apiKeyHeaderPrefix ?? derived.prefix,
       })
     }
     case 'none':

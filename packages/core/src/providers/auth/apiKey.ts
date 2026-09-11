@@ -1,5 +1,6 @@
 import type { SecretStore } from '../../platform/secrets.js'
 import type { AuthStrategy, WireFormat } from '../types.js'
+import { describeMissingSecret, resolveSecretRef } from './secretRef.js'
 
 /**
  * How each wire format expects an API key. Getting this wrong is a 401 that looks like a
@@ -26,12 +27,18 @@ export class ApiKeyAuthStrategy implements AuthStrategy {
   ) {}
 
   async resolveHeaders(): Promise<Record<string, string>> {
-    const key = await this.secrets.get(this.apiKeyRef)
+    /*
+     * Resolved through the shared reference reader, so `env:API_TOKEN` works here exactly as it
+     * does in the "is a key set?" summary and in the redaction list. A reference form understood
+     * by only some of those produces a product that authenticates while reporting the key as
+     * missing — and prints it into a log.
+     */
+    const key = await resolveSecretRef(this.apiKeyRef, { secrets: this.secrets })
     if (key === undefined) {
-      throw new Error(
-        'API key missing for this provider profile. Open Settings (the icon in the Light Code header), ' +
-          'edit the active profile, and enter the API key again.',
-      )
+      // Names the environment variable when that is where it was meant to come from. Telling
+      // somebody to re-enter a key in Settings when they deliberately pointed at the environment
+      // sends them to fix the one thing that is not broken.
+      throw new Error(describeMissingSecret(this.apiKeyRef))
     }
     return { [this.header.name]: `${this.header.prefix}${key}` }
   }

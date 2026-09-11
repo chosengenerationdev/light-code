@@ -286,6 +286,110 @@ a stale page or someone poking the API, and both deserve a reason.
 
 ---
 
+## 1b-i. Being launched by another application
+
+Light Code is often started *by* something else — a Streamlit app, a wrapper script, a container
+entrypoint — which already holds the credentials and already has a Python environment set up. Two
+things make that work without duplicating either.
+
+### The API key can come from the environment
+
+Put `env:API_TOKEN` in the API key field (or in `auth.apiKeyRef` in the config file) and the key is
+read from that environment variable instead of being stored:
+
+```jsonc
+{
+  "profiles": [
+    {
+      "id": "gateway",
+      "label": "Internal gateway",
+      "wireFormat": "openai",
+      "baseUrl": "https://gateway.internal.example/v1",
+      "model": "gpt-4o",
+      "auth": { "type": "apiKey", "apiKeyRef": "env:API_TOKEN" }
+    }
+  ],
+  "activeProfileId": "gateway"
+}
+```
+
+Nothing is written to the keychain, and the variable is read fresh on every request. From Python:
+
+```python
+import os, subprocess
+os.environ["API_TOKEN"] = my_internal_lib.get_apigee_token()
+subprocess.Popen(["npx", "@chosengeneration/light-code"], env=os.environ)
+```
+
+**It must be exported before Light Code starts.** A process cannot see a variable its parent set
+afterwards, so a token exported later — or set only in the parent's own shell — is invisible. If
+the panel shows the key as missing, that is what it is telling you: the variable is not set *in
+this process*. The message names the variable.
+
+### A token that expires needs a command, not a variable
+
+The catch with the above is that **a parent cannot change a running child's environment**. An
+Apigee token is typically good for an hour; a session that outlives it starts failing every request
+with no way back except a restart.
+
+So a profile can fetch its own token by running a command — whatever the parent already uses:
+
+```jsonc
+{
+  "auth": {
+    "type": "tokenCommand",
+    "tokenCommand": {
+      "command": ["python", "-c", "import my_internal_lib; print(my_internal_lib.get_apigee_token())"],
+      "fallbackExpirySeconds": 3600,
+      "refreshSkewSeconds": 60
+    }
+  }
+}
+```
+
+The credential logic stays in the one library that owns it, and Light Code never learns how the
+gateway's auth works. It refreshes proactively before expiry, shares one fetch across concurrent
+requests, and checks the remaining lifetime before opening a stream so a token cannot expire
+mid-response.
+
+If the command prints JSON instead of a bare token, name the fields:
+
+```jsonc
+{ "tokenPath": "access_token", "expiresInPath": "expires_in" }
+```
+
+Notes worth having in advance:
+
+- **`command` is argv, never a shell string.** It is spawned directly, so nothing is parsed by a
+  shell — no pipes, no redirection, and a path with a space is one argument. Write a script if you
+  need shell logic; that is a better place for it anyway.
+- **Print only the token.** Output containing whitespace is refused rather than sent as a bearer
+  token, because a warning line prepended to the token produces a 401 that looks like a bad
+  credential.
+- **It runs a program you name**, so it is exactly as powerful as the account Light Code runs
+  under. It is configured in the config file rather than in the panel, and on a shared server it
+  has no business in a personal profile.
+
+### Python without uv or a virtualenv
+
+If the environment that launched Light Code already has the libraries your tools need — a Streamlit
+app's own interpreter, a conda environment, a container image — point it at that interpreter and it
+will use it as it is:
+
+```jsonc
+{ "python": { "dynamicTools": "on", "interpreterPath": "/usr/bin/python3" } }
+```
+
+Leave `interpreterPath` unset and it falls back to `python3`, then `python`, from `PATH` — but only
+when `uv` is absent. uv is still preferred when it is available, because then Light Code owns the
+environment and can manage it.
+
+**In this mode Light Code does not install or remove packages.** That environment belongs to
+whatever started it, and `pip install` into it could break the application serving your users. A
+tool whose imports are already satisfied works; one declaring a dependency that is not there is
+refused at creation, naming the package, so you install it the way you install everything else
+there. The Python tab says which mode is in use and why.
+
 ## 1c. Session variables
 
 Values handed to everything a session runs — shell commands and Python tools — as environment

@@ -79,9 +79,40 @@ export type ApigeeMtlsSettingsInput = z.infer<typeof apigeeMtlsSettingsSchema>
  * `apigeeMtls` **replaces** the API key rather than supplementing it; the discriminated
  * union is what makes that structural, so the two can never both be live at once.
  */
+/**
+ * A token produced by running a command, for a parent process that already owns the credential.
+ *
+ * See `auth/tokenCommand.ts` for why this exists rather than only `env:` — in short, a parent
+ * cannot change a running child's environment, so a handed-over token cannot be refreshed and a
+ * session outlives it.
+ */
+export const tokenCommandSchema = z.object({
+  command: z
+    .array(z.string().min(1))
+    .min(1, 'Give the program and its arguments')
+    .describe('argv. Spawned directly — nothing is parsed by a shell.'),
+  cwd: z.string().optional(),
+  tokenPath: z.string().optional(),
+  expiresInPath: z.string().optional(),
+  fallbackExpirySeconds: z.number().int().positive().optional(),
+  refreshSkewSeconds: z.number().int().nonnegative().optional(),
+  timeoutSeconds: z.number().int().positive().optional(),
+  headerName: z.string().optional(),
+  headerPrefix: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+})
+export type TokenCommandConfig = z.infer<typeof tokenCommandSchema>
+
 export const authSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('none') }),
+  /**
+   * `apiKeyRef` may name the environment as well as the secret store.
+   *
+   * `env:API_TOKEN` reads it from the process environment — see `auth/secretRef.ts`. Anything
+   * else is a key into `SecretStore`, which is what the UI writes.
+   */
   z.object({ type: z.literal('apiKey'), apiKeyRef: z.string().min(1) }),
+  z.object({ type: z.literal('tokenCommand'), tokenCommand: tokenCommandSchema }),
   z.object({
     type: z.literal('apigeeMtls'),
     certs: certConfigSchema,

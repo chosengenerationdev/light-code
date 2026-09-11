@@ -9,6 +9,14 @@ export interface SecretFieldProps {
   value: string
   onChange: (value: string) => void
   placeholder?: string
+  /**
+   * Set when the value is read from the environment rather than stored.
+   *
+   * Shown because "Set" alone would be a lie of omission here: nothing is stored, and if the
+   * variable is missing at launch the credential is simply absent. Naming it is what makes that
+   * diagnosable without opening the config file.
+   */
+  envVar?: string
 }
 
 /**
@@ -23,7 +31,7 @@ export function SecretField(props: SecretFieldProps): ReactElement {
       <div style={{ marginBottom: 16 }}>
         <label style={labelStyle()}>{props.label}</label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>Set</span>
+          <span>{props.envVar === undefined ? 'Set' : `From $${props.envVar}`}</span>
           <button type="button" style={secondaryButtonStyle()} onClick={() => setReplacing(true)}>
             Replace
           </button>

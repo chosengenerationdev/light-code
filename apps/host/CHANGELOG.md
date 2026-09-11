@@ -1,5 +1,21 @@
 # @chosengeneration/light-code
 
+## 0.34.0
+
+### Minor Changes
+
+- Three changes for a Node host launched by another application.
+
+  Python works against a bare interpreter: with no uv and no virtualenv it uses an ambient Python as
+  it is, which is the point when the environment that launched it already has the internal libraries
+  the tools import. It installs and removes nothing there — that environment belongs to whatever
+  started it — and says so rather than leaving it to be discovered by a failing import.
+
+  An API key may be written as `env:API_TOKEN`, read from the process environment on every request
+  and never stored. And because a parent cannot change a running child's environment, a profile can
+  instead fetch its own token by running a command — whatever library already does the gateway's auth
+  — refreshed before expiry, shared across concurrent requests, and checked before a stream opens.
+
 ## 0.33.0
 
 ### Minor Changes

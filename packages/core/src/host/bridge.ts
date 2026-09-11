@@ -179,6 +179,8 @@ import {
   type OpenSearchConnection,
   type VectorStoreConfig,
   type HostToUiMessage,
+  resolveSecretRef,
+  describeSecretRef,
   type ProbeTarget,
   type IndexingKind,
   type ImageAttachmentInput,
@@ -244,7 +246,19 @@ async function toSummary(profile: ProviderProfile, secrets: SecretStore): Promis
     baseUrl: profile.baseUrl,
     model: profile.model,
     authType: profile.auth.type,
-    hasApiKey: profile.auth.type === 'apiKey' && (await secrets.get(profile.auth.apiKeyRef)) !== undefined,
+    hasApiKey:
+      profile.auth.type === 'apiKey' &&
+      (await resolveSecretRef(profile.auth.apiKeyRef, { secrets })) !== undefined,
+    /*
+     * The reference itself, when it names the environment.
+     *
+     * Sending it is not a secret leak (invariant 7) — a variable *name* is not its value, and the
+     * user typed it. It is what lets the panel show "from $API_TOKEN" instead of an empty box that
+     * reads as an unconfigured profile.
+     */
+    ...(profile.auth.type === 'apiKey' && describeSecretRef(profile.auth.apiKeyRef).kind === 'env'
+      ? { apiKeyEnvVar: describeSecretRef(profile.auth.apiKeyRef).envVar as string }
+      : {}),
     hasClientSecret: false,
     hasCertPassphrase: false,
   }
@@ -1814,7 +1828,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     try {
       const { config } = await configManager.load()
       const refs = (config.profiles ?? []).flatMap((profile) => SECRET_REFS_PER_PROFILE.map((refFor) => refFor(profile.id)))
-      const values = await Promise.all(refs.map((ref) => secrets.get(ref)))
+      /*
+       * References a profile names directly, not just the ones this product wrote.
+       *
+       * An `env:` key never passes through the keychain, so deriving the list from
+       * `SECRET_REFS_PER_PROFILE` alone would leave it out — and a token that redaction does not
+       * know about is a token that reaches a transcript and a spilled tool result verbatim. The
+       * whole point of keying redaction on exact values is defeated by not knowing one of them.
+       */
+      const named = (config.profiles ?? [])
+        .map((profile) => (profile.auth.type === 'apiKey' ? profile.auth.apiKeyRef : undefined))
+        .filter((ref): ref is string => ref !== undefined)
+      const values = await Promise.all(
+        [...new Set([...refs, ...named])].map((ref) => resolveSecretRef(ref, { secrets })),
+      )
       cachedSecretValues = values.filter((value): value is string => value !== undefined && value.length > 0)
       return [...cachedSecretValues]
     } catch (error) {
@@ -2440,7 +2467,43 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
     }
 
+    /*
+     * A token command is never built from the form, only preserved.
+     *
+     * The panel has no way to express one, so a save from a profile that uses it would otherwise
+     * silently replace it with `none` — the profile would keep working until the token expired and
+     * then fail in a way nobody would connect to having opened Settings.
+     */
+    if (input.authType === 'tokenCommand') {
+      const existing = (await configManager.load()).config.profiles?.find((profile) => profile.id === id)
+      if (existing?.auth.type === 'tokenCommand') return existing.auth
+      return { type: 'none' }
+    }
+
     if (input.authType === 'none') return { type: 'none' }
+
+    /*
+     * `env:API_TOKEN` is stored as the reference itself, and nothing is written to the keychain.
+     *
+     * That is the point: the credential stays wherever the launcher put it, so it can rotate
+     * without Light Code holding a stale copy — and there is no second place for it to leak from.
+     * A stored key for the same profile is deleted, because leaving one behind means the profile
+     * has two credentials and only one of them is the one being used.
+     */
+    const typed = input.apiKey.trim()
+    if (describeSecretRef(typed).kind === 'env') {
+      await secrets.delete(apiKeyRefFor(id))
+      return { type: 'apiKey', apiKeyRef: typed }
+    }
+    const existing = (await configManager.load()).config.profiles?.find((profile) => profile.id === id)
+    if (
+      typed.length === 0 &&
+      existing?.auth.type === 'apiKey' &&
+      describeSecretRef(existing.auth.apiKeyRef).kind === 'env'
+    ) {
+      // Blank means "leave it as it is", exactly as it does for a stored key.
+      return existing.auth
+    }
 
     const apiKeyRef = apiKeyRefFor(id)
     if (await persistSecret(apiKeyRef, input.apiKey)) {
