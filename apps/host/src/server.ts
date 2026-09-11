@@ -13,7 +13,7 @@ import {
   sessionVariablesSchema,
   type Transport,
 } from '@light-code/core'
-import { SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
+import { OpenIdentity, SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
 import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
 import type { SharedConfig, SharedConfigStore } from './sharedConfig.js'
@@ -91,6 +91,11 @@ export interface ServerOptions {
   /** How long the launch URL stays valid. Default 10s — see `SingleUserIdentity`. */
   handoffSeconds?: number
   /**
+   * Serves without a bearer token at all. See `OpenIdentity` for what that does and does not give
+   * up — Origin and Host are still enforced, which is what actually stops a hostile page.
+   */
+  noToken?: boolean
+  /**
    * Loopback only unless deliberately changed. Binding the literal address rather than
    * `localhost` matters: the name resolves differently per machine and can dual-stack onto
    * an interface that is not loopback at all (§14).
@@ -130,7 +135,9 @@ interface Connection {
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const log = options.logSink ?? ((line: string) => process.stderr.write(`${line}\n`))
-  const identity = options.identity ?? new SingleUserIdentity(options.handoffSeconds)
+  const identity =
+    options.identity ??
+    (options.noToken === true ? new OpenIdentity() : new SingleUserIdentity(options.handoffSeconds))
   const roles = options.roles ?? SINGLE_USER_POLICY
   /*
    * The administrator's settings, kept in memory and refreshed when they are saved.
@@ -308,6 +315,15 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
      * automatically. That is precisely what CSRF exploits.
      */
     if (url.pathname === '/api/session' && request.method === 'POST') {
+      /*
+       * With no token configured there is nothing to exchange, and the page still asks — so it is
+       * answered rather than refused. Returning an empty token keeps one code path in the client
+       * instead of a second one that only runs in this mode.
+       */
+      if (identity instanceof OpenIdentity) {
+        respondJson(response, 200, { token: '' })
+        return
+      }
       if (!(identity instanceof SingleUserIdentity)) {
         reject(response, { status: 404, reason: 'Handoff is only used in single-user mode.' })
         return

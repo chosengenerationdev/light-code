@@ -1,5 +1,21 @@
 # @chosengeneration/light-code
 
+## 0.39.0
+
+### Minor Changes
+
+- `--no-token` serves without the launch-link exchange.
+
+  Requested, for running locally without friction. It turns off the bearer token, which is what
+  stops another _process_ on the machine from driving the agent — a gap Light Code already declines
+  to guarantee against, so this narrows it rather than opening a new category. It does **not** turn
+  off `Origin` and `Host` enforcement, which is what actually stops a page open in another tab from
+  posting to 127.0.0.1, and stops DNS rebinding. Verified against a running server with a raw
+  socket, because `fetch` rewrites the `Host` header and testing it that way measures nothing.
+
+  A flag rather than a deletion, because the failure is silent and remote in time from the choice —
+  so the banner says it on every start, not only when the flag is typed.
+
 ## 0.38.1
 
 ### Patch Changes

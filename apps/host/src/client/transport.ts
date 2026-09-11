@@ -41,6 +41,31 @@ export class HttpTransport implements Transport {
       // closes, which matches the lifetime of the session this token belongs to.
       this.token = sessionStorage.getItem('lightCodeToken') ?? undefined
     }
+
+    /*
+     * No fragment and nothing stored: ask anyway.
+     *
+     * A server started with `--no-token` hands one out to anybody, which is the point of the
+     * flag; an ordinary one refuses, and the refusal reads exactly as it did before. One code
+     * path rather than a second that only runs in one mode — the client cannot tell which kind of
+     * server it is talking to, and should not have to.
+     */
+    if (this.token === undefined) {
+      try {
+        const open = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+        if (open.ok) {
+          this.token = ((await open.json()) as { token: string }).token
+          sessionStorage.setItem('lightCodeToken', this.token)
+        }
+      } catch {
+        // Falls through to the message below, which says what to do.
+      }
+    }
+
     if (this.token === undefined) throw new Error('No session. Restart light-code and open the printed URL.')
     void this.listen()
   }

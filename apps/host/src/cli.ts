@@ -154,6 +154,15 @@ async function main(): Promise<void> {
    * history and terminal scrollback, so a longer window is a longer time in which somebody reading
    * that can use it before you do.
    */
+  /*
+   * Serves with no bearer token at all.
+   *
+   * Asked for, to run locally without the launch-link exchange. Origin and Host are still
+   * enforced — those are what stop a page in another tab posting to 127.0.0.1, and they are not
+   * what this turns off. What it does turn off is the defence against another *process* on this
+   * machine driving the agent, which §3 already declines to guarantee.
+   */
+  const noToken = args.includes('--no-token')
   const handoffSeconds = Math.min(
     600,
     Math.max(1, Number.parseInt(valueOf(args, '--handoff-seconds') ?? '10', 10) || 10),
@@ -216,6 +225,7 @@ async function main(): Promise<void> {
     clientDir: path.join(here, 'client'),
     ripgrepPath: resolveRipgrep(),
     handoffSeconds,
+    noToken,
     /*
      * A lapsed link is replaced rather than ending the session.
      *
@@ -247,6 +257,23 @@ async function main(): Promise<void> {
   process.stdout.write(
     `\nLight Code ${VERSION}\n  workspace  ${workspaceRoot}\n  data       ${dataDir}\n  listening  ${server.url}\n`,
   )
+  if (noToken) {
+    /*
+     * Printed every start rather than only when the flag is typed.
+     *
+     * The choice is made once and the server then listens for days. Somebody who turned this
+     * on to get past a launch link on Monday is not thinking about it on Thursday, and a
+     * line in the banner is the only thing that will still be in front of them.
+     */
+    process.stdout.write(
+      `  auth       none — --no-token. Any program on this machine can drive this
+` +
+        `             server as you. Origin and Host are still checked, so a web page
+` +
+        `             cannot. Stop it when you are done.
+`,
+    )
+  }
   /*
    * Said only when something was actually supplied, which on Node 18 and above is never.
    *
@@ -328,6 +355,7 @@ const KNOWN_FLAGS = new Set([
   '--port',
   '--data-dir',
   '--no-open',
+  '--no-token',
   '--server',
   '--admin',
   '--admin-id',
@@ -390,6 +418,10 @@ Usage: light-code [options]
   --port <n>          Port to bind (default: an unused one)
   --data-dir <dir>    Where config, secrets and task history live
   --no-open           Print the URL instead of launching a browser
+  --no-token          Serve with no bearer token, so any request to the port is
+                      accepted. Origin and Host are still checked, so a page in
+                      another tab still cannot reach it — but any program running
+                      as you can. For a local machine you trust.
   --handoff-seconds <n>  How long the launch link stays valid (default 10, max 600).
                       Raise it when carrying the URL by hand. It rides in the URL
                       fragment, so a longer window is longer for anyone reading

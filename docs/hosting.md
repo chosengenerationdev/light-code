@@ -286,6 +286,37 @@ a stale page or someone poking the API, and both deserve a reason.
 
 ---
 
+## 1a. Running without the launch link
+
+The launch URL carries a one-time token in its fragment, which the page exchanges for a session
+token. That is right when the browser opens itself and awkward when you are moving the URL by
+hand. Two ways to make it less so, in order of preference:
+
+```bash
+# Keep the token, give yourself longer to use it.
+npx @chosengeneration/light-code --handoff-seconds 120
+
+# No token at all.
+npx @chosengeneration/light-code --no-token
+```
+
+If a link does lapse, a fresh one is printed in the terminal — you do not need to restart.
+
+**What `--no-token` turns off, precisely.** The bearer token is what stops another *process* on
+this machine from driving the agent. Without it, anything that can reach the port can read your
+files and run commands as you. Light Code already declines to defend against a process running as
+the same user, so this narrows an existing gap rather than opening a new category — but it is a
+real narrowing, and the banner says so on every start.
+
+**What it does not turn off.** `Origin` and `Host` are still enforced on every request. Those are
+what stop the thing people mean when they say a localhost server is dangerous: a page you have
+open in another tab posting to `127.0.0.1`, and DNS rebinding. A browser attaches a foreign
+`Origin` and the request is refused; a `Host` that was never bound gets `421`. Verified against a
+running server with a raw socket, because `fetch` rewrites the `Host` header and testing it that
+way measures nothing.
+
+Use it on a machine you trust, and stop the server when you are done.
+
 ## 1b-i. Being launched by another application
 
 Light Code is often started *by* something else — a Streamlit app, a wrapper script, a container

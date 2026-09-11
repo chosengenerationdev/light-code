@@ -147,3 +147,37 @@ export function timingSafeEquals(a: string, b: string): boolean {
 export function storageKeyFor(principal: Principal): string {
   return crypto.createHash('sha256').update(principal.id).digest('hex').slice(0, 32)
 }
+
+/**
+ * No token at all. Opt-in, for running locally without the launch-link dance.
+ *
+ * ## What is given up, precisely
+ *
+ * The bearer token is what stops a *non-browser* caller on this machine — any other process
+ * running as you — from driving the agent. §3 already says Light Code does not defend against a
+ * process running as the same user, so this narrows a gap rather than opening a new category. It
+ * is still a real narrowing: without it, anything that can reach the port can read your files and
+ * run commands as you.
+ *
+ * ## What is NOT given up, and this is the part that matters
+ *
+ * **Origin and Host are still checked on every request.** Those are what stop the attack people
+ * actually mean when they say "a localhost server is dangerous": a page you have open in another
+ * tab posting to 127.0.0.1, and DNS rebinding. A browser attaches a foreign `Origin` and the
+ * request is refused, token or no token. Removing *those* would be a different and much worse
+ * decision, and this does not touch them.
+ *
+ * ## Why it is a flag rather than the default
+ *
+ * Because the failure is silent and remote in time from the choice. Somebody who turns it on to
+ * get past a launch link today is not thinking about the server still listening next week. A flag
+ * is read at the moment of the decision, says so in the banner every start, and can be removed.
+ */
+export class OpenIdentity implements IdentityProvider {
+  readonly describe = 'single user, no token (--no-token)'
+  private static readonly PRINCIPAL: Principal = { id: 'local', displayName: 'Local user' }
+
+  async authenticate(): Promise<Principal | undefined> {
+    return OpenIdentity.PRINCIPAL
+  }
+}
