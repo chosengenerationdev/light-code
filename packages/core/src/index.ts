@@ -534,3 +534,5 @@ export {
 } from './dataset/types.js'
 export { createSearchDataTool } from './tools/searchData.js'
 export { mayPythonToolCall, describeNestedCall, PYTHON_CALL_DENIED } from './python/callPolicy.js'
+export { checkCollector, type CollectorCheck } from './dataset/checkCollector.js'
+export { createCheckCollectorTool } from './tools/checkCollectorTool.js'

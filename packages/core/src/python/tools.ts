@@ -154,7 +154,28 @@ async function readIfPresent(filePath: string): Promise<string> {
 /** Shared by create and update — they differ only in wording and in what already exists. */
 function makeWriteTool(
   context: PythonToolContext,
-  options: { name: 'create_python_tool' | 'update_python_tool'; description: string; mustExist: boolean },
+  options: {
+    name: 'create_python_tool' | 'update_python_tool' | 'create_collector_tool'
+    description: string
+    mustExist: boolean
+    /**
+     * A last check, after the module loads and before the approval is recorded.
+     *
+     * For a collector, which has a *contract* on what it returns and not merely on whether it
+     * imports. Without this the shape is only discovered when a sync runs — possibly at three in
+     * the morning, days later, with the failure attributed to the dataset rather than to the tool
+     * that was written for it. Reported exactly that way.
+     *
+     * `reject` rolls the file back and is what the model is told — a tool that cannot do its job
+     * is never registered as though it could. `warn` saves it and appends a note, for the case
+     * where the code may be fine and simply could not be exercised on this machine: a collector
+     * reaching a source whose credentials do not exist yet is an ordinary order to work in.
+     */
+    verify?: (
+      name: string,
+      filePath: string,
+    ) => Promise<{ reject?: string; warn?: string } | undefined>
+  },
 ): Tool<CreatePythonToolParams> {
   const generator = context.generateSource
 
@@ -307,6 +328,22 @@ function makeWriteTool(
           return { content: `The tool was not saved.\n\n${message}\n\n${traceback ?? ''}`.trim(), isError: true }
         }
 
+        /*
+         * Proven to *work*, not merely to load, where there is a contract to check.
+         *
+         * Run before the approval is recorded and rolled back on failure, so the file on disk and
+         * the registry never disagree about whether a tool is usable.
+         */
+        let verifyWarning: string | undefined
+        if (options.verify !== undefined) {
+          const outcome = await options.verify(params.name, filePath)
+          if (outcome?.reject !== undefined) {
+            await restore()
+            return { content: `The tool was not saved.\n\n${outcome.reject}`, isError: true }
+          }
+          verifyWarning = outcome?.warn
+        }
+
         // Only now, with the source proven to load, is the approval recorded — pinned to
         // exactly the bytes that were shown in the diff.
         await approveTool(context.toolsDir, params.name, source, described)
@@ -315,6 +352,7 @@ function makeWriteTool(
         return {
           content:
             `Saved and registered as py__${params.name}.\n` +
+            (verifyWarning === undefined ? '' : `\n${verifyWarning}\n\n`) +
             `Description: ${described.description || '(none — add a module docstring)'}\n` +
             `Parameters: ${JSON.stringify(described.schema)}\n\n` +
             // Accurate about *when*. The tool block is fixed for the whole turn so the
@@ -353,6 +391,61 @@ export function createCreatePythonTool(context: PythonToolContext): Tool<CreateP
       'files and creating tools are deliberately out of reach from inside a tool body. The user ' +
       'approves each nested call as they would any other, so use it for composing work rather ' +
       'than for slipping past a prompt.',
+  })
+}
+
+/**
+ * Writing a tool whose job is to feed a custom dataset.
+ *
+ * ## Why this is its own tool and not a note in `create_python_tool`
+ *
+ * Exactly the reasoning that gave `create_python_tool` its opening sentence. Asked to "write a
+ * tool", the model reached for `write_to_file` and produced a standalone script nothing could
+ * call — because `write_to_file` was advertised and the right tool had to be inferred. The same
+ * failure happened one level down and was reported: asked for a collector, it produced an
+ * ordinary Python tool returning something a person would read, and the mismatch surfaced only
+ * when a sync ran, days later, reported as a dataset failing rather than as a tool that was
+ * written wrong.
+ *
+ * **A capability the model has to infer is one it will sometimes not infer.** So the contract
+ * gets a tool whose name is the job.
+ *
+ * ## Why it runs the tool before saving it
+ *
+ * Because a collector has a contract on what it *returns*, and loading proves only that it
+ * imports. Running it once with no arguments and parsing the result moves the failure from a
+ * scheduled sync — unattended, attributed to the wrong thing — to the moment of creation, where
+ * the model still has the source in hand and can fix it in one turn.
+ *
+ * A collector that legitimately returns nothing on an empty source passes: `[]` is a successful
+ * sync, not a failure, and refusing it would force people to fake data to get a tool saved.
+ */
+export function createCollectorTool(context: PythonToolContext & {
+  /** Runs the freshly written tool and reports what is wrong with its output, if anything. */
+  checkCollector: (
+    name: string,
+    filePath: string,
+  ) => Promise<{ reject?: string; warn?: string } | undefined>
+}): Tool<CreatePythonToolParams> {
+  return makeWriteTool(context, {
+    name: 'create_collector_tool',
+    mustExist: false,
+    verify: context.checkCollector,
+    description:
+      'THE way to create a tool that feeds a custom dataset. Use this — not create_python_tool — ' +
+      'whenever the user wants the assistant to be able to search something it cannot reach: ' +
+      'tickets, wiki pages, rows from an internal system, anything behind a library or an API. ' +
+      'The tool must return a LIST OF DICTS, each with a stable `id` and a `text` to index, and ' +
+      'optionally `title`, `url`, `timestamp` (epoch MILLIseconds) and `tags` (flat strings). ' +
+      '`id` must be the source\'s own identifier and stable across runs, or every sync duplicates ' +
+      'the corpus instead of updating it. `text` is what gets embedded — put the meaning in it, ' +
+      'not an id and a status code. Do NOT return a formatted report, a summary, or a string: a ' +
+      'collector returns something a search can index, not something a person reads. It is called ' +
+      'with `since` (epoch ms of the last successful sync, or None first time) so it can fetch ' +
+      'only what changed. Return [] when there is nothing new — that is success. ' +
+      'This runs the tool once before saving and refuses it if the shape is wrong, so a mistake ' +
+      'is caught here rather than by a sync days later. The user configures the dataset ' +
+      'afterwards in Settings → Custom data.',
   })
 }
 

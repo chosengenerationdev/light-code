@@ -1,3 +1,4 @@
+import { checkCollector } from '../dataset/checkCollector.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Logger } from '../logging/logger.js'
@@ -6,6 +7,7 @@ import type { CodeGenerator } from './codeGenerator.js'
 import { describeIssue, loadRegistry, type RegisteredTool, type ToolLoadIssue } from './registry.js'
 import {
   adaptPythonTool,
+  createCollectorTool,
   createCreatePythonTool,
   createDeletePythonTool,
   createUpdatePythonTool,
@@ -355,10 +357,21 @@ export class PythonManager {
   managementTools(): Tool<never>[] {
     const context = this.toolContext()
     if (context === undefined) return []
+    const worker = this.worker
     return [
       createCreatePythonTool(context),
       createUpdatePythonTool(context),
       createDeletePythonTool(context),
+      /*
+       * Offered only when a worker exists to run the check.
+       *
+       * Its whole value over `create_python_tool` is that it *runs* the tool before saving it, so
+       * advertising it without something to run against would be advertising a promise it cannot
+       * keep — and the wrong shape would go back to being discovered by a sync days later.
+       */
+      ...(worker === undefined
+        ? []
+        : [createCollectorTool({ ...context, checkCollector: (name, filePath) => checkCollector(worker, name, filePath) })]),
     ] as unknown as Tool<never>[]
   }
 

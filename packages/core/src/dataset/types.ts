@@ -247,6 +247,9 @@ export const COLLECTOR_EXAMPLE = `def run(since: int | None = None) -> list[dict
 
 export const COLLECTOR_TOOL_GUIDANCE = [
   'Writing a collector for a custom dataset:',
+  '- **Use `create_collector_tool`, not `create_python_tool`.** It runs the tool once before',
+  '  saving and refuses the wrong shape, so a mistake is caught now rather than by a sync days',
+  '  later. `check_collector` diagnoses one that already exists.',
   '- A collector is an ordinary Python tool. Its `run` returns a list of records, each a dict',
   '  with `id` and `text`, and optionally `title`, `url`, `timestamp` (epoch milliseconds) and',
   '  `tags` (a flat dict of strings).',

@@ -431,7 +431,10 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
                     <span style={{ fontSize: 11 }}>
                       {confirming.action === 'delete'
                         ? `Delete "${dataset.name}" and everything it collected?`
-                        : `Throw away all ${String(dataset.records)} record(s)?`}
+                        : dataset.records === 0
+                          ? // Says what it will actually do, rather than offering to throw away nothing.
+                            'Nothing is collected. Clear the last result and start again from scratch?'
+                          : `Throw away all ${String(dataset.records)} record(s)?`}
                     </span>
                     <button
                       type="button"
@@ -470,7 +473,16 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
                     <button
                       type="button"
                       style={secondaryButtonStyle()}
-                      disabled={dataset.busy === true || dataset.records === 0}
+                      /*
+                       * Enabled even with nothing collected, which is the case it was disabled in.
+                       *
+                       * A dataset whose sync has only ever failed holds no records — so Clear was
+                       * greyed out precisely when somebody wanted it, and clicking a disabled
+                       * button does nothing and says nothing. Reported as Clear not clearing.
+                       * Clearing also resets the sync watermark and puts the failure away, and
+                       * both of those are worth doing whether or not any records exist.
+                       */
+                      disabled={dataset.busy === true}
                       onClick={() => setConfirming({ id: dataset.id, action: 'clear' })}
                     >
                       Clear

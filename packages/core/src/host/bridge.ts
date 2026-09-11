@@ -123,6 +123,7 @@ import {
   describeNestedCall,
   PYTHON_CALL_DENIED,
   createSearchDataTool,
+  createCheckCollectorTool,
   DatasetStore,
   syncDataset,
   clearDataset,
@@ -1612,6 +1613,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * not. A capability the model has to search for is one it will sometimes not search for.
      */
     for (const tool of python.managementTools()) combined.register(tool)
+    /*
+     * The doctor, offered whenever Python tools are. It is `read` and changes nothing, so it
+     * costs a description and can save a scheduled sync failing at three in the morning for a
+     * reason nobody would connect to the file they wrote last week.
+     */
+    if (cachedPythonEnabled) {
+      combined.register(
+        createCheckCollectorTool({
+          has: (name) => combined.get(name) !== undefined,
+          run: async (name, args) => {
+            const tool = combined.get(name)
+            if (tool === undefined) throw new Error(`No tool called ${name}.`)
+            const result = await tool.execute(args as never, {} as never)
+            if (result.isError === true) throw new Error(String(result.content))
+            try {
+              return JSON.parse(typeof result.content === 'string' ? result.content : '')
+            } catch {
+              // Returned as-is so the diagnosis can say "a string of N characters", which is
+              // exactly the finding when somebody returned a report instead of records.
+              return result.content
+            }
+          },
+        }) as unknown as Parameters<typeof combined.register>[0],
+      )
+    }
     for (const tool of python.generatedTools()) combined.register(tool, { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.

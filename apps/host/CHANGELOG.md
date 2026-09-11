@@ -1,5 +1,25 @@
 # @chosengeneration/light-code
 
+## 0.41.0
+
+### Minor Changes
+
+- `create_collector_tool` and `check_collector`, because a collector was being written as an
+  ordinary Python tool and only failing at sync time.
+
+  The model had the contract in its prompt and still reached for `create_python_tool`, which is the
+  same failure this project already fixed one level up — a capability that has to be inferred is one
+  that sometimes is not. So the contract gets a tool whose name is the job, and that tool **runs
+  what it wrote** before saving it: the wrong shape is refused at creation, with the real error, not
+  discovered by an unattended sync days later and attributed to the dataset.
+
+  `check_collector` does the same for a tool that already exists — it runs it, says what came back
+  in the terms the contract is written in, and shows the shape it should have returned. It changes
+  nothing; fixing is an ordinary `update_python_tool` edit.
+
+  Clear on a dataset was also disabled whenever no records had been collected — which is exactly
+  when a failing sync leaves you wanting it. Clicking it did nothing and said nothing.
+
 ## 0.40.1
 
 ### Patch Changes
