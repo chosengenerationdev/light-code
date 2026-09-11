@@ -308,7 +308,17 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
      * indistinguishable from a slow answer. See `httpDeadline.ts` for why the deadline is on the
      * headers and never on the body.
      */
-    httpClient: withHeadersDeadline(new FetchHttpClient()),
+    httpClient: withHeadersDeadline(
+      /*
+       * Routed the way the rest of the machine is routed.
+       *
+       * Reported: every other process on a Linux server reached the gateway and this one hung.
+       * `undici` does not read `HTTPS_PROXY`, and almost everything else on such a box does — so
+       * we alone attempted a direct connection that the firewall dropped. A server is exactly
+       * where egress is proxied, which is why the host asks for this and the extension does not.
+       */
+      new FetchHttpClient({ useEnvProxy: true }),
+    ),
     /*
      * No Excel, no Outlook, no mail index on a server.
      *

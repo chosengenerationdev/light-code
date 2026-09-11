@@ -85,6 +85,12 @@ export default tseslint.config(
        * published (the npm `files` list is `dist/**`), and it only ever talks to loopback.
        */
       'scripts/dev-proxy.mjs',
+      /*
+       * A test that stands up a proxy and an origin server on loopback to prove a request is
+       * routed through the one rather than the other. Servers are ingress; the egress it measures
+       * is `HttpClient`'s own, which is the thing invariant 2 is about.
+       */
+      'packages/core/src/platform/proxy.test.ts',
     ],
     rules: { 'no-restricted-imports': 'off' },
   },

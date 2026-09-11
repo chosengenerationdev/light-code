@@ -8,7 +8,8 @@
  * — the entire reason anybody asks is to find out whether they are on the copy they think.
  */
 declare const __LC_VERSION__: string | undefined
-const VERSION = typeof __LC_VERSION__ === 'string' ? __LC_VERSION__ : 'unknown (not a packaged build)'
+const VERSION =
+  typeof __LC_VERSION__ === 'string' ? __LC_VERSION__ : 'unknown (not a packaged build)'
 
 /*
  * First, and before anything that might read a web global at import time.
@@ -27,6 +28,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
+import { describeProxyEnvironment } from '@light-code/core'
 import type { IdentityProvider } from './identity.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
 import { adminListPolicy } from './roles.js'
@@ -296,6 +298,21 @@ async function main(): Promise<void> {
 `,
     )
   }
+  /*
+   * Said when the machine has a proxy configured, because that is the line that would have saved
+   * a long hunt.
+   *
+   * Reported: every other process on a Linux server reached the gateway and this one hung.
+   * `undici` ignores these variables where curl, wget and pip honour them, so we were the only
+   * program going direct into a firewall that drops rather than refuses. It is honoured now — and
+   * saying so on every start means the next person can see in one line which way their traffic is
+   * going, instead of inferring it from a spinner.
+   */
+  const proxyLine = describeProxyEnvironment()
+  if (proxyLine !== undefined) {
+    process.stdout.write(`  proxy      ${proxyLine}\n`)
+  }
+
   if (serverMode) {
     const who =
       effectiveAdminIds.length === 0
@@ -338,15 +355,15 @@ async function main(): Promise<void> {
        */
       noToken
         ? `Opening ${server.url}` +
-          `\n(If the browser does not open, open this \u2014 there is no time limit:)` +
-          `\n${server.url}\n\n`
+            `\n(If the browser does not open, open this \u2014 there is no time limit:)` +
+            `\n${server.url}\n\n`
         : `Opening ${server.url}` +
-          `\n(If the browser does not open, paste this within ${String(handoffSeconds)} seconds:)` +
-          `\n${launchUrl}\n\n` +
-          (handoffSeconds === 10
-            ? '  Not long enough? Start with --handoff-seconds 120.\n' +
-              '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'
-            : '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'),
+            `\n(If the browser does not open, paste this within ${String(handoffSeconds)} seconds:)` +
+            `\n${launchUrl}\n\n` +
+            (handoffSeconds === 10
+              ? '  Not long enough? Start with --handoff-seconds 120.\n' +
+                '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'
+              : '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'),
     )
   }
 

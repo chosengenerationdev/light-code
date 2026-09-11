@@ -6,7 +6,13 @@ export type { SecretStore } from './platform/secrets.js'
 export type { ConfigStore, ConfigScope } from './platform/config.js'
 export type { Transport } from './platform/transport.js'
 export type { HttpClient, HttpRequestOptions, HttpResponse } from './platform/http.js'
-export { FetchHttpClient } from './platform/http.js'
+export { FetchHttpClient, type FetchHttpClientOptions } from './platform/http.js'
+export {
+  bypassesProxy,
+  describeProxyEnvironment,
+  proxyForUrl,
+  type ProxyChoice,
+} from './platform/proxy.js'
 export {
   resolveConnectionTls,
   TlsConfigError,
