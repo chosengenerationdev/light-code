@@ -1089,6 +1089,16 @@ export type HostToUiMessage =
       semantic: boolean
       /** Everything that could serve as a collector: Python tools and MCP tools. */
       tools: { name: string; description: string; kind: 'python' | 'mcp' }[]
+      /** Every configured vector store, so a dataset can be pointed at one of them. */
+      stores: { id: string; label: string }[]
+      /**
+       * What a dataset that names no store of its own will use, already resolved.
+       *
+       * Sent rather than left to the panel to work out: the fallback is `retrieval.stores.data`
+       * and then the active connection, and a second implementation of that chain in the UI is
+       * exactly the drift this project keeps paying for.
+       */
+      defaultStoreLabel: string
       /** The contract a collector must satisfy, so the tab can show it and the model can be told. */
       guidance: string
     }

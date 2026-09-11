@@ -60,6 +60,8 @@ export interface CustomDataTabProps {
   datasets: DatasetStatus[]
   /** Everything callable that could serve as a collector — Python tools and MCP tools alike. */
   tools: { name: string; description: string; kind: 'python' | 'mcp' }[]
+  stores: { id: string; label: string }[]
+  defaultStoreLabel: string
   semantic: boolean
   guidance: string
   progress: IndexingProgressState | undefined
@@ -259,6 +261,33 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
               'not advance that, so nothing is skipped while the source is down.'}
         </span>
 
+        {/*
+          Per dataset rather than one setting for all of them.
+
+          The reason is the same one that gave mail its own store (§12e): a corpus somebody
+          collects themselves is frequently the one they most want kept off a cluster their team
+          shares — and unlike mail there can be several at once, with different answers. Tickets
+          to the shared cluster, an extract of something sensitive to a local Qdrant.
+        */}
+        <label htmlFor="lc-ds-store" style={labelStyle()}>
+          Where the index is stored
+        </label>
+        <Select
+          id="lc-ds-store"
+          value={editing.storeId ?? ''}
+          options={[
+            { value: '', label: `Default for custom data (${props.defaultStoreLabel})` },
+            ...props.stores.map((store) => ({ value: store.id, label: store.label })),
+          ]}
+          onChange={(value) => setEditing({ ...editing, storeId: value === '' ? undefined : value })}
+          ariaLabel="Vector store for this dataset"
+        />
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 12px' }}>
+          Records are embedded and written here. Changing it on a dataset that already has records
+          leaves the old ones where they were &mdash; clear it first, or rebuild afterwards, so the
+          two copies do not both answer searches.
+        </span>
+
         <label htmlFor="lc-ds-retention" style={labelStyle()}>
           Keep records for <span style={{ color: colors.muted, fontWeight: 400 }}>(days, blank for ever)</span>
         </label>
@@ -456,9 +485,14 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
 
       <Section
         title="Where it is stored"
-        hint="Records are sent to your embedding endpoint, like anything else indexed. Route this corpus to its own connection under Search if it should not share a cluster."
+        hint="Records are sent to your embedding endpoint, like anything else indexed."
       >
-        <span style={{ color: colors.muted, fontSize: 11 }}>
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+          {`Datasets that name no store of their own go to ${props.defaultStoreLabel}. `}
+          Each one can be pointed somewhere else when you edit it &mdash; a corpus you collected
+          yourself is often the one you least want on a cluster your team shares.
+        </span>
+        <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 6 }}>
           {props.semantic
             ? 'An embedding model is configured, so searches rank by meaning.'
             : 'No embedding model is configured. Datasets still sync and are still searchable — on words rather than meaning, and exact filters like dates and tags work either way.'}

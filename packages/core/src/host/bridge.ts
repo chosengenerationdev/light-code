@@ -3893,6 +3893,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * is the `py__` prefix and the mcp group, not a permission category. Reported as the picker
        * listing only built-in tools.
        */
+      stores: Object.entries(config.vectorStores ?? {}).map(([id, store]) => ({ id, label: store.label })),
+      // Resolved here, where the fallback chain lives. See the note on the message.
+      defaultStoreLabel: (await resolveDatasetSearch(config).catch(() => undefined))?.store.label ?? 'none',
       tools: currentToolRegistry()
         .list()
         .filter((tool) => tool.name.startsWith('py__') || tool.group === 'mcp')

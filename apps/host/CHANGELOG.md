@@ -1,5 +1,17 @@
 # @chosengeneration/light-code
 
+## 0.37.1
+
+### Patch Changes
+
+- A dataset can be pointed at a vector store, the way indexed mail can.
+
+  `storeId` was in the schema and honoured by the sync from the start, but there was no way to set
+  it — so every dataset went to the default with no way to say otherwise. Each one now has its own
+  picker, per dataset rather than one setting for all of them: unlike mail there can be several at
+  once with different answers, and a corpus you collected yourself is often the one you least want
+  on a cluster your team shares.
+
 ## 0.37.0
 
 ### Minor Changes

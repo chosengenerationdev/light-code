@@ -227,9 +227,11 @@ export function App(props: AppProps): ReactElement {
   const [datasets, setDatasets] = useState<{
     datasets: DatasetStatus[]
     tools: { name: string; description: string; kind: 'python' | 'mcp' }[]
+    stores: { id: string; label: string }[]
+    defaultStoreLabel: string
     semantic: boolean
     guidance: string
-  }>({ datasets: [], tools: [], semantic: false, guidance: '' })
+  }>({ datasets: [], tools: [], stores: [], defaultStoreLabel: 'none', semantic: false, guidance: '' })
   /** The mailbox tree, so folders are ticked rather than typed. */
   const [mailTree, setMailTree] = useState<{ folders: MailFolderNode[]; error?: string; loading: boolean }>({
     folders: [],
@@ -595,6 +597,8 @@ export function App(props: AppProps): ReactElement {
         setDatasets({
           datasets: message.datasets,
           tools: message.tools,
+          stores: message.stores,
+          defaultStoreLabel: message.defaultStoreLabel,
           semantic: message.semantic,
           guidance: message.guidance,
         })
@@ -1340,6 +1344,8 @@ export function App(props: AppProps): ReactElement {
             customData={{
               datasets: datasets.datasets,
               tools: datasets.tools,
+              stores: datasets.stores,
+              defaultStoreLabel: datasets.defaultStoreLabel,
               semantic: datasets.semantic,
               guidance: datasets.guidance,
               progress: indexingProgress?.kind === 'dataset' ? indexingProgress : undefined,
