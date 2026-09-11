@@ -124,6 +124,19 @@ async function main(): Promise<void> {
   const dataDir = valueOf(args, '--data-dir') ?? envPaths('light-code', { suffix: '' }).data
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
   /*
+   * How long the launch URL lives.
+   *
+   * Ten seconds suits a browser that opens itself. It is far too short when the URL has to be
+   * carried by hand — into another application, a remote session, a phone — which is the case
+   * this exists for. Capped at ten minutes: the token rides in a URL fragment that lands in shell
+   * history and terminal scrollback, so a longer window is a longer time in which somebody reading
+   * that can use it before you do.
+   */
+  const handoffSeconds = Math.min(
+    600,
+    Math.max(1, Number.parseInt(valueOf(args, '--handoff-seconds') ?? '10', 10) || 10),
+  )
+  /*
    * Still loopback unless asked otherwise, even in server mode. `--server` is about who owns
    * the settings; exposing the port is a separate decision that has to be made explicitly,
    * because binding every interface by accident is not a mistake anyone recovers from quietly.
@@ -180,6 +193,26 @@ async function main(): Promise<void> {
     dataDir,
     clientDir: path.join(here, 'client'),
     ripgrepPath: resolveRipgrep(),
+    handoffSeconds,
+    /*
+     * A lapsed link is replaced rather than ending the session.
+     *
+     * Before this the only way back from pasting a URL a few seconds late was to stop the server
+     * and start it again, losing the conversation and anything running with it. The fresh link is
+     * printed to this terminal, which is where the first one was printed, so it reaches nobody it
+     * had not already reached.
+     *
+     * Printed with a sentence, because a URL appearing on its own reads as the server having
+     * restarted itself.
+     */
+    onHandoffLapsed: (reason) => {
+      const fresh = server.newLaunchUrl?.()
+      if (fresh === undefined) return
+      process.stdout.write(
+        `\n  That link ${reason === 'expired' ? 'expired' : 'had already been used'}. ` +
+          `Here is a fresh one, good for ${String(handoffSeconds)} seconds:\n  ${fresh}\n\n`,
+      )
+    },
     port: Number.isNaN(port) ? 0 : port,
     ...(serverMode ? { roles: adminListPolicy(effectiveAdminIds), sharedConfig } : {}),
     ...(identity !== undefined ? { identity } : {}),
@@ -236,7 +269,13 @@ async function main(): Promise<void> {
     )
   } else {
     process.stdout.write(
-      `Opening ${server.url}\n(If the browser does not open, paste this within 10 seconds:)\n${launchUrl}\n\n`,
+      `Opening ${server.url}` +
+        `\n(If the browser does not open, paste this within ${String(handoffSeconds)} seconds:)` +
+        `\n${launchUrl}\n\n` +
+        (handoffSeconds === 10
+          ? '  Not long enough? Start with --handoff-seconds 120.\n' +
+            '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'
+          : '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'),
     )
   }
 
@@ -260,6 +299,7 @@ async function main(): Promise<void> {
 const KNOWN_FLAGS = new Set([
   '--help',
   '-h',
+  '--handoff-seconds',
   '--workspace',
   '--port',
   '--data-dir',
@@ -325,6 +365,10 @@ Usage: light-code [options]
   --port <n>          Port to bind (default: an unused one)
   --data-dir <dir>    Where config, secrets and task history live
   --no-open           Print the URL instead of launching a browser
+  --handoff-seconds <n>  How long the launch link stays valid (default 10, max 600).
+                      Raise it when carrying the URL by hand. It rides in the URL
+                      fragment, so a longer window is longer for anyone reading
+                      your scrollback to use it first.
   --server            Shared mode: configuration is read-only for everyone
                       except the administrators named below
   --admin             Open the administrator's interface (/admin) instead

@@ -81,6 +81,16 @@ export interface ServerOptions {
   ripgrepPath: string | undefined
   identity?: IdentityProvider
   /**
+   * Called when a handoff token was presented too late, or twice.
+   *
+   * The CLI prints a fresh launch URL. Here rather than in the server because only the caller
+   * knows where it is safe to print one — a terminal in single-user mode, and nowhere at all if
+   * this is ever embedded somewhere without one.
+   */
+  onHandoffLapsed?: (reason: 'expired' | 'spent') => void
+  /** How long the launch URL stays valid. Default 10s — see `SingleUserIdentity`. */
+  handoffSeconds?: number
+  /**
    * Loopback only unless deliberately changed. Binding the literal address rather than
    * `localhost` matters: the name resolves differently per machine and can dual-stack onto
    * an interface that is not loopback at all (§14).
@@ -101,6 +111,8 @@ export interface RunningServer {
   url: string
   /** Present only in single-user mode; the launch URL carries it in the fragment. */
   launchToken: string | undefined
+  /** Mints a new handoff token and returns the full launch URL for it. Single-user mode only. */
+  newLaunchUrl: (() => string) | undefined
   close: () => Promise<void>
 }
 
@@ -118,7 +130,7 @@ interface Connection {
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const log = options.logSink ?? ((line: string) => process.stderr.write(`${line}\n`))
-  const identity = options.identity ?? new SingleUserIdentity()
+  const identity = options.identity ?? new SingleUserIdentity(options.handoffSeconds)
   const roles = options.roles ?? SINGLE_USER_POLICY
   /*
    * The administrator's settings, kept in memory and refreshed when they are saved.
@@ -302,12 +314,32 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       }
       const body = (await readJsonBody(request)) as { handoff?: unknown } | undefined
       const handoff = typeof body?.handoff === 'string' ? body.handoff : ''
-      const token = identity.redeemHandoff(handoff)
-      if (token === undefined) {
-        reject(response, { status: 401, reason: 'Handoff token invalid or expired. Restart light-code.' })
+      const outcome = identity.redeem(handoff)
+      if (outcome.token === undefined) {
+        /*
+         * An expired token gets you another one, printed to the terminal.
+         *
+         * Before this the only way back was to stop the server and start it again, losing the
+         * session and anything running with it — for the entirely ordinary mishap of pasting a
+         * URL a few seconds late. The new token goes only to the terminal, which is where the
+         * first one was printed, so it reaches nobody it had not already reached.
+         *
+         * A *mismatch* gets nothing: that is a bug or an attack, and neither deserves a fresh
+         * token, nor the ability to fill somebody's terminal with them.
+         */
+        if (outcome.reason === 'expired' || outcome.reason === 'spent') options.onHandoffLapsed?.(outcome.reason)
+        reject(response, {
+          status: 401,
+          reason:
+            outcome.reason === 'expired'
+              ? 'That link expired. A fresh one has been printed in the terminal running light-code.'
+              : outcome.reason === 'spent'
+                ? 'That link has already been used. A fresh one has been printed in the terminal.'
+                : 'Handoff token invalid.',
+        })
         return
       }
-      respondJson(response, 200, { token })
+      respondJson(response, 200, { token: outcome.token })
       return
     }
 
@@ -626,6 +658,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   return {
     url: `http://${authority}`,
     launchToken: identity instanceof SingleUserIdentity ? identity.launchToken : undefined,
+    newLaunchUrl:
+      identity instanceof SingleUserIdentity
+        ? () => `http://${authority}/#t=${identity.remintHandoff()}`
+        : undefined,
     close: () =>
       new Promise<void>((resolve) => {
         for (const connection of connections.values()) connection.dispose()

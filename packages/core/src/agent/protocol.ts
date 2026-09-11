@@ -119,7 +119,7 @@ export interface ProfileSummary {
   wireFormat: WireFormat
   baseUrl: string
   model: string
-  authType: 'none' | 'apiKey' | 'tokenCommand' | 'apigeeMtls'
+  authType: 'none' | 'apiKey' | 'tokenCommand' | 'header' | 'apigeeMtls'
   /**
    * Whether a credential is actually resolvable — not merely whether config names one.
    *
@@ -130,6 +130,13 @@ export interface ProfileSummary {
   hasApiKey: boolean
   /** Set when the key comes from the environment, so the panel can name the variable. */
   apiKeyEnvVar?: string
+  /**
+   * The configured auth headers.
+   *
+   * Not a leak (invariant 7): a `valueRef` is a *reference* — a store key or a variable name —
+   * never the credential. A header name is exactly the part somebody needs to be able to see.
+   */
+  authHeaders?: { name: string; valueRef: string; prefix?: string | undefined }[] | undefined
   /** The configured token command, so the form can render and round-trip it. */
   tokenCommand?: TokenCommandInput
   hasClientSecret: boolean
@@ -172,7 +179,7 @@ export interface ProfileInput {
   wireFormat: WireFormat
   baseUrl: string
   model: string
-  authType: 'none' | 'apiKey' | 'tokenCommand' | 'apigeeMtls'
+  authType: 'none' | 'apiKey' | 'tokenCommand' | 'header' | 'apigeeMtls'
   apiKey: string
   /**
    * Present when `authType` is `tokenCommand`.
@@ -182,6 +189,8 @@ export interface ProfileInput {
    * crosses the bridge (invariant 7).
    */
   tokenCommand?: TokenCommandInput
+  /** Present when `authType` is `header`. A value typed here is stored and replaced by a ref. */
+  authHeaders?: { name: string; valueRef: string; prefix?: string | undefined }[]
   apigee?: ApigeeSummary
   /** Write-only, like `apiKey`. */
   clientSecret?: string

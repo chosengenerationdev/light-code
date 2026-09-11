@@ -59,6 +59,9 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
             model: editing.profile.model,
             authType: editing.profile.authType,
             hasApiKey: editing.profile.hasApiKey,
+            ...(editing.profile.authHeaders === undefined
+              ? {}
+              : { authHeaders: editing.profile.authHeaders }),
             ...(editing.profile.tokenCommand === undefined
               ? {}
               : { tokenCommand: editing.profile.tokenCommand }),

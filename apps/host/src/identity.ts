@@ -53,12 +53,37 @@ export class SingleUserIdentity implements IdentityProvider {
   /**
    * Single-use and short-lived, because it travels in the launch URL's fragment where it
    * can end up in shell history or a terminal scrollback (§14).
+   *
+   * Ten seconds is right when the browser opens itself, and far too short when a person has to
+   * move the URL by hand — into another application, a remote session, a phone. `--handoff-seconds`
+   * raises it, and what that costs is stated where it is set: a longer window is a longer time in
+   * which somebody reading that scrollback can use it before you do.
    */
   private handoffToken: string | undefined = crypto.randomBytes(32).toString('base64url')
-  private handoffExpiresAt = Date.now() + 10_000
+  private handoffExpiresAt: number
+  private readonly handoffSeconds: number
+
+  constructor(handoffSeconds = 10) {
+    this.handoffSeconds = handoffSeconds
+    this.handoffExpiresAt = Date.now() + handoffSeconds * 1000
+  }
 
   get launchToken(): string {
     if (this.handoffToken === undefined) throw new Error('handoff token already consumed')
+    return this.handoffToken
+  }
+
+  /**
+   * Mints a fresh handoff token, replacing any outstanding one.
+   *
+   * For the case the old design had no answer to: the token expired unused, and the only way back
+   * was to stop the server and start it again — losing the session, the conversation and anything
+   * running. A new token grants exactly what the first one did, to whoever can read the terminal,
+   * which is the same person it was printed to in the first place.
+   */
+  remintHandoff(): string {
+    this.handoffToken = crypto.randomBytes(32).toString('base64url')
+    this.handoffExpiresAt = Date.now() + this.handoffSeconds * 1000
     return this.handoffToken
   }
 
@@ -69,11 +94,29 @@ export class SingleUserIdentity implements IdentityProvider {
    * or an attack, and in both cases the right answer is that this token is now spent.
    */
   redeemHandoff(presented: string): string | undefined {
+    return this.redeem(presented).token
+  }
+
+  /**
+   * The same exchange, saying *why* it failed.
+   *
+   * The reasons need different handling and only one of them is anybody's fault. An expired token
+   * is an ordinary mishap — the browser was slow, the URL was pasted late — and the right response
+   * is to offer another. A token that does not match is either a bug or an attack, and the right
+   * response there is nothing at all.
+   */
+  redeem(presented: string): { token?: string; reason?: 'expired' | 'spent' | 'mismatch' } {
     const expected = this.handoffToken
     const expiresAt = this.handoffExpiresAt
+    // Cleared on the first attempt whether or not it matched: a wrong guess is either a bug or an
+    // attack, and in both cases this token is now spent.
     this.handoffToken = undefined
-    if (expected === undefined || Date.now() > expiresAt) return undefined
-    return timingSafeEquals(presented, expected) ? this.sessionToken : undefined
+
+    if (expected === undefined) return { reason: 'spent' }
+    if (Date.now() > expiresAt) return { reason: 'expired' }
+    return timingSafeEquals(presented, expected)
+      ? { token: this.sessionToken }
+      : { reason: 'mismatch' }
   }
 
   async authenticate(request: IncomingMessage): Promise<Principal | undefined> {

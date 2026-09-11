@@ -113,6 +113,24 @@ export const authSchema = z.discriminatedUnion('type', [
    */
   z.object({ type: z.literal('apiKey'), apiKeyRef: z.string().min(1) }),
   z.object({ type: z.literal('tokenCommand'), tokenCommand: tokenCommandSchema }),
+  /**
+   * A fixed header the gateway expects, with no API key involved.
+   *
+   * Each value is a *reference* — a secret-store key, or `env:NAME` — never a literal, because
+   * the profile lives in the config file and §15 is explicit that a credential never does.
+   */
+  z.object({
+    type: z.literal('header'),
+    headers: z
+      .array(
+        z.object({
+          name: z.string().min(1, 'Give the header name'),
+          valueRef: z.string().min(1, 'Give the value, or env:NAME'),
+          prefix: z.string().optional(),
+        }),
+      )
+      .min(1, 'Add at least one header'),
+  }),
   z.object({
     type: z.literal('apigeeMtls'),
     certs: certConfigSchema,

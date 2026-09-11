@@ -1,3 +1,4 @@
+import { HeaderAuthFields, type AuthHeaderInput } from './HeaderAuthFields.js'
 import type { TokenCommandInput } from '@light-code/core/browser'
 import type { BrowseRequest } from './PathField.js'
 import { TokenCommandFields } from './TokenCommandFields.js'
@@ -31,6 +32,7 @@ export interface ProviderFormValues {
   hasApiKey: boolean
   /** The configured token command, so the form can render and round-trip it. */
   tokenCommand?: TokenCommandInput | undefined
+  authHeaders?: AuthHeaderInput[] | undefined
   /** Set when the key comes from the environment. The variable's name, not its value. */
   apiKeyEnvVar?: string | undefined
   hasClientSecret: boolean
@@ -69,6 +71,9 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
    * API key the form *can* be shown what is configured — and a form that cannot see the current
    * value can only replace it.
    */
+  const [authHeaders, setAuthHeaders] = useState<AuthHeaderInput[]>(
+    props.initial.authHeaders ?? [{ name: '', valueRef: '' }],
+  )
   const [tokenCommand, setTokenCommand] = useState<TokenCommandInput>(
     props.initial.tokenCommand ?? { command: ['python', ''] },
   )
@@ -107,6 +112,7 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
     authType,
     apiKey,
     ...(authType === 'tokenCommand' ? { tokenCommand } : {}),
+    ...(authType === 'header' ? { authHeaders } : {}),
     ...(authType === 'apigeeMtls' ? { apigee, clientSecret, certs, certPassphrase } : {}),
     ...(Object.keys(capabilities).length > 0 ? { modelCapabilities: capabilities } : {}),
     ...(connectionTls.caFile !== undefined || connectionTls.rejectUnauthorized !== undefined
@@ -137,6 +143,9 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
       apiKey.trim().length > 0 ||
       props.initial.hasApiKey ||
       authType === 'apigeeMtls' ||
+      // A named header with a value is a credential, even though no key box was filled in.
+      (authType === 'header' &&
+        authHeaders.some((header) => header.name.trim().length > 0 && header.valueRef.trim().length > 0)) ||
       // A script that has been named is a credential, even though nothing was typed into a key box.
       (authType === 'tokenCommand' &&
         tokenCommand.command.filter((part: string) => part.trim().length > 0).length > 0)
@@ -210,6 +219,8 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         capabilities={capabilities}
         onCapabilitiesChange={setCapabilities}
       />
+
+      {authType === 'header' && <HeaderAuthFields headers={authHeaders} onChange={setAuthHeaders} />}
 
       {authType === 'tokenCommand' && (
         <TokenCommandFields

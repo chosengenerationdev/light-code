@@ -267,6 +267,8 @@ async function toSummary(profile: ProviderProfile, secrets: SecretStore): Promis
       : {}),
     // Not a secret: a command describes how to *get* a credential. The token it produces never
     // crosses the bridge, and a form cannot edit what it is never shown.
+    // References only — a store key or a variable name, never the credential (invariant 7).
+    ...(profile.auth.type === 'header' ? { authHeaders: profile.auth.headers } : {}),
     ...(profile.auth.type === 'tokenCommand'
       ? {
           /*
@@ -2554,6 +2556,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * silently replace it with `none` — the profile would keep working until the token expired and
      * then fail in a way nobody would connect to having opened Settings.
      */
+    if (input.authType === 'header') {
+      const headers = (input.authHeaders ?? [])
+        .map((header) => ({
+          name: header.name.trim(),
+          valueRef: header.valueRef.trim(),
+          ...(header.prefix !== undefined && header.prefix.length > 0 ? { prefix: header.prefix } : {}),
+        }))
+        .filter((header) => header.name.length > 0 && header.valueRef.length > 0)
+      /*
+       * A value typed in the form is written to the secret store and replaced by a reference.
+       *
+       * `env:` references are kept as they are, because that is the whole point of them — the
+       * credential stays wherever the launcher put it. Anything else is a literal somebody typed,
+       * and a literal must never reach the config file (§15).
+       */
+      const stored = await Promise.all(
+        headers.map(async (header, index) => {
+          if (describeSecretRef(header.valueRef).kind === 'env') return header
+          const ref = `profile:${id}:header:${String(index)}`
+          await secrets.set(ref, header.valueRef)
+          return { ...header, valueRef: ref }
+        }),
+      )
+      return stored.length > 0 ? { type: 'header', headers: stored } : { type: 'none' }
+    }
+
     if (input.authType === 'tokenCommand') {
       // Refused before anything is written, so a restricted session cannot leave a half-saved
       // profile behind — and told why, rather than silently dropping to `none`.

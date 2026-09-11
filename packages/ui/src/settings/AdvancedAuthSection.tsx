@@ -12,7 +12,7 @@ import { SecretField } from './SecretField.js'
  * *know* about it: a profile using it must render without breaking, and must survive being saved
  * from a form that cannot construct one.
  */
-export type AuthType = 'none' | 'apiKey' | 'tokenCommand' | 'apigeeMtls'
+export type AuthType = 'none' | 'apiKey' | 'tokenCommand' | 'header' | 'apigeeMtls'
 
 export interface AdvancedAuthSectionProps {
   authType: AuthType
@@ -138,6 +138,7 @@ export function AdvancedAuthSection(props: AdvancedAuthSectionProps): ReactEleme
           style={{ width: '100%' }}
           options={[
             { value: 'apiKey', label: 'API key' },
+            { value: 'header', label: 'A header the gateway expects' },
             { value: 'tokenCommand', label: 'Token from a script' },
             { value: 'apigeeMtls', label: 'Mutual TLS + OAuth (Apigee)' },
             { value: 'none', label: 'None' },

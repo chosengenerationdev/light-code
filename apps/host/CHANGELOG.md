@@ -1,5 +1,23 @@
 # @chosengeneration/light-code
 
+## 0.37.0
+
+### Minor Changes
+
+- The launch link's ten seconds is configurable, and a lapsed one no longer costs a restart.
+
+  `--handoff-seconds <n>` raises the window (default 10, max 600). Ten suits a browser that opens
+  itself and is far too short when the URL has to be carried by hand. And if it does lapse, a fresh
+  link is printed to the terminal rather than leaving the only way back as stopping the server and
+  losing whatever was running — it goes to the terminal the first one was printed to, so it reaches
+  nobody it had not already reached. A token that does not _match_ still gets nothing.
+
+  Adds a `header` auth type, for a gateway that authenticates on a header it expects rather than on
+  an API key. Several headers, each with an optional prefix. Values are references, never literals:
+  typed in, they go to secure storage and the profile keeps a pointer, because a profile lives in
+  the config file and a credential must not; written as `env:API_TOKEN`, the credential stays
+  wherever the launching process put it.
+
 ## 0.36.1
 
 ### Patch Changes

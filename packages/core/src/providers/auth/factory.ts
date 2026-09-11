@@ -1,3 +1,4 @@
+import { HeaderAuthStrategy } from './header.js'
 import { TokenCommandAuthStrategy } from './tokenCommand.js'
 import { resolveConnectionTls, type TlsFileSettings } from '../../platform/connectionTls.js'
 import type { HttpClient, TlsOptions } from '../../platform/http.js'
@@ -192,6 +193,8 @@ function createBaseAuthStrategy(auth: Auth, context: AuthStrategyContext): AuthS
         headerPrefix: auth.tokenCommand.headerPrefix ?? context.apiKeyHeaderPrefix ?? derived.prefix,
       })
     }
+    case 'header':
+      return new HeaderAuthStrategy(context.secrets, auth.headers)
     case 'none':
       return new NoAuthStrategy()
     case 'apigeeMtls': {
