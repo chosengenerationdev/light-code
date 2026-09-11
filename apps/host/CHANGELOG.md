@@ -1,5 +1,16 @@
 # @chosengeneration/light-code
 
+## 0.39.1
+
+### Patch Changes
+
+- `--no-token` told you to paste a link within ten seconds that had no token in it.
+
+  The launch message was unconditional, so in no-token mode it printed a URL ending in a bare `#t=`
+  and a deadline for a mechanism that was not running — the exact flaw this file already records for
+  shared mode, arriving through a different door. It now prints the plain URL and says there is no
+  time limit, and the browser is opened at that URL rather than one with a dangling fragment.
+
 ## 0.39.0
 
 ### Minor Changes

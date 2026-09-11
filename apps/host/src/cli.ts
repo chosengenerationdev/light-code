@@ -318,17 +318,29 @@ async function main(): Promise<void> {
     )
   } else {
     process.stdout.write(
-      `Opening ${server.url}` +
-        `\n(If the browser does not open, paste this within ${String(handoffSeconds)} seconds:)` +
-        `\n${launchUrl}\n\n` +
-        (handoffSeconds === 10
-          ? '  Not long enough? Start with --handoff-seconds 120.\n' +
-            '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'
-          : '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'),
+      /*
+       * No deadline where there is no token.
+       *
+       * The same flaw this file already records for shared mode, arriving through a different
+       * door: printing `#t=` with nothing after it and telling somebody to paste it within ten
+       * seconds sends them looking for a token that was never minted. Instructions for a
+       * mechanism that is not running are worse than none.
+       */
+      noToken
+        ? `Opening ${server.url}` +
+          `\n(If the browser does not open, open this \u2014 there is no time limit:)` +
+          `\n${server.url}\n\n`
+        : `Opening ${server.url}` +
+          `\n(If the browser does not open, paste this within ${String(handoffSeconds)} seconds:)` +
+          `\n${launchUrl}\n\n` +
+          (handoffSeconds === 10
+            ? '  Not long enough? Start with --handoff-seconds 120.\n' +
+              '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'
+            : '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'),
     )
   }
 
-  if (!noOpen) openBrowser(launchUrl)
+  if (!noOpen) openBrowser(noToken ? server.url : launchUrl)
 
   const shutdown = (): void => {
     process.stdout.write('\nStopping.\n')
