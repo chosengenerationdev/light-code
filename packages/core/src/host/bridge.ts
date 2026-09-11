@@ -10,6 +10,7 @@ import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savin
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildExpertPrompt, type ProviderExpert } from '../expert/providerExpert.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
+import { buildAgentBriefing } from '../agents/briefing.js'
 import { allRoles, buildAgentPrompt, defaultPromptFor, isAgentRole } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
 import type { Tool } from '../tools/types.js'
@@ -66,11 +67,10 @@ import {
   assertCertDirOutsideWorkspace,
   attachMentions,
   buildSystemPrompt,
-  formatToolArguments,
-  toolCallReason,
   CONTROL_TOOLS,
   chartFromToolCall,
   consultationFromToolCall,
+  toolCallSummary,
   createAuthStrategy,
   buildCodeGenerationPrompt,
   createChatProvider,
@@ -218,7 +218,6 @@ import {
   type ProviderProfile,
   type RunAgentTurnOptions,
   type Task,
-  type ToolCallSummary,
   type ToolExecutionContext,
   type UiToHostMessage,
   type WorkspaceApprovals,
@@ -564,6 +563,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   let skills: Skill[] = []
+  /**
+   * The tool registry as the last turn built it, for briefing a specialist.
+   *
+   * A consultation happens inside a turn, but `consultAgent` is declared outside the closure that
+   * builds the registry — so it is captured rather than rebuilt. Rebuilding would spawn MCP
+   * connections and a Python worker for the sake of a list of names.
+   */
+  let agentBriefingTools: (() => readonly Tool[]) | undefined
   let skillIssues: { filePath: string; detail: string }[] = []
   const refreshSkills = async (): Promise<void> => {
     const dirs = skillSearchPath()
@@ -2126,6 +2133,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }),
       )
     }
+    // Captured for `consultAgent`, which is outside this closure. See the declaration.
+    agentBriefingTools = () => combined.list()
     return combined
   }
 
@@ -2819,15 +2828,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
              * "show_chart ran" — as nothing — and became a picture only after a reload.
              */
             if (chartFromToolCall(toolCall.name, toolCall.arguments) !== undefined) return
-            const summary: ToolCallSummary = {
-              id: toolCall.id,
-              name: toolCall.name,
-              arguments: formatToolArguments(toolCall.arguments),
-              ...(toolCallReason(toolCall.arguments) === undefined
-                ? {}
-                : { why: toolCallReason(toolCall.arguments) as string }),
-              ...(consulting !== undefined ? { consultingRole: consulting } : {}),
-            }
+            const summary = toolCallSummary(toolCall)
             post({
               type: 'toolCall',
               toolCall: summary,
@@ -2855,16 +2856,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               )
               return
             }
-            const summary: ToolCallSummary = {
-              id: toolCall.id,
-              name: toolCall.name,
-              arguments: formatToolArguments(toolCall.arguments),
-              ...(toolCallReason(toolCall.arguments) === undefined
-                ? {}
-                : { why: toolCallReason(toolCall.arguments) as string }),
+            /*
+             * The same builder the call used.
+             *
+             * This one was written out separately and omitted `consultingRole`, so a consultation
+             * wore the specialist's colour while it ran and reverted to the expert's the moment it
+             * finished — exactly what was reported. One builder, so there is nothing to forget.
+             */
+            const summary = toolCallSummary(toolCall, {
               result: result.content,
               ...(result.isError === true ? { isError: true } : {}),
-            }
+            })
             post({
               type: 'toolResult',
               toolCall: summary,
@@ -6775,6 +6777,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       prompt: agent.prompt,
       question: request.question,
       ...(request.files !== undefined ? { files: request.files } : {}),
+      /*
+       * What exists in this workspace.
+       *
+       * A specialist has no tools and cannot discover any, so without this it advises as though
+       * the assistant were a bare shell — proposing by hand what a configured tool already does,
+       * or inventing a procedure an existing skill documents. The CLI expert has had an inventory
+       * since §12b for exactly this reason; provider-backed roles had none, which made them
+       * measurably worse at the same question.
+       */
+      briefing: buildAgentBriefing({
+        tools: agentBriefingTools?.() ?? [],
+        skills,
+      }),
     })
 
     if (agent.kind === 'cli') {

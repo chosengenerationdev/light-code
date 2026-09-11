@@ -175,8 +175,21 @@ export function buildAgentPrompt(options: {
   prompt: string
   question: string
   files?: readonly string[] | undefined
+  /** What exists in this workspace — see `agents/briefing.ts` for why it is worth the tokens. */
+  briefing?: string | undefined
 }): string {
-  const lines = [options.prompt, '', '---', '', options.question]
+  const lines = [options.prompt]
+  /*
+   * Between the role and the question, deliberately.
+   *
+   * After the role, because "you are a reviewer" has to land before the inventory means anything;
+   * before the question, because by the time it is reading the question it should already know
+   * what the assistant can be told to do.
+   */
+  if (options.briefing !== undefined && options.briefing.trim().length > 0) {
+    lines.push('', options.briefing)
+  }
+  lines.push('', '---', '', options.question)
   if (options.files !== undefined && options.files.length > 0) {
     lines.push(
       '',

@@ -1,5 +1,5 @@
 import { chartSpecSchema, type ChartSpec } from '../charts/types.js'
-import type { TranscriptEntry } from '../agent/protocol.js'
+import type { ToolCallSummary, TranscriptEntry } from '../agent/protocol.js'
 import type { ChatMessage } from '../providers/types.js'
 
 /**
@@ -132,26 +132,13 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
       entries.push({
         kind: 'tool',
         ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
-        toolCall: {
-          id: toolCall.id,
-          name: toolCall.name,
-          arguments: formatToolArguments(toolCall.arguments),
-          /*
-           * Carried on the entry rather than re-derived in the panel.
-           *
-           * What the panel receives is *formatted* arguments — a display string, not JSON — so it
-           * could not read the role back out even if it wanted to. Deciding here also means the
-           * live path and a restored transcript cannot disagree about who answered.
-           */
-          ...(consulting !== undefined ? { consultingRole: consulting } : {}),
-          ...(toolCallReason(toolCall.arguments) === undefined
-            ? {}
-            : { why: toolCallReason(toolCall.arguments) as string }),
-          // A call with no matching result means the task ended mid-flight — a cancel, a
-          // crash, or a window closed. Leaving `result` unset renders it as unfinished,
-          // which is what actually happened.
-          ...(result !== undefined ? { result } : {}),
-        },
+        /*
+         * Built by the one builder, so a restored transcript and a live turn cannot differ about
+         * what a call looked like. A call with no matching result means the task ended mid-flight
+         * — a cancel, a crash, a window closed — and leaving `result` unset renders it as
+         * unfinished, which is what actually happened.
+         */
+        toolCall: toolCallSummary(toolCall, { result }),
       })
     }
   }
@@ -186,6 +173,34 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
  *
  * Returns `undefined` for anything else, so a caller falls through to its ordinary handling.
  */
+/**
+ * A tool call as the panel shows it.
+ *
+ * **One builder, because there were three and the third forgot a field.** The live path built one
+ * when a call started and *another* when its result arrived, and the second omitted
+ * `consultingRole` — so a consultation was the specialist's colour while it ran and reverted to
+ * the expert's the moment it finished, which is precisely what a user saw and reported.
+ *
+ * Anything derived from the call itself belongs here. A caller supplies only what it alone knows:
+ * the result, and whether it failed.
+ */
+export function toolCallSummary(
+  call: { id: string; name: string; arguments: string },
+  outcome?: { result?: string | undefined; isError?: boolean | undefined },
+): ToolCallSummary {
+  const why = toolCallReason(call.arguments)
+  const consulting = consultationFromToolCall(call.name, call.arguments)
+  return {
+    id: call.id,
+    name: call.name,
+    arguments: formatToolArguments(call.arguments),
+    ...(why !== undefined ? { why } : {}),
+    ...(consulting !== undefined ? { consultingRole: consulting } : {}),
+    ...(outcome?.result !== undefined ? { result: outcome.result } : {}),
+    ...(outcome?.isError === true ? { isError: true } : {}),
+  }
+}
+
 export function consultationFromToolCall(name: string, rawArguments: string): string | undefined {
   if (name === 'ask_expert') return 'expert'
   if (name !== 'ask_agent') return undefined

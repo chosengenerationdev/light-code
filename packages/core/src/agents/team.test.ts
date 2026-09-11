@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { buildAgentBriefing } from './briefing.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from './guidance.js'
 import { AGENT_ROLES, buildAgentPrompt, defaultPromptFor, isAgentRole } from './roles.js'
 import { availableAgents, budgetMatters, resolveTeam, type TeamContext } from './team.js'
@@ -217,5 +218,60 @@ describe('whether a budget is worth showing', () => {
       false,
     )
     expect(budgetMatters(context({ config: { budgetMatters: true } }))).toBe(true)
+  })
+})
+
+/**
+ * What a specialist is told exists.
+ *
+ * It has no tools and cannot discover any, so without an inventory it advises as though the
+ * assistant were a bare shell — proposing by hand what a configured tool already does, or
+ * inventing a procedure an existing skill documents. The Claude CLI expert has had one since
+ * §12b; provider-backed roles had none, which made them worse at the same question.
+ */
+describe('the workspace inventory a specialist is given', () => {
+  const tools = [
+    { name: 'run_tests', description: 'Runs the suite.\nMore detail nobody needs here.' },
+    { name: 'ask_agent', description: 'Consults a specialist.' },
+  ] as never
+  const skills = [{ name: 'deployment', description: 'How we release.' }] as never
+
+  it('lists tools by name with one line each', () => {
+    const briefing = buildAgentBriefing({ tools, skills: [] })
+    expect(briefing).toContain('`run_tests`')
+    expect(briefing).toContain('Runs the suite.')
+    // The second line of a description is detail the specialist does not need to choose a tool.
+    expect(briefing).not.toContain('More detail nobody needs')
+  })
+
+  /** Telling a specialist it can consult a specialist is noise at best and a loop at worst. */
+  it('never offers the consultation tools back to it', () => {
+    expect(buildAgentBriefing({ tools, skills: [] })).not.toContain('ask_agent')
+  })
+
+  it('names skills so it points at one rather than restating it', () => {
+    const briefing = buildAgentBriefing({ tools: [], skills })
+    expect(briefing).toContain('deployment')
+    expect(briefing).toContain('How we release.')
+  })
+
+  /*
+   * A heading followed by "none" is noise in every consultation on a workspace with no MCP
+   * servers and no skills, which is most of them.
+   */
+  it('says nothing at all when there is nothing to say', () => {
+    expect(buildAgentBriefing({ tools: [], skills: [] })).toBe('')
+  })
+
+  it('sits between the role and the question', () => {
+    const prompt = buildAgentPrompt({ prompt: 'ROLE', question: 'QUESTION', briefing: 'INVENTORY' })
+    expect(prompt.indexOf('ROLE')).toBeLessThan(prompt.indexOf('INVENTORY'))
+    expect(prompt.indexOf('INVENTORY')).toBeLessThan(prompt.indexOf('QUESTION'))
+  })
+
+  it('is left out entirely when empty, rather than leaving a gap', () => {
+    expect(buildAgentPrompt({ prompt: 'ROLE', question: 'Q', briefing: '' })).not.toContain(
+      '\n\n\n',
+    )
   })
 })

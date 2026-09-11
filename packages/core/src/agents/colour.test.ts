@@ -76,8 +76,24 @@ describe('the live path and the transcript agree', () => {
     ).toBe(false)
   })
 
-  it('carries the answer on the message rather than leaving the panel to re-derive it', () => {
-    expect(bridge).toContain('consultingRole: consulting')
+  /**
+   * Both the call and its result are built by the one builder.
+   *
+   * They were written out separately, and the *result* one omitted `consultingRole` — so a
+   * consultation wore the specialist's colour while it ran and reverted to the expert's the moment
+   * it finished, which is what a user saw and reported. Counting the builder's uses is what would
+   * catch a third construction being written out by hand again.
+   */
+  it('builds every tool summary with the one builder', () => {
+    const built = bridge.match(/toolCallSummary\(/g) ?? []
+    expect(
+      built.length,
+      'a tool summary is being assembled by hand somewhere',
+    ).toBeGreaterThanOrEqual(2)
+    expect(
+      bridge.includes('const summary: ToolCallSummary = {'),
+      'a tool summary is written out literally, which is how consultingRole was dropped',
+    ).toBe(false)
   })
 
   /**

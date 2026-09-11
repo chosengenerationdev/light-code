@@ -240,6 +240,7 @@ export {
   type TeamContext,
 } from './agents/team.js'
 export { DEFAULT_TEAM_GUIDANCE, buildTeamGuidance } from './agents/guidance.js'
+export { buildAgentBriefing, type AgentBriefingInput } from './agents/briefing.js'
 export {
   buildExpertPrompt,
   type ProviderExpert,
@@ -617,6 +618,7 @@ export {
   CONTROL_TOOLS,
   chartFromToolCall,
   consultationFromToolCall,
+  toolCallSummary,
 } from './history/transcript.js'
 export { redactTask, redactMessage } from './history/redactTask.js'
 
