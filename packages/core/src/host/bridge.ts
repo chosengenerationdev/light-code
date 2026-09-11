@@ -372,7 +372,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
   const configManager = new ConfigManager(services.configStore, services.workspaceRoot)
-  const httpClient = new FetchHttpClient()
+  const httpClient = services.httpClient ?? new FetchHttpClient()
   const conversation = new Conversation(
     workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined,
   )

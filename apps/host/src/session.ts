@@ -2,6 +2,7 @@ import { watch as fsWatch, type FSWatcher } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
+  FetchHttpClient,
   Logger,
   resolveSessionVariables,
   toEnvironment,
@@ -18,6 +19,7 @@ import {
   type WorkspaceState,
 } from '@light-code/core'
 import { FileSecretStore } from './fileSecretStore.js'
+import { withHeadersDeadline } from './httpDeadline.js'
 import { RoutedSecretStore, SharedProfileConfigStore } from './sharedProfiles.js'
 import { UserVariableStore, userVariablesPath } from './userVariables.js'
 import { storageKeyFor, type Principal } from './identity.js'
@@ -48,7 +50,8 @@ export class FileConfigStore implements ConfigStore {
   /** Atomic, with the previous contents kept beside it. See the VS Code store for why. */
   async write(scope: ConfigScope, contents: string): Promise<void> {
     const filePath = this.pathFor(scope)
-    if (filePath === undefined) throw new Error(`Cannot write ${scope} config: no workspace is open`)
+    if (filePath === undefined)
+      throw new Error(`Cannot write ${scope} config: no workspace is open`)
     await fs.mkdir(path.dirname(filePath), { recursive: true })
 
     // 0600: user config holds no secret values, but it does hold every endpoint and
@@ -115,7 +118,8 @@ class FileWorkspaceState implements WorkspaceState {
   async load(): Promise<void> {
     try {
       const parsed: unknown = JSON.parse(await fs.readFile(this.filePath, 'utf8'))
-      if (typeof parsed === 'object' && parsed !== null) this.values = parsed as Record<string, string>
+      if (typeof parsed === 'object' && parsed !== null)
+        this.values = parsed as Record<string, string>
     } catch {
       this.values = {}
     }
@@ -129,7 +133,10 @@ class FileWorkspaceState implements WorkspaceState {
     if (value === undefined) delete this.values[key]
     else this.values[key] = value
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })
-    await fs.writeFile(this.filePath, JSON.stringify(this.values, null, 2), { encoding: 'utf8', mode: 0o600 })
+    await fs.writeFile(this.filePath, JSON.stringify(this.values, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
   }
 }
 
@@ -177,7 +184,9 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
      */
     openFile: async (filePath: string) => {
       try {
-        post([`[info] ${path.basename(filePath)}`, '', await fs.readFile(filePath, 'utf8')].join('\n'))
+        post(
+          [`[info] ${path.basename(filePath)}`, '', await fs.readFile(filePath, 'utf8')].join('\n'),
+        )
       } catch (error) {
         post(`[warning] Could not read ${filePath}: ${String(error)}`)
       }
@@ -189,7 +198,10 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
      */
     async findFiles(pattern, limit, excludeFolders) {
       if (workspaceRoot === undefined) return []
-      const needle = pattern.replace(/^\*\*\//, '').replace(/\*/g, '').toLowerCase()
+      const needle = pattern
+        .replace(/^\*\*\//, '')
+        .replace(/\*/g, '')
+        .toLowerCase()
       // The same list the editor host applies, resolved from config by the bridge.
       const skip = new Set(excludeFolders)
       const found: string[] = []
@@ -288,15 +300,27 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
   await workspaceState.load()
 
   const services: HostServices = {
+    /*
+     * A deadline on getting a reply, which the extension does not ask for and does not get.
+     *
+     * A server sits on a network where a blocked route *drops* packets rather than refusing
+     * them, and a connect like that waits for the kernel — minutes, during which a spinner is
+     * indistinguishable from a slow answer. See `httpDeadline.ts` for why the deadline is on the
+     * headers and never on the body.
+     */
+    httpClient: withHeadersDeadline(new FetchHttpClient()),
     transport: options.transport,
     /*
-      * A shared profile's API key belongs to the administrator and lives beside the shared config;
-      * everything else is this user's. Routed by the reference, which is all a secret store gets.
-      */
+     * A shared profile's API key belongs to the administrator and lives beside the shared config;
+     * everything else is this user's. Routed by the reference, which is all a secret store gets.
+     */
     secrets:
       options.sharedSecrets === undefined
         ? new FileSecretStore(path.join(userDir, 'secrets.json'))
-        : new RoutedSecretStore(new FileSecretStore(path.join(userDir, 'secrets.json')), options.sharedSecrets),
+        : new RoutedSecretStore(
+            new FileSecretStore(path.join(userDir, 'secrets.json')),
+            options.sharedSecrets,
+          ),
     configStore:
       options.sharedProfiles === undefined
         ? new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot)
@@ -330,7 +354,8 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
      * The administrator's win. That is a precedence rule and not a secrecy one: everything a
      * session spawns runs as the service account, so another user's agent can read these.
      */
-    sessionEnv: () => toEnvironment(resolveSessionVariables(options.adminVariables?.() ?? [], userVariables())),
+    sessionEnv: () =>
+      toEnvironment(resolveSessionVariables(options.adminVariables?.() ?? [], userVariables())),
   }
 
   new Logger({ level: 'debug', sink: options.logSink }).info(

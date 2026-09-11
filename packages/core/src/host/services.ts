@@ -1,4 +1,5 @@
 import type { ConfigStore } from '../platform/config.js'
+import type { HttpClient } from '../platform/http.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Transport } from '../platform/transport.js'
 
@@ -83,7 +84,10 @@ export interface HostUi {
    */
   openFile?(filePath: string): Promise<void>
   showOpenDialog(options: OpenDialogOptions): Promise<string | undefined>
-  showSaveDialog(options: { defaultName: string; extensions?: string[] | undefined }): Promise<string | undefined>
+  showSaveDialog(options: {
+    defaultName: string
+    extensions?: string[] | undefined
+  }): Promise<string | undefined>
   /**
    * Workspace-relative paths matching a glob, for `@` autocomplete.
    *
@@ -115,6 +119,16 @@ export interface WorkspaceState {
 export interface HostServices {
   workspaceState: WorkspaceState
   transport: Transport
+  /**
+   * The network egress point, when the host wants to decide it.
+   *
+   * Absent everywhere but the Node host, which wraps the ordinary client in a deadline: a server
+   * on a network that *drops* packets rather than refusing them otherwise waits for the operating
+   * system's connect timeout, and a spinner that never resolves is what the user sees. Left
+   * undefined the bridge builds its own exactly as before, so a host that does not ask for this
+   * is unaffected by it.
+   */
+  httpClient?: HttpClient
   secrets: SecretStore
   configStore: ConfigStore
   ui: HostUi

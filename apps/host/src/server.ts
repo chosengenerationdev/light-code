@@ -1,10 +1,5 @@
 import fs from 'node:fs/promises'
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import {
   describeSubmission,
@@ -14,9 +9,20 @@ import {
   type Transport,
 } from '@light-code/core'
 import { reachableHosts, reachableOrigins } from './reachableHosts.js'
-import { OpenIdentity, SingleUserIdentity, type IdentityProvider, type Principal } from './identity.js'
+import {
+  OpenIdentity,
+  SingleUserIdentity,
+  type IdentityProvider,
+  type Principal,
+} from './identity.js'
 import { isAdminOnly, refusalFor, SINGLE_USER_POLICY, type RolePolicy } from './roles.js'
-import { checkRequest, readJsonBody, reject, securityHeaders, type OriginPolicy } from './security.js'
+import {
+  checkRequest,
+  readJsonBody,
+  reject,
+  securityHeaders,
+  type OriginPolicy,
+} from './security.js'
 import type { SharedConfig, SharedConfigStore } from './sharedConfig.js'
 import { FileSecretStore } from './fileSecretStore.js'
 import { ReviewQueue } from './reviewQueue.js'
@@ -138,9 +144,24 @@ export interface RunningServer {
  * Streaming out and posting in are two halves of one `Transport`. They are separate HTTP
  * requests, so the stream has to be found again by principal when a message arrives.
  */
+/**
+ * One user's session, which **outlives the event stream that carries it**.
+ *
+ * The same bug the extension already fixed once, wearing different clothes: there the bridge was
+ * created per `resolveWebviewView`, so hiding the panel destroyed the conversation, the MCP
+ * connections and the schedule timer. Here it was created per `/api/events` — and the client
+ * reconnects a second after any drop, in a loop. Reported as "UI says disconnected every few
+ * minutes, I had to restart light-code".
+ *
+ * A stream now *attaches* to a session rather than being one.
+ */
 interface Connection {
   transport: Transport
   deliver: (message: unknown) => void
+  /** Points the outbound half at a newly opened stream, flushing whatever it missed. */
+  attach: (response: ServerResponse) => void
+  /** The stream went away. The session stays. */
+  detach: (response: ServerResponse) => void
   dispose: () => void
 }
 
@@ -201,18 +222,50 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   }
   let policy: OriginPolicy = { allowedHosts: [], allowedOrigins: [] }
 
-  async function openConnection(principal: Principal, response: ServerResponse): Promise<Connection> {
+  async function openConnection(principal: Principal): Promise<Connection> {
     const listeners = new Set<(message: unknown) => void>()
 
-    const deliver = (message: unknown): void => {
-      // Server-sent events framing. `\n\n` terminates an event, so any newline inside the
-      // payload has to be escaped — JSON.stringify already guarantees none, but the data
-      // line is written explicitly rather than relying on that.
-      response.write(`data: ${JSON.stringify(message)}\n\n`)
+    /** The stream currently carrying this session, if one is open. */
+    let sink: ServerResponse | undefined
+    /**
+     * Frames written while no stream was attached.
+     *
+     * Not an optimisation. Every host→UI reply travels this way, so one produced in the second
+     * between a drop and a reconnect is a control that spins for ever — which is what "refresh
+     * the models and it just says Loading" looks like from the outside. Bounded, because a
+     * session nobody returns to must not grow without limit.
+     */
+    const missed: string[] = []
+    const MAX_MISSED = 500
+
+    const write = (frame: string): void => {
+      const target = sink
+      /*
+       * A gone socket is checked for rather than written to and caught.
+       *
+       * `write` to a socket the peer has left does not throw synchronously — it emits an error
+       * asynchronously, and an error event with no listener takes the whole process down. A
+       * server that dies when a browser tab closes is not a stable one.
+       */
+      if (target === undefined || target.writableEnded || target.destroyed) {
+        if (missed.length >= MAX_MISSED) missed.shift()
+        missed.push(frame)
+        return
+      }
+      try {
+        target.write(frame)
+      } catch {
+        sink = undefined
+        if (missed.length >= MAX_MISSED) missed.shift()
+        missed.push(frame)
+      }
     }
 
     const transport: Transport = {
-      post: (message) => deliver(message),
+      // Server-sent events framing. `\n\n` terminates an event, so a newline inside the
+      // payload would split it — JSON.stringify already guarantees none, but the data line is
+      // written explicitly rather than relying on that.
+      post: (message) => write(`data: ${JSON.stringify(message)}\n\n`),
       onMessage: (listener) => {
         listeners.add(listener)
         return () => listeners.delete(listener)
@@ -224,7 +277,41 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       deliver: (message) => {
         for (const listener of listeners) listener(message)
       },
-      dispose: () => listeners.clear(),
+      attach: (response: ServerResponse) => {
+        sink = response
+        // Without this an aborted request surfaces as an unhandled 'error' on the response.
+        response.on('error', () => {
+          if (sink === response) sink = undefined
+        })
+        for (const frame of missed.splice(0, missed.length)) {
+          if (sink !== response) break
+          write(frame)
+        }
+      },
+      detach: (response: ServerResponse) => {
+        if (sink === response) sink = undefined
+      },
+      dispose: () => {
+        /*
+         * Ended, not just forgotten.
+         *
+         * `server.close()` waits for every open request to finish, and an event stream never
+         * finishes on its own — so a shutdown with a browser still attached simply never
+         * completed. Found by a test whose `afterEach` timed out, which is the failure being
+         * visible for the first time rather than a new one.
+         */
+        const open = sink
+        sink = undefined
+        missed.length = 0
+        listeners.clear()
+        if (open !== undefined && !open.writableEnded && !open.destroyed) {
+          try {
+            open.end()
+          } catch {
+            // Already gone. Nothing to do and nothing worth saying.
+          }
+        }
+      },
     }
 
     const session = await createSession({
@@ -259,7 +346,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
               'administrator on a shared server — it would run as the account this server runs ' +
               'as. Ask an administrator to add it as a shared profile, or use an API key.',
             submitForReview: async (request) => {
-              const queued = await reviews.submit({ ...request, authorId: principal.id, authorName: principal.displayName })
+              const queued = await reviews.submit({
+                ...request,
+                authorId: principal.id,
+                authorName: principal.displayName,
+              })
               log(`${principal.displayName} submitted ${request.kind} "${request.name}" for review`)
               // Every administrator watching sees it appear without reloading.
               await broadcastReviews()
@@ -354,7 +445,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
          * A *mismatch* gets nothing: that is a bug or an attack, and neither deserves a fresh
          * token, nor the ability to fill somebody's terminal with them.
          */
-        if (outcome.reason === 'expired' || outcome.reason === 'spent') options.onHandoffLapsed?.(outcome.reason)
+        if (outcome.reason === 'expired' || outcome.reason === 'spent')
+          options.onHandoffLapsed?.(outcome.reason)
         reject(response, {
           status: 401,
           reason:
@@ -377,15 +469,34 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
 
     if (url.pathname === '/api/events' && request.method === 'GET') {
-      const existing = connections.get(principal.id)
-      // A reload opens a second stream. The old one is dead but the server cannot know
-      // that until it writes, so it is replaced rather than accumulated.
-      existing?.dispose()
-
       response.writeHead(200, {
         'Content-Type': 'text/event-stream',
         Connection: 'keep-alive',
+        /*
+         * Both of these are about something between the browser and here.
+         *
+         * A proxy that buffers a response holds every event until it has "enough", which for a
+         * stream is for ever — the page connects, renders, and then every reply appears to be
+         * lost. `X-Accel-Buffering` is nginx's off switch and is ignored by everything else;
+         * `no-transform` tells any intermediary not to recompress, which has the same effect.
+         * Neither is needed on loopback, which is exactly why their absence survived until this
+         * ran on a server.
+         */
         ...securityHeaders(),
+        /*
+         * After the shared headers, not before: `securityHeaders()` sets its own `Cache-Control`
+         * and object spread means last-one-wins, so putting these first meant they were silently
+         * dropped. Found by reading the response of a running server rather than the source.
+         *
+         * `no-store` is kept from the shared value; `no-transform` is the addition, and it is the
+         * half that matters here — it tells an intermediary not to recompress or repackage the
+         * body, which is how a proxy ends up buffering a stream until it has "enough", which for
+         * a stream is for ever. `X-Accel-Buffering` is nginx's explicit off switch and is ignored
+         * by everything else. Neither is needed on loopback, which is why their absence survived
+         * until this ran on a server.
+         */
+        'Cache-Control': 'no-store, no-transform',
+        'X-Accel-Buffering': 'no',
       })
       // Flushes headers so the client's reader resolves before the first real message.
       response.write(': connected\n\n')
@@ -399,8 +510,19 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       if (viaAdminUrl) adminConnections.add(principal.id)
       else adminConnections.delete(principal.id)
 
-      const connection = await openConnection(principal, response)
-      connections.set(principal.id, connection)
+      /*
+       * The session is found, not made.
+       *
+       * Rebuilding it here is what made a dropped stream cost the conversation, the MCP
+       * connections, the Python worker and the schedule timer — every one of them torn down and
+       * started again, a second after any blip, in a loop.
+       */
+      let connection = connections.get(principal.id)
+      if (connection === undefined) {
+        connection = await openConnection(principal)
+        connections.set(principal.id, connection)
+      }
+      connection.attach(response)
 
       /*
        * Told once, at the top of the stream, so the UI can mark what this session may change
@@ -420,11 +542,24 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 
       // Proxies and load balancers drop an idle stream; a comment line is not an event, so
       // the client never sees these.
-      const heartbeat = setInterval(() => response.write(': ping\n\n'), 20_000)
+      const heartbeat = setInterval(() => {
+        // Guarded for the same reason `write` is: a ping to a socket that has gone emits an
+        // error event, and one with no listener ends the process.
+        if (response.writableEnded || response.destroyed) return
+        try {
+          response.write(': ping\n\n')
+        } catch {
+          // The close handler below does the tidying; there is nothing useful to say here.
+        }
+      }, 20_000)
+      const stream = connection
       const cleanup = (): void => {
         clearInterval(heartbeat)
-        if (connections.get(principal.id) === connection) connections.delete(principal.id)
-        connection.dispose()
+        /*
+         * Detached, not disposed. The session stays open so a reconnect resumes it, and so a
+         * reply produced while nobody was listening is still there to deliver.
+         */
+        stream.detach(response)
       }
       request.on('close', cleanup)
       return
@@ -444,9 +579,14 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
        * the VS Code host, where there is no such thing as a second user — teaching core about
        * roles would put a concept in it that only one host has.
        */
-      const type = typeof (body as { type?: unknown })?.type === 'string' ? (body as { type: string }).type : ''
+      const type =
+        typeof (body as { type?: unknown })?.type === 'string'
+          ? (body as { type: string }).type
+          : ''
       if (roles.shared && !isAdminSession(principal) && isAdminOnly(type)) {
-        log(`refused "${type}" from ${principal.displayName} (${principal.id}): not an administrator`)
+        log(
+          `refused "${type}" from ${principal.displayName} (${principal.id}): not an administrator`,
+        )
         // Answered rather than dropped: the UI hides these controls, so a message arriving
         // here is either a stale page or someone poking the API, and both deserve a reason.
         connection.transport.post({ type: 'error', message: refusalFor(type) })
@@ -522,8 +662,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
    * recorded here too — the registry is the boundary (§13), and this is the moment the approval
    * becomes one.
    */
-  async function applyApproval(item: { kind: string; name: string; content: string }): Promise<string | undefined> {
-    if (options.workspaceRoot === undefined) return 'No workspace is open, so there is nowhere to write it.'
+  async function applyApproval(item: {
+    kind: string
+    name: string
+    content: string
+  }): Promise<string | undefined> {
+    if (options.workspaceRoot === undefined)
+      return 'No workspace is open, so there is nowhere to write it.'
     try {
       if (item.kind === 'skill') {
         const dir = path.join(options.workspaceRoot, '.lightcode', 'skills')
@@ -575,9 +720,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       return true
     }
     if (type === 'decideReview') {
-      const id = typeof (body as { id?: unknown }).id === 'string' ? (body as { id: string }).id : ''
+      const id =
+        typeof (body as { id?: unknown }).id === 'string' ? (body as { id: string }).id : ''
       const approved = (body as { approved?: unknown }).approved === true
-      const reason = typeof (body as { reason?: unknown }).reason === 'string' ? (body as { reason: string }).reason : undefined
+      const reason =
+        typeof (body as { reason?: unknown }).reason === 'string'
+          ? (body as { reason: string }).reason
+          : undefined
       const decided = await reviews.decide(id, {
         approved,
         by: principal.displayName,
@@ -593,10 +742,15 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       if (approved) {
         const failure = await applyApproval(decided)
         if (failure !== undefined) {
-          connection.transport.post({ type: 'error', message: `Approved, but could not write it: ${failure}` })
+          connection.transport.post({
+            type: 'error',
+            message: `Approved, but could not write it: ${failure}`,
+          })
         }
       }
-      log(`${principal.displayName} ${approved ? 'approved' : 'rejected'} ${decided.kind} "${decided.name}"`)
+      log(
+        `${principal.displayName} ${approved ? 'approved' : 'rejected'} ${decided.kind} "${decided.name}"`,
+      )
       await broadcastReviews()
       return true
     }
@@ -607,7 +761,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     if (type === 'saveUserVariables') {
       const parsed = sessionVariablesSchema.safeParse(payload.variables)
       if (!parsed.success) {
-        connection.transport.post({ type: 'error', message: `Could not save variables: ${parsed.error.message}` })
+        connection.transport.post({
+          type: 'error',
+          message: `Could not save variables: ${parsed.error.message}`,
+        })
         return true
       }
       await userVariableStoreFor(options.dataDir, principal).save(parsed.data)
@@ -625,12 +782,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       if (type === 'saveAdminVariables') {
         const parsed = sessionVariablesSchema.safeParse(payload.variables)
         if (!parsed.success) {
-          connection.transport.post({ type: 'error', message: `Could not save variables: ${parsed.error.message}` })
+          connection.transport.post({
+            type: 'error',
+            message: `Could not save variables: ${parsed.error.message}`,
+          })
           return true
         }
         sharedCache = await sharedStore.save({ variables: parsed.data })
       } else {
-        const ids = Array.isArray(payload.ids) ? payload.ids.filter((id): id is string => typeof id === 'string') : []
+        const ids = Array.isArray(payload.ids)
+          ? payload.ids.filter((id): id is string => typeof id === 'string')
+          : []
         /*
          * An administrator removing themselves is allowed but reported: it is a legitimate act
          * when handing over, and refusing it would mean the last admin can never be replaced.
@@ -669,13 +831,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       })
       response.end(body)
     } catch {
-      reject(response, { status: 500, reason: `Missing client asset "${asset}". Rebuild with pnpm build.` })
+      reject(response, {
+        status: 500,
+        reason: `Missing client asset "${asset}". Rebuild with pnpm build.`,
+      })
     }
   }
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, bindAddress, resolve))
   const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('Server did not bind a port.')
+  if (address === null || typeof address === 'string')
+    throw new Error('Server did not bind a port.')
 
   const authority = `${bindAddress}:${address.port}`
   // Both checks are pinned to the address actually bound, which is why this is set after
@@ -706,6 +872,14 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         for (const connection of connections.values()) connection.dispose()
         connections.clear()
         server.close(() => resolve())
+        /*
+         * Keep-alive sockets from ordinary asset requests also hold `close` open, and this server
+         * supports Node 17 where `closeAllConnections` does not exist. Called through a capability
+         * check rather than assumed, so the old runtime simply waits for its sockets to time out
+         * instead of throwing on a missing method.
+         */
+        const closeAll = (server as { closeAllConnections?: () => void }).closeAllConnections
+        if (typeof closeAll === 'function') closeAll.call(server)
       }),
   }
 }

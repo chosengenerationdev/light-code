@@ -102,5 +102,18 @@ export default tseslint.config(
     files: ['apps/host/src/client/**/*.ts', 'apps/host/src/client/**/*.tsx'],
     rules: { 'no-restricted-globals': 'off' },
   },
+  {
+    /*
+     * A test that drives the host's own listening socket over loopback.
+     *
+     * Invariant 2 governs what the product *sends*: every request Light Code makes goes through
+     * HttpClient so TLS material, proxies and the no-default-endpoints rule are enforced in one
+     * place. This is the other direction entirely — it is the browser's half of a server this
+     * repository starts, and there is no HttpClient answer to "open an event stream and read
+     * frames from it". Nothing here is published; the npm `files` list is `dist/**`.
+     */
+    files: ['apps/host/src/streamResume.test.ts'],
+    rules: { 'no-restricted-globals': 'off' },
+  },
   eslintConfigPrettier,
 )

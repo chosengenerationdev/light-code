@@ -12,6 +12,10 @@ import type { Transport } from '@light-code/core/browser'
  * would have to go in the query string, which is exactly what §14's two-stage handoff
  * exists to avoid. A streamed `fetch` can set headers.
  */
+/** How many times a message is resent before the failure is reported instead. */
+const POST_RETRIES = 3
+const RETRY_DELAY_MS = 700
+
 export class HttpTransport implements Transport {
   private readonly listeners = new Set<(message: unknown) => void>()
   private token: string | undefined
@@ -66,7 +70,8 @@ export class HttpTransport implements Transport {
       }
     }
 
-    if (this.token === undefined) throw new Error('No session. Restart light-code and open the printed URL.')
+    if (this.token === undefined)
+      throw new Error('No session. Restart light-code and open the printed URL.')
     void this.listen()
   }
 
@@ -82,7 +87,8 @@ export class HttpTransport implements Transport {
         const response = await fetch(`/api/events${view}`, {
           headers: { Authorization: `Bearer ${this.token ?? ''}` },
         })
-        if (!response.ok || response.body === null) throw new Error(`stream failed: ${response.status}`)
+        if (!response.ok || response.body === null)
+          throw new Error(`stream failed: ${response.status}`)
         this.onStatus('connected')
 
         const reader = response.body.getReader()
@@ -106,7 +112,9 @@ export class HttpTransport implements Transport {
           }
         }
       } catch (error) {
-        this.onStatus(`disconnected — retrying (${error instanceof Error ? error.message : String(error)})`)
+        this.onStatus(
+          `disconnected — retrying (${error instanceof Error ? error.message : String(error)})`,
+        )
       }
       // The server going away during a restart is the common case, so reconnect rather
       // than leaving a dead page. Fixed delay: this is loopback, not a busy backend.
@@ -114,12 +122,60 @@ export class HttpTransport implements Transport {
     }
   }
 
+  /**
+   * Sends one message, and **says so when the server refuses it**.
+   *
+   * ## The reported failure
+   *
+   * "I clicked Save, it closed the window, and it didn't save anything." The old body was
+   * `fetch(...).catch(...)`, and `catch` on a fetch fires only for a *network* error — a 401, a
+   * 403 from the origin check, or the 409 this server returns when no event stream is open all
+   * resolve perfectly happily and were dropped on the floor. The UI closed the dialog because it
+   * had done its part, and nothing anywhere said the message had been thrown away.
+   *
+   * ## Why 409 is retried rather than reported
+   *
+   * It means the stream is not up *yet*, which during the second after a reconnect is ordinary
+   * rather than wrong. The reconnect loop will have a stream again shortly, so this waits for it.
+   * Every other status is a real refusal and is reported with its reason.
+   */
   post(message: unknown): void {
-    void fetch('/api/message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token ?? ''}` },
-      body: JSON.stringify(message),
-    }).catch(() => this.onStatus('send failed — is the server still running?'))
+    void this.send(message, 0)
+  }
+
+  private async send(message: unknown, attempt: number): Promise<void> {
+    try {
+      const response = await fetch('/api/message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.token ?? ''}`,
+        },
+        body: JSON.stringify(message),
+      })
+      if (response.ok) return
+
+      if (response.status === 409 && attempt < POST_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+        await this.send(message, attempt + 1)
+        return
+      }
+
+      // The server's own sentence where there is one; it names what was refused and why.
+      const reason = (await response.text().catch(() => '')).trim()
+      this.onStatus(
+        `the server refused that (${String(response.status)})${reason.length > 0 ? `: ${reason}` : ''}`,
+      )
+    } catch (error) {
+      if (attempt < POST_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+        await this.send(message, attempt + 1)
+        return
+      }
+      this.onStatus(
+        `could not reach the server: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   }
 
   onMessage(listener: (message: unknown) => void): () => void {
