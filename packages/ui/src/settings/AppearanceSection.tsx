@@ -3,6 +3,7 @@ import {
   ACCENT_PRESETS,
   contrastFor,
   DEFAULT_ACCENT,
+  DEFAULT_AGENT_COLORS,
   DEFAULT_EXPERT,
   EXPERT_PRESETS,
   isValidAccent,
@@ -15,6 +16,16 @@ export interface AppearanceSectionProps {
   accentColor: string
   onChangeAccent: (value: string) => void
   expertColor: string
+  /**
+   * A colour per specialist, and the roles to offer one for.
+   *
+   * The roles come from the host rather than being listed here: they are defined in core, and a
+   * second list in the appearance panel would be one more place to remember when a role is added
+   * — with the symptom being a specialist nobody can recolour.
+   */
+  agentRoles: { role: string; name: string }[]
+  agentColors: Record<string, string>
+  onChangeAgentColor: (role: string, hex: string) => void
   onChangeExpert: (value: string) => void
   /**
    * Light or dark, where the host has no theme of its own.
@@ -114,7 +125,11 @@ function ColourPicker(props: ColourPickerProps): ReactElement {
           spellCheck={false}
           placeholder={props.fallback}
           onChange={(event) => commit(event.target.value)}
-          style={{ ...textFieldStyle(), width: 130, fontFamily: 'var(--vscode-editor-font-family, monospace)' }}
+          style={{
+            ...textFieldStyle(),
+            width: 130,
+            fontFamily: 'var(--vscode-editor-font-family, monospace)',
+          }}
         />
         <span
           aria-hidden="true"
@@ -128,7 +143,9 @@ function ColourPicker(props: ColourPickerProps): ReactElement {
           }}
         />
         {!isValidAccent(custom) && (
-          <span style={{ color: colors.error, fontSize: 11, fontFamily }}>Needs a hex colour, e.g. {props.fallback}</span>
+          <span style={{ color: colors.error, fontSize: 11, fontFamily }}>
+            Needs a hex colour, e.g. {props.fallback}
+          </span>
         )}
       </div>
     </div>
@@ -194,14 +211,41 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
       />
 
       {/*
+        One per specialist, for the same reason the expert has one.
+
+        The expert's colour marks *authorship* — these words came from somewhere other than the
+        model you are talking to. With a team, "somewhere else" stops being one place: a review and
+        a test plan arriving in the same colour are two voices presented as one, and which
+        specialist said it is exactly what the reader needs to know.
+      */}
+      {props.agentRoles.length > 0 && (
+        <div style={{ marginTop: 4 }}>
+          {props.agentRoles.map((role) => (
+            <ColourPicker
+              key={role.role}
+              label={`${role.name} colour`}
+              description={`Marks answers from the ${role.name.toLowerCase()}.`}
+              value={
+                props.agentColors[role.role] ?? DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT
+              }
+              presets={EXPERT_PRESETS}
+              fallback={DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT}
+              inputId={`lc-agent-${role.role}-hex`}
+              onChange={(hex) => props.onChangeAgentColor(role.role, hex)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/*
        * Warned rather than prevented. Two identical colours defeat the point of having two,
        * but it is a legitimate thing to want — and the expert mark icon still distinguishes
        * them — so this states the consequence and leaves the choice alone.
        */}
       {clash && (
         <p style={{ color: colors.error, fontSize: 11, margin: '0 0 14px' }}>
-          These are the same colour, so expert answers will not stand out. Only the expert mark
-          will tell them apart.
+          These are the same colour, so expert answers will not stand out. Only the expert mark will
+          tell them apart.
         </p>
       )}
 

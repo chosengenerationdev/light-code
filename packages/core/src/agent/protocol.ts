@@ -56,6 +56,30 @@ export interface ApigeeSummary {
   refreshSkewSeconds?: number | undefined
 }
 
+/** One role as the Agents tab shows it. */
+export interface AgentRoleState {
+  role: string
+  name: string
+  summary: string
+  /** Absent when nobody is assigned, which is how a role is switched off. */
+  kind?: 'cli' | 'profile'
+  profileId?: string
+  /** Who answers, for display. */
+  label: string
+  available: boolean
+  reason?: string
+  /** The prompt in force, edited or not. */
+  prompt: string
+  /**
+   * True when that is the default rather than an edit.
+   *
+   * Sent rather than compared in the panel: the default lives in core and the panel would need
+   * its own copy to compare against, which is one fact in two places and the copy that goes
+   * stale is the one that decides whether Reset is offered.
+   */
+  promptIsDefault: boolean
+}
+
 /** Cert *paths* are not secrets (§15) — only the passphrase is, and it never crosses. */
 export interface CertSummary {
   certDir?: string | undefined
@@ -736,6 +760,26 @@ export type UiToHostMessage =
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
   | { type: 'requestExpert' }
   | {
+      type: 'setAgentRole'
+      role: string
+      /** Absent unassigns the role, which is how a specialist is switched off. */
+      assignment?: { kind: 'cli' | 'profile'; profileId?: string }
+    }
+  | {
+      type: 'setAgentPrompt'
+      role: string
+      /** Absent resets it to the default, which is not the same as setting it to empty. */
+      prompt?: string
+    }
+  | { type: 'setAgentBudget'; matters: boolean }
+  | {
+      type: 'setTeamGuidance'
+      /** Absent resets to the default. */
+      guidance?: string
+    }
+  | { type: 'setAgentColor'; role: string; color: string }
+  | { type: 'requestAgents' }
+  | {
       type: 'setExpert'
       enabled: boolean
       path?: string
@@ -1268,6 +1312,32 @@ export type HostToUiMessage =
       indexedFiles: number
     }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */
+  | {
+      type: 'agents'
+      /** Every role, in a fixed order, whether or not anybody is assigned to it. */
+      roles: AgentRoleState[]
+      /** What can be assigned. */
+      profiles: { id: string; label: string }[]
+      /** Whether the Claude CLI was found, so it can be offered as an assignment. */
+      cliAvailable: boolean
+      /** Why it was not, when it was not — the same sentence the Expert tab used to show. */
+      cliReason?: string
+      /**
+       * Whether to show anything about cost.
+       *
+       * Resolved by the host rather than read from config by the panel, because the *default*
+       * depends on whether anything meters — which the panel cannot know. A cap over an
+       * unmetered gateway would look like protection without being any.
+       */
+      budgetMatters: boolean
+      /** The Agent team instruction as it will be used, and the default to reset to. */
+      teamGuidance: string
+      defaultTeamGuidance: string
+      /** True when the guidance is the default, so the panel can offer Reset honestly. */
+      teamGuidanceIsDefault: boolean
+      /** A colour per role, filled in with the defaults for any not chosen. */
+      colors: Record<string, string>
+    }
   | {
       type: 'expert'
       /**

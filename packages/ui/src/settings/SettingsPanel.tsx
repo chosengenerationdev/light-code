@@ -11,6 +11,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
 import { ApprovalsTab } from './ApprovalsTab.js'
 import { McpTab } from './McpTab.js'
+import { AgentsTab, type AgentsTabProps } from './AgentsTab.js'
 import { ExpertTab, type ExpertState } from './ExpertTab.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
@@ -53,6 +54,9 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   accentColor: string
   onSetAccentColor: (value: string) => void
   expertColor: string
+  /** Everything the Agents tab shows and changes. See the `agents` message. */
+  agents: Omit<AgentsTabProps, 'budgetPanel'>
+  onSetAgentColor: (role: string, hex: string) => void
   onSetExpertColor: (value: string) => void
   /** Only where the host has no theme of its own — see `AppearanceSectionProps.theme`. */
   choosesTheme?: boolean
@@ -129,7 +133,7 @@ type TabId =
   | 'approvals'
   | 'mcp'
   | 'search'
-  | 'expert'
+  | 'agents'
   | 'network'
   | 'python'
   | 'tools'
@@ -161,12 +165,15 @@ export function describeDocsResult(
   return `Indexed ${String(count)} ${count === 1 ? 'entry' : 'entries'}.`
 }
 
+/** Tabs that have been renamed, so an old link still lands where it meant to. */
+const RENAMED_TABS: Record<string, string> = { expert: 'agents' }
+
 const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => ReactElement }[] = [
   { id: 'providers', label: 'Providers', Icon: ProviderIcon },
   { id: 'approvals', label: 'Approvals', Icon: ShieldIcon },
   { id: 'mcp', label: 'MCP', Icon: ServerIcon },
   { id: 'search', label: 'Search', Icon: SearchIcon },
-  { id: 'expert', label: 'Expert', Icon: ExpertIcon },
+  { id: 'agents', label: 'Agents', Icon: ExpertIcon },
   { id: 'schedules', label: 'Schedules', Icon: ClockIcon },
   { id: 'python', label: 'Python', Icon: PythonIcon },
   // After the sources it lists, because it is where you go to *read* rather than change.
@@ -213,7 +220,15 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const requested = props.requestedTab
   useEffect(() => {
     if (requested === undefined) return
-    if (TABS.some((tab) => tab.id === requested.tab)) setActive(requested.tab as TabId)
+    /*
+     * The old name still opens the tab, for the same reason `junior` still selects Agent team.
+     *
+     * Tab ids are written into walkthrough links, documentation and whatever anybody bookmarked,
+     * and an id this panel does not recognise is *ignored* — so a renamed tab would leave people
+     * clicking a link that appears to do nothing at all, which is worse than an error.
+     */
+    const wanted = RENAMED_TABS[requested.tab] ?? requested.tab
+    if (TABS.some((tab) => tab.id === wanted)) setActive(wanted as TabId)
   }, [requested])
 
   return (
@@ -285,6 +300,11 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               onChangeAccent={props.onSetAccentColor}
               expertColor={props.expertColor}
               onChangeExpert={props.onSetExpertColor}
+              // The roles come from the same message the Agents tab renders, so the two lists
+              // can never disagree about which specialists exist.
+              agentRoles={props.agents.roles.map((role) => ({ role: role.role, name: role.name }))}
+              agentColors={props.agents.colors}
+              onChangeAgentColor={props.onSetAgentColor}
               {...(props.theme === undefined ? {} : { theme: props.theme })}
               {...(props.choosesTheme === true && props.onSetTheme !== undefined
                 ? { onChangeTheme: props.onSetTheme }
@@ -342,21 +362,35 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <PythonTab {...props.python} />
         ) : shown === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
-        ) : shown === 'expert' ? (
-          <ExpertTab
-            expert={props.expert}
-            onSave={props.onSaveExpert}
-            {...(props.onSaveProfileExpert !== undefined
-              ? { onSaveProfileExpert: props.onSaveProfileExpert }
-              : {})}
-            onRecheck={props.onRecheckExpert}
-            onAssess={props.onAssessJunior}
-            onClearAssessment={props.onClearAssessment}
-            onMeasureCost={props.onMeasureCost}
-            onClearPricing={props.onClearPricing}
-            onSetKeepAlive={props.onSetKeepAlive}
-            onBrowse={props.onBrowse}
-            pickedPath={props.pickedPath}
+        ) : shown === 'agents' ? (
+          <AgentsTab
+            {...props.agents}
+            /*
+             * The old Expert panel, nested rather than discarded.
+             *
+             * It holds everything that only makes sense where a *command line* is being metered:
+             * detection, the path, the budget, the measured price, the junior assessment. None of
+             * that generalises to a role answered by a gateway — but all of it still matters when
+             * Claude is in a seat, and rewriting it to say the same things again would have been
+             * two implementations of one panel.
+             */
+            budgetPanel={
+              <ExpertTab
+                expert={props.expert}
+                onSave={props.onSaveExpert}
+                {...(props.onSaveProfileExpert !== undefined
+                  ? { onSaveProfileExpert: props.onSaveProfileExpert }
+                  : {})}
+                onRecheck={props.onRecheckExpert}
+                onAssess={props.onAssessJunior}
+                onClearAssessment={props.onClearAssessment}
+                onMeasureCost={props.onMeasureCost}
+                onClearPricing={props.onClearPricing}
+                onSetKeepAlive={props.onSetKeepAlive}
+                onBrowse={props.onBrowse}
+                pickedPath={props.pickedPath}
+              />
+            }
           />
         ) : (
           <McpTab

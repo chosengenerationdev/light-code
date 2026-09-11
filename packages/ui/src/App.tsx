@@ -51,7 +51,14 @@ import type { SearchIndex } from './settings/SearchTab.js'
 import type { EmbedderState } from './settings/IndexingSection.js'
 import { HistoryList } from './history/HistoryList.js'
 import { BackIcon, HelpIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
-import { applyAccent, applyExpert, DEFAULT_ACCENT, DEFAULT_EXPERT } from './styles.js'
+import {
+  applyAccent,
+  applyAgentColor,
+  applyAgentColors,
+  applyExpert,
+  DEFAULT_ACCENT,
+  DEFAULT_EXPERT,
+} from './styles.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
 
 export interface AppProps {
@@ -90,6 +97,9 @@ function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
     },
   ]
 }
+
+/** What the Agents tab renders, straight off the `agents` message. */
+type AgentsState = Extract<HostToUiMessage, { type: 'agents' }>
 
 export function App(props: AppProps): ReactElement {
   const [view, setView] = useState<View>('chat')
@@ -132,6 +142,23 @@ export function App(props: AppProps): ReactElement {
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [readRoots, setReadRoots] = useState<string[]>([])
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
+  /**
+   * The team, as the host resolved it.
+   *
+   * Undefined until the first `agents` message, which is why the panel renders an empty roster
+   * rather than nothing: a tab that appears blank while a reply is in flight reads as broken.
+   */
+  const [agents, setAgents] = useState<AgentsState>({
+    type: 'agents',
+    roles: [],
+    profiles: [],
+    cliAvailable: false,
+    budgetMatters: false,
+    teamGuidance: '',
+    defaultTeamGuidance: '',
+    teamGuidanceIsDefault: true,
+    colors: {},
+  })
   const [expertSpend, setExpertSpend] = useState<{
     usd: number
     consultations: number
@@ -723,6 +750,17 @@ export function App(props: AppProps): ReactElement {
         setSearchSavedTick((tick) => tick + 1)
       } else if (message.type === 'network') {
         setNetwork(message.settings)
+      } else if (message.type === 'agents') {
+        /*
+         * The whole message, not field by field.
+         *
+         * CLAUDE.md records what happened the last time a panel's state was unpacked one field at
+         * a time: every field added afterwards was silently dropped on the way through, the host
+         * was correct, the protocol was correct, and the panel quietly discarded the answer.
+         */
+        setAgents(message)
+        // Applied immediately so a colour change is visible without a round trip through save.
+        applyAgentColors(message.colors)
       } else if (message.type === 'expert') {
         /*
          * Everything except the discriminant, rather than a hand-copied list.
@@ -1341,6 +1379,40 @@ export function App(props: AppProps): ReactElement {
               setAccentColor(value)
               applyAccent(value)
               props.transport.post({ type: 'setAccentColor', value } satisfies UiToHostMessage)
+            }}
+            agents={{
+              ...agents,
+              onAssign: (role, assignment) =>
+                props.transport.post({
+                  type: 'setAgentRole',
+                  role,
+                  ...(assignment !== undefined ? { assignment } : {}),
+                } satisfies UiToHostMessage),
+              onSetPrompt: (role, prompt) =>
+                props.transport.post({
+                  type: 'setAgentPrompt',
+                  role,
+                  // Absent resets to the default, which is not the same as an empty prompt.
+                  ...(prompt !== undefined ? { prompt } : {}),
+                } satisfies UiToHostMessage),
+              onSetBudget: (matters) =>
+                props.transport.post({ type: 'setAgentBudget', matters } satisfies UiToHostMessage),
+              onSetTeamGuidance: (guidance) =>
+                props.transport.post({
+                  type: 'setTeamGuidance',
+                  ...(guidance !== undefined ? { guidance } : {}),
+                } satisfies UiToHostMessage),
+            }}
+            onSetAgentColor={(role, hex) => {
+              // Applied locally as well as saved, so the change is instant rather than waiting
+              // for the round trip a settings reply would take — the same rule the theme follows.
+              setAgents((current) => ({ ...current, colors: { ...current.colors, [role]: hex } }))
+              applyAgentColor(role, hex)
+              props.transport.post({
+                type: 'setAgentColor',
+                role,
+                color: hex,
+              } satisfies UiToHostMessage)
             }}
             expertColor={expertColor}
             onSetExpertColor={(value) => {

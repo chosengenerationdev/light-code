@@ -71,7 +71,11 @@ export { validateProviderForm, type FieldError } from './config/validate.js'
  * Pure lookup over a static table — no `node:*`, so the webview can show a model's context
  * window as it is typed without a round trip to the host.
  */
-export { lookupModelCapabilities, resolveModelCapabilities, type ModelCapabilities } from './providers/models.js'
+export {
+  lookupModelCapabilities,
+  resolveModelCapabilities,
+  type ModelCapabilities,
+} from './providers/models.js'
 
 export type {
   UiToHostMessage,
@@ -91,6 +95,7 @@ export type {
   TestConnectionStep,
   PythonSettings,
   PythonEnvVariable,
+  AgentRoleState,
   SearchConnectionSummary,
   ToolCatalogueEntry,
   SearchConnectionInput,
@@ -120,5 +125,11 @@ export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedul
 export type { ScheduleToolInfo } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'
 
-export { chartTotals, CHART_TYPES, type ChartSpec, type ChartSeries, type ChartType } from './charts/types.js'
+export {
+  chartTotals,
+  CHART_TYPES,
+  type ChartSpec,
+  type ChartSeries,
+  type ChartType,
+} from './charts/types.js'
 export type { DatasetConfig, DatasetRecord } from './dataset/types.js'

@@ -9,9 +9,9 @@ import { compareMentionCandidates, matchesMentionQuery } from '../context/mentio
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildExpertPrompt, type ProviderExpert } from '../expert/providerExpert.js'
-import { buildTeamGuidance } from '../agents/guidance.js'
-import { buildAgentPrompt } from '../agents/roles.js'
-import { resolveTeam, type ResolvedAgent } from '../agents/team.js'
+import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
+import { allRoles, buildAgentPrompt, defaultPromptFor, isAgentRole } from '../agents/roles.js'
+import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
 import type { Tool } from '../tools/types.js'
 import {
   createExcelOpenTool,
@@ -3336,6 +3336,86 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(expertEvents !== undefined
         ? { savings: summariseSavings(expertEvents, settings?.pricing) }
         : {}),
+    }
+  }
+
+  /**
+   * Everything the Agents tab is told, from one place.
+   *
+   * The whole message is built here rather than assembled at each call site, for the reason
+   * CLAUDE.md records twice: two `expert` messages built separately drifted, and the symptom was
+   * a measured price that reached one path and not the other. One constructor, one shape.
+   */
+  async function postAgents(): Promise<void> {
+    const { config } = await configManager.load()
+    const teamContext = {
+      config: config.agents,
+      profiles: (config.profiles ?? []).map((profile) => ({
+        id: profile.id,
+        label: profile.label,
+      })),
+      cliAvailable: expertCli?.available === true,
+    }
+
+    /*
+     * Every role, assigned or not — unlike `resolveTeam`, which returns only what is assigned.
+     * The panel has to render the empty ones too: they are what you click to assign somebody,
+     * and a tab showing only what already exists gives you nowhere to start.
+     */
+    const assigned = new Map(resolveTeam(teamContext).map((agent) => [agent.role, agent]))
+    const roles = allRoles().map((info) => {
+      const agent = assigned.get(info.role)
+      const prompt = config.agents?.roles?.[info.role]?.prompt
+      return {
+        role: info.role,
+        name: info.name,
+        summary: info.summary,
+        ...(agent !== undefined ? { kind: agent.kind } : {}),
+        ...(agent?.profileId !== undefined ? { profileId: agent.profileId } : {}),
+        label: agent?.label ?? 'Nobody',
+        available: agent?.available ?? false,
+        ...(agent?.reason !== undefined ? { reason: agent.reason } : {}),
+        prompt: prompt ?? defaultPromptFor(info.role),
+        promptIsDefault: prompt === undefined,
+      }
+    })
+
+    const guidance = config.agents?.teamGuidance
+    post({
+      type: 'agents',
+      roles,
+      profiles: teamContext.profiles,
+      cliAvailable: teamContext.cliAvailable,
+      ...(expertCli?.available === false && expertCli.reason !== undefined
+        ? { cliReason: expertCli.reason }
+        : {}),
+      budgetMatters: budgetMatters(teamContext),
+      teamGuidance: guidance ?? DEFAULT_TEAM_GUIDANCE,
+      defaultTeamGuidance: DEFAULT_TEAM_GUIDANCE,
+      teamGuidanceIsDefault: guidance === undefined,
+      colors: { ...(config.agents?.colors ?? {}) },
+    })
+  }
+
+  /**
+   * Writes one key of the `agents` block without disturbing the rest of it.
+   *
+   * `configManager.save` replaces whichever top-level keys it is given, so writing the whole block
+   * from one control would erase every other control's value. That has cost real settings twice
+   * here already — see `config/blockMerge.test.ts`.
+   */
+  async function saveAgents(
+    change: (
+      current: NonNullable<LightCodeConfig['agents']>,
+    ) => NonNullable<LightCodeConfig['agents']>,
+  ): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      await configManager.save('user', { agents: change(config.agents ?? {}) })
+      await loadSettings()
+      await postAgents()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -7748,6 +7828,95 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSaveNetwork(message.settings)
     } else if (message.type === 'requestExpert') {
       void postExpert()
+    } else if (message.type === 'requestAgents') {
+      void postAgents()
+    } else if (message.type === 'setAgentRole') {
+      const assignment = message.assignment
+      const role = message.role
+      /*
+       * Refused rather than written, for a role this build does not have.
+       *
+       * The role crosses as a string — the protocol cannot carry a union that core owns without
+       * the UI importing it — so this is where it becomes one. Writing it anyway would put a key
+       * in config that nothing ever reads and nothing ever cleans up.
+       */
+      if (!isAgentRole(role)) {
+        post({ type: 'error', message: `There is no "${role}" role.` })
+        return
+      }
+      void saveAgents((current) => {
+        const roles = { ...(current.roles ?? {}) }
+        /*
+         * Unassigning deletes the entry rather than storing an empty one, so "nobody" and "somebody
+         * with nothing set" cannot both exist and mean different things to different readers.
+         *
+         * The edited prompt is kept: somebody switching a reviewer from one model to another has
+         * not stopped wanting their reviewer to behave the way they wrote.
+         */
+        if (assignment === undefined) delete roles[role]
+        else {
+          roles[role] = {
+            kind: assignment.kind,
+            ...(assignment.profileId !== undefined ? { profileId: assignment.profileId } : {}),
+            ...(roles[role]?.prompt !== undefined ? { prompt: roles[role].prompt } : {}),
+          }
+        }
+        return { ...current, roles }
+      })
+    } else if (message.type === 'setAgentPrompt') {
+      const role = message.role
+      const prompt = message.prompt
+      if (!isAgentRole(role)) {
+        post({ type: 'error', message: `There is no "${role}" role.` })
+        return
+      }
+      void saveAgents((current) => {
+        const roles = { ...(current.roles ?? {}) }
+        const existing = roles[role]
+        // Only stored when it differs, so an improved default still reaches somebody who has
+        // looked at the prompt and left it alone.
+        if (prompt === undefined || prompt === defaultPromptFor(role)) {
+          if (existing !== undefined) {
+            const rest = { ...existing }
+            delete rest.prompt
+            roles[role] = rest
+          }
+        } else {
+          roles[role] = { ...(existing ?? { kind: 'profile' as const }), prompt }
+        }
+        return { ...current, roles }
+      })
+    } else if (message.type === 'setAgentBudget') {
+      const matters = message.matters
+      void saveAgents((current) => ({ ...current, budgetMatters: matters }))
+    } else if (message.type === 'setTeamGuidance') {
+      const guidance = message.guidance
+      void saveAgents((current) => {
+        if (
+          guidance === undefined ||
+          guidance.trim().length === 0 ||
+          guidance === DEFAULT_TEAM_GUIDANCE
+        ) {
+          // Removed rather than stored as the default text: storing it would pin the user to
+          // whatever it said today, and later improvements would reach everyone except the
+          // people who had once opened the box.
+          const rest = { ...current }
+          delete rest.teamGuidance
+          return rest
+        }
+        return { ...current, teamGuidance: guidance }
+      })
+    } else if (message.type === 'setAgentColor') {
+      const role = message.role
+      const color = message.color
+      if (!isAgentRole(role)) {
+        post({ type: 'error', message: `There is no "${role}" role.` })
+        return
+      }
+      void saveAgents((current) => ({
+        ...current,
+        colors: { ...(current.colors ?? {}), [role]: color },
+      }))
     } else if (message.type === 'setExpert') {
       void handleSetExpert(message.enabled, message.path, message.model, {
         ...(message.maxSpendUsd !== undefined ? { maxSpendUsd: message.maxSpendUsd } : {}),

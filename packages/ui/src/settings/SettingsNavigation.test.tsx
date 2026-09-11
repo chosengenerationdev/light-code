@@ -29,6 +29,27 @@ afterEach(() => {
 
 /** Only what the shell itself needs; each tab renders its own empty state from these. */
 const base = {
+  /*
+   * Present but empty, which is what "nothing configured" means for the Agents tab: every role
+   * exists and nobody is assigned to any of them. Absent is a different thing entirely, and the
+   * fixture is cast, so leaving it out is not a type error — it is a crash, which is exactly what
+   * this file caught.
+   */
+  agents: {
+    roles: [],
+    profiles: [],
+    cliAvailable: false,
+    budgetMatters: false,
+    teamGuidance: '',
+    defaultTeamGuidance: '',
+    teamGuidanceIsDefault: true,
+    colors: {},
+    onAssign: () => undefined,
+    onSetPrompt: () => undefined,
+    onSetBudget: () => undefined,
+    onSetTeamGuidance: () => undefined,
+  },
+  onSetAgentColor: () => undefined,
   profiles: [],
   onSave: () => undefined,
   onDuplicate: () => undefined,
@@ -79,8 +100,8 @@ const base = {
       onClearIndex: () => undefined,
       probe: { running: false, result: undefined },
       onProbe: () => undefined,
-    onClearProbe: () => undefined,
-    onRefreshTools: () => undefined,
+      onClearProbe: () => undefined,
+      onRefreshTools: () => undefined,
     },
   },
   network: { warnings: [], issues: [] },
@@ -96,7 +117,11 @@ const base = {
     onProbe: () => undefined,
     onClearProbe: () => undefined,
   },
-  skills: { skills: [], issues: [], extraDirs: [], configuredDir: '',
+  skills: {
+    skills: [],
+    issues: [],
+    extraDirs: [],
+    configuredDir: '',
     probe: { running: false, result: undefined },
     onProbe: () => undefined,
     onClearProbe: () => undefined,
@@ -147,8 +172,21 @@ describe('opening settings on a named tab', () => {
 
   it('moves when a different tab is asked for', () => {
     render({ tab: 'network', nonce: 1 })
+    render({ tab: 'agents', nonce: 2 })
+    expect(activeTab()).toBe('agents')
+  })
+
+  /**
+   * A renamed tab still answers to its old name.
+   *
+   * Tab ids are written into walkthrough links, documentation and whatever anybody bookmarked,
+   * and an id the panel does not recognise is *ignored* — so without this, a link to the old
+   * Expert tab would appear to do nothing at all, which is worse than an error.
+   */
+  it('still opens Agents for a link that asks for the old Expert tab', () => {
+    render({ tab: 'network', nonce: 1 })
     render({ tab: 'expert', nonce: 2 })
-    expect(activeTab()).toBe('expert')
+    expect(activeTab()).toBe('agents')
   })
 
   /**
@@ -182,7 +220,7 @@ describe('opening settings on a named tab', () => {
     'approvals',
     'mcp',
     'search',
-    'expert',
+    'agents',
     'schedules',
     'python',
     'tools',
