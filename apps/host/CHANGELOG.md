@@ -1,5 +1,12 @@
 # @chosengeneration/light-code
 
+## 0.40.1
+
+### Patch Changes
+
+- `--allow-host` and `--allow-origin` were accepted but missing from `--help`, and `--bind` did not
+  mention that a wildcard bind answers to the machine's own names.
+
 ## 0.40.0
 
 ### Minor Changes

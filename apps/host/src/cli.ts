@@ -458,7 +458,13 @@ Usage: light-code [options]
                       Required in shared mode; without it every request is
                       refused, which is the safe direction to fail
   --user-header <h>   Header carrying the user id (default X-Forwarded-User)
-  --bind <address>    Interface to listen on (default: 127.0.0.1)
+  --bind <address>    Interface to listen on (default: 127.0.0.1). Use 0.0.0.0 to
+                      reach it from another machine; it then answers to this
+                      machine's own hostname and addresses as well as localhost
+  --allow-host <h>    An extra name to answer to, e.g. a reverse proxy or a
+                      container alias (repeatable)
+  --allow-origin <o>  An extra origin allowed to call it, e.g. an app embedding
+                      this in an iframe (repeatable)
   --guide             Open the operator guide in your browser — setting up
                       shared mode, who can change what, and what it does not
                       protect against. Add --no-open to print it instead
