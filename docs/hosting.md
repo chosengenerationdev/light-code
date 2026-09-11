@@ -421,6 +421,155 @@ tool whose imports are already satisfied works; one declaring a dependency that 
 refused at creation, naming the package, so you install it the way you install everything else
 there. The Python tab says which mode is in use and why.
 
+## 1b-ii. Setting a server up, in order
+
+The pieces below depend on each other in roughly this order. Each one is optional; a laptop needs
+none of them.
+
+Everything the server worked out is printed when it starts, and reading that once is the cheapest
+diagnosis available:
+
+```
+Light Code 0.44.0
+  workspace  /srv/work
+  data       /home/svc/.local/share/light-code
+  listening  http://127.0.0.1:7100
+  proxy      HTTPS_PROXY=http://proxy.corp:3128, NO_PROXY=.corp.internal
+  user       identity from whoami.py — emp0042
+  secrets    creds.py — values stored as tool:<name> are fetched from it
+```
+
+### Step 1 — egress through a proxy
+
+Nothing to configure. `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` are honoured, with
+curl's rules for `NO_PROXY`, a whole-segment match so `shared-notes` is not matched by `notes`, and
+loopback never proxied. Proxy credentials in the URL are sent as a header and never written to a
+log. The banner prints the route.
+
+> **Why this needs saying.** Node's HTTP stack does not read these variables by default, so a
+> server where every *other* program reaches the gateway can have Light Code alone hang. A proxied
+> network drops a direct connection rather than refusing it, and a dropped connection waits for the
+> operating system — minutes. A spinner that never resolves while `curl` works is this, every time.
+
+Connections also fall back from IPv6 to IPv4, which is the other way a corporate network turns a
+connection into a hang rather than an error.
+
+### Step 2 — who the user is
+
+By default a local server has one user and files everything under one directory. Where an
+environment has a library that knows who is logged in, write a function returning the id:
+
+```python
+# whoami.py
+def run():
+    return "emp0042"
+```
+
+```bash
+light-code --identity-tool whoami.py --identity-python python3
+```
+
+Settings, secrets and history are then filed under whatever it returns.
+
+- **It runs once, at startup, before any session.** Not as a registered Python tool — those live
+  behind `python.toolsDir`, which is read from config, which is stored *per user*, so resolving the
+  user through the tool registry would mean reading the config of a user you have not identified.
+- **A failure does not stop the server.** These functions reach libraries that are not always up,
+  and a server that will not come back is worse than one that comes back saying why. Storage falls
+  back to the ordinary single-user path and the banner names the error.
+- **It must return a non-empty string.** `None` is refused rather than becoming a user called
+  `None` — which would file everybody it happened to under the same directory, silently.
+- **Anything printed on import is ignored.** Internal libraries announce licences and
+  deprecations; reading "the output" would file a whole configuration under a log line while
+  looking like it had worked.
+
+This resolves *identity*, never authorisation. Who may connect is still the bearer token's
+business; a function returning a name is not a way past the door.
+
+### Step 3 — where credentials come from
+
+The same shape, taking a name:
+
+```python
+# creds.py
+def run(name):
+    entry = corporate_vault.lookup(name)
+    return {"username": entry.user, "password": entry.secret}
+```
+
+```bash
+light-code --credential-tool creds.py --credential-python python3
+```
+
+Anywhere Light Code asks for a secret, store `tool:<name>` instead of the secret:
+
+| Stored value | Fetched |
+| --- | --- |
+| `tool:gateway` | the whole value, or `password` / `secret` / `token` / `value` / `key` from a dict |
+| `tool:opensearch#username` | that field exactly |
+| `tool:opensearch#password` | that field exactly |
+
+The secrets file then holds only the names of things to go and ask for. Values are fetched on use
+and cached for a few seconds, so a rotation reaches the next request with nothing to clear here.
+
+- **The assistant cannot call it.** It is a *source* of secrets, behind the same interface every
+  other secret already resolves through — the gateway key, a cluster's username and password, a
+  certificate passphrase, an MCP server's environment. A tool the model could call would put the
+  password in the transcript, the task history, and whatever it said next.
+- **A missing field is named, never answered with an empty string.** An empty password reaches the
+  gateway and comes back as "your credentials are wrong", sending you to check something that was
+  never sent. It lists the fields the function did return instead.
+- **A failing lookup's traceback is deliberately withheld.** Credential code fails with the value
+  in its hands — a library echoing what it received, an assertion printing a comparison — and that
+  string would be on its way to a screen and a log. You get the credential's name, which is enough
+  to run the function yourself.
+
+### Step 4 — settings everyone should share
+
+An administrator can publish a search connection or an MCP server to every user. Put it in the
+shared configuration beside `shared.json`, keyed by a plain id:
+
+```jsonc
+{
+  "vectorStores": {
+    "team": {
+      "kind": "opensearch",
+      "label": "Team OpenSearch",
+      "url": "https://search.internal:9200",
+      "usernameRef": "search:team:username",
+      "passwordRef": "search:team:password"
+    }
+  }
+}
+```
+
+Every user then sees it as `shared:team`, read-only, with its credentials resolved from the shared
+store rather than their own. **The key carries the scope**: `shared:team` is the administrator's,
+`team` is somebody's own. There is no separate list of what is shared, so there is nothing to fall
+out of step with — and a credential reference routes itself, which matters because a secret store
+is handed a reference and nothing else.
+
+A user's own configuration never gains a shared entry, so removing one centrally removes it
+everywhere rather than leaving a copy nobody can edit.
+
+> A control for choosing this per entry is not in the interface yet.
+
+### Step 5 — a provider
+
+**Settings → Providers.** If you configured a credential function, put `tool:<name>` in the API key
+field. **Test Connection** reports which step failed — certificates, token, or listing models —
+rather than one opaque error.
+
+### What the server deliberately does not have
+
+- **No Excel, Outlook or indexed mail.** They attach over COM to applications running on somebody's
+  desktop, which a service account has no route to, and a mailbox belongs to a person rather than to
+  the account this runs as. They remain in the VS Code extension.
+- **No Claude CLI expert, and nothing about cost.** The expert is any provider profile you have
+  configured. There is no budget, no per-consultation price, no savings figure and no keep-alive:
+  those exist because the CLI charges per call, and a spend cap over something nothing meters would
+  look like protection without being any.
+
 ## 1c. Session variables
 
 Values handed to everything a session runs — shell commands and Python tools — as environment
