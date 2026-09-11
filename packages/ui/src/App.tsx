@@ -378,6 +378,10 @@ export function App(props: AppProps): ReactElement {
             content: message.text,
             pending: true,
             ...(message.expertInformed === true ? { expertInformed: true } : {}),
+            // The role travels with the flag. Copying one and not the other is how this file
+            // dropped every field added to the expert message once before (CLAUDE.md), and it is
+            // what made every reply read "informed by expert" whoever had answered.
+            ...(message.informedBy !== undefined ? { informedBy: message.informedBy } : {}),
           }
           if (last?.kind === 'text' && last.role === 'assistant' && last.pending) {
             return [...prev.slice(0, -1), updated]
@@ -405,6 +409,10 @@ export function App(props: AppProps): ReactElement {
             kind: 'tool',
             toolCall: message.toolCall,
             ...(message.expertInformed === true ? { expertInformed: true } : {}),
+            // The role travels with the flag. Copying one and not the other is how this file
+            // dropped every field added to the expert message once before (CLAUDE.md), and it is
+            // what made every reply read "informed by expert" whoever had answered.
+            ...(message.informedBy !== undefined ? { informedBy: message.informedBy } : {}),
           },
         ])
       } else if (message.type === 'toolResult') {
@@ -414,6 +422,10 @@ export function App(props: AppProps): ReactElement {
             kind: 'tool',
             toolCall: message.toolCall,
             ...(message.expertInformed === true ? { expertInformed: true } : {}),
+            // The role travels with the flag. Copying one and not the other is how this file
+            // dropped every field added to the expert message once before (CLAUDE.md), and it is
+            // what made every reply read "informed by expert" whoever had answered.
+            ...(message.informedBy !== undefined ? { informedBy: message.informedBy } : {}),
           }
           const index = prev.findIndex(
             (m) => m.kind === 'tool' && m.toolCall.id === message.toolCall.id,
@@ -599,6 +611,10 @@ export function App(props: AppProps): ReactElement {
             kind: 'chart',
             chart: message.chart,
             ...(message.expertInformed === true ? { expertInformed: true } : {}),
+            // The role travels with the flag. Copying one and not the other is how this file
+            // dropped every field added to the expert message once before (CLAUDE.md), and it is
+            // what made every reply read "informed by expert" whoever had answered.
+            ...(message.informedBy !== undefined ? { informedBy: message.informedBy } : {}),
           },
         ])
       } else if (message.type === 'chartError') {

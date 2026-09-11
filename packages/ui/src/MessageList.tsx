@@ -47,6 +47,19 @@ export interface MessageListProps {
  * `maxWidth: 85%` is what makes it read as a conversation rather than as full-width blocks
  * with a tint; a bubble that spans the pane has no side.
  */
+/**
+ * What to call whoever informed a reply.
+ *
+ * **Not "expert" when the role is missing.** That was the fallback, and it turned a dropped field
+ * into a confident false statement: every reply read "informed by expert" whoever had actually
+ * answered, which is exactly how the drop went unnoticed. A name this cannot know is left
+ * unnamed — the same rule invariant 8 applies to an approval prompt, and the one
+ * `search_codebase` applies to a hit it cannot place.
+ */
+function describeInformer(role: string | undefined): string {
+  return role === undefined || role === 'unknown' ? 'a specialist' : role
+}
+
 function TextBlock(props: {
   role: 'user' | 'assistant'
   content: string
@@ -123,7 +136,7 @@ function TextBlock(props: {
          */}
         {props.expertInformed === true && (
           <span
-            title={`Written after consulting the ${props.informedBy ?? 'expert'}. These are not that model's words — expand the consultation above for those.`}
+            title={`Written after consulting the ${describeInformer(props.informedBy)}. These are not that model's words — expand the consultation above for those.`}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -147,7 +160,7 @@ function TextBlock(props: {
             }}
           >
             <ExpertIcon size={11} />
-            informed by {props.informedBy ?? 'expert'}
+            informed by {describeInformer(props.informedBy)}
           </span>
         )}
         {/*
