@@ -30,6 +30,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
 import { describeProxyEnvironment } from '@light-code/core'
 import type { IdentityProvider } from './identity.js'
+import { PythonToolIdentity, resolveIdentity } from './identityTool.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
 import { adminListPolicy } from './roles.js'
 import { OPERATOR_GUIDE } from './generated/operatorGuide.js'
@@ -37,6 +38,21 @@ import { guidePage } from './guideHtml.js'
 import { renderGuide } from './guideText.js'
 import { SharedConfigStore } from './sharedConfig.js'
 import { startServer } from './server.js'
+
+/**
+ * The line of a failure that actually says what went wrong.
+ *
+ * A Python traceback ends with the useful sentence and begins with a header; taking the first
+ * line printed "The identity function failed:" and nothing else, which is a banner telling the
+ * reader only that they must go and look somewhere else.
+ */
+function lastMeaningfulLine(problem: string): string {
+  const lines = problem
+    .split(String.fromCharCode(10))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.endsWith(':'))
+  return lines[lines.length - 1] ?? problem.trim()
+}
 
 /**
  * `npx light-code` — starts a local server and opens the system browser.
@@ -144,6 +160,16 @@ async function main(): Promise<void> {
   const adminIds = valuesOf(args, '--admin-id')
   const trustedProxies = valuesOf(args, '--trust-proxy')
   const userHeader = valueOf(args, '--user-header')
+  /*
+   * Who this server is running as, according to a function the operator wrote.
+   *
+   * Requested for an environment whose own libraries are the only thing that knows. See
+   * `identityTool.ts` for why it runs here, before any session, rather than as a registered tool:
+   * the tool registry lives behind per-user config, and reading the config of a user you have not
+   * identified yet has no good end.
+   */
+  const identityTool = valueOf(args, '--identity-tool')
+  const identityPython = valueOf(args, '--identity-python') ?? 'python3'
   const workspaceRoot = path.resolve(valueOf(args, '--workspace') ?? process.cwd())
   const dataDir = valueOf(args, '--data-dir') ?? envPaths('light-code', { suffix: '' }).data
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
@@ -193,6 +219,26 @@ async function main(): Promise<void> {
    * put one user's keys in front of another and look like it was working.
    */
   let identity: IdentityProvider | undefined
+  let identityProblem: string | undefined
+
+  if (identityTool !== undefined) {
+    const resolved = await resolveIdentity({ interpreter: identityPython, file: identityTool })
+    if (resolved.principal !== undefined) {
+      identity = new PythonToolIdentity(resolved.principal, identityTool)
+    } else {
+      /*
+       * Started anyway, and said loudly.
+       *
+       * Refusing to start would be defensible, but this function reaches libraries that are not
+       * always up, and a server that will not come back because a lookup was briefly unavailable
+       * is a worse failure than one that comes back saying exactly what is wrong. Storage falls
+       * back to the ordinary single-user path, and the banner says so, so nobody concludes their
+       * settings were lost when they were written somewhere else.
+       */
+      identityProblem = resolved.problem
+    }
+  }
+
   if (serverMode) {
     const bad = validateTrustedProxies(trustedProxies)
     if (bad.length > 0) {
@@ -208,6 +254,8 @@ async function main(): Promise<void> {
       )
       process.exit(2)
     }
+    // A shared server has many users and the proxy is the only thing that can tell them apart,
+    // so it wins over a function that answers for the process as a whole.
     identity = new ProxyHeaderIdentity({
       trustedProxies,
       ...(userHeader !== undefined ? { userHeader } : {}),
@@ -313,6 +361,25 @@ async function main(): Promise<void> {
     process.stdout.write(`  proxy      ${proxyLine}\n`)
   }
 
+  /*
+   * Said on every start when a tool is configured, working or not.
+   *
+   * Which user your settings are filed under is not something to have to deduce, and the case
+   * that matters is the one where the lookup failed: the fallback is a different directory, and
+   * somebody whose configuration appears empty should be able to see why in the same place they
+   * saw it come up.
+   */
+  if (identityTool !== undefined) {
+    if (identityProblem === undefined) {
+      process.stdout.write(`  user       ${identity?.describe ?? 'resolved'}\n`)
+    } else {
+      process.stdout.write(
+        `  user       could not be resolved from ${path.basename(identityTool)} — using the ` +
+          `local default\n             ${lastMeaningfulLine(identityProblem)}\n`,
+      )
+    }
+  }
+
   if (serverMode) {
     const who =
       effectiveAdminIds.length === 0
@@ -402,6 +469,8 @@ const KNOWN_FLAGS = new Set([
   '--admin-id',
   '--trust-proxy',
   '--user-header',
+  '--identity-tool',
+  '--identity-python',
   '--bind',
   '--guide',
 ])
@@ -475,6 +544,9 @@ Usage: light-code [options]
                       Required in shared mode; without it every request is
                       refused, which is the safe direction to fail
   --user-header <h>   Header carrying the user id (default X-Forwarded-User)
+  --identity-tool <f> Python file defining run() -> str, returning the current user id.
+                      Settings, secrets and history are filed under whatever it returns.
+  --identity-python <p>  Interpreter to run it with (default python3)
   --bind <address>    Interface to listen on (default: 127.0.0.1). Use 0.0.0.0 to
                       reach it from another machine; it then answers to this
                       machine's own hostname and addresses as well as localhost

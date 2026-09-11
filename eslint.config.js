@@ -30,10 +30,7 @@ export default tseslint.config(
   {
     // Invariant 2: no direct network egress anywhere except HttpClient itself.
     rules: {
-      'no-restricted-globals': [
-        'error',
-        { name: 'fetch', message: httpClientMessage },
-      ],
+      'no-restricted-globals': ['error', { name: 'fetch', message: httpClientMessage }],
       'no-restricted-imports': ['error', { paths: bannedNetworkImports }],
     },
   },
@@ -77,6 +74,7 @@ export default tseslint.config(
       'apps/host/src/security.ts',
       'apps/host/src/identity.ts',
       'apps/host/src/proxyIdentity.ts',
+      'apps/host/src/identityTool.ts',
       'apps/host/src/security.test.ts',
       'apps/host/src/proxyIdentity.test.ts',
       /*

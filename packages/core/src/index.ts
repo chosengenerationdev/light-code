@@ -461,6 +461,7 @@ export {
 export {
   detectUv,
   ensureVenv,
+  detectBareInterpreter,
   minimalPythonEnv,
   venvPythonPath,
   UvError,
