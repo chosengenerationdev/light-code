@@ -51,10 +51,13 @@ function TextBlock(props: {
   role: 'user' | 'assistant'
   content: string
   expertInformed?: boolean | undefined
+  /** Which specialist informed it. Absent falls back to the neutral expert family. */
+  informedBy?: string | undefined
   /** Marks the newest user message, so Chat can tell whether it is still on screen. */
   isLatestPrompt?: boolean
 }): ReactElement {
   const isAssistant = props.role === 'assistant'
+  const informed = agentColors(props.informedBy)
 
   const avatar = (
     <span
@@ -120,7 +123,7 @@ function TextBlock(props: {
          */}
         {props.expertInformed === true && (
           <span
-            title="Written after consulting the expert. These are not Claude's words — expand the ask_expert block above for those."
+            title={`Written after consulting the ${props.informedBy ?? 'expert'}. These are not that model's words — expand the consultation above for those.`}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -130,12 +133,21 @@ function TextBlock(props: {
               letterSpacing: 0.2,
               padding: '1px 6px 1px 4px',
               borderRadius: 8,
-              background: isAssistant ? colors.expertSoft : 'rgba(255, 255, 255, 0.18)',
-              color: isAssistant ? colors.expert : colors.accentContrast,
+              /*
+               * The specialist's own colour, not the expert's.
+               *
+               * The chip says *who* the primary model listened to, and with five of them a single
+               * colour makes a review and a test plan look like the same voice. It stays a marker
+               * rather than a costume: the bubble is still the assistant's, because these are the
+               * primary model's words written *after* advice, and painting the whole message
+               * would claim the specialist wrote it.
+               */
+              background: isAssistant ? informed.soft : 'rgba(255, 255, 255, 0.18)',
+              color: isAssistant ? informed.edge : colors.accentContrast,
             }}
           >
             <ExpertIcon size={11} />
-            informed by expert
+            informed by {props.informedBy ?? 'expert'}
           </span>
         )}
         {/*
@@ -473,6 +485,7 @@ export function MessageList(props: MessageListProps): ReactElement {
             role={message.role}
             content={message.content}
             expertInformed={message.expertInformed}
+            informedBy={message.informedBy}
             isLatestPrompt={index === latestPromptIndex}
           />
         ),

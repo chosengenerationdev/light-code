@@ -72,7 +72,14 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
   const entries: TranscriptEntry[] = []
   // Sticky for the rest of the task: everything after a consultation was decided with its
   // advice in context, so the mark reflects influence rather than adjacency.
-  let expertInformed = false
+  /*
+   * The specialist, not a boolean.
+   *
+   * It was `expertInformed = true`, which was all there was to say when there was one expert.
+   * With five, the chat has to name and colour whoever actually answered — and deriving the flag
+   * from this rather than tracking both is what stops them disagreeing.
+   */
+  let informedBy: string | undefined
   for (const message of messages) {
     if (message.role === 'system' || message.role === 'tool') continue
 
@@ -86,7 +93,7 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
         kind: 'text',
         role: 'assistant',
         content: message.content,
-        ...(expertInformed ? { expertInformed } : {}),
+        ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
       })
     }
 
@@ -107,7 +114,7 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
             ? {
                 kind: 'chart',
                 chart: asChart.chart,
-                ...(expertInformed ? { expertInformed: true } : {}),
+                ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
               }
             : asChart,
         )
@@ -121,10 +128,10 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
       }
 
       const consulting = consultationFromToolCall(toolCall.name, toolCall.arguments)
-      if (consulting !== undefined) expertInformed = true
+      if (consulting !== undefined) informedBy = consulting
       entries.push({
         kind: 'tool',
-        ...(expertInformed ? { expertInformed: true } : {}),
+        ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
         toolCall: {
           id: toolCall.id,
           name: toolCall.name,

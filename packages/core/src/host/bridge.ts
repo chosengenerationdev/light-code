@@ -2654,7 +2654,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       let cumulativeReasoning = ''
       // Sticky once the expert has been consulted, matching how a restored transcript is
       // derived — so the live view and a reopened task mark the same work.
-      let expertInformed = false
+      /*
+       * The specialist, not a boolean.
+       *
+       * It was `expertInformed = true`, all there was to say when there was one expert. With five,
+       * the chat names and colours whoever actually answered — and deriving the flag from this,
+       * rather than tracking both, is what stops the two disagreeing.
+       */
+      let informedBy: string | undefined
       const fullRegistry = currentToolRegistry(
         expertCliInfo !== undefined
           ? {
@@ -2784,7 +2791,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             post({
               type: 'textChunk',
               text: cumulativeText,
-              ...(expertInformed ? { expertInformed } : {}),
+              ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
             })
           },
           onReasoningChunk: (chunk) => {
@@ -2801,7 +2808,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
              * turn came to render as nothing: the transcript derived it and the live path did not.
              */
             const consulting = consultationFromToolCall(toolCall.name, toolCall.arguments)
-            if (consulting !== undefined) expertInformed = true
+            if (consulting !== undefined) informedBy = consulting
             if (CONTROL_TOOLS.has(toolCall.name)) return
             /*
              * A chart is not a tool block. It is posted on the result instead, so nothing
@@ -2824,7 +2831,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             post({
               type: 'toolCall',
               toolCall: summary,
-              ...(expertInformed ? { expertInformed } : {}),
+              ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
             })
           },
           onToolResult: (toolCall, result) => {
@@ -2842,7 +2849,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                   ? {
                       type: 'chart',
                       chart: chart.chart,
-                      ...(expertInformed ? { expertInformed } : {}),
+                      ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
                     }
                   : { type: 'chartError', message: chart.message },
               )
@@ -2861,7 +2868,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             post({
               type: 'toolResult',
               toolCall: summary,
-              ...(expertInformed ? { expertInformed } : {}),
+              ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
             })
           },
           onCheckpoint: (checkpoint) => {

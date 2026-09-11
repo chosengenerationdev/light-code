@@ -1,4 +1,9 @@
-import type { ApprovalDecision, ContextUsage, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
+import type {
+  ApprovalDecision,
+  ContextUsage,
+  ImageAttachmentInput,
+  ProfileSummary,
+} from '@light-code/core/browser'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
 import { FormPrompt, type FormFieldValue, type PendingForm } from './FormPrompt.js'
@@ -146,7 +151,9 @@ export function Chat(props: ChatProps): ReactElement {
   }, [props.messages])
 
   const revealPrompt = (): void => {
-    scrollRef.current?.querySelector('[data-lc-latest-prompt]')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    scrollRef.current
+      ?.querySelector('[data-lc-latest-prompt]')
+      ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
 
   /**
@@ -157,7 +164,19 @@ export function Chat(props: ChatProps): ReactElement {
    * tool runs, because that is the other stretch with nothing to look at.
    */
   const lastCall = props.messages[props.messages.length - 1]
-  const consulting = lastCall?.kind === 'tool' && lastCall.toolCall.name === 'ask_expert' && lastCall.toolCall.result === undefined
+  /*
+   * Read from the role the host decided, not from the tool's name.
+   *
+   * Testing for `ask_expert` here missed every `ask_agent` call — so asking the reviewer showed
+   * "Running ask_agent" in the accent colour, while asking the expert showed "Consulting the
+   * expert" in coral. The third place in this codebase to decide authorship by name, and the
+   * third to get it wrong.
+   */
+  const consultingRole =
+    lastCall?.kind === 'tool' && lastCall.toolCall.result === undefined
+      ? lastCall.toolCall.consultingRole
+      : undefined
+  const consulting = consultingRole !== undefined
 
   const workingLabel = ((): string | undefined => {
     if (!props.isStreaming) return undefined
@@ -170,9 +189,14 @@ export function Chat(props: ChatProps): ReactElement {
     if (last?.kind === 'tool' && last.toolCall.result === undefined) {
       // Named rather than generic: a consultation can take half a minute, and "Running
       // ask_expert" does not tell you that something else is doing the thinking.
-      return consulting ? 'Consulting the expert' : `Running ${last.toolCall.name}`
+      // Named rather than generic, and named *specifically*: "Consulting the reviewer" says
+      // which half-minute pause this is, where "Consulting the expert" would be wrong.
+      return consulting
+        ? `Consulting the ${consultingRole === 'unknown' ? 'specialist' : consultingRole}`
+        : `Running ${last.toolCall.name}`
     }
-    if (last?.kind === 'text' && last.role === 'assistant' && last.pending === true) return undefined
+    if (last?.kind === 'text' && last.role === 'assistant' && last.pending === true)
+      return undefined
     if (last?.kind === 'reasoning' && last.pending === true) return undefined
     return 'Thinking'
   })()
@@ -183,7 +207,9 @@ export function Chat(props: ChatProps): ReactElement {
         Only once the real message has scrolled away. Rendering it unconditionally would print
         the same sentence twice whenever the conversation still fits, which is most of them.
       */}
-      {promptOutOfView && latestPrompt !== undefined && <PinnedPrompt text={latestPrompt} onReveal={revealPrompt} />}
+      {promptOutOfView && latestPrompt !== undefined && (
+        <PinnedPrompt text={latestPrompt} onReveal={revealPrompt} />
+      )}
       <div
         ref={scrollRef}
         className="lc-scroll"
@@ -191,7 +217,11 @@ export function Chat(props: ChatProps): ReactElement {
       >
         <MessageList messages={props.messages} error={props.error} />
         {workingLabel !== undefined && (
-          <WorkingIndicator label={workingLabel} variant={consulting ? 'expert' : 'default'} />
+          <WorkingIndicator
+            label={workingLabel}
+            variant={consulting ? 'expert' : 'default'}
+            {...(consultingRole !== undefined ? { role: consultingRole } : {})}
+          />
         )}
         {props.pendingApproval !== undefined && (
           <ApprovalPrompt
@@ -201,7 +231,11 @@ export function Chat(props: ChatProps): ReactElement {
           />
         )}
         {props.pendingForm !== undefined && (
-          <FormPrompt form={props.pendingForm} onSubmit={props.onSubmitForm} onDismiss={props.onDismissForm} />
+          <FormPrompt
+            form={props.pendingForm}
+            onSubmit={props.onSubmitForm}
+            onDismiss={props.onDismissForm}
+          />
         )}
       </div>
       {props.canRollback && (

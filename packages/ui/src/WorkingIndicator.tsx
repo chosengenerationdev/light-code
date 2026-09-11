@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily } from './theme.js'
+import { agentColors, colors, fontFamily } from './theme.js'
 
 export interface WorkingIndicatorProps {
   /** What is happening right now, e.g. "Running read_file". Defaults to "Thinking". */
@@ -12,6 +12,14 @@ export interface WorkingIndicatorProps {
    * only in the result afterwards.
    */
   variant?: 'default' | 'expert'
+  /**
+   * Which specialist is being consulted, when one is.
+   *
+   * Separate from `variant` because the variant says *what kind* of pause this is and the role
+   * says whose — and with five specialists a single "expert" colour makes waiting on the reviewer
+   * look identical to waiting on the tester.
+   */
+  role?: string
 }
 
 /**
@@ -76,7 +84,7 @@ export function WorkingIndicator(props: WorkingIndicatorProps): ReactElement {
               width: 5,
               height: 5,
               borderRadius: '50%',
-              background: props.variant === 'expert' ? colors.expert : colors.accent,
+              background: props.variant === 'expert' ? agentColors(props.role).edge : colors.accent,
               display: 'block',
             }}
           />
@@ -85,7 +93,9 @@ export function WorkingIndicator(props: WorkingIndicatorProps): ReactElement {
       <span style={{ fontStyle: 'italic' }}>{props.label ?? 'Thinking'}</span>
       {/* Only after a few seconds: on a fast reply the number appears and vanishes, which
           is more distracting than useful. On a slow one it is the reassurance. */}
-      {elapsed >= 3 && <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{elapsed}s</span>}
+      {elapsed >= 3 && (
+        <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{elapsed}s</span>
+      )}
     </div>
   )
 }

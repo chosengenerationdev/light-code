@@ -79,4 +79,40 @@ describe('the live path and the transcript agree', () => {
   it('carries the answer on the message rather than leaving the panel to re-derive it', () => {
     expect(bridge).toContain('consultingRole: consulting')
   })
+
+  /**
+   * And the chat is told *who* informed a reply, not merely that somebody did.
+   *
+   * `expertInformed` was a boolean, which was all there was to say with one expert. The chip that
+   * marks an assistant message now names and colours the specialist, so the role has to travel
+   * with the flag — and it is derived from one variable at each emission site, so the two cannot
+   * come apart.
+   */
+  it('sends the role alongside the informed flag', () => {
+    expect(bridge).toContain('{ expertInformed: true, informedBy }')
+    expect(
+      bridge.includes('let expertInformed = false'),
+      'the live path tracks a boolean again, which cannot name the specialist',
+    ).toBe(false)
+  })
+})
+
+/**
+ * Deciding authorship by tool name kept coming back, in a new place each time.
+ *
+ * Three surfaces have now done it: the transcript's tool block, the live path, and the working
+ * indicator. Each looked local and each silently missed every `ask_agent` call — a reviewer's
+ * answer rendered in no colour at all, and the indicator said "Running ask_agent" while the
+ * expert's said "Consulting the expert".
+ */
+describe('nothing decides authorship by tool name', () => {
+  const ui = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ui', 'src')
+
+  it.each(['Chat.tsx', 'MessageList.tsx'])('%s reads the role rather than the name', (file) => {
+    const source = readFileSync(path.join(ui, file), 'utf8')
+    expect(
+      source.includes("=== 'ask_expert'"),
+      `${file} compares the tool name instead of reading consultingRole`,
+    ).toBe(false)
+  })
 })

@@ -236,10 +236,16 @@ export type TranscriptEntry =
    * rather than reasoning alone. Worth distinguishing, because it tells you which decisions
    * to scrutinise differently — and which ones you paid for.
    */
-  | { kind: 'text'; role: 'user' | 'assistant'; content: string; expertInformed?: boolean }
+  | {
+      kind: 'text'
+      role: 'user' | 'assistant'
+      content: string
+      expertInformed?: boolean
+      informedBy?: string
+    }
   /** The model's reasoning for a step. Rendered collapsed — it is context, not the answer. */
   | { kind: 'reasoning'; content: string }
-  | { kind: 'tool'; toolCall: ToolCallSummary; expertInformed?: boolean }
+  | { kind: 'tool'; toolCall: ToolCallSummary; expertInformed?: boolean; informedBy?: string }
   /**
    * A chart, derived from the `show_chart` call that produced it.
    *
@@ -250,7 +256,7 @@ export type TranscriptEntry =
    * `invalid` carries the reason when a call could not be read as a chart. Rendering nothing
    * would leave a silent gap where the model believes it drew something.
    */
-  | { kind: 'chart'; chart: ChartSpec; expertInformed?: boolean }
+  | { kind: 'chart'; chart: ChartSpec; expertInformed?: boolean; informedBy?: string }
   | { kind: 'chartError'; message: string }
 
 /** Enough to render the history list without loading every transcript. */
@@ -829,19 +835,24 @@ export type HostToUiMessage =
    * `postMessage` delivery isn't guaranteed — sending cumulative state makes each
    * message self-correcting, so one dropped message doesn't corrupt everything after it.
    */
-  | { type: 'textChunk'; text: string; expertInformed?: boolean }
+  | { type: 'textChunk'; text: string; expertInformed?: boolean; informedBy?: string }
   /** Cumulative reasoning for the current step, same self-correcting rule as `textChunk`. */
   | { type: 'reasoningChunk'; text: string }
-  | { type: 'toolCall'; toolCall: ToolCallSummary; expertInformed?: boolean }
+  | { type: 'toolCall'; toolCall: ToolCallSummary; expertInformed?: boolean; informedBy?: string }
   /**
    * A chart drawn during the turn, so it appears as it happens rather than only after a reload.
    *
    * Built by the same `chartFromToolCall` the transcript uses. Two decisions about what counts as
    * a chart is precisely the drift that made this necessary.
    */
-  | { type: 'chart'; chart: ChartSpec; expertInformed?: boolean }
+  | { type: 'chart'; chart: ChartSpec; expertInformed?: boolean; informedBy?: string }
   | { type: 'chartError'; message: string }
-  | { type: 'toolResult'; toolCall: ToolCallSummary; expertInformed?: boolean }
+  | {
+      type: 'toolResult'
+      toolCall: ToolCallSummary
+      expertInformed?: boolean
+      informedBy?: string
+    }
   /** Ground truth for the approval prompt — invariant 8. The UI renders only `preview`. */
   /** A form the assistant is waiting on. Rendered in the transcript, like an approval. */
   | {

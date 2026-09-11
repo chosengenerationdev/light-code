@@ -94,6 +94,9 @@ function finalizePendingMessage(messages: DisplayMessage[]): DisplayMessage[] {
       role: last.role,
       content: last.content,
       ...(last.expertInformed === true ? { expertInformed: true } : {}),
+      // Carried with the flag rather than left behind: a live reply would otherwise be neutral
+      // until a reload, which is the shape of bug the chart rendering already taught once.
+      ...(last.informedBy !== undefined ? { informedBy: last.informedBy } : {}),
     },
   ]
 }
