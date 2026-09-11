@@ -1,9 +1,17 @@
 import { Chart } from './charts/Chart.js'
 import type { ToolCallSummary, TranscriptEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
-import { AgentIcon, CheckIcon, ChevronIcon, CrossIcon, ExpertIcon, SpinnerIcon, UserIcon } from './icons.js'
+import {
+  AgentIcon,
+  CheckIcon,
+  ChevronIcon,
+  CrossIcon,
+  ExpertIcon,
+  SpinnerIcon,
+  UserIcon,
+} from './icons.js'
 import { MarkdownView } from './MarkdownView.js'
-import { colors, fontFamily } from './theme.js'
+import { agentColors, colors, fontFamily } from './theme.js'
 
 /**
  * A `TranscriptEntry` plus the one piece of state that only exists live. Defined as an
@@ -106,10 +114,10 @@ function TextBlock(props: {
         }}
       >
         {/*
-          * A marker, not a costume. These are the *primary* model's words, written after it
-          * consulted the expert — so the message keeps its own bubble and gains a small
-          * attribution line. Painting it in Claude's colour would claim Claude wrote it.
-          */}
+         * A marker, not a costume. These are the *primary* model's words, written after it
+         * consulted the expert — so the message keeps its own bubble and gains a small
+         * attribution line. Painting it in Claude's colour would claim Claude wrote it.
+         */}
         {props.expertInformed === true && (
           <span
             title="Written after consulting the expert. These are not Claude's words — expand the ask_expert block above for those."
@@ -131,12 +139,12 @@ function TextBlock(props: {
           </span>
         )}
         {/*
-          * Rendered for the assistant, left alone for you.
-          *
-          * Formatting what the user typed would be surprising: they can see their own message
-          * and did not ask for their asterisks to disappear. The model, on the other hand,
-          * writes markdown whether or not anything renders it.
-          */}
+         * Rendered for the assistant, left alone for you.
+         *
+         * Formatting what the user typed would be surprising: they can see their own message
+         * and did not ask for their asterisks to disappear. The model, on the other hand,
+         * writes markdown whether or not anything renders it.
+         */}
         {isAssistant ? <MarkdownView text={props.content} /> : props.content}
       </div>
     </div>
@@ -150,11 +158,22 @@ const monospace = 'var(--vscode-editor-font-family, monospace)'
  * description of what it intends to do (invariant 8). Collapsed by default to keep the
  * transcript readable; this is a visibility surface, not the Phase 4 approval gate.
  */
-function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean | undefined }): ReactElement {
+function ToolBlock(props: {
+  toolCall: ToolCallSummary
+  expertInformed?: boolean | undefined
+}): ReactElement {
   const [expanded, setExpanded] = useState(false)
   const { toolCall } = props
   const pending = toolCall.result === undefined
-  const isConsultation = toolCall.name === 'ask_expert'
+  /*
+   * Decided by the host, not here.
+   *
+   * `arguments` is a *display* string, so the role could not be read back out of it even if this
+   * wanted to — and a second derivation is how the live path and a restored transcript come to
+   * disagree, which is exactly what happened with charts.
+   */
+  const isConsultation = toolCall.consultingRole !== undefined
+  const voice = agentColors(toolCall.consultingRole)
 
   /*
    * A consultation is the one block whose *result* is another model's words, so it is the one
@@ -162,7 +181,8 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
    * including a tool call that merely followed the expert's advice — stays neutral, because
    * dressing the primary model's own work in Claude's colour would misattribute it.
    */
-  const edge = toolCall.isError === true ? colors.error : isConsultation ? colors.expert : colors.border
+  const edge =
+    toolCall.isError === true ? colors.error : isConsultation ? voice.edge : colors.border
 
   return (
     <div
@@ -173,12 +193,8 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
         margin: '6px 10px 6px 40px',
         borderRadius: 10,
         border: `1px solid ${edge}`,
-        background: isConsultation
-          ? colors.expertSoft
-          : pending
-            ? colors.accentSoft
-            : 'transparent',
-        ...(isConsultation ? { boxShadow: `0 0 0 3px ${colors.expertSoft}` } : {}),
+        background: isConsultation ? voice.soft : pending ? colors.accentSoft : 'transparent',
+        ...(isConsultation ? { boxShadow: `0 0 0 3px ${voice.soft}` } : {}),
         overflow: 'hidden',
         transition: 'background-color 190ms ease',
       }}
@@ -228,14 +244,16 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
               height: 18,
               borderRadius: '50%',
               flexShrink: 0,
-              background: colors.expertGradient,
-              color: colors.expertContrast,
+              background: voice.gradient,
+              color: voice.contrast,
             }}
           >
             <ExpertIcon size={11} />
           </span>
         )}
-        <span style={{ fontFamily: monospace, color: isConsultation ? colors.expert : undefined }}>{toolCall.name}</span>
+        <span style={{ fontFamily: monospace, color: isConsultation ? voice.edge : undefined }}>
+          {toolCall.name}
+        </span>
         {/*
           What the call is for, beside the name.
 
@@ -278,7 +296,12 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
           style={{
             display: 'flex',
             marginLeft: 'auto',
-            color: toolCall.isError === true ? colors.error : pending ? colors.muted : 'var(--vscode-testing-iconPassed, #3fb950)',
+            color:
+              toolCall.isError === true
+                ? colors.error
+                : pending
+                  ? colors.muted
+                  : 'var(--vscode-testing-iconPassed, #3fb950)',
           }}
         >
           {pending ? <SpinnerIcon /> : toolCall.isError === true ? <CrossIcon /> : <CheckIcon />}
@@ -287,10 +310,14 @@ function ToolBlock(props: { toolCall: ToolCallSummary; expertInformed?: boolean 
       {expanded && (
         <div style={{ padding: '0 10px 8px', fontSize: 12, fontFamily: monospace }}>
           <div style={{ color: colors.muted, marginBottom: 2 }}>Arguments</div>
-          <pre style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{toolCall.arguments}</pre>
+          <pre style={{ margin: '0 0 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {toolCall.arguments}
+          </pre>
           {toolCall.result !== undefined && (
             <>
-              <div style={{ color: isConsultation ? colors.expert : colors.muted, marginBottom: 2 }}>
+              <div
+                style={{ color: isConsultation ? colors.expert : colors.muted, marginBottom: 2 }}
+              >
                 {isConsultation ? "Claude's answer" : 'Result'}
               </div>
               <pre
@@ -409,7 +436,11 @@ export function MessageList(props: MessageListProps): ReactElement {
     <div role="log" aria-live="polite">
       {props.messages.map((message, index) =>
         message.kind === 'tool' ? (
-          <ToolBlock key={index} toolCall={message.toolCall} expertInformed={message.expertInformed} />
+          <ToolBlock
+            key={index}
+            toolCall={message.toolCall}
+            expertInformed={message.expertInformed}
+          />
         ) : message.kind === 'chart' ? (
           <Chart key={index} chart={message.chart} />
         ) : message.kind === 'chartError' ? (

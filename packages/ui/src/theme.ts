@@ -18,15 +18,19 @@ export const colors = {
   buttonBackground: 'var(--vscode-button-background)',
   buttonForeground: 'var(--vscode-button-foreground)',
   buttonHoverBackground: 'var(--vscode-button-hoverBackground)',
-  secondaryButtonBackground: 'var(--vscode-button-secondaryBackground, var(--vscode-input-background))',
+  secondaryButtonBackground:
+    'var(--vscode-button-secondaryBackground, var(--vscode-input-background))',
   secondaryButtonForeground: 'var(--vscode-button-secondaryForeground, var(--vscode-foreground))',
-  secondaryButtonHoverBackground: 'var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground))',
+  secondaryButtonHoverBackground:
+    'var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground))',
   hoverBackground: 'var(--vscode-toolbar-hoverBackground)',
   error: 'var(--vscode-errorForeground)',
   /* Editor warnings, for the state between fine and refused — a budget nearly spent. */
-  warning: 'var(--vscode-editorWarning-foreground, var(--vscode-list-warningForeground, var(--vscode-errorForeground)))',
+  warning:
+    'var(--vscode-editorWarning-foreground, var(--vscode-list-warningForeground, var(--vscode-errorForeground)))',
   focusBorder: 'var(--vscode-focusBorder)',
-  assistantBubble: 'var(--vscode-editor-inactiveSelectionBackground, var(--vscode-input-background))',
+  assistantBubble:
+    'var(--vscode-editor-inactiveSelectionBackground, var(--vscode-input-background))',
 
   /*
    * The accent. Set on the document root by `applyAccent` (styles.ts) rather than hardcoded,
@@ -47,7 +51,8 @@ export const colors = {
   accentSoft: 'var(--lc-accent-a12, rgba(34, 197, 94, 0.12))',
   accentRing: 'var(--lc-accent-a35, rgba(34, 197, 94, 0.35))',
   /** A gradient in the shape of the logo's, reproduced from whatever accent is active. */
-  accentGradient: 'linear-gradient(135deg, var(--lc-accent-deep, #157A3A), var(--lc-accent, #22C55E))',
+  accentGradient:
+    'linear-gradient(135deg, var(--lc-accent-deep, #157A3A), var(--lc-accent, #22C55E))',
 
   /*
    * The expert (§12b) — a coral-orange evoking Claude, whose CLI answers these.
@@ -65,7 +70,8 @@ export const colors = {
   expertContrast: 'var(--lc-expert-contrast, #ffffff)',
   expertSoft: 'var(--lc-expert-a12, rgba(217, 119, 87, 0.12))',
   expertRing: 'var(--lc-expert-a35, rgba(217, 119, 87, 0.35))',
-  expertGradient: 'linear-gradient(135deg, var(--lc-expert-deep, #86492F), var(--lc-expert, #D97757))',
+  expertGradient:
+    'linear-gradient(135deg, var(--lc-expert-deep, #86492F), var(--lc-expert, #D97757))',
 } as const
 
 export const fontFamily = 'var(--vscode-font-family, sans-serif)'
@@ -86,6 +92,38 @@ export const cls = {
   swatch: 'lc-swatch',
 } as const
 
+/**
+ * One specialist's colours, by role.
+ *
+ * Falls back to the expert family, which is what every consultation used before roles existed —
+ * so a role with no colour of its own, or a call whose role could not be read, still reads as
+ * "somebody else said this" rather than as the product's own voice.
+ *
+ * The variables are written by `applyAgentColors`; `var()`'s own fallback covers the moment
+ * before that has run, which is the first paint after a reload.
+ */
+export function agentColors(role: string | undefined): {
+  edge: string
+  soft: string
+  contrast: string
+  gradient: string
+} {
+  if (role === undefined || role === 'unknown') {
+    return {
+      edge: colors.expert,
+      soft: colors.expertSoft,
+      contrast: colors.expertContrast,
+      gradient: colors.expertGradient,
+    }
+  }
+  return {
+    edge: `var(--lc-agent-${role}, var(--lc-expert, #D97757))`,
+    soft: `var(--lc-agent-${role}-a12, var(--lc-expert-a12, rgba(217, 119, 87, 0.12)))`,
+    contrast: `var(--lc-agent-${role}-contrast, var(--lc-expert-contrast, #ffffff))`,
+    gradient: `linear-gradient(135deg, var(--lc-agent-${role}-deep, var(--lc-expert-deep, #86492F)), var(--lc-agent-${role}, var(--lc-expert, #D97757)))`,
+  }
+}
+
 export function primaryButtonStyle(disabled: boolean): CSSProperties {
   return {
     background: disabled ? colors.secondaryButtonBackground : colors.accentGradient,
@@ -100,7 +138,10 @@ export function primaryButtonStyle(disabled: boolean): CSSProperties {
   }
 }
 
-export function iconButtonStyle(kind: 'primary' | 'secondary' | 'ghost', disabled = false): CSSProperties {
+export function iconButtonStyle(
+  kind: 'primary' | 'secondary' | 'ghost',
+  disabled = false,
+): CSSProperties {
   const base: CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -116,7 +157,12 @@ export function iconButtonStyle(kind: 'primary' | 'secondary' | 'ghost', disable
     flexShrink: 0,
   }
   if (kind === 'primary') {
-    return { ...base, background: colors.accentGradient, color: colors.accentContrast, border: 'none' }
+    return {
+      ...base,
+      background: colors.accentGradient,
+      color: colors.accentContrast,
+      border: 'none',
+    }
   }
   if (kind === 'secondary') {
     return {

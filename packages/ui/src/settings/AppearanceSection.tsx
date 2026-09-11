@@ -220,20 +220,29 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
       */}
       {props.agentRoles.length > 0 && (
         <div style={{ marginTop: 4 }}>
-          {props.agentRoles.map((role) => (
-            <ColourPicker
-              key={role.role}
-              label={`${role.name} colour`}
-              description={`Marks answers from the ${role.name.toLowerCase()}.`}
-              value={
-                props.agentColors[role.role] ?? DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT
-              }
-              presets={EXPERT_PRESETS}
-              fallback={DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT}
-              inputId={`lc-agent-${role.role}-hex`}
-              onChange={(hex) => props.onChangeAgentColor(role.role, hex)}
-            />
-          ))}
+          {/*
+            The expert is deliberately not among these.
+            It already has its own control above, written before roles existed and stored under
+            its own key. Rendering it here as well gave two pickers for one thing, backed by two
+            different settings — which is the "one fact in two places" shape this project pays
+            for most often, and it was reported within minutes of shipping.
+          */}
+          {props.agentRoles
+            .filter((role) => role.role !== 'expert')
+            .map((role) => (
+              <ColourPicker
+                key={role.role}
+                label={`${role.name} colour`}
+                description={`Marks answers from the ${role.name.toLowerCase()}.`}
+                value={
+                  props.agentColors[role.role] ?? DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT
+                }
+                presets={EXPERT_PRESETS}
+                fallback={DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT}
+                inputId={`lc-agent-${role.role}-hex`}
+                onChange={(hex) => props.onChangeAgentColor(role.role, hex)}
+              />
+            ))}
         </div>
       )}
 

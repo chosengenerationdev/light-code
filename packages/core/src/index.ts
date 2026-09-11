@@ -616,6 +616,7 @@ export {
   toolCallReason,
   CONTROL_TOOLS,
   chartFromToolCall,
+  consultationFromToolCall,
 } from './history/transcript.js'
 export { redactTask, redactMessage } from './history/redactTask.js'
 

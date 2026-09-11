@@ -10,7 +10,10 @@ import type { ChatMessage } from '../providers/types.js'
  * Lives here rather than in the host so the live transcript and a restored one agree; two
  * copies of this set would eventually disagree about how a task looked.
  */
-export const CONTROL_TOOLS: ReadonlySet<string> = new Set(['attempt_completion', 'ask_followup_question'])
+export const CONTROL_TOOLS: ReadonlySet<string> = new Set([
+  'attempt_completion',
+  'ask_followup_question',
+])
 
 /*
  * `show_chart` is deliberately NOT in CONTROL_TOOLS.
@@ -79,7 +82,12 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
     }
 
     if (message.content.length > 0) {
-      entries.push({ kind: 'text', role: 'assistant', content: message.content, ...(expertInformed ? { expertInformed } : {}) })
+      entries.push({
+        kind: 'text',
+        role: 'assistant',
+        content: message.content,
+        ...(expertInformed ? { expertInformed } : {}),
+      })
     }
 
     for (const toolCall of message.toolCalls ?? []) {
@@ -96,7 +104,11 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
       if (asChart !== undefined) {
         entries.push(
           asChart.kind === 'chart'
-            ? { kind: 'chart', chart: asChart.chart, ...(expertInformed ? { expertInformed: true } : {}) }
+            ? {
+                kind: 'chart',
+                chart: asChart.chart,
+                ...(expertInformed ? { expertInformed: true } : {}),
+              }
             : asChart,
         )
         continue
@@ -108,7 +120,8 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
         continue
       }
 
-      if (toolCall.name === 'ask_expert') expertInformed = true
+      const consulting = consultationFromToolCall(toolCall.name, toolCall.arguments)
+      if (consulting !== undefined) expertInformed = true
       entries.push({
         kind: 'tool',
         ...(expertInformed ? { expertInformed: true } : {}),
@@ -116,6 +129,14 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
           id: toolCall.id,
           name: toolCall.name,
           arguments: formatToolArguments(toolCall.arguments),
+          /*
+           * Carried on the entry rather than re-derived in the panel.
+           *
+           * What the panel receives is *formatted* arguments — a display string, not JSON — so it
+           * could not read the role back out even if it wanted to. Deciding here also means the
+           * live path and a restored transcript cannot disagree about who answered.
+           */
+          ...(consulting !== undefined ? { consultingRole: consulting } : {}),
           ...(toolCallReason(toolCall.arguments) === undefined
             ? {}
             : { why: toolCallReason(toolCall.arguments) as string }),
@@ -145,6 +166,36 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
  * Returns `undefined` for anything that is not `show_chart`, so a caller can fall through to its
  * ordinary handling.
  */
+/**
+ * Which specialist a tool call consults, if any.
+ *
+ * **One owner, for the reason the chart decision has one.** The transcript and the live path both
+ * need this, and when they each decided for themselves what a chart was, a chart drawn during a
+ * turn rendered as nothing — the same bug written twice in one session. `agents/colour.test.ts`
+ * reads `host/bridge.ts` and fails if the live path ever decides it again.
+ *
+ * `ask_expert` is the expert by definition: it predates roles and is still the name everything
+ * downstream refers to. `ask_agent` carries the role in its arguments.
+ *
+ * Returns `undefined` for anything else, so a caller falls through to its ordinary handling.
+ */
+export function consultationFromToolCall(name: string, rawArguments: string): string | undefined {
+  if (name === 'ask_expert') return 'expert'
+  if (name !== 'ask_agent') return undefined
+  const decoded = decodeArguments(rawArguments)
+  const role =
+    typeof decoded === 'object' && decoded !== null
+      ? (decoded as { role?: unknown }).role
+      : undefined
+  /*
+   * A call with an unreadable role is still a consultation, and is attributed to nobody rather
+   * than to the expert. Colouring it as the expert would say Claude answered when something else
+   * did — and misattribution is worse than no attribution, which is the whole reason this colour
+   * exists.
+   */
+  return typeof role === 'string' && role.trim().length > 0 ? role.trim().toLowerCase() : 'unknown'
+}
+
 export function chartFromToolCall(
   name: string,
   rawArguments: string,

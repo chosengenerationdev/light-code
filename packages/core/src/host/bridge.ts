@@ -70,6 +70,7 @@ import {
   toolCallReason,
   CONTROL_TOOLS,
   chartFromToolCall,
+  consultationFromToolCall,
   createAuthStrategy,
   buildCodeGenerationPrompt,
   createChatProvider,
@@ -2794,7 +2795,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             // Each tool call starts a fresh assistant text block in the transcript.
             cumulativeText = ''
             cumulativeReasoning = ''
-            if (toolCall.name === 'ask_expert') expertInformed = true
+            /*
+             * One owner for "is this a consultation, and by whom" — the same function the
+             * transcript uses. Deciding it separately here is exactly how a chart drawn during a
+             * turn came to render as nothing: the transcript derived it and the live path did not.
+             */
+            const consulting = consultationFromToolCall(toolCall.name, toolCall.arguments)
+            if (consulting !== undefined) expertInformed = true
             if (CONTROL_TOOLS.has(toolCall.name)) return
             /*
              * A chart is not a tool block. It is posted on the result instead, so nothing
@@ -2812,6 +2819,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               ...(toolCallReason(toolCall.arguments) === undefined
                 ? {}
                 : { why: toolCallReason(toolCall.arguments) as string }),
+              ...(consulting !== undefined ? { consultingRole: consulting } : {}),
             }
             post({
               type: 'toolCall',
@@ -3437,7 +3445,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       teamGuidance: guidance ?? DEFAULT_TEAM_GUIDANCE,
       defaultTeamGuidance: DEFAULT_TEAM_GUIDANCE,
       teamGuidanceIsDefault: guidance === undefined,
-      colors: { ...(config.agents?.colors ?? {}) },
+      colors: {
+        /*
+         * The expert's colour comes from the control that has always owned it.
+         *
+         * It predates roles and lives under `ui.expertColor`, and the Agents work briefly gave it
+         * a second home under `agents.colors.expert` — two pickers for one thing, backed by two
+         * settings, which is the drift this project pays for most often. An explicit per-role
+         * value still wins, so nothing is taken away; it is simply no longer the *default*
+         * source for a colour that already had one.
+         */
+        expert: config.ui?.expertColor ?? '#D97757',
+        ...(config.agents?.colors ?? {}),
+      },
     })
   }
 

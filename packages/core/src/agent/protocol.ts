@@ -386,6 +386,17 @@ export interface ToolCallSummary {
    * not that.
    */
   why?: string
+  /**
+   * Which specialist this call consults, when it consults one.
+   *
+   * Decided by `consultationFromToolCall` and carried here rather than re-derived in the panel:
+   * `arguments` above is a *display* string, so the role cannot be read back out of it, and a
+   * second derivation is how the live path and a restored transcript come to disagree.
+   *
+   * `unknown` where a call named no readable role — attributed to nobody rather than to the
+   * expert, because saying Claude answered when something else did is worse than saying nothing.
+   */
+  consultingRole?: string
   result?: string
   isError?: boolean
 }
