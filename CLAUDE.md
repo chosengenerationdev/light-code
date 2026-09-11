@@ -1159,6 +1159,58 @@ that keeps "node only" true as this grows.
   nothing and expect a memory that does not exist. The *name* stays `ask_expert`, because the
   approval gate, the transcript, `recall_expert_advice` and the Junior guidance all refer to it.
 
+### Identity and credentials from the operator's own Python (2026-09-11)
+
+Requested for a host whose own libraries are the only thing that knows who is logged in and where
+the passwords are. Two flags, two functions, one shape:
+
+    light-code --identity-tool whoami.py --credential-tool creds.py
+
+- **`run() -> str` names the user.** Settings, secrets and history are filed under it.
+- **`run(name) -> str | dict` fetches a credential.** A secret stored as `tool:<name>` is fetched
+  on use instead of being kept on disk; `tool:<name>#field` picks one field of a pair.
+
+**Both run before any session, from operator settings, never through the tool registry.** That is
+not a convenience: registered Python tools live behind `python.toolsDir`, which is read from
+config, which is stored *per user* — so resolving the user through the registry means reading the
+config of a user you have not identified yet, and that circularity has no good end.
+
+- **The credential function is a secret *source*, not a tool the model can call.** Every place that
+  needs one — the gateway key, a cluster's username and password, a certificate passphrase, an MCP
+  server's environment — already resolves through `SecretStore`, so putting it behind that
+  interface covers all of them and teaches nothing downstream a new concept. A tool the model
+  called would put the password in the transcript, the task history and whatever it said next.
+  `credentialWiring.test.ts` asserts `bridge.ts` has never heard of it.
+- **What is stored is a pointer, not a secret**, so the secrets file holds only names of things to
+  go and ask for. It *wraps* rather than replaces, so a key typed into the interface still works
+  beside one from a vault.
+- **A chatty import must not be mistaken for the answer.** Internal libraries print licence
+  notices and deprecations, and reading "the output" would file somebody's whole configuration
+  under a log line while looking like it had worked. Both wrappers print the value behind a marker
+  for exactly that reason, and both have a test with a library that prints.
+- **Refuse rather than guess, in both.** `str(None)` is `"None"`, so a function falling through its
+  branches would key every affected person's configuration to the same word, silently and
+  identically. A credential missing the field asked for names the fields it *did* return — an
+  empty password reaches the gateway and comes back as "your credentials are wrong", sending
+  somebody to check something that was never sent.
+- **The credential traceback is deliberately withheld**, unlike the identity one. Credential code
+  fails with the value in its hands — a library echoing what it received, an assertion printing a
+  comparison — and that string is on its way to a screen and a log. A test plants a password in an
+  exception and asserts it does not come back.
+- **A five-second cache.** One turn resolves the same credential several times (auth, refresh,
+  retry) and an interpreter per resolution would be felt; five seconds covers a turn and expires
+  long before a rotation matters, which keeps §15's "fetch at request time" honest rather than
+  nominal.
+- Identity resolution is **not** authorisation. The bearer token still decides who gets in, exactly
+  as in `SingleUserIdentity`: conflating them would make a function returning a name a way past
+  the door. A failure does not stop the server either — these reach libraries that are not always
+  up, and the banner says which user was resolved, or names the error.
+
+**Still missing, and asked for:** making this a *mandatory setup step before providers*, in the
+Python tab. The mechanism is done; the UI is not. Note the gap in shape, too — the file is named
+by an operator flag today, so a UI that writes it would also need a conventional default path
+(under `dataDir`) for the flag to become optional.
+
 ### The Node host's stability, and four ways a reply could vanish (2026-09-11)
 
 Reported together from a Linux server: the model list said "Loading…" for ever, Test Connection
