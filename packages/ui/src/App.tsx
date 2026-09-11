@@ -1356,6 +1356,14 @@ export function App(props: AppProps): ReactElement {
                 props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
               },
               onClearProbe: () => clearProbe('data'),
+              /*
+               * Asks for both, because the tab shows both: the tool list it offers as collectors,
+               * and the record counts beside each dataset. One button, one round trip.
+               */
+              onRefresh: () => {
+                props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
+                props.transport.post({ type: 'requestDatasetStatus' } satisfies UiToHostMessage)
+              },
               onSave: (dataset) =>
                 props.transport.post({ type: 'saveDataset', dataset } satisfies UiToHostMessage),
               onDelete: (id: string) =>
@@ -1413,6 +1421,7 @@ export function App(props: AppProps): ReactElement {
                 props.transport.post({ type: 'runSearchProbe', query, target } satisfies UiToHostMessage)
               },
               onClearProbe: () => clearProbe('docs'),
+              onRefreshTools: () => props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage),
               onClearDocs: () => {
                 setDocsResult(undefined)
                 props.transport.post({ type: 'clearDocsIndex', kind: 'tool' } satisfies UiToHostMessage)

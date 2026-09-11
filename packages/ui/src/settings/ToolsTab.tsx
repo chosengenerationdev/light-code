@@ -19,6 +19,15 @@ export interface ToolsTabProps {
   docsIndex: { enabled: boolean; retrievalReady: boolean; indexing: boolean; result: string | undefined } | undefined
   onIndexDocs: () => void
   onClearDocs: () => void
+  /**
+   * Re-asks the host for the catalogue.
+   *
+   * The list *is* pushed whenever a tool is registered or a server connects, so this is not the
+   * primary path — it is for the cases a push cannot cover: a tool file edited outside the
+   * editor, a server that changed what it offers without saying so, and the ordinary human need
+   * to confirm rather than assume. A list you cannot make refresh is one you stop trusting.
+   */
+  onRefreshTools: () => void
   probe: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
   onProbe: (query: string, target: ProbeTarget) => void
   onClearProbe: () => void
@@ -193,14 +202,24 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
         <label htmlFor="lc-tools-search" style={labelStyle()}>
           Search
         </label>
-        <input
-          id="lc-tools-search"
-          type="search"
-          value={query}
-          placeholder="e.g. read a spreadsheet"
-          onChange={(event) => setQuery(event.target.value)}
-          style={textFieldStyle()}
-        />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            id="lc-tools-search"
+            type="search"
+            value={query}
+            placeholder="e.g. read a spreadsheet"
+            onChange={(event) => setQuery(event.target.value)}
+            style={{ ...textFieldStyle(), flex: 1 }}
+          />
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            title="Re-ask for the catalogue. It updates on its own when a tool is added — this is for when you would rather not wonder."
+            onClick={props.onRefreshTools}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       <p style={{ color: colors.muted, fontSize: 11 }}>

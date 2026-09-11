@@ -412,6 +412,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // the schedule picker without the user reloading the window.
       void postSchedules()
       void postTools()
+      /*
+       * And in the collector picker, for exactly the same reason.
+       *
+       * This was missed when Custom data was added: `postTools` was pushed on every way the
+       * catalogue can change and `postDatasetStatus` was not, so a collector written for a
+       * dataset was absent from the list that exists to choose it. Reported as the tool list not
+       * updating with what had just been added.
+       */
+      void postDatasetStatus()
     },
   })
 
@@ -1416,6 +1425,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // Same reasoning: MCP servers connect seconds after the panel opens, so a catalogue
         // fetched once on mount would show an empty list for ever.
         void postTools()
+        // And the collector picker, which offers MCP tools too.
+        void postDatasetStatus()
         // Fires on connect, disconnect and tools/list_changed — every way the MCP half of
         // the corpus can change. Opening the panel fires several at once, which is what the
         // debounce is for.

@@ -74,6 +74,8 @@ export interface CustomDataTabProps {
   onClear: (id: string, resync: boolean) => void
   onStop: () => void
   onOpenPython: () => void
+  /** Re-asks for the tool list and the dataset figures. */
+  onRefresh: () => void
 }
 
 function formatSize(bytes: number): string {
@@ -154,9 +156,24 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
           &ldquo;check the {editing.name.trim().length > 0 ? editing.name : 'tickets'}&rdquo;.
         </span>
 
-        <label htmlFor="lc-ds-tool" style={labelStyle()}>
-          Collector tool
-        </label>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <label htmlFor="lc-ds-tool" style={labelStyle()}>
+            Collector tool
+          </label>
+          {/*
+            Here as well as on the list, because this is where a missing tool is noticed: you came
+            to pick the collector you just wrote. The list does refresh on its own when a tool is
+            registered — this is for a file edited outside the editor, and for confirming rather
+            than assuming.
+          */}
+          <button
+            type="button"
+            style={{ background: 'none', border: 'none', color: colors.accent, cursor: 'pointer', padding: 0, fontSize: 11 }}
+            onClick={props.onRefresh}
+          >
+            Refresh the list
+          </button>
+        </div>
         {props.tools.length === 0 ? (
           <div style={{ border: `1px solid ${colors.border}`, borderRadius: 4, padding: 10, fontSize: 11, color: colors.muted }}>
             <span style={{ display: 'block', marginBottom: 6 }}>
@@ -476,9 +493,14 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
           ))
         )}
 
-        <button type="button" style={primaryButtonStyle(false)} onClick={() => setEditing(newDataset())}>
-          Add a dataset
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button type="button" style={primaryButtonStyle(false)} onClick={() => setEditing(newDataset())}>
+            Add a dataset
+          </button>
+          <button type="button" style={secondaryButtonStyle()} onClick={props.onRefresh}>
+            Refresh
+          </button>
+        </div>
 
         <IndexingProgress progress={props.progress} onStop={props.onStop} />
       </Section>

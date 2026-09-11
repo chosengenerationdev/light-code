@@ -1,5 +1,17 @@
 # @chosengeneration/light-code
 
+## 0.37.3
+
+### Patch Changes
+
+- The collector picker did not see a tool that had just been added.
+
+  `postTools` was pushed on every way the catalogue can change — a Python tool created, an MCP server
+  connecting, `tools/list_changed` — and `postDatasetStatus` was not, so a collector written for a
+  dataset was missing from the list that exists to choose it. It follows the same triggers now, and
+  both the Tools tab and the collector picker have an explicit Refresh for what a push cannot cover:
+  a tool file edited outside the editor, and the ordinary need to confirm rather than assume.
+
 ## 0.37.2
 
 ### Patch Changes

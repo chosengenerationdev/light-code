@@ -61,6 +61,7 @@ function render(
         docsIndex={undefined}
         onIndexDocs={() => undefined}
         onClearDocs={() => undefined}
+        onRefreshTools={() => undefined}
         probe={{ running: false, result: undefined }}
         onProbe={() => undefined}
         onClearProbe={() => undefined}

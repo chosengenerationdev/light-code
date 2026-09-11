@@ -80,6 +80,7 @@ const base = {
       probe: { running: false, result: undefined },
       onProbe: () => undefined,
     onClearProbe: () => undefined,
+    onRefreshTools: () => undefined,
     },
   },
   network: { warnings: [], issues: [] },
