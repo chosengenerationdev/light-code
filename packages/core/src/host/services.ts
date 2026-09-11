@@ -158,6 +158,19 @@ export interface HostServices {
    * the person approving is the person asking — and absent for an administrator on a shared
    * server, who gets the ordinary in-chat prompt.
    */
+  /**
+   * Why this session may not configure a profile that runs a program, when it may not.
+   *
+   * Present only for a restricted session — the same shape as `submitForReview` above and for the
+   * same reason. A token command runs as the account Light Code runs under, so on a shared server
+   * a personal profile must not be able to introduce one: that is arbitrary execution as the
+   * service account, which §14 is explicit is *not* what locking down configuration buys you.
+   *
+   * Absent everywhere else. In the extension there is one user who owns the machine, and on a
+   * single-user host the person configuring it is the person it runs as.
+   */
+  executableAuthRefusal?: string
+
   submitForReview?: (request: {
     kind: 'python-tool' | 'skill'
     name: string

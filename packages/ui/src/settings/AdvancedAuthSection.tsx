@@ -138,6 +138,7 @@ export function AdvancedAuthSection(props: AdvancedAuthSectionProps): ReactEleme
           style={{ width: '100%' }}
           options={[
             { value: 'apiKey', label: 'API key' },
+            { value: 'tokenCommand', label: 'Token from a script' },
             { value: 'apigeeMtls', label: 'Mutual TLS + OAuth (Apigee)' },
             { value: 'none', label: 'None' },
           ]}

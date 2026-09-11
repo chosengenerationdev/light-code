@@ -1,3 +1,6 @@
+import type { TokenCommandInput } from '@light-code/core/browser'
+import type { BrowseRequest } from './PathField.js'
+import { TokenCommandFields } from './TokenCommandFields.js'
 import {
   providerPresets,
   validateProviderForm,
@@ -26,6 +29,8 @@ export interface ProviderFormValues {
   model: string
   authType: AuthType
   hasApiKey: boolean
+  /** The configured token command, so the form can render and round-trip it. */
+  tokenCommand?: TokenCommandInput | undefined
   /** Set when the key comes from the environment. The variable's name, not its value. */
   apiKeyEnvVar?: string | undefined
   hasClientSecret: boolean
@@ -38,6 +43,9 @@ export interface ProviderFormValues {
 
 export interface ProviderFormProps {
   initial: ProviderFormValues
+  /** The shared browse dialog, keyed by purpose. Absent where the host has no picker (§19). */
+  onBrowse?: ((request: BrowseRequest) => void) | undefined
+  pickedPath?: { purpose: string; path: string } | undefined
   onSave: (input: ProfileInput) => void
   onCancel: () => void
   /** Ask the host to fetch the catalogue for the profile as currently typed. */
@@ -56,6 +64,14 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
   const [baseUrl, setBaseUrl] = useState(props.initial.baseUrl)
   const [model, setModel] = useState(props.initial.model)
   const [apiKey, setApiKey] = useState('')
+  /*
+   * Seeded from the profile rather than started empty: a command is not a secret, so unlike the
+   * API key the form *can* be shown what is configured — and a form that cannot see the current
+   * value can only replace it.
+   */
+  const [tokenCommand, setTokenCommand] = useState<TokenCommandInput>(
+    props.initial.tokenCommand ?? { command: ['python', ''] },
+  )
   const [authType, setAuthType] = useState<AuthType>(props.initial.authType)
   const [apigee, setApigee] = useState<ApigeeSummary>(props.initial.apigee ?? {})
   const [clientSecret, setClientSecret] = useState('')
@@ -90,6 +106,7 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
     model,
     authType,
     apiKey,
+    ...(authType === 'tokenCommand' ? { tokenCommand } : {}),
     ...(authType === 'apigeeMtls' ? { apigee, clientSecret, certs, certPassphrase } : {}),
     ...(Object.keys(capabilities).length > 0 ? { modelCapabilities: capabilities } : {}),
     ...(connectionTls.caFile !== undefined || connectionTls.rejectUnauthorized !== undefined
@@ -115,7 +132,14 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
       return
     }
     // A profile with no credential yet would just 401; wait until there is one to send.
-    const hasCredential = authType === 'none' || apiKey.trim().length > 0 || props.initial.hasApiKey || authType === 'apigeeMtls'
+    const hasCredential: boolean =
+      authType === 'none' ||
+      apiKey.trim().length > 0 ||
+      props.initial.hasApiKey ||
+      authType === 'apigeeMtls' ||
+      // A script that has been named is a credential, even though nothing was typed into a key box.
+      (authType === 'tokenCommand' &&
+        tokenCommand.command.filter((part: string) => part.trim().length > 0).length > 0)
     if (!hasCredential) return
 
     setLastFetchedUrl(url)
@@ -186,6 +210,15 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         capabilities={capabilities}
         onCapabilitiesChange={setCapabilities}
       />
+
+      {authType === 'tokenCommand' && (
+        <TokenCommandFields
+          value={tokenCommand}
+          onChange={setTokenCommand}
+          {...(props.onBrowse === undefined ? {} : { onBrowse: props.onBrowse })}
+          {...(props.pickedPath === undefined ? {} : { pickedPath: props.pickedPath })}
+        />
+      )}
 
       {authType === 'apiKey' && (
         <div onBlur={maybeAutoFetchModels}>

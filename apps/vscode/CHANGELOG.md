@@ -1,5 +1,21 @@
 # light-code-vscode
 
+## 0.60.0
+
+### Minor Changes
+
+- A token-fetching script is configured in the Providers tab, not by hand-editing a config file.
+
+  "Token from a script" in the authentication picker: point at a `.py` file, optionally name the
+  interpreter and any arguments, and Test Connection runs it and reports what came back. Advanced
+  fields cover JSON output, expiry and headers.
+
+  The form is a shape over the same `tokenCommand` it always wrote — the mode is derived from the
+  stored argv rather than remembered separately, so a hand-written `python -c "..."` opens as raw
+  argv and saves back unchanged rather than being rewritten into something the friendly form can
+  represent. On a shared server a personal profile cannot configure one: it would run as the
+  account the server runs as.
+
 ## 0.59.2
 
 ### Patch Changes

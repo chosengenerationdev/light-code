@@ -85,7 +85,21 @@ export async function testConnection(
   } else {
     try {
       await auth.resolveHeaders()
-      steps.push({ step: 'token', status: 'ok', detail: 'Credential resolved from secure storage.' })
+      /*
+       * Says where the credential came from, because the three sources fail in different places
+       * and "resolved from secure storage" is simply untrue for two of them — which makes a
+       * passing test unhelpful for the person whose script is the thing they want to check.
+       */
+      steps.push({
+        step: 'token',
+        status: 'ok',
+        detail:
+          profile.auth.type === 'tokenCommand'
+            ? 'The token command ran and returned a token.'
+            : profile.auth.type === 'apiKey' && profile.auth.apiKeyRef.startsWith('env:')
+              ? `Key read from ${profile.auth.apiKeyRef.slice('env:'.length)}.`
+              : 'Credential resolved from secure storage.',
+      })
     } catch (error) {
       steps.push({ step: 'token', status: 'failed', detail: messageOf(error) })
       steps.push({ step: 'models', status: 'skipped', detail: 'Not attempted — no credential.' })

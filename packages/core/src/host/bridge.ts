@@ -259,6 +259,24 @@ async function toSummary(profile: ProviderProfile, secrets: SecretStore): Promis
     ...(profile.auth.type === 'apiKey' && describeSecretRef(profile.auth.apiKeyRef).kind === 'env'
       ? { apiKeyEnvVar: describeSecretRef(profile.auth.apiKeyRef).envVar as string }
       : {}),
+    // Not a secret: a command describes how to *get* a credential. The token it produces never
+    // crosses the bridge, and a form cannot edit what it is never shown.
+    ...(profile.auth.type === 'tokenCommand'
+      ? {
+          /*
+           * `env` is dropped on the way out, deliberately.
+           *
+           * It is the one field here somebody might have put a credential in, and the panel has no
+           * business rendering it. Dropping it from the summary rather than from the schema means a
+           * hand-written one keeps working; the form simply never sees it, and never sends it back.
+           */
+          tokenCommand: ((whole) => {
+            const { env, ...rest } = whole
+            void env
+            return rest
+          })(profile.auth.tokenCommand),
+        }
+      : {}),
     hasClientSecret: false,
     hasCertPassphrase: false,
   }
@@ -2475,9 +2493,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * then fail in a way nobody would connect to having opened Settings.
      */
     if (input.authType === 'tokenCommand') {
+      // Refused before anything is written, so a restricted session cannot leave a half-saved
+      // profile behind — and told why, rather than silently dropping to `none`.
+      if (services.executableAuthRefusal !== undefined) throw new Error(services.executableAuthRefusal)
       const existing = (await configManager.load()).config.profiles?.find((profile) => profile.id === id)
-      if (existing?.auth.type === 'tokenCommand') return existing.auth
-      return { type: 'none' }
+      if (input.tokenCommand === undefined || input.tokenCommand.command.length === 0) {
+        // Nothing sent means the form did not edit it — keep what is there rather than replacing a
+        // working credential with `none`, which would fail only once the current token expired.
+        return existing?.auth.type === 'tokenCommand' ? existing.auth : { type: 'none' }
+      }
+      return {
+        type: 'tokenCommand',
+        tokenCommand: {
+          ...input.tokenCommand,
+          command: input.tokenCommand.command.filter((part) => part.trim().length > 0),
+        },
+      }
     }
 
     if (input.authType === 'none') return { type: 'none' }

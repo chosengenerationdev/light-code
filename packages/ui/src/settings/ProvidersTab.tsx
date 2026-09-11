@@ -1,3 +1,4 @@
+import type { BrowseRequest } from './PathField.js'
 import type { ProfileInput, ProfileSummary, TestConnectionStep } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { CheckIcon, CopyIcon, EditIcon, TrashIcon } from '../icons.js'
@@ -6,6 +7,9 @@ import { ProviderForm, type ProviderFormValues } from './ProviderForm.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
 export interface ProvidersTabProps {
+  /** The shared browse dialog, for the token-script field. Absent where there is no picker. */
+  onBrowse?: ((request: BrowseRequest) => void) | undefined
+  pickedPath?: { purpose: string; path: string } | undefined
   profiles: ProfileSummary[]
   activeProfileId: string | undefined
   onSave: (input: ProfileInput) => void
@@ -55,6 +59,9 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
             model: editing.profile.model,
             authType: editing.profile.authType,
             hasApiKey: editing.profile.hasApiKey,
+            ...(editing.profile.tokenCommand === undefined
+              ? {}
+              : { tokenCommand: editing.profile.tokenCommand }),
             ...(editing.profile.apiKeyEnvVar === undefined
               ? {}
               : { apiKeyEnvVar: editing.profile.apiKeyEnvVar }),
@@ -82,6 +89,8 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
 
     return (
       <ProviderForm
+        onBrowse={props.onBrowse}
+        {...(props.pickedPath === undefined ? {} : { pickedPath: props.pickedPath })}
         initial={initial}
         onSave={(input) => {
           props.onSave(input)

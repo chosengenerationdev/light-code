@@ -216,6 +216,18 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
        */
       ...(roles.shared && !isAdminSession(principal)
         ? {
+            /*
+             * A personal profile may not run a program to fetch its token.
+             *
+             * That would be arbitrary execution as the service account, which §14 says plainly is
+             * the thing locking down configuration does *not* buy you. An administrator can still
+             * set one up as a shared profile, which is where a credential belonging to the server
+             * belongs anyway.
+             */
+            executableAuthRefusal:
+              'A profile that runs a program to fetch its token can only be set up by an ' +
+              'administrator on a shared server — it would run as the account this server runs ' +
+              'as. Ask an administrator to add it as a shared profile, or use an API key.',
             submitForReview: async (request) => {
               const queued = await reviews.submit({ ...request, authorId: principal.id, authorName: principal.displayName })
               log(`${principal.displayName} submitted ${request.kind} "${request.name}" for review`)

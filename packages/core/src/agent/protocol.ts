@@ -129,12 +129,36 @@ export interface ProfileSummary {
   hasApiKey: boolean
   /** Set when the key comes from the environment, so the panel can name the variable. */
   apiKeyEnvVar?: string
+  /** The configured token command, so the form can render and round-trip it. */
+  tokenCommand?: TokenCommandInput
   hasClientSecret: boolean
   hasCertPassphrase: boolean
   apigee?: ApigeeSummary
   certs?: CertSummary
   modelCapabilities?: ModelCapabilityInput
   connectionTls?: ConnectionTlsInput
+}
+
+/**
+ * A token fetched by running a program, as the panel edits it.
+ *
+ * Deliberately the same fields as the config file's `tokenCommand`, so the form is a *shape* over
+ * the one mechanism rather than a second one. `env` is absent on purpose: it is somewhere a secret
+ * could be typed, and secrets do not go in config (§15).
+ */
+export interface TokenCommandInput {
+  /** argv. Nothing is shell-parsed, so a path with a space is one element. */
+  command: string[]
+  // `| undefined` throughout: these mirror a zod-inferred type, and under
+  // `exactOptionalPropertyTypes` "absent" and "present and undefined" are different types.
+  cwd?: string | undefined
+  tokenPath?: string | undefined
+  expiresInPath?: string | undefined
+  fallbackExpirySeconds?: number | undefined
+  refreshSkewSeconds?: number | undefined
+  timeoutSeconds?: number | undefined
+  headerName?: string | undefined
+  headerPrefix?: string | undefined
 }
 
 /**
@@ -149,6 +173,14 @@ export interface ProfileInput {
   model: string
   authType: 'none' | 'apiKey' | 'tokenCommand' | 'apigeeMtls'
   apiKey: string
+  /**
+   * Present when `authType` is `tokenCommand`.
+   *
+   * Not write-only like `apiKey`: a command is not a secret, it is a *description of how to get
+   * one*, and the panel cannot let you edit what it is never shown. The token it produces never
+   * crosses the bridge (invariant 7).
+   */
+  tokenCommand?: TokenCommandInput
   apigee?: ApigeeSummary
   /** Write-only, like `apiKey`. */
   clientSecret?: string

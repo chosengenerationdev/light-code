@@ -78,6 +78,7 @@ export type {
   HostToUiMessage,
   IndexingKind,
   ProbeTarget,
+  TokenCommandInput,
   ProfileSummary,
   ProfileInput,
   ToolCallSummary,
