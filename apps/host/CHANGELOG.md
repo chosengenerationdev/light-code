@@ -1,5 +1,19 @@
 # @chosengeneration/light-code
 
+## 0.37.2
+
+### Patch Changes
+
+- `light-code --version` works, and the banner names it.
+
+  It was not a known flag — and because unknown flags are rejected rather than ignored, asking for
+  the version _failed_. That is the wrong way round for the one question people ask when something
+  else has already gone wrong, and this project has already been bitten by a stale `npx` cache
+  serving a build that predated `--server`. `--version` and `-v` are answered before the
+  unknown-flag check, so they work even on a copy too old to understand the rest of the command
+  line, and the version now appears in the startup banner and in the unknown-flag error too — which
+  is where a stale copy actually shows itself.
+
 ## 0.37.1
 
 ### Patch Changes

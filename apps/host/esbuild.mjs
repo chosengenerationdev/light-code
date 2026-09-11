@@ -26,6 +26,16 @@ import * as esbuild from 'esbuild'
  */
 const outDir = 'dist'
 
+/*
+ * The published version, baked in.
+ *
+ * Read from the manifest here rather than at runtime because the bundle has no `package.json`
+ * beside it to read — the same reason the operator guide and the Python worker are inlined. A
+ * `__LC_VERSION__` that survived into the output unreplaced would be a visible bug rather than a
+ * silent one, which is the right way round.
+ */
+const { version } = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+
 await esbuild.build({
   entryPoints: ['src/cli.ts', 'src/server.ts'],
   outdir: outDir,
@@ -37,6 +47,7 @@ await esbuild.build({
   // Workspace packages are bundled (they are not published); real dependencies are not.
   external: ['@vscode/ripgrep'],
   logLevel: 'info',
+  define: { __LC_VERSION__: JSON.stringify(version) },
   banner: {
     // The bundle is ESM but core reaches for `require` to locate ripgrep lazily, which ESM
     // does not define. Recreating it here is the standard shim.

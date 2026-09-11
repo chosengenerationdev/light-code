@@ -1,4 +1,15 @@
 #!/usr/bin/env node
+/**
+ * Replaced at build time by esbuild's `define` with the version from `package.json`.
+ *
+ * Declared rather than imported: the bundle has no manifest beside it to read, which is the same
+ * reason the operator guide and the Python worker are inlined. The fallback is a visible string
+ * rather than a plausible number, because a *wrong* version is worse than an obviously absent one
+ * — the entire reason anybody asks is to find out whether they are on the copy they think.
+ */
+declare const __LC_VERSION__: string | undefined
+const VERSION = typeof __LC_VERSION__ === 'string' ? __LC_VERSION__ : 'unknown (not a packaged build)'
+
 /*
  * First, and before anything that might read a web global at import time.
  *
@@ -85,12 +96,23 @@ async function main(): Promise<void> {
    * locked when it was not. A flag that does nothing is worse than one that errors, and worse
    * still when the thing it was supposed to do is a restriction.
    */
+  /*
+   * Answered before anything else, including the unknown-flag check.
+   *
+   * It is the one question worth asking *because* something else went wrong, so it must work on a
+   * copy too old to understand whatever else was typed.
+   */
+  if (args.includes('--version') || args.includes('-v')) {
+    process.stdout.write(`${VERSION}\n`)
+    return
+  }
+
   const unknown = args.filter((arg) => arg.startsWith('--') && !KNOWN_FLAGS.has(arg))
   if (unknown.length > 0) {
     process.stderr.write(
       `light-code: unknown option${unknown.length === 1 ? '' : 's'} ${unknown.join(', ')}\n` +
-        'If you expected this to work, you may be on an older cached copy — try:\n' +
-        '  npx @chosengeneration/light-code@latest --help\n',
+        `If you expected this to work, you may be on an older cached copy. This one is ` +
+        `${VERSION}. Try:\n  npx @chosengeneration/light-code@latest --help\n`,
     )
     process.exit(2)
   }
@@ -223,7 +245,7 @@ async function main(): Promise<void> {
   // what makes it usable as a one-time handoff. It is single-use and expires in 10s.
   const launchUrl = `${server.url}${adminMode ? '/admin' : ''}/#t=${server.launchToken ?? ''}`
   process.stdout.write(
-    `\nLight Code\n  workspace  ${workspaceRoot}\n  data       ${dataDir}\n  listening  ${server.url}\n`,
+    `\nLight Code ${VERSION}\n  workspace  ${workspaceRoot}\n  data       ${dataDir}\n  listening  ${server.url}\n`,
   )
   /*
    * Said only when something was actually supplied, which on Node 18 and above is never.
@@ -299,6 +321,8 @@ async function main(): Promise<void> {
 const KNOWN_FLAGS = new Set([
   '--help',
   '-h',
+  '--version',
+  '-v',
   '--handoff-seconds',
   '--workspace',
   '--port',
@@ -362,6 +386,7 @@ function usage(): string {
 Usage: light-code [options]
 
   --workspace <dir>   Folder to work in (default: current directory)
+  --version, -v       Print the version and exit
   --port <n>          Port to bind (default: an unused one)
   --data-dir <dir>    Where config, secrets and task history live
   --no-open           Print the URL instead of launching a browser
