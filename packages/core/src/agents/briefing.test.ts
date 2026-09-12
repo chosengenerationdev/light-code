@@ -72,6 +72,21 @@ describe('what a specialist is told about the rest of the team', () => {
     expect(briefing).toContain('another pair of')
   })
 
+  /*
+   * Reported: the expert gave the librarian a step reading "confirm the exact import paths in the
+   * installed version" — a job that requires opening the package. Every specialist is told in its
+   * *own* prompt that it cannot see the workspace, but the roster describing the *others* never
+   * said so, so the expert had no reason to think anybody but itself was blind.
+   */
+  it('says the other specialists cannot look anything up either', () => {
+    const briefing = buildAgentBriefing({
+      team: [agent('expert'), agent('librarian')],
+      self: 'expert',
+    })
+    expect(briefing).toContain('None of them can see the workspace')
+    expect(briefing).toContain('go and look something up')
+  })
+
   it('does not ask for an allocation when there is nobody to allocate', () => {
     const briefing = buildAgentBriefing({ team: [agent('expert')], self: 'expert' })
     expect(briefing).not.toContain('say who should be involved in which step')

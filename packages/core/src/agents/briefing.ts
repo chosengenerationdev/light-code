@@ -144,6 +144,24 @@ function buildRoster(team: readonly ResolvedAgent[], self: AgentRole | undefined
        * tester allocated across four steps, programmer nowhere, on a machine where it was
        * assigned. An instruction that names one mode of use gets obeyed in one mode.
        */
+      /*
+       * The others are as blind as you are, which the roster never said.
+       *
+       * Every specialist's own prompt opens with "You cannot see the workspace and cannot read
+       * files, run commands or search" — but that is in *its* prompt, and this roster describes
+       * *other* people. So the expert knew it was blind itself and had no reason to think anybody
+       * else was, and allocated the librarian a step reading "confirm the exact import paths in
+       * the installed version" — a job that requires opening the package. Reported exactly that
+       * way. The assistant spotted it and settled the question by reading, which is the system
+       * degrading well, but the approved plan still had a step in it that could not happen.
+       */
+      '**None of them can see the workspace.** They have no tools, cannot read a file, run a',
+      'command or search, and know only what is pasted into the question — the same position you',
+      'are in. So never allocate a step that is really *go and look something up*: checking what',
+      'version is installed, confirming an API against the real package, reading what a file',
+      'currently says. Those are the assistant\'s own job and it can simply do them. Ask a',
+      'specialist to judge, design or review something once the assistant has fetched the facts.',
+      '',
       'They divide into two kinds, and both are worth allocating:',
       '',
       '- **Readers** — the reviewer, the tester, the librarian. Worth a step where another pair of',

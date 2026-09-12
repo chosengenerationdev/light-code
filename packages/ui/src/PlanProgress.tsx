@@ -108,7 +108,15 @@ function RoleChip({ role, planned }: { role: string; planned?: boolean }): React
         whiteSpace: 'nowrap',
       }}
     >
-      {planned === true ? `${role}?` : role}
+      {/*
+        The role, and nothing else.
+
+        This read `reviewer?`, which was meant as "intended, not confirmed" and landed as a
+        puzzle — a question mark on a name reads as uncertainty about the name. The distinction is
+        carried by the dashed outline, by the `plan:` label the chips sit behind, and by the
+        tooltip, none of which need the reader to decode punctuation.
+      */}
+      {role}
     </span>
   )
 }
@@ -219,11 +227,22 @@ export function PlanProgress(props: PlanProgressProps): ReactElement {
                     ))}
                     {/* Only the ones not yet confirmed: once a specialist has actually answered,
                         the intention is history and showing both says nothing extra. */}
-                    {checkpoint.plannedRoles
-                      .filter((role) => !checkpoint.roles.includes(role))
-                      .map((role) => (
-                        <RoleChip key={`planned-${role}`} role={role} planned />
-                      ))}
+                    {(() => {
+                      const pending = checkpoint.plannedRoles.filter(
+                        (role) => !checkpoint.roles.includes(role),
+                      )
+                      if (pending.length === 0) return null
+                      return (
+                        <>
+                          {/* Says outright what the dashed chips mean, so nothing has to be
+                              inferred from how they are drawn. */}
+                          <span style={{ color: colors.muted, fontSize: 10 }}>plan:</span>
+                          {pending.map((role) => (
+                            <RoleChip key={`planned-${role}`} role={role} planned />
+                          ))}
+                        </>
+                      )
+                    })()}
                   </div>
                 )}
               </div>

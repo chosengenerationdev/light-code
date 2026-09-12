@@ -1,5 +1,27 @@
 # @chosengeneration/light-code
 
+## 0.48.6
+
+### Patch Changes
+
+- Stop the expert allocating steps a specialist could never carry out
+
+  Reported from a real plan: the librarian was given "confirm the exact import paths for MATCH/ALL
+  and ctx.triggered_id in the installed version" — a job that requires opening the installed
+  package, which no specialist can do.
+
+  Every specialist's own prompt opens by saying it cannot see the workspace or read files. But that
+  sits in _its_ prompt, and the roster the expert reads describes _other_ people — so the expert
+  knew it was blind itself and had no reason to think anybody else was. The roster now says it
+  outright, and says what follows from it: a step that is really "go and look something up" —
+  checking an installed version, confirming an API against the real package, reading what a file
+  currently says — belongs to the assistant, which can simply do it. Specialists judge, design and
+  review once the facts have been fetched.
+
+  The planned-role chip also loses its trailing question mark. `reviewer?` was meant as "intended,
+  not confirmed" and read as uncertainty about the name. The chips now sit behind a small `plan:`
+  label, which says what they mean rather than asking anyone to decode punctuation.
+
 ## 0.48.5
 
 ### Patch Changes
