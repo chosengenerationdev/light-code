@@ -171,6 +171,31 @@ export function buildSystemPrompt(
   }
 
   /*
+   * The same omission as the Python block above, made again and reported the same way.
+   *
+   * Asked to change a specialist's prompt, the assistant answered that it could not — "that's
+   * Settings → Agents, done by hand in the UI" — and offered to draft text to paste. The tools
+   * were registered and working. They are `dispatchOnly`, so nothing advertised them, and the
+   * model had no reason to suspect there was anything to search for: it is not a capability an
+   * assistant would assume it has.
+   *
+   * A hidden tool is only reachable by a model that thinks to look, and for a capability like
+   * this one nobody thinks to look. Four lines at the front of the prompt buys the difference
+   * between a feature that exists and one that is confidently denied.
+   */
+  lines.push(
+    '',
+    'Specialist roles:',
+    '- The team of specialists is configurable, and you can change it. `read_role_prompt` shows',
+    '  what a role is told it is (no argument lists them all); `update_role` changes that, or a',
+    '  custom role\'s name, summary and workspace access.',
+    '- `create_role` invents one — a security reviewer, say — and `delete_role` removes a custom',
+    '  one. The user approves each of these, seeing the whole role or a diff of it.',
+    '- So "make the reviewer stricter" or "add a role that reviews SQL" is something to do, not',
+    '  something to explain how to do by hand.',
+  )
+
+  /*
    * Skills first, and local before team.
    *
    * Requested directly: "make the agent always remember to check the skills as first thing (local

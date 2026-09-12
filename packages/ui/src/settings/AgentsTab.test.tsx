@@ -316,6 +316,22 @@ describe('custom roles', () => {
     expect(onSetRoleEnabled).toHaveBeenCalledWith('reviewer', false)
   })
 
+  it('says "off" in words, not only by dimming', () => {
+    // Reported as "I don't see the enable or disable switch" while it was on screen: an
+    // unlabelled checkbox beside the name, with two labelled ones under it. Dimming says
+    // something is different; this says what.
+    // The chip itself, not the word: the tab's own prose says "off" in a couple of places, so a
+    // substring check passes whatever the row is doing.
+    const chip = () =>
+      [...container.querySelectorAll('span')].filter((node) => node.textContent === 'off')
+
+    render({ roles: [role({ role: 'reviewer', name: 'Reviewer', enabled: false })] })
+    expect(chip()).toHaveLength(1)
+
+    render({ roles: [role({ role: 'reviewer', name: 'Reviewer', enabled: true })] })
+    expect(chip()).toHaveLength(0)
+  })
+
   it('still shows a switched-off role, and still lets it be configured', () => {
     render({ roles: [role({ role: 'reviewer', name: 'Reviewer', enabled: false })] })
     expect(container.textContent).toContain('Reviewer')

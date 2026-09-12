@@ -1,5 +1,31 @@
 # light-code-vscode
 
+## 0.79.1
+
+### Patch Changes
+
+- The assistant knows it can change a role's prompt
+
+  Reported with a screenshot: asked to make a role a security specialist, the assistant replied that
+  it could not — _"that's Settings → Agents, done by hand in the UI"_ — and offered to draft text to
+  paste in. The tools were registered and working the whole time.
+
+  They are `dispatchOnly`, so nothing advertised them, and the model had no reason to suspect there
+  was anything to search for: reconfiguring its own team is not a capability an assistant assumes it
+  has. A hidden tool is reachable only by a model that thinks to look, and for this one nobody
+  thinks to look.
+
+  **This is the second time in the same file.** `create_python_tool` was hidden the same way, and the
+  comment recording that fix describes the identical wrong answer, confidently given — guidance
+  written for the _absent_ case, with the present case assumed to need none. The system prompt now
+  names `read_role_prompt`, `update_role`, `create_role` and `delete_role`, and says outright that
+  "make the reviewer stricter" is something to do rather than something to explain how to do by hand.
+  `roleToolsAnnounced.test.ts` fails if any of them stops being mentioned.
+
+  Also: a switched-off role says **off** in words. It was reported as a missing switch while on
+  screen — an unlabelled checkbox beside the name, with two labelled ones under it. The dimmed row
+  said something was different; nothing said what.
+
 ## 0.79.0
 
 ### Minor Changes

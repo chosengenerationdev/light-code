@@ -192,6 +192,28 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
             <strong style={{ fontSize: 12, ...(role.enabled ? {} : { color: colors.muted }) }}>
               {role.name}
             </strong>
+            {/*
+              Said in words when it is off.
+
+              Reported as "I don't see the enable or disable switch" — and the control was there,
+              an unlabelled checkbox beside the name with two labelled ones underneath it. A
+              checkbox with no text is findable only by someone already looking for it. The dimmed
+              row says something is different; this says what, and gives the eye somewhere to land.
+            */}
+            {!role.enabled && (
+              <span
+                style={{
+                  color: colors.muted,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 999,
+                  padding: '0 6px',
+                  fontSize: 10,
+                  lineHeight: '15px',
+                }}
+              >
+                off
+              </span>
+            )}
             <span style={{ color: colors.muted, fontSize: 11, flex: 1 }}>
               {role.summary}
               {!role.promptIsDefault && ' · prompt edited'}
