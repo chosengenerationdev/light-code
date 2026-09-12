@@ -21,6 +21,8 @@
  * that was finished, and claiming otherwise is the failure mode worth avoiding.
  */
 
+import { AGENT_ROLES } from '../agents/roles.js'
+
 /** More than any real plan, and few enough that the panel stays a list rather than a document. */
 export const MAX_CHECKPOINTS = 50
 
@@ -32,6 +34,14 @@ export interface Checkpoint {
   /** 1-based, and the number the model is given to refer to. */
   index: number
   text: string
+  /**
+   * Specialists the plan says should be involved in this step.
+   *
+   * A statement of intent from the approved plan — **not** evidence that anybody was consulted.
+   * `CheckpointView.roles` is that, and the two are kept apart deliberately; see
+   * `rolesMentionedIn`.
+   */
+  plannedRoles: string[]
 }
 
 /** What happened to one checkpoint. Keyed by checkpoint id in `PlanProgress`. */
@@ -57,7 +67,21 @@ export interface CheckpointView extends Checkpoint {
   roles: string[]
 }
 
-const LIST_ITEM = /^\s*(?:[-*•]|\d+[.)])\s+(.+)$/
+/**
+ * One list item: its indentation, whether it is numbered, and its text.
+ *
+ * Indentation and ordered-ness both matter, because a real plan is not a flat list — see
+ * `parseCheckpoints` for the two things that went wrong when this only matched "a line starting
+ * with a bullet or a number".
+ */
+const LIST_ITEM = /^(\s*)(?:([-*•])|(\d+)[.)])\s+(.+)$/
+
+interface ListLine {
+  indent: number
+  ordered: boolean
+  text: string
+  line: number
+}
 
 /**
  * A short, stable id for a step's text.
@@ -89,29 +113,105 @@ function normalise(text: string): string {
  */
 export function parseCheckpoints(plan: string | undefined): Checkpoint[] {
   const lines = (plan ?? '').split(/\r?\n/)
-  const marked = lines
-    .map((line) => LIST_ITEM.exec(line)?.[1]?.trim())
-    .filter((text): text is string => text !== undefined && text.length > 0)
 
-  const texts = (
-    marked.length > 0 ? marked : lines.map((line) => line.trim()).filter((line) => line.length > 0)
-  ).slice(0, MAX_CHECKPOINTS)
+  const items: ListLine[] = []
+  lines.forEach((line, index) => {
+    const match = LIST_ITEM.exec(line)
+    if (match === null) return
+    const text = match[4]?.trim() ?? ''
+    if (text.length === 0) return
+    items.push({
+      indent: (match[1] ?? '').replace(/\t/g, '    ').length,
+      ordered: match[3] !== undefined,
+      text,
+      line: index,
+    })
+  })
+
+  /*
+   * Which items are the *steps*, out of everything that looks like a list.
+   *
+   * Reported with a real plan: six numbered steps, one of which had five sub-bullets describing
+   * an architecture, followed by "Definition of done" and "Notes" sections that were also bullet
+   * lists. The old rule — any line starting with a bullet or a number — turned that into
+   * seventeen checkpoints. The panel became a jumble, and far worse, **the numbering contract
+   * broke**: the assistant was told step 5 was "ONE callback writes the store" while the plan the
+   * user approved said step 5 was "Review". `plan_progress` then moves the wrong row.
+   *
+   * Two rules fix it, in order:
+   *
+   * 1. **Numbered items win outright.** Somebody who numbered their steps has said which things
+   *    are steps; every bullet in the document is then either a sub-point or a trailing section,
+   *    and neither is a step. This is what excludes "Definition of done" and "Notes".
+   * 2. **Only the shallowest level counts.** Sub-points are indented under their parent, so
+   *    taking the minimum indentation keeps the parent and drops its detail. It also handles a
+   *    plan written entirely in bullets, which is common enough to matter.
+   */
+  const ordered = items.filter((item) => item.ordered)
+  const candidates = ordered.length > 0 ? ordered : items
+  const shallowest = candidates.reduce(
+    (least, item) => Math.min(least, item.indent),
+    Number.POSITIVE_INFINITY,
+  )
+  const steps = candidates.filter((item) => item.indent === shallowest)
+
+  const texts =
+    steps.length > 0
+      ? steps
+      : // No list at all: plenty of people write a plan as bare lines, and a progress view that
+        // only worked for bullet-point authors would read as broken.
+        lines
+          .map((line, index) => ({ indent: 0, ordered: false, text: line.trim(), line: index }))
+          .filter((item) => item.text.length > 0)
+
+  const chosen = texts.slice(0, MAX_CHECKPOINTS)
 
   /*
    * Two steps with the same wording are two steps, so ids are disambiguated by occurrence.
    * Without this they collide and marking the second done also marks the first.
    */
   const seen = new Map<string, number>()
-  return texts.map((text, position) => {
-    const key = normalise(text)
+  return chosen.map((item, position) => {
+    const key = normalise(item.text)
     const occurrence = (seen.get(key) ?? 0) + 1
     seen.set(key, occurrence)
+    const until = chosen[position + 1]?.line ?? lines.length
     return {
       id: occurrence === 1 ? idFor(key) : `${idFor(key)}-${String(occurrence)}`,
       index: position + 1,
-      text,
+      text: item.text,
+      /*
+       * Who the plan says should be involved, read from the step *and everything under it* —
+       * which is where the allocation actually lives, since a specialist is usually named on a
+       * continuation line ("Owner: reviewer") or inside a sub-point rather than in the heading.
+       */
+      plannedRoles: rolesMentionedIn(lines.slice(item.line, until).join(' ')),
     }
   })
+}
+
+/**
+ * Roles the plan names for a step.
+ *
+ * ## Why this is scanned rather than required in a fixed format
+ *
+ * The plan is prose a model wrote and a person approved, and it will say "Owner: reviewer.",
+ * "Specialist: **expert**", or "hand it to the tester" on different days. Demanding one syntax
+ * would mean the panel showing nothing whenever the wording drifted, which is indistinguishable
+ * from the feature being broken. Matching the role words themselves is robust to all of it.
+ *
+ * ## Why a planned role is not the same claim as a role chip
+ *
+ * An observed chip says *this specialist actually answered while that step was open* — ground
+ * truth, recorded host-side. This says only *the approved plan intends to consult them*. The two
+ * must stay visually distinct, because the whole value of the observed one is that it cannot be
+ * asserted by anybody. They are separate fields for that reason, never merged.
+ *
+ * "none" is handled by simply not being a role: "Specialist: none needed" matches nothing.
+ */
+function rolesMentionedIn(text: string): string[] {
+  const haystack = text.toLowerCase()
+  return AGENT_ROLES.filter((role) => new RegExp(`\\b${role}\\b`).test(haystack))
 }
 
 /**

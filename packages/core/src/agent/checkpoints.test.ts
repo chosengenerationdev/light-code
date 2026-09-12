@@ -39,6 +39,54 @@ describe('reading a plan as steps', () => {
     ])
   })
 
+  /*
+   * The reported shape, reduced to a fixture: numbered steps, one carrying indented sub-points,
+   * and trailing bullet sections. The old parser turned a six-step plan into seventeen
+   * checkpoints — which made the panel a jumble and, much worse, broke the numbering contract:
+   * the assistant was told step 5 was a sub-point while the approved plan said step 5 was the
+   * review. `plan_progress` then moves a row nobody meant.
+   */
+  const nested = [
+    '### Steps',
+    '',
+    '1. **Set up** - make the virtualenv and record the dependencies.',
+    '   Owner: me. Specialist: none needed.',
+    '',
+    '2. **Build it** - to a fixed architecture:',
+    '   - one store is the single source of truth;',
+    '   - one callback writes it, another renders it;',
+    '   - no duplicate outputs.',
+    '   Owner: me. Specialist: **expert** - consult on the library API first.',
+    '',
+    '3. **Review** - hand the result to the **reviewer**.',
+    '',
+    '### Definition of done',
+    '- it starts cleanly.',
+    '- the tests pass.',
+    '',
+    '### Notes',
+    '- a JSON file rather than a database.',
+  ].join('\n')
+
+  it('takes the numbered steps and ignores sub-points and trailing sections', () => {
+    const steps = parseCheckpoints(nested)
+    expect(steps).toHaveLength(3)
+    expect(steps.map((step) => step.index)).toEqual([1, 2, 3])
+    expect(steps[2]?.text).toContain('Review')
+  })
+
+  it('reads the specialist a step names, including from its continuation lines', () => {
+    const steps = parseCheckpoints(nested)
+    expect(steps[0]?.plannedRoles).toEqual([])
+    expect(steps[1]?.plannedRoles).toEqual(['expert'])
+    expect(steps[2]?.plannedRoles).toEqual(['reviewer'])
+  })
+
+  it('keeps sub-bullets out when a plan is written entirely in bullets', () => {
+    const steps = parseCheckpoints('- top one\n  - detail\n  - more detail\n- top two')
+    expect(steps.map((step) => step.text)).toEqual(['top one', 'top two'])
+  })
+
   it('gives two identically worded steps different ids', () => {
     const steps = parseCheckpoints('1. run the tests\n2. run the tests')
     expect(steps[0]?.id).not.toBe(steps[1]?.id)

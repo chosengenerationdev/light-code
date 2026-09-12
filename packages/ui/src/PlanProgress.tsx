@@ -78,15 +78,29 @@ function StatusMark({ status }: { status: CheckpointView['status'] }): ReactElem
   )
 }
 
-function RoleChip({ role }: { role: string }): ReactElement {
+/**
+ * A role on a step, in one of two meanings that must never look the same.
+ *
+ * `planned` is what the approved plan says should happen — an intention, and one the model wrote.
+ * Solid is what actually happened: a consultation the host recorded while that step was open.
+ * The whole value of the second is that nobody can assert it, so it is drawn as the stronger of
+ * the two and the planned one is deliberately faint and dashed. Merging them would throw away
+ * the only distinction worth having here.
+ */
+function RoleChip({ role, planned }: { role: string; planned?: boolean }): ReactElement {
   const palette = agentColors(role)
   return (
     <span
-      title={`${role} was consulted while this step was being worked`}
+      title={
+        planned === true
+          ? `The plan says the ${role} should be involved in this step`
+          : `${role} was consulted while this step was being worked`
+      }
       style={{
-        background: palette.soft,
+        background: planned === true ? 'transparent' : palette.soft,
         color: palette.edge,
-        border: `1px solid ${palette.edge}`,
+        border: `1px ${planned === true ? 'dashed' : 'solid'} ${palette.edge}`,
+        opacity: planned === true ? 0.75 : 1,
         borderRadius: 999,
         padding: '0 6px',
         fontSize: 10,
@@ -94,7 +108,7 @@ function RoleChip({ role }: { role: string }): ReactElement {
         whiteSpace: 'nowrap',
       }}
     >
-      {role}
+      {planned === true ? `${role}?` : role}
     </span>
   )
 }
@@ -188,7 +202,9 @@ export function PlanProgress(props: PlanProgressProps): ReactElement {
                   <span style={{ color: colors.muted, marginRight: 4 }}>{checkpoint.index}.</span>
                   {checkpoint.text}
                 </div>
-                {(checkpoint.roles.length > 0 || checkpoint.status !== 'todo') && (
+                {(checkpoint.roles.length > 0 ||
+                  checkpoint.plannedRoles.length > 0 ||
+                  checkpoint.status !== 'todo') && (
                   <div
                     style={{
                       display: 'flex',
@@ -204,6 +220,13 @@ export function PlanProgress(props: PlanProgressProps): ReactElement {
                     {checkpoint.roles.map((role) => (
                       <RoleChip key={role} role={role} />
                     ))}
+                    {/* Only the ones not yet confirmed: once a specialist has actually answered,
+                        the intention is history and showing both says nothing extra. */}
+                    {checkpoint.plannedRoles
+                      .filter((role) => !checkpoint.roles.includes(role))
+                      .map((role) => (
+                        <RoleChip key={`planned-${role}`} role={role} planned />
+                      ))}
                   </div>
                 )}
               </div>

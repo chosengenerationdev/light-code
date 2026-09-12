@@ -1,5 +1,34 @@
 # @chosengeneration/light-code
 
+## 0.48.3
+
+### Patch Changes
+
+- A plan's steps are its steps, not every bullet in the document
+
+  Reported from a real plan: six numbered steps, one of them carrying five indented sub-points
+  describing an architecture, followed by "Definition of done" and "Notes" sections that were also
+  bullet lists. Every one of those lines was being read as a step, so a six-step plan became
+  **seventeen checkpoints**.
+
+  The visible half was a progress panel nobody could use. The serious half was quieter: the
+  numbering is a contract — `plan_progress` takes a step number and the assistant is given those
+  numbers in its prompt — and it had come apart. The assistant was being told step 5 was "ONE
+  callback writes the store" while the plan the user approved said step 5 was "Review", so marking
+  progress moved a row nobody meant.
+
+  Two rules now decide what counts. Numbered items win outright, because somebody who numbered
+  their steps has already said which things are steps and every bullet is then a sub-point or a
+  trailing section. Failing that, only the shallowest indentation level counts, which keeps a
+  bullet-written plan working while dropping its detail lines.
+
+  **The panel also shows who the plan says should be involved.** A step naming a specialist —
+  "Owner: reviewer", "ask the tester what would break this" — gets a faint dashed chip in that
+  role's colour, read from the step and everything under it. It is drawn deliberately unlike the
+  solid chip that records a consultation which actually happened: one is an intention a model
+  wrote, the other is ground truth the host observed, and the second is only worth anything while
+  it cannot be confused with the first.
+
 ## 0.48.2
 
 ### Patch Changes
