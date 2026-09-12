@@ -11,3 +11,8 @@ coverage/
 .lightcode/
 *.tsbuildinfo
 .ripgrep-cache/
+
+# Packed npm tarballs. They are build output, and a stale one checked in is a
+# publishable artifact sitting several versions behind — `npm publish <tarball>`
+# would ship it. One was committed by accident and survived eight releases.
+*.tgz
