@@ -1,3 +1,4 @@
+import { AGENT_ROLES } from './roles.js'
 import type { ResolvedAgent } from './team.js'
 
 /**
@@ -142,7 +143,47 @@ export function buildTeamGuidance(
   const advice = budgetMatters === true ? `${base}\n${BUDGET_ADVICE}` : base
   const planning = hasPlan === true ? PLAN_IN_PLACE : PLAN_FIRST
 
-  if (agents.length === 0) {
+  /*
+   * The whole team arrives, and the filtering happens here.
+   *
+   * It used to be filtered by the caller, which made "who is available" a decision taken in two
+   * places for two audiences — this roster and the specialists' briefing — and only one of them
+   * knew about the roles that are *not* set up. One input, one filter, and both lists come out of
+   * the same `resolveTeam` result.
+   */
+  const usable = agents.filter((agent) => agent.available)
+  const unusable = AGENT_ROLES.filter(
+    (role) => !usable.some((agent) => agent.role === role),
+  ).map((role) => {
+    const assigned = agents.find((agent) => agent.role === role)
+    return assigned === undefined
+      ? `- **${role}** — nobody assigned.`
+      : `- **${role}** — ${assigned.reason ?? 'assigned, but cannot be reached.'}`
+  })
+
+  /*
+   * Naming who is missing, not only who is there.
+   *
+   * A list of available roles reads as a suggestion, and a model with a strong prior about how
+   * software gets reviewed reaches for a reviewer regardless — spending a step being refused, or
+   * writing it into a plan where nobody notices it never happened. Saying plainly which roles do
+   * not exist turns the list into an instruction.
+   */
+  const missing =
+    unusable.length === 0
+      ? []
+      : [
+          '',
+          '**Not available, so do not ask for them and do not plan work for them:**',
+          '',
+          ...unusable,
+          '',
+          'If something genuinely needs one of these, say so and say that assigning it in',
+          'Settings → Agents would let you consult it — then carry on without it rather than',
+          'leaving that part of the job unaccounted for.',
+        ]
+
+  if (usable.length === 0) {
     return [
       advice,
       planning,
@@ -151,6 +192,7 @@ export function buildTeamGuidance(
       '',
       '**Nobody is assigned yet.** Until somebody is, do the work yourself and tell the user that',
       'assigning a specialist in Settings → Agents would let you consult one.',
+      ...missing,
     ].join('\n')
   }
 
@@ -160,8 +202,9 @@ export function buildTeamGuidance(
     '',
     '## Your team',
     '',
-    'Reach any of them with `ask_agent`, naming the role:',
+    'Reach any of them with `ask_agent`, naming the role. These are the only ones that exist:',
     '',
-    ...agents.map((agent) => `- **${agent.role}** (${agent.label}) — ${agent.summary}`),
+    ...usable.map((agent) => `- **${agent.role}** (${agent.label}) — ${agent.summary}`),
+    ...missing,
   ].join('\n')
 }

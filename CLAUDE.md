@@ -1070,6 +1070,37 @@ make one, which is how a standing instruction stops being read at all. The same 
 the roster generated and the advice editable. A question the assistant can simply answer is still
 answered rather than planned.
 
+### A specialist has to know who else exists (0.71.0)
+
+Reported from real use: a plan came back naming specialists that were never set up. The expert is
+the role most often asked for a plan, it had no idea who the team was, and so it wrote the team it
+would have liked. The assistant then either spent a round trip being refused by `ask_agent` or
+quietly skipped that step — and either way the user had approved a plan containing work that was
+never going to happen.
+
+- **Every consultation carries the roster**, including the roles that are *not* available and why.
+  Listing only who is available reads as a suggestion, and a model with a strong prior about how
+  software gets reviewed reaches for a reviewer regardless. Naming who is missing, and saying that
+  proposing work for them is wrong, is what turns a list into an instruction. It costs a handful
+  of tokens.
+- **`buildTeamGuidance` takes the whole team and filters inside it.** It used to be handed a
+  pre-filtered list, which made "who is available" a decision taken in two places for two
+  audiences — the assistant's roster and the specialists' briefing — and only one of them could
+  know about the roles that are absent. One input, one filter, both lists out of the same
+  `resolveTeam` result, so they cannot disagree about who exists.
+- **Assigned-but-unreachable is not the same as unassigned**, and the wording distinguishes them.
+  A role whose profile has since been deleted is reported as unavailable *with that reason*; calling
+  it "not set up" would send the user to configure something they had already configured.
+- **It holds whichever model is the expert, by construction.** `consultAgent` assembles the prompt,
+  briefing included, **above** the `agent.kind` branch, so the Claude CLI and a provider profile
+  are handed identical text. `briefing.test.ts` pins that ordering by reading the source, because
+  the failure is invisible: switching expert would quietly produce worse plans with nothing to
+  point at.
+- The old `team.test.ts` assertion was `not.toContain('**tester**')` — it encoded the weaker rule
+  that an unassigned role is simply absent, which is the rule that allowed this. It was updated
+  rather than worked around; what must still never happen is an unavailable role being offered as
+  consultable, and that is what the replacement asserts.
+
 ---
 
 ## 13. Python interop and skills (phase 9)

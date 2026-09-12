@@ -1,0 +1,112 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+import { buildAgentBriefing } from './briefing.js'
+import { buildTeamGuidance } from './guidance.js'
+import type { ResolvedAgent } from './team.js'
+
+const read = (relative: string): string =>
+  readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
+
+function agent(role: ResolvedAgent['role'], over: Partial<ResolvedAgent> = {}): ResolvedAgent {
+  return {
+    role,
+    name: role,
+    summary: `what the ${role} is for`,
+    kind: 'profile',
+    label: 'Some Model',
+    prompt: 'you are a specialist',
+    available: true,
+    ...over,
+  }
+}
+
+describe('what a specialist is told about the rest of the team', () => {
+  it('names who is available and who is not', () => {
+    const briefing = buildAgentBriefing({
+      team: [agent('expert'), agent('reviewer')],
+      self: 'expert',
+    })
+
+    expect(briefing).toContain('You are the **expert**')
+    expect(briefing).toContain('**reviewer**')
+    // The three nobody assigned, each said out loud rather than merely left off the list.
+    expect(briefing).toContain('**tester** — nobody is assigned')
+    expect(briefing).toContain('**programmer** — nobody is assigned')
+    expect(briefing).toContain('**librarian** — nobody is assigned')
+    expect(briefing).toContain('Not available, so the assistant cannot use them')
+    expect(briefing).toContain('Do not put them in a plan')
+  })
+
+  it('does not describe the consulted role to itself', () => {
+    const briefing = buildAgentBriefing({ team: [agent('expert')], self: 'expert' })
+    expect(briefing).not.toContain('**expert** — nobody is assigned')
+    expect(briefing).toContain('no other specialists available')
+  })
+
+  it('gives the reason when a role is assigned but unreachable', () => {
+    const briefing = buildAgentBriefing({
+      team: [agent('expert'), agent('tester', { available: false, reason: 'That profile is gone.' })],
+      self: 'expert',
+    })
+    expect(briefing).toContain('**tester** — That profile is gone.')
+  })
+
+  it('says nothing at all when there is nothing to say', () => {
+    expect(buildAgentBriefing({})).toBe('')
+  })
+})
+
+describe('what the assistant is told', () => {
+  it('names the roles it must not reach for', () => {
+    const guidance = buildTeamGuidance([agent('expert')], undefined, false, true)
+    expect(guidance).toContain('These are the only ones that exist')
+    expect(guidance).toContain('do not plan work for them')
+    expect(guidance).toContain('**reviewer** — nobody assigned.')
+  })
+
+  it('says what is missing even when the whole team is unassigned', () => {
+    const guidance = buildTeamGuidance([], undefined, false, true)
+    expect(guidance).toContain('Nobody is assigned yet')
+    expect(guidance).toContain('**expert** — nobody assigned.')
+  })
+
+  it('treats an assigned-but-broken role as unavailable, not as available', () => {
+    const guidance = buildTeamGuidance(
+      [agent('reviewer', { available: false, reason: 'No such profile.' })],
+      undefined,
+      false,
+      true,
+    )
+    expect(guidance).toContain('**reviewer** — No such profile.')
+    expect(guidance).not.toContain('(Some Model) — what the reviewer is for')
+  })
+})
+
+describe('the expert is told the same thing whichever model it is', () => {
+  /*
+   * The request was explicit that this must hold when another provider is made the expert.
+   *
+   * It holds by construction — `consultAgent` assembles the prompt, briefing included, *above*
+   * the `kind` branch, so the Claude CLI and a provider profile are handed the same text. That is
+   * easy to undo by accident, and the symptom would be invisible: switching expert would quietly
+   * produce worse plans, with nothing to point at. So it is pinned by reading the source, the way
+   * a missing call has to be.
+   */
+  const bridge = read('../host/bridge.ts')
+  const body = bridge.slice(bridge.indexOf('async function consultAgent'))
+  const briefingAt = body.indexOf('buildAgentBriefing(')
+  const branchAt = body.indexOf("if (agent.kind === 'cli')")
+
+  it('builds the briefing before it decides which kind of expert to call', () => {
+    expect(briefingAt).toBeGreaterThan(-1)
+    expect(branchAt).toBeGreaterThan(-1)
+    expect(briefingAt).toBeLessThan(branchAt)
+  })
+
+  it('passes the team and the role being consulted', () => {
+    const call = body.slice(briefingAt, branchAt)
+    expect(call).toContain('team: cachedTeam')
+    expect(call).toContain('self: agent.role')
+  })
+})

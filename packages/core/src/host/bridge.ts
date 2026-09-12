@@ -2694,7 +2694,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           if (activeMode.id === AGENT_TEAM_MODE.id) {
             parts.push(
               buildTeamGuidance(
-                cachedTeam.filter((agent) => agent.available),
+                // The whole team, not only the available ones: the roster names what is missing
+                // as well as what is there, and it cannot do that from a pre-filtered list.
+                cachedTeam,
                 cachedTeamGuidance,
                 cachedBudgetMatters,
                 /*
@@ -6924,6 +6926,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       briefing: buildAgentBriefing({
         tools: agentBriefingTools?.() ?? [],
         skills,
+        /*
+         * Who else exists, so a plan cannot name a specialist nobody set up.
+         *
+         * Built here, above the `kind` branch, which is the point: the Claude CLI expert and a
+         * provider-profile expert are given byte-identical briefings, so making a different model
+         * the expert cannot change what it knows about the team. `briefing.test.ts` pins that,
+         * because the two paths diverging is invisible until somebody switches expert and gets a
+         * worse plan for no reason they could name.
+         */
+        team: cachedTeam,
+        self: agent.role,
       }),
     })
 

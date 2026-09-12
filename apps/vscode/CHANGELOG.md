@@ -1,5 +1,32 @@
 # light-code-vscode
 
+## 0.71.0
+
+### Minor Changes
+
+- Specialists know who else is on the team, and who is not
+
+  Reported from real use: a plan came back naming specialists that were never set up. The expert is
+  the role most often asked for a plan and it had no idea who the team was, so it wrote the team it
+  would have liked — "have the tester write cases, then the reviewer checks it" — and the assistant
+  either spent a round trip being refused or quietly skipped that step. Either way the user approved
+  a plan containing work that was never going to happen.
+
+  Every consultation now carries the roster: who is available, and — the part that does the work —
+  which roles are not, each with its reason, and a plain instruction not to give them work or write
+  them into a plan. Listing only who is available reads as a suggestion; naming who is missing makes
+  it an instruction.
+
+  The assistant's own roster says the same thing, from the same `resolveTeam` result, so the two
+  cannot disagree about who exists. A role that is assigned but whose profile has since gone is
+  reported as unavailable _with that reason_, rather than as "not set up" — the user did set it up,
+  and saying otherwise sends them to fix the wrong thing.
+
+  **This holds whichever model is the expert.** The briefing is assembled above the branch that
+  chooses between the Claude CLI and a provider profile, so both are handed identical text, and
+  there is now a test reading the source to keep it that way — switching expert and quietly getting
+  worse plans is the kind of regression nobody could point at.
+
 ## 0.70.0
 
 ### Minor Changes

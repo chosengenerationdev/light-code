@@ -171,7 +171,16 @@ describe('the mode instruction', () => {
     expect(guidance).toContain('Only consult on payments code.')
     expect(guidance).toContain('**expert** (Corporate gateway)')
     expect(guidance).toContain('**reviewer** (Local qwen)')
-    expect(guidance).not.toContain('**tester**')
+    /*
+     * A role nobody assigned is now *named as unavailable* rather than quietly left off.
+     *
+     * This assertion used to be `not.toContain('**tester**')`, which encoded the weaker rule —
+     * and the weaker rule is what let plans come back proposing work for specialists who were
+     * never set up. A list of who exists reads as a suggestion; naming who does not makes it an
+     * instruction. What must still never happen is the tester being offered as consultable.
+     */
+    expect(guidance).toContain('**tester** — nobody assigned.')
+    expect(guidance).not.toMatch(/\*\*tester\*\* \(/)
   })
 
   it('falls back to the default advice when none was written', () => {
