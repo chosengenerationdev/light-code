@@ -1,5 +1,40 @@
 # @chosengeneration/light-code
 
+## 0.50.0
+
+### Minor Changes
+
+- A review goes back to the programmer, and the programmer can argue with it
+
+  Requested for Agent team mode, where the point is clean code coming out the other end: when the
+  reviewer finds something in code the programmer wrote, the fix belongs to the programmer. It is
+  the role hired for writing. Fixing it silently wastes the specialist the user configured, and
+  hides the exchange from them.
+
+  **The programmer may push back, and that is the half that makes it worth doing.** A finding can be
+  about a path that cannot happen, a convention this codebase deliberately does not follow, or a
+  misreading of a fragment. A programmer that rewrites working code to satisfy a mistaken objection
+  has made the change worse while looking like it agreed. So it is told to say when a review is
+  wrong, the reviewer is told its findings will be contested and must be concrete enough to settle,
+  and the assistant — the only one of the three holding the actual file — decides and says which way
+  it went.
+
+  Bounded at one lap. Re-review only when the fix was substantial enough that the first review no
+  longer describes the code; if they still disagree, put it to the expert or decide it. Two models
+  that cannot see the file trading a disagreement is a turn spent deciding nothing.
+
+  **The routing lives in the tool result, not only in the mode instruction.** A standing instruction
+  is read at the top of every turn and applies to one moment in a few of them; this codebase has now
+  watched four behaviours fail because an instruction did not happen to mention them. The result
+  arrives at the moment the decision is made, costs nothing at the prompt prefix, and names the
+  programmer only when one is actually assigned.
+
+  **Reporting progress no longer spends the step budget.** `plan_progress` is called twice per
+  checkpoint, so a six-step plan was spending twelve of twenty-five steps saying what it was about
+  to do — the plan feature taxing the work it exists to organise, and landing as "stopped after 25
+  steps" in the middle of something healthy. Those calls are refunded, with the refunds themselves
+  bounded so the cap can still be reached: a cap that cannot be hit is not a cap.
+
 ## 0.49.0
 
 ### Minor Changes

@@ -130,10 +130,7 @@ export function createAskAgentTool(options: AskAgentOptions): Tool<AskAgentParam
       options.onAdvice?.({ at: Date.now(), question: params.question, advice: result.advice })
 
       return {
-        content:
-          `${result.advice}\n\n---\n\n` +
-          `That is the ${role}'s advice, from ${result.label}, which has not seen your workspace. ` +
-          'Check it against the actual code before acting on it, and say so if it turns out to be wrong.',
+        content: `${result.advice}\n\n---\n\n${trailerFor(agent, team)}`,
       }
     },
   }
@@ -159,4 +156,62 @@ function describeTeam(team: readonly ResolvedAgent[]): string {
   return usable.length === 0
     ? 'None are assigned on this machine.'
     : `Assigned here: ${usable.join(', ')}.`
+}
+
+/**
+ * What to do with the answer, attached to the answer.
+ *
+ * ## Why this is not in the mode guidance
+ *
+ * It was going to be. But a standing instruction is read at the top of every turn and applies to
+ * one moment in a few of them, and this codebase has now watched four separate behaviours fail
+ * because an instruction did not happen to mention them. A tool result arrives **at the moment the
+ * decision is made**, costs nothing at the prompt prefix (§12), and is impossible to have
+ * forgotten by the time it matters. So the routing lives here, where the review is.
+ *
+ * ## The routing itself
+ *
+ * A review of code the programmer wrote goes back to the programmer. It is the role hired for
+ * writing, the fix is its job, and fixing it silently wastes the specialist the user configured.
+ * It is told by name, and only when it is actually available — an instruction naming a role nobody
+ * assigned is the failure this file already handles everywhere else.
+ *
+ * And it is told the review may be **wrong**. A finding can be about a path that cannot happen or
+ * a convention this codebase does not follow, and a programmer that rewrites working code to
+ * satisfy a mistaken objection has made the change worse while looking like it agreed. The
+ * assistant holds the file, so the assistant settles it.
+ */
+function trailerFor(agent: ResolvedAgent, team: readonly ResolvedAgent[]): string {
+  const lines = [
+    `That is the ${agent.role}'s advice, from ${agent.label}. ` +
+      (agent.usesTools
+        ? 'It could read this workspace but cannot change anything in it.'
+        : 'It has not seen your workspace — it answered from what you pasted.') +
+      ' Check it against the actual code before acting on it, and say so if it turns out to be wrong.',
+  ]
+
+  const programmer = team.find(
+    (candidate) => candidate.role === 'programmer' && candidate.available,
+  )
+
+  if (agent.role === 'reviewer' && programmer !== undefined) {
+    lines.push(
+      '',
+      'If the programmer wrote this code, take the findings back to it rather than fixing them ' +
+        'yourself: paste the code as it stands, the findings in full, and anything you have ' +
+        'already checked. It may disagree, and a disagreement is an answer — you have the real ' +
+        'file and neither of them does, so you settle it and say which way you went. Re-review ' +
+        'only if the fix was substantial enough that this review no longer describes the code.',
+    )
+  }
+
+  if (agent.role === 'programmer') {
+    lines.push(
+      '',
+      'Check this against the real file before applying it — it was written from what you pasted, ' +
+        'so it can miss a convention or a caller it was never shown.',
+    )
+  }
+
+  return lines.join('\n')
 }

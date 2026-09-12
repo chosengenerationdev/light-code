@@ -88,6 +88,18 @@ export interface RunAgentTurnOptions {
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
+/**
+ * Tool calls that report rather than act, and so do not consume the step budget.
+ *
+ * Deliberately tiny and deliberately not "every read-only tool": a `read_file` is work — it is how
+ * a model loops on something it cannot get right, which is the failure the cap catches. What
+ * belongs here is a call that changes no state the agent can then react to.
+ */
+const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set(['plan_progress'])
+
+/** How many such calls a single turn may have refunded before the cap applies to them too. */
+const MAX_REFUNDED_STEPS = 20
+
 const MAX_CONSECUTIVE_MISTAKES = 3
 
 /**
@@ -417,6 +429,20 @@ export async function runAgentTurn(
   conversation.addUserMessage(userMessage, options.images)
 
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
+  /*
+   * Reporting progress is not a step of work, so it does not spend the budget for work.
+   *
+   * The cap exists to stop a model looping on a failing edit. `plan_progress` cannot loop on
+   * anything — it moves a marker in a panel — and a planned task calls it twice per checkpoint, so
+   * a six-step plan was spending twelve of twenty-five steps saying what it was about to do. That
+   * is the plan feature taxing the work it is supposed to organise, and it lands as "stopped after
+   * 25 steps" halfway through something perfectly healthy.
+   *
+   * Refunded rather than exempted, and the refunds are themselves bounded: a model that called
+   * nothing but `plan_progress` would otherwise never be stopped at all, which is the one thing a
+   * cap is for. Worst case the turn gets `maxIterations + MAX_REFUNDED_STEPS`.
+   */
+  let refunded = 0
   const mistakeCounts = new Map<string, number>()
   let continueNudges = 0
   const mode = options.mode ?? CODE_MODE
@@ -524,6 +550,13 @@ export async function runAgentTurn(
     if (toolCall.name === 'attempt_completion' || toolCall.name === 'ask_followup_question') {
       events.onDone()
       return
+    }
+
+    // Given back after the call has been recorded, so a refunded step is still in the transcript
+    // and still visible to the user — it is the budget it does not spend, not the history.
+    if (BOOKKEEPING_TOOLS.has(toolCall.name) && refunded < MAX_REFUNDED_STEPS) {
+      refunded += 1
+      iteration -= 1
     }
 
     if (result.path !== undefined) {

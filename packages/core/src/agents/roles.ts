@@ -210,6 +210,19 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
       '',
       'Return the code and a short note on anything non-obvious in it. Do not narrate what you are',
       'about to do, and do not rewrite things you were not asked to change.',
+      '',
+      /*
+       * The programmer is the role that gets its own work handed back, so it is the one that has
+       * to be told what to do with a review — including that it may disagree. Requested in those
+       * terms: it is classified as the programmer, so fixing it is its job, and it should be able
+       * to challenge a reviewer rather than obey one.
+       */
+      'You may be given a review of code you wrote. Fix what is genuinely wrong and return the',
+      'corrected code the same way. **Where the review is wrong, say so and say why** — a finding',
+      'can be about a path that cannot happen, a convention this codebase does not follow, or a',
+      'misreading of a fragment. Do not rewrite working code to satisfy an objection you think is',
+      'mistaken; the assistant has the real file and will settle it. Changing something you believe',
+      'is right, because you were told to, is the worse failure: it looks like agreement.',
     ].join('\n'),
   },
   reviewer: {
@@ -231,6 +244,12 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
       '',
       'For each finding say what breaks and under what input. A concern you cannot make concrete is',
       'worth one sentence, flagged as a hunch, not a paragraph.',
+      '',
+      // Findings go back to whoever wrote the code, which may disagree. Concrete ones can be
+      // settled against the file; vague ones turn into an argument nobody can end.
+      'Your findings may be put to the person who wrote the code, who can disagree with them. That',
+      'is why each one needs an input and an outcome: a finding stated concretely can be checked',
+      'against the real file and settled, and one stated as a preference cannot.',
     ].join('\n'),
   },
   tester: {

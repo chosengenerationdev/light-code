@@ -203,6 +203,31 @@ describe('the mode instruction', () => {
     expect(guidance).not.toMatch(/\*\*tester\*\* \(/)
   })
 
+  /*
+   * Requested directly: a reviewer finding should go back to the programmer, because that is the
+   * role hired for writing — and the programmer should be able to challenge the review rather
+   * than obey it. Both halves matter. Fixing it silently wastes the specialist; obeying a wrong
+   * finding changes working code and looks like agreement.
+   */
+  /*
+   * The routing lives in the tool result rather than only in this instruction, because a standing
+   * instruction is read at the top of every turn and applies to one moment in a few of them. A
+   * result arrives *at* that moment. Both exist: the instruction sets the expectation, the result
+   * makes it unmissable. `askAgent.test.ts` covers the result half.
+   */
+  it('routes a review finding back to the programmer, and lets it disagree', () => {
+    expect(DEFAULT_TEAM_GUIDANCE).toContain('Take it back to the programmer')
+    expect(DEFAULT_TEAM_GUIDANCE).toContain('It may push back')
+    // Bounded: two models that cannot see the file must not trade a disagreement all turn.
+    expect(DEFAULT_TEAM_GUIDANCE).toContain('One lap, not a loop')
+  })
+
+  it('tells the programmer it may be given a review of its own code', () => {
+    const prompt = defaultPromptFor('programmer')
+    expect(prompt).toContain('review of code you wrote')
+    expect(prompt).toContain('Where the review is wrong, say so')
+  })
+
   it('tells the assistant when to hand work to the programmer', () => {
     // It was absent from the consult-without-being-asked list entirely, which is most of why the
     // role never came up: every other bullet is somebody reading what you already have.
