@@ -65,6 +65,22 @@ describe('what the assistant is told', () => {
     expect(guidance).toContain('**reviewer** — nobody assigned.')
   })
 
+  /*
+   * Reported with a screenshot: asked to build a to-do app in Agent team mode, the assistant
+   * opened with "I'll start by understanding the workspace before proposing anything" and spent
+   * seven tool calls surveying before any consultation. The build was correct and the guidance
+   * was live — step one simply said "reading only what you need in order to ask a good question",
+   * which that opening line is very nearly a quotation of. An open licence is not a bound.
+   */
+  it('bounds the looking around, so the expert is genuinely asked first', () => {
+    const guidance = buildTeamGuidance([agent('expert')], undefined, false, false)
+    expect(guidance).toContain('Look at almost nothing first')
+    expect(guidance).toContain('Do **not** survey the codebase')
+    // Named because it is the exact sentence that was produced, and a model reading its own
+    // reasonable-sounding plan back should recognise it as the thing being ruled out.
+    expect(guidance).toContain('getting a sense of the workspace before proposing anything')
+  })
+
   it('says what is missing even when the whole team is unassigned', () => {
     const guidance = buildTeamGuidance([], undefined, false, true)
     expect(guidance).toContain('Nobody is assigned yet')

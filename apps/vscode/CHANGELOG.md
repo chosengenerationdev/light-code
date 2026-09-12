@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.71.1
+
+### Patch Changes
+
+- Agent team stops surveying the workspace before it consults the expert
+
+  Reported with a screenshot: asked to build a small app, the assistant opened with "I'll start by
+  understanding the workspace before proposing anything" and spent seven tool calls listing,
+  reading and searching before any consultation happened.
+
+  The instruction was live and the build was correct. The fault was its first step, which said to
+  read "only what you need in order to ask a good question" — an open licence that the reported
+  opening line is very nearly a quotation of. It is now a bound: one look at the workspace root and
+  any file the user actually named, with surveying the codebase, searching the documentation index
+  and hunting for skills all ruled out until the plan exists. The specialist cannot see any of that
+  anyway, and it will say what it needs.
+
+  It also names the failure in the model's own words, so a plan that sounds this reasonable is
+  recognisable as the thing being ruled out.
+
 ## 0.71.0
 
 ### Minor Changes
