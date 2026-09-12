@@ -1,5 +1,33 @@
 # light-code-vscode
 
+## 0.75.0
+
+### Minor Changes
+
+- Change what a specialist is, from the chat
+
+  Requested directly: "make the reviewer stricter about error handling" should be something you say
+  rather than something you go and edit. Two tools, and the pair is deliberate.
+
+  `read_role_prompt` returns the prompt a role is running on and says whether it is the user's or
+  the built-in default; with no role it lists them all. Without it the assistant would rewrite
+  blind — asked to make the reviewer stricter it would produce a whole new prompt from its own idea
+  of what a reviewer is, discarding whatever had been written. Reading first makes the change an
+  edit rather than a replacement.
+
+  `update_role_prompt` changes one, and **always asks**. A role prompt is prose injected into a model
+  that is then asked to advise on this repository's own code — the reason `agents` is user-scope only
+  in the first place — so it gets `write_skill`'s treatment: never auto-approved by a category
+  toggle, never available to a scheduled run, and an approval showing a diff of the prompt that
+  stands against the one proposed. The failure it guards against is quiet rather than loud: a
+  reviewer whose prompt has been softened does not error, it approves things, in the same tone as
+  before. An empty prompt resets the role, and the diff shows the default as the outcome so the
+  approval does not read as deletion.
+
+  Both are `dispatchOnly`, so neither costs anything at the front of the prompt in the conversations
+  that never need them, and both write through `saveAgents` — the same path the Agents tab uses, so a
+  prompt changed from the chat and one changed in Settings cannot behave differently.
+
 ## 0.74.0
 
 ### Minor Changes

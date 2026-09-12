@@ -24,10 +24,23 @@ import {
   createUpdatePlanTool,
   type PlanAccess,
 } from '../tools/planTools.js'
+import {
+  createReadRolePromptTool,
+  createUpdateRolePromptTool,
+  type RolePromptAccess,
+} from '../tools/roleTools.js'
 import { buildAgentBriefing } from '../agents/briefing.js'
 import { runConsultation, toolsForConsultation } from '../agents/consult.js'
 import { toToolDefinitions } from '../tools/registry.js'
-import { allRoles, buildAgentPrompt, defaultPromptFor, isAgentRole } from '../agents/roles.js'
+import {
+  allRoles,
+  buildAgentPrompt,
+  defaultPromptFor,
+  isAgentRole,
+  knownRoles,
+  roleInfo,
+  type CustomRoleDefinition,
+} from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
 import type { Tool } from '../tools/types.js'
 import {
@@ -970,6 +983,47 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /**
+   * What the role-prompt tools are given.
+   *
+   * Writes through `saveAgents`, the same function the Agents tab uses, so a prompt changed from
+   * the chat and one changed in Settings cannot end up doing different things — the reload and
+   * the repost of the panel come with it for free. One owner, as everywhere else here.
+   */
+  const rolePromptAccess: RolePromptAccess = {
+    list: () =>
+      knownRoles(cachedAgentDefinitions).map((role) => ({
+        role,
+        name: roleInfo(role, cachedAgentDefinitions).name,
+        assigned: cachedTeam.some((agent) => agent.role === role),
+        edited: cachedAgentRoles?.[role]?.prompt !== undefined,
+      })),
+    current: (role) => {
+      if (!isAgentRole(role, cachedAgentDefinitions)) return undefined
+      return cachedAgentRoles?.[role]?.prompt ?? defaultPromptFor(role, cachedAgentDefinitions)
+    },
+    fallback: (role) =>
+      isAgentRole(role, cachedAgentDefinitions)
+        ? defaultPromptFor(role, cachedAgentDefinitions)
+        : undefined,
+    save: async (role, prompt) => {
+      await saveAgents((current) => {
+        const roles = { ...(current.roles ?? {}) }
+        const existing = roles[role] ?? { kind: 'profile' as const }
+        if (prompt === undefined) {
+          // Cleared rather than stored empty, so "reset to default" and "the user wrote nothing"
+          // cannot both exist and mean different things to different readers.
+          const rest = { ...existing }
+          delete rest.prompt
+          roles[role] = rest
+        } else {
+          roles[role] = { ...existing, prompt }
+        }
+        return { ...current, roles }
+      })
+    },
+  }
+
+  /**
    * What `update_plan` and `plan_progress` are given.
    *
    * The tools hold no state of their own: they are a door onto this closure, the same shape
@@ -1485,6 +1539,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   let cachedTeam: ResolvedAgent[] = []
   let cachedTeamGuidance: string | undefined
+  let cachedAgentRoles: NonNullable<LightCodeConfig['agents']>['roles']
+  let cachedAgentDefinitions: CustomRoleDefinition[] = []
   /**
    * Whether anything is counting what a consultation costs.
    *
@@ -1578,6 +1634,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       cliAvailable: expertCli?.available === true,
     }
     cachedTeam = resolveTeam(teamContext)
+    /*
+     * The raw blocks as well as the resolved team, because the role-prompt tools need two things
+     * `ResolvedAgent` deliberately loses: whether a prompt is the *user's* or the default (the
+     * resolved one is just a string either way), and the roles that exist but nobody has been
+     * assigned to. Refreshed here so there is one moment when all of it becomes current.
+     */
+    cachedAgentRoles = config.agents?.roles
+    cachedAgentDefinitions = config.agents?.definitions ?? []
     cachedTeamGuidance = config.agents?.teamGuidance
     cachedBudgetMatters = budgetMatters(teamContext)
     cachedProgrammingProfileId = config.programmingProfileId
@@ -1916,6 +1980,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      */
     combined.register(createUpdatePlanTool(planAccess), { dispatchOnly: dispatcher })
     combined.register(createPlanProgressTool(planAccess), { dispatchOnly: dispatcher })
+
+    /*
+     * Changing what a specialist is, from the chat.
+     *
+     * `dispatchOnly` like the plan tools: this is wanted in the rare conversation where somebody
+     * says "the reviewer is too soft", and paying for two descriptions at the front of every
+     * prompt to serve that would be the wrong trade (§12). The user asks in words; the dispatcher
+     * finds it.
+     */
+    combined.register(createReadRolePromptTool(rolePromptAccess), { dispatchOnly: dispatcher })
+    combined.register(createUpdateRolePromptTool(rolePromptAccess), { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
     /*
