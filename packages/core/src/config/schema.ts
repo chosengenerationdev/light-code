@@ -127,9 +127,30 @@ export const agentAssignmentSchema = z
  * model that is then asked to advise on this repository's own code: a hostile repo could tell the
  * reviewer what to approve.
  */
+/** One user-defined role. The id reaches a CSS variable and a tool argument; see `isValidRoleId`. */
+export const customRoleSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  summary: z.string(),
+  prompt: z.string(),
+})
+
 export const agentsConfigSchema = z
   .object({
     roles: z.record(z.string(), agentAssignmentSchema),
+    /**
+     * Roles the user invented, beyond the five built in.
+     *
+     * A role *is* its prompt, and the ones people ask for next are nearly always a reviewer with
+     * a different one — security, performance, accessibility. Defining them here answers that
+     * whole family without a code change each time, and without growing the fixed roster the
+     * expert has to allocate from.
+     *
+     * Covered by the same user-scope rule as the rest of this block, and it is the sharpest part
+     * of it: this is prose injected into a model that is then asked to advise on this
+     * repository, so a workspace able to write it could define a reviewer that approves anything.
+     */
+    definitions: z.array(customRoleSchema),
     /** Whether what a consultation costs is worth managing. See `agents/team.ts`. */
     budgetMatters: z.boolean(),
     /** The Agent team mode instruction, when edited. The roster is always generated. */

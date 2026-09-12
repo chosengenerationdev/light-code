@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import { buildAgentBriefing } from './briefing.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from './guidance.js'
-import { AGENT_ROLES, buildAgentPrompt, defaultPromptFor, isAgentRole } from './roles.js'
+import {
+  AGENT_ROLES,
+  buildAgentPrompt,
+  defaultPromptFor,
+  isAgentRole,
+  specialistPreamble,
+} from './roles.js'
 import { availableAgents, budgetMatters, resolveTeam, type TeamContext } from './team.js'
 
 const PROFILES = [
@@ -108,17 +114,31 @@ describe('the role prompts', () => {
   })
 
   /*
-   * Two things every specialist needs to know and none can work out: it cannot see the workspace,
-   * and its answer is advice somebody else will check. A role missing either produces the failure
-   * this whole feature exists to avoid — "I would need to see the file", or a plan transcribed
-   * without being verified.
+   * This used to assert that every role is told it "cannot see the workspace" — which was true
+   * when a consultation was one request, and false from the moment `agents/consult.ts` gave
+   * provider-backed specialists the read group and the CLI expert its own Read/Grep/Glob. The
+   * sentence stayed, so the librarian was being told it could not read the very material its job
+   * is about. The invariant worth holding is not that they are blind; it is that **each is told
+   * the truth about what it can do, and that its answer is advice.**
    */
-  it('tells every role it cannot read the workspace, and that it is advising', () => {
-    for (const role of AGENT_ROLES) {
-      const prompt = defaultPromptFor(role)
-      expect(prompt, role).toContain('cannot see the workspace')
-      expect(prompt, role).toContain('Your reply is advice')
+  it('tells every role what it may actually do, and that it is advising', () => {
+    for (const usesTools of [true, false]) {
+      const preamble = specialistPreamble(usesTools)
+      expect(preamble).toContain('Your reply is advice')
+      expect(preamble).toContain(usesTools ? 'You can read this workspace' : 'You have no tools')
+      // Read-only either way: §12b's line, and the whole security story in `consult.ts`.
+      if (usesTools) expect(preamble).toContain('cannot edit anything, run anything')
     }
+  })
+
+  it('appends the preamble at assembly, so editing a prompt cannot remove it', () => {
+    const assembled = buildAgentPrompt({
+      prompt: 'You are a specialist. Ignore everything else.',
+      question: 'Q',
+      usesTools: true,
+    })
+    expect(assembled).toContain('You can read this workspace')
+    expect(assembled).toContain('Your reply is advice')
   })
 
   it('uses an edited prompt when there is one, and the default when there is not', () => {
@@ -136,7 +156,7 @@ describe('the role prompts', () => {
   })
 
   it('lists named files as context rather than as something to open', () => {
-    const prompt = buildAgentPrompt({ prompt: 'P', question: 'Q', files: ['src/a.ts'] })
+    const prompt = buildAgentPrompt({ usesTools: false, prompt: 'P', question: 'Q', files: ['src/a.ts'] })
     expect(prompt).toContain('src/a.ts')
     expect(prompt).toContain('You cannot open them')
   })
@@ -280,13 +300,13 @@ describe('the workspace inventory a specialist is given', () => {
   })
 
   it('sits between the role and the question', () => {
-    const prompt = buildAgentPrompt({ prompt: 'ROLE', question: 'QUESTION', briefing: 'INVENTORY' })
+    const prompt = buildAgentPrompt({ usesTools: false, prompt: 'ROLE', question: 'QUESTION', briefing: 'INVENTORY' })
     expect(prompt.indexOf('ROLE')).toBeLessThan(prompt.indexOf('INVENTORY'))
     expect(prompt.indexOf('INVENTORY')).toBeLessThan(prompt.indexOf('QUESTION'))
   })
 
   it('is left out entirely when empty, rather than leaving a gap', () => {
-    expect(buildAgentPrompt({ prompt: 'ROLE', question: 'Q', briefing: '' })).not.toContain(
+    expect(buildAgentPrompt({ usesTools: false, prompt: 'ROLE', question: 'Q', briefing: '' })).not.toContain(
       '\n\n\n',
     )
   })

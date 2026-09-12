@@ -22,7 +22,8 @@ import { agentColors, colors } from './theme.js'
  */
 
 export interface PlanProgressProps {
-  plan: string
+  // The plan text itself is deliberately not taken: nothing here renders it any more, and a prop
+  // kept "in case" is how a component ends up quietly depending on something it should not.
   checkpoints: CheckpointView[]
   onClose: () => void
   /** Opens the plan editor, so "this is wrong" has somewhere to go from here. */
@@ -169,115 +170,88 @@ export function PlanProgress(props: PlanProgressProps): ReactElement {
       )}
 
       {/*
-        Steps on the left, the plan as written on the right — and `wrap`, because this renders in
-        a VS Code sidebar that is routinely narrower than two columns can survive. Wrapping puts
-        the steps above the prose rather than crushing both, which is the right order: the steps
-        are what this panel is for.
+        The steps, and nothing beside them.
+
+        There was a second column here showing the plan text. It was removed on sight of a
+        screenshot: for a plan that is only steps it printed the *same words* as the list, so half
+        the width said nothing twice. Its one real use was the prose a plan carries around its
+        steps — a goal, a definition of done — and that is occasional, while the whole text is
+        already one click away behind Edit plan. A panel whose job is progress should show
+        progress.
       */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-start' }}>
-        <ol
-          style={{
-            flex: '1 1 190px',
-            minWidth: 0,
-            listStyle: 'none',
-            margin: 0,
-            padding: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
-          {props.checkpoints.map((checkpoint) => (
-            <li
-              key={checkpoint.id}
-              style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 12 }}
-            >
-              <StatusMark status={checkpoint.status} />
-              <div style={{ minWidth: 0, flex: 1 }}>
+      <ol
+        style={{
+          minWidth: 0,
+          listStyle: 'none',
+          margin: 0,
+          padding: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}
+      >
+        {props.checkpoints.map((checkpoint) => (
+          <li
+            key={checkpoint.id}
+            style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 12 }}
+          >
+            <StatusMark status={checkpoint.status} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  color: checkpoint.status === 'todo' ? colors.muted : colors.foreground,
+                  // Struck through rather than hidden: what has been done is most of what a
+                  // progress view is for, and a list that shrank as work finished would be a
+                  // list you could not check.
+                  textDecoration: checkpoint.status === 'done' ? 'line-through' : 'none',
+                  wordBreak: 'break-word',
+                }}
+              >
+                <span style={{ color: colors.muted, marginRight: 4 }}>{checkpoint.index}.</span>
+                {checkpoint.text}
+              </div>
+              {(checkpoint.roles.length > 0 ||
+                checkpoint.plannedRoles.length > 0 ||
+                checkpoint.status !== 'todo') && (
                 <div
                   style={{
-                    color: checkpoint.status === 'todo' ? colors.muted : colors.foreground,
-                    // Struck through rather than hidden: what has been done is most of what a
-                    // progress view is for, and a list that shrank as work finished would be a
-                    // list you could not check.
-                    textDecoration: checkpoint.status === 'done' ? 'line-through' : 'none',
-                    wordBreak: 'break-word',
+                    display: 'flex',
+                    gap: 4,
+                    marginTop: 2,
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
                   }}
                 >
-                  <span style={{ color: colors.muted, marginRight: 4 }}>{checkpoint.index}.</span>
-                  {checkpoint.text}
-                </div>
-                {(checkpoint.roles.length > 0 ||
-                  checkpoint.plannedRoles.length > 0 ||
-                  checkpoint.status !== 'todo') && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 4,
-                      marginTop: 2,
-                      flexWrap: 'wrap',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <span style={{ color: colors.muted, fontSize: 10 }}>
-                      {STATUS_LABEL[checkpoint.status]}
-                    </span>
-                    {checkpoint.roles.map((role) => (
-                      <RoleChip key={role} role={role} />
-                    ))}
-                    {/* Only the ones not yet confirmed: once a specialist has actually answered,
+                  <span style={{ color: colors.muted, fontSize: 10 }}>
+                    {STATUS_LABEL[checkpoint.status]}
+                  </span>
+                  {checkpoint.roles.map((role) => (
+                    <RoleChip key={role} role={role} />
+                  ))}
+                  {/* Only the ones not yet confirmed: once a specialist has actually answered,
                         the intention is history and showing both says nothing extra. */}
-                    {(() => {
-                      const pending = checkpoint.plannedRoles.filter(
-                        (role) => !checkpoint.roles.includes(role),
-                      )
-                      if (pending.length === 0) return null
-                      return (
-                        <>
-                          {/* Says outright what the dashed chips mean, so nothing has to be
+                  {(() => {
+                    const pending = checkpoint.plannedRoles.filter(
+                      (role) => !checkpoint.roles.includes(role),
+                    )
+                    if (pending.length === 0) return null
+                    return (
+                      <>
+                        {/* Says outright what the dashed chips mean, so nothing has to be
                               inferred from how they are drawn. */}
-                          <span style={{ color: colors.muted, fontSize: 10 }}>plan:</span>
-                          {pending.map((role) => (
-                            <RoleChip key={`planned-${role}`} role={role} planned />
-                          ))}
-                        </>
-                      )
-                    })()}
-                  </div>
-                )}
-              </div>
-            </li>
-          ))}
-        </ol>
-
-        <div style={{ flex: '1 1 190px', minWidth: 0 }}>
-          {/*
-            Just what the box contains.
-
-            This said "Next: step 3", which was redundant — the list on the left already shows
-            which step is open, and more precisely — and it sat above the plan text where it read
-            as a description of that text rather than of the work. A label that has to be
-            reconciled against the thing beside it is worse than no label.
-          */}
-          <div style={{ color: colors.muted, fontSize: 10, marginBottom: 3 }}>The plan</div>
-          <div
-            className="lc-scroll"
-            style={{
-              maxHeight: 180,
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontSize: 11,
-              color: colors.muted,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 4,
-              padding: 6,
-            }}
-          >
-            {props.plan}
-          </div>
-        </div>
-      </div>
+                        <span style={{ color: colors.muted, fontSize: 10 }}>plan:</span>
+                        {pending.map((role) => (
+                          <RoleChip key={`planned-${role}`} role={role} planned />
+                        ))}
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

@@ -1,4 +1,11 @@
-import { AGENT_ROLES, defaultPromptFor, roleInfo, type AgentRole } from './roles.js'
+import {
+  AGENT_ROLES,
+  defaultPromptFor,
+  knownRoles,
+  roleInfo,
+  type AgentRole,
+  type CustomRoleDefinition,
+} from './roles.js'
 
 /**
  * Who answers each role, as config holds it.
@@ -25,6 +32,14 @@ export interface AgentAssignment {
    * role's prompt would reach nobody who had ever looked at it.
    */
   prompt?: string | undefined
+  /**
+   * Overrides whether this role may look things up.
+   *
+   * On the *assignment* rather than the role, because it depends on who is answering: a small
+   * local model given five lookups can spend them all and answer worse, while a strong one uses
+   * them well. Absent means the role's own default.
+   */
+  tools?: boolean | undefined
 }
 
 export interface AgentTeamConfig {
@@ -40,6 +55,14 @@ export interface AgentTeamConfig {
   budgetMatters?: boolean | undefined
   /** The Agent team mode's own instruction, when the user has edited it. */
   teamGuidance?: string | undefined
+  /**
+   * Roles the user defined, beyond the five built in.
+   *
+   * Carried alongside the assignments rather than merged into them: a definition says what a role
+   * *is*, an assignment says who answers it, and the two are edited at different moments. A role
+   * can be defined and unassigned, which is the ordinary state just after creating one.
+   */
+  definitions?: readonly CustomRoleDefinition[] | undefined
 }
 
 /** One role, resolved: who answers, with what prompt, and whether it can be used at all. */
@@ -54,6 +77,8 @@ export interface ResolvedAgent {
   prompt: string
   /** False when the assignment names something that no longer exists. */
   available: boolean
+  /** Whether this specialist may read and search the workspace. See `AgentRoleInfo.usesTools`. */
+  usesTools: boolean
   /** Why not, when it is not. */
   reason?: string
 }
@@ -80,12 +105,18 @@ function defaultAssignment(role: AgentRole, context: TeamContext): AgentAssignme
 /** Every role, with whoever answers it. Roles nobody assigned are absent from the result. */
 export function resolveTeam(context: TeamContext): ResolvedAgent[] {
   const resolved: ResolvedAgent[] = []
-  for (const role of AGENT_ROLES) {
+  // Built-ins first, then whatever the user defined — `knownRoles` owns that order so the roster,
+  // the picker and the team all present the roles the same way round.
+  const custom = context.config?.definitions ?? []
+  for (const role of knownRoles(custom)) {
     const assignment = context.config?.roles?.[role] ?? defaultAssignment(role, context)
     if (assignment === undefined) continue
 
-    const info = roleInfo(role)
-    const prompt = assignment.prompt ?? defaultPromptFor(role)
+    const info = roleInfo(role, custom)
+    const prompt = assignment.prompt ?? defaultPromptFor(role, custom)
+    // The assignment may override the role's own default, so somebody who wants a frugal reviewer
+    // or a well-read tester can say so without editing prompts.
+    const usesTools = assignment.tools ?? info.usesTools
 
     if (assignment.kind === 'cli') {
       resolved.push({
@@ -95,6 +126,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
         kind: 'cli',
         label: 'Claude',
         prompt,
+        usesTools,
         available: context.cliAvailable,
         ...(context.cliAvailable
           ? {}
@@ -112,6 +144,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
       ...(assignment.profileId !== undefined ? { profileId: assignment.profileId } : {}),
       label: profile?.label ?? assignment.profileId ?? 'unassigned',
       prompt,
+      usesTools,
       available: profile !== undefined,
       /*
        * A profile that has been deleted leaves the role unavailable and says so, rather than

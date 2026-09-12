@@ -8,10 +8,10 @@ import type { ResolvedAgent } from './team.js'
  *
  * ## Why a specialist needs this and did not have it
  *
- * A consultation is one request with no tools. The specialist cannot read a file, search the
- * documentation index, or open a skill — so left uninformed it advises as though the assistant
- * were a bare shell: proposing that something be done by hand when a configured tool already does
- * it, or inventing a procedure that an existing skill documents.
+ * A specialist is not the assistant. Even the ones that can read the workspace have no way to
+ * *act* on it — so left uninformed they advise as though the assistant were a bare shell:
+ * proposing that something be done by hand when a configured tool already does it, or inventing a
+ * procedure that an existing skill documents.
  *
  * The Claude CLI expert has had an inventory since §12b, for exactly this reason. Provider-backed
  * roles had none at all, which made the reviewer and the librarian markedly worse than the expert
@@ -113,7 +113,31 @@ function buildRoster(team: readonly ResolvedAgent[], self: AgentRole | undefined
   if (usable.length > 0) {
     sections.push(
       '',
-      ...usable.map((agent) => `- **${agent.role}** (${agent.label}) — ${agent.summary}`),
+      /*
+       * What the others can actually do — and this was wrong once, in the expensive direction.
+       *
+       * It first said "None of them can see the workspace", written to stop the expert giving the
+       * librarian a lookup job. That was false: `agents/consult.ts` gives a specialist the read
+       * tool group, and the CLI expert holds Claude's own Read/Grep/Glob. The instruction was
+       * therefore telling the expert *not* to allocate the librarian the one kind of work the
+       * librarian is equipped for, which made the weakest role weaker.
+       *
+       * The real distinction is per role and the user controls it, so it is rendered from the
+       * team rather than asserted about all of them — and it sits *above* the list, because it is
+       * how to read the marks in it.
+       */
+      '**None of them can edit anything or run anything.** They read and advise; the assistant',
+      'makes every change, and it is the one answerable for the result. Some can look things up',
+      'for themselves, marked below; the rest know only what is in the question, so give those',
+      'everything they need.',
+      '',
+      ...usable.map(
+        (agent) =>
+          `- **${agent.role}** (${agent.label}) — ${agent.summary}` +
+          // Marked per role because it decides what is worth asking them: one that can read
+          // needs pointing at a file, one that cannot needs the file pasted in.
+          (agent.usesTools ? ' *(can read and search the workspace)*' : ''),
+      ),
       '',
       /*
        * Knowing who exists is not the same as being asked to use them.
@@ -144,24 +168,6 @@ function buildRoster(team: readonly ResolvedAgent[], self: AgentRole | undefined
        * tester allocated across four steps, programmer nowhere, on a machine where it was
        * assigned. An instruction that names one mode of use gets obeyed in one mode.
        */
-      /*
-       * The others are as blind as you are, which the roster never said.
-       *
-       * Every specialist's own prompt opens with "You cannot see the workspace and cannot read
-       * files, run commands or search" — but that is in *its* prompt, and this roster describes
-       * *other* people. So the expert knew it was blind itself and had no reason to think anybody
-       * else was, and allocated the librarian a step reading "confirm the exact import paths in
-       * the installed version" — a job that requires opening the package. Reported exactly that
-       * way. The assistant spotted it and settled the question by reading, which is the system
-       * degrading well, but the approved plan still had a step in it that could not happen.
-       */
-      '**None of them can see the workspace.** They have no tools, cannot read a file, run a',
-      'command or search, and know only what is pasted into the question — the same position you',
-      'are in. So never allocate a step that is really *go and look something up*: checking what',
-      'version is installed, confirming an API against the real package, reading what a file',
-      'currently says. Those are the assistant\'s own job and it can simply do them. Ask a',
-      'specialist to judge, design or review something once the assistant has fetched the facts.',
-      '',
       'They divide into two kinds, and both are worth allocating:',
       '',
       '- **Readers** — the reviewer, the tester, the librarian. Worth a step where another pair of',

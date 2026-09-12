@@ -6915,6 +6915,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const prompt = buildAgentPrompt({
       prompt: agent.prompt,
       question: request.question,
+      // Decides the preamble as well as whether tools are offered below, so the two can never
+      // disagree — a specialist told it can read, and then given nothing to read with, wastes a
+      // step discovering that.
+      usesTools: agent.usesTools,
       ...(request.files !== undefined ? { files: request.files } : {}),
       /*
        * What exists in this workspace.
@@ -6981,7 +6985,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * See `agents/consult.ts` for why the reads skip the approval gate and why the cap forces an
      * answer rather than an error.
      */
-    const readOnly = toolsForConsultation(agentBriefingTools?.() ?? [])
+    /*
+     * Nothing at all for a role the user has said does not need it.
+     *
+     * The programmer is handed a spec and asked to write; the tester reasons about the change
+     * in front of it. Offering either a lookup budget buys a slower answer that is no better,
+     * and the preamble above already told it so — these two decisions come from the same flag
+     * so they cannot disagree.
+     */
+    const readOnly = agent.usesTools ? toolsForConsultation(agentBriefingTools?.() ?? []) : []
     const context = consultationContext?.()
     const result = await runConsultation({
       provider,

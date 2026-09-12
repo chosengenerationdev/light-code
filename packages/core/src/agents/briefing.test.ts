@@ -17,6 +17,7 @@ function agent(role: ResolvedAgent['role'], over: Partial<ResolvedAgent> = {}): 
     label: 'Some Model',
     prompt: 'you are a specialist',
     available: true,
+    usesTools: false,
     ...over,
   }
 }
@@ -73,18 +74,28 @@ describe('what a specialist is told about the rest of the team', () => {
   })
 
   /*
-   * Reported: the expert gave the librarian a step reading "confirm the exact import paths in the
-   * installed version" — a job that requires opening the package. Every specialist is told in its
-   * *own* prompt that it cannot see the workspace, but the roster describing the *others* never
-   * said so, so the expert had no reason to think anybody but itself was blind.
+   * The correction, and it went the wrong way first.
+   *
+   * The expert gave the librarian "confirm the exact import paths in the installed version", and
+   * the fix written for it said "None of them can see the workspace" — which is false.
+   * `agents/consult.ts` gives a specialist the read tool group and the CLI expert holds Claude's
+   * own Read/Grep/Glob, so that instruction told the expert not to allocate the librarian the one
+   * kind of work it is equipped for. What is true of all of them is that they cannot *write* or
+   * *run*; whether each can look things up varies and is the user's setting.
    */
-  it('says the other specialists cannot look anything up either', () => {
+  it('says what every specialist cannot do, and marks who can look things up', () => {
     const briefing = buildAgentBriefing({
-      team: [agent('expert'), agent('librarian')],
+      team: [
+        agent('expert'),
+        agent('librarian', { usesTools: true }),
+        agent('programmer', { usesTools: false }),
+      ],
       self: 'expert',
     })
-    expect(briefing).toContain('None of them can see the workspace')
-    expect(briefing).toContain('go and look something up')
+    expect(briefing).toContain('None of them can edit anything or run anything')
+    expect(briefing).toContain('**librarian** (Some Model) — what the librarian is for *(can read')
+    // The one without tools is not marked, so the expert knows to paste what it needs.
+    expect(briefing).not.toContain('**programmer** (Some Model) — what the programmer is for *(can')
   })
 
   it('does not ask for an allocation when there is nobody to allocate', () => {

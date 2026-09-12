@@ -717,7 +717,6 @@ export function Composer(props: ComposerProps): ReactElement {
           </div>
         ) : progressOpen ? (
           <PlanProgress
-            plan={props.plan}
             checkpoints={props.planCheckpoints}
             onClose={() => setProgressOpen(false)}
             onEdit={() => {
