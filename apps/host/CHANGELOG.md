@@ -1,5 +1,18 @@
 # @chosengeneration/light-code
 
+## 0.48.5
+
+### Patch Changes
+
+- Drop the "Next: step N" line from the progress panel
+
+  It was redundant and slightly misleading. The checkpoint list beside it already shows which step
+  is open, and shows it more precisely — a filled ring for in progress, a dashed one for not
+  started. Worse, it sat directly above the plan text, so it read as a description of that box
+  rather than of the work.
+
+  The box is labelled "The plan", which is what it holds.
+
 ## 0.48.4
 
 ### Patch Changes

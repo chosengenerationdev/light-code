@@ -115,9 +115,6 @@ function RoleChip({ role, planned }: { role: string; planned?: boolean }): React
 
 export function PlanProgress(props: PlanProgressProps): ReactElement {
   const done = props.checkpoints.filter((checkpoint) => checkpoint.status === 'done')
-  const active = props.checkpoints.filter((checkpoint) => checkpoint.status === 'active')
-  const remaining = props.checkpoints.filter((checkpoint) => checkpoint.status === 'todo')
-  const next = active[0] ?? remaining[0]
 
   return (
     <div
@@ -235,13 +232,15 @@ export function PlanProgress(props: PlanProgressProps): ReactElement {
         </ol>
 
         <div style={{ flex: '1 1 190px', minWidth: 0 }}>
-          <div style={{ color: colors.muted, fontSize: 10, marginBottom: 3 }}>
-            {next !== undefined
-              ? `Next: step ${String(next.index)}`
-              : props.checkpoints.length > 0
-                ? 'Every step is complete'
-                : 'The plan'}
-          </div>
+          {/*
+            Just what the box contains.
+
+            This said "Next: step 3", which was redundant — the list on the left already shows
+            which step is open, and more precisely — and it sat above the plan text where it read
+            as a description of that text rather than of the work. A label that has to be
+            reconciled against the thing beside it is worse than no label.
+          */}
+          <div style={{ color: colors.muted, fontSize: 10, marginBottom: 3 }}>The plan</div>
           <div
             className="lc-scroll"
             style={{
