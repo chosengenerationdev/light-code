@@ -1,5 +1,35 @@
 # @chosengeneration/light-code
 
+## 0.55.1
+
+### Patch Changes
+
+- A failed tool no longer breaks a conversation permanently
+
+  Reported with a screenshot: a chat answering every message with an HTTP 400 from the provider —
+  _"An assistant message with 'tool_calls' must be followed by tool messages responding to each
+  'tool_call_id'."_ Not intermittent. **Permanent.** Starting a new chat was the only way out, and
+  nothing said so.
+
+  The assistant message is added to the conversation _before_ the tool runs, which it has to be, or
+  the record would lose what was attempted whenever something went wrong afterwards. The result is
+  added after. Anything escaping between the two — a tool throwing rather than returning an error
+  result, a failure inside the truncation store — left a call with nothing answering it. The turn
+  ended with a visible error, the task was saved in its `finally`, and the broken pair was then on
+  disk, going out with every request from then on.
+
+  Two fixes, because one is not enough. The loop now turns a throw into an error result, so the
+  window is closed rather than narrowed — the same shape a denial already had. And history is
+  repaired on the way to the provider, so a conversation broken before this existed heals when it is
+  reopened instead of staying unusable for ever; that matters because the broken ones are exactly
+  the chats people are in the middle of.
+
+  The repair answers the call rather than deleting it. Removing the assistant message would lose the
+  record of what was attempted and leave the model looking at a turn where it had asked for nothing.
+  The synthetic result says what actually happened — the tool never reported back, nothing can be
+  assumed about whether it ran — and is inserted immediately after its own call, because several
+  providers require the ordering and not merely the count.
+
 ## 0.55.0
 
 ### Minor Changes

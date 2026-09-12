@@ -1,5 +1,6 @@
 import { CONTINUE_PROMPT, looksUnfinished, MAX_CONTINUE_NUDGES } from './unfinished.js'
 import { requiresApproval, type ApprovalGate } from '../approval/types.js'
+import { repairUnansweredToolCalls } from './repairHistory.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
 import { computeBreakdown, type TokenBreakdown } from '../context/budget.js'
 import { compactHistory, isSummaryMessage, shouldCompact, type CompactionOptions } from '../context/compact.js'
@@ -118,7 +119,11 @@ async function prepareModelMessages(
   events: AgentTurnEvents,
 ): Promise<ReturnType<Conversation['toModelMessages']>> {
   const contextWindow = options.contextWindow ?? 0
-  let messages = conversation.toModelMessages()
+  /*
+   * Repaired on the way out, so a conversation broken before this fix existed heals when it is
+   * reopened rather than staying unusable for ever. See `repairHistory.ts`.
+   */
+  let messages = repairUnansweredToolCalls(conversation.toModelMessages())
 
   if (options.compactionEnabled !== false && contextWindow > 0) {
     const estimated = computeBreakdown(messages, tools, contextWindow).total
@@ -131,7 +136,7 @@ async function prepareModelMessages(
           // `applyCompaction` measures against.
           conversation.applyCompaction(summary, conversation.compactedCount() + result.summarisedCount)
           events.onCompacted?.(result.summarisedCount)
-          messages = conversation.toModelMessages()
+          messages = repairUnansweredToolCalls(conversation.toModelMessages())
         }
       }
     }
@@ -522,12 +527,35 @@ export async function runAgentTurn(
     conversation.addAssistantMessage(assistantText, [toolCall])
     events.onToolCall(toolCall)
 
-    const result = await runOneToolCall(toolCall, toolRegistry, toolContext, options, events, {
-      hasCheckpoint: () => checkpointTaken,
-      markCheckpointTaken: () => {
-        checkpointTaken = true
-      },
-    }, mode)
+    /*
+     * A throw here must not escape, because the call is already in the conversation.
+     *
+     * The assistant message goes in *before* the tool runs — it has to, or the record would lose
+     * what was attempted whenever something went wrong afterwards. So anything that escapes
+     * between the two leaves a call with no result, and every provider rejects that history from
+     * then on: the reported symptom was a chat that answered every later message with an HTTP 400
+     * about tool_call_ids, permanently, with starting a new chat the only way out.
+     *
+     * `runOneToolCall` returns an error result for the failures it knows about. This covers the
+     * ones it does not — a tool throwing rather than returning, a failure inside the truncation
+     * store — by turning them into the same thing: a result the model can read and respond to.
+     * Identical in shape to how a denial is handled, and for the same reason.
+     */
+    let result: ToolResult
+    try {
+      result = await runOneToolCall(toolCall, toolRegistry, toolContext, options, events, {
+        hasCheckpoint: () => checkpointTaken,
+        markCheckpointTaken: () => {
+          checkpointTaken = true
+        },
+      }, mode)
+    } catch (error) {
+      result = {
+        content:
+          `"${toolCall.name}" failed: ${error instanceof Error ? error.message : String(error)}`,
+        isError: true,
+      }
+    }
     // The conversation gets the capped text; the UI event carries the full result so the
     // user still sees everything that actually happened.
     const forModel =
