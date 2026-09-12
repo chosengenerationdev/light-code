@@ -1642,11 +1642,14 @@ addition to the text input rather than a replacement for it.
 
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
-workflow has never run. **0.73.0 was live as of 2026-09-12**, published that morning and queried from
-the gallery. The local manifest is **0.79.1**. An upload of it was made the same evening and had
-**not appeared** when the gallery was queried minutes later — which has happened before (0.10.0,
-2026-08-13), so lag and a failed upload look identical for a while. Query again before assuming
-either.
+workflow has never run. **0.79.1 is live as of 2026-09-12**, queried from the gallery, and it matches
+the local manifest exactly.
+
+**Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
+gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same
+thing happened to 0.10.0 on 2026-08-13 and was recorded then as not having appeared. Neither time
+was anything wrong. Wait and query again before concluding an upload failed — and do not record
+"not published" as a fact on one query.
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
