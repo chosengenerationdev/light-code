@@ -1,5 +1,28 @@
 # @chosengeneration/light-code
 
+## 0.48.4
+
+### Patch Changes
+
+- The programmer gets allocated too
+
+  Reported from a real plan: the reviewer and the tester were named across four steps and the
+  programmer nowhere, on a machine where all of them were assigned.
+
+  The fault was in two instructions, both mine, and both the same shape. The expert was asked to
+  allocate specialists "where another reader would genuinely change the outcome" — review framing
+  throughout, down to "another pair of eyes", with a reviewer and a tester as its only examples. The
+  programmer does not read, it produces, so a plan written to that instruction correctly never
+  mentions it. And the assistant's own consult-without-being-asked list named the expert, reviewer,
+  tester and librarian, with no bullet for the programmer at all — which is most of why the role
+  never came up in the first place.
+
+  Both now describe the two kinds of specialist separately: the readers, worth a step where another
+  pair of eyes changes what happens, and the programmer, worth a step that is a self-contained piece
+  of code with a spec clear enough to hand over. Bounded in both places — not for a two-line change,
+  not where the spec is still moving, and what comes back is checked against the real file before it
+  is applied.
+
 ## 0.48.3
 
 ### Patch Changes

@@ -112,7 +112,20 @@ export const DEFAULT_TEAM_GUIDANCE = [
   '- you are about to call something done that has no tests — ask the **tester** what would break',
   '  it;',
   '- you are guessing at how this codebase does something — ask the **librarian** rather than',
-  '  inventing a convention.',
+  '  inventing a convention;',
+  /*
+   * The programmer was missing from this list entirely, which is most of why it never got used.
+   *
+   * Every other bullet describes somebody *reading* what you have, and writing code is the one
+   * thing the assistant can already do — so with no bullet of its own the role simply never came
+   * up, and a plan drafted by the expert never allocated it either (the same omission, in the
+   * briefing). Bounded deliberately: "hand everything to the programmer" would add a round trip
+   * to every edit and put a second model's conventions into the file.
+   */
+  '- a step is a self-contained piece of code with a clear spec — a parser, a schema, a set of',
+  '  pure functions — hand it to the **programmer** rather than writing it yourself out of habit,',
+  '  then check what comes back against the real file before applying it. Not for a two-line',
+  '  change, and not where the spec is still moving.',
   '',
   'The user can also ask directly ("ask the reviewer to look at this"), and then you consult that',
   'role whatever you would have chosen.',

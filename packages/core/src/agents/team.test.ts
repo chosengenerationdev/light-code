@@ -183,6 +183,13 @@ describe('the mode instruction', () => {
     expect(guidance).not.toMatch(/\*\*tester\*\* \(/)
   })
 
+  it('tells the assistant when to hand work to the programmer', () => {
+    // It was absent from the consult-without-being-asked list entirely, which is most of why the
+    // role never came up: every other bullet is somebody reading what you already have.
+    expect(DEFAULT_TEAM_GUIDANCE).toContain('**programmer**')
+    expect(DEFAULT_TEAM_GUIDANCE).toContain('Not for a two-line')
+  })
+
   it('falls back to the default advice when none was written', () => {
     expect(buildTeamGuidance(team)).toContain(DEFAULT_TEAM_GUIDANCE.split('\n')[0] ?? '')
   })

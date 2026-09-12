@@ -54,6 +54,24 @@ describe('what a specialist is told about the rest of the team', () => {
     expect(briefing).toContain('ceremony')
   })
 
+  /*
+   * Reported: a plan allocated the reviewer and the tester across four steps and the programmer
+   * nowhere, with all of them assigned. The instruction asked for allocation where "another
+   * reader" would change the outcome and called it "another pair of eyes" — review framing, with
+   * a reviewer and a tester as its only examples. The programmer produces rather than reads, so a
+   * plan written to that instruction correctly never names it.
+   */
+  it('asks for the writing role as well as the reading ones', () => {
+    const briefing = buildAgentBriefing({
+      team: [agent('expert'), agent('programmer'), agent('reviewer'), agent('tester')],
+      self: 'expert',
+    })
+    expect(briefing).toContain('The programmer writes')
+    expect(briefing).toContain('self-contained piece of code')
+    // And the review framing is still there for the roles it actually describes.
+    expect(briefing).toContain('another pair of')
+  })
+
   it('does not ask for an allocation when there is nobody to allocate', () => {
     const briefing = buildAgentBriefing({ team: [agent('expert')], self: 'expert' })
     expect(briefing).not.toContain('say who should be involved in which step')

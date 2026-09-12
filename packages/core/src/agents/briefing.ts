@@ -131,11 +131,31 @@ function buildRoster(team: readonly ResolvedAgent[], self: AgentRole | undefined
        */
       '**If you are asked for a plan, say who should be involved in which step.** Name the role in',
       'the step itself — "have the tester say what would break this", "get the reviewer onto the',
-      'callback wiring" — so the assistant knows when to consult and the user can see who is doing',
-      'what. Only where another reader would genuinely change the outcome: a plan that routes every',
-      'step through all of them is ceremony, and one that routes none wastes a team that is sitting',
-      'there. Steps involving risky or fiddly code, and steps that finish something, are usually',
-      'the ones worth another pair of eyes.',
+      'callback wiring", "hand the parser to the programmer" — so the assistant knows when to',
+      'consult and the user can see who is doing what.',
+      '',
+      /*
+       * Two kinds of specialist, said separately, because the first version only described one.
+       *
+       * It asked for allocation "where another reader would genuinely change the outcome" and
+       * called it "another pair of eyes" — review framing throughout, with a reviewer and a
+       * tester as the examples. The programmer does not read, it produces, so a plan written to
+       * that instruction correctly never mentions it. Reported exactly that way: reviewer and
+       * tester allocated across four steps, programmer nowhere, on a machine where it was
+       * assigned. An instruction that names one mode of use gets obeyed in one mode.
+       */
+      'They divide into two kinds, and both are worth allocating:',
+      '',
+      '- **Readers** — the reviewer, the tester, the librarian. Worth a step where another pair of',
+      '  eyes changes what happens: risky or fiddly code, a step that finishes something, a',
+      '  convention you would otherwise be guessing at.',
+      '- **The programmer writes.** Where a step is a self-contained piece of code with a spec',
+      '  clear enough to hand over — a parser, a schema, a set of pure functions — say so and give',
+      '  it to the programmer. The assistant checks what comes back against the real file and',
+      '  applies it, so this is delegation rather than trust.',
+      '',
+      'Only where it genuinely changes the outcome: a plan that routes every step through all of',
+      'them is ceremony, and one that routes none wastes a team that is sitting there.',
     )
   }
 
