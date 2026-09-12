@@ -43,10 +43,13 @@ export interface AgentsTabProps {
     summary: string
     prompt: string
     usesTools: boolean
+    canWrite: boolean
   }) => void
   onDeleteCustomRole: (id: string) => void
   /** Turns one role's workspace access on or off. */
   onSetRoleTools: (role: string, usesTools: boolean) => void
+  /** Turns one role's ability to change things on or off. Every change is still approved. */
+  onSetRoleWrite: (role: string, canWrite: boolean) => void
   /** How many custom roles may exist, so the form can say so before the save fails. */
   customRoleLimit: number
   /** The budget controls, rendered here only when cost is worth managing. */
@@ -86,6 +89,9 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
     summary: '',
     prompt: '',
     usesTools: true,
+    // Off: a role invented in a hurry should not be able to edit the repository because nobody
+    // thought about the box.
+    canWrite: false,
   })
 
   const customCount = props.roles.filter((role) => role.custom === true).length
@@ -244,6 +250,32 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
               onChange={(event) => props.onSetRoleTools(role.role, event.target.checked)}
             />
             Can read and search the workspace
+          </label>
+
+          {/*
+            Changing things, which is off everywhere by default.
+
+            Worth its own line rather than a second clause on the one above: reading is a cost
+            question and this is a trust question, and they are not the same decision. The label
+            says the approval is part of it, because a checkbox reading only "can write" would be
+            agreed to by people who would not have agreed to what it does.
+          */}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 4,
+              fontSize: 11,
+              color: colors.muted,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={role.canWrite}
+              onChange={(event) => props.onSetRoleWrite(role.role, event.target.checked)}
+            />
+            Can edit files and record skills — you approve each change
           </label>
 
           {/*
@@ -419,6 +451,26 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
             Can read and search the workspace
           </label>
 
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 4,
+              fontSize: 11,
+              color: colors.muted,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={newRole.canWrite}
+              onChange={(event) =>
+                setNewRole((current) => ({ ...current, canWrite: event.target.checked }))
+              }
+            />
+            Can edit files and record skills — you approve each change
+          </label>
+
           <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center' }}>
             <button
               type="button"
@@ -427,7 +479,14 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
               onClick={() => {
                 props.onSaveCustomRole({ ...newRole, id: newRole.id.trim().toLowerCase() })
                 setAdding(false)
-                setNewRole({ id: '', name: '', summary: '', prompt: '', usesTools: true })
+                setNewRole({
+                  id: '',
+                  name: '',
+                  summary: '',
+                  prompt: '',
+                  usesTools: true,
+                  canWrite: false,
+                })
               }}
             >
               Add role

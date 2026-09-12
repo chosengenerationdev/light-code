@@ -166,8 +166,21 @@ export async function runConsultation(options: ConsultationOptions): Promise<Con
        * With no approver the call is refused rather than quietly allowed, the same direction
        * `requestPathAccess` fails in when there is nobody to answer.
        */
+      /*
+       * Anything that is not a read is asked about.
+       *
+       * The first rule here was `ALWAYS_ASK_TOOLS.has(name)`, which was right while the only
+       * extra was `write_skill` — and quietly wrong the moment a role could be given
+       * `write_to_file`, because an ordinary edit is *not* on that list. It would have run with
+       * nobody asked, in the one path that asks nobody by default.
+       *
+       * The group is the honest test: the filter admits `read` and nothing else, so any other
+       * group present at all arrived through `extra` and is privileged by definition. A tool
+       * added to the read group later stays free, and one added anywhere else is gated without
+       * anybody remembering to list it.
+       */
       const permitted =
-        !ALWAYS_ASK_TOOLS.has(tool.name) ||
+        (tool.group === 'read' && !ALWAYS_ASK_TOOLS.has(tool.name)) ||
         (options.approve !== undefined && (await options.approve(tool, parsed.data)))
 
       const result = !permitted

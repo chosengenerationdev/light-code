@@ -29,6 +29,7 @@ function role(partial: Partial<AgentRoleState> & { role: string }): AgentRoleSta
     prompt: 'You are a thing.',
     promptIsDefault: true,
     usesTools: true,
+    canWrite: false,
     ...partial,
   }
 }
@@ -52,6 +53,7 @@ const base: AgentsTabProps = {
   onSaveCustomRole: () => {},
   onDeleteCustomRole: () => {},
   onSetRoleTools: () => {},
+  onSetRoleWrite: () => {},
   customRoleLimit: 5,
 }
 

@@ -88,6 +88,8 @@ export interface AgentRoleState {
   custom?: boolean
   /** Whether this specialist may read and search the workspace. See `AgentRoleInfo.usesTools`. */
   usesTools: boolean
+  /** Whether it may change things, each change approved. See `AgentRoleInfo.canWrite`. */
+  canWrite: boolean
 }
 
 /** Cert *paths* are not secrets (§15) — only the passphrase is, and it never crosses. */
@@ -813,11 +815,14 @@ export type UiToHostMessage =
       summary: string
       prompt: string
       usesTools: boolean
+      canWrite: boolean
     }
   /** Removes one, along with its assignment. Built-in roles are refused. */
   | { type: 'deleteCustomRole'; id: string }
   /** Turns a role's workspace access on or off, overriding its default. */
   | { type: 'setRoleTools'; role: string; usesTools: boolean }
+  /** Turns a role's ability to change things on or off. Every change is still approved. */
+  | { type: 'setRoleWrite'; role: string; canWrite: boolean }
   | { type: 'requestAgents' }
   /** Sets the plan for the open chat. Empty clears it. */
   | { type: 'setPlan'; plan: string }

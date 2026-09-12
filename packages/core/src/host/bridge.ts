@@ -3709,6 +3709,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // The assignment's override where there is one, else the role's own default — the same
         // resolution `resolveTeam` does, so the switch in the tab shows what will actually happen.
         usesTools: config.agents?.roles?.[info.role]?.tools ?? info.usesTools,
+        canWrite: config.agents?.roles?.[info.role]?.write ?? info.canWrite,
       }
     })
 
@@ -3762,6 +3763,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     summary: string
     prompt: string
     usesTools: boolean
+    canWrite?: boolean
   }): Promise<void> {
     const id = role.id.trim().toLowerCase()
     if (!isValidRoleId(id)) {
@@ -3787,6 +3789,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         summary: role.summary.trim(),
         prompt: role.prompt.trim(),
         usesTools: role.usesTools,
+        canWrite: role.canWrite === true,
       }
       if (at === -1) {
         if (definitions.length >= CUSTOM_ROLE_LIMIT) {
@@ -7105,6 +7108,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // disagree — a specialist told it can read, and then given nothing to read with, wastes a
       // step discovering that.
       usesTools: agent.usesTools,
+      canWrite: agent.canWrite,
       ...(request.files !== undefined ? { files: request.files } : {}),
       /*
        * What exists in this workspace.
@@ -7219,8 +7223,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * Only the librarian, and only this tool. Every other specialist stays strictly read-only,
      * and `consultBoundary.test.ts` holds that line.
      */
-    const extraTools =
-      agent.role === 'librarian' ? new Set(['write_skill']) : new Set<string>()
+    /*
+     * What this specialist may do beyond reading, by name.
+     *
+     * The librarian records skills whatever else is set — that is the role's own job, and it was
+     * the case that opened this door. `canWrite` adds the ordinary edit tools for a role the user
+     * has switched it on for. Everything here is gated: `runConsultation` asks before any
+     * non-read call, so this list widens *what can be proposed*, never what happens unasked.
+     *
+     * Deliberately a short list rather than the whole edit group. Creating a Python tool or
+     * installing a macro is authorising a capability rather than making a change, and §13 wants a
+     * human reading the source in a context less hurried than mid-consultation.
+     */
+    const extraTools = new Set<string>(agent.role === 'librarian' ? ['write_skill'] : [])
+    if (agent.canWrite) {
+      extraTools.add('write_to_file')
+      extraTools.add('apply_diff')
+      extraTools.add('write_skill')
+    }
 
     const readOnly = agent.usesTools
       ? toolsForConsultation(agentBriefingTools?.() ?? [], extraTools)
@@ -8394,6 +8414,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSaveCustomRole(message)
     } else if (message.type === 'deleteCustomRole') {
       void handleDeleteCustomRole(message.id)
+    } else if (message.type === 'setRoleWrite') {
+      const role = message.role
+      if (!isAgentRole(role, cachedAgentDefinitions)) {
+        post({ type: 'error', message: `There is no "${role}" role.` })
+        return
+      }
+      void saveAgents((current) => {
+        const roles = { ...(current.roles ?? {}) }
+        roles[role] = { ...(roles[role] ?? { kind: 'profile' as const }), write: message.canWrite }
+        return { ...current, roles }
+      })
     } else if (message.type === 'setRoleTools') {
       const role = message.role
       if (!isAgentRole(role, cachedAgentDefinitions)) {

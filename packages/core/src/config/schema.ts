@@ -123,6 +123,14 @@ export const agentAssignmentSchema = z
      * uses them well. Absent means the role's own default.
      */
     tools: z.boolean().optional(),
+    /**
+     * Whether this specialist may change things, each change through the approval gate.
+     *
+     * Off by default everywhere. §12b's rule is that a consultant is read-only; this is the
+     * deliberate exception, and it is per role because "the programmer may edit" and "the tester
+     * may edit" are quite different decisions.
+     */
+    write: z.boolean().optional(),
   })
   .strict()
 

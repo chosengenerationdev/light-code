@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.78.0
+
+### Minor Changes
+
+- A role can be allowed to change things, with every change approved
+
+  Each role in Settings → Agents gains a second checkbox: **Can edit files and record skills — you
+  approve each change.** Off for every built-in role, off for a new custom one unless the box is
+  ticked, and present on custom roles exactly as on the built-in five.
+
+  §12b's rule was that a consultant is read-only, because a second agent mutating the repository
+  would sit outside the approval gate everything else passes through. That objection is answerable
+  now rather than structural: `runConsultation` routes every non-read call through the same gate the
+  agent loop uses, so a specialist's edit is approved exactly as the assistant's would be, showing
+  the same computed diff.
+
+  **The gate rule had to change to make that true, and it was nearly wrong.** It asked only about
+  `ALWAYS_ASK_TOOLS`, which is right for `write_skill` and silently wrong for `write_to_file` — an
+  ordinary edit is not on that list, so it would have run with nobody asked, in the one code path
+  that asks nobody by default. The test is the tool's _group_ now: the filter admits `read` and
+  nothing else, so anything else present arrived through the per-role extras and is privileged by
+  definition. A read tool added next year stays free; anything else is gated with no list to keep in
+  step.
+
+  What a writing role gets is deliberately short — edit a file, record a skill — and not the whole
+  edit group. Creating a Python tool or installing a macro authorises a capability rather than making
+  a change, and §13 wants a human reading that source somewhere less hurried than the middle of a
+  consultation.
+
 ## 0.77.0
 
 ### Minor Changes

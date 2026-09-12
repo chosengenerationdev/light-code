@@ -1456,6 +1456,12 @@ export function App(props: AppProps): ReactElement {
                   role,
                   usesTools,
                 } satisfies UiToHostMessage),
+              onSetRoleWrite: (role, canWrite) =>
+                props.transport.post({
+                  type: 'setRoleWrite',
+                  role,
+                  canWrite,
+                } satisfies UiToHostMessage),
               /*
                * The cap comes from core rather than being repeated here.
                *

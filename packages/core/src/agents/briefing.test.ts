@@ -18,6 +18,7 @@ function agent(role: ResolvedAgent['role'], over: Partial<ResolvedAgent> = {}): 
     prompt: 'you are a specialist',
     available: true,
     usesTools: false,
+    canWrite: false,
     ...over,
   }
 }

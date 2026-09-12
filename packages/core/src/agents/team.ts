@@ -39,6 +39,8 @@ export interface AgentAssignment {
    * them well. Absent means the role's own default.
    */
   tools?: boolean | undefined
+  /** Overrides whether this role may change things. Absent means the role's own default. */
+  write?: boolean | undefined
 }
 
 export interface AgentTeamConfig {
@@ -78,6 +80,8 @@ export interface ResolvedAgent {
   available: boolean
   /** Whether this specialist may read and search the workspace. See `AgentRoleInfo.usesTools`. */
   usesTools: boolean
+  /** Whether it may change things, each change approved. See `AgentRoleInfo.canWrite`. */
+  canWrite: boolean
   /** Why not, when it is not. */
   reason?: string
 }
@@ -116,6 +120,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
     // The assignment may override the role's own default, so somebody who wants a frugal reviewer
     // or a well-read tester can say so without editing prompts.
     const usesTools = assignment.tools ?? info.usesTools
+    const canWrite = assignment.write ?? info.canWrite
 
     if (assignment.kind === 'cli') {
       resolved.push({
@@ -126,6 +131,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
         label: 'Claude',
         prompt,
         usesTools,
+        canWrite,
         available: context.cliAvailable,
         ...(context.cliAvailable
           ? {}
@@ -155,6 +161,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
       label: profile?.label ?? assignment.profileId ?? 'unassigned',
       prompt,
       usesTools,
+      canWrite,
       available: profile !== undefined,
       /*
        * A profile that has been deleted leaves the role unavailable and says so, rather than

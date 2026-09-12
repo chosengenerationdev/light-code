@@ -53,6 +53,8 @@ export interface CustomRoleDefinition {
   prompt: string
   /** Whether it may read and search the workspace. Absent means yes; see `roleInfo`. */
   usesTools?: boolean | undefined
+  /** Whether it may edit files and record skills, each through the approval gate. Absent means no. */
+  canWrite?: boolean | undefined
 }
 
 /**
@@ -104,6 +106,20 @@ export interface AgentRoleInfo {
    * round trip and a slower answer that is no better.
    */
   usesTools: boolean
+  /**
+   * Whether this specialist may *change* things, not merely read them.
+   *
+   * Off everywhere by default, and off is where this design starts: §12b's load-bearing decision
+   * is that a consultant is read-only, because a second agent mutating the repository would sit
+   * outside the approval gate everything else goes through.
+   *
+   * It can be switched on per role because that objection is answerable now rather than
+   * structural — `runConsultation` routes every non-read call through the same gate the agent
+   * loop uses, so a specialist's edit is approved exactly as the assistant's would be. What it
+   * still costs is attention: the approval arrives mid-consultation, about work the user did not
+   * watch being decided.
+   */
+  canWrite: boolean
 }
 
 /**
@@ -145,6 +161,15 @@ const SHARED_TAIL = [
   'Answer in prose and short lists. No preamble about being happy to help.',
 ]
 
+/** What a role that may change things is told, appended to whichever preamble it has. */
+const MAY_WRITE = [
+  '',
+  'You can also change this workspace: edit files, and record a skill. Every such change is shown',
+  'to the user and approved by them before it happens, so make each one small enough to read and',
+  'say what it is for. Prefer telling the assistant what to change where the change is large or',
+  'spans files — it has the whole picture and you have only what you asked for.',
+].join('\n')
+
 /** For a role that can look things up. Read-only by construction — see `agents/consult.ts`. */
 const SHARED_WITH_TOOLS = [
   'You can read this workspace: open files, list them, and search. Use that rather than guessing,',
@@ -173,8 +198,14 @@ const SHARED_BLIND = [
  * custom one — cannot remove the sentences that say what it may and may not do. Before this, the
  * built-in prompts carried it inline and an edit could delete it silently.
  */
-export function specialistPreamble(usesTools: boolean): string {
-  return usesTools ? SHARED_WITH_TOOLS : SHARED_BLIND
+export function specialistPreamble(usesTools: boolean, canWrite = false): string {
+  const base = usesTools ? SHARED_WITH_TOOLS : SHARED_BLIND
+  /*
+   * Appended rather than replacing the "cannot edit anything" sentence above it, which would leave
+   * a preamble contradicting itself. Both preambles say what a specialist cannot do; this says
+   * what it additionally can, and it appears only where the user switched it on.
+   */
+  return canWrite ? `${base}${MAY_WRITE}` : base
 }
 
 const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
@@ -184,6 +215,7 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
     /* Planning a change means knowing what is already there, and it spans files the asker
      * cannot paste all of. */
     usesTools: true,
+    canWrite: false,
     prompt: [
       'You are a senior engineer being consulted by another AI assistant that is doing the work.',
       '',
@@ -201,6 +233,7 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
     /* It is handed a spec and the surrounding code and asked to write. Looking around buys
      * a slower answer that is no better. */
     usesTools: false,
+    canWrite: false,
     prompt: [
       'You are an experienced programmer writing code for another AI assistant to apply.',
       '',
@@ -231,6 +264,7 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
     /* Most of what a review turns on is *around* the diff — the callers, the neighbouring
      * function, whether this convention is really the convention. */
     usesTools: true,
+    canWrite: false,
     prompt: [
       'You are reviewing a change written by another AI assistant.',
       '',
@@ -258,6 +292,7 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
     /* The change is in front of it and the cases come from reasoning about it, not from
      * reading more of the codebase. */
     usesTools: false,
+    canWrite: false,
     prompt: [
       'You design tests for code written by another AI assistant.',
       '',
@@ -277,6 +312,7 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
      * left it answering from whatever happened to be pasted in. This is the role the flag
      * exists for. */
     usesTools: true,
+    canWrite: false,
     prompt: [
       'You answer questions about how things are done here: internal libraries, house conventions,',
       'the shape of existing code, and what has already been written down.',
@@ -335,6 +371,9 @@ export function roleInfo(
        * there to turn it off for the ones that are really "write this to spec".
        */
       usesTools: defined.usesTools !== false,
+      // Off unless asked for: a role invented in a hurry should not be able to edit the
+      // repository because nobody thought about the box.
+      canWrite: defined.canWrite === true,
     }
   }
 
@@ -349,6 +388,7 @@ export function roleInfo(
     summary: 'This role is no longer defined.',
     prompt: '',
     usesTools: false,
+    canWrite: false,
   }
 }
 
@@ -385,6 +425,8 @@ export function buildAgentPrompt(options: {
    * wrong is how a specialist ends up asking for a file it has been told it cannot open.
    */
   usesTools: boolean
+  /** Whether it may change things, which adds a paragraph saying what that means. */
+  canWrite?: boolean | undefined
 }): string {
   /*
    * Role, then the half that is not editable.
@@ -393,7 +435,11 @@ export function buildAgentPrompt(options: {
    * one — cannot delete the sentences saying what it may and may not do. They used to live inline
    * in each built-in prompt, one edit away from being gone.
    */
-  const lines = [options.prompt.trim(), '', specialistPreamble(options.usesTools)]
+  const lines = [
+    options.prompt.trim(),
+    '',
+    specialistPreamble(options.usesTools, options.canWrite === true),
+  ]
   /*
    * Between the role and the question, deliberately.
    *

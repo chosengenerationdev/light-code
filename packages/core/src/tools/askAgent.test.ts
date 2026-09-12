@@ -13,6 +13,7 @@ function agent(role: string, over: Partial<ResolvedAgent> = {}): ResolvedAgent {
     prompt: '',
     available: true,
     usesTools: false,
+    canWrite: false,
     ...over,
   }
 }
