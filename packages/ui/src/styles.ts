@@ -249,8 +249,20 @@ export function applyAgentColors(
     ...Object.keys(colors ?? {}),
   ])
   for (const role of roles) {
-    applyAgentColor(role, colors?.[role] ?? DEFAULT_AGENT_COLORS[role] ?? hueFor(role))
+    applyAgentColor(role, colors?.[role] ?? defaultAgentColor(role))
   }
+}
+
+/**
+ * The colour a role has before anybody picks one — the single answer to that question.
+ *
+ * The palette writes tokens with it and the Appearance picker shows it as the swatch, and those
+ * two must agree: the picker fell back to the expert's coral for a custom role while the chat
+ * painted the derived hue, so the setting you were looking at and the colour you were seeing were
+ * different colours. One fact, one owner.
+ */
+export function defaultAgentColor(role: string): string {
+  return DEFAULT_AGENT_COLORS[role] ?? hueFor(role)
 }
 
 /**

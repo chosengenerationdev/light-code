@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.77.0
+
+### Minor Changes
+
+- Roles can be edited and removed, from the panel and from the chat
+
+  `update_role_prompt` becomes `update_role`, and it changes more than a prompt: a custom role's
+  name, its summary, and whether it may read the workspace. Only what you pass is changed. The
+  summary matters most of the three — it is the line every other specialist sees and the one the
+  expert allocates from, so a role whose summary is wrong gets used for the wrong work, and a diff
+  of the prompt alone would have shown nothing for that edit. The approval now shows the whole role.
+
+  A built-in role still only accepts a prompt change, and says so rather than failing quietly.
+  Renaming the reviewer would leave a role whose name says one thing and whose prompt says another.
+
+  **`delete_role` is new, and it is a reversal.** It was withheld on the grounds that there is no
+  case where the assistant needs to remove a role badly enough to risk getting it wrong — which was
+  taste, not a safety argument. The act is gated exactly like creating one, the approval shows the
+  whole role including the prompt that would be lost, and refusing it only meant the user went and
+  did the same thing by hand. Built-in roles are refused explicitly, because "delete the reviewer"
+  is a reasonable thing to try and being told why beats the call doing nothing.
+
+  **Custom roles get colours like any other**, in Settings → Appearance. That needed no wiring — the
+  list is built from the roles that exist — but it did need a fix: the swatch fell back to the
+  expert's coral for a role with no built-in default while the palette painted a hue derived from the
+  id, so the setting you were looking at and the colour you were seeing were different colours.
+  `defaultAgentColor` is now the single answer to "what colour is this role before anybody picks
+  one", and both read it.
+
 ## 0.76.0
 
 ### Minor Changes

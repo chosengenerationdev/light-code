@@ -317,3 +317,65 @@ describe('custom roles', () => {
     expect(onSetRoleTools).toHaveBeenCalledWith('reviewer', true)
   })
 })
+
+/**
+ * A custom role is a role everywhere, including where colours are chosen.
+ *
+ * The Appearance list is built from the same roles array as the Agents tab, so this needed no
+ * wiring — which is exactly why it is worth a test: nothing would have failed if it had been
+ * built from a fixed list of five instead, and the symptom would be a role you cannot recolour.
+ */
+describe('colours for custom roles', () => {
+  it('offers a picker for one, alongside the built-in roles', async () => {
+    const { AppearanceSection } = await import('./AppearanceSection.js')
+    act(() =>
+      root.render(
+        <AppearanceSection
+          accentColor="#22C55E"
+          onChangeAccent={() => {}}
+          expertColor="#D97757"
+          onChangeExpert={() => {}}
+          agentRoles={[
+            { role: 'reviewer', name: 'Reviewer' },
+            { role: 'db-reviewer', name: 'DB reviewer' },
+          ]}
+          agentColors={{}}
+          onChangeAgentColor={() => {}}
+        />,
+      ),
+    )
+
+    expect(container.textContent).toContain('DB reviewer colour')
+    expect(container.textContent).toContain('Reviewer colour')
+  })
+
+  /*
+   * The swatch must show what actually gets painted. It used to fall back to the expert's coral
+   * for any role without a built-in default, while `applyAgentColors` derived a hue from the id —
+   * so the setting you were looking at and the colour you were seeing were different colours.
+   */
+  it('shows the colour the role is actually painted with', async () => {
+    const { defaultAgentColor } = await import('../styles.js')
+    const { AppearanceSection } = await import('./AppearanceSection.js')
+
+    const derived = defaultAgentColor('db-reviewer')
+    expect(derived).not.toBe(defaultAgentColor('reviewer'))
+
+    act(() =>
+      root.render(
+        <AppearanceSection
+          accentColor="#22C55E"
+          onChangeAccent={() => {}}
+          expertColor="#D97757"
+          onChangeExpert={() => {}}
+          agentRoles={[{ role: 'db-reviewer', name: 'DB reviewer' }]}
+          agentColors={{}}
+          onChangeAgentColor={() => {}}
+        />,
+      ),
+    )
+
+    const hex = container.querySelector<HTMLInputElement>('#lc-agent-db-reviewer-hex')
+    expect(hex?.value.toLowerCase()).toBe(derived.toLowerCase())
+  })
+})

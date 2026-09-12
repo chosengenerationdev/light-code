@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   createCreateRoleTool,
+  createDeleteRoleTool,
   createReadRolePromptTool,
   createUpdateRolePromptTool,
 } from './roleTools.js'
@@ -18,12 +19,14 @@ const DEFAULTS: Record<string, string> = {
 
 function access(
   edited: Record<string, string> = {},
-): RolePromptAccess & { saved: unknown[]; created: { id: string }[] } {
+): RolePromptAccess & { saved: unknown[]; created: { id: string }[]; removed: string[] } {
   const saved: unknown[] = []
   const created: { id: string }[] = []
+  const removed: string[] = []
   return {
     saved,
     created,
+    removed,
     list: () =>
       Object.keys(DEFAULTS).map((role) => ({
         role,
@@ -31,16 +34,49 @@ function access(
         assigned: true,
         edited: edited[role] !== undefined,
       })),
-    current: (role) => edited[role] ?? DEFAULTS[role],
+    current: (role) =>
+      edited[role] ??
+      DEFAULTS[role] ??
+      // A created role has a prompt too — without this the fixture reported every custom role as
+      // not existing, and the tool refused an edit for a reason the real host does not have.
+      (created.find((candidate) => candidate.id === role) as { prompt?: string } | undefined)?.prompt,
     fallback: (role) => DEFAULTS[role],
     save: async (role, prompt) => {
       saved.push({ role, prompt })
     },
     create: async (role) => {
+      // Mirrors the host: an id that already exists is *replaced*, and only a genuinely new one
+      // meets the cap. The first version of this fixture refused both, which failed an edit for a
+      // reason the real code does not have — the fixture was wrong, not the tool.
+      const at = created.findIndex((candidate) => candidate.id === role.id)
+      if (at !== -1) {
+        created[at] = role
+        return
+      }
       if (created.length >= 1) throw new Error('The limit is 1 custom role.')
       created.push(role)
     },
     capacity: () => ({ used: created.length, limit: 1 }),
+    details: (role) => {
+      const custom = created.find((candidate) => candidate.id === role) as
+        | { id: string; name: string; summary: string; prompt: string; usesTools: boolean }
+        | undefined
+      if (custom !== undefined) return { ...custom, custom: true }
+      const builtIn = DEFAULTS[role]
+      return builtIn === undefined
+        ? undefined
+        : {
+            id: role,
+            name: role,
+            summary: `the ${role}`,
+            prompt: edited[role] ?? builtIn,
+            usesTools: true,
+            custom: false,
+          }
+    },
+    remove: async (role) => {
+      removed.push(role)
+    },
   }
 }
 
@@ -90,13 +126,13 @@ describe('changing a role prompt', () => {
       decideFromPolicy(
         {
           id: 'probe',
-          toolName: 'update_role_prompt',
+          toolName: 'update_role',
           group: tool.group,
           preview: { kind: 'text', text: '' },
         },
         {
           autoApprove: { read: true, edit: true, command: true, mcp: true },
-          allowedTools: ['update_role_prompt'],
+          allowedTools: ['update_role'],
           allowedCommands: [],
         },
       ),
@@ -104,7 +140,7 @@ describe('changing a role prompt', () => {
   })
 
   it('is never available to an unattended run', () => {
-    expect(NEVER_AVAILABLE_TO_SCHEDULES).toContain('update_role_prompt')
+    expect(NEVER_AVAILABLE_TO_SCHEDULES).toContain('update_role')
   })
 
   it('shows a diff of the prompt that stands against the one proposed', async () => {
@@ -113,12 +149,10 @@ describe('changing a role prompt', () => {
       { role: 'reviewer', prompt: 'Be brutal. Especially about error handling.', reason: 'stricter' },
       NO_CONTEXT,
     )
-    expect(preview).toMatchObject({
-      kind: 'diff',
-      before: 'Be brutal.',
-      after: 'Be brutal. Especially about error handling.',
-      note: 'stricter',
-    })
+    expect(preview).toMatchObject({ kind: 'diff', note: 'stricter' })
+    const diff = preview as { before: string; after: string }
+    expect(diff.before).toContain('Be brutal.')
+    expect(diff.after).toContain('Be brutal. Especially about error handling.')
   })
 
   /*
@@ -128,7 +162,9 @@ describe('changing a role prompt', () => {
   it('previews a reset as a return to the default, not as deletion', async () => {
     const tool = createUpdateRolePromptTool(access({ reviewer: 'Be brutal.' }))
     const preview = await tool.preview?.({ role: 'reviewer', prompt: '   ' }, NO_CONTEXT)
-    expect(preview).toMatchObject({ before: 'Be brutal.', after: DEFAULTS.reviewer })
+    const diff = preview as { before: string; after: string }
+    expect(diff.before).toContain('Be brutal.')
+    expect(diff.after).toContain(DEFAULTS.reviewer ?? '')
   })
 
   it('clears the edit rather than storing an empty one', async () => {
@@ -153,6 +189,7 @@ describe('the wiring', () => {
   it('registers both tools', () => {
     expect(bridge).toContain('createReadRolePromptTool(rolePromptAccess)')
     expect(bridge).toContain('createUpdateRolePromptTool(rolePromptAccess)')
+    expect(bridge).toContain('createDeleteRoleTool(rolePromptAccess)')
   })
 
   /*
@@ -237,12 +274,85 @@ describe('inventing a role', () => {
     expect(NEVER_AVAILABLE_TO_SCHEDULES).toContain('create_role')
   })
 
+})
+
+describe('editing and removing a role', () => {
+  it('changes a custom role\'s name and summary', async () => {
+    const store = access()
+    await store.create({
+      id: 'db',
+      name: 'DB reviewer',
+      summary: 'SQL',
+      prompt: 'You review SQL.',
+      usesTools: true,
+    })
+
+    const tool = createUpdateRolePromptTool(store)
+    const result = await tool.execute(
+      { role: 'db', summary: 'SQL, migrations and indexes' },
+      NO_CONTEXT,
+    )
+    expect(result.isError).toBeUndefined()
+    expect(store.created.at(-1)).toMatchObject({
+      id: 'db',
+      name: 'DB reviewer',
+      summary: 'SQL, migrations and indexes',
+      // The prompt is carried over rather than re-sent, so an identity edit cannot blank it.
+      prompt: 'You review SQL.',
+    })
+  })
+
   /*
-   * Deleting is deliberately not offered to the model: it takes a prompt somebody wrote and tuned
-   * with it, and the tab already does it behind a two-click confirm.
+   * A built-in role is what it is. Renaming the reviewer would leave a role whose name says one
+   * thing and whose prompt says another, and the expert allocates from the summary.
    */
-  it('offers no way to delete one', () => {
-    const source = readFileSync(fileURLToPath(new URL('./roleTools.ts', import.meta.url)), 'utf8')
-    expect(source).not.toContain('delete_role')
+  it('refuses to rename a built-in role, and says why', async () => {
+    const store = access()
+    const tool = createUpdateRolePromptTool(store)
+    const result = await tool.execute({ role: 'reviewer', name: 'Nitpicker' }, NO_CONTEXT)
+    expect(result.isError).toBe(true)
+    expect(String(result.content)).toContain('built in')
+  })
+
+  it('leaves the prompt alone when none was passed', async () => {
+    const store = access({ reviewer: 'Be brutal.' })
+    const tool = createUpdateRolePromptTool(store)
+    await tool.execute({ role: 'reviewer' }, NO_CONTEXT)
+    expect(store.saved).toEqual([])
+  })
+
+  it('shows the whole role before deleting it, including the prompt that goes', async () => {
+    const store = access()
+    await store.create({
+      id: 'db',
+      name: 'DB reviewer',
+      summary: 'SQL',
+      prompt: 'You review SQL.',
+      usesTools: true,
+    })
+
+    const tool = createDeleteRoleTool(store)
+    const preview = await tool.preview?.({ role: 'db' }, NO_CONTEXT)
+    const text = preview?.kind === 'text' ? preview.text : ''
+    expect(text).toContain('DB reviewer')
+    expect(text).toContain('You review SQL.')
+    expect(text).toContain('removed with it')
+
+    await tool.execute({ role: 'db' }, NO_CONTEXT)
+    expect(store.removed).toEqual(['db'])
+  })
+
+  it('refuses to delete a built-in role', async () => {
+    const store = access()
+    const tool = createDeleteRoleTool(store)
+    const result = await tool.execute({ role: 'reviewer' }, NO_CONTEXT)
+    expect(result.isError).toBe(true)
+    expect(String(result.content)).toContain('cannot be deleted')
+    expect(store.removed).toEqual([])
+  })
+
+  it('always asks before deleting, and never does it unattended', () => {
+    expect(createDeleteRoleTool(access()).group).not.toBe('always')
+    expect(NEVER_AVAILABLE_TO_SCHEDULES).toContain('delete_role')
   })
 })

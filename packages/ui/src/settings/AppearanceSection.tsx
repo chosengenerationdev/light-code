@@ -1,14 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import {
-  ACCENT_PRESETS,
-  contrastFor,
-  DEFAULT_ACCENT,
-  DEFAULT_AGENT_COLORS,
-  DEFAULT_EXPERT,
-  EXPERT_PRESETS,
-  isValidAccent,
-  type AccentPreset,
-} from '../styles.js'
+import { ACCENT_PRESETS, DEFAULT_ACCENT, DEFAULT_EXPERT, EXPERT_PRESETS, contrastFor, defaultAgentColor, isValidAccent, type AccentPreset } from '../styles.js'
 import { CheckIcon, ExpertIcon } from '../icons.js'
 import { colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
 
@@ -234,11 +225,12 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
                 key={role.role}
                 label={`${role.name} colour`}
                 description={`Marks answers from the ${role.name.toLowerCase()}.`}
-                value={
-                  props.agentColors[role.role] ?? DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT
-                }
+                // Through `defaultAgentColor`, which is what actually paints the tokens. Reading
+                // `DEFAULT_AGENT_COLORS` directly showed a custom role as coral here while the
+                // chat painted its derived hue — the swatch and the thing it describes disagreeing.
+                value={props.agentColors[role.role] ?? defaultAgentColor(role.role)}
                 presets={EXPERT_PRESETS}
-                fallback={DEFAULT_AGENT_COLORS[role.role] ?? DEFAULT_EXPERT}
+                fallback={defaultAgentColor(role.role)}
                 inputId={`lc-agent-${role.role}-hex`}
                 onChange={(hex) => props.onChangeAgentColor(role.role, hex)}
               />

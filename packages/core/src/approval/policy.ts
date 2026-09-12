@@ -74,9 +74,11 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * things, in the same tone as before. A category toggle must never stand in for reading that
    * diff.
    */
-  'update_role_prompt',
+  'update_role',
   // Inventing one is the same act as rewriting one: a prompt that will advise on this code.
   'create_role',
+  // And removing one takes a prompt somebody wrote with it.
+  'delete_role',
 ])
 
 export function decideFromPolicy(

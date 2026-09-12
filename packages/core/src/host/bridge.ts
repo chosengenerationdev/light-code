@@ -26,6 +26,7 @@ import {
 } from '../tools/planTools.js'
 import {
   createCreateRoleTool,
+  createDeleteRoleTool,
   createReadRolePromptTool,
   createUpdateRolePromptTool,
   type RolePromptAccess,
@@ -1008,6 +1009,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       isAgentRole(role, cachedAgentDefinitions)
         ? defaultPromptFor(role, cachedAgentDefinitions)
         : undefined,
+    details: (role) => {
+      if (!isAgentRole(role, cachedAgentDefinitions)) return undefined
+      const info = roleInfo(role, cachedAgentDefinitions)
+      return {
+        id: role,
+        name: info.name,
+        summary: info.summary,
+        prompt: cachedAgentRoles?.[role]?.prompt ?? info.prompt,
+        usesTools: cachedAgentRoles?.[role]?.tools ?? info.usesTools,
+        custom: cachedAgentDefinitions.some((definition) => definition.id === role),
+      }
+    },
+    remove: async (role) => {
+      await handleDeleteCustomRole(role)
+    },
     create: async (role) => {
       // Through the same handler the tab uses, so the id rules, the cap and the error wording are
       // written once. A second validation path is a second set of rules to drift apart.
@@ -2001,6 +2017,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     combined.register(createReadRolePromptTool(rolePromptAccess), { dispatchOnly: dispatcher })
     combined.register(createUpdateRolePromptTool(rolePromptAccess), { dispatchOnly: dispatcher })
     combined.register(createCreateRoleTool(rolePromptAccess), { dispatchOnly: dispatcher })
+    combined.register(createDeleteRoleTool(rolePromptAccess), { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
     /*
