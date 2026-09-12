@@ -16,9 +16,51 @@ import type { Transport } from '@light-code/core/browser'
 const POST_RETRIES = 3
 const RETRY_DELAY_MS = 700
 
+/**
+ * How many messages are held while the stream is down before the loss is reported.
+ *
+ * Large enough that no real page reaches it — the UI posts on user action, and a disconnected
+ * page offers little to act on. It exists so the queue cannot grow without bound, and it reports
+ * rather than discarding quietly, because silent loss is the bug this queue was written to fix.
+ */
+const MAX_QUEUED = 500
+
 export class HttpTransport implements Transport {
   private readonly listeners = new Set<(message: unknown) => void>()
   private token: string | undefined
+
+  /**
+   * Whether a stream is open *right now*, and what to send once one is.
+   *
+   * ## The reported failure
+   *
+   * "There is no dark mode or light mode option any more", on a remote server, with the version
+   * confirmed as the one that had already fixed this on the server side.
+   *
+   * `connect()` starts the event stream but does not wait for it — `void this.listen()` — so it
+   * resolves, React mounts, and the five startup requests go out at once. The server answers a
+   * message with `409 No event stream open` until the stream it belongs to exists, so on a fresh
+   * server the first of those five is refused. Measured against the published build: the stream
+   * opened 51ms later and the first POST still lost the race on loopback.
+   *
+   * The 409 retry covers that, but only for about two seconds. Over a proxy on a remote server
+   * the stream can take longer, and then the startup requests are gone permanently — `settings`
+   * among them, which is the message carrying `choosesTheme`. So the theme control is absent, the
+   * Agents tab is empty and the model list never loads, all from one lost second.
+   *
+   * ## Why a queue rather than awaiting the stream in `connect()`
+   *
+   * Waiting would mean a server that is slow to answer renders nothing at all, trading a missing
+   * control for a blank page. Holding the messages instead lets the page paint immediately and
+   * costs the sender nothing, and it covers a mid-session drop as well as startup — where
+   * awaiting would only ever have covered the first connection.
+   *
+   * This is the client half of the rule already written into the server: **a window that cannot
+   * exist beats one something else recovers from.** The 409 retry stays as a fallback for a race
+   * this does not anticipate.
+   */
+  private streamOpen = false
+  private queued: unknown[] = []
 
   constructor(private readonly onStatus: (status: string) => void) {}
 
@@ -90,6 +132,9 @@ export class HttpTransport implements Transport {
         if (!response.ok || response.body === null)
           throw new Error(`stream failed: ${response.status}`)
         this.onStatus('connected')
+        // The server registers the session before it writes these headers, so by the time the
+        // response is in hand a message posted now has somewhere to go.
+        this.openStream()
 
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
@@ -116,6 +161,9 @@ export class HttpTransport implements Transport {
           `disconnected — retrying (${error instanceof Error ? error.message : String(error)})`,
         )
       }
+      // Both ways out of the block above — the stream ending cleanly and it failing — mean there
+      // is no longer anywhere for a message to be delivered, so anything posted from here waits.
+      this.streamOpen = false
       // The server going away during a restart is the common case, so reconnect rather
       // than leaving a dead page. Fixed delay: this is loopback, not a busy backend.
       await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -140,7 +188,28 @@ export class HttpTransport implements Transport {
    * Every other status is a real refusal and is reported with its reason.
    */
   post(message: unknown): void {
+    if (!this.streamOpen) {
+      if (this.queued.length >= MAX_QUEUED) {
+        this.onStatus(
+          `still not connected, and ${String(MAX_QUEUED)} messages are already waiting — ` +
+            'this one was dropped. Reload the page.',
+        )
+        return
+      }
+      this.queued.push(message)
+      return
+    }
     void this.send(message, 0)
+  }
+
+  /** Marks the stream up and releases everything posted while it was not, in order. */
+  private openStream(): void {
+    this.streamOpen = true
+    // Taken before sending: `send` is async, so a failure that re-queues must not append to the
+    // list being drained.
+    const waiting = this.queued
+    this.queued = []
+    for (const message of waiting) void this.send(message, 0)
   }
 
   private async send(message: unknown, attempt: number): Promise<void> {

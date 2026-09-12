@@ -1230,6 +1230,18 @@ about source, because every claim here is about behaviour across two connections
   401, 403 and the server's own 409 all resolve happily and were dropped on the floor. That is
   "Save closed the window and saved nothing" exactly. A 409 is retried — it only means the stream
   is not up yet — and every other status is surfaced with the server's reason.
+- **The client had the same window, one layer up, and the retry hid it** (0.46.0). Reported from a
+  remote server *running the build that had already fixed the server half*: no light/dark control,
+  an empty Agents tab, a model list loading for ever. `connect()` starts the event stream without
+  awaiting it — `void this.listen()` — so it resolves, the UI mounts, and its five startup requests
+  race the stream. Measured against the published build on loopback: the stream opened **51ms**
+  later and the first request was still refused. The 409 retry bought about two seconds, which is
+  enough on loopback and not enough over a proxy, and past that the requests are gone — `settings`
+  among them, which is the message `choosesTheme` rides on. **So "there is no dark mode option any
+  more" had two independent causes with one symptom, and fixing the first left the second looking
+  like a stale cache.** Messages posted while no stream is open are held and released in order,
+  which closes it for a mid-session drop too. A queue rather than awaiting the stream in
+  `connect()`, because waiting trades a missing control for a blank page.
 - **A request with no deadline cannot fail, and something that cannot fail cannot report.** A
   connect to a host that *drops* packets rather than refusing them waits for the kernel, and a
   spinner is indistinguishable from a slow answer. `withHeadersDeadline` bounds the wait for

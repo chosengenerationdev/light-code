@@ -1,5 +1,27 @@
 # @chosengeneration/light-code
 
+## 0.46.0
+
+### Minor Changes
+
+- Hold outgoing messages until the event stream is open
+
+  Reported from a remote server running the build that had already fixed this on the server side:
+  no light/dark control, an empty Agents tab, and a model list that loaded for ever without ever
+  failing.
+
+  The server was right — it registers the session before writing the stream's headers, and answers
+  `409 No event stream open` to a message that has no stream. The client was posting into the gap.
+  `connect()` starts the stream without waiting for it, so it resolves, the UI mounts, and its five
+  startup requests go out at once. Measured against the published build on loopback: the stream
+  opened 51ms later and the first request still lost the race. The 409 retry covered that for about
+  two seconds; over a proxy on a remote server the stream can take longer, and then the requests are
+  gone for good — `settings` among them, which is the message carrying the theme capability.
+
+  Messages posted while no stream is open are now held and released in order when one opens, so
+  there is no window to lose them in. This covers a mid-session drop as well as startup: clicking
+  Refresh Models while the stream was down had the same ending.
+
 ## 0.45.0
 
 ### Minor Changes
