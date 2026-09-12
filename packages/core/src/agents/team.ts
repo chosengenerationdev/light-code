@@ -1,5 +1,4 @@
 import {
-  AGENT_ROLES,
   defaultPromptFor,
   knownRoles,
   roleInfo,
