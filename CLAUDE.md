@@ -1642,22 +1642,18 @@ addition to the text input rather than a replacement for it.
 
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
-workflow has never run. **0.36.1 was live as of 2026-08-31**, published 2026-08-27, queried from
-the gallery. **0.54.1 is live as of 2026-09-10**, published the same day, queried from the gallery. The local
-manifest is **0.55.0** (the mail harvest ordering fix and clear/rebuild for every index),
-built and unpublished.
-
-**A sequencing note while 0.55.0 is unpublished:** rebuilding the mail index on 0.54.1 re-runs the
-restrict-then-sort defect and reproduces the same gaps at full embedding cost. Publish first, then
-rebuild.
+workflow has never run. **0.73.0 was live as of 2026-09-12**, published that morning and queried from
+the gallery. The local manifest is **0.79.1**. An upload of it was made the same evening and had
+**not appeared** when the gallery was queried minutes later — which has happened before (0.10.0,
+2026-08-13), so lag and a failed upload look identical for a while. Query again before assuming
+either.
 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
-Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.26.0 is live as of
-2026-09-10**, queried from the registry. The local manifest is **0.32.0**, so npm is six releases
-behind while the extension is one. The bare name `light-code` belongs to an unrelated
-package, hence the scope. **Publishing automation is not wanted** — the user decided against it
+Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.56.1 is live as of
+2026-09-12**, queried from the registry, and it matches the local manifest exactly. The bare name
+`light-code` belongs to an unrelated package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
 **Check the gallery rather than this file before claiming a published version** — the query is
