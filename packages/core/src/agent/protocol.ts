@@ -90,6 +90,8 @@ export interface AgentRoleState {
   usesTools: boolean
   /** Whether it may change things, each change approved. See `AgentRoleInfo.canWrite`. */
   canWrite: boolean
+  /** Whether the role is in play. A switched-off role keeps everything it was configured with. */
+  enabled: boolean
 }
 
 /** Cert *paths* are not secrets (§15) — only the passphrase is, and it never crosses. */
@@ -823,6 +825,8 @@ export type UiToHostMessage =
   | { type: 'setRoleTools'; role: string; usesTools: boolean }
   /** Turns a role's ability to change things on or off. Every change is still approved. */
   | { type: 'setRoleWrite'; role: string; canWrite: boolean }
+  /** Switches a role in or out of play, keeping everything it was configured with. */
+  | { type: 'setRoleEnabled'; role: string; enabled: boolean }
   | { type: 'requestAgents' }
   /** Sets the plan for the open chat. Empty clears it. */
   | { type: 'setPlan'; plan: string }

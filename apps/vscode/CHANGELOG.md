@@ -1,5 +1,35 @@
 # light-code-vscode
 
+## 0.79.0
+
+### Minor Changes
+
+- An on/off switch per role, and the dropdown opens where you clicked
+
+  **Each role can be switched off** without being taken apart. Unassigning it was the only way
+  before, and that forgets _who_ answered — somebody standing a specialist down for one job does not
+  want to lose the model, the prompt and the flags they set up. The switch keeps all of it; the row
+  stays in the list, dimmed, because a role you switched off is one you will switch back on and a
+  list that dropped it would leave you hunting.
+
+  A switched-off role leaves the team _entirely_ rather than showing as unavailable. Unavailable
+  means "this was meant to work and does not" — it is reported as a fault, in the roster and in red
+  in the tab. A choice is not a fault.
+
+  **The provider dropdown opened a thousand pixels from the button** that opened it, near the top of
+  the panel. `position: fixed` is resolved against the viewport only while no ancestor establishes a
+  containing block, and a transform does — `.lc-panel` carries `animation: lc-fade-up 180ms both`,
+  whose keyframes animate `transform`, and `both` keeps it filling after it ends. The measurement was
+  right the whole time; it was being measured against the wrong origin. The popup is rendered into
+  `document.body` now, so there is no ancestor left to capture it — which is also why this is the
+  third fix to this component's positioning and the first that does not depend on what its parents
+  happen to be doing.
+
+  Also: a malformed `saveProfile` no longer fails with `Cannot read properties of undefined (reading
+'trim')`. Refresh Models and Test Connection validate the form the same way saving already did —
+  one owner for "is this a usable profile" — and an unrecognised auth type no longer falls into the
+  API-key branch and dereferences a key nobody sent.
+
 ## 0.78.2
 
 ### Patch Changes

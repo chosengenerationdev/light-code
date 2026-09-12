@@ -131,6 +131,15 @@ export const agentAssignmentSchema = z
      * may edit" are quite different decisions.
      */
     write: z.boolean().optional(),
+    /**
+     * Whether this role is in play at all.
+     *
+     * Distinct from unassigning it, which is why both exist: unassigning forgets *who* answered,
+     * and somebody switching a specialist off for one job does not want to lose the model, the
+     * prompt and the flags they set up. Absent means on, so nothing changes for a config written
+     * before this.
+     */
+    enabled: z.boolean().optional(),
   })
   .strict()
 

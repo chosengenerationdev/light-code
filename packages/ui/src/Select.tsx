@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+} from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronIcon } from './icons.js'
 import { colors, fontFamily, selectStyle } from './theme.js'
 
@@ -74,7 +82,8 @@ export function Select(props: SelectProps): ReactElement {
     if (button === null) return
     const rect = button.getBoundingClientRect()
     const below = window.innerHeight - rect.bottom
-    const above = below < Math.min(MAX_POPUP_HEIGHT, props.options.length * 28 + 8) && rect.top > below
+    const above =
+      below < Math.min(MAX_POPUP_HEIGHT, props.options.length * 28 + 8) && rect.top > below
     setPosition({
       left: rect.left,
       top: above ? rect.top : rect.bottom,
@@ -97,7 +106,10 @@ export function Select(props: SelectProps): ReactElement {
     const close = (): void => setOpen(false)
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target as Node | null
-      if (target !== null && (buttonRef.current?.contains(target) === true || listRef.current?.contains(target) === true)) {
+      if (
+        target !== null &&
+        (buttonRef.current?.contains(target) === true || listRef.current?.contains(target) === true)
+      ) {
         return
       }
       close()
@@ -132,7 +144,9 @@ export function Select(props: SelectProps): ReactElement {
   /** Keeps the highlighted row in view when arrowing past the visible window. */
   useEffect(() => {
     if (!open) return
-    listRef.current?.querySelector<HTMLElement>(`[data-index="${highlighted}"]`)?.scrollIntoView({ block: 'nearest' })
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-index="${highlighted}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
   }, [highlighted, open])
 
   const openList = (): void => {
@@ -164,7 +178,12 @@ export function Select(props: SelectProps): ReactElement {
     if (props.disabled === true) return
 
     if (!open) {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
+      if (
+        event.key === 'ArrowDown' ||
+        event.key === 'ArrowUp' ||
+        event.key === 'Enter' ||
+        event.key === ' '
+      ) {
         event.preventDefault()
         openList()
       }
@@ -245,96 +264,128 @@ export function Select(props: SelectProps): ReactElement {
         </span>
       </button>
 
-      {open && position !== undefined && (
-        <div
-          ref={listRef}
-          role="listbox"
-          aria-label={props.ariaLabel}
-          className="lc-scroll lc-fade-up"
-          style={{
-            position: 'fixed',
-            left: position.left,
-            width: Math.max(position.width, 160),
-            ...(position.above ? { bottom: window.innerHeight - position.top + 4 } : { top: position.top + 4 }),
-            maxHeight: MAX_POPUP_HEIGHT,
-            overflowY: 'auto',
-            zIndex: 1000,
-            background: colors.inputBackground,
-            border: `1px solid ${colors.accent}`,
-            borderRadius: 8,
-            boxShadow: `0 6px 20px rgba(0, 0, 0, 0.35), 0 0 0 3px ${colors.accentSoft}`,
-            padding: 3,
-            fontFamily,
-          }}
-        >
-          {props.options.length === 0 && (
-            <div style={{ padding: '6px 8px', color: colors.muted, fontSize: 12 }}>Nothing to choose from</div>
-          )}
-          {props.options.map((option, index) => {
-            const isSelected = option.value === props.value
-            const isHighlighted = index === highlighted
-            return (
-              <div
-                key={option.value}
-                role="option"
-                data-index={index}
-                aria-selected={isSelected}
-                aria-disabled={option.disabled === true}
-                onPointerEnter={() => option.disabled !== true && setHighlighted(index)}
-                // pointerdown, not click: click lands after the outside-press handler has
-                // already closed the list.
-                onPointerDown={(event) => {
-                  event.preventDefault()
-                  choose(index)
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: props.compact === true ? '4px 8px' : '6px 8px',
-                  borderRadius: 6,
-                  cursor: option.disabled === true ? 'default' : 'pointer',
-                  opacity: option.disabled === true ? 0.5 : 1,
-                  // The whole point of the component: this highlight is ours, in the accent,
-                  // rather than the platform's blue.
-                  background: isHighlighted ? colors.accent : 'transparent',
-                  color: isHighlighted ? colors.accentContrast : colors.inputForeground,
-                  fontSize: props.compact === true ? 11 : 13,
-                }}
-              >
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {option.label}
-                  {option.detail !== undefined && (
-                    <span
-                      style={{
-                        marginLeft: 6,
-                        opacity: 0.7,
-                        // Inherits the highlight's contrast colour, so it stays legible on
-                        // the accent rather than staying muted-grey on purple.
-                        color: 'inherit',
-                      }}
-                    >
-                      {option.detail}
-                    </span>
-                  )}
-                </span>
-                {isSelected && (
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                      background: isHighlighted ? colors.accentContrast : colors.accent,
-                    }}
-                  />
-                )}
+      {/*
+        The popup is rendered into `document.body`, not where it sits in the tree.
+        ## The reported failure
+        Opening the provider dropdown at the bottom of the Agents tab put the list near the *top*
+        of the panel, a thousand pixels from the button that opened it.
+        `position: fixed` is resolved against the viewport **only while no ancestor establishes a
+        containing block** — and a transform does, which `.lc-panel` has: `animation: lc-fade-up
+        180ms both`, whose keyframes animate `transform`. With `both` the animation goes on filling
+        after it ends, so the panel keeps capturing every `fixed` descendant. The measurement was
+        right the whole time; it was being measured against the wrong origin.
+        ## Why a portal rather than removing the animation
+        The animation is wanted, and the next element given one would break this again silently —
+        the failure is invisible until somebody opens a dropdown low on a scrolled panel. A portal
+        removes the dependency entirely: there is no ancestor left to capture it. It is also why
+        this is the third fix to this component's positioning, per CLAUDE.md, and the first that
+        does not depend on what its parents happen to be doing.
+      */}
+      {open &&
+        position !== undefined &&
+        createPortal(
+          <div
+            ref={listRef}
+            role="listbox"
+            aria-label={props.ariaLabel}
+            className="lc-scroll lc-fade-up"
+            style={{
+              position: 'fixed',
+              left: position.left,
+              width: Math.max(position.width, 160),
+              ...(position.above
+                ? { bottom: window.innerHeight - position.top + 4 }
+                : { top: position.top + 4 }),
+              maxHeight: MAX_POPUP_HEIGHT,
+              overflowY: 'auto',
+              zIndex: 1000,
+              background: colors.inputBackground,
+              border: `1px solid ${colors.accent}`,
+              borderRadius: 8,
+              boxShadow: `0 6px 20px rgba(0, 0, 0, 0.35), 0 0 0 3px ${colors.accentSoft}`,
+              padding: 3,
+              fontFamily,
+            }}
+          >
+            {props.options.length === 0 && (
+              <div style={{ padding: '6px 8px', color: colors.muted, fontSize: 12 }}>
+                Nothing to choose from
               </div>
-            )
-          })}
-        </div>
-      )}
+            )}
+            {props.options.map((option, index) => {
+              const isSelected = option.value === props.value
+              const isHighlighted = index === highlighted
+              return (
+                <div
+                  key={option.value}
+                  role="option"
+                  data-index={index}
+                  aria-selected={isSelected}
+                  aria-disabled={option.disabled === true}
+                  onPointerEnter={() => option.disabled !== true && setHighlighted(index)}
+                  // pointerdown, not click: click lands after the outside-press handler has
+                  // already closed the list.
+                  onPointerDown={(event) => {
+                    event.preventDefault()
+                    choose(index)
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: props.compact === true ? '4px 8px' : '6px 8px',
+                    borderRadius: 6,
+                    cursor: option.disabled === true ? 'default' : 'pointer',
+                    opacity: option.disabled === true ? 0.5 : 1,
+                    // The whole point of the component: this highlight is ours, in the accent,
+                    // rather than the platform's blue.
+                    background: isHighlighted ? colors.accent : 'transparent',
+                    color: isHighlighted ? colors.accentContrast : colors.inputForeground,
+                    fontSize: props.compact === true ? 11 : 13,
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {option.label}
+                    {option.detail !== undefined && (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          opacity: 0.7,
+                          // Inherits the highlight's contrast colour, so it stays legible on
+                          // the accent rather than staying muted-grey on purple.
+                          color: 'inherit',
+                        }}
+                      >
+                        {option.detail}
+                      </span>
+                    )}
+                  </span>
+                  {isSelected && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        flexShrink: 0,
+                        background: isHighlighted ? colors.accentContrast : colors.accent,
+                      }}
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>,
+          document.body,
+        )}
     </>
   )
 }

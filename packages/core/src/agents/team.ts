@@ -41,6 +41,8 @@ export interface AgentAssignment {
   tools?: boolean | undefined
   /** Overrides whether this role may change things. Absent means the role's own default. */
   write?: boolean | undefined
+  /** Whether the role is in play. Absent means yes; see the config schema for why it is separate. */
+  enabled?: boolean | undefined
 }
 
 export interface AgentTeamConfig {
@@ -114,6 +116,15 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
   for (const role of knownRoles(custom)) {
     const assignment = context.config?.roles?.[role] ?? defaultAssignment(role, context)
     if (assignment === undefined) continue
+    /*
+     * A switched-off role is not on the team at all — not present-and-unavailable.
+     *
+     * Unavailable means "this was meant to work and does not", and it is reported as a problem:
+     * the roster names it with a reason, and the tab shows it in red. Switching one off is a
+     * choice, not a fault, so it leaves the same shape as never having assigned anybody — while
+     * the assignment, prompt and flags stay in the file, waiting.
+     */
+    if (assignment.enabled === false) continue
 
     const info = roleInfo(role, custom)
     const prompt = assignment.prompt ?? defaultPromptFor(role, custom)

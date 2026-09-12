@@ -33,6 +33,59 @@ const REGISTRY = [
  * call in a consultation goes through the same gate the agent loop uses — so it becomes a choice
  * the user makes per role. The tests here are about the *gate* holding, not about the choice.
  */
+describe('switching a role off', () => {
+  /*
+   * Distinct from unassigning it, and the difference is the point: unassigning forgets who
+   * answered, while switching off keeps the model, the prompt and the flags exactly as set. So a
+   * switched-off role leaves the team entirely rather than appearing as unavailable — unavailable
+   * means "this was meant to work and does not", which is reported as a fault in the roster and
+   * in red in the tab. A choice is not a fault.
+   */
+  it('leaves the team entirely rather than showing as unavailable', () => {
+    const build = (enabled?: boolean) =>
+      resolveTeam({
+        config: {
+          roles: {
+            reviewer: {
+              kind: 'profile',
+              profileId: 'gw',
+              ...(enabled === undefined ? {} : { enabled }),
+            },
+          },
+        },
+        profiles: [{ id: 'gw', label: 'Gateway' }],
+        cliAvailable: false,
+      })
+
+    expect(build().map((agent) => agent.role)).toEqual(['reviewer'])
+    expect(build(true).map((agent) => agent.role)).toEqual(['reviewer'])
+    expect(build(false)).toEqual([])
+  })
+
+  it('keeps what was configured, so switching back on restores it', () => {
+    const config = {
+      roles: {
+        reviewer: {
+          kind: 'profile' as const,
+          profileId: 'gw',
+          prompt: 'Be brutal.',
+          tools: false,
+          write: true,
+          enabled: false,
+        },
+      },
+    }
+    expect(resolveTeam({ config, profiles: [{ id: 'gw', label: 'Gateway' }], cliAvailable: false })).toEqual([])
+
+    const back = resolveTeam({
+      config: { roles: { reviewer: { ...config.roles.reviewer, enabled: true } } },
+      profiles: [{ id: 'gw', label: 'Gateway' }],
+      cliAvailable: false,
+    })
+    expect(back[0]).toMatchObject({ prompt: 'Be brutal.', usesTools: false, canWrite: true })
+  })
+})
+
 describe('a role that may change things', () => {
   it('is off for every built-in role', () => {
     const team = resolveTeam({

@@ -186,3 +186,52 @@ describe('Select', () => {
     expect(trigger().getAttribute('aria-expanded')).toBe('true')
   })
 })
+
+/**
+ * The popup must not live inside whatever happens to be above it.
+ *
+ * Reported with a screenshot: opening the provider dropdown at the bottom of the Agents tab put
+ * the list near the *top* of the panel, a thousand pixels from the button. `position: fixed`
+ * resolves against the viewport only while no ancestor establishes a containing block, and a
+ * transform does — `.lc-panel` carries `animation: lc-fade-up 180ms both`, whose keyframes animate
+ * `transform`, and `both` keeps it filling after it ends. The measurement was right the whole
+ * time; it was measured against the wrong origin.
+ *
+ * jsdom computes no layout, so this cannot assert *where* the popup lands. It asserts the property
+ * that makes the position trustworthy: the popup is not a descendant of the transformed element.
+ * That is the whole of the fix, and it is checkable.
+ */
+describe('where the popup is rendered', () => {
+  it('escapes an ancestor that would capture position: fixed', () => {
+    const transformed = document.createElement('div')
+    // What `.lc-panel` effectively is once its animation is filling.
+    transformed.style.transform = 'translate3d(0, 0, 0)'
+    container.appendChild(transformed)
+    const inner = createRoot(transformed)
+
+    act(() =>
+      inner.render(
+        <Select
+          value="a"
+          onChange={() => {}}
+          options={[
+            { value: 'a', label: 'A' },
+            { value: 'b', label: 'B' },
+          ]}
+        />,
+      ),
+    )
+
+    const button = transformed.querySelector('button')
+    act(() => button?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+    const listbox = document.querySelector('[role="listbox"]')
+    expect(listbox, 'the popup did not open').not.toBeNull()
+    // The point of the fix: not inside the transformed element, and therefore positioned against
+    // the viewport like every other `fixed` element.
+    expect(transformed.contains(listbox)).toBe(false)
+    expect(document.body.contains(listbox)).toBe(true)
+
+    act(() => inner.unmount())
+  })
+})

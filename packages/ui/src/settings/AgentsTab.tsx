@@ -50,6 +50,8 @@ export interface AgentsTabProps {
   onSetRoleTools: (role: string, usesTools: boolean) => void
   /** Turns one role's ability to change things on or off. Every change is still approved. */
   onSetRoleWrite: (role: string, canWrite: boolean) => void
+  /** Switches a role in or out of play, keeping everything it was configured with. */
+  onSetRoleEnabled: (role: string, enabled: boolean) => void
   /** How many custom roles may exist, so the form can say so before the save fails. */
   customRoleLimit: number
   /** The budget controls, rendered here only when cost is worth managing. */
@@ -164,10 +166,32 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
             borderRadius: 3,
             padding: '8px 10px',
             marginBottom: 8,
+            // Dimmed rather than hidden: a role you switched off is one you will switch back on,
+            // and a list that dropped it would leave you hunting for where it went.
+            ...(role.enabled ? {} : { opacity: 0.55 }),
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <strong style={{ fontSize: 12 }}>{role.name}</strong>
+            {/*
+              In the header, because it is about the role rather than about its configuration —
+              and first, because everything below it is conditional on it. Unassigning is the other
+              way to switch a role off, and the two are kept distinct on purpose: that one forgets
+              who answered, this one keeps the model, the prompt and the flags exactly as set.
+            */}
+            <input
+              type="checkbox"
+              aria-label={`${role.name} enabled`}
+              title={
+                role.enabled
+                  ? `Stop using the ${role.name.toLowerCase()}, keeping its settings`
+                  : `Use the ${role.name.toLowerCase()} again`
+              }
+              checked={role.enabled}
+              onChange={(event) => props.onSetRoleEnabled(role.role, event.target.checked)}
+            />
+            <strong style={{ fontSize: 12, ...(role.enabled ? {} : { color: colors.muted }) }}>
+              {role.name}
+            </strong>
             <span style={{ color: colors.muted, fontSize: 11, flex: 1 }}>
               {role.summary}
               {!role.promptIsDefault && ' · prompt edited'}
@@ -246,6 +270,10 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
           >
             <input
               type="checkbox"
+              // Named, like the switch above it. A test found the first checkbox on the page by
+              // position and silently retargeted when another was added -- twice now, which is
+              // twice more than a selector that says what it means would have cost.
+              aria-label={`${role.name} can read the workspace`}
               checked={role.usesTools}
               onChange={(event) => props.onSetRoleTools(role.role, event.target.checked)}
             />
@@ -272,6 +300,7 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
           >
             <input
               type="checkbox"
+              aria-label={`${role.name} can change things`}
               checked={role.canWrite}
               onChange={(event) => props.onSetRoleWrite(role.role, event.target.checked)}
             />

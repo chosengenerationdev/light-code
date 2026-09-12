@@ -30,6 +30,7 @@ function role(partial: Partial<AgentRoleState> & { role: string }): AgentRoleSta
     promptIsDefault: true,
     usesTools: true,
     canWrite: false,
+    enabled: true,
     ...partial,
   }
 }
@@ -54,6 +55,7 @@ const base: AgentsTabProps = {
   onDeleteCustomRole: () => {},
   onSetRoleTools: () => {},
   onSetRoleWrite: () => {},
+  onSetRoleEnabled: () => {},
   customRoleLimit: 5,
 }
 
@@ -295,6 +297,36 @@ describe('custom roles', () => {
     expect(labels.some((label) => label?.includes('Delete'))).toBe(false)
   })
 
+  /*
+   * Switching a role off is not the same act as unassigning it: unassigning forgets who answered,
+   * this keeps the model, the prompt and the flags exactly as configured. So the row stays,
+   * dimmed, rather than vanishing -- a list that dropped it would leave you hunting for where it
+   * went, and you switched it off intending to switch it back.
+   */
+  it('switches a role out of play without losing its settings', () => {
+    const onSetRoleEnabled = vi.fn()
+    render({
+      onSetRoleEnabled,
+      roles: [role({ role: 'reviewer', name: 'Reviewer', enabled: true })],
+    })
+
+    const box = container.querySelector<HTMLInputElement>('input[aria-label="Reviewer enabled"]')
+    expect(box?.checked).toBe(true)
+    act(() => box?.click())
+    expect(onSetRoleEnabled).toHaveBeenCalledWith('reviewer', false)
+  })
+
+  it('still shows a switched-off role, and still lets it be configured', () => {
+    render({ roles: [role({ role: 'reviewer', name: 'Reviewer', enabled: false })] })
+    expect(container.textContent).toContain('Reviewer')
+    // The controls stay usable: setting a role up while it is off is a reasonable thing to do.
+    const tools = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Reviewer can read the workspace"]',
+    )
+    expect(tools).not.toBeNull()
+    expect(tools?.disabled).toBe(false)
+  })
+
   it('stops offering more once the cap is reached', () => {
     render({
       customRoleLimit: 1,
@@ -313,7 +345,11 @@ describe('custom roles', () => {
       roles: [role({ role: 'reviewer', name: 'Reviewer', usesTools: false })],
     })
 
-    const box = container.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    // By name: the first checkbox in a row is the enable switch now, and was the tools one
+    // before. A positional selector here has already broken twice.
+    const box = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Reviewer can read the workspace"]',
+    )
     expect(box?.checked).toBe(false)
     act(() => box?.click())
     expect(onSetRoleTools).toHaveBeenCalledWith('reviewer', true)

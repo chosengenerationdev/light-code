@@ -1462,6 +1462,12 @@ export function App(props: AppProps): ReactElement {
                   role,
                   canWrite,
                 } satisfies UiToHostMessage),
+              onSetRoleEnabled: (role, enabled) =>
+                props.transport.post({
+                  type: 'setRoleEnabled',
+                  role,
+                  enabled,
+                } satisfies UiToHostMessage),
               /*
                * The cap comes from core rather than being repeated here.
                *

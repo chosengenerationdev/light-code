@@ -3304,7 +3304,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * A stored key for the same profile is deleted, because leaving one behind means the profile
      * has two credentials and only one of them is the one being used.
      */
-    const typed = input.apiKey.trim()
+    /*
+     * The fall-through branch, which is `apiKey` auth — and which an *unrecognised* `authType`
+     * also lands in. That is where `Cannot read properties of undefined (reading 'trim')` came
+     * from: a message with no `authType` at all reached here and dereferenced a key nobody sent.
+     *
+     * Absent is read as "no key typed", which is already a case this handles — it means keep the
+     * stored one, or none. Failing here instead would refuse a profile over a field the user was
+     * not asked about.
+     */
+    const typed = (input.apiKey ?? '').trim()
     if (describeSecretRef(typed).kind === 'env') {
       await secrets.delete(apiKeyRefFor(id))
       return { type: 'apiKey', apiKeyRef: typed }
@@ -3507,6 +3516,34 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function profileFromForm(
     input: ProfileInput,
   ): Promise<{ profile: ProviderProfile; auth: Auth } | undefined> {
+    /*
+     * The shape is checked rather than assumed, even though the type says it is fine.
+     *
+     * `ProfileInput` describes what the *panel* sends; what arrives is whatever was posted to
+     * `/api/message`, which on the Node host is anything that can reach the port with a session
+     * token. A payload missing a field produced `Cannot read properties of undefined (reading
+     * 'trim')` — caught and shown, so nothing broke, but it names no field and suggests no fix,
+     * which §17 says an error must do.
+     *
+     * Through `validateProviderForm`, which is what `handleSaveProfile` already uses and what the
+     * form itself uses: one owner of "is this a usable profile", so a hand-posted message and a
+     * mistyped field fail identically. Refresh Models and Test Connection had no check at all
+     * before this — only saving did.
+     */
+    const fieldErrors = validateProviderForm({
+      label: input.label,
+      wireFormat: input.wireFormat,
+      baseUrl: input.baseUrl,
+      model: input.model,
+    })
+    if (fieldErrors.length > 0) {
+      post({
+        type: 'error',
+        message: fieldErrors.map((issue) => `${issue.path}: ${issue.message}`).join('; '),
+      })
+      return undefined
+    }
+
     const baseUrl = input.baseUrl.trim()
     if (baseUrl.length === 0) {
       post({ type: 'error', message: 'Enter a base URL first.' })
@@ -3710,6 +3747,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // resolution `resolveTeam` does, so the switch in the tab shows what will actually happen.
         usesTools: config.agents?.roles?.[info.role]?.tools ?? info.usesTools,
         canWrite: config.agents?.roles?.[info.role]?.write ?? info.canWrite,
+        enabled: config.agents?.roles?.[info.role]?.enabled !== false,
       }
     })
 
@@ -8414,6 +8452,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSaveCustomRole(message)
     } else if (message.type === 'deleteCustomRole') {
       void handleDeleteCustomRole(message.id)
+    } else if (message.type === 'setRoleEnabled') {
+      const role = message.role
+      if (!isAgentRole(role, cachedAgentDefinitions)) {
+        post({ type: 'error', message: `There is no "${role}" role.` })
+        return
+      }
+      void saveAgents((current) => {
+        const roles = { ...(current.roles ?? {}) }
+        roles[role] = {
+          ...(roles[role] ?? { kind: 'profile' as const }),
+          enabled: message.enabled,
+        }
+        return { ...current, roles }
+      })
     } else if (message.type === 'setRoleWrite') {
       const role = message.role
       if (!isAgentRole(role, cachedAgentDefinitions)) {
