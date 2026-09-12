@@ -38,6 +38,27 @@ describe('what a specialist is told about the rest of the team', () => {
     expect(briefing).toContain('Do not put them in a plan')
   })
 
+  /*
+   * Reported: the expert produced a good plan that allocated nobody, on a machine where all four
+   * other roles were assigned. It had been told who was available and told not to name anyone who
+   * was not — so it named nobody, and wrote a plan for the assistant working alone. An
+   * instruction that only says what not to do is satisfied by doing nothing.
+   */
+  it('asks the expert to allocate the specialists that do exist', () => {
+    const briefing = buildAgentBriefing({
+      team: [agent('expert'), agent('reviewer'), agent('tester')],
+      self: 'expert',
+    })
+    expect(briefing).toContain('say who should be involved in which step')
+    // And still bounded: routing every step through everybody is the opposite failure.
+    expect(briefing).toContain('ceremony')
+  })
+
+  it('does not ask for an allocation when there is nobody to allocate', () => {
+    const briefing = buildAgentBriefing({ team: [agent('expert')], self: 'expert' })
+    expect(briefing).not.toContain('say who should be involved in which step')
+  })
+
   it('does not describe the consulted role to itself', () => {
     const briefing = buildAgentBriefing({ team: [agent('expert')], self: 'expert' })
     expect(briefing).not.toContain('**expert** — nobody is assigned')

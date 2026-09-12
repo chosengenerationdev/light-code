@@ -1,5 +1,29 @@
 # @chosengeneration/light-code
 
+## 0.48.2
+
+### Patch Changes
+
+- The expert allocates the specialists instead of only knowing about them
+
+  Reported with a plan that was good and assigned nobody, on a machine where all four other roles
+  were assigned. The expert had been told who was available and told not to name anyone who was
+  not — so it named nobody at all and wrote a plan for the assistant working alone, down to "I'll
+  show you the code before moving on" with a reviewer sitting right there.
+
+  An instruction that only says what _not_ to do is satisfied by doing nothing. Asked for a plan,
+  the expert is now asked to say which specialist belongs in which step, and to name the role in the
+  step itself so the assistant knows when to consult and the user can see who is doing what.
+
+  Bounded on purpose: only where another reader genuinely changes the outcome. A plan routing every
+  step through the whole team is ceremony and stops being read, which is the opposite failure and
+  just as easy to cause.
+
+  The assistant is also told to consult a named specialist **while that step is the active one** —
+  advice arriving after the work is a review nobody can act on without redoing it, and the progress
+  panel attributes a consultation to whichever step was open when it happened, so a step worked in
+  silence shows as nobody having helped with it.
+
 ## 0.48.1
 
 ### Patch Changes

@@ -72,6 +72,8 @@ const PLAN_FIRST = [
   '   and ask for numbered steps. A plan is the one thing worth asking for before the work rather',
   '   than after it, and it is what the expert is for. An expert asked early enough to change the',
   '   shape of the work is worth several times one asked to bless a direction already taken.',
+  '   **Ask it to say which specialist should be involved in which step**, from the team it is',
+  '   given. It knows who is available; it will not volunteer the allocation unless asked.',
   '3. **Propose it with `update_plan`.** The user sees a diff and approves it. Do not skip this:',
   '   a plan held only in the conversation is forgotten as the chat grows, and it is not',
   '   something the user has agreed to.',
@@ -131,6 +133,17 @@ export const DEFAULT_TEAM_GUIDANCE = [
   '- Do not relay advice you have not checked. You have the code open and the specialist does not;',
   '  if it is wrong, say so and say why — to the user, and in your next question.',
   '- Do not consult the same role twice with the same question hoping for a better answer.',
+  '',
+  '## When the plan names a specialist',
+  '',
+  'Consult them **while that step is the active one**, not at the end in a batch. Two reasons, and',
+  'the second is the one people notice: advice arriving after the work is done is a review nobody',
+  'can act on without redoing it, and the progress panel attributes a consultation to whichever',
+  'step was open when it happened — so a step worked in silence shows as nobody having helped with',
+  'it, whatever you say afterwards.',
+  '',
+  'If a step names somebody and you decide against consulting them, say so and say why. A plan the',
+  'user approved said that step would get another reader.',
 ].join('\n')
 
 /**

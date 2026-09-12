@@ -111,7 +111,32 @@ function buildRoster(team: readonly ResolvedAgent[], self: AgentRole | undefined
   )
 
   if (usable.length > 0) {
-    sections.push('', ...usable.map((agent) => `- **${agent.role}** (${agent.label}) — ${agent.summary}`))
+    sections.push(
+      '',
+      ...usable.map((agent) => `- **${agent.role}** (${agent.label}) — ${agent.summary}`),
+      '',
+      /*
+       * Knowing who exists is not the same as being asked to use them.
+       *
+       * Reported with a plan that allocated nobody, on a machine where all four other roles were
+       * assigned. The briefing told the expert who was available and told it not to name anyone
+       * who was not — and it dutifully named nobody at all, writing a plan for the assistant
+       * working alone, down to "I'll show you the code before moving on" where a reviewer was
+       * sitting right there. An instruction that only says what *not* to do gets obeyed by doing
+       * nothing.
+       *
+       * Deliberately not "use every specialist": that is four extra round trips on a task that
+       * may not want any, and a plan routing every step through the whole team is worse than one
+       * routing none — it reads as ceremony and people stop reading it.
+       */
+      '**If you are asked for a plan, say who should be involved in which step.** Name the role in',
+      'the step itself — "have the tester say what would break this", "get the reviewer onto the',
+      'callback wiring" — so the assistant knows when to consult and the user can see who is doing',
+      'what. Only where another reader would genuinely change the outcome: a plan that routes every',
+      'step through all of them is ceremony, and one that routes none wastes a team that is sitting',
+      'there. Steps involving risky or fiddly code, and steps that finish something, are usually',
+      'the ones worth another pair of eyes.',
+    )
   }
 
   if (missing.length > 0) {
