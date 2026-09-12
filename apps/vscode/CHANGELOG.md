@@ -1,5 +1,56 @@
 # light-code-vscode
 
+## 0.74.0
+
+### Minor Changes
+
+- The librarian records skills itself, and the approval gate reaches consultations
+
+  Asked for directly. The objection was never that the librarian should not write down what it
+  knows — it is the role that can see the gap — but that a consultation **asks nobody**, so a skill
+  written there would be prose injected into every later prompt that no human had read. §13 calls a
+  skill a persistent prompt-injection vector, which is exactly why `write_skill` is always-ask.
+
+  That was answered by making the path ask rather than by letting the write through unseen.
+  `runConsultation` now takes an approver and routes anything in `ALWAYS_ASK_TOOLS` through the same
+  gate the agent loop uses — same prompt, same ground truth, same rule. The librarian calls
+  `write_skill`, the user sees the skill text, and nothing is recorded until they approve. With no
+  approver present the call is refused rather than quietly allowed, the direction `requestPathAccess`
+  already fails in.
+
+  Everything else stays strictly read-only. The exception is to the _group_ filter and never to the
+  approval rule: `consultBoundary.test.ts` pins that any name allowed past the filter must be one the
+  gate will stop on, and that an `edit` tool written next year is excluded by default because the
+  filter is by group rather than by name.
+
+## 0.73.1
+
+### Patch Changes
+
+- Claude is metered whichever role it answers as, and the librarian drafts skills
+
+  **A real hole in the spend meter.** `recordConsultation` was wired only into `ask_expert`, the tool
+  that predates roles. Once Claude could be assigned to _any_ role, a reviewer or a librarian backed
+  by the CLI spent real money that the meter never saw and that the per-task budget never checked —
+  and nothing looked wrong, because an under-reported number still gets believed and a limit that
+  quietly does not apply looks exactly like one that was never reached. Every CLI consultation is now
+  checked before the call and recorded after it, including a failed one, which can still have been
+  charged. Only where consultations are actually metered: a gateway bills somewhere this product
+  cannot see.
+
+  **The librarian drafts skills; it still cannot write them.** It is the role that can see a gap in
+  what is written down, so a plan step like "record how this is set up" is a sensible thing for the
+  expert to allocate to it — and the roster now says so, including that the step should be worded as
+  drafting rather than filing.
+
+  What it must never have is `write_skill` itself. A skill is prose injected into every later prompt,
+  which is why that tool is always-ask and a human sees the source; consultation tool calls
+  deliberately ask nobody. A librarian able to call it could write a permanent instruction no one
+  ever read, through the one path with no gate. So it returns the text as advice, the assistant
+  proposes it, and the approval shows exactly what would be recorded. `consultBoundary.test.ts` pins
+  the rule generally: nothing a specialist is offered may be a tool that would otherwise demand
+  approval, and the filter is by group so an edit tool written next year is excluded by default.
+
 ## 0.73.0
 
 ### Minor Changes

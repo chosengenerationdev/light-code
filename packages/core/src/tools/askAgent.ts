@@ -205,6 +205,16 @@ function trailerFor(agent: ResolvedAgent, team: readonly ResolvedAgent[]): strin
     )
   }
 
+  if (agent.role === 'librarian') {
+    lines.push(
+      '',
+      'It can record a skill itself, and the user will have approved the text before it was ' +
+        'written — so if it says it wrote one, that is done and not something to repeat. If it ' +
+        'said something already written down is wrong or out of date, act on that: a stale skill ' +
+        'is worse than a missing one, because it is believed.',
+    )
+  }
+
   if (agent.role === 'programmer') {
     lines.push(
       '',

@@ -6947,6 +6947,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (agent.kind === 'cli') {
       const cli = expertCli
       if (cli === undefined || !cli.available) throw new Error('The Claude CLI is not available.')
+
+      /*
+       * The bill does not care which role Claude is answering as.
+       *
+       * `recordConsultation` was wired only into `ask_expert` — the tool that predates roles — so
+       * once Claude could be assigned to *any* role, a reviewer or a librarian backed by the CLI
+       * spent real money that the meter never saw and the per-task budget never checked. Nothing
+       * was visibly wrong: the spend panel simply under-reported, and a limit the user had set
+       * quietly did not apply. That is §12b's own objection to the keep-alive timer — something
+       * that spends money invisibly is the version nobody should trust — arriving through a
+       * different door.
+       *
+       * Checked before the call and recorded after it, in the one place every CLI consultation
+       * passes through, so a role added later is covered without anybody remembering.
+       */
+      if (cachedBudgetMatters) {
+        const verdict = checkExpertBudget(expertSpend, effectiveExpertLimits())
+        if (!verdict.allowed) throw new Error(verdict.message)
+      }
+
       const answer = await consultExpert(cli, {
         question: prompt,
         /*
@@ -6957,6 +6977,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         cwd: workspaceRoot ?? process.cwd(),
         ...(request.signal !== undefined ? { signal: request.signal } : {}),
       })
+      // Recorded even when it failed: a consultation that errored partway can still have been
+      // charged, and a meter that only counts successes drifts quietly downwards.
+      recordConsultation({
+        isError: answer.isError,
+        ...(answer.costUsd !== undefined ? { costUsd: answer.costUsd } : {}),
+      })
+
       if (answer.isError) throw new Error(answer.text)
       return { advice: answer.text, label: agent.label }
     }
@@ -6993,7 +7020,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * and the preamble above already told it so — these two decisions come from the same flag
      * so they cannot disagree.
      */
-    const readOnly = agent.usesTools ? toolsForConsultation(agentBriefingTools?.() ?? []) : []
+    /*
+     * The librarian may write the skill itself, and the user still sees it first.
+     *
+     * Asked for directly. The objection was never that the librarian should not record what it
+     * knows — it is the role that can see the gap — but that a consultation asks nobody, so a
+     * skill written there would be prose injected into every later prompt that no human read.
+     * `runConsultation` now routes anything in `ALWAYS_ASK_TOOLS` through the same gate the main
+     * loop uses, which removes the objection rather than accepting it: the librarian calls
+     * `write_skill`, and an ordinary approval shows the source before anything is recorded.
+     *
+     * Only the librarian, and only this tool. Every other specialist stays strictly read-only,
+     * and `consultBoundary.test.ts` holds that line.
+     */
+    const extraTools =
+      agent.role === 'librarian' ? new Set(['write_skill']) : new Set<string>()
+
+    const readOnly = agent.usesTools
+      ? toolsForConsultation(agentBriefingTools?.() ?? [], extraTools)
+      : []
     const context = consultationContext?.()
     const result = await runConsultation({
       provider,
@@ -7003,6 +7048,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // With no context there is nothing to read *with*, so it answers from the question alone
       // rather than being offered tools that would fail.
       context: context ?? ({} as ToolExecutionContext),
+      /*
+       * The same gate the agent loop uses, so an approval raised by a specialist is
+       * indistinguishable from one raised by the assistant — same prompt, same ground truth, same
+       * always-ask rule. A second approval path would be a second place for the rule to be wrong.
+       */
+      approve: async (tool, args) => {
+        const preview = await tool
+          .preview?.(args as never, context ?? ({} as ToolExecutionContext))
+          .catch(() => undefined)
+        const decision = await approvalGate.requestApproval({
+          id: `agent-${agent.role}-${String(Date.now())}-${tool.name}`,
+          toolName: tool.name,
+          group: tool.group,
+          preview: preview ?? {
+            kind: 'text',
+            text: `The ${agent.role} wants to run ${tool.name}.`,
+          },
+        })
+        return decision === 'approve'
+      },
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
       onStep: (name) => logger.info(`${agent.role} looked up ${name}`),
     })

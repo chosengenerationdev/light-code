@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatProvider, ToolDefinition } from '../providers/types.js'
+import { ALWAYS_ASK_TOOLS } from '../approval/policy.js'
 import type { Tool, ToolExecutionContext } from '../tools/types.js'
 
 /**
@@ -44,10 +45,22 @@ const ALLOWED_GROUPS = new Set(['read'])
  * by being forgotten about here. The exclusions are the consultation tools themselves: letting a
  * specialist consult a specialist is a loop with a bill attached.
  */
-export function toolsForConsultation(all: readonly Tool[]): Tool[] {
+export function toolsForConsultation(
+  all: readonly Tool[],
+  /**
+   * Names allowed past the group filter, each of which **must** be approval-gated below.
+   *
+   * One entry today: `write_skill`, for the librarian. A name here that is not in
+   * `ALWAYS_ASK_TOOLS` would put an ungated write in the one path that asks nobody, so
+   * `consultBoundary.test.ts` checks that every extra is always-ask.
+   */
+  extra: ReadonlySet<string> = new Set<string>(),
+): Tool[] {
   return all.filter(
     (tool) =>
-      ALLOWED_GROUPS.has(tool.group) && tool.name !== 'ask_agent' && tool.name !== 'ask_expert',
+      (ALLOWED_GROUPS.has(tool.group) || extra.has(tool.name)) &&
+      tool.name !== 'ask_agent' &&
+      tool.name !== 'ask_expert',
   )
 }
 
@@ -60,6 +73,13 @@ export interface ConsultationResult {
 }
 
 export interface ConsultationOptions {
+  /**
+   * Asked before any tool in `ALWAYS_ASK_TOOLS`. Absent means such a tool is refused.
+   *
+   * Deliberately not on `ToolExecutionContext`: it belongs to *this* consultation, and putting it
+   * on the shared context would hand an approver to every other caller of these tools.
+   */
+  approve?: (tool: Tool, args: unknown) => Promise<boolean>
   provider: ChatProvider
   prompt: string
   tools: readonly Tool[]
@@ -132,7 +152,31 @@ export async function runConsultation(options: ConsultationOptions): Promise<Con
 
     try {
       const parsed = tool.parametersSchema.safeParse(JSON.parse(call.arguments || '{}'))
-      const result = parsed.success
+
+      /*
+       * A tool that would normally stop and ask still stops and asks, even here.
+       *
+       * Consultation calls deliberately bypass the approval gate: prompting for every file a
+       * reviewer opens would train the user to click through prompts, and a read is harmless
+       * enough to make that trade worth it. `write_skill` is neither frequent nor harmless — a
+       * skill is prose injected into every later prompt, and §13 requires a human to see the
+       * source. Asking once, for something rare that matters, is not what that blanket rule was
+       * arguing against.
+       *
+       * With no approver the call is refused rather than quietly allowed, the same direction
+       * `requestPathAccess` fails in when there is nobody to answer.
+       */
+      const permitted =
+        !ALWAYS_ASK_TOOLS.has(tool.name) ||
+        (options.approve !== undefined && (await options.approve(tool, parsed.data)))
+
+      const result = !permitted
+        ? {
+            content:
+              `The user did not approve ${tool.name}. Say what you would have written and why, ` +
+              'and let the assistant put it to them instead.',
+          }
+        : parsed.success
         ? await tool.execute(parsed.data as never, options.context)
         : {
             content: `Those arguments are not valid: ${parsed.error.issues.map((i) => i.message).join('; ')}`,

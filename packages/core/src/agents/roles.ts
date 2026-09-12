@@ -287,6 +287,28 @@ const DEFINITIONS: Record<BuiltInRole, Omit<AgentRoleInfo, 'role'>> = {
       '',
       'If the material does not answer the question, say so and say what would. Do not fill the gap',
       'with how it is usually done elsewhere unless you label it as exactly that.',
+      '',
+      /*
+       * The one specialist that may write, and only this one thing.
+       *
+       * The objection was never that the librarian should not record what it knows — it is the
+       * role that can see the gap. It was that a consultation asks nobody, so a skill written
+       * there would be prose injected into every later prompt that no human had read (§13's
+       * persistent prompt-injection vector). That was answered by making this path *ask*:
+       * `runConsultation` routes anything in ALWAYS_ASK_TOOLS through the same approval gate the
+       * agent loop uses, so the user sees the source exactly as they would for any other write.
+       *
+       * Everything else stays read-only. `consultBoundary.test.ts` holds that line, and pins the
+       * rule that any name allowed past the group filter must be one the gate will stop on.
+       */
+      'When the answer is something worth writing down — a convention you had to piece together,',
+      'a gotcha that will catch the next person, a procedure that is currently only in somebody\'s',
+      'head — say so and **write it with `write_skill`**. The user is shown the text and',
+      'approves it before anything is recorded, so write it as it should stand rather than',
+      'describing what it would say. If they decline, say what you would have written and why.',
+      '',
+      'Say plainly when something already written down is **wrong or out of date**. A stale skill',
+      'is worse than a missing one, because it is believed.',
     ].join('\n'),
   },
 }

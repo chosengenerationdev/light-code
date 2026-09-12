@@ -69,6 +69,19 @@ describe('what comes back with a consultation', () => {
     expect(content).not.toContain('take the findings back')
   })
 
+  /*
+   * The librarian records skills itself now, through the approval gate — so the trailer must not
+   * tell the assistant to propose one that has already been written and approved. Repeating it
+   * would put the same skill in front of the user twice, which is how people learn to click
+   * through approvals.
+   */
+  it('does not ask the assistant to re-propose a skill already written', async () => {
+    const content = await consultAs('librarian', [agent('librarian', { usesTools: true })])
+    expect(content).toContain('It can record a skill itself')
+    expect(content).toContain('that is done and not something to repeat')
+    expect(content).not.toContain('It cannot write one itself')
+  })
+
   it('warns that the programmer wrote from what it was shown', async () => {
     const content = await consultAs('programmer', [agent('programmer')])
     expect(content).toContain('Check this against the real file')
