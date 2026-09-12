@@ -22,6 +22,23 @@ import type { ResolvedAgent } from './team.js'
  * configuration each turn, so an edited instruction does not go stale the moment a role is
  * reassigned. That split is the whole reason this is two pieces rather than one blob.
  */
+/**
+ * The paragraph that only makes sense where somebody is counting.
+ *
+ * Appended rather than written into the default, so it is absent entirely when nothing meters a
+ * consultation. Advice about spending, given where there is no spending to manage, makes a model
+ * consult less than it should and buys nothing back.
+ */
+const BUDGET_ADVICE = [
+  '',
+  '## Consultations cost money here',
+  '',
+  'Each one is charged. Make the first count — gather what is needed and ask one full question',
+  'rather than opening with something you could have settled yourself. If a per-task budget runs',
+  'out the specialist stops being available, and you finish the work alone, so spend it on the',
+  'parts where another reader genuinely changes what you do.',
+].join('\n')
+
 export const DEFAULT_TEAM_GUIDANCE = [
   'You lead a small team. You do the work — reading, searching, editing, running things — and you',
   'consult specialists when another reader would genuinely change what you do.',
@@ -66,8 +83,14 @@ export const DEFAULT_TEAM_GUIDANCE = [
  * The roster is appended rather than woven in, so the editable half stays editable and the
  * generated half stays true.
  */
-export function buildTeamGuidance(agents: readonly ResolvedAgent[], custom?: string): string {
-  const advice = custom !== undefined && custom.trim().length > 0 ? custom : DEFAULT_TEAM_GUIDANCE
+export function buildTeamGuidance(
+  agents: readonly ResolvedAgent[],
+  custom?: string,
+  budgetMatters?: boolean,
+): string {
+  const base = custom !== undefined && custom.trim().length > 0 ? custom : DEFAULT_TEAM_GUIDANCE
+  // Only where something meters. See `BUDGET_ADVICE`.
+  const advice = budgetMatters === true ? `${base}\n${BUDGET_ADVICE}` : base
 
   if (agents.length === 0) {
     return [

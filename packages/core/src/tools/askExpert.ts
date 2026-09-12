@@ -81,6 +81,14 @@ export interface AskExpertOptions {
    */
   budget?: () => { allowed: boolean; message?: string | undefined }
   /**
+   * Whether anybody is actually counting what this costs.
+   *
+   * When nothing meters it, the description says nothing about spending. Telling a model to
+   * ration something nobody is measuring makes it ask fewer questions than it should, for no
+   * benefit at all.
+   */
+  budgetMatters?: boolean
+  /**
    * What is left of the budget, told to the expert so it can plan to fit.
    *
    * Sent on **every** consultation, not only the first, because the number changes with each
@@ -110,10 +118,26 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
   return {
     name: 'ask_expert',
     group: 'read',
+    /*
+     * The rationing is said only where somebody is counting.
+     *
+     * "Each call costs money, use it for genuinely difficult questions only" was unconditional,
+     * and it is *advice about money* — so on a deployment where nobody is metering it, it buys
+     * nothing and costs something real: a model told to hoard consultations asks fewer questions
+     * than it should, which is the failure this whole feature exists to avoid. It was the right
+     * default when every consultation was a metered cold start on a CLI, and it stopped being
+     * right when the expert became a seat any model can sit in.
+     *
+     * Varying the description with a *setting* is the carve-out §12 already makes: the block stays
+     * byte-stable for a whole session and changes only when the user changes their mind in
+     * Settings, exactly as switching the dispatcher does.
+     */
     description:
       'Consult a stronger expert model about a hard problem: planning a multi-file change, ' +
       'diagnosing a bug you have already failed to fix, or choosing between designs. ' +
-      'Each call costs the user money, so use it for genuinely difficult questions only, and there may be a per-task budget after which it stops being available. ' +
+      (options.budgetMatters === true
+        ? 'Each call costs the user money, so use it for genuinely difficult questions only, and there may be a per-task budget after which it stops being available. '
+        : 'Consult it whenever another reader would genuinely change what you do. ') +
       'The expert can read the workspace but cannot edit or run anything. ' +
       'Consultations within one task continue the same conversation, so after the first one it ' +
       'remembers what you already told it — a follow-up is far cheaper than a fresh explanation.',
@@ -124,7 +148,9 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
         // Ground truth (invariant 8): the user sees the question that will actually be
         // sent, not a summary of it, because they are paying for it.
         text: `Consult the expert (${options.cli.executable}):\n\n${params.question}${
-          params.files !== undefined && params.files.length > 0 ? `\n\nSuggested files: ${params.files.join(', ')}` : ''
+          params.files !== undefined && params.files.length > 0
+            ? `\n\nSuggested files: ${params.files.join(', ')}`
+            : ''
         }`,
       }
     },
@@ -133,7 +159,10 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
       if (verdict !== undefined && !verdict.allowed) {
         // Not an error in the tool's own terms — nothing failed. But `isError` is what makes
         // the model treat it as a condition to work around rather than as advice to follow.
-        return { content: verdict.message ?? 'The expert budget for this task is exhausted.', isError: true }
+        return {
+          content: verdict.message ?? 'The expert budget for this task is exhausted.',
+          isError: true,
+        }
       }
 
       const question =
@@ -143,7 +172,9 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
 
       const budgetLine = options.budgetSummary?.()
       const withBudget =
-        budgetLine === undefined || budgetLine.length === 0 ? question : `${question}\n\n[${budgetLine}]`
+        budgetLine === undefined || budgetLine.length === 0
+          ? question
+          : `${question}\n\n[${budgetLine}]`
 
       const previousSession = options.session?.get()
 
@@ -154,7 +185,9 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
        */
       const briefing = previousSession === undefined ? options.briefing?.() : undefined
       const withBriefing =
-        briefing !== undefined && briefing.length > 0 ? `${briefing}\n\n---\n\n${withBudget}` : withBudget
+        briefing !== undefined && briefing.length > 0
+          ? `${briefing}\n\n---\n\n${withBudget}`
+          : withBudget
 
       const answer = await consultExpert(options.cli, {
         question: withBriefing,
@@ -207,7 +240,9 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
             'before in this task, so do not repeat context you have already given it.',
         )
       } else if (answer.resumeFailed === true) {
-        notes.push('The earlier consultation could not be resumed, so this one started fresh with no memory of it.')
+        notes.push(
+          'The earlier consultation could not be resumed, so this one started fresh with no memory of it.',
+        )
       }
       if (answer.deniedTools.length > 0) {
         // Surfaced rather than swallowed: if the expert wanted to edit or run something,

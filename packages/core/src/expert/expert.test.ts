@@ -53,11 +53,36 @@ describe('ask_expert', () => {
     expect(result.content).toContain('not found on PATH')
   })
 
-  it("describes itself as costing money, so the model does not reach for it casually", () => {
-    const tool = createAskExpertTool({ cli: { available: true, executable: 'claude' } })
+  /**
+   * The rationing is said only where somebody is counting.
+   *
+   * It used to be unconditional, which was right when every consultation was a metered cold start
+   * on a CLI. Once the expert became a seat any model can sit in, telling a model to hoard
+   * consultations on an unmetered gateway buys nothing and costs something real: it asks fewer
+   * questions than it should, which is the failure this feature exists to prevent.
+   */
+  it('says consultations cost money when something is counting them', () => {
+    const tool = createAskExpertTool({
+      cli: { available: true, executable: 'claude' },
+      budgetMatters: true,
+    })
     expect(tool.description).toMatch(/costs the user money/i)
-    // And states the read-only boundary, so the model does not ask it to make changes.
-    expect(tool.description).toMatch(/cannot edit or run/i)
+  })
+
+  it('says nothing about spending when nothing meters it', () => {
+    const tool = createAskExpertTool({ cli: { available: true, executable: 'claude' } })
+    expect(tool.description).not.toMatch(/costs the user money/i)
+    expect(tool.description).toMatch(/whenever another reader would genuinely change what you do/i)
+  })
+
+  it('states the read-only boundary either way, so it is never asked to make changes', () => {
+    for (const budgetMatters of [true, false]) {
+      const tool = createAskExpertTool({
+        cli: { available: true, executable: 'claude' },
+        budgetMatters,
+      })
+      expect(tool.description, String(budgetMatters)).toMatch(/cannot edit or run/i)
+    }
   })
 })
 
@@ -68,7 +93,10 @@ describe('system prompt', () => {
    * configured id is the only reliable source.
    */
   it('states the configured model and profile', () => {
-    const prompt = buildSystemPrompt('/repo', { model: 'internal-qwen3-coder', providerLabel: 'Corp Gateway' })
+    const prompt = buildSystemPrompt('/repo', {
+      model: 'internal-qwen3-coder',
+      providerLabel: 'Corp Gateway',
+    })
 
     expect(prompt).toContain('internal-qwen3-coder')
     expect(prompt).toContain('Corp Gateway')

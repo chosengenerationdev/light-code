@@ -12,6 +12,8 @@ import { buildExpertPrompt, type ProviderExpert } from '../expert/providerExpert
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
 import { PLAN_LIMIT } from '../agent/plan.js'
 import { buildAgentBriefing } from '../agents/briefing.js'
+import { runConsultation, toolsForConsultation } from '../agents/consult.js'
+import { toToolDefinitions } from '../tools/registry.js'
 import { allRoles, buildAgentPrompt, defaultPromptFor, isAgentRole } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
 import type { Tool } from '../tools/types.js'
@@ -572,6 +574,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * connections and a Python worker for the sake of a list of names.
    */
   let agentBriefingTools: (() => readonly Tool[]) | undefined
+  /**
+   * The execution context a specialist's read-only lookups run in.
+   *
+   * The turn's own context, so confinement, the path deny list and the workspace root are exactly
+   * what the assistant gets — rather than a second set of rules that could drift looser. Undefined
+   * outside a turn, and then no tools are offered at all.
+   */
+  let consultationContext: (() => ToolExecutionContext) | undefined
   let skillIssues: { filePath: string; detail: string }[] = []
   const refreshSkills = async (): Promise<void> => {
     const dirs = skillSearchPath()
@@ -1387,6 +1397,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   let cachedTeam: ResolvedAgent[] = []
   let cachedTeamGuidance: string | undefined
+  /**
+   * Whether anything is counting what a consultation costs.
+   *
+   * Read by the prompt and by `ask_expert`'s description, so the advice about spending appears
+   * only where there is spending to manage — telling a model to ration an unmetered gateway makes
+   * it ask fewer questions for no benefit.
+   */
+  let cachedBudgetMatters = false
   /** Undefined means the defaults; an empty array means the user cleared the list. */
   let cachedMentionExcludes: string[] | undefined
   /** Undefined until a consultation has told us. See `recordConsultation`. */
@@ -1474,6 +1492,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     cachedTeam = resolveTeam(teamContext)
     cachedTeamGuidance = config.agents?.teamGuidance
+    cachedBudgetMatters = budgetMatters(teamContext)
     cachedProgrammingProfileId = config.programmingProfileId
     cachedOffice = config.office ?? {}
     cachedMail = config.mail ?? {}
@@ -2096,6 +2115,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       combined.register(
         createAskExpertTool({
           cli: expert.cli,
+          budgetMatters: cachedBudgetMatters,
           ...(expert.model !== undefined ? { model: expert.model } : {}),
           onConsultation: recordConsultation,
           onAdvice: (record) => expertAdvice.push(record),
@@ -2584,6 +2604,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               buildTeamGuidance(
                 cachedTeam.filter((agent) => agent.available),
                 cachedTeamGuidance,
+                cachedBudgetMatters,
               ),
             )
           } else if (
@@ -2627,6 +2648,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // lives in the VSIX, so resolving it is a host concern (§4).
         ...(ripgrepPath !== undefined ? { ripgrepPath } : {}),
       }
+
+      /*
+       * Captured for a consultation's own lookups.
+       *
+       * The turn's context, not a second one: confinement, the deny list and the workspace root
+       * are then exactly what the assistant has, rather than a parallel set of rules that could
+       * drift looser without anybody noticing.
+       */
+      consultationContext = () => toolContext
 
       /*
        * Published for the duration of the turn, so a Python tool's nested call runs against this
@@ -6845,14 +6875,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       authStrategyFor(config, profile),
       logger,
     )
-    let text = ''
-    for await (const chunk of provider.streamChat([{ role: 'user', content: prompt }], {
-      // No tools offered: it is being asked for judgement and has no way to run one.
+
+    /*
+     * A specialist can look things up for itself, read-only.
+     *
+     * It used to be a single request knowing only what was pasted into the question, which made a
+     * reviewer guess at the code around a change and a librarian answer about skills it had never
+     * read. The Claude CLI expert has had its own Read/Grep/Glob since §12b, and gathering its own
+     * context is most of why its advice is better — this is that, for a provider.
+     *
+     * See `agents/consult.ts` for why the reads skip the approval gate and why the cap forces an
+     * answer rather than an error.
+     */
+    const readOnly = toolsForConsultation(agentBriefingTools?.() ?? [])
+    const context = consultationContext?.()
+    const result = await runConsultation({
+      provider,
+      prompt,
+      tools: readOnly,
+      definitions: context === undefined ? [] : toToolDefinitions(readOnly),
+      // With no context there is nothing to read *with*, so it answers from the question alone
+      // rather than being offered tools that would fail.
+      context: context ?? ({} as ToolExecutionContext),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
-    })) {
-      if (chunk.type === 'text') text += chunk.text
+      onStep: (name) => logger.info(`${agent.role} looked up ${name}`),
+    })
+    if (result.truncated) {
+      logger.info(`${agent.role} reached its lookup limit and answered with what it had`)
     }
-    return { advice: text, label: agent.label }
+    return { advice: result.advice, label: agent.label }
   }
 
   function providerExpertFor(

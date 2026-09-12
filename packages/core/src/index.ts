@@ -241,6 +241,7 @@ export {
 } from './agents/team.js'
 export { DEFAULT_TEAM_GUIDANCE, buildTeamGuidance } from './agents/guidance.js'
 export { buildAgentBriefing, type AgentBriefingInput } from './agents/briefing.js'
+export { CONSULT_MAX_STEPS, runConsultation, toolsForConsultation } from './agents/consult.js'
 export { buildPlanGuidance, PLAN_LIMIT } from './agent/plan.js'
 export {
   buildExpertPrompt,
