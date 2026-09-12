@@ -56,6 +56,7 @@ afterEach(() => {
 function chatProps(messages: DisplayMessage[]): ChatProps {
   return {
     plan: '',
+    planCheckpoints: [],
     onSetPlan: () => undefined,
     conversationKey: 'test',
     messages,

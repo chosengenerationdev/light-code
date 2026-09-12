@@ -1,4 +1,4 @@
-import type { ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
+import type { CheckpointView, ImageAttachmentInput, ProfileSummary } from '@light-code/core/browser'
 import {
   useEffect,
   useRef,
@@ -14,6 +14,7 @@ import {
   insertMention as insertMentionInto,
   splitMentions,
 } from './mentions.js'
+import { PlanProgress } from './PlanProgress.js'
 import { Select } from './Select.js'
 import {
   badgeStyle,
@@ -35,6 +36,14 @@ export interface ComposerProps {
    * fix that?" into a mystery rather than a glance.
    */
   plan: string
+  /**
+   * The plan's steps with their progress, resolved by the host.
+   *
+   * Not derived from `plan` here: the numbering is a contract with the assistant, which is
+   * given the same numbers in its prompt, so a second reading of the plan in the UI would
+   * eventually light up the wrong row.
+   */
+  planCheckpoints: CheckpointView[]
   onSetPlan: (plan: string) => void
   onSend: (text: string, images: ImageAttachmentInput[]) => void
   onCancel: () => void
@@ -128,6 +137,7 @@ function firstPlanLine(plan: string): string {
 export function Composer(props: ComposerProps): ReactElement {
   const [text, setText] = useState('')
   const [planOpen, setPlanOpen] = useState(false)
+  const [progressOpen, setProgressOpen] = useState(false)
   const [planDraft, setPlanDraft] = useState(props.plan)
   const [images, setImages] = useState<ImageAttachmentInput[]>([])
   const [texts, setTexts] = useState<TextAttachment[]>([])
@@ -705,12 +715,25 @@ export function Composer(props: ComposerProps): ReactElement {
               </span>
             </div>
           </div>
+        ) : progressOpen ? (
+          <PlanProgress
+            plan={props.plan}
+            checkpoints={props.planCheckpoints}
+            onClose={() => setProgressOpen(false)}
+            onEdit={() => {
+              setProgressOpen(false)
+              setPlanDraft(props.plan)
+              setPlanOpen(true)
+            }}
+          />
         ) : (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
           <button
             type="button"
             style={{
               ...secondaryButtonStyle(),
-              width: '100%',
+              flex: 1,
+              minWidth: 0,
               textAlign: 'left',
               display: 'flex',
               alignItems: 'center',
@@ -739,6 +762,27 @@ export function Composer(props: ComposerProps): ReactElement {
               {props.plan.length > 0 ? firstPlanLine(props.plan) : 'keeps the assistant on the job'}
             </span>
           </button>
+          {/*
+            Only where there is something to show. A progress button beside an unset plan would
+            open an empty panel, which teaches that the feature is broken rather than unused.
+          */}
+          {props.planCheckpoints.length > 0 && (
+            <button
+              type="button"
+              style={{ ...secondaryButtonStyle(), whiteSpace: 'nowrap' }}
+              title="Which steps of the plan are done, and who was consulted on them"
+              onClick={() => setProgressOpen(true)}
+            >
+              <span style={{ color: colors.muted }}>
+                Progress{' '}
+                <span style={{ color: colors.accent }}>
+                  {props.planCheckpoints.filter((c) => c.status === 'done').length}/
+                  {props.planCheckpoints.length}
+                </span>
+              </span>
+            </button>
+          )}
+          </div>
         )}
       </div>
 

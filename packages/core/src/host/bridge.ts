@@ -10,6 +10,20 @@ import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savin
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
 import { PLAN_LIMIT } from '../agent/plan.js'
+import {
+  attributeConsultation,
+  checkpointViews,
+  markCheckpoint,
+  progressSummary,
+  pruneProgress,
+  type CheckpointView,
+  type PlanProgress,
+} from '../agent/checkpoints.js'
+import {
+  createPlanProgressTool,
+  createUpdatePlanTool,
+  type PlanAccess,
+} from '../tools/planTools.js'
 import { buildAgentBriefing } from '../agents/briefing.js'
 import { runConsultation, toolsForConsultation } from '../agents/consult.js'
 import { toToolDefinitions } from '../tools/registry.js'
@@ -911,7 +925,84 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * the user would believe it was still bound by something it had never been told.
    */
   let activePlan: string | undefined
+  /**
+   * How far through the plan this chat is, keyed by checkpoint id.
+   *
+   * Beside the plan rather than derived from the transcript: "step 3 is done" is something the
+   * assistant reports, and nothing in the message history states it in a form that could be read
+   * back reliably. What is *not* stored here is the steps themselves — those are parsed from the
+   * plan text on demand, so there is only ever one plan.
+   */
+  let activePlanProgress: PlanProgress = {}
   let activeTaskCreatedAt = Date.now()
+
+  /** The plan's steps with their progress, as the panel and the protocol want them. */
+  function planViews(): CheckpointView[] {
+    return checkpointViews(activePlan, activePlanProgress)
+  }
+
+  function postPlanProgress(): void {
+    post({ type: 'planProgress', checkpoints: planViews() })
+  }
+
+  /**
+   * Replaces the plan, from either side: the user's editor or an approved `update_plan`.
+   *
+   * One function because the two must behave identically — progress pruned to the steps that
+   * still exist, the task saved at once, and both the plan and the progress reposted. Written
+   * twice, one of them would eventually forget the pruning and the panel would report a step
+   * that is no longer in the plan as done.
+   */
+  async function applyPlan(next: string | undefined): Promise<void> {
+    const trimmed = next?.slice(0, PLAN_LIMIT).trim()
+    activePlan = trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined
+    activePlanProgress = pruneProgress(activePlan, activePlanProgress)
+    /*
+     * Saved immediately rather than at the end of the next turn.
+     *
+     * Somebody who sets a plan and then closes the window has still set a plan, and a plan that
+     * survives only if you happen to send a message is one people would stop trusting after the
+     * first time it vanished.
+     */
+    await persistActiveTask()
+    post({ type: 'plan', plan: activePlan ?? '' })
+    postPlanProgress()
+  }
+
+  /**
+   * What `update_plan` and `plan_progress` are given.
+   *
+   * The tools hold no state of their own: they are a door onto this closure, the same shape
+   * `ask_agent` already uses. A tool that kept its own copy of the plan would be a second answer
+   * to "what is the plan", and the first thing to disagree with the system prompt.
+   */
+  const planAccess: PlanAccess = {
+    current: () => activePlan,
+    save: async (nextPlan) => {
+      await applyPlan(nextPlan)
+    },
+    mark: async (index, status) => {
+      const updated = markCheckpoint(activePlan, activePlanProgress, index, status)
+      if (updated === undefined) {
+        const total = planViews().length
+        return {
+          ok: false,
+          reason:
+            total === 0
+              ? 'There is no plan set for this conversation, so there is nothing to report against.'
+              : `There is no step ${String(index)}. The plan has ${String(total)} steps, numbered 1 to ${String(total)}.`,
+        }
+      }
+      activePlanProgress = updated
+      await persistActiveTask()
+      postPlanProgress()
+      const views = planViews()
+      return {
+        ok: true,
+        summary: `Step ${String(index)} is now ${status}. ${progressSummary(views)} steps complete.`,
+      }
+    },
+  }
 
   async function setActiveTaskId(id: string | undefined): Promise<void> {
     activeTaskId = id
@@ -1809,6 +1900,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     for (const tool of python.generatedTools())
       combined.register(tool, { dispatchOnly: dispatcher })
+    /*
+     * The two plan tools, always registered.
+     *
+     * `dispatchOnly` follows the dispatcher exactly as MCP and Python tools do, and it matters
+     * more here than usual: these exist to serve a feature most conversations never switch on,
+     * and §12 is strict that what sits at the front of the prompt must stay byte-stable. Hiding
+     * them costs nothing, because the *plan guidance names them both* — and that guidance is only
+     * present when there is a plan, which is exactly when they are wanted. With no plan set and
+     * the dispatcher on they are still reachable, through `search_docs` like anything else.
+     *
+     * Registered unconditionally rather than only when a plan exists: making the registry itself
+     * a function of whether a plan is set would put the plan into the tool block, which is the
+     * one thing §12 rules out.
+     */
+    combined.register(createUpdatePlanTool(planAccess), { dispatchOnly: dispatcher })
+    combined.register(createPlanProgressTool(planAccess), { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
     /*
@@ -2284,6 +2391,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       messages,
       resultHandles: truncationStore.spilledHandles(),
       ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
+      ...(Object.keys(activePlanProgress).length > 0 ? { planProgress: activePlanProgress } : {}),
     }
 
     try {
@@ -2338,10 +2446,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * something this conversation never agreed, and the user with no reason to suspect it.
      */
     activePlan = task.plan
+    // Pruned on the way in as well as on the way out: a task saved before a plan was edited by
+    // hand in the config file could otherwise restore progress for steps that no longer exist.
+    activePlanProgress = pruneProgress(activePlan, task.planProgress)
     await setActiveTaskId(task.id)
 
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
     post({ type: 'plan', plan: activePlan ?? '' })
+    postPlanProgress()
     await postTasks()
   }
 
@@ -2356,10 +2468,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // A new conversation is a new job. Carrying the last one's plan forward would silently
     // constrain work nobody had scoped yet.
     activePlan = undefined
+    activePlanProgress = {}
     await setActiveTaskId(undefined)
 
     post({ type: 'taskRestored', taskId: undefined, entries: [] })
     post({ type: 'plan', plan: '' })
+    postPlanProgress()
     await postTasks()
   }
 
@@ -2583,6 +2697,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 cachedTeam.filter((agent) => agent.available),
                 cachedTeamGuidance,
                 cachedBudgetMatters,
+                /*
+                 * Whether a plan already exists, which decides whether this mode is told to go
+                 * and make one. Passed rather than inferred from the prompt: the plan section is
+                 * assembled separately, and a mode guessing at whether it is there would be a
+                 * second reading of the same fact.
+                 */
+                activePlan !== undefined && activePlan.trim().length > 0,
               ),
             )
           } else if (
@@ -2849,7 +2970,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
              * turn came to render as nothing: the transcript derived it and the live path did not.
              */
             const consulting = consultationFromToolCall(toolCall.name, toolCall.arguments)
-            if (consulting !== undefined) informedBy = consulting
+            if (consulting !== undefined) {
+              informedBy = consulting
+              /*
+               * Who contributed to the step being worked, recorded from a consultation that
+               * genuinely happened rather than from the model naming a role.
+               *
+               * The assistant says *which* step it is on; it does not get to say who helped with
+               * it. That split is deliberate — the panel colours a checkpoint by role, and a
+               * colour is read as a fact about who did the work. The same reasoning as
+               * `search_codebase` testing the filesystem rather than trusting the owner field:
+               * report the ground truth, not the description of it.
+               */
+              const attributed = attributeConsultation(activePlanProgress, consulting)
+              if (attributed !== activePlanProgress) {
+                activePlanProgress = attributed
+                postPlanProgress()
+              }
+            }
             if (CONTROL_TOOLS.has(toolCall.name)) return
             /*
              * A chart is not a tool block. It is posted on the result instead, so nothing
@@ -7890,19 +8028,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'requestExpert') {
       void postExpert()
     } else if (message.type === 'setPlan') {
-      const plan = message.plan.slice(0, PLAN_LIMIT).trim()
-      activePlan = plan.length > 0 ? plan : undefined
-      /*
-       * Saved immediately rather than at the end of the next turn.
-       *
-       * Somebody who sets a plan and then closes the window has still set a plan, and a plan that
-       * survives only if you happen to send a message is one people would stop trusting after the
-       * first time it vanished.
-       */
-      void persistActiveTask()
-      post({ type: 'plan', plan: activePlan ?? '' })
+      // Through `applyPlan` rather than inline, so the user's editor and an approved
+      // `update_plan` cannot end up doing different things — pruning in particular.
+      void applyPlan(message.plan)
     } else if (message.type === 'requestPlan') {
       post({ type: 'plan', plan: activePlan ?? '' })
+      postPlanProgress()
+    } else if (message.type === 'requestPlanProgress') {
+      postPlanProgress()
     } else if (message.type === 'requestAgents') {
       void postAgents()
     } else if (message.type === 'setAgentRole') {

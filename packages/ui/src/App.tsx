@@ -1,5 +1,5 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
-import type { ProbeTarget } from '@light-code/core/browser'
+import type { CheckpointView, ProbeTarget } from '@light-code/core/browser'
 import {
   DEFAULT_MODE_ID,
   type ApprovalDecision,
@@ -339,6 +339,14 @@ export function App(props: AppProps): ReactElement {
    * task switch can replace it — the host posts `plan` whenever the conversation changes.
    */
   const [plan, setPlan] = useState('')
+  /*
+   * The plan's steps with their progress, exactly as the host resolved them.
+   *
+   * Held whole rather than unpacked field by field. `App.tsx` rebuilding a host message piece by
+   * piece is the bug shape this file has produced more than once — most recently dropping
+   * `informedBy` from four places — and a list assigned wholesale cannot lose a field.
+   */
+  const [planCheckpoints, setPlanCheckpoints] = useState<CheckpointView[]>([])
   const [offersOffice, setOffersOffice] = useState(true)
   /** The global tool timeout, when one is set. Undefined leaves each tool at its own default. */
   const [toolTimeoutSeconds, setToolTimeoutSeconds] = useState<number | undefined>(undefined)
@@ -778,6 +786,8 @@ export function App(props: AppProps): ReactElement {
         setNetwork(message.settings)
       } else if (message.type === 'plan') {
         setPlan(message.plan)
+      } else if (message.type === 'planProgress') {
+        setPlanCheckpoints(message.checkpoints)
       } else if (message.type === 'agents') {
         /*
          * The whole message, not field by field.
@@ -1914,6 +1924,7 @@ export function App(props: AppProps): ReactElement {
              * every keystroke would look like a conversation change and re-pin the scroll.
              */
             plan={plan}
+            planCheckpoints={planCheckpoints}
             onSetPlan={(next) => {
               // Optimistic, then confirmed by the host's own `plan` message — the strip must not
               // lag a click behind the thing it describes.

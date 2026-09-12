@@ -1,3 +1,4 @@
+import type { PlanProgress } from '../agent/checkpoints.js'
 import type { ChatMessage } from '../providers/types.js'
 
 /**
@@ -32,6 +33,17 @@ export interface Task {
    * was for would be worse than no plan at all.
    */
   plan?: string
+  /**
+   * How far through that plan this chat got, keyed by checkpoint id.
+   *
+   * Stored beside the plan and restored with it, for the same reason: reopening a task whose
+   * progress panel had reset to nothing would read as the work having been lost.
+   *
+   * Deliberately **not** a copy of the steps — `agent/checkpoints.ts` derives those from the plan
+   * text every time, so there is no second version of the plan here to fall out of step with the
+   * one the assistant is actually given.
+   */
+  planProgress?: PlanProgress
 }
 
 /** Enough to render the history list without loading every transcript. */

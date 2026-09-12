@@ -16,6 +16,8 @@ export type { FormField } from './tools/askUserForm.js'
 export type { ApprovalDecision } from './approval/types.js'
 export type { AutoApproveSettings, WorkspaceApprovals, ApprovableGroup } from './approval/policy.js'
 export type { Mode } from './modes/types.js'
+/* The progress panel renders these; the plan itself never crosses as anything but its text. */
+export type { CheckpointView, CheckpointStatus } from './agent/checkpoints.js'
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
 export type {
   McpServerConfig,

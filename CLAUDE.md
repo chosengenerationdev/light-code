@@ -1014,6 +1014,64 @@ the one-line message say what happened, since that line is all that appears on s
 
 ---
 
+## 12h. The plan, its checkpoints, and who did what (0.70.0)
+
+A plan the user sets for one chat, held in the **system prompt** so it is as present at step
+twenty as at step one. `agent/plan.ts` carries the reasoning for that and for why the reminder is
+*not* in `attempt_completion`'s description — a description that changed with the plan would make
+the tool block a function of the plan, which is the one thing section 12 rules out.
+
+**The plan is one string, and its steps are derived from it every time.** The obvious design is a
+structured list the user edits; it was not taken. The plan is also the prose sent to the model, so
+a structured version would be a second representation of one fact — the shape this project has
+paid for more than any other. `agent/checkpoints.ts` is the only place a plan becomes steps, and
+the panel, the protocol and the prompt all read its output. The numbering is a **contract**:
+`plan_progress` takes those numbers and the guidance states them, so a second reading of the plan
+anywhere would light up the wrong row.
+
+- **Step ids are content-derived, never positional.** People edit plans mid-task — that is the
+  point of being able to. With positional ids, inserting a step at the top silently moves "done"
+  onto work nobody did, and the panel then reports it as finished. With content ids, reordering
+  keeps every step's progress and *rewording* clears only that step, which is the honest reading:
+  a step whose text changed is not obviously the step that was completed.
+- **Progress for a step the plan no longer has is dropped**, on the way in as well as out, so the
+  panel can never report a deleted step as done.
+- **A role chip is ground truth, not a claim.** The assistant declares which step it is on; who
+  contributed is recorded host-side from consultations that actually ran while that step was
+  active. A coloured row reads as "the reviewer did this", and that is exactly the sort of
+  statement nobody thinks to go and check — the same reasoning as `search_codebase` testing the
+  filesystem rather than trusting an owner field. A step nobody was consulted on carries no chip.
+
+**`update_plan` lets the assistant propose a plan, and the user approves a diff of it.** Requested
+in those terms: the agent may save or modify the plan *after taking permission*. Two rules hold it
+in place, and neither is optional:
+
+- **It is in `ALWAYS_ASK_TOOLS`, and its group is `edit` rather than `always`.** That second half
+  is the trap: `decideFromPolicy` answers `approve` for the `always` group **before** it consults
+  `ALWAYS_ASK_TOOLS`, so grouping it there — tempting, since it edits no file — would have
+  silently auto-approved the one permission the feature exists to ask for, with nothing else in
+  the suite noticing. `checkpoints.test.ts` asserts the group directly for that reason.
+- **It is in `NEVER_AVAILABLE_TO_SCHEDULES`.** A run that can rewrite the plan it is held to is
+  bounded by nothing — the same ladder as `schedule_prompt`.
+
+**Both plan tools follow the dispatcher**, so nothing is added to the advertised tool block when
+the dispatcher is on. That matters more here than usual: these serve a feature most conversations
+never switch on. Hiding them costs nothing because the plan guidance *names them both*, and that
+guidance exists only when a plan does. They are registered unconditionally, though — making the
+registry a function of whether a plan is set would put the plan into the tool block, which is the
+thing section 12 forbids.
+
+**Agent team mode plans before it does anything else** (user-requested, in those words). With no
+plan it asks the expert for one, proposes it with `update_plan`, and waits; with a plan it works
+it. Which of those two instructions applies is **generated** by `buildTeamGuidance` from a
+`hasPlan` flag the bridge passes, not inferred by the model from whether the plan section happens
+to be in the prompt — one fixed instruction would tell somebody who already has a plan to go and
+make one, which is how a standing instruction stops being read at all. The same split that keeps
+the roster generated and the advice editable. A question the assistant can simply answer is still
+answered rather than planned.
+
+---
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

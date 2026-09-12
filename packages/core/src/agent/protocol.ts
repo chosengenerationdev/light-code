@@ -1,3 +1,4 @@
+import type { CheckpointView } from './checkpoints.js'
 import type { FormField } from '../tools/askUserForm.js'
 import type { ExpertSavings } from '../expert/savings.js'
 import type { ApprovableGroup, WorkspaceApprovals } from '../approval/policy.js'
@@ -799,6 +800,8 @@ export type UiToHostMessage =
   /** Sets the plan for the open chat. Empty clears it. */
   | { type: 'setPlan'; plan: string }
   | { type: 'requestPlan' }
+  /** Opens the progress panel. Answered with 'planProgress'. */
+  | { type: 'requestPlanProgress' }
   | {
       type: 'setExpert'
       enabled: boolean
@@ -1344,6 +1347,15 @@ export type HostToUiMessage =
    * disagree about what the assistant has actually been told.
    */
   | { type: 'plan'; plan: string }
+  /**
+   * The plan's steps with their progress, which is what the progress panel renders.
+   *
+   * The **resolved views** travel rather than the raw progress record, so the panel never parses
+   * a plan itself. Two readings of one plan -- the one the assistant is given and the one the
+   * user watches -- is exactly the drift this codebase pays for most often, and the numbering is
+   * a contract between them: 'plan_progress' takes these numbers.
+   */
+  | { type: 'planProgress'; checkpoints: CheckpointView[] }
   | {
       type: 'agents'
       /** Every role, in a fixed order, whether or not anybody is assigned to it. */

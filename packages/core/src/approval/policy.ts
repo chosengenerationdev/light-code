@@ -61,6 +61,13 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * whatever DoTheThing does.
    */
   'excel_run_macro',
+  /*
+   * The plan is what holds the assistant to work the user agreed, so a category toggle must
+   * never stand in for reading the change. Auto-approving this would mean an agent could widen
+   * its own instructions and then point at them as authority — and both the panel and the
+   * prompt would look right afterwards, because both would be reading the new plan.
+   */
+  'update_plan',
 ])
 
 export function decideFromPolicy(

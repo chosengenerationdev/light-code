@@ -1,5 +1,32 @@
 # @chosengeneration/light-code
 
+## 0.47.0
+
+### Minor Changes
+
+- Plans have checkpoints, and Agent team starts by making one
+
+  The plan a chat is given is now read as a numbered list of steps, and there is a **Progress**
+  button beside **Set a plan** showing which are done, which is being worked, and which are still to
+  come — with a chip for each specialist consulted along the way, in that role's colour.
+
+  **The assistant can propose a plan, and the user approves it.** `update_plan` shows an ordinary
+  approval prompt containing a diff of the plan you have against the one being proposed, so a plan
+  drafted by the expert becomes yours by you agreeing to it. It can never be auto-approved: a plan
+  exists to hold the assistant to work that was agreed, and an agent that could widen its own
+  instructions and then point at them as authority is the one failure this feature must not have. It
+  is withheld from scheduled runs entirely, for the same reason `schedule_prompt` is.
+
+  **Agent team mode now plans before it does anything else.** With no plan set it asks the expert for
+  one, proposes it, and waits — which is what an expert is worth asking before the work rather than
+  after it. A question you can simply answer is still just answered.
+
+  Two details worth knowing. Steps are identified by their wording rather than their position, so
+  inserting a step above a finished one does not move "done" onto work nobody did — and rewording a
+  step clears just that step. And a role chip records a consultation that actually happened while
+  that step was active; the assistant says which step it is on, but it does not get to say who
+  helped with it.
+
 ## 0.46.0
 
 ### Minor Changes

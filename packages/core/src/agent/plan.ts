@@ -33,6 +33,8 @@
  * the property that matters.
  */
 
+import { parseCheckpoints } from './checkpoints.js'
+
 /** Long enough for a real plan, short enough that it cannot crowd out the rest of the prompt. */
 export const PLAN_LIMIT = 4000
 
@@ -46,12 +48,51 @@ export function buildPlanGuidance(plan: string | undefined): string {
   const trimmed = plan?.trim() ?? ''
   if (trimmed.length === 0) return ''
 
+  /*
+   * The numbering is stated here because it is a contract.
+   *
+   * `plan_progress` takes a step *number*, and the panel renders the same numbers — both derived
+   * from `parseCheckpoints`, which is the one place a plan is turned into steps. Letting the
+   * model infer the numbering from the prose instead would put a second reading of the plan in
+   * the prompt, and the two would disagree the first time somebody wrote a plan with a preamble
+   * line above the list. Same rule as everywhere else here: one owner, and pass the result.
+   */
+  const checkpoints = parseCheckpoints(trimmed)
+  const numbered =
+    checkpoints.length > 0
+      ? [
+          '',
+          'Its steps are numbered as follows. These numbers are what `plan_progress` takes, and',
+          'they are what the user sees:',
+          '',
+          ...checkpoints.map((checkpoint) => `${String(checkpoint.index)}. ${checkpoint.text}`),
+        ]
+      : []
+
   return [
     '# The plan for this conversation',
     '',
     'The user set this. It is what you are here to do:',
     '',
     trimmed,
+    ...numbered,
+    '',
+    '## Reporting where you are',
+    '',
+    '- **Call `plan_progress` with `active` when you start a step**, and with `done` when it is',
+    '  actually finished. The user watches this rather than reading the whole transcript, so a',
+    '  step marked done that is not done is worse than one never marked at all.',
+    '- Work one step at a time. Marking three done at the end tells the user nothing while it',
+    '  matters, which is the only time it is useful.',
+    '',
+    '## Changing the plan',
+    '',
+    '- **You may propose a different plan with `update_plan`, and the user must approve it.**',
+    '  They are shown a diff of the plan they have against the one you are proposing. This is',
+    '  the only way the plan changes on your side — never act on a plan the user has not agreed.',
+    '- Use it when you have worked out a better plan, including one a specialist drafted for you.',
+    '  Put the whole plan in it: it replaces what is there rather than adding to it.',
+    '- If they decline, the existing plan still stands and you carry on with it.',
     '',
     '## Working to it',
     '',

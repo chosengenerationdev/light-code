@@ -441,6 +441,25 @@ export {
 } from './approval/policy.js'
 export { isCommandAllowlisted, addToAllowlist, removeFromAllowlist } from './approval/commands.js'
 export { ShadowGit, type Checkpoint } from './checkpoints/shadowGit.js'
+/*
+ * The plan's steps. Deliberately does NOT re-export its `Checkpoint` type: `Checkpoint` already
+ * means a shadow-git snapshot here, and two unrelated things sharing a name in one barrel is how
+ * an import ends up silently referring to the wrong one.
+ */
+export {
+  parseCheckpoints,
+  checkpointViews,
+  pruneProgress,
+  markCheckpoint,
+  attributeConsultation,
+  progressSummary,
+  MAX_CHECKPOINTS,
+  type PlanProgress,
+  type CheckpointProgress,
+  type CheckpointStatus,
+  type CheckpointView,
+} from './agent/checkpoints.js'
+export { createUpdatePlanTool, createPlanProgressTool, type PlanAccess } from './tools/planTools.js'
 
 export { McpRegistry, type McpRegistryEvents } from './mcp/registry.js'
 export { McpConnection, interpolateSecrets } from './mcp/client.js'

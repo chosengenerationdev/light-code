@@ -48,6 +48,7 @@ function messages(count: number): DisplayMessage[] {
 function props(overrides: Partial<ChatProps>): ChatProps {
   return {
     plan: '',
+    planCheckpoints: [],
     onSetPlan: () => undefined,
     conversationKey: 'one',
     messages: messages(6),

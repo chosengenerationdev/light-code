@@ -58,6 +58,11 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   'excel_write_macro',
   // And running one: unattended execution of arbitrary VBA, with nobody to read the source.
   'excel_run_macro',
+  /*
+   * Rewriting the plan it is being held to, with nobody there to approve the diff. Same ladder
+   * as `schedule_prompt`: a run that can change its own instructions is bounded by nothing.
+   */
+  'update_plan',
 ]
 
 /**

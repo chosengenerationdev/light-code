@@ -1,5 +1,6 @@
 import type {
   ApprovalDecision,
+  CheckpointView,
   ContextUsage,
   ImageAttachmentInput,
   ProfileSummary,
@@ -27,6 +28,14 @@ const FOLLOW_THRESHOLD_PX = 120
 export interface ChatProps {
   /** The plan for this conversation, and how to change it. See `agent/plan.ts`. */
   plan: string
+  /**
+   * The plan's steps with their progress, resolved by the host.
+   *
+   * Not derived from `plan` here: the numbering is a contract with the assistant, which is
+   * given the same numbers in its prompt, so a second reading of the plan in the UI would
+   * eventually light up the wrong row.
+   */
+  planCheckpoints: CheckpointView[]
   onSetPlan: (plan: string) => void
   messages: DisplayMessage[]
   isStreaming: boolean
@@ -274,6 +283,7 @@ export function Chat(props: ChatProps): ReactElement {
       <TokenBar usage={props.usage} />
       <Composer
         plan={props.plan}
+        planCheckpoints={props.planCheckpoints}
         onSetPlan={props.onSetPlan}
         isStreaming={props.isStreaming}
         onSend={props.onSend}
