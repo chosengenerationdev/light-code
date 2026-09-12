@@ -8,7 +8,6 @@ import path from 'node:path'
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
-import { buildExpertPrompt, type ProviderExpert } from '../expert/providerExpert.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
 import { PLAN_LIMIT } from '../agent/plan.js'
 import { buildAgentBriefing } from '../agents/briefing.js'
@@ -84,7 +83,6 @@ import {
   type CodeGenerator,
   createAskExpertTool,
   createAskAgentTool,
-  createAskProviderExpertTool,
   createRecallExpertTool,
   type ExpertConsultationRecord,
   createSearchOpensearchTool,
@@ -1388,7 +1386,6 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** Rebuilt on every settings load, so a profile change reaches the next turn. */
   let cachedCodeGenerator: CodeGenerator | undefined
   /** Resolved with the rest of settings, so changing the profile takes effect on the next turn. */
-  let cachedProviderExpert: { consult: ProviderExpert; label: string } | undefined
   /**
    * The specialists, resolved once per settings load.
    *
@@ -1473,7 +1470,6 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const { config } = await configManager.load()
     cachedApprovals = approvalsFrom(config.approvals)
     cachedCodeGenerator = codeGeneratorFor(config)
-    cachedProviderExpert = providerExpertFor(config)
 
     /*
      * The team is resolved from config plus what was detected, in one place.
@@ -2073,18 +2069,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
     }
     /*
-     * A provider profile answering instead, where the host says that is what it has.
-     *
-     * Checked before the CLI branch and returning early, so the two can never both register a
-     * tool called `ask_expert` — whichever won would depend on registration order, which is the
-     * kind of thing that works until somebody reorders two lines.
-     */
-    /*
      * The whole team, behind one tool.
      *
-     * Registered whenever anybody is assigned — including alongside the CLI expert below, since
-     * `ask_agent` and `ask_expert` answer different questions: one names a role, the other is the
-     * established name that the transcript, `recall_expert_advice` and older guidance all use.
+     * Registered alongside the CLI expert below rather than instead of it: `ask_agent` names a
+     * role and `ask_expert` is the established name the transcript, `recall_expert_advice` and
+     * older guidance all refer to.
      */
     if (cachedTeam.some((agent) => agent.available)) {
       combined.register(
@@ -2096,20 +2085,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
     }
 
-    const providerExpert = cachedProviderExpert
-    if (providerExpert !== undefined) {
-      combined.register(createRecallExpertTool({ history: () => expertAdvice }))
-      combined.register(
-        createAskProviderExpertTool({
-          consult: providerExpert.consult,
-          label: providerExpert.label,
-          onAdvice: (record) => expertAdvice.push(record),
-        }),
-      )
-    }
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
-    else if (expert !== undefined) {
+    if (expert !== undefined) {
       // Free by construction: it has no path to the CLI, only to what was already said.
       combined.register(createRecallExpertTool({ history: () => expertAdvice }))
       combined.register(
@@ -3395,7 +3373,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // The whole thing, profiles included. Passing only half of what the constructor takes is
         // the same mistake as having two constructors, and this failure path is where the last
         // one hid: it runs rarely, so a field missing here is noticed much later than elsewhere.
-        ...expertMessageFrom(settings, loaded?.profiles),
+        ...expertMessageFrom(settings),
         available: false,
         path: settings?.path ?? expertCliPath ?? 'claude',
         reason: `Could not check whether the Claude CLI is available: ${reason}`,
@@ -3413,22 +3391,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   function expertMessageFrom(
     settings: LightCodeConfig['expert'],
-    profiles?: ProviderProfile[],
   ): Extract<HostToUiMessage, { type: 'expert' }> {
     return {
       type: 'expert',
-      /*
-       * Sent from here and nowhere else. CLAUDE.md records what happened the last time two
-       * `expert` messages were built separately: measured pricing reached the success path and
-       * not the failure path, and the panel showed a dash for something that had been measured.
-       */
-      ...(services.expertMode === 'profile'
-        ? {
-            mode: 'profile' as const,
-            profiles: (profiles ?? []).map((profile) => ({ id: profile.id, label: profile.label })),
-            ...(settings?.profileId !== undefined ? { profileId: settings.profileId } : {}),
-          }
-        : {}),
       enabled: settings?.enabled === true,
       available: false,
       path: settings?.path ?? expertCliPath ?? 'claude',
@@ -3551,26 +3516,6 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // needs it, and nothing should touch the disk just because a window opened.
     const { config } = await configManager.load()
 
-    /*
-     * Nothing here applies where the expert is a provider profile.
-     *
-     * Every line below probes for a `claude` binary and reads the spend log that binary writes.
-     * On a host that consults a profile the probe spawns a process that is never going to be
-     * there, on every panel open, to fill fields the panel no longer renders — and reports
-     * `available: false` with a reason about a CLI the user was never offered.
-     */
-    if (services.expertMode === 'profile') {
-      post({
-        ...expertMessageFrom(config.expert, config.profiles),
-        // Usable when a profile is chosen, which is the only thing availability can mean here.
-        available:
-          config.expert?.enabled === true &&
-          config.expert.profileId !== undefined &&
-          config.profiles?.some((profile) => profile.id === config.expert?.profileId) === true,
-      })
-      return
-    }
-
     // Read here rather than at construction: the panel opening is the first moment anything
     // needs it, and nothing should touch the disk just because a window opened.
     await loadExpertEvents()
@@ -3592,7 +3537,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     post({
       // Everything from settings comes from one place, so the two paths cannot drift again.
-      ...expertMessageFrom(config.expert, config.profiles),
+      ...expertMessageFrom(config.expert),
       available: detected.available,
       path: configured,
       ...(detected.version !== undefined ? { version: detected.version } : {}),
@@ -6818,10 +6763,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /**
    * Sends one question to one specialist, whichever kind it is.
    *
-   * The two paths differ only in *who* answers: the role's prompt, the question and the named
-   * files are assembled identically, so a reviewer behaves the same whether it is Claude or a
-   * gateway. Folding that into one function is what keeps it true — two assemblies would drift,
-   * and the symptom would be a role subtly better on one backend than the other.
+   * The two paths differ only in *who* answers: the role's prompt, the briefing, the question and
+   * the named files are assembled identically, so a reviewer behaves the same whether it is Claude
+   * or a gateway. Folding that into one function is what keeps it true — two assemblies would
+   * drift, and the symptom would be a role subtly better on one backend than the other.
    */
   async function consultAgent(
     agent: ResolvedAgent,
@@ -6834,11 +6779,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       /*
        * What exists in this workspace.
        *
-       * A specialist has no tools and cannot discover any, so without this it advises as though
-       * the assistant were a bare shell — proposing by hand what a configured tool already does,
-       * or inventing a procedure an existing skill documents. The CLI expert has had an inventory
-       * since §12b for exactly this reason; provider-backed roles had none, which made them
-       * measurably worse at the same question.
+       * Without it a specialist advises as though the assistant were a bare shell — proposing by
+       * hand what a configured tool already does, or inventing a procedure an existing skill
+       * documents. See `agents/briefing.ts` for why names are worth the tokens and schemas are not.
        */
       briefing: buildAgentBriefing({
         tools: agentBriefingTools?.() ?? [],
@@ -6904,54 +6847,6 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       logger.info(`${agent.role} reached its lookup limit and answered with what it had`)
     }
     return { advice: result.advice, label: agent.label }
-  }
-
-  function providerExpertFor(
-    config: LightCodeConfig,
-  ): { consult: ProviderExpert; label: string } | undefined {
-    if (services.expertMode !== 'profile') return undefined
-    if (config.expert?.enabled !== true) return undefined
-
-    const id = config.expert.profileId
-    if (id === undefined || id.length === 0) return undefined
-
-    const profile = config.profiles?.find((candidate) => candidate.id === id)
-    /*
-     * A named profile that no longer exists means no expert, said out loud.
-     *
-     * Not a fallback to the chat model: the whole point is a *second opinion*, and quietly
-     * asking the same model that is stuck would be advice the user had no reason to distrust.
-     */
-    if (profile === undefined) {
-      logger.warn(
-        `the expert profile "${id}" is configured but no such profile exists; the expert is unavailable`,
-      )
-      return undefined
-    }
-
-    return {
-      label: profile.label,
-      consult: async (request) => {
-        const provider = createChatProvider(
-          profile,
-          httpClient,
-          authStrategyFor(config, profile),
-          logger,
-        )
-        let text = ''
-        for await (const chunk of provider.streamChat(
-          [{ role: 'user', content: buildExpertPrompt(request) }],
-          {
-            // No tools offered: it is being asked for judgement, and offering tools invites it to
-            // reach for one it has no way to run.
-            ...(request.signal !== undefined ? { signal: request.signal } : {}),
-          },
-        )) {
-          if (chunk.type === 'text') text += chunk.text
-        }
-        return { advice: text, producedBy: profile.label }
-      },
-    }
   }
 
   function codeGeneratorFor(config: LightCodeConfig): CodeGenerator | undefined {

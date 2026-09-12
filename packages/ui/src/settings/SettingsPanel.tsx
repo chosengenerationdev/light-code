@@ -92,8 +92,6 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onMeasureCost: () => void
   onClearPricing: () => void
   onSetKeepAlive: (enabled: boolean) => void
-  /** Saves the profile-based expert, where the host has one. */
-  onSaveProfileExpert?: (enabled: boolean, profileId: string) => void
   onSaveExpert: (
     enabled: boolean,
     path: string,
@@ -378,9 +376,6 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               <ExpertTab
                 expert={props.expert}
                 onSave={props.onSaveExpert}
-                {...(props.onSaveProfileExpert !== undefined
-                  ? { onSaveProfileExpert: props.onSaveProfileExpert }
-                  : {})}
                 onRecheck={props.onRecheckExpert}
                 onAssess={props.onAssessJunior}
                 onClearAssessment={props.onClearAssessment}

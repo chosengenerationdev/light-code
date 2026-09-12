@@ -215,10 +215,6 @@ export {
   type ExpertAnswer,
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
-export {
-  createAskProviderExpertTool,
-  type AskProviderExpertParams,
-} from './tools/askProviderExpert.js'
 export { createAskAgentTool, type AskAgentParams } from './tools/askAgent.js'
 export {
   AGENT_ROLES,
@@ -243,12 +239,6 @@ export { DEFAULT_TEAM_GUIDANCE, buildTeamGuidance } from './agents/guidance.js'
 export { buildAgentBriefing, type AgentBriefingInput } from './agents/briefing.js'
 export { CONSULT_MAX_STEPS, runConsultation, toolsForConsultation } from './agents/consult.js'
 export { buildPlanGuidance, PLAN_LIMIT } from './agent/plan.js'
-export {
-  buildExpertPrompt,
-  type ProviderExpert,
-  type ProviderExpertRequest,
-  type ProviderExpertResult,
-} from './expert/providerExpert.js'
 export { createRecallExpertTool, type ExpertConsultationRecord } from './tools/recallExpert.js'
 export { buildExpertBriefing, type BriefingInput } from './expert/briefing.js'
 export { extractEstimate, ESTIMATE_INSTRUCTION, type ExpertEstimate } from './expert/estimate.js'

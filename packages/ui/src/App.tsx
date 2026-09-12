@@ -1088,17 +1088,6 @@ export function App(props: AppProps): ReactElement {
     },
   }
 
-  /**
-   * Saving the profile-based expert.
-   *
-   * Deliberately not folded into `saveExpert`: that one writes `path`, `model` and two spend
-   * caps, none of which mean anything to a host that consults a provider profile — and one of
-   * them would write `path: 'claude'` into the config of a server with no such binary.
-   */
-  const saveProfileExpert = (enabled: boolean, profileId: string): void => {
-    props.transport.post({ type: 'setExpert', enabled, profileId } satisfies UiToHostMessage)
-  }
-
   const saveExpert = (
     enabled: boolean,
     path: string,
@@ -1240,7 +1229,7 @@ export function App(props: AppProps): ReactElement {
             "this has cost you nothing yet" rather than "nothing is counting" — and a cap over
             it would look like protection while binding on nothing.
           */}
-          {view === 'chat' && expert?.mode !== 'profile' && (
+          {view === 'chat' && agents.budgetMatters && (
             <ExpertBudget
               enabled={expertEnabled}
               modeId={modeId}
@@ -1499,7 +1488,6 @@ export function App(props: AppProps): ReactElement {
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}
-            onSaveProfileExpert={saveProfileExpert}
             onAssessJunior={() =>
               props.transport.post({ type: 'assessJunior' } satisfies UiToHostMessage)
             }

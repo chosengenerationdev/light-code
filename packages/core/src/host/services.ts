@@ -141,19 +141,6 @@ export interface HostServices {
    * Absent means offered, so the extension is unaffected.
    */
   offersOffice?: boolean
-  /**
-   * Which kind of expert this host offers. Defaults to `cli`.
-   *
-   * `cli` consults Claude through its command line — what the extension has, unchanged.
-   * `profile` consults a provider profile the user has already configured, which is what the
-   * Node host offers: there is no `claude` binary on a server, and the gateway answering the
-   * chat already has a stronger model behind it.
-   *
-   * The two differ in what they can *truthfully say*, which is why this selects a whole tool
-   * rather than a flag inside one — see `askProviderExpert.ts`. Everything about budgets,
-   * per-consultation cost, savings and session resume belongs to `cli` alone.
-   */
-  expertMode?: 'cli' | 'profile'
   secrets: SecretStore
   configStore: ConfigStore
   ui: HostUi

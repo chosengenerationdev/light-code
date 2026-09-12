@@ -391,16 +391,6 @@ export async function createSession(options: SessionOptions): Promise<{ dispose:
      * The extension says nothing and keeps all of it — that is where the feature is used.
      */
     offersOffice: false,
-    /*
-     * The expert is a provider profile here, not the Claude CLI.
-     *
-     * Asked for directly: any configured model should be able to be the expert, and cost is no
-     * longer something to manage in the product. Both follow from where this runs — there is no
-     * `claude` binary on a server, and the gateway answering the chat already has a stronger
-     * model behind it. Everything about budgets, measured price and savings belongs to the CLI
-     * expert, which is what the extension still has.
-     */
-    expertMode: 'profile',
     transport: options.transport,
     /*
      * A shared profile's API key belongs to the administrator and lives beside the shared config;

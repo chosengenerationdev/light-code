@@ -17,7 +17,6 @@ import {
   textFieldStyle,
 } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
-import { ExpertProfilePanel } from './ExpertProfilePanel.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -38,15 +37,6 @@ const EXPERT_MODELS = [
 ] as const
 
 export interface ExpertState {
-  /**
-   * Which kind of expert this host has. Absent means the Claude CLI.
-   *
-   * `profile` renders an entirely different panel rather than hiding fields in this one — see
-   * `ExpertProfilePanel` for what is missing from it and why that is the point.
-   */
-  mode?: 'cli' | 'profile'
-  profileId?: string
-  profiles?: { id: string; label: string }[]
   enabled: boolean
   available: boolean
   path: string
@@ -90,8 +80,6 @@ export interface ExpertTabProps {
     model: string,
     limits: { maxSpendUsd: number; maxConsultations: number },
   ) => void
-  /** Saves the profile-based expert. Only ever called in `profile` mode. */
-  onSaveProfileExpert?: (enabled: boolean, profileId: string) => void
 }
 
 /**
@@ -101,29 +89,16 @@ export interface ExpertTabProps {
  * making. "Reduce Claude spend" only works if consultations stay rare, and the surest way
  * to make them rare is to be honest about the trade rather than presenting a free upgrade.
  */
+/**
+ * The Claude CLI expert: detection, the path, and everything about what it costs.
+ *
+ * Nested inside the Agents tab, and only where a budget applies. It briefly had a sibling — a
+ * cut-down panel for a provider-backed expert on the Node host — which the Agents tab then
+ * superseded outright: the expert is a *role*, and which model sits in it is one picker among
+ * five. Two panels for one idea is the drift this project pays for most often, so the sibling
+ * went rather than being kept in step.
+ */
 export function ExpertTab(props: ExpertTabProps): ReactElement {
-  /*
-   * A whole different panel, chosen before any of this tab's state exists.
-   *
-   * Branching inside the render instead would mean the CLI fields keep their state, their
-   * resync effect and their save handler in a host that has no CLI — a save away from writing
-   * `path: 'claude'` into the config of a server that has no such binary.
-   */
-  if (props.expert?.mode === 'profile') {
-    return (
-      <ExpertProfilePanel
-        enabled={props.expert.enabled}
-        profileId={props.expert.profileId}
-        profiles={props.expert.profiles ?? []}
-        onSave={(enabled, profileId) => props.onSaveProfileExpert?.(enabled, profileId)}
-      />
-    )
-  }
-  return <ExpertCliTab {...props} />
-}
-
-/** The Claude CLI expert, unchanged. Everything about cost and budget belongs to this one. */
-function ExpertCliTab(props: ExpertTabProps): ReactElement {
   const [enabled, setEnabled] = useState(props.expert?.enabled ?? false)
   const [path, setPath] = useState(props.expert?.path ?? 'claude')
   const [model, setModel] = useState(props.expert?.model ?? '')
