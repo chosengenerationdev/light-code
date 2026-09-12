@@ -8344,7 +8344,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * the UI importing it — so this is where it becomes one. Writing it anyway would put a key
        * in config that nothing ever reads and nothing ever cleans up.
        */
-      if (!isAgentRole(role)) {
+      if (!isAgentRole(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
@@ -8370,7 +8370,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setAgentPrompt') {
       const role = message.role
       const prompt = message.prompt
-      if (!isAgentRole(role)) {
+      if (!isAgentRole(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
@@ -8439,7 +8439,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setAgentColor') {
       const role = message.role
       const color = message.color
-      if (!isAgentRole(role)) {
+      if (!isAgentRole(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }

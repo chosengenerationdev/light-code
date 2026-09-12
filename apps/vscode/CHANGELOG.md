@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.78.2
+
+### Patch Changes
+
+- A custom role can actually be configured
+
+  Reported with a screenshot: a role created in the Agents tab, showing its checkboxes and its
+  colour, refused a provider with _There is no "test-role" role._
+
+  Three handlers — assigning somebody to a role, editing its prompt, setting its colour — still
+  called `isAgentRole(role)` with one argument, which means "the built-in five and nothing else".
+  The role existed everywhere except the places that let you configure it, which is a role you can
+  create and cannot use.
+
+  `roleValidation.test.ts` reads `bridge.ts` and fails on any bare `isAgentRole(role)`, because the
+  defect lives in the _absence_ of an argument: the function was correct throughout, and no test of
+  it could ever have caught this. The same reason `config/retrieval.test.ts` reads the bridge for a
+  directly-read config key. Verified non-vacuously by putting one call site back and watching two
+  assertions fail.
+
 ## 0.78.1
 
 ### Patch Changes
