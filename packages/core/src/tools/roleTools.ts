@@ -38,6 +38,16 @@ export interface RolePromptAccess {
   fallback(role: string): string | undefined
   /** Stores an edited prompt, or clears the edit when given undefined. */
   save(role: string, prompt: string | undefined): Promise<void>
+  /** Creates a role the user did not have. Rejects an unusable id or a full roster. */
+  create(role: {
+    id: string
+    name: string
+    summary: string
+    prompt: string
+    usesTools: boolean
+  }): Promise<void>
+  /** How many custom roles may exist, and how many there are, so the tool can say so. */
+  capacity(): { used: number; limit: number }
 }
 
 const readParams = z.object({
@@ -170,6 +180,106 @@ export function createUpdateRolePromptTool(
             ? `The ${role} is back to its default prompt. This applies from the next consultation.`
             : `The ${role}'s prompt is updated and the user approved it. Every consultation of ` +
               'that role from now on uses it.',
+      }
+    },
+  }
+}
+
+const createParams = z.object({
+  id: z
+    .string()
+    .describe(
+      'Short id the assistant will use to reach it, e.g. "security". Lowercase letters, digits ' +
+        'and hyphens. It cannot be changed afterwards.',
+    ),
+  name: z.string().describe('What to call it in the settings panel, e.g. "Security reviewer".'),
+  summary: z
+    .string()
+    .describe(
+      'One line on what it is for. Every other specialist sees this, and the expert allocates ' +
+        'from it when writing a plan — so say what it is good for, not what it is.',
+    ),
+  prompt: z
+    .string()
+    .describe(
+      'Its system prompt: what it is told it is and how to answer. What it may and may not do ' +
+        'is added automatically, so do not write rules about tools or permissions.',
+    ),
+  usesTools: z
+    .boolean()
+    .describe(
+      'Whether it may read and search the workspace. True where the answer depends on code the ' +
+        'asker cannot paste; false where the question carries everything it needs.',
+    ),
+})
+
+/**
+ * Inventing a specialist, from the chat.
+ *
+ * The same act as `update_role_prompt` and gated the same way — model-authored prose that will be
+ * injected into a model advising on this repository, so a human reads it once before it exists.
+ * The preview shows the whole definition rather than a diff, because there is nothing to diff
+ * against and what the user is being asked to judge is the role in full.
+ *
+ * Deleting one is deliberately **not** offered. It takes a prompt somebody wrote and tuned with
+ * it, the Agents tab already does it behind a two-click confirm, and there is no case where the
+ * assistant needs to remove a role badly enough to risk getting it wrong.
+ */
+export function createCreateRoleTool(access: RolePromptAccess): Tool<z.infer<typeof createParams>> {
+  return {
+    name: 'create_role',
+    // `edit`, never `always` — see the note on `update_role_prompt`.
+    group: 'edit',
+    description:
+      'Create a new specialist role beyond the built-in ones, when the user wants a kind of ' +
+      'reviewer or helper the team does not have — a security reviewer, a performance reviewer, ' +
+      'one that knows a particular part of this codebase. A role is its prompt, so write that ' +
+      'carefully. The user is shown the whole role and must approve it, and then assigns a model ' +
+      'to it in Settings → Agents before it can answer.',
+    parametersSchema: createParams,
+
+    async preview(params) {
+      const { used, limit } = access.capacity()
+      return {
+        kind: 'text',
+        text: [
+          `Create the role "${params.id.trim().toLowerCase()}" (${used + 1} of ${limit}).`,
+          '',
+          `Name:    ${params.name}`,
+          `For:     ${params.summary}`,
+          `Reads:   ${params.usesTools ? 'yes — it can read and search the workspace' : 'no — it answers from the question alone'}`,
+          '',
+          'What it is told:',
+          '',
+          params.prompt.trim(),
+        ].join('\n'),
+      }
+    },
+
+    async execute(params): Promise<ToolResult> {
+      const id = params.id.trim().toLowerCase()
+      if (access.current(id) !== undefined) {
+        return {
+          content:
+            `There is already a "${id}" role. Change it with update_role_prompt rather than ` +
+            'creating it again.',
+          isError: true,
+        }
+      }
+
+      try {
+        await access.create({ ...params, id })
+      } catch (error) {
+        return {
+          content: error instanceof Error ? error.message : String(error),
+          isError: true,
+        }
+      }
+
+      return {
+        content:
+          `The ${id} role exists and the user approved it. Nobody answers it yet — it needs a ` +
+          'model assigned in Settings → Agents before it can be consulted. Tell the user that.',
       }
     },
   }

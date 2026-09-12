@@ -1,5 +1,44 @@
 # light-code-vscode
 
+## 0.76.0
+
+### Minor Changes
+
+- Invent your own roles
+
+  The five built-in specialists cover most of a development cycle, and the ones people want next are
+  almost always the same shape — a reviewer with a different brief. A security reviewer, a
+  performance reviewer, one that knows a particular corner of a codebase. A role _is_ its prompt, so
+  the whole feature is a name, what it is for, and what it is told.
+
+  **Settings → Agents** has an Add role form: name, id, one-line summary, prompt, and whether it may
+  read the workspace. The id is suggested from the name, because it has rules the name does not — it
+  reaches a CSS variable, a config key and the argument a model types, where a space would be
+  mangled with no error. Deleting takes two clicks: it takes a prompt somebody wrote and tuned with
+  it. Capped at five, and the form says so before a save can fail on it, because the expert
+  allocates from that list and its judgement is what a longer one costs.
+
+  Each role also gets a **Can read and search the workspace** switch, so the per-role tool access
+  added alongside this is reachable rather than hand-edit only.
+
+  **The expert finds out automatically.** A custom role that has a model assigned appears on the
+  roster every specialist is given, with its summary and whether it can look things up — so the
+  expert allocates it in plans with no further wiring. It is told to treat the summary as the
+  authority on a role it does not recognise.
+
+  **And the assistant can create and maintain them.** `create_role` invents one, `read_role_prompt`
+  reads what a role is running on, and `update_role_prompt` changes it — each of the writing ones
+  always-ask, never available to a scheduled run, and previewing the whole role or a diff of the
+  prompt. Deleting is deliberately not offered to the model.
+
+  Two fixes found while building it. A custom role with no explicit colour now gets one derived from
+  its id, quantised to twelve evenly spaced hues — hashing the ids people actually pick put four of
+  five within 43° of each other, which on screen is four shades of the same green, and without any
+  colour at all they would every one have rendered as the expert. And an assignment naming no
+  profile no longer counts as an assignment: setting a preference on a role before staffing it made
+  it read as "unassigned" and unavailable, which looks like something broken rather than something
+  not yet done.
+
 ## 0.75.0
 
 ### Minor Changes

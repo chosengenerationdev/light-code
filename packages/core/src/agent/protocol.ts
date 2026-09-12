@@ -79,6 +79,15 @@ export interface AgentRoleState {
    * stale is the one that decides whether Reset is offered.
    */
   promptIsDefault: boolean
+  /**
+   * True for a role the user invented, which is the only kind that can be deleted.
+   *
+   * Sent rather than derived from a list of built-in names in the panel — that list is core's,
+   * and a copy of it in the UI is one more thing to go stale the day a sixth built-in appears.
+   */
+  custom?: boolean
+  /** Whether this specialist may read and search the workspace. See `AgentRoleInfo.usesTools`. */
+  usesTools: boolean
 }
 
 /** Cert *paths* are not secrets (§15) — only the passphrase is, and it never crosses. */
@@ -796,6 +805,19 @@ export type UiToHostMessage =
       guidance?: string
     }
   | { type: 'setAgentColor'; role: string; color: string }
+  /** Creates or updates a user-defined role. The id is fixed once created. */
+  | {
+      type: 'saveCustomRole'
+      id: string
+      name: string
+      summary: string
+      prompt: string
+      usesTools: boolean
+    }
+  /** Removes one, along with its assignment. Built-in roles are refused. */
+  | { type: 'deleteCustomRole'; id: string }
+  /** Turns a role's workspace access on or off, overriding its default. */
+  | { type: 'setRoleTools'; role: string; usesTools: boolean }
   | { type: 'requestAgents' }
   /** Sets the plan for the open chat. Empty clears it. */
   | { type: 'setPlan'; plan: string }

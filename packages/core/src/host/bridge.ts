@@ -25,6 +25,7 @@ import {
   type PlanAccess,
 } from '../tools/planTools.js'
 import {
+  createCreateRoleTool,
   createReadRolePromptTool,
   createUpdateRolePromptTool,
   type RolePromptAccess,
@@ -35,8 +36,10 @@ import { toToolDefinitions } from '../tools/registry.js'
 import {
   allRoles,
   buildAgentPrompt,
+  CUSTOM_ROLE_LIMIT,
   defaultPromptFor,
   isAgentRole,
+  isValidRoleId,
   knownRoles,
   roleInfo,
   type CustomRoleDefinition,
@@ -1005,6 +1008,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       isAgentRole(role, cachedAgentDefinitions)
         ? defaultPromptFor(role, cachedAgentDefinitions)
         : undefined,
+    create: async (role) => {
+      // Through the same handler the tab uses, so the id rules, the cap and the error wording are
+      // written once. A second validation path is a second set of rules to drift apart.
+      await handleSaveCustomRole(role)
+    },
+    capacity: () => ({ used: cachedAgentDefinitions.length, limit: CUSTOM_ROLE_LIMIT }),
     save: async (role, prompt) => {
       await saveAgents((current) => {
         const roles = { ...(current.roles ?? {}) }
@@ -1991,6 +2000,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      */
     combined.register(createReadRolePromptTool(rolePromptAccess), { dispatchOnly: dispatcher })
     combined.register(createUpdateRolePromptTool(rolePromptAccess), { dispatchOnly: dispatcher })
+    combined.register(createCreateRoleTool(rolePromptAccess), { dispatchOnly: dispatcher })
     // Offered whenever a folder is open. Unlike Python tools these need no interpreter —
     // a skill is markdown, so the only prerequisite is somewhere to put it.
     /*
@@ -3660,7 +3670,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * and a tab showing only what already exists gives you nowhere to start.
      */
     const assigned = new Map(resolveTeam(teamContext).map((agent) => [agent.role, agent]))
-    const roles = allRoles().map((info) => {
+    // Built-ins *and* whatever the user invented. Passing the definitions is the whole of what
+    // makes a custom role appear in the tab — everything below already works by role id.
+    const definitions = config.agents?.definitions ?? []
+    const customIds = new Set(definitions.map((definition) => definition.id))
+    const roles = allRoles(definitions).map((info) => {
       const agent = assigned.get(info.role)
       const prompt = config.agents?.roles?.[info.role]?.prompt
       return {
@@ -3672,8 +3686,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         label: agent?.label ?? 'Nobody',
         available: agent?.available ?? false,
         ...(agent?.reason !== undefined ? { reason: agent.reason } : {}),
-        prompt: prompt ?? defaultPromptFor(info.role),
+        prompt: prompt ?? defaultPromptFor(info.role, definitions),
         promptIsDefault: prompt === undefined,
+        ...(customIds.has(info.role) ? { custom: true } : {}),
+        // The assignment's override where there is one, else the role's own default — the same
+        // resolution `resolveTeam` does, so the switch in the tab shows what will actually happen.
+        usesTools: config.agents?.roles?.[info.role]?.tools ?? info.usesTools,
       }
     })
 
@@ -3711,6 +3729,82 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * from one control would erase every other control's value. That has cost real settings twice
    * here already — see `config/blockMerge.test.ts`.
    */
+  /**
+   * Creates or updates a role the user invented.
+   *
+   * The id is validated rather than trusted: it reaches a CSS custom property, a config key and
+   * the `ask_agent` argument a model types, and somewhere in that chain a space or a capital
+   * would be mangled with no error — presenting as a role that simply never answers.
+   *
+   * Editing keeps the same id on purpose. The id is what an assignment, a colour and any plan
+   * already written refer to, so letting it change would silently orphan all three.
+   */
+  async function handleSaveCustomRole(role: {
+    id: string
+    name: string
+    summary: string
+    prompt: string
+    usesTools: boolean
+  }): Promise<void> {
+    const id = role.id.trim().toLowerCase()
+    if (!isValidRoleId(id)) {
+      post({
+        type: 'error',
+        message:
+          `"${id}" is not a usable role id. Use lowercase letters, digits and hyphens, starting ` +
+          'with a letter, and not the name of a built-in role.',
+      })
+      return
+    }
+    if (role.name.trim().length === 0) {
+      post({ type: 'error', message: 'A role needs a name.' })
+      return
+    }
+
+    await saveAgents((current) => {
+      const definitions = [...(current.definitions ?? [])]
+      const at = definitions.findIndex((candidate) => candidate.id === id)
+      const next = {
+        id,
+        name: role.name.trim(),
+        summary: role.summary.trim(),
+        prompt: role.prompt.trim(),
+        usesTools: role.usesTools,
+      }
+      if (at === -1) {
+        if (definitions.length >= CUSTOM_ROLE_LIMIT) {
+          throw new Error(
+            `That would be ${String(definitions.length + 1)} custom roles. The limit is ` +
+              `${String(CUSTOM_ROLE_LIMIT)}: the expert allocates from this list, and its judgement ` +
+              'is what a longer one costs.',
+          )
+        }
+        definitions.push(next)
+      } else definitions[at] = next
+      return { ...current, definitions }
+    })
+  }
+
+  /** Removes a custom role, and the assignment that pointed at it. */
+  async function handleDeleteCustomRole(id: string): Promise<void> {
+    await saveAgents((current) => {
+      const roles = { ...(current.roles ?? {}) }
+      /*
+       * The assignment goes with the definition.
+       *
+       * Left behind it would be a key naming a role that no longer exists — invisible in the tab,
+       * still in the file, and resolving to the "no longer defined" placeholder if anything ever
+       * read it. `handleSetAgentRole` refuses to *write* such a key for the same reason.
+       */
+      delete roles[id]
+      return {
+        ...current,
+        roles,
+        definitions: (current.definitions ?? []).filter((candidate) => candidate.id !== id),
+      }
+    })
+  }
+
   async function saveAgents(
     change: (
       current: NonNullable<LightCodeConfig['agents']>,
@@ -8278,6 +8372,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           return rest
         }
         return { ...current, teamGuidance: guidance }
+      })
+    } else if (message.type === 'saveCustomRole') {
+      void handleSaveCustomRole(message)
+    } else if (message.type === 'deleteCustomRole') {
+      void handleDeleteCustomRole(message.id)
+    } else if (message.type === 'setRoleTools') {
+      const role = message.role
+      if (!isAgentRole(role, cachedAgentDefinitions)) {
+        post({ type: 'error', message: `There is no "${role}" role.` })
+        return
+      }
+      void saveAgents((current) => {
+        const roles = { ...(current.roles ?? {}) }
+        roles[role] = { ...(roles[role] ?? { kind: 'profile' as const }), tools: message.usesTools }
+        return { ...current, roles }
       })
     } else if (message.type === 'setAgentColor') {
       const role = message.role

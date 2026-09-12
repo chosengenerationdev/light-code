@@ -134,6 +134,17 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
       continue
     }
 
+    /*
+     * An assignment naming no profile is not an assignment.
+     *
+     * It exists because settings that live *on* the assignment — the tools flag, an edited
+     * prompt — have to be stored somewhere before anybody has been picked. Treated as assigned it
+     * showed the role as "unassigned" and unavailable, so turning a preference on for a role you
+     * had not staffed yet made it look broken. Skipped, the preference is kept and the role still
+     * reads as nobody-yet.
+     */
+    if (assignment.profileId === undefined) continue
+
     const profile = context.profiles.find((candidate) => candidate.id === assignment.profileId)
     resolved.push({
       role,

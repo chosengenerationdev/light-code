@@ -18,6 +18,8 @@ export type { AutoApproveSettings, WorkspaceApprovals, ApprovableGroup } from '.
 export type { Mode } from './modes/types.js'
 /* The progress panel renders these; the plan itself never crosses as anything but its text. */
 export type { CheckpointView, CheckpointStatus } from './agent/checkpoints.js'
+/* A value, not a type: the Agents tab states the cap before a save can fail on it. */
+export { CUSTOM_ROLE_LIMIT } from './agents/roles.js'
 export { BUILTIN_MODES, CODE_MODE, ASK_MODE, DEFAULT_MODE_ID, findMode } from './modes/builtin.js'
 export type {
   McpServerConfig,

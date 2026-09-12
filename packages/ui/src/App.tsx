@@ -1,4 +1,5 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
+import { CUSTOM_ROLE_LIMIT } from '@light-code/core/browser'
 import type { CheckpointView, ProbeTarget } from '@light-code/core/browser'
 import {
   DEFAULT_MODE_ID,
@@ -798,7 +799,12 @@ export function App(props: AppProps): ReactElement {
          */
         setAgents(message)
         // Applied immediately so a colour change is visible without a round trip through save.
-        applyAgentColors(message.colors)
+        // The roles in the message, so a user-defined one gets a colour of its own rather
+        // than falling through to the expert's.
+        applyAgentColors(
+          message.colors,
+          message.roles.map((entry) => entry.role),
+        )
       } else if (message.type === 'expert') {
         /*
          * Everything except the discriminant, rather than a hand-copied list.
@@ -1437,6 +1443,27 @@ export function App(props: AppProps): ReactElement {
                   type: 'setTeamGuidance',
                   ...(guidance !== undefined ? { guidance } : {}),
                 } satisfies UiToHostMessage),
+              onSaveCustomRole: (role) =>
+                props.transport.post({
+                  type: 'saveCustomRole',
+                  ...role,
+                } satisfies UiToHostMessage),
+              onDeleteCustomRole: (id) =>
+                props.transport.post({ type: 'deleteCustomRole', id } satisfies UiToHostMessage),
+              onSetRoleTools: (role, usesTools) =>
+                props.transport.post({
+                  type: 'setRoleTools',
+                  role,
+                  usesTools,
+                } satisfies UiToHostMessage),
+              /*
+               * The cap comes from core rather than being repeated here.
+               *
+               * The form states it before a save can fail on it, and a second copy in the UI is
+               * the one that would go stale the day it changes — the shape this codebase pays
+               * for most often.
+               */
+              customRoleLimit: CUSTOM_ROLE_LIMIT,
             }}
             onSetAgentColor={(role, hex) => {
               // Applied locally as well as saved, so the change is instant rather than waiting

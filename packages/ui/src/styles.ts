@@ -232,10 +232,90 @@ export function applyAgentColor(role: string, hex: string): void {
  * nothing and paints transparent, so a role assigned later would render as invisible text until
  * something else happened to rewrite the palette.
  */
-export function applyAgentColors(colors: Record<string, string> | undefined): void {
-  for (const [role, fallback] of Object.entries(DEFAULT_AGENT_COLORS)) {
-    applyAgentColor(role, colors?.[role] ?? fallback)
+export function applyAgentColors(
+  colors: Record<string, string> | undefined,
+  /**
+   * Roles beyond the built-in five, so a user-defined one is not invisible.
+   *
+   * Without this its tokens are never written, `var()` falls through to the expert's coral, and
+   * every custom role renders as the expert — which in the progress panel means a chip that
+   * claims the wrong specialist. A silent wrong colour is worse than an ugly one.
+   */
+  extraRoles: readonly string[] = [],
+): void {
+  const roles = new Set([
+    ...Object.keys(DEFAULT_AGENT_COLORS),
+    ...extraRoles,
+    ...Object.keys(colors ?? {}),
+  ])
+  for (const role of roles) {
+    applyAgentColor(role, colors?.[role] ?? DEFAULT_AGENT_COLORS[role] ?? hueFor(role))
   }
+}
+
+/**
+ * A colour for a role nobody has picked one for.
+ *
+ * ## Why it is derived rather than random, and quantised rather than continuous
+ *
+ * Derived from the id so it is stable: the same role is the same colour on every machine and
+ * after every restart, which matters because the colour is how somebody recognises whose advice
+ * they are reading.
+ *
+ * Quantised to twelve evenly spaced hues because a continuous wheel does not spread short strings
+ * well. Measured, not assumed — hashing the ids people actually pick ("security", "db-reviewer",
+ * "perf", "a11y") put four of five within 43° of each other, which on screen is four shades of
+ * the same green. Twelve slots guarantee at least 30° between any two distinct picks, and turn a
+ * collision into two roles that plainly share a colour rather than two that look subtly alike.
+ * Sharing is recoverable — the user sets one explicitly; looking alike is just confusing.
+ *
+ * Saturation and lightness are fixed where the result stays legible on a light and a dark ground,
+ * which is the whole reason this is not simply a random colour.
+ */
+function hueFor(role: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < role.length; index += 1) {
+    hash ^= role.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  /*
+   * An avalanche step before the modulo.
+   *
+   * FNV's low bits carry very little entropy for short inputs, and the slot is taken from exactly
+   * those bits. Without this, ids that differ by one character land in the same slot far more
+   * often than one in twelve.
+   */
+  hash ^= hash >>> 16
+  hash = Math.imul(hash, 0x7feb352d) >>> 0
+  hash ^= hash >>> 15
+  hash = Math.imul(hash, 0x846ca68b) >>> 0
+  hash ^= hash >>> 16
+
+  return hslToHex(((hash >>> 0) % 12) * 30, 0.52, 0.58)
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation
+  const second = chroma * (1 - Math.abs(((hue / 60) % 2) - 1))
+  const match = lightness - chroma / 2
+  const [red, green, blue] = (
+    hue < 60
+      ? [chroma, second, 0]
+      : hue < 120
+        ? [second, chroma, 0]
+        : hue < 180
+          ? [0, chroma, second]
+          : hue < 240
+            ? [0, second, chroma]
+            : hue < 300
+              ? [second, 0, chroma]
+              : [chroma, 0, second]
+  ) as [number, number, number]
+  const channel = (value: number): string =>
+    Math.round((value + match) * 255)
+      .toString(16)
+      .padStart(2, '0')
+  return `#${channel(red)}${channel(green)}${channel(blue)}`
 }
 
 /*

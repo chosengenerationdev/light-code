@@ -28,6 +28,7 @@ function role(partial: Partial<AgentRoleState> & { role: string }): AgentRoleSta
     available: false,
     prompt: 'You are a thing.',
     promptIsDefault: true,
+    usesTools: true,
     ...partial,
   }
 }
@@ -48,6 +49,10 @@ const base: AgentsTabProps = {
   onSetPrompt: () => {},
   onSetBudget: () => {},
   onSetTeamGuidance: () => {},
+  onSaveCustomRole: () => {},
+  onDeleteCustomRole: () => {},
+  onSetRoleTools: () => {},
+  customRoleLimit: 5,
 }
 
 function render(props: Partial<AgentsTabProps>): void {
@@ -161,7 +166,12 @@ describe('the Agents tab', () => {
   it('reports the budget choice', () => {
     const onSetBudget = vi.fn()
     render({ onSetBudget })
-    const box = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')][0]
+    // By name, not by position: this used to take the first checkbox on the page, and adding a
+    // per-role one above it pointed the test at something else entirely.
+    const box = container.querySelector<HTMLInputElement>(
+      'input[aria-label="What consultations cost is worth managing"]',
+    )
+    if (box === null) throw new Error('no budget checkbox')
     click(box)
     expect(onSetBudget).toHaveBeenCalledWith(true)
   })
@@ -192,5 +202,118 @@ describe('the Agents tab', () => {
   it('warns when there are no providers to assign at all', () => {
     render({ profiles: [], cliAvailable: false })
     expect(container.textContent).toContain('No providers are configured yet')
+  })
+})
+
+/**
+ * Inventing a role, from the tab.
+ *
+ * Rendered rather than reasoned about: jsdom is the only eye this has before it reaches a real
+ * panel, and the two things worth catching here are both behavioural — a delete that fires on one
+ * click, and an id the user never sees until it is wrong.
+ */
+describe('custom roles', () => {
+  function click(label: string): void {
+    const button = [...container.querySelectorAll('button')].find((candidate) =>
+      candidate.textContent?.includes(label),
+    )
+    if (button === undefined) throw new Error(`no button matching "${label}"`)
+    act(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  }
+
+  function type(placeholder: string, value: string): void {
+    const field = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      `[placeholder^="${placeholder}"]`,
+    )
+    if (field === null) throw new Error(`no field with placeholder "${placeholder}"`)
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        field instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype,
+        'value',
+      )?.set
+      setter?.call(field, value)
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
+  it('suggests an id from the name, so nobody has to learn the rules', () => {
+    render({})
+    click('Add a role')
+    type('Security reviewer', 'DB Reviewer!')
+
+    const id = container.querySelector<HTMLInputElement>('[placeholder="security"]')
+    expect(id?.value).toBe('db-reviewer')
+  })
+
+  it('saves what was typed', () => {
+    const onSaveCustomRole = vi.fn()
+    render({ onSaveCustomRole })
+    click('Add a role')
+    type('Security reviewer', 'DB reviewer')
+    type('Threat model', 'SQL and migrations')
+    click('Add role')
+
+    expect(onSaveCustomRole).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'db-reviewer', name: 'DB reviewer', summary: 'SQL and migrations' }),
+    )
+  })
+
+  it('will not save a role with no name', () => {
+    const onSaveCustomRole = vi.fn()
+    render({ onSaveCustomRole })
+    click('Add a role')
+    click('Add role')
+    expect(onSaveCustomRole).not.toHaveBeenCalled()
+  })
+
+  /*
+   * Deleting takes a prompt somebody wrote and tuned with it, so one click arms and the second
+   * does it. The label changing is the whole affordance — without it the first click looks like
+   * nothing happened.
+   */
+  it('asks twice before deleting', () => {
+    const onDeleteCustomRole = vi.fn()
+    render({
+      onDeleteCustomRole,
+      roles: [role({ role: 'db', name: 'DB reviewer', custom: true })],
+    })
+
+    click('Delete')
+    expect(onDeleteCustomRole).not.toHaveBeenCalled()
+
+    click('Really delete?')
+    expect(onDeleteCustomRole).toHaveBeenCalledWith('db')
+  })
+
+  it('offers no delete for a built-in role', () => {
+    render({ roles: [role({ role: 'reviewer', name: 'Reviewer' })] })
+    const labels = [...container.querySelectorAll('button')].map((button) => button.textContent)
+    expect(labels.some((label) => label?.includes('Delete'))).toBe(false)
+  })
+
+  it('stops offering more once the cap is reached', () => {
+    render({
+      customRoleLimit: 1,
+      roles: [role({ role: 'db', name: 'DB reviewer', custom: true })],
+    })
+    const add = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Add a role'),
+    )
+    expect(add?.disabled).toBe(true)
+  })
+
+  it('turns a role\'s workspace access on and off', () => {
+    const onSetRoleTools = vi.fn()
+    render({
+      onSetRoleTools,
+      roles: [role({ role: 'reviewer', name: 'Reviewer', usesTools: false })],
+    })
+
+    const box = container.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    expect(box?.checked).toBe(false)
+    act(() => box?.click())
+    expect(onSetRoleTools).toHaveBeenCalledWith('reviewer', true)
   })
 })

@@ -115,6 +115,14 @@ export const agentAssignmentSchema = z
      * every user to whatever it said the day they first opened it.
      */
     prompt: z.string().optional(),
+    /**
+     * Whether this specialist may read and search the workspace, overriding the role's default.
+     *
+     * On the assignment rather than the role because it depends on *who* is answering: a small
+     * local model given five lookups can spend them all and answer worse, where a strong one
+     * uses them well. Absent means the role's own default.
+     */
+    tools: z.boolean().optional(),
   })
   .strict()
 

@@ -75,6 +75,8 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * diff.
    */
   'update_role_prompt',
+  // Inventing one is the same act as rewriting one: a prompt that will advise on this code.
+  'create_role',
 ])
 
 export function decideFromPolicy(

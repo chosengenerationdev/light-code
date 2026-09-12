@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { createReadRolePromptTool, createUpdateRolePromptTool } from './roleTools.js'
+import {
+  createCreateRoleTool,
+  createReadRolePromptTool,
+  createUpdateRolePromptTool,
+} from './roleTools.js'
 import type { RolePromptAccess } from './roleTools.js'
 import { decideFromPolicy } from '../approval/policy.js'
 import { NEVER_AVAILABLE_TO_SCHEDULES } from '../schedule/runner.js'
@@ -12,10 +16,14 @@ const DEFAULTS: Record<string, string> = {
   tester: 'You design tests.',
 }
 
-function access(edited: Record<string, string> = {}): RolePromptAccess & { saved: unknown[] } {
+function access(
+  edited: Record<string, string> = {},
+): RolePromptAccess & { saved: unknown[]; created: { id: string }[] } {
   const saved: unknown[] = []
+  const created: { id: string }[] = []
   return {
     saved,
+    created,
     list: () =>
       Object.keys(DEFAULTS).map((role) => ({
         role,
@@ -28,6 +36,11 @@ function access(edited: Record<string, string> = {}): RolePromptAccess & { saved
     save: async (role, prompt) => {
       saved.push({ role, prompt })
     },
+    create: async (role) => {
+      if (created.length >= 1) throw new Error('The limit is 1 custom role.')
+      created.push(role)
+    },
+    capacity: () => ({ used: created.length, limit: 1 }),
   }
 }
 
@@ -151,5 +164,85 @@ describe('the wiring', () => {
     const accessAt = bridge.indexOf('const rolePromptAccess')
     const block = bridge.slice(accessAt, accessAt + 2000)
     expect(block).toContain('await saveAgents(')
+  })
+})
+
+describe('inventing a role', () => {
+  it('shows the whole role, because there is nothing to diff against', async () => {
+    const tool = createCreateRoleTool(access())
+    const preview = await tool.preview?.(
+      {
+        id: 'security',
+        name: 'Security reviewer',
+        summary: 'Threat model and attack surface',
+        prompt: 'You review changes for security.',
+        usesTools: true,
+      },
+      NO_CONTEXT,
+    )
+    const text = preview?.kind === 'text' ? preview.text : ''
+    expect(text).toContain('Security reviewer')
+    expect(text).toContain('Threat model and attack surface')
+    expect(text).toContain('You review changes for security.')
+    // What it can do is part of what is being approved, not a detail.
+    expect(text).toContain('it can read and search the workspace')
+    expect(text).toContain('1 of 1')
+  })
+
+  it('creates it and says it still needs a model', async () => {
+    const store = access()
+    const tool = createCreateRoleTool(store)
+    const result = await tool.execute(
+      { id: ' Security ', name: 'Security reviewer', summary: 's', prompt: 'p', usesTools: false },
+      NO_CONTEXT,
+    )
+    // Normalised here as well as in the host, so the id the model typed cannot differ from the
+    // one that gets stored by a stray capital.
+    expect(store.created).toEqual([
+      { id: 'security', name: 'Security reviewer', summary: 's', prompt: 'p', usesTools: false },
+    ])
+    expect(String(result.content)).toContain('needs a model assigned')
+  })
+
+  it('refuses a role that already exists, and points at the other tool', async () => {
+    const store = access()
+    const tool = createCreateRoleTool(store)
+    const result = await tool.execute(
+      { id: 'reviewer', name: 'x', summary: 's', prompt: 'p', usesTools: true },
+      NO_CONTEXT,
+    )
+    expect(result.isError).toBe(true)
+    expect(String(result.content)).toContain('update_role_prompt')
+    expect(store.created).toEqual([])
+  })
+
+  /*
+   * The cap is enforced where the tab enforces it, so the tool reports the same sentence rather
+   * than carrying its own copy of the rule. A second limit check is a second thing to get wrong.
+   */
+  it('reports the host refusing it rather than throwing', async () => {
+    const store = access()
+    const tool = createCreateRoleTool(store)
+    await tool.execute({ id: 'a', name: 'a', summary: '', prompt: '', usesTools: true }, NO_CONTEXT)
+    const result = await tool.execute(
+      { id: 'b', name: 'b', summary: '', prompt: '', usesTools: true },
+      NO_CONTEXT,
+    )
+    expect(result.isError).toBe(true)
+    expect(String(result.content)).toContain('limit is 1')
+  })
+
+  it('always asks, and is never available to a schedule', () => {
+    expect(createCreateRoleTool(access()).group).not.toBe('always')
+    expect(NEVER_AVAILABLE_TO_SCHEDULES).toContain('create_role')
+  })
+
+  /*
+   * Deleting is deliberately not offered to the model: it takes a prompt somebody wrote and tuned
+   * with it, and the tab already does it behind a two-click confirm.
+   */
+  it('offers no way to delete one', () => {
+    const source = readFileSync(fileURLToPath(new URL('./roleTools.ts', import.meta.url)), 'utf8')
+    expect(source).not.toContain('delete_role')
   })
 })

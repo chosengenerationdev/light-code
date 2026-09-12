@@ -66,6 +66,7 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   // Rewriting what a specialist is, unattended. The same ladder: a run that can redefine its own
   // reviewer can arrange to be reviewed favourably by the next one.
   'update_role_prompt',
+  'create_role',
 ]
 
 /**

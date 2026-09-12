@@ -173,14 +173,25 @@ function buildRoster(team: readonly ResolvedAgent[], self: AgentRole | undefined
       '- **Readers** — the reviewer, the tester, the librarian. Worth a step where another pair of',
       '  eyes changes what happens: risky or fiddly code, a step that finishes something, a',
       '  convention you would otherwise be guessing at.',
-      '- **The librarian drafts what should be written down.** A step like "record how this is',
-      '  set up" is a good one to allocate: it reads what already exists and writes the skill',
-      '  text. It cannot save it — the assistant proposes it and the user approves the source',
-      '  before anything is recorded — so word the step as drafting, not filing.',
+      '- **The librarian writes down what should be written down.** A step like "record how this',
+      '  is set up" is a good one to allocate: it reads what already exists and records the skill',
+      '  itself. The user approves the text before it is saved, so word the step as recording.',
       '- **The programmer writes.** Where a step is a self-contained piece of code with a spec',
       '  clear enough to hand over — a parser, a schema, a set of pure functions — say so and give',
       '  it to the programmer. The assistant checks what comes back against the real file and',
       '  applies it, so this is delegation rather than trust.',
+      '',
+      /*
+       * A role invented by the user, which no fixed description can cover.
+       *
+       * The two bullets above name the built-in five, and a plan written only from them would
+       * quietly skip a `db-reviewer` the user went to the trouble of creating — the same failure
+       * as never allocating the programmer, arriving from the other direction. The summary is the
+       * only thing that can describe it, so the instruction is to read it.
+       */
+      '- **A role you do not recognise is described by its summary above.** The user invented it',
+      '  and wrote that line, so treat it as the authority on what the role is for and allocate it',
+      '  where the summary says it helps.',
       '',
       'Only where it genuinely changes the outcome: a plan that routes every step through all of',
       'them is ceremony, and one that routes none wastes a team that is sitting there.',

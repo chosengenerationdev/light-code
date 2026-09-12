@@ -36,6 +36,19 @@ export interface AgentsTabProps {
   onSetPrompt: (role: string, prompt: string | undefined) => void
   onSetBudget: (matters: boolean) => void
   onSetTeamGuidance: (guidance: string | undefined) => void
+  /** Creates or updates a role the user invented. The id is fixed once created. */
+  onSaveCustomRole: (role: {
+    id: string
+    name: string
+    summary: string
+    prompt: string
+    usesTools: boolean
+  }) => void
+  onDeleteCustomRole: (id: string) => void
+  /** Turns one role's workspace access on or off. */
+  onSetRoleTools: (role: string, usesTools: boolean) => void
+  /** How many custom roles may exist, so the form can say so before the save fails. */
+  customRoleLimit: number
   /** The budget controls, rendered here only when cost is worth managing. */
   budgetPanel?: ReactElement
 }
@@ -64,6 +77,19 @@ export interface AgentsTabProps {
 export function AgentsTab(props: AgentsTabProps): ReactElement {
   const [editing, setEditing] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState('')
+  /** Which delete has been clicked once. Two clicks, because it takes a written prompt with it. */
+  const [confirmed, setConfirmed] = useState<string | undefined>(undefined)
+  const [adding, setAdding] = useState(false)
+  const [newRole, setNewRole] = useState({
+    id: '',
+    name: '',
+    summary: '',
+    prompt: '',
+    usesTools: true,
+  })
+
+  const customCount = props.roles.filter((role) => role.custom === true).length
+  const roomForMore = customCount < props.customRoleLimit
   const [guidance, setGuidance] = useState(props.teamGuidance)
   const [showGuidance, setShowGuidance] = useState(false)
 
@@ -159,6 +185,22 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
               */}
               Prompt
             </button>
+            {role.custom === true && (
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                aria-label={`Delete the ${role.name} role`}
+                title="Remove this role and its assignment"
+                onClick={() => {
+                  // Confirmed because it takes the prompt with it, and a prompt somebody wrote
+                  // and tuned is not something to lose to a mis-click.
+                  if (confirmed === role.role) props.onDeleteCustomRole(role.role)
+                  else setConfirmed(role.role)
+                }}
+              >
+                {confirmed === role.role ? 'Really delete?' : 'Delete'}
+              </button>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -179,6 +221,30 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
               />
             </div>
           </div>
+
+          {/*
+            Whether this specialist may look things up for itself.
+            Shown per role because the right answer differs: a librarian that cannot read what is
+            written down is answering from whatever was pasted at it, while a programmer handed a
+            spec spends its lookups on nothing. Each costs a round trip, so it is a choice.
+          */}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 6,
+              fontSize: 11,
+              color: colors.muted,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={role.usesTools}
+              onChange={(event) => props.onSetRoleTools(role.role, event.target.checked)}
+            />
+            Can read and search the workspace
+          </label>
 
           {/*
             A role assigned to something that has gone says so here rather than failing at the
@@ -248,6 +314,154 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
         </div>
       ))}
 
+      {/*
+        Inventing a role.
+
+        The five built-in ones cover most of a development cycle, and the ones people want next are
+        almost always a reviewer with a different brief — security, performance, accessibility, or
+        one that knows this codebase's own conventions. A role *is* its prompt, so this is the
+        whole feature: a name, what it is for, and what it is told.
+
+        Capped, and the cap is stated up front rather than discovered when saving fails. The expert
+        allocates from this list and its judgement is what a longer one costs.
+      */}
+      {adding ? (
+        <div
+          style={{
+            border: `1px solid ${colors.border}`,
+            borderRadius: 3,
+            padding: '8px 10px',
+            marginBottom: 8,
+          }}
+        >
+          <span style={labelStyle()}>Name</span>
+          <input
+            value={newRole.name}
+            placeholder="Security reviewer"
+            style={{ ...textFieldStyle(), width: '100%' }}
+            onChange={(event) => {
+              const name = event.target.value
+              setNewRole((current) => ({
+                ...current,
+                name,
+                // Suggested from the name until the user types one themselves, because the id has
+                // rules the name does not and nobody wants to learn them to make a role.
+                id:
+                  current.id.length === 0 || current.id === slug(current.name)
+                    ? slug(name)
+                    : current.id,
+              }))
+            }}
+          />
+
+          <span style={labelStyle()}>Id</span>
+          <input
+            value={newRole.id}
+            placeholder="security"
+            style={{ ...textFieldStyle(), width: '100%' }}
+            onChange={(event) => setNewRole((current) => ({ ...current, id: event.target.value }))}
+          />
+          <p style={{ color: colors.muted, fontSize: 11, margin: '2px 0 0' }}>
+            What the assistant types to reach it (<code>ask_agent {newRole.id || 'security'}</code>
+            ). Lowercase letters, digits and hyphens. It cannot be changed later.
+          </p>
+
+          <span style={labelStyle()}>What it is for</span>
+          <input
+            value={newRole.summary}
+            placeholder="Threat model and attack surface"
+            style={{ ...textFieldStyle(), width: '100%' }}
+            onChange={(event) =>
+              setNewRole((current) => ({ ...current, summary: event.target.value }))
+            }
+          />
+          <p style={{ color: colors.muted, fontSize: 11, margin: '2px 0 0' }}>
+            One line. Every specialist sees it on the roster, and it is what the expert allocates
+            from when it writes a plan.
+          </p>
+
+          <span style={labelStyle()}>What it is told</span>
+          <textarea
+            value={newRole.prompt}
+            rows={8}
+            spellCheck={false}
+            placeholder={
+              'You review changes for security. Look for what the code trusts, where untrusted ' +
+              'input reaches a decision, and what an attacker controls...'
+            }
+            style={{ ...textFieldStyle(), width: '100%', resize: 'vertical' }}
+            onChange={(event) =>
+              setNewRole((current) => ({ ...current, prompt: event.target.value }))
+            }
+          />
+          <p style={{ color: colors.muted, fontSize: 11, margin: '2px 0 0' }}>
+            Its system prompt. What it may and may not do is added automatically, so it cannot be
+            left out by accident.
+          </p>
+
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 6,
+              fontSize: 11,
+              color: colors.muted,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={newRole.usesTools}
+              onChange={(event) =>
+                setNewRole((current) => ({ ...current, usesTools: event.target.checked }))
+              }
+            />
+            Can read and search the workspace
+          </label>
+
+          <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              style={primaryButtonStyle(newRole.name.trim().length === 0)}
+              disabled={newRole.name.trim().length === 0}
+              onClick={() => {
+                props.onSaveCustomRole({ ...newRole, id: newRole.id.trim().toLowerCase() })
+                setAdding(false)
+                setNewRole({ id: '', name: '', summary: '', prompt: '', usesTools: true })
+              }}
+            >
+              Add role
+            </button>
+            <button type="button" style={secondaryButtonStyle()} onClick={() => setAdding(false)}>
+              Cancel
+            </button>
+            <span style={{ color: colors.muted, fontSize: 11 }}>
+              Assign a model to it once it exists.
+            </span>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={!roomForMore}
+          title={
+            roomForMore
+              ? 'Invent a role of your own'
+              : `The limit is ${String(props.customRoleLimit)} custom roles.`
+          }
+          onClick={() => setAdding(true)}
+        >
+          Add a role
+          {customCount > 0 && (
+            <span style={{ color: colors.muted }}>
+              {' '}
+              ({customCount}/{props.customRoleLimit})
+            </span>
+          )}
+        </button>
+      )}
+
       <label
         style={{
           display: 'flex',
@@ -259,6 +473,9 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
       >
         <input
           type="checkbox"
+          // Named, so nothing has to find it by position. A test did, and adding a checkbox above
+          // it silently retargeted that test at a different control.
+          aria-label="What consultations cost is worth managing"
           checked={props.budgetMatters}
           onChange={(event) => props.onSetBudget(event.target.checked)}
         />
@@ -340,4 +557,20 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
       )}
     </div>
   )
+}
+
+/**
+ * A name turned into a usable id.
+ *
+ * Suggested rather than enforced: the id has rules the name does not — lowercase, no spaces,
+ * because it reaches a CSS custom property, a config key and a tool argument — and nobody should
+ * have to learn them to invent a role. Typing over it stops the suggestion.
+ */
+function slug(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24)
 }
