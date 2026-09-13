@@ -1,5 +1,29 @@
 # @chosengeneration/light-code
 
+## 0.59.4
+
+### Patch Changes
+
+- A consultation routed through the dispatcher is attributed to the role that answered
+
+  Reported from real use: working a plan, the librarian's step arrived labelled "informed by
+  reviewer" — the reviewer's name over the librarian's words.
+
+  The model had called `call_tool({name: 'ask_agent', arguments: {role: 'librarian'}})`. The agent
+  loop fires `onToolCall` with the **raw** call and unwraps the dispatcher only later, inside
+  `prepareToolCall`, so `consultationFromToolCall` saw the name `call_tool`, recognised nothing, and
+  returned `undefined` — leaving the caller's `informedBy` holding whatever the previous step had put
+  there.
+
+  A stale label is not a missing one. The chat names and colours that role, and a colour reads as a
+  fact about who did the work; misattribution is worse than no attribution, which is the entire
+  reason the attribution exists.
+
+  Unwrapped in the derivation rather than at `onToolCall`, because the stored history holds the raw
+  call too — fixing only the loop would have corrected the live chat and left a reopened task still
+  lying. `chartFromToolCall` goes through the same helper: a chart drawn through the dispatcher would
+  otherwise render as nothing, which this project has already had once by another road.
+
 ## 0.59.3
 
 ### Patch Changes

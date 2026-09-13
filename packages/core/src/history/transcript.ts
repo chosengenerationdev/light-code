@@ -1,4 +1,5 @@
 import { chartSpecSchema, type ChartSpec } from '../charts/types.js'
+import { CALL_TOOL_NAME } from '../tools/callTool.js'
 import type { ToolCallSummary, TranscriptEntry } from '../agent/protocol.js'
 import type { ChatMessage } from '../providers/types.js'
 
@@ -202,9 +203,10 @@ export function toolCallSummary(
 }
 
 export function consultationFromToolCall(name: string, rawArguments: string): string | undefined {
-  if (name === 'ask_expert') return 'expert'
-  if (name !== 'ask_agent') return undefined
-  const decoded = decodeArguments(rawArguments)
+  const call = throughDispatch(name, rawArguments)
+  if (call.name === 'ask_expert') return 'expert'
+  if (call.name !== 'ask_agent') return undefined
+  const decoded = call.args
   const role =
     typeof decoded === 'object' && decoded !== null
       ? (decoded as { role?: unknown }).role
@@ -222,11 +224,48 @@ export function chartFromToolCall(
   name: string,
   rawArguments: string,
 ): { kind: 'chart'; chart: ChartSpec } | { kind: 'chartError'; message: string } | undefined {
-  if (name !== 'show_chart') return undefined
-  const parsed = chartSpecSchema.safeParse(decodeArguments(rawArguments))
+  const call = throughDispatch(name, rawArguments)
+  if (call.name !== 'show_chart') return undefined
+  const parsed = chartSpecSchema.safeParse(call.args)
   return parsed.success
     ? { kind: 'chart', chart: parsed.data }
     : { kind: 'chartError', message: parsed.error.issues.map((issue) => issue.message).join('; ') }
+}
+
+/**
+ * The call a tool call actually stands for, seeing through `call_tool`.
+ *
+ * ## Why this is needed, and what it cost
+ *
+ * Reported from real use: a librarian's answer was labelled "informed by reviewer". The model had
+ * routed the consultation through the dispatcher — `call_tool({name: 'ask_agent', ...})` — and the
+ * loop fires `onToolCall` with the **raw** call, unwrapping only later inside `prepareToolCall`.
+ * So this function saw the name `call_tool`, recognised nothing, returned `undefined`, and the
+ * caller's `informedBy` kept whatever it held from the previous step. A stale label reads as a
+ * fact about who did the work, which is precisely what this attribution exists to get right —
+ * misattribution is worse than none.
+ *
+ * ## Why it is unwrapped here rather than at `onToolCall`
+ *
+ * Because the stored history holds the raw call too, so the restored transcript derives from the
+ * same shape as the live path. Unwrapping only in the loop would fix the chat and leave a reopened
+ * task still lying, which is the one-fact-in-two-places split this repository keeps paying for.
+ * One owner, both readers.
+ *
+ * `chartFromToolCall` goes through it for the same reason: a chart drawn via the dispatcher would
+ * otherwise render as nothing, which is a bug this project has already had once by another road.
+ */
+function throughDispatch(name: string, rawArguments: string): { name: string; args: unknown } {
+  const decoded = decodeArguments(rawArguments)
+  if (name !== CALL_TOOL_NAME || typeof decoded !== 'object' || decoded === null) {
+    return { name, args: decoded }
+  }
+  const inner = decoded as { name?: unknown; arguments?: unknown }
+  // A malformed wrapper is left as itself rather than guessed at: reporting it as the inner call
+  // would attribute work to a role nobody named.
+  if (typeof inner.name !== 'string' || inner.name.length === 0) return { name, args: decoded }
+  // `call_tool`'s arguments are an object by schema, not the JSON string a provider sends.
+  return { name: inner.name, args: inner.arguments ?? {} }
 }
 
 /** A tool call's arguments as an object. Providers send them as a JSON string. */
