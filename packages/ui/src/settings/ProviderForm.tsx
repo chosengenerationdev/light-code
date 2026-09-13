@@ -41,6 +41,7 @@ export interface ProviderFormValues {
   certs?: CertSummary
   modelCapabilities?: ModelCapabilityInput
   connectionTls?: ConnectionTlsInput
+  thinking?: { level: 'off' | 'low' | 'medium' | 'high'; style?: 'effort' | 'qwen' }
 }
 
 export interface ProviderFormProps {
@@ -83,6 +84,16 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
   const [certs, setCerts] = useState<CertSummary>(props.initial.certs ?? {})
   const [certPassphrase, setCertPassphrase] = useState('')
   const [capabilities, setCapabilities] = useState<ModelCapabilityInput>(props.initial.modelCapabilities ?? {})
+  /*
+   * Thinking, and which parameter carries it.
+   *
+   * Empty level means send nothing at all, which is what every request did before the setting
+   * existed and the only value that cannot break a gateway nobody has tested against.
+   */
+  const [thinkingLevel, setThinkingLevel] = useState<string>(props.initial.thinking?.level ?? '')
+  const [thinkingStyle, setThinkingStyle] = useState<'effort' | 'qwen'>(
+    props.initial.thinking?.style ?? 'effort',
+  )
   const [connectionTls, setConnectionTls] = useState<ConnectionTlsInput>(props.initial.connectionTls ?? {})
   const [errors, setErrors] = useState<FieldError[]>([])
   /** Prevents a re-fetch every time focus leaves the URL field without it having changed. */
@@ -115,6 +126,16 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
     ...(authType === 'header' ? { authHeaders } : {}),
     ...(authType === 'apigeeMtls' ? { apigee, clientSecret, certs, certPassphrase } : {}),
     ...(Object.keys(capabilities).length > 0 ? { modelCapabilities: capabilities } : {}),
+    ...(thinkingLevel === ''
+      ? {}
+      : {
+          thinking: {
+            level: thinkingLevel as 'off' | 'low' | 'medium' | 'high',
+            // Only consulted for the OpenAI wire format; the others spell it unambiguously, and
+            // storing a style against them would be a setting that reads as if it did something.
+            ...(wireFormat === 'openai' ? { style: thinkingStyle } : {}),
+          },
+        }),
     ...(connectionTls.caFile !== undefined || connectionTls.rejectUnauthorized !== undefined
       ? { connectionTls }
       : {}),
@@ -219,6 +240,58 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         capabilities={capabilities}
         onCapabilitiesChange={setCapabilities}
       />
+
+      {/*
+        How hard this model thinks.
+
+        This lived in config and nowhere else for a release - the mechanism was complete and
+        unreachable, which from the outside is the same as not having it. The `style` half is why
+        it had to surface: "OpenAI-compatible" is not one thing, and the two spellings are not
+        interchangeable. Sending the wrong one is a 400 on every request.
+      */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+        <label style={labelStyle()}>Thinking</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 150, flex: 1 }}>
+            <Select
+              compact
+              ariaLabel="Thinking level"
+              value={thinkingLevel}
+              onChange={setThinkingLevel}
+              options={[
+                { value: '', label: 'Send nothing (default)' },
+                { value: 'off', label: 'Off' },
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'high', label: 'High' },
+              ]}
+            />
+          </div>
+          {wireFormat === 'openai' && thinkingLevel !== '' && (
+            <div style={{ minWidth: 210, flex: 1 }}>
+              <Select
+                compact
+                ariaLabel="Thinking parameter"
+                value={thinkingStyle}
+                onChange={(value) => setThinkingStyle(value as 'effort' | 'qwen')}
+                options={[
+                  { value: 'effort', label: 'as reasoning_effort' },
+                  { value: 'qwen', label: 'as enable_thinking (Qwen)' },
+                ]}
+              />
+            </div>
+          )}
+        </div>
+        <span style={{ color: colors.muted, fontSize: 11, lineHeight: 1.5 }}>
+          {thinkingLevel === ''
+            ? 'Nothing is sent, which is how every profile behaved before this existed. Set it only against a gateway you know accepts it.'
+            : wireFormat !== 'openai'
+              ? 'This wire format spells thinking one way, so there is nothing to choose.'
+              : thinkingStyle === 'effort'
+                ? 'Sends reasoning_effort. Right for OpenAI and most gateways fronting a reasoning model.'
+                : 'Sends chat_template_kwargs.enable_thinking, which vLLM and SGLang expose for Qwen3 and its relatives. On or off only \u2014 the level is not a depth dial here.'}
+        </span>
+      </div>
 
       {authType === 'header' && <HeaderAuthFields headers={authHeaders} onChange={setAuthHeaders} />}
 

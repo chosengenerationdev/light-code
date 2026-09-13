@@ -186,6 +186,8 @@ export interface ProfileSummary {
   certs?: CertSummary
   modelCapabilities?: ModelCapabilityInput
   connectionTls?: ConnectionTlsInput
+  /** The configured thinking level and parameter style. Neither is a secret. */
+  thinking?: { level: 'off' | 'low' | 'medium' | 'high'; style?: 'effort' | 'qwen' | undefined }
 }
 
 /**
@@ -240,6 +242,15 @@ export interface ProfileInput {
   certPassphrase?: string
   modelCapabilities?: ModelCapabilityInput
   connectionTls?: ConnectionTlsInput
+  /**
+   * How hard this model thinks, and which parameter says so.
+   *
+   * `style` is the load-bearing half and the reason this had to reach the UI: OpenAI-compatible
+   * endpoints are not one thing. OpenAI itself takes `reasoning_effort`; vLLM and SGLang serving
+   * Qwen3 take `chat_template_kwargs.enable_thinking`, and neither accepts the other. Sending the
+   * wrong one is a 400 on *every* request, not a hint quietly ignored on the hard ones.
+   */
+  thinking?: { level: 'off' | 'low' | 'medium' | 'high'; style?: 'effort' | 'qwen' }
 }
 
 /**

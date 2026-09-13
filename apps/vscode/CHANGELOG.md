@@ -1,5 +1,31 @@
 # light-code-vscode
 
+## 0.82.1
+
+### Patch Changes
+
+- The thinking setting is reachable from the panel, including which parameter carries it
+
+  `providers/thinking.ts` shipped complete and correct, and its own doc comment said _"the profile
+  says which — and the UI explains the choice rather than hiding it behind a heuristic"_. No such
+  control existed. Both the level and the parameter style were config-file-only, which from the
+  outside is the same as not having them — the identical gap as the `always: true` skill flag and
+  the per-project override, each of which shipped a release ahead of any way to reach it.
+
+  **The style is the half that made it urgent.** "OpenAI-compatible" is not one thing: OpenAI itself
+  takes `reasoning_effort`, while vLLM and SGLang serving Qwen3 take
+  `chat_template_kwargs.enable_thinking`, and neither accepts the other. The per-seat thinking
+  override in the Agents tab could therefore ask a Qwen3 seat to think, and the only spelling
+  available was the one that model rejects — a 400 on _every_ request, not a hint quietly ignored on
+  the hard ones.
+
+  The provider form now carries both, and the style is offered only for the OpenAI wire format,
+  where the parameter is genuinely ambiguous. Sending nothing stays the default, because it is the
+  only setting that cannot break a gateway nobody has tested against.
+
+  `providers/thinkingReachable.test.ts` reads the form and the bridge, since the defect is a missing
+  connection and no test of the module that works can see it.
+
 ## 0.82.0
 
 ### Minor Changes

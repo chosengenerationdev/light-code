@@ -341,6 +341,9 @@ async function toSummary(profile: ProviderProfile, secrets: SecretStore): Promis
     hasCertPassphrase: false,
   }
   if (profile.modelCapabilities !== undefined) summary.modelCapabilities = profile.modelCapabilities
+  // Not a secret, and the form cannot edit what it is never shown - the same reasoning that
+  // seeds the token command rather than starting it blank.
+  if (profile.thinking !== undefined) summary.thinking = profile.thinking
   // Not a secret: a path and a boolean. Only the passphrase is withheld (§15).
   if (profile.tls !== undefined) summary.connectionTls = profile.tls
 
@@ -3423,6 +3426,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         auth,
       }
       if (input.modelCapabilities !== undefined) saved.modelCapabilities = input.modelCapabilities
+      // Absent stays absent: sending nothing is the only setting that cannot break a gateway
+      // nobody has tested against, so an untouched profile keeps behaving exactly as before.
+      if (input.thinking !== undefined) saved.thinking = input.thinking
       const connectionTls = stripEmpty(input.connectionTls ?? {})
       if (Object.keys(connectionTls).length > 0) saved.tls = connectionTls
 
