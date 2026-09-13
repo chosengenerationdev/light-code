@@ -1640,6 +1640,45 @@ no native picker, so `showOpenDialog` returns `undefined` — indistinguishable 
 and every path field stays typeable. That is why the Browse buttons were built as an
 addition to the text input rather than a replacement for it.
 
+### Seats are decided from evidence, never from a model's name (0.82.0)
+
+`agents/seats.ts` says which of the five assessment probes speaks to which seat, and the Agents
+tab shows it beside the answers. The argument is `expert/assessment.ts`'s own, one step on: ranking
+two models for the reviewer seat from their names is a recall question about training data that may
+predate the release, describe a different quantisation, or be about a similarly-named model — it
+reads authoritatively and is unfalsifiable, and says nothing about the gateway in front of it.
+**The expert seat is deliberately unpredicted**; planning across files is the whole of what it does
+and no short probe stands in for it, so what it needs is stated instead.
+
+Three structural faults were in the way, and the shape of each is worth keeping:
+
+- **Grading ran through the Claude command line only**, which made the whole feature unreachable
+  for anybody whose expert is a profile — the deployment this product is *for*. It goes through
+  whoever holds the expert seat now. A capability wired to one implementation of a role that has
+  since become configurable is a recurring shape here; §14 records the same thing about `ask_expert`.
+- **It was nested inside the budget panel**, hidden whenever no seat is held by Claude. Cost and
+  fitness are different questions and only one of them is about Claude. **A feature reachable only
+  through a panel gated on something unrelated is the same as absent** — the `always: true` skill
+  flag and the per-project override each shipped that way once.
+- **One assessment slot, so assessing the second model destroyed the evidence about the first** —
+  and comparing is the entire question somebody with several models has.
+
+`expert/assessments.ts` owns both config shapes (the legacy single `assessment` and the
+`assessments` list) so nothing reads either directly, and `assessmentWiring.test.ts` reads
+`bridge.ts` and fails on a direct read — the `config/retrieval.test.ts` pattern, for the same
+reason: a decision that never reaches its owner is invisible to any test of the owner.
+
+**Budget controls are absent, not zeroed, where nothing is metered.** Only a Claude consultation
+reports a price, so with no Claude seat every control in that section would be a cap over a number
+that stays at zero, which is worse than no cap because it is believed. Same rule as §14's refusal
+to render the CLI's cost machinery zeroed on the Node host.
+
+**Guard found while wiring it:** `loadSettings` now resolves the active profile, and
+`resolveActiveProfile` *throws* when none is configured. Unguarded, a fresh install — the one state
+where nothing is set up — could not open its own settings. Caught by `apps/host` tests, and only
+after a rebuild: **the host bundles core's `dist`, so an unbuilt change runs as the old code** and
+the first run reported a failure that the source had already fixed.
+
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.79.1 is live as of 2026-09-12**, queried from the gallery, and it matches
