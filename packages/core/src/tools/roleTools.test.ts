@@ -61,7 +61,19 @@ function access(
       const custom = created.find((candidate) => candidate.id === role) as
         | { id: string; name: string; summary: string; prompt: string; usesTools: boolean }
         | undefined
-      if (custom !== undefined) return { ...custom, custom: true }
+      if (custom !== undefined) {
+        // The override, exactly as the host resolves it: an edit is stored separately from the
+        // definition, and `prompt` is what the role actually runs on. Without modelling that, a
+        // test about preserving the original passes whatever the code does.
+        const edits = saved as { role: string; prompt?: string }[]
+        const override = [...edits].reverse().find((entry) => entry.role === role)
+        return {
+          ...custom,
+          prompt: override?.prompt ?? custom.prompt,
+          originalPrompt: custom.prompt,
+          custom: true,
+        }
+      }
       const builtIn = DEFAULTS[role]
       return builtIn === undefined
         ? undefined
@@ -70,6 +82,7 @@ function access(
             name: role,
             summary: `the ${role}`,
             prompt: edited[role] ?? builtIn,
+            originalPrompt: builtIn,
             usesTools: true,
             custom: false,
           }
@@ -306,6 +319,35 @@ describe('editing and removing a role', () => {
    * A built-in role is what it is. Renaming the reviewer would leave a role whose name says one
    * thing and whose prompt says another, and the expert allocates from the summary.
    */
+  /*
+   * The failure this guards: rename a role whose prompt had been edited, and the edit was written
+   * into the *definition* — so "reset to default" afterwards handed back the edit, with the text
+   * the role was created with gone for good and nothing reporting a loss.
+   *
+   * An edit and the original live in separate stores precisely so that one can be undone. The
+   * identity path must not collapse them.
+   */
+  it('keeps the original prompt when a role with an edited one is renamed', async () => {
+    const store = access()
+    await store.create({
+      id: 'db',
+      name: 'DB reviewer',
+      summary: 'SQL',
+      prompt: 'ORIGINAL',
+      usesTools: true,
+    })
+
+    const tool = createUpdateRolePromptTool(store)
+    // an edit on top, then a rename
+    await tool.execute({ role: 'db', prompt: 'EDITED' }, NO_CONTEXT)
+    await tool.execute({ role: 'db', name: 'Database reviewer' }, NO_CONTEXT)
+
+    expect(store.created.at(-1)).toMatchObject({
+      name: 'Database reviewer',
+      prompt: 'ORIGINAL',
+    })
+  })
+
   it('refuses to rename a built-in role, and says why', async () => {
     const store = access()
     const tool = createUpdateRolePromptTool(store)

@@ -1964,6 +1964,14 @@ export function App(props: AppProps): ReactElement {
              */
             plan={plan}
             planCheckpoints={planCheckpoints}
+            /*
+             * Only specialists that can actually answer, and derived from the same roles message
+             * the Agents tab renders — so the picker cannot offer somebody the host would then
+             * refuse. A role nobody is assigned to is not addressable.
+             */
+            directRoles={agents.roles
+              .filter((role) => role.available && role.enabled)
+              .map((role) => ({ role: role.role, name: role.name, summary: role.summary }))}
             onSetPlan={(next) => {
               // Optimistic, then confirmed by the host's own `plan` message — the strip must not
               // lag a click behind the thing it describes.

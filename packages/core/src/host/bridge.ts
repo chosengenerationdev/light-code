@@ -9,6 +9,7 @@ import { compareMentionCandidates, matchesMentionQuery } from '../context/mentio
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
+import { describeDirectedRoles, findDirectedRoles } from '../agents/direct.js'
 import { PLAN_LIMIT } from '../agent/plan.js'
 import {
   attributeConsultation,
@@ -1017,6 +1018,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         name: info.name,
         summary: info.summary,
         prompt: cachedAgentRoles?.[role]?.prompt ?? info.prompt,
+        // What a reset restores. `info.prompt` is the definition's for a custom role and the
+        // shipped text for a built-in one, in both cases ignoring any edit on top.
+        originalPrompt: info.prompt,
         usesTools: cachedAgentRoles?.[role]?.tools ?? info.usesTools,
         custom: cachedAgentDefinitions.some((definition) => definition.id === role),
       }
@@ -2872,7 +2876,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // explicitly, so there is nothing to decide and nothing to approve. Confinement and
       // the deny list still apply, since the path is user-typed text.
       const mentions = await resolveMentions(text, { fs: toolContext.fs, workspaceRoot, denylist })
-      const messageText = attachMentions(text, mentions)
+      /*
+       * `#role` is resolved here for the same reason `@path` is: the user named the specialist,
+       * so there is nothing for the model to decide. Left to guidance it would be a suggestion
+       * weighed against the model's own judgement about whether a consultation earns its round
+       * trip — and typing the name *is* that judgement, already made by the person making it.
+       *
+       * Available roles only. One addressed at a specialist nobody assigned is reported rather
+       * than ignored, or the message simply does nothing unusual and the feature reads as broken.
+       */
+      const directed = findDirectedRoles(text, cachedTeam)
+      const direction = describeDirectedRoles(directed, cachedTeam)
+      const messageText =
+        direction.length > 0
+          ? `${attachMentions(text, mentions)}\n\n${direction}`
+          : attachMentions(text, mentions)
 
       const turnOptions: RunAgentTurnOptions = {
         signal: activeAbortController.signal,

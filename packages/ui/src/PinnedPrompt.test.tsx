@@ -57,6 +57,7 @@ function chatProps(messages: DisplayMessage[]): ChatProps {
   return {
     plan: '',
     planCheckpoints: [],
+    directRoles: [],
     onSetPlan: () => undefined,
     conversationKey: 'test',
     messages,

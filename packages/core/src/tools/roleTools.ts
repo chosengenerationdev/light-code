@@ -40,7 +40,23 @@ export interface RolePromptAccess {
   save(role: string, prompt: string | undefined): Promise<void>
   /** Everything about one role, for editing and for showing what a deletion removes. */
   details(role: string):
-    | { id: string; name: string; summary: string; prompt: string; usesTools: boolean; custom: boolean }
+    | {
+        id: string
+        name: string
+        summary: string
+        /** What the role is running on: the edit where there is one, else the original. */
+        prompt: string
+        /**
+         * The prompt the role was *defined* with, which "reset to default" restores.
+         *
+         * Separate from `prompt` because an identity change must not carry the effective one
+         * back into the definition — see the comment where it is used. For a built-in role this
+         * is the shipped default.
+         */
+        originalPrompt: string
+        usesTools: boolean
+        custom: boolean
+      }
     | undefined
   /** Removes a custom role and its assignment. Built-in roles are refused. */
   remove(role: string): Promise<void>
@@ -235,9 +251,19 @@ export function createUpdateRolePromptTool(
           id: details.id,
           name: params.name?.trim() ?? details.name,
           summary: params.summary?.trim() ?? details.summary,
-          // Carried over rather than re-sent: this path is about identity, and the prompt has its
-          // own store. Passing the old one back keeps the two from disagreeing.
-          prompt: details.prompt,
+          /*
+           * The **original**, not the one in force.
+           *
+           * This path rewrites the role's definition, and for a custom role the definition's
+           * prompt is what "reset to default" restores. Passing the effective prompt here would
+           * quietly bake an edit into the definition: rename a role whose prompt had been changed,
+           * and resetting it afterwards would hand back the edit, with the text it was created
+           * with gone for good and nothing having reported a loss.
+           *
+           * An edit lives in its own store and is untouched by this, which is the point — the two
+           * are separate so that one can be undone.
+           */
+          prompt: details.originalPrompt,
           usesTools: params.usesTools ?? details.usesTools,
         })
       }

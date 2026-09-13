@@ -25,6 +25,24 @@ export function activeMentionQuery(text: string, caret: number): string | undefi
   return token
 }
 
+/**
+ * The role being typed after a `#`, for the specialist picker.
+ *
+ * Separate from `activeMentionQuery` rather than a parameterised version of it, because the two
+ * differ in what ends them: a path may contain almost anything and is ended by whitespace, while a
+ * role id is a known shape. Matching that shape is what keeps `#include <stdio.h>` and `#2` from
+ * opening a picker over ordinary text.
+ */
+export function activeRoleQuery(text: string, caret: number): string | undefined {
+  const before = text.slice(0, caret)
+  const at = before.lastIndexOf('#')
+  if (at === -1) return undefined
+  // Only at a word boundary: `issue#3` is a reference, not an address.
+  if (at > 0 && !/\s/.test(before[at - 1] ?? '')) return undefined
+  const token = before.slice(at + 1)
+  return /^[a-z0-9-]*$/.test(token) ? token : undefined
+}
+
 /** Paths containing spaces are quoted, so the resolver reads them as a single target. */
 export function renderMention(candidatePath: string): string {
   return candidatePath.includes(' ') ? `@"${candidatePath}"` : `@${candidatePath}`

@@ -11,6 +11,7 @@ import {
 import { AttachIcon, CrossIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
 import {
   activeMentionQuery,
+  activeRoleQuery,
   insertMention as insertMentionInto,
   splitMentions,
 } from './mentions.js'
@@ -51,6 +52,8 @@ export interface ComposerProps {
   supportsVision: boolean
   /** Paths matching the current `@` query, supplied by the host. */
   mentionCandidates: string[]
+  /** Specialists that can answer, for the `#` picker. Unavailable ones are not offered. */
+  directRoles: { role: string; name: string; summary: string }[]
   onQueryMentions: (query: string) => void
   /** Shown as a selector under the input, so the answering model is switchable in place. */
   profiles: ProfileSummary[]
@@ -136,6 +139,7 @@ function firstPlanLine(plan: string): string {
 
 export function Composer(props: ComposerProps): ReactElement {
   const [text, setText] = useState('')
+  const [roleQuery, setRoleQuery] = useState<string | undefined>(undefined)
   const [planOpen, setPlanOpen] = useState(false)
   const [progressOpen, setProgressOpen] = useState(false)
   const [planDraft, setPlanDraft] = useState(props.plan)
@@ -154,6 +158,16 @@ export function Composer(props: ComposerProps): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const showingMentions = mentionQuery !== undefined && props.mentionCandidates.length > 0
+  // Matched on the id and the name, because somebody typing `#rev` means the reviewer and
+  // somebody typing `#DB` means the role they called DB reviewer.
+  const matchingRoles =
+    roleQuery === undefined
+      ? []
+      : props.directRoles.filter(
+          (candidate) =>
+            candidate.role.startsWith(roleQuery) ||
+            candidate.name.toLowerCase().startsWith(roleQuery),
+        )
 
   // Held in a ref so the effect below depends only on the query. Depending on the callback
   // itself would fire a workspace lookup on every parent render, which is most keystrokes.
@@ -169,6 +183,14 @@ export function Composer(props: ComposerProps): ReactElement {
   }, [mentionQuery])
 
   const syncMentionQuery = (value: string, caret: number): void => {
+    /*
+     * The role picker, opened by `#`.
+     *
+     * Only when there is somebody to offer: a picker listing nothing teaches that the symbol does
+     * not work, which is worse than the symbol doing nothing at all.
+     */
+    const role = activeRoleQuery(value, caret)
+    setRoleQuery(role !== undefined && props.directRoles.length > 0 ? role : undefined)
     const query = activeMentionQuery(value, caret)
     setMentionQuery(query)
     setHighlighted(0)
@@ -202,6 +224,30 @@ export function Composer(props: ComposerProps): ReactElement {
     if (acceptedImages.length > 0) setImages((previous) => [...previous, ...acceptedImages])
     if (acceptedTexts.length > 0) setTexts((previous) => [...previous, ...acceptedTexts])
     setNotice(problems.length > 0 ? problems.join(' ') : undefined)
+  }
+
+  /**
+   * Replaces the `#…` being typed with the chosen role.
+   *
+   * Written out rather than reusing `insertMentionInto`, which quotes paths containing spaces and
+   * anchors on `@`. A role id has neither problem, and bending that helper to serve both would
+   * make the file picker's rules depend on the specialist picker's.
+   */
+  const insertRole = (role: string): void => {
+    const textarea = textareaRef.current
+    const caret = textarea?.selectionStart ?? text.length
+    const at = text.slice(0, caret).lastIndexOf('#')
+    if (at === -1) return
+
+    const next = `${text.slice(0, at)}#${role} ${text.slice(caret)}`
+    setText(next)
+    setRoleQuery(undefined)
+
+    const position = at + role.length + 2
+    requestAnimationFrame(() => {
+      textarea?.focus()
+      textarea?.setSelectionRange(position, position)
+    })
   }
 
   const insertMention = (candidatePath: string): void => {
@@ -288,6 +334,52 @@ export function Composer(props: ComposerProps): ReactElement {
       }}
       style={{ borderTop: `1px solid ${colors.border}`, flexShrink: 0 }}
     >
+      {/*
+        Addressing a specialist, by name.
+
+        The same shape as the file picker above it, deliberately: one list, one highlight, one
+        insertion. A second interaction pattern for the same gesture would be a thing to learn for
+        no reason. Only specialists that can actually answer are here — offering one nobody is
+        assigned to produces a message that quietly does nothing.
+      */}
+      {roleQuery !== undefined && matchingRoles.length > 0 && (
+        <div
+          role="listbox"
+          aria-label="Specialists"
+          className="lc-scroll lc-fade-up"
+          style={{ maxHeight: 160, overflowY: 'auto', borderBottom: `1px solid ${colors.border}` }}
+        >
+          {matchingRoles.map((candidate) => (
+            <button
+              key={candidate.role}
+              type="button"
+              role="option"
+              aria-selected={false}
+              onMouseDown={(event) => {
+                // mousedown, not click: click fires after blur, which closes the list first.
+                event.preventDefault()
+                insertRole(candidate.role)
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                background: 'none',
+                border: 'none',
+                padding: '4px 10px',
+                cursor: 'pointer',
+                fontFamily,
+                fontSize: 12,
+                color: colors.foreground,
+              }}
+            >
+              <span style={{ color: colors.accent }}>#{candidate.role}</span>{' '}
+              <span style={{ color: colors.muted }}>{candidate.summary}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {showingMentions && (
         <div
           role="listbox"

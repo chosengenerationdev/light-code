@@ -1,5 +1,35 @@
 # @chosengeneration/light-code
 
+## 0.57.0
+
+### Minor Changes
+
+- Address a specialist with `#`, and keep the original prompt safe
+
+  **`#reviewer have a look at this`** consults that specialist, whatever the mode. The composer
+  offers a picker on `#`, listing only specialists that can actually answer, and it is resolved
+  host-side like an `@` mention and for the same reason (§18): you named the specialist, so there is
+  nothing for the model to decide. Left to guidance it would be a suggestion weighed against the
+  model's own judgement about whether a consultation earns its round trip — and typing the name _is_
+  that judgement, already made.
+
+  `#` rather than `@`, which is taken by file mentions and would make `@r` ambiguous at the moment
+  the picker has to decide what to show; and rather than `/`, which people expect to be a command
+  rather than a recipient.
+
+  Only a name that is a role **here** counts. The first version matched anything shaped like a role
+  id, which made `#include` in a pasted C file an unknown specialist, and `#define`, and `#main` — a
+  feature that accuses you of mis-addressing somebody every time you paste code is unusable in the
+  conversations this product exists for. Addressing a role that exists but cannot answer is still
+  reported, because otherwise the message does nothing unusual and reads as broken.
+
+  **Restoring a role's original prompt now survives a rename.** Resetting to default already worked,
+  and still does. But when the assistant changed a custom role's _name_, it wrote the prompt then in
+  force back into the role's definition — so an earlier edit became the new "default", and the text
+  the role was created with was gone for good, with nothing reporting a loss. An edit and the
+  original live in separate stores precisely so one can be undone; the identity path no longer
+  collapses them.
+
 ## 0.56.1
 
 ### Patch Changes

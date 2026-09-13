@@ -36,6 +36,8 @@ export interface ChatProps {
    * eventually light up the wrong row.
    */
   planCheckpoints: CheckpointView[]
+  /** Specialists that can answer, for the `#` picker. */
+  directRoles: { role: string; name: string; summary: string }[]
   onSetPlan: (plan: string) => void
   messages: DisplayMessage[]
   isStreaming: boolean
@@ -284,6 +286,7 @@ export function Chat(props: ChatProps): ReactElement {
       <Composer
         plan={props.plan}
         planCheckpoints={props.planCheckpoints}
+        directRoles={props.directRoles}
         onSetPlan={props.onSetPlan}
         isStreaming={props.isStreaming}
         onSend={props.onSend}
