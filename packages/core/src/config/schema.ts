@@ -232,6 +232,29 @@ export type WorkspaceApprovals = z.infer<typeof workspaceApprovalsSchema>
  * executable, and a workspace able to set it would run a program of its choosing the
  * moment the panel opened. Same threat as `python.uvPath`.
  */
+/**
+ * One model's assessment as config holds it.
+ *
+ * Named rather than inline because two fields carry it - the single legacy slot and the list that
+ * replaced it - and a schema written out twice is the shape this repository has drifted on before.
+ */
+const juniorAssessmentSchema = z.object({
+  model: z.string(),
+  profileLabel: z.string(),
+  assessedAt: z.number(),
+  verdict: z.string(),
+  costUsd: z.number().optional(),
+  probes: z.array(
+    z.object({
+      id: z.string(),
+      measures: z.string(),
+      prompt: z.string(),
+      answer: z.string(),
+      error: z.string().optional(),
+    }),
+  ),
+})
+
 export const expertConfigSchema = z
   .object({
     /** Off unless explicitly enabled. Nothing is spawned or spent without this. */
@@ -265,24 +288,16 @@ export const expertConfigSchema = z
      * there is one, for the model that was assessed, and it records which that was so a stale
      * one is recognisable rather than silently applied to a different model.
      */
-    assessment: z
-      .object({
-        model: z.string(),
-        profileLabel: z.string(),
-        assessedAt: z.number(),
-        verdict: z.string(),
-        costUsd: z.number().optional(),
-        probes: z.array(
-          z.object({
-            id: z.string(),
-            measures: z.string(),
-            prompt: z.string(),
-            answer: z.string(),
-            error: z.string().optional(),
-          }),
-        ),
-      })
-      .optional(),
+    assessment: juniorAssessmentSchema.optional(),
+    /**
+     * Every model assessed, so several can be compared.
+     *
+     * One slot answers "is this model any good"; deciding which of four models reviews and which
+     * writes needs them side by side, and assessing the second used to destroy the evidence about
+     * the first. Read through `expert/assessments.ts`, never directly, so this and the single
+     * `assessment` above cannot come apart.
+     */
+    assessments: z.array(juniorAssessmentSchema).optional(),
     /**
      * Consultations allowed within one task. 0 means no limit.
      *

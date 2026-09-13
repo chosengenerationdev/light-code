@@ -1,5 +1,33 @@
 # light-code-vscode
 
+## 0.82.0
+
+### Minor Changes
+
+- Decide which model takes which seat from what the models did, not from their names
+
+  The Agents tab gains a **Which model suits which seat** panel: put any profile through the five
+  probes, have whoever is in the expert seat grade the answers, and keep every model assessed side
+  by side. Each seat says which probes speak to it and what to look for in the answers.
+
+  Three things were in the way, all of them structural:
+
+  - **The assessment was graded by the Claude command line and nothing else**, so the whole feature
+    was unreachable for anybody whose expert is a model on their gateway — which is the deployment
+    this product is for. It now goes through whoever holds the expert seat, profile or CLI.
+  - **It was nested inside the budget panel**, which is hidden whenever no seat is held by Claude.
+    Somebody with several models and no Claude at all could not open the one screen that would tell
+    them which model to put where. Fitness and cost are different questions; only one is about
+    Claude.
+  - **Only one assessment was kept**, so assessing the second model destroyed the evidence about the
+    first — and comparing is the entire question. They are kept as a list now, and the verdict fed
+    back to the expert is the one matching the model actually in the seat, chosen rather than
+    assumed.
+
+  **Budget controls are absent, not zeroed, when Claude holds no seat.** Nothing here can see what a
+  gateway bills, so every control in that section would be a cap over a number that stays at zero —
+  which is worse than no cap, because it is believed.
+
 ## 0.81.0
 
 ### Minor Changes

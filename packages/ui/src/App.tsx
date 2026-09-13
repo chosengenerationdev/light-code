@@ -158,6 +158,7 @@ export function App(props: AppProps): ReactElement {
     profiles: [],
     cliAvailable: false,
     budgetMatters: false,
+    claudeSeated: false,
     teamGuidance: '',
     defaultTeamGuidance: '',
     teamGuidanceIsDefault: true,
@@ -1544,8 +1545,12 @@ export function App(props: AppProps): ReactElement {
             onConnectMcp={connectMcp}
             expert={expert}
             onSaveExpert={saveExpert}
-            onAssessJunior={() =>
-              props.transport.post({ type: 'assessJunior' } satisfies UiToHostMessage)
+            onAssessJunior={(profileId) =>
+              props.transport.post({
+                type: 'assessJunior',
+                // Absent means the model in the chat, which is what the picker's first entry says.
+                ...(profileId !== undefined ? { profileId } : {}),
+              } satisfies UiToHostMessage)
             }
             onMeasureCost={() =>
               props.transport.post({ type: 'measureExpertCost' } satisfies UiToHostMessage)
@@ -1559,8 +1564,15 @@ export function App(props: AppProps): ReactElement {
                 enabled,
               } satisfies UiToHostMessage)
             }
-            onClearAssessment={() =>
-              props.transport.post({ type: 'clearAssessment' } satisfies UiToHostMessage)
+            onClearAssessment={(model, profileLabel) =>
+              props.transport.post({
+                type: 'clearAssessment',
+                // Both or neither: a subject is a model *through a profile*, and half of one
+                // would forget whichever entry happened to match first.
+                ...(model !== undefined && profileLabel !== undefined
+                  ? { model, profileLabel }
+                  : {}),
+              } satisfies UiToHostMessage)
             }
             onRecheckExpert={() => {
               // Cleared first so the tab visibly restarts rather than showing a stale answer.

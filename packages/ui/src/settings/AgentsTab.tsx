@@ -25,6 +25,8 @@ export interface AgentsTabProps {
   cliAvailable: boolean
   cliReason?: string
   budgetMatters: boolean
+  /** Whether any seat is held by the Claude CLI. Nothing else here reports a price. */
+  claudeSeated: boolean
   teamGuidance: string
   defaultTeamGuidance: string
   teamGuidanceIsDefault: boolean
@@ -58,6 +60,14 @@ export interface AgentsTabProps {
   customRoleLimit: number
   /** The budget controls, rendered here only when cost is worth managing. */
   budgetPanel?: ReactElement
+  /**
+   * Which model suits which seat, from the probes.
+   *
+   * Rendered unconditionally, unlike the budget panel. Fitness and cost are different questions
+   * and only one of them is about Claude — this used to be nested inside the budget panel, which
+   * made it invisible to exactly the person with four models on a gateway and no Claude at all.
+   */
+  fitPanel?: ReactElement
 }
 
 /**
@@ -604,32 +614,46 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
         </button>
       )}
 
-      <label
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          cursor: 'pointer',
-          margin: '12px 0',
-        }}
-      >
-        <input
-          type="checkbox"
-          // Named, so nothing has to find it by position. A test did, and adding a checkbox above
-          // it silently retargeted that test at a different control.
-          aria-label="What consultations cost is worth managing"
-          checked={props.budgetMatters}
-          onChange={(event) => props.onSetBudget(event.target.checked)}
-        />
-        <span style={{ fontSize: 12 }}>What consultations cost is worth managing</span>
-      </label>
-      <p style={{ color: colors.muted, fontSize: 11, margin: '-6px 0 12px', lineHeight: 1.5 }}>
-        Only a Claude consultation reports a price. A gateway bills somewhere this cannot see, so
-        with this off there is no budget to show — a cap over something nobody is counting would
-        look like protection without being any.
-      </p>
+      {props.fitPanel}
 
-      {props.budgetMatters && props.budgetPanel}
+      {/*
+        The whole budget section, present only where there is something to budget.
+
+        Nothing here can see what a gateway bills, so with no Claude seat every control in it
+        would be a cap over a number that stays at zero — which is worse than no cap, because it
+        is believed. `budgetMatters` keeps it on the screen for somebody who switched it on
+        deliberately, so turning it on is never a one-way door.
+      */}
+      {(props.claudeSeated || props.budgetMatters) && (
+        <>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              margin: '12px 0',
+            }}
+          >
+            <input
+              type="checkbox"
+              // Named, so nothing has to find it by position. A test did, and adding a checkbox
+              // above it silently retargeted that test at a different control.
+              aria-label="What consultations cost is worth managing"
+              checked={props.budgetMatters}
+              onChange={(event) => props.onSetBudget(event.target.checked)}
+            />
+            <span style={{ fontSize: 12 }}>What consultations cost is worth managing</span>
+          </label>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '-6px 0 12px', lineHeight: 1.5 }}>
+            Only a Claude consultation reports a price. A gateway bills somewhere this cannot see,
+            so with this off there is no budget to show — a cap over something nobody is counting
+            would look like protection without being any.
+          </p>
+
+          {props.budgetMatters && props.budgetPanel}
+        </>
+      )}
 
       <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

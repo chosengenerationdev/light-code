@@ -726,12 +726,20 @@ export type UiToHostMessage =
    * task would be a limit nobody set.
    */
   | { type: 'setTaskExpertLimits'; maxSpendUsd?: number; maxConsultations?: number }
-  /** Runs the probes through the junior, then asks the expert to grade them. Costs money. */
-  | { type: 'assessJunior' }
+  /**
+   * Runs the probes through a model, then asks the expert to grade the answers. Costs money.
+   *
+   * `profileId` names which model to put through them; absent means the active one. Naming it
+   * matters for the question this feature exists to answer - which of the models on a gateway
+   * should review and which should write - because switching the active profile four times to
+   * find out is how people stop finding out.
+   */
+  | { type: 'assessJunior'; profileId?: string }
   | { type: 'measureExpertCost' }
   | { type: 'setExpertKeepAlive'; enabled: boolean }
   | { type: 'clearExpertPricing' }
-  | { type: 'clearAssessment' }
+  /** Forgets one assessment, or every one when no subject is named. */
+  | { type: 'clearAssessment'; model?: string; profileLabel?: string }
   | { type: 'restartScheduler' }
   /** Clears a schedule's remembered runs. Omit `id` to clear every schedule's. */
   | { type: 'clearScheduleRuns'; id?: string }
@@ -1409,6 +1417,15 @@ export type HostToUiMessage =
        * unmetered gateway would look like protection without being any.
        */
       budgetMatters: boolean
+      /**
+       * Whether any seat is held by the Claude command line.
+       *
+       * Separate from `budgetMatters`, which is a *choice* about whether to manage cost. This is
+       * the fact underneath it: nothing here meters a gateway, so with no Claude seat there is no
+       * spend to cap, and a cap over something nobody counts looks like protection without being
+       * any. The whole budget section is hidden on this rather than rendered at zero.
+       */
+      claudeSeated: boolean
       /** The Agent team instruction as it will be used, and the default to reset to. */
       teamGuidance: string
       defaultTeamGuidance: string
@@ -1456,8 +1473,16 @@ export type HostToUiMessage =
       measuringStep?: string
       /** Whether the cache is refreshed while a task is open. */
       keepAlive: boolean
-      /** The expert's judgement of the junior, when one has been made. */
+      /** The expert's judgement of the model now active, when one has been made. */
       assessment?: JuniorAssessment
+      /** Every model assessed, newest first, so several can be compared. */
+      assessments?: JuniorAssessment[]
+      /** Which seats the probes speak to, and what to look for in the answers. */
+      seatFits?: { role: string; name: string; probes: string[]; lookFor: string }[]
+      /** What the expert seat needs, which no short probe measures. */
+      expertGuidance?: string
+      /** Who grades the answers - the Claude CLI, or the profile in the expert seat. */
+      assessor?: { label: string; available: boolean }
       /** True while probes are running, so the tab can show progress rather than nothing. */
       assessing?: boolean
       /** How far through the probes, for the same reason. */

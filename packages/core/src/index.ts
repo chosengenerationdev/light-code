@@ -250,6 +250,14 @@ export {
   type ProbeResult,
 } from './expert/assessment.js'
 export {
+  allAssessments,
+  assessmentFor,
+  forgetAssessment,
+  MAX_ASSESSMENTS,
+  recordAssessment,
+} from './expert/assessments.js'
+export { EXPERT_GUIDANCE, SEAT_FITS, unmappedProbes, type SeatFit } from './agents/seats.js'
+export {
   checkExpertBudget,
   describeExpertBudget,
   expertBudgetUsage,

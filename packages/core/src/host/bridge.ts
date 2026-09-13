@@ -47,6 +47,7 @@ import {
   type CustomRoleDefinition,
 } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
+import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
 import type { Tool } from '../tools/types.js'
 import {
   createExcelOpenTool,
@@ -184,6 +185,10 @@ import {
   ASSESSMENT_PROBES,
   buildAssessmentQuestion,
   consultExpert,
+  allAssessments,
+  assessmentFor,
+  forgetAssessment,
+  recordAssessment,
   type JuniorAssessment,
   type ProbeResult,
   checkExpertBudget,
@@ -1691,7 +1696,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedToolTimeoutSeconds = config.tools?.timeoutSeconds
     cachedToolTimeouts = config.tools?.timeouts
     cachedExpertColor = config.ui?.expertColor ?? '#D97757'
-    cachedAssessment = config.expert?.assessment
+    /*
+     * The assessment that applies to the model now in the junior seat, chosen from everything
+     * assessed rather than read from one slot. `allAssessments` owns the older single-field
+     * shape, so this never has to know which shape the file is in.
+     *
+     * Tolerant of there being no profile at all, which `resolveActiveProfile` reports by
+     * throwing. Every setting on this screen loads through here, so letting that escape means a
+     * fresh install - the one state where nothing is configured yet - cannot open its settings.
+     */
+    const junior = ((): { model: string; label?: string } | undefined => {
+      try {
+        return resolveActiveProfile(config)
+      } catch {
+        return undefined
+      }
+    })()
+    cachedAssessment =
+      junior === undefined
+        ? undefined
+        : assessmentFor(allAssessments(config.expert ?? {}), junior.model, junior.label ?? junior.model)
     cachedReportsCost = config.expert?.reportsCost
     cachedPricing = config.expert?.pricing
     cachedKeepAlive = config.expert?.keepAlive === true
@@ -3698,7 +3722,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       maxConsultations: settings?.maxConsultations ?? 0,
       keepAlive: settings?.keepAlive === true,
       ...(settings?.model !== undefined ? { model: settings.model } : {}),
-      ...(settings?.assessment !== undefined ? { assessment: settings.assessment } : {}),
+      // The one that applies to the active junior, chosen through the module that owns both
+      // config shapes - not `settings.assessment`, which is only the legacy slot.
+      ...(cachedAssessment !== undefined ? { assessment: cachedAssessment } : {}),
+      assessments: allAssessments(settings ?? {}),
+      /*
+       * What the probes predict about each seat, and who grades them.
+       *
+       * Sent rather than duplicated in the UI: the mapping is reasoned about beside the probes,
+       * in `agents/seats.ts`, and a copy in a React component is the second declaration of one
+       * fact that this repository keeps paying for.
+       */
+      seatFits: SEAT_FITS.map((fit) => ({
+        role: fit.role,
+        name: roleInfo(fit.role, cachedAgentDefinitions).name,
+        probes: [...fit.probes],
+        lookFor: fit.lookFor,
+      })),
+      expertGuidance: EXPERT_GUIDANCE,
+      assessor: describeAssessor(),
       ...(settings?.reportsCost !== undefined ? { reportsCost: settings.reportsCost } : {}),
       ...(settings?.pricing !== undefined ? { pricing: settings.pricing } : {}),
       ...(measuringStep !== undefined ? { measuringStep } : {}),
@@ -3783,6 +3825,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       cliAvailable: teamContext.cliAvailable,
       ...(cli?.available === false && cli.reason !== undefined ? { cliReason: cli.reason } : {}),
       budgetMatters: budgetMatters(teamContext),
+      /*
+       * Assigned, rather than assigned *and* detected.
+       *
+       * Somebody who put Claude in a seat on a machine where it is momentarily missing has still
+       * said they intend to spend money there, and taking the budget controls away from them
+       * because a probe failed would be the panel arguing with the user.
+       */
+      claudeSeated: [...assigned.values()].some((agent) => agent.kind === 'cli'),
       teamGuidance: guidance ?? DEFAULT_TEAM_GUIDANCE,
       defaultTeamGuidance: DEFAULT_TEAM_GUIDANCE,
       teamGuidanceIsDefault: guidance === undefined,
@@ -4176,20 +4226,135 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleAssessJunior(): Promise<void> {
+  /**
+   * Who grades the probe answers, for the tab to name before anything is spent.
+   *
+   * The Claude CLI when the expert seat is Claude, and otherwise whatever profile sits in that
+   * seat. It used to be the CLI or nothing, which made the whole assessment unreachable for
+   * anybody whose expert is a model on their gateway - the deployment this product is for.
+   */
+  function describeAssessor(): { label: string; available: boolean } {
+    const expert = cachedTeam.find((agent) => agent.role === 'expert')
+    if (expert === undefined) {
+      return { label: 'Nobody is in the expert seat', available: false }
+    }
+    return { label: expert.label, available: expert.available }
+  }
+
+  /**
+   * Puts one question to whoever is in the expert seat, with no tools and no workspace.
+   *
+   * Deliberately not the specialist consultation path: that one carries read tools, a budget
+   * check and an approval gate, all of which are about a specialist working *on the task*. This
+   * is a single graded question about text already gathered, and giving it tools would let it
+   * grade the harness rather than the answers.
+   */
+  async function askExpertSeat(
+    question: string,
+    config: LightCodeConfig,
+    expert: ResolvedAgent,
+  ): Promise<{ text: string; costUsd?: number }> {
+    if (expert.kind === 'cli') {
+      const cli = await detectCli(config.expert?.path ?? 'claude')
+      if (!cli.available) throw new Error('The Claude CLI is not available.')
+      const graded = await consultExpert(cli, {
+        question,
+        cwd: workspaceRoot ?? process.cwd(),
+        ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
+      })
+      // Counted like any other consultation: it spent the user's money, and a total that
+      // quietly omitted it would understate the spend.
+      recordConsultation({
+        isError: graded.isError,
+        ...(graded.costUsd !== undefined ? { costUsd: graded.costUsd } : {}),
+      })
+      if (graded.isError) throw new Error(graded.text)
+      return {
+        text: graded.text,
+        ...(graded.costUsd !== undefined ? { costUsd: graded.costUsd } : {}),
+      }
+    }
+
+    const profile = config.profiles?.find((candidate) => candidate.id === expert.profileId)
+    if (profile === undefined) {
+      throw new Error(`No profile "${expert.profileId ?? ''}" exists any more.`)
+    }
+    // The seat's thinking level over the profile's, on a copy - see the consultation path for
+    // why a mutation here would leak the Agents tab's setting into the chat model.
+    const seatProfile =
+      expert.thinking === undefined
+        ? profile
+        : {
+            ...profile,
+            thinking: {
+              ...(profile.thinking ?? { level: expert.thinking }),
+              level: expert.thinking,
+            },
+          }
+    const provider = createChatProvider(
+      seatProfile,
+      httpClient,
+      authStrategyFor(config, profile),
+      logger,
+    )
+    let text = ''
+    for await (const chunk of provider.streamChat([
+      { role: 'system', content: expert.prompt },
+      { role: 'user', content: question },
+    ])) {
+      if (chunk.type === 'text') text += chunk.text
+      if (chunk.type === 'error') throw new Error(chunk.error)
+    }
+    if (text.trim().length === 0) throw new Error('The expert replied with nothing.')
+    return { text }
+  }
+
+  async function handleAssessJunior(profileId?: string): Promise<void> {
     if (assessmentStep !== undefined) return
     try {
       const { config } = await configManager.load()
-      const cli = await resolveExpert(config)
-      if (cli === undefined) {
+
+      /*
+       * Graded by whoever is in the expert seat, which may be a profile.
+       *
+       * Resolved from freshly loaded config rather than from `cachedTeam`, because the user has
+       * very often just assigned somebody to that seat in the tab next door.
+       */
+      const cli = await detectCli(config.expert?.path ?? 'claude').catch(() => undefined)
+      const team = resolveTeam({
+        config: config.agents,
+        profiles: (config.profiles ?? []).map((entry) => ({ id: entry.id, label: entry.label })),
+        cliAvailable: cli?.available === true,
+      })
+      const expert = team.find((agent) => agent.role === 'expert' && agent.available)
+      if (expert === undefined) {
         post({
           type: 'error',
-          message: 'Enable the expert first — the assessment is its judgement, not ours.',
+          message:
+            'Nothing is in the expert seat. Assign one in the Agents tab - the assessment is ' +
+            'its judgement, not ours.',
         })
         return
       }
 
-      const profile = resolveActiveProfile(config)
+      /*
+       * The model being assessed, which is not necessarily the one in the chat.
+       *
+       * Naming it is what makes comparing four models on a gateway possible at all: before this
+       * the only assessable model was whichever profile happened to be active, so finding out
+       * which should review and which should write meant switching the active profile four
+       * times and losing each verdict as the next was made.
+       */
+      const chosen =
+        profileId === undefined
+          ? undefined
+          : config.profiles?.find((candidate) => candidate.id === profileId)
+      if (profileId !== undefined && chosen === undefined) {
+        post({ type: 'error', message: 'That profile no longer exists.' })
+        return
+      }
+      const profile = chosen ?? resolveActiveProfile(config)
+
       const provider = createChatProvider(
         profile,
         httpClient,
@@ -4199,14 +4364,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       const results: ProbeResult[] = []
       for (const [index, probe] of ASSESSMENT_PROBES.entries()) {
-        assessmentStep = `Asking the junior: ${probe.measures} (${String(index + 1)}/${String(ASSESSMENT_PROBES.length)})`
+        assessmentStep = `Asking ${profile.label ?? profile.model}: ${probe.measures} (${String(index + 1)}/${String(ASSESSMENT_PROBES.length)})`
         await postExpert({ redetect: false })
 
         let answer = ''
         try {
           /*
            * No tools and no system prompt beyond the probe. The point is to measure the model,
-           * not the scaffolding around it — and a probe that could call `read_file` would
+           * not the scaffolding around it - and a probe that could call `read_file` would
            * measure whether the harness works.
            */
           for await (const chunk of provider.streamChat([
@@ -4218,7 +4383,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           }
           results.push({ id: probe.id, measures: probe.measures, prompt: probe.prompt, answer })
         } catch (error) {
-          // A probe that fails is itself a finding — a model that times out on five short
+          // A probe that fails is itself a finding - a model that times out on five short
           // questions is one the expert should know about.
           results.push({
             id: probe.id,
@@ -4230,26 +4395,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }
       }
 
-      assessmentStep = 'Asking the expert to grade the answers'
+      assessmentStep = `Asking ${expert.label} to grade the answers`
       await postExpert({ redetect: false })
 
-      const graded = await consultExpert(cli, {
-        question: buildAssessmentQuestion(profile.model, results),
-        cwd: workspaceRoot ?? process.cwd(),
-        ...(config.expert?.model !== undefined ? { model: config.expert.model } : {}),
-      })
-
-      // Counted like any other consultation: it spent the user's money, and a total that
-      // quietly omitted it would understate the spend.
-      recordConsultation({
-        isError: graded.isError,
-        ...(graded.costUsd !== undefined ? { costUsd: graded.costUsd } : {}),
-      })
-
-      if (graded.isError) {
-        post({ type: 'error', message: `The expert could not assess the junior: ${graded.text}` })
-        return
-      }
+      const graded = await askExpertSeat(
+        buildAssessmentQuestion(profile.model, results),
+        config,
+        expert,
+      )
 
       const assessment: JuniorAssessment = {
         model: profile.model,
@@ -4261,7 +4414,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
 
       const latest = (await configManager.load()).config
-      await configManager.save('user', { expert: { ...latest.expert, assessment } })
+      await configManager.save('user', {
+        expert: {
+          ...latest.expert,
+          assessments: recordAssessment(allAssessments(latest.expert ?? {}), assessment),
+        },
+      })
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -4270,10 +4428,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleClearAssessment(): Promise<void> {
+  /** Forgets one assessment, or every one when no subject is named. */
+  async function handleClearAssessment(model?: string, profileLabel?: string): Promise<void> {
     const { config } = await configManager.load()
     const expert = { ...config.expert }
-    delete expert.assessment
+    if (model === undefined || profileLabel === undefined) {
+      delete expert.assessment
+      delete expert.assessments
+    } else {
+      // Through `allAssessments` so forgetting one held in the older single field actually
+      // forgets it, rather than filtering a list that never contained it.
+      expert.assessments = forgetAssessment(allAssessments(expert), model, profileLabel)
+      delete expert.assessment
+    }
     await configManager.save('user', { expert })
     await postExpert()
   }
@@ -8355,9 +8522,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'assessJunior') {
-      void handleAssessJunior()
+      void handleAssessJunior(message.profileId)
     } else if (message.type === 'clearAssessment') {
-      void handleClearAssessment()
+      void handleClearAssessment(message.model, message.profileLabel)
     } else if (message.type === 'restartScheduler') {
       restartScheduleTimer()
       logger.info('schedule timer restarted by the user')

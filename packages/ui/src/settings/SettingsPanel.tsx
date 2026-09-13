@@ -13,6 +13,7 @@ import { ApprovalsTab } from './ApprovalsTab.js'
 import { McpTab } from './McpTab.js'
 import { AgentsTab, type AgentsTabProps } from './AgentsTab.js'
 import { ExpertTab, type ExpertState } from './ExpertTab.js'
+import { ModelFitPanel } from './ModelFitPanel.js'
 import { SearchTab, type SearchTabProps } from './SearchTab.js'
 import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
@@ -55,7 +56,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetAccentColor: (value: string) => void
   expertColor: string
   /** Everything the Agents tab shows and changes. See the `agents` message. */
-  agents: Omit<AgentsTabProps, 'budgetPanel'>
+  agents: Omit<AgentsTabProps, 'budgetPanel' | 'fitPanel'>
   onSetAgentColor: (role: string, hex: string) => void
   onSetExpertColor: (value: string) => void
   /** Only where the host has no theme of its own — see `AppearanceSectionProps.theme`. */
@@ -86,8 +87,10 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onConnectMcp: (name: string) => void
   expert: ExpertState | undefined
   onRecheckExpert: () => void
-  onAssessJunior: () => void
-  onClearAssessment: () => void
+  /** Puts the probes to one model. Absent id means whichever is in the chat. */
+  onAssessJunior: (profileId?: string) => void
+  /** Forgets one assessment, or all of them when no subject is named. */
+  onClearAssessment: (model?: string, profileLabel?: string) => void
   /** Runs two real consultations to learn what they cost on this plan. */
   onMeasureCost: () => void
   onClearPricing: () => void
@@ -377,13 +380,29 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 expert={props.expert}
                 onSave={props.onSaveExpert}
                 onRecheck={props.onRecheckExpert}
-                onAssess={props.onAssessJunior}
-                onClearAssessment={props.onClearAssessment}
                 onMeasureCost={props.onMeasureCost}
                 onClearPricing={props.onClearPricing}
                 onSetKeepAlive={props.onSetKeepAlive}
                 onBrowse={props.onBrowse}
                 pickedPath={props.pickedPath}
+              />
+            }
+            /*
+             * Which model suits which seat — shown whether or not anything is metered, because
+             * "who should review" is a question everybody with more than one model has and
+             * "what does it cost" is a question only a Claude command line answers.
+             */
+            fitPanel={
+              <ModelFitPanel
+                assessments={props.expert?.assessments ?? []}
+                seatFits={props.expert?.seatFits ?? []}
+                expertGuidance={props.expert?.expertGuidance ?? ''}
+                assessor={props.expert?.assessor}
+                profiles={props.agents.profiles}
+                assessing={props.expert?.assessing === true}
+                step={props.expert?.assessmentStep}
+                onAssess={props.onAssessJunior}
+                onClear={props.onClearAssessment}
               />
             }
           />

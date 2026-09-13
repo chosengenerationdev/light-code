@@ -43,6 +43,7 @@ const base: AgentsTabProps = {
   profiles: [{ id: 'gw', label: 'Corporate gateway' }],
   cliAvailable: true,
   budgetMatters: false,
+  claudeSeated: false,
   teamGuidance: 'Consult when it helps.',
   defaultTeamGuidance: 'Consult when it helps.',
   teamGuidanceIsDefault: true,
@@ -170,7 +171,9 @@ describe('the Agents tab', () => {
 
   it('reports the budget choice', () => {
     const onSetBudget = vi.fn()
-    render({ onSetBudget })
+    // With a Claude seat, because without one there is nothing to budget and the whole section
+    // is absent rather than present and inert.
+    render({ onSetBudget, claudeSeated: true })
     // By name, not by position: this used to take the first checkbox on the page, and adding a
     // per-role one above it pointed the test at something else entirely.
     const box = container.querySelector<HTMLInputElement>(
@@ -432,5 +435,43 @@ describe('colours for custom roles', () => {
 
     const hex = container.querySelector<HTMLInputElement>('#lc-agent-db-reviewer-hex')
     expect(hex?.value.toLowerCase()).toBe(derived.toLowerCase())
+  })
+})
+
+/**
+ * Nothing here can see what a gateway bills.
+ *
+ * So with no Claude seat, every budget control would be a cap over a number that stays at zero —
+ * which is worse than no cap at all, because it is believed. The section is absent rather than
+ * present and inert, which is the rule the tools already follow.
+ */
+describe('budget controls, where there is something to budget', () => {
+  const COST = 'What consultations cost is worth managing'
+
+  it('shows nothing about cost when no seat is held by Claude', () => {
+    render({ claudeSeated: false, budgetMatters: false, budgetPanel: <div>the budget</div> })
+    expect(container.textContent).not.toContain(COST)
+    expect(container.textContent).not.toContain('the budget')
+  })
+
+  it('shows it once a seat is', () => {
+    render({ claudeSeated: true, budgetMatters: false })
+    expect(container.textContent).toContain(COST)
+  })
+
+  /* Turning it on must not be a one-way door: somebody who chose to manage cost keeps the way back. */
+  it('keeps it while the user has switched it on, whoever holds the seats', () => {
+    render({ claudeSeated: false, budgetMatters: true, budgetPanel: <div>the budget</div> })
+    expect(container.textContent).toContain(COST)
+    expect(container.textContent).toContain('the budget')
+  })
+
+  /*
+   * Which model suits which seat is not a question about cost, and it used to be nested inside
+   * the budget panel — invisible to exactly the person with several models and no Claude.
+   */
+  it('shows which model suits which seat regardless', () => {
+    render({ claudeSeated: false, budgetMatters: false, fitPanel: <div>which model</div> })
+    expect(container.textContent).toContain('which model')
   })
 })
