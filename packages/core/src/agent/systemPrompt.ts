@@ -132,6 +132,23 @@ export function buildSystemPrompt(
     '- Paths are relative to the workspace root. You cannot access anything outside it.',
     '- When the task is complete, call attempt_completion with a summary of what you did.',
     '- If you need information only the user can provide, call ask_followup_question.',
+    /*
+     * Asked for directly, from real use with a model whose training predates the libraries in
+     * front of it. The failure it addresses is not refusing to answer - it is answering anyway,
+     * from a remembered version of an API, which produces code that looks right and is wrong
+     * against the installed version. The user very often has the page open.
+     *
+     * Phrased as a thing to do rather than a permission, because a model that is unsure is
+     * already reluctant to interrupt, and "you may ask" reads as "prefer not to".
+     */
+    '- **If a library or API is unfamiliar, or the version here does not match what you remember,',
+    '  ask the user for documentation rather than guessing.** Say which library and what you need',
+    '  to know - a signature, which module something moved to, whether a call is still supported.',
+    '  They can paste it, point you at a file or a URL they have already fetched, or tell you the',
+    '  house convention. Recalling an API from a version you were trained on produces code that',
+    '  looks correct and fails against the one installed, which is far more expensive than asking.',
+    '- Before asking, check what is here: the imports and existing calls in this workspace are',
+    '  evidence about the version actually installed, and a skill may already describe it.',
   )
 
   if (options.skills !== undefined && options.skills.length > 0) {

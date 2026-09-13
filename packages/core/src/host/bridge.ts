@@ -2021,21 +2021,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     for (const tool of python.generatedTools())
       combined.register(tool, { dispatchOnly: dispatcher })
     /*
-     * The two plan tools, always registered.
+     * The two plan tools, always registered and always *advertised*.
      *
-     * `dispatchOnly` follows the dispatcher exactly as MCP and Python tools do, and it matters
-     * more here than usual: these exist to serve a feature most conversations never switch on,
-     * and §12 is strict that what sits at the front of the prompt must stay byte-stable. Hiding
-     * them costs nothing, because the *plan guidance names them both* — and that guidance is only
-     * present when there is a plan, which is exactly when they are wanted. With no plan set and
-     * the dispatcher on they are still reachable, through `search_docs` like anything else.
+     * They used to follow the dispatcher, on the argument that hiding them cost nothing because
+     * the plan guidance names them both. Reported from real use, and the argument was wrong in
+     * the one place it mattered most: agent team mode opens by telling the model to propose the
+     * expert's plan with `update_plan`, and with the dispatcher on that tool is not in the list
+     * it can see. So it was instructed to call something invisible while `write_to_file` sat
+     * right there — and it wrote the plan into a file, which looks like progress and is not. The
+     * user had to stop it and say so.
      *
-     * Registered unconditionally rather than only when a plan exists: making the registry itself
-     * a function of whether a plan is set would put the plan into the tool block, which is the
-     * one thing §12 rules out.
+     * Naming a tool in guidance and hiding it from the tool block are not compatible. Being
+     * reachable through `search_docs` is not the same as being reachable: it asks the model to
+     * notice an absence, infer indirection, and spend a step on it, which is exactly what a model
+     * under instruction to get on with the plan will not do.
+     *
+     * §12 permits this outright. What it forbids is the advertised set *varying* — and always
+     * present is the most stable thing there is, strictly more stable than conditioning on the
+     * dispatcher. The price is two tool definitions in every session, which against a plan
+     * silently written to a file is not a price worth haggling over.
+     *
+     * Registered unconditionally rather than only when a plan exists, for the original reason:
+     * making the registry a function of whether a plan is set would put the plan into the tool
+     * block, which is the one thing §12 rules out.
      */
-    combined.register(createUpdatePlanTool(planAccess), { dispatchOnly: dispatcher })
-    combined.register(createPlanProgressTool(planAccess), { dispatchOnly: dispatcher })
+    combined.register(createUpdatePlanTool(planAccess))
+    combined.register(createPlanProgressTool(planAccess))
 
     /*
      * Changing what a specialist is, from the chat.

@@ -1,5 +1,50 @@
 # light-code-vscode
 
+## 0.82.3
+
+### Patch Changes
+
+- Ask the user for documentation instead of guessing at an unfamiliar API
+
+  Requested from real use with a model whose training predates the libraries in front of it. The
+  failure this addresses is not the assistant refusing to answer — it is answering anyway, from a
+  remembered version of an API, which produces code that looks correct and fails against the version
+  actually installed. The user very often has the page open.
+
+  It is phrased as a thing to do rather than a permission: a model that is unsure is already
+  reluctant to interrupt, and "you may ask" reads as "prefer not to". It is also told to check the
+  workspace first — the imports and existing calls here are evidence about the installed version, and
+  a skill may already describe it.
+
+## 0.82.2
+
+### Patch Changes
+
+- The plan tools are advertised, not hidden behind the dispatcher
+
+  Reported from real use: in agent team mode the assistant tried to set the plan, could not, and
+  wrote it into a file instead — which looks like progress and is not. Nothing reads that file, the
+  progress panel stays empty, and the user approved nothing. They had to stop it and explain.
+
+  The cause was ours. Agent team mode opens by telling the model to propose the expert's plan with
+  `update_plan`. Both plan tools followed the dispatcher, which is on by default, so that tool was
+  **not in the list the model could see** — instructed to call something invisible, with
+  `write_to_file` plainly available. The registration comment even carried the assumption that broke:
+  that hiding them cost nothing because the guidance names them.
+
+  Naming a tool in guidance and hiding it from the tool block are not compatible, and "still
+  reachable through `search_docs`" is not the same as reachable — it asks the model to notice an
+  absence, infer indirection, and spend a step on it, which a model under instruction to get on with
+  the plan will not do.
+
+  §12 permits this outright: what it forbids is the advertised set _varying_, and always-present is
+  strictly more stable than conditioning on a config key. The price is two tool definitions per
+  session, against a plan silently written to a file.
+
+  The guidance also now says never to write the plan to a file, and to report the failure rather than
+  route around it — an instruction that only forbids leaves a model with nowhere to go, which is how
+  it invented the file.
+
 ## 0.82.1
 
 ### Patch Changes
