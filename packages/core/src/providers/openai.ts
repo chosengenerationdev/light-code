@@ -2,6 +2,7 @@ import type { Logger } from '../logging/logger.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { describeTlsError } from './auth/apigeeMtls.js'
 import { toOpenAITools } from './schema.js'
+import { ThinkTagSplitter } from './thinkTags.js'
 import type {
   AuthStrategy,
   ChatMessage,
@@ -176,6 +177,7 @@ async function* parseSseStream(
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  const thinking = new ThinkTagSplitter()
   const toolCallAccumulators = new Map<number, ToolCallAccumulator>()
 
   try {
@@ -216,7 +218,16 @@ async function* parseSseStream(
             yield { type: 'reasoning', text: reasoning }
           }
           if (typeof choice.delta.content === 'string' && choice.delta.content.length > 0) {
-            yield { type: 'text', text: choice.delta.content }
+            /*
+             * Qwen3 and friends put their thinking in the content, wrapped in `<think>` tags,
+             * unless whoever serves them switched a reasoning parser on. Routed to the reasoning
+             * channel here so it renders as a trace and, more importantly, never enters the
+             * conversation — otherwise it is re-sent on every later request, and the models that
+             * emit these tags are the ones with the least context to spare. See `thinkTags.ts`.
+             */
+            const split = thinking.push(choice.delta.content)
+            if (split.reasoning.length > 0) yield { type: 'reasoning', text: split.reasoning }
+            if (split.text.length > 0) yield { type: 'text', text: split.text }
           }
           accumulateToolCallDeltas(toolCallAccumulators, choice.delta.tool_calls)
 
