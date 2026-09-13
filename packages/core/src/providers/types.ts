@@ -165,6 +165,35 @@ export const providerProfileSchema = z.object({
    */
   maxTokens: z.number().int().positive().optional(),
   /**
+   * Sampling, sent only when set.
+   *
+   * Absent means the server's default, which is what every request used before this existed. That
+   * default is frequently 1.0, and on a mid-size model a high temperature is felt most sharply in
+   * the one place it is least wanted: tool calls. A model that has to emit exactly
+   * `{"path":"src/a.ts"}` and is sampling freely produces a plausible-looking argument that is
+   * subtly wrong, and the failure surfaces as a tool error rather than as anything pointing at
+   * sampling. Large models absorb this; smaller ones do not.
+   *
+   * Not given a default here, because a default would apply to every profile including the ones
+   * that are fine, and silently changing how somebody's working model behaves is worse than
+   * leaving a setting unset.
+   */
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
+  /**
+   * How hard this model should think, translated per wire format by `providers/thinking.ts`.
+   *
+   * Absent sends nothing, which is what every request did before this existed and the only
+   * setting that cannot break a gateway nobody has tested against.
+   */
+  thinking: z
+    .object({
+      level: z.enum(['off', 'low', 'medium', 'high']),
+      /** Only consulted for the OpenAI wire format, where the parameter is genuinely ambiguous. */
+      style: z.enum(['effort', 'qwen']).optional(),
+    })
+    .optional(),
+  /**
    * Per-profile corrections to the local capability table (§9). Needed because gateway
    * aliases hide the underlying model, so the table cannot recognise them.
    */

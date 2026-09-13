@@ -140,6 +140,15 @@ export const agentAssignmentSchema = z
      * before this.
      */
     enabled: z.boolean().optional(),
+    /**
+     * How hard this seat should think, overriding whatever its profile says.
+     *
+     * On the assignment because it belongs to the *job*, not to the model: the same Qwen is worth
+     * thinking hard as the expert, where it is planning a change across files, and worth answering
+     * quickly as the librarian, where it is reading back what is written down. One profile, two
+     * seats, two settings.
+     */
+    thinking: z.enum(['off', 'low', 'medium', 'high']).optional(),
   })
   .strict()
 

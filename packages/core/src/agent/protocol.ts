@@ -92,6 +92,8 @@ export interface AgentRoleState {
   canWrite: boolean
   /** Whether the role is in play. A switched-off role keeps everything it was configured with. */
   enabled: boolean
+  /** This seat's thinking override. Absent means the profile decides. */
+  thinking?: 'off' | 'low' | 'medium' | 'high'
 }
 
 /** Cert *paths* are not secrets (§15) — only the passphrase is, and it never crosses. */
@@ -827,6 +829,8 @@ export type UiToHostMessage =
   | { type: 'setRoleWrite'; role: string; canWrite: boolean }
   /** Switches a role in or out of play, keeping everything it was configured with. */
   | { type: 'setRoleEnabled'; role: string; enabled: boolean }
+  /** How hard this seat should think. Absent level clears the override. */
+  | { type: 'setRoleThinking'; role: string; level?: 'off' | 'low' | 'medium' | 'high' }
   | { type: 'requestAgents' }
   /** Sets the plan for the open chat. Empty clears it. */
   | { type: 'setPlan'; plan: string }

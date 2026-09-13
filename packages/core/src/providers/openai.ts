@@ -2,6 +2,7 @@ import type { Logger } from '../logging/logger.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { describeTlsError } from './auth/apigeeMtls.js'
 import { toOpenAITools } from './schema.js'
+import { applyThinking } from './thinking.js'
 import { ThinkTagSplitter } from './thinkTags.js'
 import type {
   AuthStrategy,
@@ -72,6 +73,9 @@ export class OpenAIProvider implements ChatProvider {
       body.tools = toOpenAITools(options.tools)
       body.tool_choice = 'auto'
     }
+    if (this.profile.temperature !== undefined) body.temperature = this.profile.temperature
+    if (this.profile.topP !== undefined) body.top_p = this.profile.topP
+    applyThinking(body, 'openai', this.profile.thinking, this.profile.maxTokens)
 
     let response: HttpResponse
     try {

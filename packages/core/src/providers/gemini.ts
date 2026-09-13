@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { applyThinking } from './thinking.js'
 import type { Logger } from '../logging/logger.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { describeTlsError } from './auth/apigeeMtls.js'
@@ -50,6 +51,27 @@ export class GeminiProvider implements ChatProvider {
     }
     if (this.profile.maxTokens !== undefined) {
       body.generationConfig = { maxOutputTokens: this.profile.maxTokens }
+    }
+    /*
+     * Gemini nests it under `generationConfig`, so the helper writes a top-level `thinkingConfig`
+     * and it is folded in here rather than teaching the helper about one provider's nesting.
+     */
+    if (this.profile.temperature !== undefined || this.profile.topP !== undefined) {
+      body.generationConfig = {
+        ...((body.generationConfig as Record<string, unknown> | undefined) ?? {}),
+        ...(this.profile.temperature !== undefined
+          ? { temperature: this.profile.temperature }
+          : {}),
+        ...(this.profile.topP !== undefined ? { topP: this.profile.topP } : {}),
+      }
+    }
+    applyThinking(body, 'gemini', this.profile.thinking, this.profile.maxTokens)
+    if (body.thinkingConfig !== undefined) {
+      body.generationConfig = {
+        ...((body.generationConfig as Record<string, unknown> | undefined) ?? {}),
+        thinkingConfig: body.thinkingConfig,
+      }
+      delete body.thinkingConfig
     }
 
     let response: HttpResponse

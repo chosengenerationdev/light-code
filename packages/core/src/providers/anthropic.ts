@@ -1,4 +1,5 @@
 import type { Logger } from '../logging/logger.js'
+import { applyThinking } from './thinking.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { describeTlsError } from './auth/apigeeMtls.js'
 import { toAnthropicTools } from './schema.js'
@@ -56,6 +57,13 @@ export class AnthropicProvider implements ChatProvider {
       stream: true,
     }
     if (system !== undefined) body.system = system
+    if (this.profile.temperature !== undefined) body.temperature = this.profile.temperature
+    if (this.profile.topP !== undefined) body.top_p = this.profile.topP
+    /*
+     * After `max_tokens` is set, because the budget has to fit inside it and the clamp reads it.
+     * Anthropic rejects a budget that is not smaller, and the two are edited in different places.
+     */
+    applyThinking(body, 'anthropic', this.profile.thinking, this.profile.maxTokens ?? DEFAULT_MAX_TOKENS)
     if (options.tools !== undefined && options.tools.length > 0) {
       body.tools = toAnthropicTools(options.tools)
     }

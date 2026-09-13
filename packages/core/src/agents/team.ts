@@ -5,6 +5,7 @@ import {
   type AgentRole,
   type CustomRoleDefinition,
 } from './roles.js'
+import type { ThinkingLevel } from '../providers/thinking.js'
 
 /**
  * Who answers each role, as config holds it.
@@ -43,6 +44,8 @@ export interface AgentAssignment {
   write?: boolean | undefined
   /** Whether the role is in play. Absent means yes; see the config schema for why it is separate. */
   enabled?: boolean | undefined
+  /** How hard this seat should think, overriding its profile. Absent means the profile decides. */
+  thinking?: ThinkingLevel | undefined
 }
 
 export interface AgentTeamConfig {
@@ -84,6 +87,8 @@ export interface ResolvedAgent {
   usesTools: boolean
   /** Whether it may change things, each change approved. See `AgentRoleInfo.canWrite`. */
   canWrite: boolean
+  /** The seat's thinking override, where it has one. */
+  thinking?: ThinkingLevel | undefined
   /** Why not, when it is not. */
   reason?: string
 }
@@ -132,6 +137,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
     // or a well-read tester can say so without editing prompts.
     const usesTools = assignment.tools ?? info.usesTools
     const canWrite = assignment.write ?? info.canWrite
+    const thinking = assignment.thinking
 
     if (assignment.kind === 'cli') {
       resolved.push({
@@ -143,6 +149,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
         prompt,
         usesTools,
         canWrite,
+        ...(thinking !== undefined ? { thinking } : {}),
         available: context.cliAvailable,
         ...(context.cliAvailable
           ? {}
@@ -173,6 +180,7 @@ export function resolveTeam(context: TeamContext): ResolvedAgent[] {
       prompt,
       usesTools,
       canWrite,
+      ...(thinking !== undefined ? { thinking } : {}),
       available: profile !== undefined,
       /*
        * A profile that has been deleted leaves the role unavailable and says so, rather than

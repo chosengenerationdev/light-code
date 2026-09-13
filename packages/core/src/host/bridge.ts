@@ -3766,6 +3766,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         usesTools: config.agents?.roles?.[info.role]?.tools ?? info.usesTools,
         canWrite: config.agents?.roles?.[info.role]?.write ?? info.canWrite,
         enabled: config.agents?.roles?.[info.role]?.enabled !== false,
+        ...(() => {
+          // Read once: `config.agents.roles[id]` narrows badly when indexed twice, and a second
+          // read is a second chance for the two to disagree.
+          const level = config.agents?.roles?.[info.role]?.thinking
+          return level !== undefined ? { thinking: level } : {}
+        })(),
       }
     })
 
@@ -7240,8 +7246,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       throw new Error(`No profile "${agent.profileId ?? ''}" exists any more.`)
     }
 
+    /*
+     * The seat's thinking level, applied over the profile's.
+     *
+     * A copy rather than a mutation: the profile object is shared with everything else that uses
+     * it this turn, and a seat changing how the *chat* model thinks would be a setting leaking
+     * sideways out of the Agents tab.
+     */
+    const seatProfile =
+      agent.thinking === undefined
+        ? profile
+        : {
+            ...profile,
+            thinking: { ...(profile.thinking ?? { level: agent.thinking }), level: agent.thinking },
+          }
+
     const provider = createChatProvider(
-      profile,
+      seatProfile,
       httpClient,
       authStrategyFor(config, profile),
       logger,
@@ -8470,6 +8491,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       void handleSaveCustomRole(message)
     } else if (message.type === 'deleteCustomRole') {
       void handleDeleteCustomRole(message.id)
+    } else if (message.type === 'setRoleThinking') {
+      const role = message.role
+      if (!isAgentRole(role, cachedAgentDefinitions)) {
+        post({ type: 'error', message: `There is no "${role}" role.` })
+        return
+      }
+      void saveAgents((current) => {
+        const roles = { ...(current.roles ?? {}) }
+        const existing = roles[role] ?? { kind: 'profile' as const }
+        if (message.level === undefined) {
+          // Cleared rather than stored as a value, so "the profile decides" and "somebody chose
+          // off" stay distinguishable — they behave differently and read the same otherwise.
+          const rest = { ...existing }
+          delete rest.thinking
+          roles[role] = rest
+        } else {
+          roles[role] = { ...existing, thinking: message.level }
+        }
+        return { ...current, roles }
+      })
     } else if (message.type === 'setRoleEnabled') {
       const role = message.role
       if (!isAgentRole(role, cachedAgentDefinitions)) {

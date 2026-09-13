@@ -1468,6 +1468,13 @@ export function App(props: AppProps): ReactElement {
                   role,
                   enabled,
                 } satisfies UiToHostMessage),
+              onSetRoleThinking: (role, level) =>
+                props.transport.post({
+                  type: 'setRoleThinking',
+                  role,
+                  // Absent clears the override rather than storing a level.
+                  ...(level !== undefined ? { level } : {}),
+                } satisfies UiToHostMessage),
               /*
                * The cap comes from core rather than being repeated here.
                *

@@ -52,6 +52,8 @@ export interface AgentsTabProps {
   onSetRoleWrite: (role: string, canWrite: boolean) => void
   /** Switches a role in or out of play, keeping everything it was configured with. */
   onSetRoleEnabled: (role: string, enabled: boolean) => void
+  /** How hard this seat thinks. `undefined` hands the decision back to the profile. */
+  onSetRoleThinking: (role: string, level: 'off' | 'low' | 'medium' | 'high' | undefined) => void
   /** How many custom roles may exist, so the form can say so before the save fails. */
   customRoleLimit: number
   /** The budget controls, rendered here only when cost is worth managing. */
@@ -256,6 +258,36 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
           </div>
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/*
+              Thinking, per seat rather than per model.
+              The same model is worth thinking hard as the expert, planning a change across files,
+              and worth answering quickly as the librarian, reading back what is written down. One
+              profile, two seats, two settings — so this sits beside the model rather than inside
+              its profile, and "Profile default" is the state that changes nothing.
+            */}
+            <div style={{ width: 150 }}>
+              <Select
+                compact
+                ariaLabel={`${role.name} thinking`}
+                title="How hard this specialist should think. Only sent if the profile is set up for it."
+                value={role.thinking ?? ''}
+                onChange={(value) =>
+                  props.onSetRoleThinking(
+                    role.role,
+                    value === ''
+                      ? undefined
+                      : (value as 'off' | 'low' | 'medium' | 'high'),
+                  )
+                }
+                options={[
+                  { value: '', label: 'Profile default' },
+                  { value: 'off', label: 'Thinking: off' },
+                  { value: 'low', label: 'Thinking: low' },
+                  { value: 'medium', label: 'Thinking: medium' },
+                  { value: 'high', label: 'Thinking: high' },
+                ]}
+              />
+            </div>
             <div style={{ flex: 1 }}>
               <Select
                 value={valueFor(role)}

@@ -1,5 +1,59 @@
 # @chosengeneration/light-code
 
+## 0.58.0
+
+### Minor Changes
+
+- Choose how hard a model thinks, per profile and per seat
+
+  Every vendor spells this differently and none accepts another's spelling: OpenAI takes
+  `reasoning_effort`, Anthropic a `thinking` block with a token budget, Gemini a `thinkingConfig`,
+  and vLLM or SGLang serving Qwen3 take `chat_template_kwargs.enable_thinking`. §11 calls schema
+  translation a silent-failure source; this is the same hazard with a louder failure, because an
+  unrecognised top-level field is a 400 on _every_ request rather than a hint quietly ignored on the
+  hard ones.
+
+  So `thinking.level` is set once and translated per wire format, and **nothing is sent unless it is
+  set** — that is what every request did before, and the only setting that cannot break a gateway
+  nobody has tested against. The OpenAI wire format also takes a `style`, because "OpenAI-compatible"
+  covers OpenAI itself, vLLM, SGLang and a dozen corporate gateways, and guessing between
+  `reasoning_effort` and `chat_template_kwargs` would break every request against half of them.
+  Anthropic's budget is clamped under `max_tokens`, which it requires and which is edited elsewhere.
+
+  **A seat can override its profile**, from Settings → Agents. The same model is worth thinking hard
+  as the expert, planning a change across files, and worth answering quickly as the librarian,
+  reading back what is written down — one profile, two seats, two settings. The override is applied
+  to a copy, so the Agents tab cannot change how the assistant itself thinks.
+
+  **Sampling is settable too** — `temperature` and `topP`, sent only when set. A server default is
+  frequently 1.0, and on a mid-size model that is felt most sharply where it is least wanted: a model
+  that has to emit exactly `{"path":"src/a.ts"}` while sampling freely produces a plausible argument
+  that is subtly wrong, and it surfaces as a tool error pointing nowhere near sampling. Large models
+  absorb this; smaller ones do not. Left unset by default, because a default would change how
+  somebody's working model behaves without their asking.
+
+### Patch Changes
+
+- 9000c30: Qwen3's thinking no longer fills the context window
+
+  DeepSeek puts a reasoning trace in `reasoning_content` and several gateways use `reasoning`; both
+  were already routed to the reasoning channel. **Qwen3 does neither** unless whoever runs the server
+  switched a reasoning parser on — vLLM and SGLang need `--reasoning-parser` explicitly. Without it
+  the thinking arrives in `content`, wrapped in `<think>` tags, with no field to tell it from the
+  answer.
+
+  Untouched that costs three things, and the third is the expensive one: it is shown as the reply, it
+  is stored as assistant text, and it is therefore **re-sent on every later request for the rest of
+  the task**. A model with 32k of context spends a growing share of it re-reading its own discarded
+  reasoning — and the models that emit these tags are precisely the ones with the least room to
+  spare.
+
+  Tags are now split out of the content stream and sent to the reasoning channel, so they render as
+  a trace and never enter the conversation. A state machine rather than a regex, because a tag split
+  across two stream chunks — `<thi` then `nk>` — is ordinary, and a regex applied per chunk sees
+  neither half. Content that merely starts like a tag is passed straight through, and a stream cut
+  off mid-thought gives back what it was holding rather than dropping it.
+
 ## 0.57.0
 
 ### Minor Changes

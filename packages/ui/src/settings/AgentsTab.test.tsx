@@ -56,6 +56,7 @@ const base: AgentsTabProps = {
   onSetRoleTools: () => {},
   onSetRoleWrite: () => {},
   onSetRoleEnabled: () => {},
+  onSetRoleThinking: () => {},
   customRoleLimit: 5,
 }
 
