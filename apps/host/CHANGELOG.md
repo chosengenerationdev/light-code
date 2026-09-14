@@ -1,5 +1,23 @@
 # @chosengeneration/light-code
 
+## 0.59.6
+
+### Patch Changes
+
+- Refreshing the mail index always says what happened
+
+  Reported from real use: clicking **Refresh that window** did nothing at all — no progress bar, no
+  message. Two of the three guards in the handler returned in silence.
+
+  The likeliest of them is `mailBusy`, which fires exactly when the automatic sync timer happens to
+  be mid-run — invisible from the tab, so the button simply appears dead. The Outlook availability
+  check was silent too, and it now distinguishes _switched off in Settings_ from _not available on
+  this host_, because those are different things to fix.
+
+  A control somebody just pressed must answer. It matters more than usual here: the user was chasing
+  messages missing from the index, and a silent button removed the one clue that would have told them
+  why nothing was happening.
+
 ## 0.59.5
 
 ### Patch Changes

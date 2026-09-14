@@ -5432,9 +5432,34 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * repairing would be its own source of gaps.
    */
   async function handleRefreshMail(days: number): Promise<void> {
-    if (mailBusy) return
+    /*
+     * Every way out of here says something.
+     *
+     * Reported from real use: "nothing happened, no progress bar". Two of the three guards below
+     * returned in silence, so a button the user had just pressed did nothing and explained
+     * nothing - and the most likely one, `mailBusy`, fires precisely when the automatic timer
+     * happens to be mid-sync, which is invisible from the tab. A control that answers nothing is
+     * indistinguishable from a broken one, and it also robs the user of the one clue that would
+     * let them diagnose the gaps they were chasing.
+     */
+    if (mailBusy) {
+      mailLastResult = 'A mail sync is already running — wait for it to finish, then try again.'
+      await postMailStatus()
+      return
+    }
     const config = await loadSettings()
-    if (cachedOffice.outlook !== true || !officeAvailable()) return
+    if (cachedOffice.outlook !== true) {
+      mailLastResult = 'Outlook is switched off in Settings → Tools.'
+      await postMailStatus()
+      return
+    }
+    if (!officeAvailable()) {
+      // Named rather than lumped in with the switch: this host cannot reach Outlook at all, which
+      // is a different thing to fix from a setting the user can turn on.
+      mailLastResult = 'Outlook is not available on this host.'
+      await postMailStatus()
+      return
+    }
     const chosen = config.mail?.folders ?? []
     if (chosen.length === 0) {
       mailLastResult = 'No folders selected.'
