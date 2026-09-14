@@ -59,6 +59,7 @@ import {
   createExcelListMacrosTool,
   createExcelReadMacroTool,
   createExcelWriteMacroTool,
+  createExcelWriteRangeTool,
   createOutlookFoldersTool,
   createOutlookSearchTool,
   createOutlookReadTool,
@@ -2261,6 +2262,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createExcelListMacrosTool(officeOptions))
         combined.register(createExcelReadMacroTool(officeOptions))
         combined.register(createExcelWriteMacroTool(officeOptions))
+        combined.register(createExcelWriteRangeTool(officeOptions))
         combined.register(createExcelCheckMacroTool(officeOptions))
         combined.register(createExcelEvaluateTool(officeOptions))
         combined.register(createExcelRunMacroTool(officeOptions))

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { OfficeBridge } from '../office/bridge.js'
 import { annotateHtmlBody } from '../office/mailFormat.js'
 import { resolveToolPath } from './paths.js'
-import type { Tool, ToolResult } from './types.js'
+import type { Tool, ToolPreview, ToolResult } from './types.js'
 
 /**
  * Tools for the Excel and Outlook already running on this machine.
@@ -20,7 +20,8 @@ import type { Tool, ToolResult } from './types.js'
  *
  * ## What is read and what is written
  *
- * Everything here is `read` except `excel_write_macro`, which is `edit` **and** always asks
+ * Everything here is `read` except `excel_write_macro` and `excel_write_range`, which are
+ * `edit` **and** always ask
  * (see `ALWAYS_ASK_TOOLS`). Writing VBA into a workbook is writing code that runs on the user's
  * machine with their identity — the same class of act as creating a Python tool, and section 13
  * requires a human to see the source. It is also never granted to a scheduled run.
@@ -566,6 +567,189 @@ export function createExcelReadMacroTool(options: OfficeToolOptions): Tool<z.inf
       }
     },
   }
+}
+
+
+const writeRangeSchema = z.object({
+  workbook: z.string().optional().describe('Which open workbook. Defaults to the active one.'),
+  sheet: z.string().optional().describe('Which sheet. Defaults to the active one.'),
+  cell: z
+    .string()
+    .describe('The top-left cell to start writing at, such as "A1". The block extends right and down from there.'),
+  values: z
+    .array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])))
+    .min(1)
+    .describe(
+      'Rows of cell contents, every row the same width. A string starting with "=" is written as a ' +
+        'formula and Excel calculates it; anything else is written as a plain value.',
+    ),
+})
+
+/**
+ * Writing into the workbook that is open in front of somebody.
+ *
+ * The Office tools were read-and-diagnose for their first several releases, which answered "why is
+ * this cell wrong" and could not answer "put some sample data in and show me a VLOOKUP". The only
+ * route was to write a VBA module and run it: two approvals, a macro left behind in the workbook,
+ * and a Trust Center setting most people do not have switched on.
+ *
+ * ## Why it is `edit` and always asks
+ *
+ * It changes work somebody has not saved, and there is no undo that this product controls. That
+ * puts it in the same bracket as `write_to_file` rather than the read tools around it, and in
+ * `ALWAYS_ASK_TOOLS` so no category toggle can wave it through.
+ *
+ * ## The preview is a diff, not a description
+ *
+ * Invariant 8 applied to a spreadsheet: the approval shows what is in those cells *now* beside
+ * what would replace them, read live from the workbook. What people actually need protecting from
+ * here is not a wrong formula - it is the row of data they had forgotten was underneath.
+ *
+ * ## The workbook is left unsaved
+ *
+ * Exactly as `excel_write_macro` does. Nothing reaches disk until the user saves it themselves,
+ * so the escape hatch from a bad write is to close without saving.
+ */
+export function createExcelWriteRangeTool(
+  options: OfficeToolOptions,
+): Tool<z.infer<typeof writeRangeSchema>> {
+  return {
+    name: 'excel_write_range',
+    group: 'edit',
+    description:
+      'Write a block of values or formulas into an open workbook, starting at a cell. Rows of ' +
+      'equal width; a string beginning with "=" becomes a formula Excel calculates. The workbook ' +
+      'is left unsaved so the user can look at the result before keeping it.',
+    parametersSchema: writeRangeSchema,
+    async preview(params): Promise<ToolPreview> {
+      const width = params.values[0]?.length ?? 0
+      const target = `${params.values.length} row(s) x ${String(width)} column(s) from ${params.cell}`
+      const proposed = params.values
+        .map((row) => row.map((cell) => (cell === null ? '' : String(cell))).join(' | '))
+        .join('\n')
+
+      /*
+       * The current contents are read for the prompt, so the user sees what is being replaced.
+       * A failure to read them must not block the approval - it degrades to saying so, because a
+       * preview that throws would otherwise become an edit nobody was asked about.
+       */
+      let existing = 'Could not read the current contents of that range.'
+      try {
+        const current = await options.bridge.request<{
+          cells: { address: string; value: unknown; text?: string }[]
+        }>({
+          op: 'excel.readRange',
+          ...(params.workbook !== undefined ? { workbook: params.workbook } : {}),
+          ...(params.sheet !== undefined ? { sheet: params.sheet } : {}),
+          range: rangeFor(params.cell, params.values.length, width),
+        })
+        const filled = current.cells.filter(
+          (cell) => cell.value !== null && cell.value !== undefined && String(cell.value) !== '',
+        )
+        existing =
+          filled.length === 0
+            ? 'Those cells are all empty.'
+            : filled.map((cell) => `${cell.address}: ${String(cell.text ?? cell.value)}`).join('\n')
+      } catch {
+        // Left as the sentence above.
+      }
+
+      return {
+        kind: 'text',
+        text: [
+          `Write ${target} into ${params.sheet ?? 'the active sheet'} of ${params.workbook ?? 'the active workbook'}.`,
+          '',
+          '--- what is there now ---',
+          existing,
+          '',
+          '--- what will replace it ---',
+          proposed,
+          '',
+          'The workbook stays open and unsaved, so nothing reaches disk until the user saves it.',
+        ].join('\n'),
+      }
+    },
+    async execute(params): Promise<ToolResult> {
+      try {
+        const result = await options.bridge.request<{
+          workbook: string
+          sheet: string
+          range: string
+          written: number
+          overwritten: { address: string; was: string }[]
+          cells: { address: string; value: unknown }[]
+        }>({ op: 'excel.writeRange', ...params })
+
+        /*
+         * The computed values are reported, not assumed. A formula that lands as #N/A or #REF! is
+         * exactly what somebody needs told - it looks like success from here otherwise, and the
+         * error sits in the sheet unnoticed.
+         */
+        const errors = result.cells.filter((cell) => String(cell.value).startsWith('#'))
+        const sample = result.cells
+          .slice(0, 40)
+          .map((cell) => `${cell.address}: ${cell.value === null ? '' : String(cell.value)}`)
+          .join('\n')
+
+        return {
+          content: [
+            `Wrote ${String(result.written)} cell(s) to ${result.sheet}!${result.range} in ${result.workbook}.`,
+            result.overwritten.length > 0
+              ? `Replaced ${String(result.overwritten.length)} cell(s) that had contents.`
+              : 'Every target cell was empty.',
+            errors.length > 0
+              ? `${String(errors.length)} cell(s) evaluated to an error: ${errors.map((cell) => `${cell.address} ${String(cell.value)}`).join(', ')}`
+              : '',
+            '',
+            sample,
+            result.cells.length > 40 ? `...and ${String(result.cells.length - 40)} more` : '',
+            '',
+            'The workbook is NOT saved; tell the user to save it in Excel if they want to keep it.',
+          ]
+            .filter((line) => line !== '')
+            .join('\n'),
+          isError: false,
+        }
+      } catch (error) {
+        return { content: message(error), isError: true }
+      }
+    },
+  }
+}
+
+/**
+ * The A1 range a block starting at `cell` would cover.
+ *
+ * Computed here rather than asked of Excel, because the preview needs it *before* anything is
+ * written and a round trip to resolve an address is a cross-process call for arithmetic.
+ */
+export function rangeFor(cell: string, rows: number, columns: number): string {
+  const match = /^\$?([A-Za-z]+)\$?(\d+)$/.exec(cell.trim())
+  // Not a plain cell reference - hand it back untouched and let Excel reject it by its own rules,
+  // rather than guessing at a shape this does not understand.
+  if (match === null) return cell
+  const startColumn = columnNumber(match[1] ?? 'A')
+  const startRow = Number(match[2])
+  return `${match[1]?.toUpperCase() ?? 'A'}${String(startRow)}:${columnLetters(startColumn + columns - 1)}${String(startRow + rows - 1)}`
+}
+
+function columnNumber(letters: string): number {
+  let total = 0
+  for (const character of letters.toUpperCase()) {
+    total = total * 26 + (character.charCodeAt(0) - 64)
+  }
+  return total
+}
+
+function columnLetters(column: number): string {
+  let remaining = column
+  let letters = ''
+  while (remaining > 0) {
+    const remainder = (remaining - 1) % 26
+    letters = String.fromCharCode(65 + remainder) + letters
+    remaining = Math.floor((remaining - 1) / 26)
+  }
+  return letters
 }
 
 const writeMacroSchema = macroSchema.extend({

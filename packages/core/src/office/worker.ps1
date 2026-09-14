@@ -752,6 +752,96 @@ function Invoke-ExcelSessions {
   happened, because a currency column silently losing its currency is the kind of difference
   someone should be told about rather than left to notice.
 #>
+# Writes a block of values or formulas into a live workbook.
+#
+# Bulk, not cell by cell. Reading 400 cells one at a time measured 315x slower than the array
+# property and ran past the timeout entirely; writing has exactly the same shape, so the whole
+# block goes in one assignment.
+#
+# `.Formula` rather than `.Value2`, so a string beginning with = becomes a real formula that
+# Excel calculates. A plain value assigned through Formula stays a plain value, so one property
+# covers both and the caller does not have to say which it meant.
+#
+# What was there is read *before* the write and returned, so the result tells the truth about what
+# was overwritten even if the sheet changed between the approval and the call.
+function Invoke-ExcelWriteRange {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+
+    $rows = @($Request.values)
+    $rowCount = $rows.Count
+    if ($rowCount -eq 0) { throw 'No values were given to write.' }
+    $columnCount = @($rows[0]).Count
+    if ($columnCount -eq 0) { throw 'The first row is empty, so there is nothing to write.' }
+
+    $limit = 5000
+    if (($rowCount * $columnCount) -gt $limit) {
+        throw "That is $($rowCount * $columnCount) cells; write at most $limit at a time."
+    }
+
+    # A ragged block would silently write nulls into the short rows, so it is refused instead.
+    for ($r = 0; $r -lt $rowCount; $r++) {
+        $width = @($rows[$r]).Count
+        if ($width -ne $columnCount) {
+            throw "Row $($r + 1) has $width value(s) but the first row has $columnCount; every row must be the same width."
+        }
+    }
+
+    $target = $sheet.Range($Request.cell).Resize($rowCount, $columnCount)
+
+    # What is being replaced, captured before anything is written.
+    $existing = $target.Formula
+    $before = @()
+    for ($r = 1; $r -le $rowCount; $r++) {
+        for ($c = 1; $c -le $columnCount; $c++) {
+            $was = if ($rowCount -eq 1 -and $columnCount -eq 1) { $existing } else { $existing[$r, $c] }
+            if ($null -ne $was -and "$was" -ne '') {
+                $before += [ordered]@{
+                    address = (Get-CellAddress -Row ($target.Row + $r - 1) -Column ($target.Column + $c - 1))
+                    was     = [string]$was
+                }
+            }
+        }
+    }
+
+    $block = New-Object 'object[,]' $rowCount, $columnCount
+    for ($r = 0; $r -lt $rowCount; $r++) {
+        $row = @($rows[$r])
+        for ($c = 0; $c -lt $columnCount; $c++) {
+            $block[$r, $c] = $row[$c]
+        }
+    }
+
+    $target.Formula = $block
+
+    # Read back what Excel made of it. A formula that lands as #N/A or #REF! is the whole reason
+    # this is reported rather than assumed - it would otherwise sit there unnoticed.
+    $after = @()
+    $computed = $target.Value2
+    for ($r = 1; $r -le $rowCount; $r++) {
+        for ($c = 1; $c -le $columnCount; $c++) {
+            $value = if ($rowCount -eq 1 -and $columnCount -eq 1) { $computed } else { $computed[$r, $c] }
+            $converted = Convert-ExcelValue -Value $value
+            $after += [ordered]@{
+                address = (Get-CellAddress -Row ($target.Row + $r - 1) -Column ($target.Column + $c - 1))
+                value   = $converted
+            }
+        }
+    }
+
+    return @{
+        workbook    = $wb.Name
+        sheet       = $sheet.Name
+        range       = $target.Address(0, 0)
+        written     = $rowCount * $columnCount
+        overwritten = $before
+        cells       = $after
+    }
+}
+
 function Invoke-ExcelReadRange {
     param($Request)
 
@@ -1871,6 +1961,7 @@ function Invoke-Request {
         'excel.sessions'        { return Invoke-ExcelSessions }
         'excel.diagnose'        { return Invoke-ExcelDiagnose }
         'excel.readRange'       { return Invoke-ExcelReadRange -Request $Request }
+        'excel.writeRange'      { return Invoke-ExcelWriteRange -Request $Request }
         'excel.trace'           { return Invoke-ExcelTrace -Request $Request }
         'excel.listMacros'      { return Invoke-ExcelListMacros -Request $Request }
         'excel.readMacro'       { return Invoke-ExcelReadMacro -Request $Request }

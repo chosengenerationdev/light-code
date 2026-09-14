@@ -56,6 +56,7 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   // Same reasoning, and sharper unattended: installing a macro is authorising a capability, and
   // section 13 requires approval showing the source, which cannot happen with nobody there.
   'excel_write_macro',
+  'excel_write_range',
   // And running one: unattended execution of arbitrary VBA, with nobody to read the source.
   'excel_run_macro',
   /*

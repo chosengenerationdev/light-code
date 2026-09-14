@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.83.0
+
+### Minor Changes
+
+- `excel_write_range` — write values and formulas into the workbook you have open
+
+  The Office tools were read-and-diagnose only. That answered "why is this cell wrong" and had no
+  answer at all for "put some dummy data in and show me a VLOOKUP" — the only route was writing a VBA
+  module and running it, which is two approvals, a macro left behind in the workbook, and a Trust
+  Center setting most people do not have switched on.
+
+  Give it a starting cell and rows of equal width. A string beginning with `=` is written as a
+  formula and Excel calculates it; anything else stays a plain value, so one property covers both and
+  the caller never has to say which it meant.
+
+  - **`edit`, always asks, never available to a schedule.** It changes work somebody has not saved,
+    and there is no undo this product owns.
+  - **The approval is a diff, not a description** (invariant 8): what is in those cells _now_, read
+    live from the workbook, beside what would replace them. What people need protecting from here is
+    not a wrong formula — it is the row of data they had forgotten was underneath.
+  - **Computed results are read back and reported.** A formula landing as `#N/A` or `#REF!` looks
+    like success otherwise, and the error sits in the sheet unnoticed.
+  - **The whole block goes in one assignment.** Reading 400 cells one at a time measured 315× slower
+    than the array property and ran past the timeout; writing has exactly the same shape.
+  - **The workbook is left unsaved**, exactly as `excel_write_macro` does, so closing without saving
+    is the escape hatch from a bad write.
+
+  Extension only — the Node host declares no Office support, so nothing here reaches it.
+
 ## 0.82.6
 
 ### Patch Changes
