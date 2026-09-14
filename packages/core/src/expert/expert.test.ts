@@ -108,8 +108,8 @@ describe('system prompt', () => {
   })
 
   it('explains the expert only when one is available', () => {
-    expect(buildSystemPrompt('/repo', { expertAvailable: true })).toMatch(/ask_expert/)
-    expect(buildSystemPrompt('/repo', { expertAvailable: false })).not.toMatch(/ask_expert/)
+    expect(buildSystemPrompt('/repo', { expertAvailable: true })).toMatch(/ask_claude/)
+    expect(buildSystemPrompt('/repo', { expertAvailable: false })).not.toMatch(/ask_claude/)
   })
 
   it('tells the model the expert costs money and cannot see the workspace', () => {

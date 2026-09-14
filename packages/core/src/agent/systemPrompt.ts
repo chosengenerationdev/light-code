@@ -376,7 +376,7 @@ export function buildSystemPrompt(
     lines.push(
       '',
       'Expert consultation:',
-      '- A stronger model, Claude, is available through the ask_expert tool. You CAN talk to',
+      '- A stronger model, Claude, is available through the ask_claude tool. You CAN talk to',
       '  it. Never tell the user you have no way to reach another model — you do.',
       '- **If the user asks you to consult it, do so.** "Ask Claude", "check with the',
       '  expert", "what does Claude think" and anything similar are direct instructions.',

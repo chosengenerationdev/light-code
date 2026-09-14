@@ -48,7 +48,7 @@ export function createRecallExpertTool(options: RecallExpertOptions): Tool<Recal
     group: 'read',
     description:
       'Re-read advice the expert already gave in this task, at no cost. Check here before ' +
-      'calling ask_expert — if a plan was lost to an error or a long conversation, it can be ' +
+      'calling ask_claude — if a plan was lost to an error or a long conversation, it can be ' +
       'recovered instead of bought again. Returns previous answers verbatim; it never asks ' +
       'anything new.',
     parametersSchema: paramsSchema,
@@ -58,7 +58,7 @@ export function createRecallExpertTool(options: RecallExpertOptions): Tool<Recal
         return {
           content:
             'The expert has not been consulted in this task yet, so there is nothing to recall. ' +
-            'Use ask_expert if you need advice.',
+            'Use ask_claude if you need advice.',
         }
       }
 

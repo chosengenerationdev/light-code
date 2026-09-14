@@ -114,9 +114,25 @@ export interface AskExpertOptions {
  * as well as the system prompt, because a weak model will otherwise transcribe a plan it
  * has not verified.
  */
+/**
+ * What this tool is called, and why it says Claude rather than "expert".
+ *
+ * Reported from real use: with a profile in the expert seat and the Claude CLI still enabled,
+ * there were two doors to "the expert" and only one of them honoured the seat. The model reached
+ * for the obvious name and the work went to Claude, silently, against the user's configuration.
+ *
+ * A name is the only thing the model has to choose between them, so the name has to say which is
+ * which. `ask_agent` takes a role and answers from whoever holds that seat; this one always
+ * spawns the Claude command line, whatever the Agents tab says, so it is named for what it does.
+ */
+export const ASK_CLAUDE_TOOL = 'ask_claude'
+
+/** What it used to be called. Stored transcripts still hold calls under this name. */
+export const LEGACY_ASK_EXPERT_TOOL = 'ask_expert'
+
 export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertParams> {
   return {
-    name: 'ask_expert',
+    name: ASK_CLAUDE_TOOL,
     group: 'read',
     /*
      * The rationing is said only where somebody is counting.
@@ -133,7 +149,8 @@ export function createAskExpertTool(options: AskExpertOptions): Tool<AskExpertPa
      * Settings, exactly as switching the dispatcher does.
      */
     description:
-      'Consult a stronger expert model about a hard problem: planning a multi-file change, ' +
+      'Consult Claude, running as a separate command line on this machine, about a hard problem: '
+      + 'planning a multi-file change, ' +
       'diagnosing a bug you have already failed to fix, or choosing between designs. ' +
       (options.budgetMatters === true
         ? 'Each call costs the user money, so use it for genuinely difficult questions only, and there may be a per-task budget after which it stops being available. '

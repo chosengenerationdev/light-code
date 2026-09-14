@@ -1,4 +1,5 @@
 import type { Skill } from '../skills/index.js'
+import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
 import { AGENT_ROLES, type AgentRole } from './roles.js'
 import type { ResolvedAgent } from './team.js'
@@ -229,7 +230,7 @@ function buildRoster(team: readonly ResolvedAgent[], self: AgentRole | undefined
 export function buildAgentBriefing(input: AgentBriefingInput): string {
   const tools = (input.tools ?? []).filter(
     // Telling a specialist it can consult a specialist is noise at best and a loop at worst.
-    (tool) => tool.name !== 'ask_agent' && tool.name !== 'ask_expert',
+    (tool) => tool.name !== 'ask_agent' && tool.name !== ASK_CLAUDE_TOOL,
   )
   const skills = input.skills ?? []
   const team = input.team

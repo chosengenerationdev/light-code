@@ -17,6 +17,11 @@ const STEP_LABELS: Record<TestConnectionStep['step'], string> = {
 function markerFor(status: TestConnectionStep['status']): { glyph: string; color: string } {
   if (status === 'ok') return { glyph: '✓', color: 'var(--vscode-testing-iconPassed, #3fb950)' }
   if (status === 'failed') return { glyph: '✕', color: colors.error }
+  /*
+   * A note is neither a pass nor a problem — a gateway that serves no catalogue is the ordinary
+   * case, not a fault. Marked distinctly from `skipped`, which means "we never got this far".
+   */
+  if (status === 'note') return { glyph: 'ℹ', color: colors.muted }
   return { glyph: '–', color: colors.muted }
 }
 

@@ -48,6 +48,7 @@ import {
 } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
 import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
+import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
 import {
   createExcelOpenTool,
@@ -2383,7 +2384,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
               ...(cachedAssessment === undefined ? {} : { juniorAssessment: cachedAssessment }),
               // `ask_expert` itself is excluded: telling the expert it can consult itself is
               // noise at best and a loop at worst.
-              promptTools: combined.promptList().filter((tool) => tool.name !== 'ask_expert'),
+              promptTools: combined.promptList().filter((tool) => tool.name !== ASK_CLAUDE_TOOL),
               dispatchOnlyTools: combined.dispatchOnlyList(),
               skills,
               retrievalAvailable: combined.get('search_docs') !== undefined,

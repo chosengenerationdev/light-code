@@ -135,7 +135,13 @@ describe('testConnection', () => {
     expect(result.steps[1]?.detail).toMatch(/HTTP 401/)
   })
 
-  it('distinguishes a models failure from a token failure', async () => {
+  /*
+   * The catalogue is not the chat path, and refusing to list it says nothing certain about
+   * whether chat works - measured against a gateway that answered completions perfectly while
+   * this step reported red. So the status is a note and the *detail* carries the code, which is
+   * what §10 actually asks for: say which step did what, and let the reader judge.
+   */
+  it('reports the catalogue refusal without calling the connection broken', async () => {
     const http = router({
       token: () => json(200, { access_token: 'tok' }),
       models: () => json(403, {}),
@@ -144,8 +150,10 @@ describe('testConnection', () => {
     const result = await testConnection(mtlsProfile(), context(http), http)
 
     expect(statusOf(result.steps, 'token')).toBe('ok')
-    expect(statusOf(result.steps, 'models')).toBe('failed')
+    expect(statusOf(result.steps, 'models')).toBe('note')
     expect(result.steps[2]?.detail).toMatch(/HTTP 403/)
+    // The token step is what distinguishes this from a credential problem, and it passed.
+    expect(result.ok).toBe(true)
   })
 
   it('skips the certificate step for an API-key profile rather than inventing one', async () => {

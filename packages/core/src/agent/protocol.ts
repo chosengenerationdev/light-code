@@ -399,7 +399,8 @@ export interface SearchConnectionInput {
 /** One line per step of load-certs → get-token → list-models (§10). */
 export interface TestConnectionStep {
   step: 'certificates' | 'token' | 'models'
-  status: 'ok' | 'failed' | 'skipped'
+  /** `note` is a step that did not succeed and is not a problem. See `TestStepResult`. */
+  status: 'ok' | 'failed' | 'skipped' | 'note'
   detail: string
 }
 

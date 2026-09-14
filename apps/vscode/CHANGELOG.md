@@ -1,5 +1,33 @@
 # light-code-vscode
 
+## 0.82.5
+
+### Patch Changes
+
+- `ask_expert` is now `ask_claude`, and Test Connection reports instead of spinning
+
+  **Two doors to "the expert", and only one honoured the seat.** Reported from real use: with a
+  profile assigned to the expert seat and the Claude command line still enabled, `ask_expert` was
+  registered regardless — it always spawns Claude, whatever the Agents tab says. The model reached
+  for the obvious name and the work went to Claude, silently, against the user's configuration.
+
+  A name is all the model has to choose between them, so the name now says which is which:
+  `ask_agent` takes a role and answers from whoever holds that seat; `ask_claude` is the command
+  line. Calls stored under the old name are still attributed, or every saved transcript would
+  quietly lose its labels.
+
+  **Test Connection could not fail, so it could not report.** Reported on the Node host: the button
+  sat on "Testing…" against a gateway that answered chat completions perfectly well — proved by
+  invoking a LangChain client against the same URL and headers. Two faults, both ours:
+
+  - `testConnection` took an optional `AbortSignal` and the one caller never passed one, so there was
+    no deadline anywhere. It now owns a 20s bound of its own, composed with the caller's signal
+    rather than replacing it, because "the caller must remember" is how it came to be missing.
+  - A gateway that publishes no `/models` was reported as a red failure, with a comment beside the
+    code saying this case was normal. §9 has said since Phase 6 that the dropdown must never be a
+    hard dependency. It is a **note** now, and the detail carries the HTTP status without asserting
+    a cause — a refused catalogue says nothing certain about whether chat works.
+
 ## 0.82.4
 
 ### Patch Changes

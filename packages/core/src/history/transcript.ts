@@ -1,5 +1,6 @@
 import { chartSpecSchema, type ChartSpec } from '../charts/types.js'
 import { CALL_TOOL_NAME } from '../tools/callTool.js'
+import { ASK_CLAUDE_TOOL, LEGACY_ASK_EXPERT_TOOL } from '../tools/askExpert.js'
 import type { ToolCallSummary, TranscriptEntry } from '../agent/protocol.js'
 import type { ChatMessage } from '../providers/types.js'
 
@@ -204,7 +205,9 @@ export function toolCallSummary(
 
 export function consultationFromToolCall(name: string, rawArguments: string): string | undefined {
   const call = throughDispatch(name, rawArguments)
-  if (call.name === 'ask_expert') return 'expert'
+  // Both names: the tool is `ask_claude` now, and every task saved before that holds calls
+  // under the old one. Dropping the old name would quietly unlabel every stored transcript.
+  if (call.name === ASK_CLAUDE_TOOL || call.name === LEGACY_ASK_EXPERT_TOOL) return 'expert'
   if (call.name !== 'ask_agent') return undefined
   const decoded = call.args
   const role =

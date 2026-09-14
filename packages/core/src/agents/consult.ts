@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatProvider, ToolDefinition } from '../providers/types.js'
 import { ALWAYS_ASK_TOOLS } from '../approval/policy.js'
 import type { Tool, ToolExecutionContext } from '../tools/types.js'
+import { ASK_CLAUDE_TOOL, LEGACY_ASK_EXPERT_TOOL } from '../tools/askExpert.js'
 
 /**
  * A consultation that can look things up for itself.
@@ -60,7 +61,8 @@ export function toolsForConsultation(
     (tool) =>
       (ALLOWED_GROUPS.has(tool.group) || extra.has(tool.name)) &&
       tool.name !== 'ask_agent' &&
-      tool.name !== 'ask_expert',
+      tool.name !== ASK_CLAUDE_TOOL &&
+      tool.name !== LEGACY_ASK_EXPERT_TOOL,
   )
 }
 

@@ -50,7 +50,7 @@ describe('recalling what the expert already said', () => {
   it('says plainly when the expert has not been asked anything yet', async () => {
     const content = await run([])
     expect(content).toContain('not been consulted')
-    expect(content).toContain('ask_expert')
+    expect(content).toContain('ask_claude')
   })
 
   /** It must be safe to tell the model to reach for this first, so it can never spend. */
