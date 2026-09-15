@@ -1,5 +1,32 @@
 # light-code-vscode
 
+## 0.84.3
+
+### Patch Changes
+
+- Diagrams are legible: the theme colours never reached the SVG
+
+  Reported with a screenshot — labels invisible against a dark panel, **no arrows at all**, and box
+  fills that barely showed. One cause for all three.
+
+  The palette was passed `var(--vscode-foreground)` and friends straight from the theme, and **a CSS
+  custom property does not reach an SVG loaded through `<img>`**: that document has its own root and
+  inherits nothing from the page. An invalid attribute value is not an error in SVG, it is a
+  fallback — `fill` becomes black and `stroke` becomes `none`. So the text went black on black and
+  the arrows were never painted. Nothing threw, nothing logged, every test passed.
+
+  - **Colours are resolved before they are used.** `getComputedStyle` on a hidden probe resolves a
+    `var()` chain and its fallbacks, so the browser does the work rather than this code
+    re-implementing the cascade — and the _result_ is checked, not the input. Anything that is not
+    `rgb(…)` or hex becomes a real fallback colour, so a renderer that cannot resolve variables
+    draws a readable diagram instead of an invisible one.
+  - **Tints are an opacity attribute, not eight-digit hex.** A resolved accent arrives as `rgb(…)`,
+    and `rgb(…)1f` is not a colour — it is another invalid value painting another default.
+  - **`isDark` understands `rgb(…)`**, which is what a resolved colour actually is. It was reading
+    hex only, so a dark theme got the pale tints meant for a light one.
+  - **Arrows take the description colour rather than the widget border**, which is meant to be
+    barely visible and was the wrong choice for the lines carrying the meaning.
+
 ## 0.84.2
 
 ### Patch Changes

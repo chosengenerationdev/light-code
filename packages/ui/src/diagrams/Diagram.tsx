@@ -31,14 +31,30 @@ export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
   const [copied, setCopied] = useState(false)
 
   const { svg, uri, width } = useMemo(() => {
+    /*
+     * Resolved to real colours, because the SVG is a document of its own.
+     *
+     * Every colour in `theme.ts` is a `var(--vscode-…)`, and a CSS custom property defined on this
+     * page does not reach an SVG loaded through `<img>` — that document has its own root and
+     * inherits nothing. So the values arrived as `var(…)`, which is not a valid attribute value:
+     * `fill` fell back to black and the labels vanished into a dark panel, `stroke` fell back to
+     * `none` and *every arrow disappeared*, and `dark` was decided from a string that was not a
+     * colour, so a dark theme got the pale tints meant for a light one. One cause, all of it.
+     *
+     * `getComputedStyle` is what resolves a `var()` chain, fallbacks and all, so the browser does
+     * the work rather than this file re-implementing the cascade.
+     */
+    const background = resolveColour(colors.background, '#1e1e1e')
     const palette: DiagramPalette = {
-      background: colors.background,
-      line: colors.border,
-      surface: colors.inputBackground,
-      text: colors.foreground,
-      muted: colors.muted,
-      accent: colors.accent,
-      dark: isDark(colors.background),
+      background,
+      // The arrows take the description colour rather than the widget border: a border is meant
+      // to be barely visible, which is wrong for the lines carrying the meaning of the diagram.
+      line: resolveColour(colors.muted, '#8a8a8a'),
+      surface: resolveColour(colors.inputBackground, '#252526'),
+      text: resolveColour(colors.foreground, '#e0e0e0'),
+      muted: resolveColour(colors.muted, '#8a8a8a'),
+      accent: resolveColour(colors.accent, '#22c55e'),
+      dark: isDark(background),
     }
     const layout = layoutDiagram(props.diagram)
     const markup = diagramSvg(layout, palette)
@@ -82,19 +98,78 @@ export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
 }
 
 /**
+ * A CSS colour expression as an actual colour.
+ *
+ * The browser resolves it, rather than this file learning to parse `var()` chains and their
+ * fallbacks. A hidden probe is the only way to ask: custom properties are resolved against an
+ * element, so there is nothing to read without one.
+ */
+export function resolveColour(value: string, fallback: string): string {
+  try {
+    const probe = document.createElement('span')
+    probe.style.color = value
+    probe.style.display = 'none'
+    document.body.appendChild(probe)
+    const resolved = globalThis.getComputedStyle(probe).color
+    probe.remove()
+    /*
+     * The *output* is checked, not the input, and that is the point.
+     *
+     * A browser resolves a `var()` chain here and hands back `rgb(…)`. Something that does not —
+     * an engine without custom-property support, a variable that is genuinely undefined, jsdom —
+     * hands back the expression it was given, and passing that on is the exact bug this function
+     * was written to end: an invalid attribute value paints black, or nothing at all.
+     *
+     * So anything that is not a colour becomes the fallback. A diagram in a guessed grey is
+     * readable; one drawn in an invalid value is not drawn.
+     */
+    return isPaintable(resolved) ? resolved : fallback
+  } catch {
+    // No DOM: a test, or a renderer that has not mounted. The fallback is a real colour.
+    return fallback
+  }
+}
+
+/**
+ * Whether a value will actually paint.
+ *
+ * Deliberately narrow: `rgb(…)`, `rgba(…)` and hex are what a resolved colour looks like, and
+ * anything else — an unresolved `var()`, an empty string, a keyword this cannot vouch for — is
+ * treated as unusable. Being strict costs a fallback colour; being permissive costs the diagram.
+ */
+function isPaintable(value: string): boolean {
+  const text = value.trim()
+  if (text.length === 0 || text.includes('var(')) return false
+  return /^#[\da-f]{3,8}$/i.test(text) || /^rgba?\(/i.test(text)
+}
+
+/**
  * Whether a colour is dark, so a tone knows how hard to tint.
  *
  * Perceptual weights rather than a plain average: the eye is far more sensitive to green than to
  * blue, and an average calls a saturated blue "light" when nothing on it is readable.
  */
-function isDark(colour: string): boolean {
-  const hex = /^#?([\da-f]{6})$/i.exec(colour.trim())
-  // Not a hex colour — a CSS variable, most likely. Light is the safer guess: the tint is
-  // gentler, so a wrong guess costs contrast rather than legibility.
-  if (hex === null) return false
-  const value = Number.parseInt(hex[1] ?? 'ffffff', 16)
-  const r = (value >> 16) & 0xff
-  const g = (value >> 8) & 0xff
-  const b = value & 0xff
+export function isDark(colour: string): boolean {
+  const text = colour.trim()
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(text)
+  const hex = /^#?([\da-f]{6})$/i.exec(text)
+
+  let r: number
+  let g: number
+  let b: number
+  if (rgb !== null) {
+    r = Number(rgb[1])
+    g = Number(rgb[2])
+    b = Number(rgb[3])
+  } else if (hex !== null) {
+    const value = Number.parseInt(hex[1] ?? 'ffffff', 16)
+    r = (value >> 16) & 0xff
+    g = (value >> 8) & 0xff
+    b = value & 0xff
+  } else {
+    // Neither notation. Dark is the better guess in this product: the editor default is dark,
+    // and the cost of being wrong is a slightly strong tint rather than an unreadable one.
+    return true
+  }
   return (r * 299 + g * 587 + b * 114) / 1000 < 128
 }

@@ -66,13 +66,20 @@ const TONE_HUES: Record<Exclude<NodeTone, 'neutral' | 'muted' | 'accent'>, strin
 function tonePaint(
   tone: NodeTone,
   palette: DiagramPalette,
-): { fill: string; stroke: string; text: string; icon: string } {
+): { fill: string; fillOpacity: number; stroke: string; text: string; icon: string } {
   if (tone === 'neutral') {
-    return { fill: palette.surface, stroke: palette.line, text: palette.text, icon: palette.muted }
+    return {
+      fill: palette.surface,
+      fillOpacity: 1,
+      stroke: palette.line,
+      text: palette.text,
+      icon: palette.muted,
+    }
   }
   if (tone === 'muted') {
     return {
       fill: palette.background,
+      fillOpacity: 1,
       stroke: palette.muted,
       text: palette.muted,
       icon: palette.muted,
@@ -88,9 +95,15 @@ function tonePaint(
    *
    * Opacity does the tinting rather than arithmetic on the hex, because the correct blend depends
    * on the background and the background is the thing that changes with the theme.
+   *
+   * As an *attribute* rather than eight-digit hex, so it works whatever notation the colour
+   * arrived in. The accent comes from the panel and reaches here as `rgb(…)`, and `rgb(…)1f` is
+   * not a colour at all — it is an invalid attribute value, which SVG resolves by painting the
+   * default. That is a whole box drawn in black on a dark theme.
    */
   return {
-    fill: `${hue}${palette.dark === true ? '33' : '1f'}`,
+    fill: hue,
+    fillOpacity: palette.dark === true ? 0.2 : 0.12,
     stroke: hue,
     text: palette.text,
     icon: hue,
@@ -152,7 +165,7 @@ function escape(text: string): string {
 function shapeFor(node: PlacedNode, palette: DiagramPalette): string {
   const { x, y, width: w, height: h } = node
   const paint = tonePaint(node.tone, palette)
-  const common = `fill="${paint.fill}" stroke="${paint.stroke}" stroke-width="1.5"`
+  const common = `fill="${paint.fill}" fill-opacity="${String(paint.fillOpacity)}" stroke="${paint.stroke}" stroke-width="1.5"`
 
   if (node.shape === 'diamond') {
     const points = [
