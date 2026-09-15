@@ -113,6 +113,15 @@ export type {
 /** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */
 export type { VectorStoreKind } from './config/schema.js'
 export type { JuniorAssessment, ProbeResult } from './expert/assessment.js'
+/*
+ * The diagram feature, browser side: the spec type, the layout and the serialiser.
+ *
+ * Value exports, so they go through this file deliberately rather than by accident — importing
+ * them from the bare package would pull core's barrel and with it `node:fs`.
+ */
+export { layoutDiagram, type DiagramLayout } from './diagrams/layout.js'
+export { diagramSvg, diagramDataUri, DEFAULT_PALETTE, type DiagramPalette } from './diagrams/svg.js'
+export { diagramSpecSchema, type DiagramSpec } from './diagrams/types.js'
 
 // Type-only, so nothing from indexer.ts (which imports node:fs) reaches the bundle.
 export type { IndexProgress, IndexResult } from './rag/indexer.js'

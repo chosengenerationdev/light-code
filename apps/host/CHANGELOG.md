@@ -1,5 +1,44 @@
 # @chosengeneration/light-code
 
+## 0.61.0
+
+### Minor Changes
+
+- `show_diagram` — draw a flow chart, an architecture sketch or a state machine
+
+  Requested directly. The model describes a **graph** — nodes with ids and labels, edges between
+  them — and the layout is worked out here.
+
+  **Why the model does not write the SVG**, which is the decision the rest follows from:
+
+  - _Layout._ Models place boxes badly: overlapping shapes, edges crossing their own nodes,
+    coordinates that drift as the diagram grows. Describing what connects to what is a modelling
+    question and a model is good at it; deciding where things go is arithmetic.
+  - _Safety._ Model-authored SVG is model-authored markup, and SVG carries script. Generated from a
+    validated graph, the only model-supplied strings in the output are labels, and labels are
+    escaped. It is still rendered through an `<img>`, where an SVG cannot run script whatever it
+    contains — the same property the guide's diagrams already rely on.
+
+  **Colour and icons, so it can draw something worth looking at.** Nodes take a `tone`
+  (`success`, `danger`, `warning`, `info`, `accent`, `muted`) and an `icon` from a closed set —
+  service, database, user, file, cloud, lock, clock, queue, code, mail, check, cross, warning, gear.
+
+  Tones are _named_, never hex: a model picking `#3b82f6` picks something that may be invisible on
+  somebody's background and different in the next diagram, while a tone is resolved against the live
+  theme so the same spec reads in light and dark. The fill is a tint and the outline carries the hue
+  at full strength — six saturated boxes is a warning label, not a diagram. Icons are paths drawn
+  here rather than a font (a dependency and a fetch) or emoji (platform-dependent, and toy-looking in
+  a technical drawing).
+
+  Shapes carry their conventional meanings — round for start and end, diamond for a decision,
+  cylinder for a store. Loops are drawn round the outside rather than back through everything
+  between their ends; a cycle is ranked by excluding the backward edges, which is what stops a
+  layered layout recursing for ever.
+
+  The SVG is vector, so it stays sharp at any size, and **Copy SVG** puts it on the clipboard for a
+  document or a slide. In a written report a diagram becomes its list of connections, for the same
+  reason a chart becomes a table there: the picture is unavailable and the content is what mattered.
+
 ## 0.60.0
 
 ### Minor Changes

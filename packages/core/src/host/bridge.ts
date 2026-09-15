@@ -8902,6 +8902,29 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         )
       } else if (entry.kind === 'chartError') {
         lines.push(`## Chart\n\nCould not be drawn: ${entry.message}`)
+      } else if (entry.kind === 'diagramError') {
+        lines.push(`## Diagram\n\nCould not be drawn: ${entry.message}`)
+      } else if (entry.kind === 'diagram') {
+        /*
+         * A diagram becomes its edges, for the same reason a chart becomes a table.
+         *
+         * The report is markdown read in the morning with no picture available, and what the
+         * diagram was *saying* is the connections — so they are written out. "A diagram was
+         * shown" would lose the whole content.
+         */
+        const diagram = entry.diagram
+        const labels = new Map(diagram.nodes.map((node) => [node.id, node.label]))
+        lines.push(
+          [
+            `## ${diagram.title ?? 'Diagram'}`,
+            '',
+            ...diagram.edges.map((edge) => {
+              const via = edge.label === undefined ? '' : ` — ${edge.label}`
+              return `- ${labels.get(edge.from) ?? edge.from} → ${labels.get(edge.to) ?? edge.to}${via}`
+            }),
+            ...(diagram.note === undefined ? [] : ['', diagram.note]),
+          ].join('\n'),
+        )
       } else {
         const call = entry.toolCall
         lines.push(

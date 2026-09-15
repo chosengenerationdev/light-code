@@ -38,6 +38,7 @@ import type { ToolGroup, ToolPreview } from '../tools/types.js'
  */
 import type { DatasetConfig } from '../dataset/types.js'
 import type { ChartSpec } from '../charts/types.js'
+import type { DiagramSpec } from '../diagrams/types.js'
 
 export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data'
 
@@ -284,7 +285,9 @@ export type TranscriptEntry =
    * would leave a silent gap where the model believes it drew something.
    */
   | { kind: 'chart'; chart: ChartSpec; expertInformed?: boolean; informedBy?: string }
+  | { kind: 'diagram'; diagram: DiagramSpec; expertInformed?: boolean; informedBy?: string }
   | { kind: 'chartError'; message: string }
+  | { kind: 'diagramError'; message: string }
 
 /** Enough to render the history list without loading every transcript. */
 export interface TaskListEntry {
@@ -907,6 +910,9 @@ export type HostToUiMessage =
    * a chart is precisely the drift that made this necessary.
    */
   | { type: 'chart'; chart: ChartSpec; expertInformed?: boolean; informedBy?: string }
+  /** A diagram to draw. The spec, not a picture: the panel lays it out in the current theme. */
+  | { type: 'diagram'; diagram: DiagramSpec; expertInformed?: boolean; informedBy?: string }
+  | { type: 'diagramError'; message: string }
   | { type: 'chartError'; message: string }
   | {
       type: 'toolResult'

@@ -1,4 +1,5 @@
 import { Chart } from './charts/Chart.js'
+import { Diagram } from './diagrams/Diagram.js'
 import type { ToolCallSummary, TranscriptEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import {
@@ -31,6 +32,9 @@ export type DisplayMessage =
    */
   | Extract<TranscriptEntry, { kind: 'chart' }>
   | Extract<TranscriptEntry, { kind: 'chartError' }>
+  /* A diagram and its failure, derived from `show_diagram` the same way. */
+  | Extract<TranscriptEntry, { kind: 'diagram' }>
+  | Extract<TranscriptEntry, { kind: 'diagramError' }>
 
 export interface MessageListProps {
   messages: DisplayMessage[]
@@ -466,6 +470,13 @@ export function MessageList(props: MessageListProps): ReactElement {
             toolCall={message.toolCall}
             expertInformed={message.expertInformed}
           />
+        ) : message.kind === 'diagram' ? (
+          <Diagram key={index} diagram={message.diagram} />
+        ) : message.kind === 'diagramError' ? (
+          /* Said rather than skipped, for the reason the chart failure is. */
+          <div key={index} style={{ color: colors.error, fontSize: 11, margin: '8px 0' }}>
+            The diagram could not be drawn: {message.message}
+          </div>
         ) : message.kind === 'chart' ? (
           <Chart key={index} chart={message.chart} />
         ) : message.kind === 'chartError' ? (

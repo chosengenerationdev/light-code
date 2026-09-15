@@ -1,5 +1,6 @@
 import { chartSpecSchema, type ChartSpec } from '../charts/types.js'
 import { CALL_TOOL_NAME } from '../tools/callTool.js'
+import { diagramSpecSchema, type DiagramSpec } from '../diagrams/types.js'
 import { ASK_CLAUDE_TOOL, LEGACY_ASK_EXPERT_TOOL } from '../tools/askExpert.js'
 import type { ToolCallSummary, TranscriptEntry } from '../agent/protocol.js'
 import type { ChatMessage } from '../providers/types.js'
@@ -221,6 +222,30 @@ export function consultationFromToolCall(name: string, rawArguments: string): st
    * exists.
    */
   return typeof role === 'string' && role.trim().length > 0 ? role.trim().toLowerCase() : 'unknown'
+}
+
+/**
+ * A diagram call, seen through the dispatcher like everything else here.
+ *
+ * Mirrors `chartFromToolCall` deliberately rather than inventing a second route to a picture: the
+ * live transcript and a reopened task must agree about what a tool call became, and two
+ * derivations of that would be the split this repository keeps paying for.
+ */
+export function diagramFromToolCall(
+  name: string,
+  rawArguments: string,
+): { kind: 'diagram'; diagram: DiagramSpec } | { kind: 'diagramError'; message: string } | undefined {
+  const call = throughDispatch(name, rawArguments)
+  if (call.name !== 'show_diagram') return undefined
+  const parsed = diagramSpecSchema.safeParse(call.args)
+  return parsed.success
+    ? { kind: 'diagram', diagram: parsed.data }
+    : {
+        kind: 'diagramError',
+        message: parsed.error.issues
+          .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+          .join('; '),
+      }
 }
 
 export function chartFromToolCall(

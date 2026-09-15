@@ -636,6 +636,28 @@ export function App(props: AppProps): ReactElement {
         ])
       } else if (message.type === 'chartError') {
         setMessages((prev) => [...prev, { kind: 'chartError', message: message.message }])
+      } else if (message.type === 'diagram') {
+        // Placed exactly as a chart is, and for the same reason: the host decided this was a
+        // diagram with the same function the transcript uses, so this only puts it on screen.
+        setMessages((prev) => [
+          ...prev.filter(
+            (entry) =>
+              !(
+                entry.kind === 'text' &&
+                entry.role === 'assistant' &&
+                entry.pending === true &&
+                entry.content.length === 0
+              ),
+          ),
+          {
+            kind: 'diagram',
+            diagram: message.diagram,
+            ...(message.expertInformed === true ? { expertInformed: true } : {}),
+            ...(message.informedBy !== undefined ? { informedBy: message.informedBy } : {}),
+          },
+        ])
+      } else if (message.type === 'diagramError') {
+        setMessages((prev) => [...prev, { kind: 'diagramError', message: message.message }])
       } else if (message.type === 'searchProbe') {
         setSearchProbes((current) => ({
           ...current,
