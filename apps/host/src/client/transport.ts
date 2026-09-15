@@ -14,12 +14,18 @@ import type { Transport } from '@light-code/core/browser'
  */
 /** How many times a message is resent before the failure is reported instead. */
 /**
- * How long a message may sit queued before the user is told.
+ * How long to wait for the event stream before giving up on it and fetching replies instead.
  *
- * Long enough that an ordinary slow connection never trips it, short enough that somebody who
- * pressed Save learns the truth while they are still looking at the screen.
+ * An ordinary connection opens the stream in milliseconds. Eight seconds is not a slow network,
+ * it is a network that will not carry one.
  */
-const QUEUE_DEADLINE_MS = 15_000
+const STREAM_PATIENCE_MS = 8_000
+
+/** How often to ask for what is waiting, once polling. */
+const POLL_INTERVAL_MS = 1_000
+
+/** How many polls in a row may fail before the user is told. See `notePollFailure`. */
+const POLL_FAILURES_BEFORE_REPORTING = 5
 
 const POST_RETRIES = 3
 const RETRY_DELAY_MS = 700
@@ -67,26 +73,40 @@ export class HttpTransport implements Transport {
    * exist beats one something else recovers from.** The 409 retry stays as a fallback for a race
    * this does not anticipate.
    *
-   * ## And why the queue has a deadline
+   * ## And why the wait is bounded by a fallback rather than by a warning
    *
-   * Because without one it turned a *reported* failure into a silent one. Reported again from a
-   * Linux server behind a proxy: the theme control missing and Save closing having saved nothing,
-   * with no error anywhere. Before the queue those requests were refused and the refusal was
-   * surfaced; after it they sat in the list for ever, because the event stream never opened at
-   * all — and a message waiting is indistinguishable from a message sent.
+   * Without a bound the queue turned a *reported* failure into a silent one. Reported again from
+   * a Linux server behind a proxy: the theme control missing and Save closing having saved
+   * nothing, with no error anywhere. Before the queue those requests were refused and the refusal
+   * was surfaced; after it they sat in the list for ever, because the event stream never opened
+   * at all — and a message waiting is indistinguishable from a message sent.
    *
-   * A proxy that buffers a response holds every event until it has "enough", which for a stream
-   * is for ever; the server sets `X-Accel-Buffering: no` and `Cache-Control: no-transform` to ask
-   * it not to, and not every proxy listens. So the wait is bounded and says so. It does not throw
-   * the messages away — the stream may still come up and flush them — it just stops pretending
-   * everything is fine.
+   * The first answer was to warn after fifteen seconds. That reported the problem without fixing
+   * it, so `startPolling` replaces it: the stream is given eight seconds, and after that replies
+   * are fetched with ordinary short requests instead. Two mechanisms would have disagreed anyway
+   * — a warning saying "nothing has been saved" is false the moment the fallback has saved it.
    */
   private streamOpen = false
   private queued: unknown[] = []
-  /** Fires if the stream has still not opened while messages are waiting. */
-  private queueTimer: ReturnType<typeof setTimeout> | undefined
-  /** So a long outage reports once rather than every time something is posted. */
-  private queueReported = false
+  /**
+   * Set once the stream has been given up on and replies are being fetched instead.
+   *
+   * Reported from a Linux server behind a proxy: the stream never opened — not slowly, never.
+   * `fetch` did not resolve its headers, so nothing was refused and nothing errored, while the
+   * session on the server stayed perfectly healthy. Padding the stream defeats an intermediary
+   * that buffers by *size*; it does nothing against one that holds a response until it is
+   * complete, and an event stream never completes.
+   *
+   * An ordinary short request that finishes is the one shape every intermediary handles. It is
+   * worse than a stream — a second of latency, and a reply arrives whole rather than as it is
+   * written — and it is enormously better than a page that does nothing at all.
+   */
+  private polling = false
+  private pollTimer: ReturnType<typeof setInterval> | undefined
+  private patienceTimer: ReturnType<typeof setTimeout> | undefined
+  /** Consecutive failed polls, so a persistent failure reports once rather than every second. */
+  private pollFailures = 0
+  private pollReported = false
 
   constructor(private readonly onStatus: (status: string) => void) {}
 
@@ -140,6 +160,7 @@ export class HttpTransport implements Transport {
 
     if (this.token === undefined)
       throw new Error('No session. Restart light-code and open the printed URL.')
+    this.awaitStream()
     void this.listen()
   }
 
@@ -187,8 +208,14 @@ export class HttpTransport implements Transport {
           `disconnected — retrying (${error instanceof Error ? error.message : String(error)})`,
         )
       }
-      // Both ways out of the block above — the stream ending cleanly and it failing — mean there
-      // is no longer anywhere for a message to be delivered, so anything posted from here waits.
+      /*
+       * Both ways out of the block above — the stream ending cleanly and it failing — mean there
+       * is no longer anywhere for a message to be delivered, so anything posted from here waits.
+       *
+       * Unless polling has taken over, in which case there *is* somewhere: leaving `streamOpen`
+       * true keeps posts going out, and returning stops the reconnect loop racing the poller.
+       */
+      if (this.polling) return
       this.streamOpen = false
       // The server going away during a restart is the common case, so reconnect rather
       // than leaving a dead page. Fixed delay: this is loopback, not a busy backend.
@@ -223,52 +250,100 @@ export class HttpTransport implements Transport {
         return
       }
       this.queued.push(message)
-      this.armQueueDeadline()
       return
     }
     void this.send(message, 0)
   }
 
   /**
-   * Starts the clock on a queued message, once per outage.
+   * Gives the stream a bounded chance, then stops depending on it.
    *
-   * The cause is *offered*, never asserted: a confident wrong diagnosis costs the reader a search
-   * as well as the failure, which this project has already paid for once with an Outlook timeout
-   * that sent somebody hunting a dialog that did not exist.
+   * Armed once per session rather than per attempt: a stream that opens and later drops is a
+   * different thing, and the reconnect loop already handles that.
    */
-  private armQueueDeadline(): void {
-    if (this.queueTimer !== undefined || this.queueReported) return
-    this.queueTimer = setTimeout(() => {
-      this.queueTimer = undefined
-      if (this.streamOpen) return
-      this.queueReported = true
-      this.onStatus(
-        `the event stream has not opened after ${String(Math.round(QUEUE_DEADLINE_MS / 1000))}s, so ` +
-          `${String(this.queued.length)} message(s) are still waiting and nothing has been saved. ` +
-          'Anything between the browser and the server that buffers responses will hold an event ' +
-          'stream open but empty — a reverse proxy is the usual one. They will be sent if it opens.',
-      )
-    }, QUEUE_DEADLINE_MS)
+  private awaitStream(): void {
+    if (this.patienceTimer !== undefined || this.polling) return
+    this.patienceTimer = setTimeout(() => {
+      this.patienceTimer = undefined
+      if (this.streamOpen || this.polling) return
+      this.startPolling()
+    }, STREAM_PATIENCE_MS)
+  }
+
+  private startPolling(): void {
+    this.polling = true
+    this.onStatus(
+      'connected — the event stream did not open, so replies are being fetched instead. ' +
+        'Something between this page and the server does not pass streaming responses through.',
+    )
+    /*
+     * The first poll goes *before* the queue is flushed, and the order is load-bearing.
+     *
+     * A message posted to a server with no session for this principal is answered `409`, and the
+     * session is created by whichever of `/api/events` or `/api/poll` arrives first. Flushing
+     * first therefore spends the queue against a server that has not built one yet: every
+     * startup request is refused, retried, and only then succeeds — the same lost second this
+     * whole queue exists to prevent, one layer along.
+     */
+    void this.poll().finally(() => {
+      /*
+       * Flushing what was queued is the point: those are the startup requests, and without them
+       * the settings reply never arrives and the page stays half-built — which is what the
+       * missing light/dark control was.
+       */
+      this.openStream()
+      this.pollTimer = setInterval(() => void this.poll(), POLL_INTERVAL_MS)
+    })
+  }
+
+  private async poll(): Promise<void> {
+    try {
+      const response = await fetch('/api/poll', {
+        headers: { Authorization: `Bearer ${this.token ?? ''}` },
+      })
+      if (!response.ok) {
+        this.notePollFailure()
+        return
+      }
+      const body = (await response.json()) as { messages?: unknown[] }
+      this.pollFailures = 0
+      if (this.pollReported) {
+        this.pollReported = false
+        this.onStatus('connected.')
+      }
+      for (const message of body.messages ?? []) {
+        for (const listener of this.listeners) listener(message)
+      }
+    } catch {
+      // One failure is the next poll's problem; a run of them is the user's.
+      this.notePollFailure()
+    }
+  }
+
+  /**
+   * The last backstop.
+   *
+   * Once polling has taken over there is nothing further to fall back to, so a poll that keeps
+   * failing is somebody watching a page that will never answer — and the only thing worse than
+   * that is one that will never answer and never says so.
+   */
+  private notePollFailure(): void {
+    this.pollFailures += 1
+    if (this.pollFailures < POLL_FAILURES_BEFORE_REPORTING || this.pollReported) return
+    this.pollReported = true
+    this.onStatus(
+      'cannot reach the server — the event stream did not open and fetching replies is failing ' +
+        'too, so nothing is being saved. Check that the address in the browser reaches the ' +
+        'server light-code printed.',
+    )
   }
 
   /** Marks the stream up and releases everything posted while it was not, in order. */
   private openStream(): void {
     this.streamOpen = true
-    if (this.queueTimer !== undefined) {
-      clearTimeout(this.queueTimer)
-      this.queueTimer = undefined
-    }
-    /*
-     * Re-armed for the *next* outage, and the recovery is said out loud: somebody who has just
-     * been told nothing was saved needs to know when that stopped being true.
-     */
-    if (this.queueReported) {
-      this.queueReported = false
-      this.onStatus(
-        this.queued.length > 0
-          ? `connected — sending the ${String(this.queued.length)} message(s) that were waiting.`
-          : 'connected.',
-      )
+    if (this.patienceTimer !== undefined) {
+      clearTimeout(this.patienceTimer)
+      this.patienceTimer = undefined
     }
     // Taken before sending: `send` is async, so a failure that re-queues must not append to the
     // list being drained.

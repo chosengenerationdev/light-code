@@ -1,5 +1,36 @@
 # @chosengeneration/light-code
 
+## 0.60.0
+
+### Minor Changes
+
+- Works where the network will not carry an event stream
+
+  Reported from a Linux server behind a proxy, on the build that had already been padded to defeat a
+  buffering one: the diagnostic said the stream had not opened after fifteen seconds and eighteen
+  messages were still waiting. So the stream was not slow — it never opened at all. `fetch` never
+  resolved its headers, which is why nothing was refused and nothing errored while the session on the
+  server stayed perfectly healthy.
+
+  Padding defeats an intermediary that buffers by **size**. It does nothing against one that holds a
+  response until it is **complete**, and an event stream never completes.
+
+  So the client stops depending on one. After eight seconds without a stream it falls back to
+  `/api/poll` — an ordinary short request that finishes, which is the one shape every intermediary
+  handles. It is worse than a stream (a second of latency, and a reply arrives whole rather than as
+  it is written) and enormously better than a page that does nothing at all.
+
+  - **`/api/poll` creates the session**, exactly as `/api/events` does, so a client that polls never
+    needs the stream to have worked once.
+  - **The first poll happens before the queue is flushed.** A message posted to a server with no
+    session is answered `409`, and flushing first would spend every startup request against a server
+    that had not built one yet.
+  - **It drains the buffer the reconnect path already used**, rather than adding a second record of
+    the same replies.
+  - **The fifteen-second warning is gone**, superseded: it reported a problem the fallback now fixes,
+    and its wording ("nothing has been saved") would be false once the fallback had saved it. A run
+    of failed polls is reported instead, since past that there is nothing left to fall back to.
+
 ## 0.59.8
 
 ### Patch Changes

@@ -191,6 +191,14 @@ interface Connection {
   attach: (response: ServerResponse) => void
   /** The stream went away. The session stays. */
   detach: (response: ServerResponse) => void
+  /**
+   * Takes everything waiting and clears it, for a client that cannot receive a stream.
+   *
+   * The same buffer a reconnect flushes. Nothing here is specific to polling - the frames were
+   * already being kept for a client that was not listening, and this is another way of not
+   * listening.
+   */
+  drain: () => unknown[]
   dispose: () => void
 }
 
@@ -325,6 +333,26 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       },
       detach: (response: ServerResponse) => {
         if (sink === response) sink = undefined
+      },
+      drain: () => {
+        /*
+         * Parsed back out of the SSE frame it was stored as.
+         *
+         * The alternative is a second buffer holding the objects, which would be two records of
+         * one fact - and the two would drift the first time anything wrote to only one of them.
+         * One buffer, read two ways.
+         */
+        return missed.splice(0, missed.length).flatMap((frame) => {
+          const body = frame.startsWith('data: ') ? frame.slice(6).trimEnd() : ''
+          if (body.length === 0) return []
+          try {
+            return [JSON.parse(body) as unknown]
+          } catch {
+            // A frame that will not parse is dropped rather than failing the whole poll: losing
+            // one reply beats losing every reply queued behind it.
+            return []
+          }
+        })
       },
       dispose: () => {
         /*
@@ -639,6 +667,31 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         stream.detach(response)
       }
       request.on('close', cleanup)
+      return
+    }
+
+    /*
+     * The way out when the environment will not carry an event stream.
+     *
+     * Reported from a Linux server behind a proxy: the stream never opened at all - not slowly,
+     * never - so every reply stayed on the server and the page looked dead while the session
+     * underneath it was perfectly healthy. Padding the stream defeats a proxy that buffers *by
+     * size*; it does nothing against one that holds a response until it is complete, and an
+     * event stream is never complete.
+     *
+     * So this is an ordinary short request that finishes, which is the one shape every
+     * intermediary handles. It creates the session exactly as `/api/events` does, so a client
+     * that polls never needs the stream to have worked even once.
+     *
+     * Deliberately *not* a long poll. A held-open request is the very thing that fails here.
+     */
+    if (url.pathname === '/api/poll' && request.method === 'GET') {
+      let connection = connections.get(principal.id)
+      if (connection === undefined) {
+        connection = await openConnection(principal)
+        connections.set(principal.id, connection)
+      }
+      respondJson(response, 200, { messages: connection.drain() })
       return
     }
 

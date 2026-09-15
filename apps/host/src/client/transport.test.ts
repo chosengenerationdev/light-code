@@ -23,10 +23,15 @@ function harness(): {
   transport: HttpTransport
   posts: Recorded[]
   statuses: string[]
+  polled: unknown[]
+  pollCount: () => number
   openStream: () => void
 } {
   const posts: Recorded[] = []
   const statuses: string[] = []
+  // Replies the server is holding for a client that cannot receive a stream.
+  const polled: unknown[] = []
+  let polls = 0
   let streamOpen = false
   let release: () => void = () => undefined
   const opened = new Promise<void>((resolve) => {
@@ -35,6 +40,12 @@ function harness(): {
 
   vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => {
     if (url === '/api/session') return { ok: true, json: async () => ({ token: 't' }) }
+
+    if (url === '/api/poll') {
+      polls += 1
+      const messages = polled.splice(0, polled.length)
+      return { ok: true, json: async () => ({ messages }) }
+    }
 
     if (url.startsWith('/api/events')) {
       await opened
@@ -47,7 +58,13 @@ function harness(): {
     }
 
     const { type } = JSON.parse(init?.body ?? '{}') as { type: string }
-    const status = streamOpen ? 202 : 409
+    /*
+     * The server refuses on `409` when the *session* does not exist, not when a stream is
+     * missing — and it creates the session in `/api/poll` exactly as it does in `/api/events`.
+     * Modelling that matters: without it a polling client looks like it is being refused, which
+     * is the opposite of the property under test.
+     */
+    const status = streamOpen || polls > 0 ? 202 : 409
     posts.push({ type, status })
     return { ok: streamOpen, status, text: async () => 'No event stream open. Reload the page.' }
   })
@@ -56,6 +73,8 @@ function harness(): {
     transport: new HttpTransport((status) => statuses.push(status)),
     posts,
     statuses,
+    polled,
+    pollCount: () => polls,
     openStream: () => {
       release()
     },
@@ -111,81 +130,70 @@ describe('posting before the event stream is open', () => {
 })
 
 /**
- * A stream that never opens at all.
+ * When the environment will not carry a stream at all.
  *
- * Reported from a Linux server behind a proxy: the light/dark control missing, and Save closing
- * its dialog having saved nothing — with no error anywhere. The queue above is what made it
- * silent. Before it, those requests were refused and the refusal was surfaced; after it they sat
- * in the list for ever, and a message waiting is indistinguishable from a message sent.
+ * Reported from a Linux server behind a proxy: the stream never opened — not slowly, never.
+ * `fetch` did not resolve its headers, so nothing was refused and nothing errored; every message
+ * sat in the queue while the session on the server was perfectly healthy. Padding the stream
+ * defeats an intermediary that buffers by *size*; it does nothing against one that holds a
+ * response until it is complete, and an event stream never completes.
  *
- * A proxy that buffers a response holds an event stream open and empty for ever. The server asks
- * it not to with `X-Accel-Buffering: no`, and not every proxy listens — so the wait is bounded and
- * says so. Same rule as Test Connection: something that cannot fail cannot report.
+ * So the client stops depending on it. An ordinary short request that finishes is the one shape
+ * every intermediary handles.
  */
-describe('when the event stream never opens', () => {
-  it('says so rather than waiting silently', async () => {
+describe('falling back to polling', () => {
+  it('sends what was queued once it gives up on the stream', async () => {
     vi.useFakeTimers()
     try {
       const { transport, posts, statuses } = harness()
       await transport.connect()
 
-      transport.post({ type: 'saveProfile' })
+      transport.post({ type: 'requestSettings' })
       expect(posts).toEqual([])
-      // Nothing said yet: a slow connection must not be reported as a broken one.
-      expect(statuses.filter((status) => status.includes('not opened'))).toEqual([])
 
-      await vi.advanceTimersByTimeAsync(20_000)
+      await vi.advanceTimersByTimeAsync(9_000)
 
-      const reported = statuses.filter((status) => status.includes('not opened'))
-      expect(reported).toHaveLength(1)
-      // The count, so the reader knows how much is outstanding rather than only that something is.
-      expect(reported[0]).toContain('1 message(s)')
-      expect(reported[0]).toContain('nothing has been saved')
-      /*
-       * The cause is offered, not asserted. A confident wrong diagnosis costs a search as well as
-       * the failure — this project paid for that once with an Outlook timeout that sent somebody
-       * hunting a dialog that did not exist.
-       */
-      expect(reported[0]).toContain('proxy')
-      expect(reported[0]).not.toContain('is a proxy')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('reports once, not on every message', async () => {
-    vi.useFakeTimers()
-    try {
-      const { transport, statuses } = harness()
-      await transport.connect()
-
-      for (let index = 0; index < 5; index += 1) transport.post({ type: 'saveProfile' })
-      await vi.advanceTimersByTimeAsync(20_000)
-      transport.post({ type: 'saveProfile' })
-      await vi.advanceTimersByTimeAsync(20_000)
-
-      expect(statuses.filter((status) => status.includes('not opened'))).toHaveLength(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  /* Somebody told nothing was saved needs to know when that stops being true. */
-  it('says so when it recovers, and sends what was waiting', async () => {
-    vi.useFakeTimers()
-    try {
-      const { transport, posts, statuses, openStream } = harness()
-      await transport.connect()
-
-      transport.post({ type: 'saveProfile' })
-      await vi.advanceTimersByTimeAsync(20_000)
-      expect(statuses.some((status) => status.includes('not opened'))).toBe(true)
-
-      openStream()
+      // The startup requests are what matter: without them the settings reply never arrives and
+      // the page stays half-built, which is what "no dark mode option" was.
       await vi.waitFor(() => {
-        expect(posts).toHaveLength(1)
+        expect(posts.map((post) => post.type)).toEqual(['requestSettings'])
       })
-      expect(statuses.some((status) => status.startsWith('connected'))).toBe(true)
+      expect(statuses.some((status) => status.includes('fetched instead'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('delivers replies it fetches', async () => {
+    vi.useFakeTimers()
+    try {
+      const { transport, polled } = harness()
+      const seen: unknown[] = []
+      transport.onMessage((message) => seen.push(message))
+      await transport.connect()
+
+      polled.push({ type: 'settings', choosesTheme: true })
+      await vi.advanceTimersByTimeAsync(9_000)
+
+      await vi.waitFor(() => {
+        expect(seen).toEqual([{ type: 'settings', choosesTheme: true }])
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /* A stream that opens normally must never start polling — this is a fallback, not a mode. */
+  it('does not poll when the stream opens', async () => {
+    vi.useFakeTimers()
+    try {
+      const { transport, statuses, openStream, pollCount } = harness()
+      await transport.connect()
+      openStream()
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      expect(pollCount()).toBe(0)
+      expect(statuses.some((status) => status.includes('fetched instead'))).toBe(false)
     } finally {
       vi.useRealTimers()
     }

@@ -251,3 +251,79 @@ describe('opening an event stream through something that buffers', () => {
     stream.abort()
   })
 })
+
+/**
+ * Working with no event stream at all.
+ *
+ * Reported from a Linux server behind a proxy: the stream never opened — not slowly, never — so
+ * every reply stayed on the server while the session underneath was perfectly healthy. Padding
+ * defeats an intermediary that buffers by *size*; it does nothing against one that holds a
+ * response until it is complete, and an event stream never completes.
+ *
+ * So `/api/poll` is an ordinary short request that finishes, which is the one shape every
+ * intermediary handles. Driven against the running server, because the claim is that a client
+ * which never opens a stream still works end to end.
+ */
+describe('a client that cannot receive a stream', () => {
+  it('builds the session itself, without one ever opening', async () => {
+    const url = await start()
+
+    const polled = await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+    expect(polled.status).toBe(200)
+    // The session is what a POST needs to exist; `/api/events` is only one way to create it.
+    expect(await until(() => sessionsBuilt() === 1)).toBe(true)
+  }, 30_000)
+
+  it('accepts messages and returns the replies they produced', async () => {
+    const url = await start()
+
+    await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+    const posted = await fetch(`${url}/api/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: url },
+      body: JSON.stringify({ type: 'requestSettings' }),
+    })
+    // Accepted, not 409: the poll created the session the POST needs.
+    expect(posted.status).toBe(202)
+
+    // An explicit loop: `until` takes a *synchronous* predicate, and an async one returns a
+    // promise, which is truthy on the first check — so it would pass without polling at all.
+    const received: string[] = []
+    const deadline = Date.now() + 4000
+    while (Date.now() < deadline && !received.includes('settings')) {
+      const response = await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+      const body = (await response.json()) as { messages: { type: string }[] }
+      received.push(...body.messages.map((message) => message.type))
+      if (received.includes('settings')) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    // `settings` is the reply carrying `choosesTheme` — the one whose loss removed the
+    // light/dark control in the first place.
+    expect(received).toContain('settings')
+  }, 30_000)
+
+  it('drains, so the same reply is not delivered twice', async () => {
+    const url = await start()
+
+    await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+    await fetch(`${url}/api/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: url },
+      body: JSON.stringify({ type: 'requestSettings' }),
+    })
+
+    let first: { type: string }[] = []
+    const deadline = Date.now() + 4000
+    while (Date.now() < deadline && first.length === 0) {
+      const response = await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+      first = ((await response.json()) as { messages: { type: string }[] }).messages
+      if (first.length > 0) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    const second = await fetch(`${url}/api/poll`, { headers: { Origin: url } })
+    const again = ((await second.json()) as { messages: unknown[] }).messages
+    expect(first.length).toBeGreaterThan(0)
+    expect(again).toEqual([])
+  }, 30_000)
+})
