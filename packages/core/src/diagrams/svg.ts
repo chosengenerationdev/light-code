@@ -259,6 +259,40 @@ export function diagramSvg(layout: DiagramLayout, palette: DiagramPalette = DEFA
     )
   }
 
+  /*
+   * The key, drawn with the same paint the boxes use.
+   *
+   * A swatch that does not match what it explains is worse than no key at all, so it goes through
+   * `tonePaint` and `shapeFor` rather than being drawn a second way that has to be kept in step.
+   */
+  for (const entry of layout.legend) {
+    const swatch: PlacedNode = {
+      id: '',
+      label: '',
+      note: undefined,
+      shape: entry.shape,
+      tone: entry.tone,
+      icon: undefined,
+      x: entry.x,
+      y: entry.y,
+      width: entry.swatchWidth,
+      height: entry.swatchHeight,
+    }
+    parts.push(shapeFor(swatch, palette))
+    if (entry.icon !== undefined) {
+      // Centred in the swatch rather than in its corner, which is where a node's icon sits: at
+      // this size a corner is the edge.
+      const paint = tonePaint(entry.tone, palette)
+      const scale = 11 / 16
+      parts.push(
+        `<g transform="translate(${String(entry.x + entry.swatchWidth / 2 - 5.5)},${String(entry.y + entry.swatchHeight / 2 - 5.5)}) scale(${String(scale)})" fill="none" stroke="${paint.icon}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON_PATHS[entry.icon]}" /></g>`,
+      )
+    }
+    parts.push(
+      `<text x="${String(entry.x + entry.swatchWidth + 7)}" y="${String(entry.y + entry.swatchHeight - 4)}" font-family="system-ui, sans-serif" font-size="11" fill="${palette.muted}">${escape(entry.label)}</text>`,
+    )
+  }
+
   parts.push('</svg>')
   return parts.join('')
 }

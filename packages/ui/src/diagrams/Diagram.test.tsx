@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Diagram, isDark, resolveColour } from './Diagram.js'
+import { Diagram, fileNameFor, isDark, resolveColour } from './Diagram.js'
 
 let container: HTMLDivElement
 let root: Root
@@ -123,5 +123,44 @@ describe('deciding whether a theme is dark', () => {
   it('weighs the channels perceptually', () => {
     expect(isDark('rgb(0, 0, 255)')).toBe(true)
     expect(isDark('rgb(0, 255, 0)')).toBe(false)
+  })
+})
+
+/**
+ * A filename built from a title the model wrote.
+ *
+ * Nothing a title contains may steer where a file lands: a label is model-authored text, and
+ * `../` or a drive letter in one would otherwise reach the download name directly.
+ */
+describe('naming the saved file', () => {
+  it('uses the title, flattened', () => {
+    expect(fileNameFor('Request path through a cache')).toBe('request-path-through-a-cache')
+  })
+
+  it('keeps nothing that could be a path', () => {
+    const name = fileNameFor('../../etc/passwd')
+    expect(name).not.toContain('/')
+    expect(name).not.toContain('..')
+    expect(name).toBe('etc-passwd')
+  })
+
+  it('falls back rather than producing an empty name', () => {
+    expect(fileNameFor(undefined)).toBe('diagram')
+    expect(fileNameFor('!!!')).toBe('diagram')
+  })
+
+  /* A title can be a paragraph; a filename cannot. */
+  it('does not run away with a very long title', () => {
+    expect(fileNameFor('word '.repeat(80)).length).toBeLessThanOrEqual(60)
+  })
+})
+
+describe('the buttons offered', () => {
+  it('offers to copy and to save, in both formats', () => {
+    act(() => root.render(<Diagram diagram={spec} />))
+    const labels = [...container.querySelectorAll('button')].map((button) => button.textContent)
+    expect(labels).toContain('Copy SVG')
+    expect(labels).toContain('Save SVG')
+    expect(labels).toContain('Save PNG')
   })
 })

@@ -123,9 +123,41 @@ export const diagramEdgeSchema = z.object({
     .describe('dashed for something conditional, asynchronous or secondary.'),
 })
 
+/**
+ * One line of a key.
+ *
+ * ## Why the model writes it rather than this being derived
+ *
+ * Because a tone means whatever the diagram is using it to mean. `info` is an external system in
+ * one drawing and a cached path in the next; `warning` is a retry here and a manual step there.
+ * Generating "blue = info" from the tones in use would be a key that explains the palette instead
+ * of the picture, and a reader who wanted that did not need a key.
+ *
+ * So an entry carries the *appearance* and the meaning together, and whoever chose the appearance
+ * says what it was for.
+ */
+export const diagramLegendSchema = z.object({
+  label: z.string().min(1).max(80).describe('What this appearance means in this diagram.'),
+  tone: z.enum(NODE_TONES).optional(),
+  shape: z.enum(NODE_SHAPES).optional(),
+  icon: z.enum(NODE_ICONS).optional(),
+})
+
+/** Longer than this is a table, and a table should be written as one. */
+export const DIAGRAM_MAX_LEGEND = 8
+
 export const diagramSpecSchema = z
   .object({
     title: z.string().max(120).optional(),
+    legend: z
+      .array(diagramLegendSchema)
+      .max(DIAGRAM_MAX_LEGEND)
+      .optional()
+      .describe(
+        'A key under the diagram. Give an entry only where the meaning is not obvious from the ' +
+          'label — a colour that stands for something, a shape used in a particular way. Explain ' +
+          'the diagram, not the palette.',
+      ),
     direction: z
       .enum(['down', 'right'])
       .optional()
@@ -176,3 +208,4 @@ export const diagramSpecSchema = z
 export type DiagramSpec = z.infer<typeof diagramSpecSchema>
 export type DiagramNode = z.infer<typeof diagramNodeSchema>
 export type DiagramEdge = z.infer<typeof diagramEdgeSchema>
+export type DiagramLegendEntry = z.infer<typeof diagramLegendSchema>

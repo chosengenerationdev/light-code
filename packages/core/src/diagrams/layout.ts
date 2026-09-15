@@ -31,6 +31,20 @@ export interface DiagramLayout {
   note: string | undefined
   nodes: PlacedNode[]
   edges: RoutedEdge[]
+  /** The key, laid out in rows under the drawing. Empty when the spec gave none. */
+  legend: PlacedLegend[]
+}
+
+/** One key entry: a swatch drawn like a miniature node, and the text beside it. */
+export interface PlacedLegend {
+  label: string
+  shape: NodeShape
+  tone: NodeTone
+  icon: NodeIcon | undefined
+  x: number
+  y: number
+  swatchWidth: number
+  swatchHeight: number
 }
 
 export interface PlacedNode {
@@ -68,6 +82,15 @@ const GAP_WITHIN_RANK = 28
 const GAP_BETWEEN_RANKS = 64
 const MARGIN = 28
 const TITLE_HEIGHT = 40
+const SWATCH_WIDTH = 26
+const SWATCH_HEIGHT = 16
+/** Between a swatch and its words. */
+const SWATCH_GAP = 7
+/** Between one entry and the next on a row. */
+const LEGEND_ITEM_GAP = 22
+const LEGEND_ROW_HEIGHT = 24
+/** Between the drawing and the key, so the key reads as a separate thing. */
+const LEGEND_TOP_GAP = 18
 
 /** Width a box needs for its text, clamped so one long label cannot stretch the whole diagram. */
 function widthFor(label: string, note: string | undefined): number {
@@ -308,12 +331,59 @@ export function layoutDiagram(spec: DiagramSpec): DiagramLayout {
     ]
   })
 
+  /*
+   * The key goes underneath, in rows that wrap.
+   *
+   * Placed after the transposition rather than before it, in final coordinates: a key reads
+   * left-to-right whichever way the arrows run, so turning it with the diagram would stand the
+   * words on their side. It is the one part of this that is not a graph.
+   */
+  const legend: PlacedLegend[] = []
+  let legendHeight = 0
+  let canvasWidth = size.width
+  if (spec.legend !== undefined && spec.legend.length > 0) {
+    const entryWidths = spec.legend.map(
+      (entry) => SWATCH_WIDTH + SWATCH_GAP + Math.round(entry.label.length * 6.6),
+    )
+    /*
+     * Wrapped against the drawing's own width, and the canvas grows if one entry is wider than
+     * that. Clipping the key would be worse than a wider picture — an explanation cut in half
+     * explains nothing, and the reader cannot tell it was cut.
+     */
+    const available = Math.max(size.width - MARGIN * 2, Math.max(...entryWidths))
+    let x = MARGIN
+    let y = size.height + LEGEND_TOP_GAP
+    let rows = 1
+    for (const [index, entry] of spec.legend.entries()) {
+      const entryWidth = entryWidths[index] ?? 0
+      if (x > MARGIN && x + entryWidth - MARGIN > available) {
+        x = MARGIN
+        y += LEGEND_ROW_HEIGHT
+        rows += 1
+      }
+      legend.push({
+        label: entry.label,
+        shape: entry.shape ?? 'box',
+        tone: entry.tone ?? 'neutral',
+        icon: entry.icon,
+        x,
+        y,
+        swatchWidth: SWATCH_WIDTH,
+        swatchHeight: SWATCH_HEIGHT,
+      })
+      x += entryWidth + LEGEND_ITEM_GAP
+      canvasWidth = Math.max(canvasWidth, x - LEGEND_ITEM_GAP + MARGIN)
+    }
+    legendHeight = LEGEND_TOP_GAP + rows * LEGEND_ROW_HEIGHT
+  }
+
   return {
-    width: size.width,
-    height: size.height,
+    width: canvasWidth,
+    height: size.height + legendHeight,
     title: spec.title,
     note: spec.note,
     nodes,
     edges,
+    legend,
   }
 }

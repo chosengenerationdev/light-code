@@ -29,8 +29,9 @@ import { colors, secondaryButtonStyle } from '../theme.js'
  */
 export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
   const [copied, setCopied] = useState(false)
+  const [saveError, setSaveError] = useState<string | undefined>(undefined)
 
-  const { svg, uri, width } = useMemo(() => {
+  const { svg, uri, width, height } = useMemo(() => {
     /*
      * Resolved to real colours, because the SVG is a document of its own.
      *
@@ -58,7 +59,7 @@ export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
     }
     const layout = layoutDiagram(props.diagram)
     const markup = diagramSvg(layout, palette)
-    return { svg: markup, uri: diagramDataUri(markup), width: layout.width }
+    return { svg: markup, uri: diagramDataUri(markup), width: layout.width, height: layout.height }
   }, [props.diagram])
 
   return (
@@ -77,24 +78,115 @@ export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
           {props.diagram.note}
         </div>
       )}
-      <button
-        type="button"
-        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginTop: 6 }}
-        title="Copy the SVG, which scales to any size without blurring"
-        onClick={() => {
-          void navigator.clipboard?.writeText(svg).then(
-            () => {
-              setCopied(true)
-              setTimeout(() => setCopied(false), 1500)
-            },
-            () => setCopied(false),
-          )
-        }}
-      >
-        {copied ? 'Copied' : 'Copy SVG'}
-      </button>
+      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+          title="Copy the SVG markup, to paste into a document or an editor"
+          onClick={() => {
+            void navigator.clipboard?.writeText(svg).then(
+              () => {
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              },
+              () => setCopied(false),
+            )
+          }}
+        >
+          {copied ? 'Copied' : 'Copy SVG'}
+        </button>
+        <button
+          type="button"
+          style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+          title="Save as SVG — vector, so it stays sharp at any size"
+          onClick={() => {
+            download(`${fileNameFor(props.diagram.title)}.svg`, new Blob([svg], { type: 'image/svg+xml' }))
+          }}
+        >
+          Save SVG
+        </button>
+        <button
+          type="button"
+          style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+          title="Save as PNG, at twice the drawn size, for somewhere that cannot take an SVG"
+          onClick={() => {
+            void toPng(uri, width, height).then(
+              (blob) => download(`${fileNameFor(props.diagram.title)}.png`, blob),
+              () => setSaveError('Could not make a PNG here — use Save SVG, or copy it.'),
+            )
+          }}
+        >
+          Save PNG
+        </button>
+      </div>
+      {saveError !== undefined && (
+        <div style={{ color: colors.muted, fontSize: 11, marginTop: 4 }}>{saveError}</div>
+      )}
     </div>
   )
+}
+
+/**
+ * Hands a file to the browser.
+ *
+ * An object URL rather than a `data:` one: a large PNG as a data URI is a megabytes-long string in
+ * an attribute, and some hosts cap how long an href may be. Revoked on the next frame, because
+ * revoking immediately can beat the download starting.
+ */
+function download(name: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = name
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+/** A filename from the title, or a plain one. Nothing a title contains may steer a path. */
+export function fileNameFor(title: string | undefined): string {
+  const cleaned = (title ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+  return cleaned.length > 0 ? cleaned : 'diagram'
+}
+
+/**
+ * Rasterises the SVG through a canvas.
+ *
+ * At twice the drawn size, because a PNG is fixed and somebody will put it in a slide and enlarge
+ * it. The SVG stays the better artifact and is offered first; this is for the places that cannot
+ * take one.
+ *
+ * Drawn from a `data:` URI, which does not taint the canvas — a remote image would, and `toBlob`
+ * would then throw rather than return anything.
+ */
+async function toPng(uri: string, width: number, height: number): Promise<Blob> {
+  const scale = 2
+  const image = new Image()
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve()
+    image.onerror = () => reject(new Error('the diagram could not be loaded for rasterising'))
+    image.src = uri
+  })
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width * scale
+  canvas.height = height * scale
+  const context = canvas.getContext('2d')
+  if (context === null) throw new Error('no 2d canvas in this host')
+  context.scale(scale, scale)
+  context.drawImage(image, 0, 0, width, height)
+
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob === null) reject(new Error('the canvas produced nothing'))
+      else resolve(blob)
+    }, 'image/png')
+  })
 }
 
 /**

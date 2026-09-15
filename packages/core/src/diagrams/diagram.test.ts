@@ -186,3 +186,85 @@ describe('the SVG', () => {
     expect(svg).toContain('stroke-dasharray')
   })
 })
+
+/**
+ * The key under the drawing.
+ *
+ * Written by the model rather than derived, because a tone means whatever this diagram is using it
+ * to mean: `info` is an external system in one and a cached path in the next. Generating
+ * "blue = info" would explain the palette rather than the picture.
+ */
+describe('the legend', () => {
+  const withLegend = (entries: { label: string; tone?: string; shape?: string; icon?: string }[]) =>
+    layoutDiagram(
+      diagramSpecSchema.parse({
+        nodes: [{ id: 'a', label: 'A' }],
+        edges: [],
+        legend: entries,
+      }),
+    )
+
+  it('is absent when nothing asked for one', () => {
+    expect(layoutDiagram(spec()).legend).toEqual([])
+  })
+
+  it('places one entry per line of the key', () => {
+    const layout = withLegend([
+      { label: 'succeeded', tone: 'success' },
+      { label: 'needs a human', tone: 'warning', icon: 'user' },
+    ])
+    expect(layout.legend).toHaveLength(2)
+    expect(layout.legend[0]?.label).toBe('succeeded')
+    expect(layout.legend[1]?.icon).toBe('user')
+  })
+
+  /* Below the drawing, never over it: a key drawn on top of a box explains nothing. */
+  it('sits under the diagram and makes room for itself', () => {
+    const plain = layoutDiagram(
+      diagramSpecSchema.parse({ nodes: [{ id: 'a', label: 'A' }], edges: [] }),
+    )
+    const keyed = withLegend([{ label: 'succeeded', tone: 'success' }])
+    expect(keyed.height).toBeGreaterThan(plain.height)
+    const lowest = Math.max(...keyed.nodes.map((node) => node.y + node.height))
+    expect(keyed.legend[0]?.y).toBeGreaterThan(lowest)
+  })
+
+  /*
+   * Clipping a key would be worse than a wider picture: an explanation cut in half explains
+   * nothing, and the reader cannot tell it was cut.
+   */
+  it('widens the canvas rather than cutting a long entry off', () => {
+    const layout = withLegend([
+      { label: 'a very long explanation of what this particular colour is standing in for here' },
+    ])
+    const entry = layout.legend[0]
+    expect(entry).toBeDefined()
+    expect(layout.width).toBeGreaterThan((entry?.x ?? 0) + (entry?.swatchWidth ?? 0))
+  })
+
+  it('wraps onto another row rather than running off the side', () => {
+    const layout = withLegend(
+      Array.from({ length: 6 }, (_, index) => ({ label: `meaning number ${String(index)}` })),
+    )
+    const rows = new Set(layout.legend.map((entry) => entry.y))
+    expect(rows.size).toBeGreaterThan(1)
+    for (const entry of layout.legend) {
+      expect(entry.x).toBeGreaterThanOrEqual(0)
+      expect(entry.x).toBeLessThan(layout.width)
+    }
+  })
+
+  it('draws a swatch and its words', () => {
+    const svg = diagramSvg(withLegend([{ label: 'succeeded', tone: 'success', shape: 'round' }]))
+    expect(svg).toContain('succeeded')
+    // The swatch goes through the same painter the boxes use, so a key cannot drift from what it
+    // explains — a rounded swatch is a `rect` with a radius, like the node it stands for.
+    expect(svg.match(/<rect /g)?.length).toBeGreaterThan(2)
+  })
+
+  it('escapes a label in the key as well', () => {
+    const svg = diagramSvg(withLegend([{ label: '<script>x</script>' }]))
+    expect(svg).not.toContain('<script>')
+    expect(svg).toContain('&lt;script&gt;')
+  })
+})

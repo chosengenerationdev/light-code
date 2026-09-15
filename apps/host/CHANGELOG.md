@@ -1,5 +1,31 @@
 # @chosengeneration/light-code
 
+## 0.62.0
+
+### Minor Changes
+
+- Diagrams take a legend, and can be saved as SVG or PNG
+
+  **A legend, written by the model rather than derived.** A tone means whatever the diagram is using
+  it to mean — `info` is an external system in one drawing and a cached path in the next, `warning`
+  is a retry here and a manual step there. Generating "blue = info" from the tones in use would be a
+  key explaining the palette instead of the picture, and a reader who wanted that did not need a key.
+  So an entry carries the appearance and the meaning together, and whoever chose the appearance says
+  what it was for.
+
+  Entries sit under the drawing, wrap onto further rows, and widen the canvas rather than being cut
+  off — an explanation cut in half explains nothing, and the reader cannot tell it was cut. The
+  swatches go through the same painter the boxes do, so a key can never drift from what it explains.
+
+  **Save SVG and Save PNG** beside the existing Copy SVG. The SVG is offered first and is the better
+  artifact: it is vector, so it stays sharp at any size and in any document. The PNG is rasterised
+  through a canvas at twice the drawn size, for the places that cannot take an SVG — and if a host
+  refuses to produce one, that is said rather than silently doing nothing.
+
+  The filename comes from the title, flattened: model-authored text must not be able to steer where a
+  file lands, so anything that is not a letter or a digit becomes a hyphen and the length is capped.
+  `../../etc/passwd` becomes `etc-passwd`.
+
 ## 0.61.2
 
 ### Patch Changes
