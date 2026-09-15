@@ -1,5 +1,24 @@
 # light-code-vscode
 
+## 0.84.1
+
+### Patch Changes
+
+- A diagram drawn during a turn now appears during that turn
+
+  Reported immediately: `show_diagram` ran, the tool row showed a tick, the assistant described what
+  it had drawn — and there was no diagram. It rendered as an ordinary collapsed tool block.
+
+  The derivation existed and the **live path did not**, so the picture would only have appeared after
+  reopening the task. That is the identical failure the chart feature had, recorded in CLAUDE.md in
+  those words: the transcript derived it and the live path did not. Two places deciding one thing,
+  and only one of them updated.
+
+  `diagrams/liveRender.test.ts` reads `bridge.ts` and fails if either half goes missing — the posting
+  or the suppression that stops the picture being drawn underneath a tool row. What was wrong was a
+  _missing call_, which no test of the function that works can see, which is exactly why the suite
+  was green while the feature was not.
+
 ## 0.84.0
 
 ### Minor Changes

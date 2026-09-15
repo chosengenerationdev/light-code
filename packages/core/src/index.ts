@@ -636,6 +636,7 @@ export {
   toolCallReason,
   CONTROL_TOOLS,
   chartFromToolCall,
+  diagramFromToolCall,
   consultationFromToolCall,
   toolCallSummary,
 } from './history/transcript.js'
@@ -664,6 +665,18 @@ export {
 } from './tools/index.js'
 
 export { createShowChartTool } from './tools/showChart.js'
+export { createShowDiagramTool } from './tools/showDiagram.js'
+export { layoutDiagram, type DiagramLayout, type PlacedNode } from './diagrams/layout.js'
+export { diagramSvg, diagramDataUri, DEFAULT_PALETTE, type DiagramPalette } from './diagrams/svg.js'
+export {
+  diagramSpecSchema,
+  DIAGRAM_MAX_NODES,
+  DIAGRAM_MAX_EDGES,
+  NODE_ICONS,
+  NODE_SHAPES,
+  NODE_TONES,
+  type DiagramSpec,
+} from './diagrams/types.js'
 export {
   chartSpecSchema,
   chartTotals,

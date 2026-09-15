@@ -106,6 +106,7 @@ import {
   buildSystemPrompt,
   CONTROL_TOOLS,
   chartFromToolCall,
+  diagramFromToolCall,
   consultationFromToolCall,
   toolCallSummary,
   createAuthStrategy,
@@ -3161,6 +3162,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
              * "show_chart ran" — as nothing — and became a picture only after a reload.
              */
             if (chartFromToolCall(toolCall.name, toolCall.arguments) !== undefined) return
+            if (diagramFromToolCall(toolCall.name, toolCall.arguments) !== undefined) return
             const summary = toolCallSummary(toolCall)
             post({
               type: 'toolCall',
@@ -3174,6 +3176,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             // something the user has to expand a collapsed block to read.
             if (CONTROL_TOOLS.has(toolCall.name)) {
               post({ type: 'textChunk', text: result.content })
+              return
+            }
+            const diagram = diagramFromToolCall(toolCall.name, toolCall.arguments)
+            if (diagram !== undefined) {
+              post(
+                diagram.kind === 'diagram'
+                  ? {
+                      type: 'diagram',
+                      diagram: diagram.diagram,
+                      ...(informedBy !== undefined ? { expertInformed: true, informedBy } : {}),
+                    }
+                  : { type: 'diagramError', message: diagram.message },
+              )
               return
             }
             const chart = chartFromToolCall(toolCall.name, toolCall.arguments)
