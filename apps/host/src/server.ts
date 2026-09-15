@@ -80,6 +80,33 @@ const CONTENT_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
 }
 
+/**
+ * How much filler opens an event stream.
+ *
+ * Sized against nginx's `proxy_buffer_size`, which defaults to 4 KB and is 8 KB on some builds.
+ * One buffer has to fill before a buffering proxy forwards anything, and it is paid once per
+ * connection - a rounding error against a single reply, and the difference between a working
+ * page and one that silently never receives anything.
+ */
+const STREAM_PADDING_BYTES = 8192
+
+/**
+ * The padding line itself. An SSE comment, so no client ever sees it as an event.
+ *
+ * Varied rather than one character repeated: an intermediary that gzips would squeeze 8 KB of the
+ * same byte down to nothing and the padding would buy nothing at all. `no-transform` asks not to
+ * be compressed; this does not rely on having been listened to.
+ */
+const STREAM_PADDING = `: ${((): string => {
+  let filler = ''
+  let seed = 1
+  while (filler.length < STREAM_PADDING_BYTES) {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    filler += (seed % 36).toString(36)
+  }
+  return filler
+})()}\n\n`
+
 export interface ServerOptions {
   workspaceRoot: string | undefined
   dataDir: string
@@ -540,6 +567,21 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         'Cache-Control': 'no-store, no-transform',
         'X-Accel-Buffering': 'no',
       })
+      /*
+       * Padding, written before anything else, to force a buffering intermediary to let go.
+       *
+       * The fourteen bytes below were enough on loopback and are nowhere near enough anywhere
+       * else. A proxy with response buffering on forwards when its buffer *fills* or the response
+       * *ends* - nginx's `proxy_buffer_size` defaults to 4 or 8 KB - and an event stream never
+       * ends. So a comment and a 20-second ping of eight bytes would take eight minutes to
+       * release the first reply, which from the page is indistinguishable from a server that
+       * answers nothing: the theme control never arrives, the Agents tab stays empty, and a save
+       * appears to do nothing.
+       *
+       * `X-Accel-Buffering: no` and `no-transform` ask for the same thing politely and are
+       * ignored by most proxies that are not nginx. This does not ask.
+       */
+      response.write(STREAM_PADDING)
       // Flushes headers so the client's reader resolves before the first real message.
       response.write(': connected\n\n')
 

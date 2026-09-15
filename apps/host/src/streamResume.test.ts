@@ -173,3 +173,81 @@ describe('an event stream that drops and comes back', () => {
     stream.abort()
   }, 30_000)
 })
+
+/**
+ * An event stream has to survive a buffering proxy, and that is a claim about bytes on the wire.
+ *
+ * Reported from a Linux server reached through a proxy: the light/dark control missing and Save
+ * closing having saved nothing, on the current build. A proxy with response buffering on forwards
+ * when its buffer *fills* or the response *ends* — nginx's `proxy_buffer_size` defaults to 4 KB,
+ * 8 KB on some builds — and an event stream never ends. The server wrote fourteen bytes to open
+ * and eight every twenty seconds after that, so the first reply would clear a 4 KB buffer about
+ * eight minutes later. From the page that is indistinguishable from a server that answers nothing.
+ *
+ * `X-Accel-Buffering: no` and `Cache-Control: no-transform` ask for the same thing politely and
+ * are ignored by most proxies that are not nginx. The padding does not ask.
+ *
+ * Measured against the running server, because the whole claim is how much arrives and how soon.
+ */
+describe('opening an event stream through something that buffers', () => {
+  it('sends enough immediately to clear a proxy buffer', async () => {
+    const url = await start()
+    const stream = await openStream(url)
+
+    expect(await until(() => stream.frames.join('').length >= 4096)).toBe(true)
+    /*
+     * The *first frame*, not the total. Whatever the server happens to send next would otherwise
+     * satisfy this on its own — and it does, which is exactly why a proxy sometimes releases the
+     * page and then nothing else. What has to clear the buffer is the opening write itself.
+     */
+    const first = stream.frames.join('').split('\n\n')[0] ?? ''
+    // Enough for the 8 KB variant too, since that is the one that would otherwise still hang.
+    expect(first.length).toBeGreaterThanOrEqual(8192)
+    stream.abort()
+  })
+
+  /*
+   * A comment, so it is padding rather than content. The client only acts on frames beginning
+   * `data: `; anything else is ignored, which is what makes this safe to send to every client
+   * including the ones that never needed it.
+   */
+  it('sends it as a comment no client will read as an event', async () => {
+    const url = await start()
+    const stream = await openStream(url)
+
+    expect(await until(() => stream.frames.join('').length >= 8192)).toBe(true)
+    const opening = stream.frames.join('')
+    // The *first* frame is the padding, and it is a comment. Real events follow it immediately —
+    // that is the point: they are what the padding has just made deliverable.
+    const frames = opening.split('\n\n')
+    expect(frames[0]?.startsWith(': ')).toBe(true)
+    expect(frames[0]?.startsWith('data: ')).toBe(false)
+    stream.abort()
+  })
+
+  /*
+   * Not one byte repeated. An intermediary that gzips would squeeze 8 KB of the same character
+   * into almost nothing and the padding would buy nothing — and `no-transform` is exactly the
+   * header such a proxy has already ignored.
+   */
+  it('pads with something that does not compress to nothing', async () => {
+    const url = await start()
+    const stream = await openStream(url)
+
+    expect(await until(() => stream.frames.join('').length >= 8192)).toBe(true)
+    const padding = stream.frames.join('').split('\n\n')[0]?.slice(2) ?? ''
+    expect(padding.length).toBeGreaterThanOrEqual(8192)
+    expect(new Set(padding).size).toBeGreaterThan(8)
+    stream.abort()
+  })
+
+  /* And the headers that ask nicely are still there, for the proxies that do listen. */
+  it('still asks not to be buffered', async () => {
+    const url = await start()
+    const stream = await openStream(url)
+
+    expect(stream.response.headers.get('x-accel-buffering')).toBe('no')
+    expect(stream.response.headers.get('cache-control')).toContain('no-transform')
+    stream.abort()
+  })
+})

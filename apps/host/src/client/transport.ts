@@ -13,6 +13,14 @@ import type { Transport } from '@light-code/core/browser'
  * exists to avoid. A streamed `fetch` can set headers.
  */
 /** How many times a message is resent before the failure is reported instead. */
+/**
+ * How long a message may sit queued before the user is told.
+ *
+ * Long enough that an ordinary slow connection never trips it, short enough that somebody who
+ * pressed Save learns the truth while they are still looking at the screen.
+ */
+const QUEUE_DEADLINE_MS = 15_000
+
 const POST_RETRIES = 3
 const RETRY_DELAY_MS = 700
 
@@ -58,9 +66,27 @@ export class HttpTransport implements Transport {
    * This is the client half of the rule already written into the server: **a window that cannot
    * exist beats one something else recovers from.** The 409 retry stays as a fallback for a race
    * this does not anticipate.
+   *
+   * ## And why the queue has a deadline
+   *
+   * Because without one it turned a *reported* failure into a silent one. Reported again from a
+   * Linux server behind a proxy: the theme control missing and Save closing having saved nothing,
+   * with no error anywhere. Before the queue those requests were refused and the refusal was
+   * surfaced; after it they sat in the list for ever, because the event stream never opened at
+   * all — and a message waiting is indistinguishable from a message sent.
+   *
+   * A proxy that buffers a response holds every event until it has "enough", which for a stream
+   * is for ever; the server sets `X-Accel-Buffering: no` and `Cache-Control: no-transform` to ask
+   * it not to, and not every proxy listens. So the wait is bounded and says so. It does not throw
+   * the messages away — the stream may still come up and flush them — it just stops pretending
+   * everything is fine.
    */
   private streamOpen = false
   private queued: unknown[] = []
+  /** Fires if the stream has still not opened while messages are waiting. */
+  private queueTimer: ReturnType<typeof setTimeout> | undefined
+  /** So a long outage reports once rather than every time something is posted. */
+  private queueReported = false
 
   constructor(private readonly onStatus: (status: string) => void) {}
 
@@ -197,14 +223,53 @@ export class HttpTransport implements Transport {
         return
       }
       this.queued.push(message)
+      this.armQueueDeadline()
       return
     }
     void this.send(message, 0)
   }
 
+  /**
+   * Starts the clock on a queued message, once per outage.
+   *
+   * The cause is *offered*, never asserted: a confident wrong diagnosis costs the reader a search
+   * as well as the failure, which this project has already paid for once with an Outlook timeout
+   * that sent somebody hunting a dialog that did not exist.
+   */
+  private armQueueDeadline(): void {
+    if (this.queueTimer !== undefined || this.queueReported) return
+    this.queueTimer = setTimeout(() => {
+      this.queueTimer = undefined
+      if (this.streamOpen) return
+      this.queueReported = true
+      this.onStatus(
+        `the event stream has not opened after ${String(Math.round(QUEUE_DEADLINE_MS / 1000))}s, so ` +
+          `${String(this.queued.length)} message(s) are still waiting and nothing has been saved. ` +
+          'Anything between the browser and the server that buffers responses will hold an event ' +
+          'stream open but empty — a reverse proxy is the usual one. They will be sent if it opens.',
+      )
+    }, QUEUE_DEADLINE_MS)
+  }
+
   /** Marks the stream up and releases everything posted while it was not, in order. */
   private openStream(): void {
     this.streamOpen = true
+    if (this.queueTimer !== undefined) {
+      clearTimeout(this.queueTimer)
+      this.queueTimer = undefined
+    }
+    /*
+     * Re-armed for the *next* outage, and the recovery is said out loud: somebody who has just
+     * been told nothing was saved needs to know when that stopped being true.
+     */
+    if (this.queueReported) {
+      this.queueReported = false
+      this.onStatus(
+        this.queued.length > 0
+          ? `connected — sending the ${String(this.queued.length)} message(s) that were waiting.`
+          : 'connected.',
+      )
+    }
     // Taken before sending: `send` is async, so a failure that re-queues must not append to the
     // list being drained.
     const waiting = this.queued

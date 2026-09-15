@@ -1,5 +1,56 @@
 # @chosengeneration/light-code
 
+## 0.59.8
+
+### Patch Changes
+
+- An event stream now survives a buffering proxy
+
+  Reported from a Linux server: the light/dark control missing, the Agents tab empty, and Save
+  closing its dialog having saved nothing — on the current build, with the same setup working
+  perfectly on Windows.
+
+  The difference is what sits between the browser and the server. A proxy with response buffering on
+  forwards when its buffer **fills** or the response **ends**, and an event stream never ends.
+  nginx's `proxy_buffer_size` defaults to 4 KB and is 8 KB on some builds; this server opened a
+  stream with fourteen bytes and sent eight more every twenty seconds. A 4 KB buffer would therefore
+  release the first reply about eight minutes later, which from the page is indistinguishable from a
+  server that answers nothing at all.
+
+  `X-Accel-Buffering: no` and `Cache-Control: no-transform` ask for the same thing politely, and are
+  ignored by most proxies that are not nginx. The stream now opens with 8 KB of padding, which does
+  not ask. It is an SSE comment, so no client reads it as an event, and it is varied rather than one
+  character repeated — an intermediary that gzips would squeeze 8 KB of the same byte into nothing,
+  and compressing is precisely what `no-transform` already failed to prevent.
+
+  Measured against a running server rather than asserted about the source, since the whole claim is
+  how many bytes arrive and how soon.
+
+## 0.59.7
+
+### Patch Changes
+
+- A queued message that is never sent now says so
+
+  Reported from a Linux server: the light/dark control missing, and Save closing its dialog having
+  saved nothing — with no error anywhere. The same two symptoms as the startup race fixed earlier,
+  on a build that already had that fix.
+
+  The queue is what made it silent. Before it, a message posted with no event stream open was
+  refused by the server and the refusal was surfaced; after it, the message sits in the list — and a
+  message waiting is indistinguishable from a message sent. The requests were never refused because
+  they were never sent, so nothing had anything to report.
+
+  The wait is bounded now. If the stream has not opened after 15 seconds, the user is told how many
+  messages are outstanding and that nothing has been saved. Nothing is thrown away — the stream may
+  still come up and flush them — and when it does, the recovery is said out loud too, because
+  somebody just told nothing was saved needs to know when that stopped being true.
+
+  The likely cause is **offered, not asserted**: anything between the browser and the server that
+  buffers responses will hold an event stream open and empty, and a reverse proxy is the usual one.
+  The server already asks not to be buffered with `X-Accel-Buffering: no` and
+  `Cache-Control: no-transform`; not every proxy listens.
+
 ## 0.59.6
 
 ### Patch Changes

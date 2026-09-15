@@ -109,3 +109,85 @@ describe('posting before the event stream is open', () => {
     })
   })
 })
+
+/**
+ * A stream that never opens at all.
+ *
+ * Reported from a Linux server behind a proxy: the light/dark control missing, and Save closing
+ * its dialog having saved nothing — with no error anywhere. The queue above is what made it
+ * silent. Before it, those requests were refused and the refusal was surfaced; after it they sat
+ * in the list for ever, and a message waiting is indistinguishable from a message sent.
+ *
+ * A proxy that buffers a response holds an event stream open and empty for ever. The server asks
+ * it not to with `X-Accel-Buffering: no`, and not every proxy listens — so the wait is bounded and
+ * says so. Same rule as Test Connection: something that cannot fail cannot report.
+ */
+describe('when the event stream never opens', () => {
+  it('says so rather than waiting silently', async () => {
+    vi.useFakeTimers()
+    try {
+      const { transport, posts, statuses } = harness()
+      await transport.connect()
+
+      transport.post({ type: 'saveProfile' })
+      expect(posts).toEqual([])
+      // Nothing said yet: a slow connection must not be reported as a broken one.
+      expect(statuses.filter((status) => status.includes('not opened'))).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(20_000)
+
+      const reported = statuses.filter((status) => status.includes('not opened'))
+      expect(reported).toHaveLength(1)
+      // The count, so the reader knows how much is outstanding rather than only that something is.
+      expect(reported[0]).toContain('1 message(s)')
+      expect(reported[0]).toContain('nothing has been saved')
+      /*
+       * The cause is offered, not asserted. A confident wrong diagnosis costs a search as well as
+       * the failure — this project paid for that once with an Outlook timeout that sent somebody
+       * hunting a dialog that did not exist.
+       */
+      expect(reported[0]).toContain('proxy')
+      expect(reported[0]).not.toContain('is a proxy')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports once, not on every message', async () => {
+    vi.useFakeTimers()
+    try {
+      const { transport, statuses } = harness()
+      await transport.connect()
+
+      for (let index = 0; index < 5; index += 1) transport.post({ type: 'saveProfile' })
+      await vi.advanceTimersByTimeAsync(20_000)
+      transport.post({ type: 'saveProfile' })
+      await vi.advanceTimersByTimeAsync(20_000)
+
+      expect(statuses.filter((status) => status.includes('not opened'))).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /* Somebody told nothing was saved needs to know when that stops being true. */
+  it('says so when it recovers, and sends what was waiting', async () => {
+    vi.useFakeTimers()
+    try {
+      const { transport, posts, statuses, openStream } = harness()
+      await transport.connect()
+
+      transport.post({ type: 'saveProfile' })
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(statuses.some((status) => status.includes('not opened'))).toBe(true)
+
+      openStream()
+      await vi.waitFor(() => {
+        expect(posts).toHaveLength(1)
+      })
+      expect(statuses.some((status) => status.startsWith('connected'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
