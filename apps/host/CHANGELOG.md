@@ -1,5 +1,34 @@
 # @chosengeneration/light-code
 
+## 0.62.1
+
+### Patch Changes
+
+- Long labels wrap instead of running off the edge of the diagram
+
+  Reported from real use: words chopped at the edge of the image.
+
+  The box width was `Math.min(MAX_WIDTH, …)` — a **clamp**, not a threshold. So a label longer than
+  about twenty-seven characters got a box narrower than its own text, and since SVG text does not
+  wrap, the words ran out of the box and off the canvas. The wider the label, the further off.
+
+  The instinct that it needed a bigger canvas is understandable and would not have fixed it: a box is
+  sized from its label and knows nothing about the canvas, so a larger canvas would have produced the
+  same clipped box with more space around it.
+
+  Now the threshold is where wrapping _begins_. A long label breaks across lines on word boundaries,
+  the box grows to hold them, the rank grows to hold the box and the canvas grows to hold the rank —
+  so nothing can be drawn outside the picture. A single word longer than a line is cut rather than
+  allowed to overflow: a hyphen would be a guess at where the word divides, and a word that long is
+  nearly always an identifier. Notes wrap on the same rule at their own size.
+
+  The per-character estimate also errs upwards now. There are no font metrics where the layout runs,
+  so a guess that is slightly too wide leaves a little air inside a box, while one that is slightly
+  too narrow puts the last word through the wall.
+
+  `diagram.test.ts` asserts the property directly — every line must fit the usable width of the box
+  it is drawn in — rather than any particular size.
+
 ## 0.62.0
 
 ### Minor Changes

@@ -191,11 +191,27 @@ function shapeFor(node: PlacedNode, palette: DiagramPalette): string {
   return `<rect x="${String(x)}" y="${String(y)}" width="${String(w)}" height="${String(h)}" rx="${String(radius)}" ${common} />`
 }
 
-/** Text centred in a box, with the note beneath it when there is one. */
+const LINE_HEIGHT = 17
+const NOTE_LINE_HEIGHT = 14
+
+/**
+ * The label and its note, wrapped across as many lines as they need.
+ *
+ * One `<text>` per line rather than one with `tspan`s, because a `tspan` carries its own quirks
+ * around `dy` accumulation and this needs no inheritance. The block is centred vertically as a
+ * whole, so a two-line label sits where a one-line label would have.
+ *
+ * The lines arrive already wrapped: the layout decided them, because it is the layout that knows
+ * how wide the box ended up. Wrapping here instead would be a second opinion about the same
+ * question, and the two would disagree the first time either changed.
+ */
 function labelFor(node: PlacedNode, palette: DiagramPalette): string {
   const paint = tonePaint(node.tone, palette)
   const centreX = node.x + node.width / 2
-  const baseline = node.note === undefined ? node.y + node.height / 2 + 5 : node.y + node.height / 2
+  const textHeight = node.lines.length * LINE_HEIGHT + node.noteLines.length * NOTE_LINE_HEIGHT
+  // The first baseline: down by however much space is left above, plus most of a line — a baseline
+  // sits near the bottom of its line rather than at the top.
+  let baseline = node.y + (node.height - textHeight) / 2 + LINE_HEIGHT * 0.78
 
   /*
    * Text keeps the theme's own foreground on every tone, because the fill is a tint rather than
@@ -203,15 +219,20 @@ function labelFor(node: PlacedNode, palette: DiagramPalette): string {
    * readable as the rest of the panel, instead of being white-on-green and failing the moment
    * somebody picks a pale accent.
    */
-  const lines = [
-    `<text x="${String(centreX)}" y="${String(baseline)}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="${paint.text}">${escape(node.label)}</text>`,
-  ]
-  if (node.note !== undefined) {
-    lines.push(
-      `<text x="${String(centreX)}" y="${String(baseline + 16)}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="${palette.muted}">${escape(node.note)}</text>`,
+  const out: string[] = []
+  for (const line of node.lines) {
+    out.push(
+      `<text x="${String(centreX)}" y="${String(baseline)}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="${paint.text}">${escape(line)}</text>`,
     )
+    baseline += LINE_HEIGHT
   }
-  return lines.join('')
+  for (const line of node.noteLines) {
+    out.push(
+      `<text x="${String(centreX)}" y="${String(baseline)}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="${palette.muted}">${escape(line)}</text>`,
+    )
+    baseline += NOTE_LINE_HEIGHT
+  }
+  return out.join('')
 }
 
 /** Serialises a laid-out diagram. The only model-supplied content is escaped text. */
@@ -268,8 +289,8 @@ export function diagramSvg(layout: DiagramLayout, palette: DiagramPalette = DEFA
   for (const entry of layout.legend) {
     const swatch: PlacedNode = {
       id: '',
-      label: '',
-      note: undefined,
+      lines: [],
+      noteLines: [],
       shape: entry.shape,
       tone: entry.tone,
       icon: undefined,

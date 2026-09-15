@@ -49,8 +49,10 @@ export interface PlacedLegend {
 
 export interface PlacedNode {
   id: string
-  label: string
-  note: string | undefined
+  /** The label, wrapped to fit the box. Never one string: SVG text does not wrap itself. */
+  lines: string[]
+  /** The note, wrapped the same way. Empty when there is none. */
+  noteLines: string[]
   shape: NodeShape
   tone: NodeTone
   icon: NodeIcon | undefined
@@ -72,11 +74,29 @@ export interface RoutedEdge {
 }
 
 const NODE_HEIGHT = 52
-const NOTE_EXTRA = 14
 const MIN_WIDTH = 96
-const MAX_WIDTH = 260
-/** Rough advance per character. No font metrics exist here, and being a little generous is safe. */
-const CHAR_WIDTH = 7.4
+/**
+ * How wide a box may get before its label wraps instead.
+ *
+ * A threshold, not a clamp — and that distinction is the bug this replaced. It *was* a clamp:
+ * anything longer than about twenty-seven characters got a box narrower than its own text, and
+ * because SVG text does not wrap, the words simply ran out of the box and off the edge of the
+ * canvas. Reported as words being chopped, which is exactly what it was.
+ */
+const MAX_WIDTH = 280
+/**
+ * Rough advance per character, generous on purpose.
+ *
+ * There are no font metrics here — the diagram is laid out where no text can be measured — so the
+ * estimate has to err upwards. Too wide leaves a little air inside a box; too narrow puts the last
+ * word through the wall.
+ */
+const CHAR_WIDTH = 7.6
+/** The note's font is smaller, so more of it fits on a line. */
+const NOTE_CHAR_WIDTH = 6.4
+const LINE_HEIGHT = 17
+const NOTE_LINE_HEIGHT = 14
+const PADDING_Y = 15
 const PADDING_X = 28
 const GAP_WITHIN_RANK = 28
 const GAP_BETWEEN_RANKS = 64
@@ -92,10 +112,64 @@ const LEGEND_ROW_HEIGHT = 24
 /** Between the drawing and the key, so the key reads as a separate thing. */
 const LEGEND_TOP_GAP = 18
 
-/** Width a box needs for its text, clamped so one long label cannot stretch the whole diagram. */
-function widthFor(label: string, note: string | undefined): number {
-  const longest = Math.max(label.length, note?.length ?? 0)
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(longest * CHAR_WIDTH) + PADDING_X * 2))
+/**
+ * Breaks text into lines that fit a given number of characters.
+ *
+ * On spaces where it can. A single word longer than the line is cut rather than allowed to
+ * overflow — a hyphen would be a guess at where the word divides, and a word that long is nearly
+ * always an identifier, where a break anywhere is equally arbitrary and equally readable.
+ */
+export function wrapText(text: string, perLine: number): string[] {
+  const limit = Math.max(4, perLine)
+  const lines: string[] = []
+  let current = ''
+
+  for (const word of text.split(/\s+/).filter((part) => part.length > 0)) {
+    if (current.length === 0) {
+      current = word
+    } else if (current.length + 1 + word.length <= limit) {
+      current = `${current} ${word}`
+    } else {
+      lines.push(current)
+      current = word
+    }
+    while (current.length > limit) {
+      lines.push(current.slice(0, limit))
+      current = current.slice(limit)
+    }
+  }
+  if (current.length > 0) lines.push(current)
+  return lines.length > 0 ? lines : ['']
+}
+
+/**
+ * How big a box has to be to hold its text.
+ *
+ * Measured from the text rather than assumed: the width is what one line would need, up to the
+ * wrap threshold, and the height then follows from how many lines that produced. Nothing here can
+ * return a box its own content does not fit in, which is the property that was missing.
+ */
+function boxFor(
+  label: string,
+  note: string | undefined,
+): { width: number; height: number; lines: string[]; noteLines: string[] } {
+  const ideal = Math.max(
+    Math.round(label.length * CHAR_WIDTH),
+    note === undefined ? 0 : Math.round(note.length * NOTE_CHAR_WIDTH),
+  )
+  const width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, ideal + PADDING_X * 2))
+  const usable = width - PADDING_X * 2
+
+  const lines = wrapText(label, Math.floor(usable / CHAR_WIDTH))
+  const noteLines = note === undefined ? [] : wrapText(note, Math.floor(usable / NOTE_CHAR_WIDTH))
+
+  const textHeight = lines.length * LINE_HEIGHT + noteLines.length * NOTE_LINE_HEIGHT
+  return {
+    width,
+    height: Math.max(NODE_HEIGHT, textHeight + PADDING_Y * 2),
+    lines,
+    noteLines,
+  }
 }
 
 /**
@@ -209,13 +283,8 @@ export function layoutDiagram(spec: DiagramSpec): DiagramLayout {
   const rows = order(spec, ranks, back)
   const byId = new Map(spec.nodes.map((node) => [node.id, node]))
 
-  const sizes = new Map<string, { width: number; height: number }>()
-  for (const node of spec.nodes) {
-    sizes.set(node.id, {
-      width: widthFor(node.label, node.note),
-      height: NODE_HEIGHT + (node.note === undefined ? 0 : NOTE_EXTRA),
-    })
-  }
+  const sizes = new Map<string, ReturnType<typeof boxFor>>()
+  for (const node of spec.nodes) sizes.set(node.id, boxFor(node.label, node.note))
 
   /*
    * Laid out top-to-bottom always, then transposed for `right`.
@@ -245,8 +314,8 @@ export function layoutDiagram(spec: DiagramSpec): DiagramLayout {
       if (node === undefined || size === undefined) continue
       placed.push({
         id,
-        label: node.label,
-        note: node.note,
+        lines: size.lines,
+        noteLines: size.noteLines,
         shape: node.shape ?? 'box',
         // A start or an end is accented unless the model said otherwise: the entry and exit of a
         // flow are what a reader looks for first.

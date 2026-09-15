@@ -268,3 +268,83 @@ describe('the legend', () => {
     expect(svg).toContain('&lt;script&gt;')
   })
 })
+
+/**
+ * Text has to fit inside the box drawn around it.
+ *
+ * Reported from real use: words chopped at the edge of the image. The box width was `Math.min(
+ * MAX_WIDTH, …)` — a clamp, not a threshold — so a label over about twenty-seven characters got a
+ * box narrower than its own text. SVG text does not wrap, so the words ran out of the box and off
+ * the canvas.
+ *
+ * The fix is not a bigger canvas, which is what it looked like from outside: the box is sized from
+ * the label and knows nothing about the canvas. Long labels wrap, and the box grows to hold the
+ * lines.
+ */
+describe('a label longer than a box', () => {
+  const longest = (id: string, layout: ReturnType<typeof layoutDiagram>): number => {
+    const node = layout.nodes.find((entry) => entry.id === id)
+    return Math.max(...(node?.lines ?? ['']).map((line) => line.length))
+  }
+
+  const withLabel = (label: string, note?: string) =>
+    layoutDiagram(
+      diagramSpecSchema.parse({
+        nodes: [{ id: 'a', label, ...(note === undefined ? {} : { note }) }],
+        edges: [],
+      }),
+    )
+
+  it('wraps rather than overflowing', () => {
+    const label = 'Validate the incoming payload against the published schema'
+    const layout = withLabel(label)
+    const node = layout.nodes[0]
+    expect(node?.lines.length).toBeGreaterThan(1)
+    // Every line has to fit the usable width of the box it is drawn in.
+    const usable = (node?.width ?? 0) - 56
+    for (const line of node?.lines ?? []) {
+      expect(line.length * 7.6, `"${line}" is wider than its box`).toBeLessThanOrEqual(usable)
+    }
+  })
+
+  it('grows the box to hold the lines it produced', () => {
+    const short = withLabel('Step')
+    const long = withLabel('Validate the incoming payload against the published schema')
+    expect(long.nodes[0]?.height).toBeGreaterThan(short.nodes[0]?.height ?? 0)
+  })
+
+  it('loses none of the words', () => {
+    const label = 'Validate the incoming payload against the published schema'
+    expect(withLabel(label).nodes[0]?.lines.join(' ')).toBe(label)
+  })
+
+  it('wraps a long note too', () => {
+    const layout = withLabel('Gateway', 'mutual TLS, with the client certificate from the machine store')
+    expect(layout.nodes[0]?.noteLines.length).toBeGreaterThan(1)
+  })
+
+  /*
+   * A single word longer than the line is cut rather than allowed to overflow. A hyphen would be a
+   * guess at where the word divides, and a word this long is nearly always an identifier.
+   */
+  it('breaks a single unbroken word rather than letting it run out', () => {
+    const layout = withLabel('supercalifragilisticexpialidociousandthensomemoreforgoodmeasure')
+    expect(longest('a', layout) * 7.6).toBeLessThanOrEqual((layout.nodes[0]?.width ?? 0) - 56)
+  })
+
+  it('keeps a wrapped box inside the canvas', () => {
+    const layout = layoutDiagram(
+      diagramSpecSchema.parse({
+        nodes: [
+          { id: 'a', label: 'Validate the incoming payload against the published schema' },
+          { id: 'b', label: 'Reject with a 422 and the first failing field named in the body' },
+        ],
+        edges: [{ from: 'a', to: 'b' }],
+      }),
+    )
+    for (const node of layout.nodes) {
+      expect(node.x + node.width).toBeLessThanOrEqual(layout.width)
+      expect(node.y + node.height).toBeLessThanOrEqual(layout.height)
+    }
+  })
+})
