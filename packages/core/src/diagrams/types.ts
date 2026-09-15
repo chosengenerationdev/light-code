@@ -72,6 +72,17 @@ export const NODE_ICONS = [
 ] as const
 export type NodeIcon = (typeof NODE_ICONS)[number]
 
+/**
+ * How large the text is, by name.
+ *
+ * Steps rather than a number of pixels, and the reason is the layout: a box is measured by
+ * counting characters against a per-character width, so a size this cannot measure is a size that
+ * puts the last word through the wall. Four steps cover "make that one stand out" and "the whole
+ * thing is too small to read", which are the two things anybody actually asks for.
+ */
+export const TEXT_SIZES = ['small', 'normal', 'large', 'xlarge'] as const
+export type TextSize = (typeof TEXT_SIZES)[number]
+
 /** What a box means, by its outline. Conventional shapes, so no key is needed. */
 export const NODE_SHAPES = ['box', 'round', 'diamond', 'cylinder'] as const
 export type NodeShape = (typeof NODE_SHAPES)[number]
@@ -106,6 +117,25 @@ export const diagramNodeSchema = z.object({
     .describe(
       'A small glyph in the corner of the box: service, database, user, file, cloud, lock, ' +
         'clock, queue, code, mail, check, cross, warning, gear.',
+    ),
+  emphasis: z
+    .enum(['bold'])
+    .optional()
+    .describe('Bold the label, for the one or two boxes the diagram is really about.'),
+  font: z
+    .enum(['mono'])
+    .optional()
+    .describe(
+      'Set the label in a monospaced face. For a label that *is* an identifier — a path, a ' +
+        'function, a table, an endpoint — where proportional text reads as prose.',
+    ),
+  textSize: z
+    .enum(TEXT_SIZES)
+    .optional()
+    .describe(
+      'How large this box\'s text is: small, normal, large or xlarge. Use it when the user asks ' +
+        'for a particular box to be bigger, or to make the one thing the diagram is about stand ' +
+        'out. The box grows with the text, so nothing is cut off.',
     ),
 })
 
@@ -149,6 +179,13 @@ export const DIAGRAM_MAX_LEGEND = 8
 export const diagramSpecSchema = z
   .object({
     title: z.string().max(120).optional(),
+    textSize: z
+      .enum(TEXT_SIZES)
+      .optional()
+      .describe(
+        'The size for every box that does not set its own. Use it when the user says the diagram ' +
+          'is too small or too large to read comfortably.',
+      ),
     legend: z
       .array(diagramLegendSchema)
       .max(DIAGRAM_MAX_LEGEND)

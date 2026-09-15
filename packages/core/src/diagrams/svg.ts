@@ -191,8 +191,21 @@ function shapeFor(node: PlacedNode, palette: DiagramPalette): string {
   return `<rect x="${String(x)}" y="${String(y)}" width="${String(w)}" height="${String(h)}" rx="${String(radius)}" ${common} />`
 }
 
-const LINE_HEIGHT = 17
-const NOTE_LINE_HEIGHT = 14
+const SANS = 'system-ui, sans-serif'
+/**
+ * The monospaced stack, ending in the generic keyword.
+ *
+ * Named faces first and `monospace` last, because this renders inside an `<img>` and can only use
+ * what is installed on the machine looking at it. The generic keyword is the one entry guaranteed
+ * to resolve, and every face here advances closely enough that the layout's estimate holds
+ * whichever one wins.
+ */
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+
+/** Two decimal places, so a scaled size does not put sixteen digits into an attribute. */
+function round(value: number): number {
+  return Math.round(value * 100) / 100
+}
 
 /**
  * The label and its note, wrapped across as many lines as they need.
@@ -208,10 +221,11 @@ const NOTE_LINE_HEIGHT = 14
 function labelFor(node: PlacedNode, palette: DiagramPalette): string {
   const paint = tonePaint(node.tone, palette)
   const centreX = node.x + node.width / 2
-  const textHeight = node.lines.length * LINE_HEIGHT + node.noteLines.length * NOTE_LINE_HEIGHT
+  const textHeight =
+    node.lines.length * node.lineHeight + node.noteLines.length * node.noteLineHeight
   // The first baseline: down by however much space is left above, plus most of a line — a baseline
   // sits near the bottom of its line rather than at the top.
-  let baseline = node.y + (node.height - textHeight) / 2 + LINE_HEIGHT * 0.78
+  let baseline = node.y + (node.height - textHeight) / 2 + node.lineHeight * 0.78
 
   /*
    * Text keeps the theme's own foreground on every tone, because the fill is a tint rather than
@@ -219,18 +233,21 @@ function labelFor(node: PlacedNode, palette: DiagramPalette): string {
    * readable as the rest of the panel, instead of being white-on-green and failing the moment
    * somebody picks a pale accent.
    */
+  const family = node.mono ? MONO : SANS
+  const weight = node.bold ? ' font-weight="600"' : ''
+
   const out: string[] = []
   for (const line of node.lines) {
     out.push(
-      `<text x="${String(centreX)}" y="${String(baseline)}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="${paint.text}">${escape(line)}</text>`,
+      `<text x="${String(centreX)}" y="${String(baseline)}" text-anchor="middle" font-family="${family}" font-size="${String(round(node.fontSize))}"${weight} fill="${paint.text}">${escape(line)}</text>`,
     )
-    baseline += LINE_HEIGHT
+    baseline += node.lineHeight
   }
   for (const line of node.noteLines) {
     out.push(
-      `<text x="${String(centreX)}" y="${String(baseline)}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="${palette.muted}">${escape(line)}</text>`,
+      `<text x="${String(centreX)}" y="${String(baseline)}" text-anchor="middle" font-family="${family}" font-size="${String(round(node.noteFontSize))}" fill="${palette.muted}">${escape(line)}</text>`,
     )
-    baseline += NOTE_LINE_HEIGHT
+    baseline += node.noteLineHeight
   }
   return out.join('')
 }
@@ -291,6 +308,13 @@ export function diagramSvg(layout: DiagramLayout, palette: DiagramPalette = DEFA
       id: '',
       lines: [],
       noteLines: [],
+      // No text, so the type's text fields are filled with the base values and never read.
+      bold: false,
+      mono: false,
+      fontSize: 13,
+      noteFontSize: 11,
+      lineHeight: 17,
+      noteLineHeight: 14,
       shape: entry.shape,
       tone: entry.tone,
       icon: undefined,

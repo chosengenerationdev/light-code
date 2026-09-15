@@ -36,6 +36,14 @@ export function createShowDiagramTool(): Tool<DiagramSpec> {
       '`cylinder` for a store, and the default box for a step. Put the condition on the edge ' +
       '(`label: "yes"`, `label: "on timeout"`) rather than inventing a node for it, and use ' +
       '`style: "dashed"` for anything conditional, asynchronous or secondary. ' +
+      'Tone colours a box by meaning — success, danger, warning, info, accent, muted — and `icon` ' +
+      'puts a glyph in its corner. `emphasis: "bold"` for the box the diagram is really about, ' +
+      '`font: "mono"` where the label *is* an identifier (a path, a function, a table). ' +
+      '`textSize` is small, normal, large or xlarge, on a node for one box or on the diagram for ' +
+      'all of them — use it when the user asks for bigger or smaller text, which they may well ' +
+      'do; the box grows with the text so nothing is cut off. ' +
+      'A `legend` explains what a colour or a shape stands for *in this diagram*, which is worth ' +
+      'giving whenever the meaning is not obvious from the labels. ' +
       '`direction: "right"` suits a pipeline; the default runs downwards and suits most flows. ' +
       'Loops are fine — an edge pointing back is drawn round the outside. ' +
       'Keep it to the boxes that earn their place: a diagram of forty is a wall, not an ' +

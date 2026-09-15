@@ -348,3 +348,102 @@ describe('a label longer than a box', () => {
     }
   })
 })
+
+/**
+ * Weight, face and size.
+ *
+ * All three are *named* rather than free values, and the reason is the measurement: a box is sized
+ * by counting characters against a per-character advance, so a face or a size this cannot measure
+ * is one that puts the last word through the wall. Offering only what can be measured is what
+ * keeps the wrapping honest.
+ */
+describe('emphasis, face and size', () => {
+  const one = (over: Record<string, unknown>) =>
+    layoutDiagram(
+      diagramSpecSchema.parse({
+        nodes: [{ id: 'a', label: 'Validate the payload', ...over }],
+        edges: [],
+      }),
+    ).nodes[0]
+
+  it('marks a bold label bold, and renders the weight', () => {
+    expect(one({ emphasis: 'bold' })?.bold).toBe(true)
+    const svg = diagramSvg(
+      layoutDiagram(
+        diagramSpecSchema.parse({
+          nodes: [{ id: 'a', label: 'Important', emphasis: 'bold' }],
+          edges: [],
+        }),
+      ),
+    )
+    expect(svg).toContain('font-weight="600"')
+  })
+
+  /* A bold face is wider at the same size, so a box that ignored that would clip its own text. */
+  it('gives a bold label more room than a regular one', () => {
+    const regular = one({})
+    const bold = one({ emphasis: 'bold' })
+    expect(bold?.width ?? 0).toBeGreaterThanOrEqual(regular?.width ?? 0)
+  })
+
+  it('sets a monospaced label in a monospaced stack, ending in the generic keyword', () => {
+    expect(one({ font: 'mono' })?.mono).toBe(true)
+    const svg = diagramSvg(
+      layoutDiagram(
+        diagramSpecSchema.parse({
+          nodes: [{ id: 'a', label: '/api/v1/orders', font: 'mono' }],
+          edges: [],
+        }),
+      ),
+    )
+    // The generic keyword last: it is the only entry guaranteed to resolve to something.
+    expect(svg).toMatch(/font-family="[^"]*monospace"/)
+  })
+
+  it('grows the text and the box together', () => {
+    const normal = one({})
+    const large = one({ textSize: 'xlarge' })
+    expect(large?.fontSize ?? 0).toBeGreaterThan(normal?.fontSize ?? 0)
+    expect(large?.height ?? 0).toBeGreaterThan(normal?.height ?? 0)
+    expect(large?.width ?? 0).toBeGreaterThan(normal?.width ?? 0)
+  })
+
+  /*
+   * Asking for bigger text and getting a tall thin column is not what anybody means by bigger, so
+   * the wrap threshold grows with the size rather than the same box holding twice the lines.
+   */
+  it('does not answer a larger size with more lines in the same box', () => {
+    const normal = one({})
+    const large = one({ textSize: 'large' })
+    expect(large?.lines.length).toBeLessThanOrEqual(normal?.lines.length ?? 0)
+  })
+
+  /* The whole diagram can be sized, and a node still overrides it. */
+  it('takes a size from the diagram, and lets a node override it', () => {
+    const layout = layoutDiagram(
+      diagramSpecSchema.parse({
+        textSize: 'large',
+        nodes: [
+          { id: 'a', label: 'Follows the diagram' },
+          { id: 'b', label: 'Says its own', textSize: 'small' },
+        ],
+        edges: [{ from: 'a', to: 'b' }],
+      }),
+    )
+    const a = layout.nodes.find((node) => node.id === 'a')
+    const b = layout.nodes.find((node) => node.id === 'b')
+    expect(a?.fontSize ?? 0).toBeGreaterThan(b?.fontSize ?? 0)
+  })
+
+  /* Whatever the size, the text still has to fit the box measured for it. */
+  it('keeps enlarged text inside its box', () => {
+    for (const textSize of ['small', 'normal', 'large', 'xlarge'] as const) {
+      const node = one({ label: 'Validate the incoming payload against the schema', textSize })
+      const usable = (node?.width ?? 0) - 56
+      const advance = 7.6 * (node?.fontSize ?? 13) / 13
+      for (const line of node?.lines ?? []) {
+        expect(line.length * advance, `${textSize}: "${line}" overflows`).toBeLessThanOrEqual(usable)
+      }
+    }
+  })
+})

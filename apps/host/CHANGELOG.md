@@ -1,5 +1,39 @@
 # @chosengeneration/light-code
 
+## 0.63.0
+
+### Minor Changes
+
+- Diagrams take bold, monospace and a text size
+
+  Asked for directly. Before this the title was semi-bold, nothing else was, and there was one font
+  family throughout.
+
+  - **`emphasis: "bold"`** on a node, for the one or two boxes a diagram is really about.
+  - **`font: "mono"`**, for a label that _is_ an identifier — a path, a function, a table, an
+    endpoint — where proportional text reads as prose.
+  - **`textSize`** — small, normal, large or xlarge — on a node for one box, or on the diagram for
+    all of them. So "make that box bigger" and "the whole thing is too small to read" both work, and
+    a node still overrides the diagram.
+
+  **All three are named rather than free values, and that is the load-bearing part.** A box is
+  measured by counting characters against a per-character advance, because the layout runs where no
+  text can be measured. A face or a size this cannot measure is one measured with the wrong number —
+  and being wrong there does not degrade gracefully, it puts the last word through the wall, which is
+  the bug the wrapping was just fixed to prevent. So each face carries its own advance (bold is wider
+  than regular; a monospaced face advances the same for an `i` as for a `W`) and each size scales the
+  advance, the line height and the wrap threshold together.
+
+  The threshold scales too, deliberately: asking for bigger text and getting a tall thin column of
+  the same width is not what anybody means by bigger.
+
+  The monospaced stack ends in the generic `monospace` keyword, since the SVG renders inside an
+  `<img>` and can only use what is installed on the machine looking at it — every face listed
+  advances closely enough that the estimate holds whichever one wins.
+
+  The sizes travel with each node to the renderer rather than being recomputed there from a scale:
+  the measurement used them, and a renderer that worked them out again could disagree by a rounding.
+
 ## 0.62.1
 
 ### Patch Changes

@@ -1,4 +1,4 @@
-import type { DiagramSpec, NodeIcon, NodeShape, NodeTone } from './types.js'
+import type { DiagramSpec, NodeIcon, NodeShape, NodeTone, TextSize } from './types.js'
 
 /**
  * Where every box and arrow goes.
@@ -56,6 +56,20 @@ export interface PlacedNode {
   shape: NodeShape
   tone: NodeTone
   icon: NodeIcon | undefined
+  /*
+   * Everything the renderer needs to draw the text, decided here.
+   *
+   * The sizes travel with the node rather than being recomputed from a scale at drawing time,
+   * because the *measurement* used them: a renderer that worked them out again could disagree by
+   * a rounding, and disagreeing about a font size is how text stops fitting the box measured for
+   * it. One owner, and the drawing does no arithmetic.
+   */
+  bold: boolean
+  mono: boolean
+  fontSize: number
+  noteFontSize: number
+  lineHeight: number
+  noteLineHeight: number
   x: number
   y: number
   width: number
@@ -85,17 +99,37 @@ const MIN_WIDTH = 96
  */
 const MAX_WIDTH = 280
 /**
- * Rough advance per character, generous on purpose.
+ * Per-character advance for each face, at the base size. Generous on purpose.
  *
- * There are no font metrics here — the diagram is laid out where no text can be measured — so the
- * estimate has to err upwards. Too wide leaves a little air inside a box; too narrow puts the last
- * word through the wall.
+ * There are no font metrics here — the layout runs where no text can be measured — so every
+ * estimate errs upwards. Too wide leaves a little air inside a box; too narrow puts the last word
+ * through the wall.
+ *
+ * Every face needs its own number: bold is wider than regular at the same size, and a monospaced
+ * face advances the same for an `i` as for a `W`.
+ *
+ * This is also why the family is a closed set rather than a string the model supplies. An
+ * arbitrary face would be measured with the wrong number, and being wrong does not degrade
+ * gracefully — it puts the last word through the wall, which is the bug this measurement exists
+ * to prevent. A face nobody can measure is a face nobody should offer.
  */
-const CHAR_WIDTH = 7.6
+const FACE_WIDTH = { regular: 7.6, bold: 8.2, mono: 8.0, monoBold: 8.0 } as const
+
+/** Multipliers for the named sizes. Applied to the advance and the line height alike. */
+const SIZE_SCALE: Record<TextSize, number> = {
+  small: 0.85,
+  normal: 1,
+  large: 1.25,
+  xlarge: 1.55,
+}
+
 /** The note's font is smaller, so more of it fits on a line. */
 const NOTE_CHAR_WIDTH = 6.4
 const LINE_HEIGHT = 17
 const NOTE_LINE_HEIGHT = 14
+/** The base sizes the scales multiply. Travel with each node so the renderer never recomputes. */
+const LABEL_FONT_SIZE = 13
+const NOTE_FONT_SIZE = 11
 const PADDING_Y = 15
 const PADDING_X = 28
 const GAP_WITHIN_RANK = 28
@@ -149,26 +183,55 @@ export function wrapText(text: string, perLine: number): string[] {
  * wrap threshold, and the height then follows from how many lines that produced. Nothing here can
  * return a box its own content does not fit in, which is the property that was missing.
  */
+interface Measured {
+  width: number
+  height: number
+  lines: string[]
+  noteLines: string[]
+  fontSize: number
+  noteFontSize: number
+  lineHeight: number
+  noteLineHeight: number
+}
+
 function boxFor(
   label: string,
   note: string | undefined,
-): { width: number; height: number; lines: string[]; noteLines: string[] } {
+  face: keyof typeof FACE_WIDTH = 'regular',
+  size: TextSize = 'normal',
+): Measured {
+  const scale = SIZE_SCALE[size]
+  const charWidth = FACE_WIDTH[face] * scale
+  const noteCharWidth = NOTE_CHAR_WIDTH * scale
+  const lineHeight = LINE_HEIGHT * scale
+  const noteLineHeight = NOTE_LINE_HEIGHT * scale
+
   const ideal = Math.max(
-    Math.round(label.length * CHAR_WIDTH),
-    note === undefined ? 0 : Math.round(note.length * NOTE_CHAR_WIDTH),
+    Math.round(label.length * charWidth),
+    note === undefined ? 0 : Math.round(note.length * noteCharWidth),
   )
-  const width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, ideal + PADDING_X * 2))
+  /*
+   * The wrap threshold grows with the text, so a larger size means a larger box rather than the
+   * same box holding twice as many lines. Asking for bigger text and getting a tall thin column
+   * is not what anybody means by bigger.
+   */
+  const maxWidth = MAX_WIDTH * scale
+  const width = Math.min(maxWidth, Math.max(MIN_WIDTH, ideal + PADDING_X * 2))
   const usable = width - PADDING_X * 2
 
-  const lines = wrapText(label, Math.floor(usable / CHAR_WIDTH))
-  const noteLines = note === undefined ? [] : wrapText(note, Math.floor(usable / NOTE_CHAR_WIDTH))
+  const lines = wrapText(label, Math.floor(usable / charWidth))
+  const noteLines = note === undefined ? [] : wrapText(note, Math.floor(usable / noteCharWidth))
 
-  const textHeight = lines.length * LINE_HEIGHT + noteLines.length * NOTE_LINE_HEIGHT
+  const textHeight = lines.length * lineHeight + noteLines.length * noteLineHeight
   return {
     width,
-    height: Math.max(NODE_HEIGHT, textHeight + PADDING_Y * 2),
+    height: Math.max(NODE_HEIGHT * scale, textHeight + PADDING_Y * 2),
     lines,
     noteLines,
+    fontSize: LABEL_FONT_SIZE * scale,
+    noteFontSize: NOTE_FONT_SIZE * scale,
+    lineHeight,
+    noteLineHeight,
   }
 }
 
@@ -283,8 +346,14 @@ export function layoutDiagram(spec: DiagramSpec): DiagramLayout {
   const rows = order(spec, ranks, back)
   const byId = new Map(spec.nodes.map((node) => [node.id, node]))
 
-  const sizes = new Map<string, ReturnType<typeof boxFor>>()
-  for (const node of spec.nodes) sizes.set(node.id, boxFor(node.label, node.note))
+  const sizes = new Map<string, Measured>()
+  for (const node of spec.nodes) {
+    const bold = node.emphasis === 'bold'
+    const mono = node.font === 'mono'
+    const face = mono ? (bold ? 'monoBold' : 'mono') : bold ? 'bold' : 'regular'
+    // The node's own size wins; the diagram's is the default for everything that did not say.
+    sizes.set(node.id, boxFor(node.label, node.note, face, node.textSize ?? spec.textSize ?? 'normal'))
+  }
 
   /*
    * Laid out top-to-bottom always, then transposed for `right`.
@@ -316,6 +385,12 @@ export function layoutDiagram(spec: DiagramSpec): DiagramLayout {
         id,
         lines: size.lines,
         noteLines: size.noteLines,
+        bold: node.emphasis === 'bold',
+        mono: node.font === 'mono',
+        fontSize: size.fontSize,
+        noteFontSize: size.noteFontSize,
+        lineHeight: size.lineHeight,
+        noteLineHeight: size.noteLineHeight,
         shape: node.shape ?? 'box',
         // A start or an end is accented unless the model said otherwise: the entry and exit of a
         // flow are what a reader looks for first.
