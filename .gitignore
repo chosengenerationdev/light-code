@@ -16,3 +16,7 @@ coverage/
 # publishable artifact sitting several versions behind — `npm publish <tarball>`
 # would ship it. One was committed by accident and survived eight releases.
 *.tgz
+
+# PowerPoint owner files. Office creates these beside an open document and deletes them on
+# close, so they are never content — two were committed by a sweeping `git add -A`.
+~$*
