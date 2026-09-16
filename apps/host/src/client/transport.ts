@@ -21,11 +21,52 @@ import type { Transport } from '@light-code/core/browser'
  */
 const STREAM_PATIENCE_MS = 8_000
 
-/** How often to ask for what is waiting, once polling. */
-const POLL_INTERVAL_MS = 1_000
+/**
+ * How often to ask for what is waiting, once polling — fast while something is happening, slow
+ * when nothing is.
+ *
+ * A fixed second is the wrong answer in both directions. Streamed text arriving in one-second
+ * blocks reads as a stutter rather than as typing; and an idle page asking once a second for ever
+ * is a request every second for nothing, all day, per open tab.
+ *
+ * So the interval follows the conversation: anything arriving or being sent resets it to the fast
+ * rate, and it eases back towards the slow one while the page is quiet. The user is watching
+ * exactly when it is fast.
+ */
+const POLL_FAST_MS = 300
+const POLL_IDLE_MS = 2_000
+/** How long after the last activity the fast rate is kept. */
+const POLL_ACTIVE_WINDOW_MS = 4_000
 
 /** How many polls in a row may fail before the user is told. See `notePollFailure`. */
 const POLL_FAILURES_BEFORE_REPORTING = 5
+
+/**
+ * Where this page's API lives, worked out from where the page itself came from.
+ *
+ * Reported from a JupyterHub server: the app is reached through `jupyter-server-proxy`, which
+ * exposes a local port under `/user/<id>/proxy/<port>/`. A root-absolute request — `/api/events` —
+ * does not belong to the app at all there; it belongs to the *hub*, and whether it arrives depends
+ * entirely on how the proxy in front happens to be configured.
+ *
+ * Asking relative to `document.baseURI` removes the question. The proxy strips its own prefix
+ * before forwarding, so `<prefix>/api/events` arrives here as `/api/events`, which is what this
+ * server already serves. At the root it resolves to the same URLs as before, so nothing changes
+ * for anybody running it locally.
+ *
+ * `new URL('.', …)` gives the directory: `/user/x/proxy/8080/admin` and `/user/x/proxy/8080/` both
+ * yield `/user/x/proxy/8080/`, which is the base those two pages share.
+ */
+function apiBase(): string {
+  try {
+    return new URL('.', document.baseURI).pathname
+  } catch {
+    // No document: a test, or a runtime without one. The old behaviour is the right fallback.
+    return '/'
+  }
+}
+
+const API = apiBase()
 
 const POST_RETRIES = 3
 const RETRY_DELAY_MS = 700
@@ -102,11 +143,13 @@ export class HttpTransport implements Transport {
    * written — and it is enormously better than a page that does nothing at all.
    */
   private polling = false
-  private pollTimer: ReturnType<typeof setInterval> | undefined
+  private pollTimer: ReturnType<typeof setTimeout> | undefined
   private patienceTimer: ReturnType<typeof setTimeout> | undefined
   /** Consecutive failed polls, so a persistent failure reports once rather than every second. */
   private pollFailures = 0
   private pollReported = false
+  /** When something was last sent or received, which decides how eagerly to poll. */
+  private lastActivity = Date.now()
 
   constructor(private readonly onStatus: (status: string) => void) {}
 
@@ -120,7 +163,7 @@ export class HttpTransport implements Transport {
     const handoff = new URLSearchParams(window.location.hash.slice(1)).get('t')
     if (handoff !== null) {
       window.history.replaceState(null, '', window.location.pathname)
-      const response = await fetch('/api/session', {
+      const response = await fetch(`${API}api/session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ handoff }),
@@ -144,7 +187,7 @@ export class HttpTransport implements Transport {
      */
     if (this.token === undefined) {
       try {
-        const open = await fetch('/api/session', {
+        const open = await fetch(`${API}api/session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
@@ -173,7 +216,7 @@ export class HttpTransport implements Transport {
          * what the first one is, and a reload of either lands where it was.
          */
         const view = window.location.pathname.startsWith('/admin') ? '?view=admin' : ''
-        const response = await fetch(`/api/events${view}`, {
+        const response = await fetch(`${API}api/events${view}`, {
           headers: { Authorization: `Bearer ${this.token ?? ''}` },
         })
         if (!response.ok || response.body === null)
@@ -252,6 +295,9 @@ export class HttpTransport implements Transport {
       this.queued.push(message)
       return
     }
+    // Sending is activity: the reply to this is what the user is waiting for.
+    this.lastActivity = Date.now()
+    if (this.polling) this.schedulePoll()
     void this.send(message, 0)
   }
 
@@ -292,13 +338,29 @@ export class HttpTransport implements Transport {
        * missing light/dark control was.
        */
       this.openStream()
-      this.pollTimer = setInterval(() => void this.poll(), POLL_INTERVAL_MS)
+      this.schedulePoll()
     })
+  }
+
+  /**
+   * Books the next poll at whichever rate the conversation deserves.
+   *
+   * A chain of timeouts rather than an interval, because the delay changes between one poll and
+   * the next — and an interval whose period is fixed at creation cannot do that without being torn
+   * down and rebuilt each time, which is the same thing written less clearly.
+   */
+  private schedulePoll(): void {
+    if (!this.polling) return
+    if (this.pollTimer !== undefined) clearTimeout(this.pollTimer)
+    const active = Date.now() - this.lastActivity < POLL_ACTIVE_WINDOW_MS
+    this.pollTimer = setTimeout(() => {
+      void this.poll().finally(() => this.schedulePoll())
+    }, active ? POLL_FAST_MS : POLL_IDLE_MS)
   }
 
   private async poll(): Promise<void> {
     try {
-      const response = await fetch('/api/poll', {
+      const response = await fetch(`${API}api/poll`, {
         headers: { Authorization: `Bearer ${this.token ?? ''}` },
       })
       if (!response.ok) {
@@ -311,7 +373,10 @@ export class HttpTransport implements Transport {
         this.pollReported = false
         this.onStatus('connected.')
       }
-      for (const message of body.messages ?? []) {
+      const messages = body.messages ?? []
+      // Anything arriving means the conversation is live, so the next poll comes quickly.
+      if (messages.length > 0) this.lastActivity = Date.now()
+      for (const message of messages) {
         for (const listener of this.listeners) listener(message)
       }
     } catch {
@@ -354,7 +419,7 @@ export class HttpTransport implements Transport {
 
   private async send(message: unknown, attempt: number): Promise<void> {
     try {
-      const response = await fetch('/api/message', {
+      const response = await fetch(`${API}api/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

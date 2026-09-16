@@ -19,6 +19,7 @@ const VERSION =
  * repository. `nodeCompat.test.ts` asserts this import stays at the top.
  */
 import { installNodeCompat } from './nodeCompat.js'
+import { publicAddressFor, publicLaunchUrl } from './publicUrl.js'
 
 const compat = installNodeCompat()
 
@@ -207,6 +208,7 @@ async function main(): Promise<void> {
    * Repeatable, like `--admin-id`. Needed for anything not derivable from this machine — a
    * reverse proxy, a container alias, or the app embedding this in an iframe.
    */
+  const publicUrl = valueOf(args, '--public-url')
   const allowHosts = valuesOf(args, '--allow-host')
   const allowOrigins = valuesOf(args, '--allow-origin')
   const handoffSeconds = Math.min(
@@ -297,8 +299,16 @@ async function main(): Promise<void> {
       : {}),
     handoffSeconds,
     noToken,
-    allowHosts,
-    allowOrigins,
+    /*
+     * A stated public address is trusted as a name and an origin.
+     *
+     * Otherwise `--public-url` would print a link that the server then refuses: the Host check
+     * exists to catch DNS rebinding, and a proxy legitimately forwards the name the browser used.
+     * Somebody who typed the address is telling us it is theirs, which is the same statement
+     * `--allow-host` makes and this saves them making it twice.
+     */
+    allowHosts: [...allowHosts, ...trustedFromPublicUrl(publicUrl).hosts],
+    allowOrigins: [...allowOrigins, ...trustedFromPublicUrl(publicUrl).origins],
     /*
      * A lapsed link is replaced rather than ending the session.
      *
@@ -327,9 +337,37 @@ async function main(): Promise<void> {
   // The token is in the fragment, which the browser never sends to the server — that is
   // what makes it usable as a one-time handoff. It is single-use and expires in 10s.
   const launchUrl = `${server.url}${adminMode ? '/admin' : ''}/#t=${server.launchToken ?? ''}`
+  /*
+   * Where a browser can actually reach this, which on a server is rarely where it binds.
+   *
+   * Reported from a JupyterHub host: the banner printed 127.0.0.1, there is no browser on that
+   * machine, and the only way out was the hub's proxy at `/user/<name>/proxy/<port>/` — which the
+   * user had to have a script written to discover. JupyterHub tells every process it starts where
+   * it lives, so this is derivable rather than something to reconstruct.
+   */
+  const publicAddress = publicAddressFor(new URL(server.url).port === '' ? 80 : Number(new URL(server.url).port), {
+    ...(publicUrl !== undefined ? { publicUrl } : {}),
+    env: process.env,
+  })
   process.stdout.write(
     `\nLight Code ${VERSION}\n  workspace  ${workspaceRoot}\n  data       ${dataDir}\n  listening  ${server.url}\n`,
   )
+  /* What to hand the reader: the public address when one was found, the bound one otherwise. */
+  const reachableUrl =
+    publicAddress === undefined
+      ? noToken
+        ? server.url
+        : launchUrl
+      : publicLaunchUrl(publicAddress, adminMode, noToken ? '' : (server.launchToken ?? ''))
+
+  if (publicAddress !== undefined) {
+    process.stdout.write(
+      `  open       ${reachableUrl}
+` +
+        `             via ${publicAddress.source}
+`,
+    )
+  }
   if (noToken) {
     /*
      * Printed every start rather than only when the flag is typed.
@@ -445,13 +483,20 @@ async function main(): Promise<void> {
        * seconds sends them looking for a token that was never minted. Instructions for a
        * mechanism that is not running are worse than none.
        */
+      /*
+       * The *reachable* address, which on a server is not the one it binds to.
+       *
+       * This line is the one people copy, so printing loopback here undid the whole point of
+       * working the public address out: the useful URL scrolled past above it, and the useless
+       * one had the last word.
+       */
       noToken
         ? `Opening ${server.url}` +
             `\n(If the browser does not open, open this \u2014 there is no time limit:)` +
-            `\n${server.url}\n\n`
+            `\n${reachableUrl}\n\n`
         : `Opening ${server.url}` +
             `\n(If the browser does not open, paste this within ${String(handoffSeconds)} seconds:)` +
-            `\n${launchUrl}\n\n` +
+            `\n${reachableUrl}\n\n` +
             (handoffSeconds === 10
               ? '  Not long enough? Start with --handoff-seconds 120.\n' +
                 '  If it does lapse, a fresh link is printed here \u2014 no need to restart.\n\n'
@@ -487,6 +532,7 @@ const KNOWN_FLAGS = new Set([
   '--data-dir',
   '--no-open',
   '--no-token',
+  '--public-url',
   '--allow-host',
   '--allow-origin',
   '--server',
@@ -503,6 +549,25 @@ const KNOWN_FLAGS = new Set([
 ])
 
 /** Every value given for a repeatable flag, so `--admin a --admin b` works. */
+/**
+ * The host and origin a stated public URL implies.
+ *
+ * Absent for a bare path — which is what JupyterHub gives, since the hub's own name is not
+ * something this process is told. Nothing is guessed: a wrong entry here would widen the very
+ * check it is meant to satisfy.
+ */
+function trustedFromPublicUrl(value: string | undefined): { hosts: string[]; origins: string[] } {
+  if (value === undefined || !/^https?:\/\//i.test(value.trim())) return { hosts: [], origins: [] }
+  try {
+    const url = new URL(value.trim())
+    return { hosts: [url.host], origins: [url.origin] }
+  } catch {
+    // Not a URL. Left alone rather than half-parsed: the flag is also used for the printed link,
+    // and a value this cannot read is one the user should see verbatim and fix.
+    return { hosts: [], origins: [] }
+  }
+}
+
 function valuesOf(args: string[], flag: string): string[] {
   const values: string[] = []
   for (let index = 0; index < args.length; index++) {
@@ -581,6 +646,9 @@ Usage: light-code [options]
   --bind <address>    Interface to listen on (default: 127.0.0.1). Use 0.0.0.0 to
                       reach it from another machine; it then answers to this
                       machine's own hostname and addresses as well as localhost
+  --public-url <u>    The address this is reachable at from a browser, when that is not
+                      the one it binds. Printed as the link to open, and trusted as a
+                      host and origin. Detected automatically under JupyterHub.
   --allow-host <h>    An extra name to answer to, e.g. a reverse proxy or a
                       container alias (repeatable)
   --allow-origin <o>  An extra origin allowed to call it, e.g. an app embedding

@@ -1,5 +1,37 @@
 # @chosengeneration/light-code
 
+## 0.64.0
+
+### Minor Changes
+
+- Works properly behind a path prefix, and prints an address you can actually open
+
+  Reported from a JupyterHub server, where the only way to reach a local port is the hub's proxy at
+  `/user/<name>/proxy/<port>/` — something the user had to have a script written to work out.
+
+  **Every request is now relative to where the page was served.** The client asked for `/api/events`
+  and `/api/session` from the _root_, and under a prefix those belong to the hub rather than to this
+  app; whether they arrived at all depended on how the proxy in front happened to be configured. They
+  are resolved against `document.baseURI` now, and the page asks for its own assets relatively too.
+  The proxy strips its prefix before forwarding, so `<prefix>/api/events` arrives as `/api/events`,
+  which is what this server already serves. At the root nothing changes.
+
+  **The banner prints the reachable address.** It printed `http://127.0.0.1:<port>`, which is right
+  on a laptop and useless on a headless server — there is no browser on that machine, and 127.0.0.1
+  from the reader's own laptop is the reader's own laptop. `--public-url` states it, and under
+  JupyterHub it is derived from `JUPYTERHUB_SERVICE_PREFIX` without being asked. A stated URL is also
+  trusted as a host and an origin, so the link it prints is not one the server then refuses.
+
+  Where only the path can be known, only the path is printed, with a line saying to append it to the
+  host already in the browser — a guessed hostname that resolves to nothing would be worse than
+  saying less. And the closing "open this" line uses the reachable address: that is the line people
+  copy, so printing loopback there undid the whole point.
+
+  **Polling follows the conversation.** The fallback polled once a second regardless, which reads as
+  a stutter while text is arriving and is a request a second for nothing when nobody is typing. It
+  now polls quickly for a few seconds after anything is sent or received and eases back to every two
+  seconds while idle.
+
 ## 0.63.0
 
 ### Minor Changes
