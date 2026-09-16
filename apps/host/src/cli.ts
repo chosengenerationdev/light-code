@@ -648,7 +648,10 @@ Usage: light-code [options]
                       machine's own hostname and addresses as well as localhost
   --public-url <u>    The address this is reachable at from a browser, when that is not
                       the one it binds. Printed as the link to open, and trusted as a
-                      host and origin. Detected automatically under JupyterHub.
+                      host and origin.
+                      Under JupyterHub give only the hub's base URL — the
+                      /user/<you>/proxy/<port>/ part is worked out, including the
+                      port, which you cannot know before it starts.
   --allow-host <h>    An extra name to answer to, e.g. a reverse proxy or a
                       container alias (repeatable)
   --allow-origin <o>  An extra origin allowed to call it, e.g. an app embedding

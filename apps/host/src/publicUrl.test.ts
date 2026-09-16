@@ -70,3 +70,40 @@ describe('the link that is printed', () => {
     expect(publicLaunchUrl(address, true, 'abc')).toBe('/user/ana/proxy/8080/admin#t=abc')
   })
 })
+
+/**
+ * Each side knows half of the address.
+ *
+ * The hub's own hostname is the one thing the environment does not reliably tell a process it
+ * started; the port is the one thing the operator cannot know in advance, because the server binds
+ * an unused one by choice. So an origin on its own is enough, and the derived path completes it.
+ */
+describe('an origin on its own', () => {
+  const hub = { JUPYTERHUB_SERVICE_PREFIX: '/user/ana/' }
+
+  it('is completed with the proxy path and the running port', () => {
+    const address = publicAddressFor(64115, { publicUrl: 'https://hub.example', env: hub })
+    expect(address?.base).toBe('https://hub.example/user/ana/proxy/64115/')
+    expect(address?.source).toContain('JupyterHub')
+  })
+
+  it('is completed the same with a trailing slash', () => {
+    expect(publicAddressFor(64115, { publicUrl: 'https://hub.example/', env: hub })?.base).toBe(
+      'https://hub.example/user/ana/proxy/64115/',
+    )
+  })
+
+  /* Somebody who states a whole path knows something this does not, and keeps it. */
+  it('does not touch a URL that already carries a path', () => {
+    expect(
+      publicAddressFor(64115, { publicUrl: 'https://hub.example/somewhere/else/', env: hub })?.base,
+    ).toBe('https://hub.example/somewhere/else/')
+  })
+
+  /* With nothing to complete it, an origin is used as given rather than guessed at. */
+  it('stands alone when the environment names no prefix', () => {
+    expect(publicAddressFor(64115, { publicUrl: 'https://box.example', env: {} })?.base).toBe(
+      'https://box.example/',
+    )
+  })
+})

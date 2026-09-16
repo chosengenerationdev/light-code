@@ -1,5 +1,26 @@
 # @chosengeneration/light-code
 
+## 0.64.1
+
+### Patch Changes
+
+- `--public-url` takes just the hub's base URL
+
+  Asked while reading the flag: how would anybody know the port? They cannot — the server binds an
+  unused one by choice, so the port is not knowable when the flag is typed. The first version of this
+  flag required the whole address including that port, which made it unusable for the case it was
+  written for.
+
+  Each side knows half. The hub's own hostname is the one thing the environment does not reliably
+  tell a process it started; the port is the one thing the operator cannot know in advance. So an
+  origin on its own is now enough:
+
+      light-code --public-url https://your-hub.example
+
+  and the `/user/<you>/proxy/<port>/` part is completed from `JUPYTERHUB_SERVICE_PREFIX` and the port
+  actually bound. Anybody who states a full path still overrides all of it, because stating one means
+  knowing something this cannot.
+
 ## 0.64.0
 
 ### Minor Changes

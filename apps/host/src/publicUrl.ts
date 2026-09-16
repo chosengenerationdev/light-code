@@ -51,14 +51,38 @@ export function publicAddressFor(
   port: number,
   options: { publicUrl?: string | undefined; env?: JupyterEnvironment },
 ): PublicAddress | undefined {
+  const env = options.env ?? {}
+  const prefix = env.JUPYTERHUB_SERVICE_PREFIX?.trim()
+  /*
+   * The path a proxy would expose this port at, when the environment names one.
+   *
+   * Worked out before the stated URL is considered, because it is the half that depends on the
+   * *running* port — which is the one thing somebody typing a flag cannot know when the server
+   * binds an unused port by choice.
+   */
+  const proxyPath =
+    prefix === undefined || prefix.length === 0
+      ? undefined
+      : `${withSlash(prefix)}proxy/${String(port)}/`
+
   const stated = options.publicUrl?.trim()
   if (stated !== undefined && stated.length > 0) {
+    /*
+     * An origin on its own is completed with the derived path.
+     *
+     * The hub's own hostname is the one thing the environment does not reliably tell a process it
+     * started, and the port is the one thing the operator cannot know in advance. Each side knows
+     * half, so giving `--public-url https://hub.example` is enough — and anybody who states a full
+     * path still overrides everything, because they know something this does not.
+     */
+    const origin = originOnly(stated)
+    if (origin !== undefined && proxyPath !== undefined) {
+      return { base: `${origin}${proxyPath}`, source: '--public-url and JupyterHub' }
+    }
     return { base: withSlash(stated), source: '--public-url' }
   }
 
-  const env = options.env ?? {}
-  const prefix = env.JUPYTERHUB_SERVICE_PREFIX?.trim()
-  if (prefix === undefined || prefix.length === 0) return undefined
+  if (proxyPath === undefined) return undefined
 
   /*
    * The path is certain; the origin is not.
@@ -68,12 +92,30 @@ export function publicAddressFor(
    * address already in their browser is useful; a guessed hostname that resolves to nothing is
    * worse than saying less.
    */
-  const path = `${withSlash(prefix)}proxy/${String(port)}/`
-  const origin = (env.JUPYTERHUB_PUBLIC_URL ?? env.JUPYTERHUB_HOST ?? '').trim()
-  if (origin.length === 0) {
-    return { base: path, source: 'JupyterHub — append this to the host in your browser' }
+  const hubOrigin = (env.JUPYTERHUB_PUBLIC_URL ?? env.JUPYTERHUB_HOST ?? '').trim()
+  if (hubOrigin.length === 0) {
+    return {
+      base: proxyPath,
+      source: 'JupyterHub — append this to the host in your browser, or give --public-url',
+    }
   }
-  return { base: `${trimSlash(origin)}${path}`, source: 'JupyterHub' }
+  return { base: `${trimSlash(hubOrigin)}${proxyPath}`, source: 'JupyterHub' }
+}
+
+/**
+ * The origin of a URL that names nothing but an origin.
+ *
+ * Undefined for anything carrying a path, which is the signal that the operator has described the
+ * whole address themselves — and for a bare path, which has no origin to take.
+ */
+function originOnly(value: string): string | undefined {
+  if (!/^https?:\/\//i.test(value)) return undefined
+  try {
+    const url = new URL(value)
+    return url.pathname === '/' || url.pathname === '' ? url.origin : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
