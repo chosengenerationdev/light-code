@@ -208,6 +208,7 @@ async function main(): Promise<void> {
    * Repeatable, like `--admin-id`. Needed for anything not derivable from this machine — a
    * reverse proxy, a container alias, or the app embedding this in an iframe.
    */
+  const printUrl = args.includes('--print-url')
   const publicUrl = valueOf(args, '--public-url')
   const allowHosts = valuesOf(args, '--allow-host')
   const allowOrigins = valuesOf(args, '--allow-origin')
@@ -222,7 +223,7 @@ async function main(): Promise<void> {
    */
   const bindAddress = valueOf(args, '--bind')
   // A shared server has no browser to open on the machine it runs on.
-  const noOpen = args.includes('--no-open') || serverMode
+  const noOpen = args.includes('--no-open') || serverMode || printUrl
 
   /*
    * Shared mode needs real users, and the only source of those is the proxy in front. Refusing
@@ -360,6 +361,18 @@ async function main(): Promise<void> {
         : launchUrl
       : publicLaunchUrl(publicAddress, adminMode, noToken ? '' : (server.launchToken ?? ''))
 
+  /*
+   * The machine-readable line, on its own and prefixed.
+   *
+   * A program that started this one needs to know where it went, and the banner is prose written
+   * for a person: it wraps, it explains, and what it says varies with a dozen flags. Parsing that
+   * is a plugin which breaks the next time a sentence is reworded.
+   *
+   * Prefixed rather than printed bare so a reader can scan for its own line instead of assuming an
+   * ordering — a proxy warning or a Node compatibility note may legitimately come first.
+   */
+  if (printUrl) process.stdout.write(`light-code-url: ${reachableUrl}\n`)
+
   if (publicAddress !== undefined) {
     process.stdout.write(
       `  open       ${reachableUrl}
@@ -491,10 +504,10 @@ async function main(): Promise<void> {
        * one had the last word.
        */
       noToken
-        ? `Opening ${server.url}` +
+        ? `${noOpen ? 'Serving on' : 'Opening'} ${server.url}` +
             `\n(If the browser does not open, open this \u2014 there is no time limit:)` +
             `\n${reachableUrl}\n\n`
-        : `Opening ${server.url}` +
+        : `${noOpen ? 'Serving on' : 'Opening'} ${server.url}` +
             `\n(If the browser does not open, paste this within ${String(handoffSeconds)} seconds:)` +
             `\n${reachableUrl}\n\n` +
             (handoffSeconds === 10
@@ -533,6 +546,7 @@ const KNOWN_FLAGS = new Set([
   '--no-open',
   '--no-token',
   '--public-url',
+  '--print-url',
   '--allow-host',
   '--allow-origin',
   '--server',
@@ -646,6 +660,9 @@ Usage: light-code [options]
   --bind <address>    Interface to listen on (default: 127.0.0.1). Use 0.0.0.0 to
                       reach it from another machine; it then answers to this
                       machine's own hostname and addresses as well as localhost
+  --print-url         Print the launch URL on its own line, prefixed light-code-url:,
+                      then serve. For a program starting this and needing to know
+                      where it went — an IDE plugin, a script. Implies --no-open.
   --public-url <u>    The address this is reachable at from a browser, when that is not
                       the one it binds. Printed as the link to open, and trusted as a
                       host and origin.

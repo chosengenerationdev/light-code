@@ -1,5 +1,24 @@
 # @chosengeneration/light-code
 
+## 0.65.0
+
+### Minor Changes
+
+- `--print-url`, so a program can start this and find out where it went
+
+  Added for the IntelliJ plugin, which starts the server and needs its address. The banner is prose
+  written for a person — it wraps, it explains, and what it says varies with a dozen flags — so a
+  plugin scraping it is one broken by the next reworded sentence.
+
+  `--print-url` emits `light-code-url: <url>` on a line of its own and then serves as normal. It is
+  prefixed rather than printed bare so a reader can scan for its own line instead of assuming an
+  ordering: a proxy warning or a Node compatibility note may legitimately come first. It implies
+  `--no-open`, since a program that asked where the server went did not ask for a browser window on
+  whatever machine it is running on.
+
+  The banner also stops saying "Opening" when it is not opening anything. With `--no-open` it now
+  says "Serving on", which is what is actually happening — found by running it rather than reading it.
+
 ## 0.64.1
 
 ### Patch Changes

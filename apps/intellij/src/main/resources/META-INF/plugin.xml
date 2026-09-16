@@ -1,0 +1,44 @@
+<idea-plugin>
+  <id>dev.chosengeneration.lightcode</id>
+  <name>Light Code</name>
+  <vendor email="chosen.generation.dev@gmail.com" url="https://github.com/chosengenerationdev/light-code">
+    Chosen Generation
+  </vendor>
+
+  <description><![CDATA[
+    A minimal agentic coding assistant, for working inside an organisation.
+    <ul>
+      <li>Your own gateway: mutual TLS, client certificates, OAuth client-credentials, header auth.</li>
+      <li>An agent team — expert, programmer, reviewer, tester, librarian — each backed by a
+          different model, consulting each other.</li>
+      <li>MCP tools, dynamic Python tools, skills shared across a team.</li>
+      <li>Technical diagrams, charts, and indexed search over your own data.</li>
+      <li>No telemetry, no default endpoints. Nothing is contacted that you did not configure.</li>
+    </ul>
+    Works in IntelliJ IDEA, PyCharm and the other IntelliJ-based IDEs.
+  ]]></description>
+
+  <!--
+    Only the platform. This plugin deliberately depends on nothing language-specific, so the same
+    build installs into IDEA, PyCharm, GoLand and the rest — the assistant is about the files in
+    the project, not about which language the IDE specialises in.
+  -->
+  <depends>com.intellij.modules.platform</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow
+      id="Light Code"
+      anchor="right"
+      factoryClass="dev.chosengeneration.lightcode.LightCodeToolWindow"
+      icon="AllIcons.Toolwindows.ToolWindowMessages" />
+
+    <applicationConfigurable
+      parentId="tools"
+      instance="dev.chosengeneration.lightcode.LightCodeConfigurable"
+      id="dev.chosengeneration.lightcode.settings"
+      displayName="Light Code" />
+
+    <applicationService serviceImplementation="dev.chosengeneration.lightcode.LightCodeSettings" />
+    <projectService serviceImplementation="dev.chosengeneration.lightcode.LightCodeServer" />
+  </extensions>
+</idea-plugin>
