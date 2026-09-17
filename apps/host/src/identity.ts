@@ -45,8 +45,9 @@ export interface IdentityProvider {
  * the browser happens to have open. Hence a bearer token rather than a login.
  */
 export class SingleUserIdentity implements IdentityProvider {
-  readonly describe = 'single user (local)'
+  readonly describe: string
   private static readonly PRINCIPAL: Principal = { id: 'local', displayName: 'Local user' }
+  private readonly principal: Principal
 
   /** Long-lived, minted per server run, only ever sent in an `Authorization` header. */
   private readonly sessionToken = crypto.randomBytes(32).toString('base64url')
@@ -63,9 +64,20 @@ export class SingleUserIdentity implements IdentityProvider {
   private handoffExpiresAt: number
   private readonly handoffSeconds: number
 
-  constructor(handoffSeconds = 10) {
+  /**
+   * @param principal Who this server's storage is filed under. Defaults to the local user.
+   *
+   * Supplied when the platform named the account — `JUPYTERHUB_USER` and friends, see
+   * `hostedUser.ts`. **It changes the name, not the gate.** The bearer token below still decides
+   * who gets in, which is §14's rule that identity resolution must never become a way past the
+   * door: knowing that a server was spawned for Ana says nothing about who is making this request.
+   */
+  constructor(handoffSeconds = 10, principal?: Principal) {
     this.handoffSeconds = handoffSeconds
     this.handoffExpiresAt = Date.now() + handoffSeconds * 1000
+    this.principal = principal ?? SingleUserIdentity.PRINCIPAL
+    this.describe =
+      principal === undefined ? 'single user (local)' : `single user — ${principal.id}`
   }
 
   get launchToken(): string {
@@ -123,7 +135,7 @@ export class SingleUserIdentity implements IdentityProvider {
     const header = request.headers.authorization
     if (header === undefined || !header.startsWith('Bearer ')) return undefined
     return timingSafeEquals(header.slice('Bearer '.length), this.sessionToken)
-      ? SingleUserIdentity.PRINCIPAL
+      ? this.principal
       : undefined
   }
 }

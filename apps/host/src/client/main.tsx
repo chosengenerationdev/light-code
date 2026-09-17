@@ -57,15 +57,43 @@ try {
   // Private windows and locked-down policies both throw here. Not a reason to fail to start.
 }
 
-const transport = new HttpTransport(setStatus)
+/**
+ * Takes the starting screen down once the panel has what it needs.
+ *
+ * `settings` is the signal, because it is the reply the panel is built from — the one carrying
+ * the theme, the mode and the approvals. Waiting for it rather than for the connection means the
+ * chat appears furnished rather than empty and then filling in.
+ *
+ * **It always comes down**, on a timer as well, and that is deliberate: a starting screen that
+ * can get stuck is worse than none at all, because the product becomes unreachable rather than
+ * merely unfurnished. If the state never arrives the user gets the panel plus whatever the status
+ * banner says about why, which they can act on.
+ */
+const booting = document.getElementById('booting')
+const bootingDetail = document.getElementById('booting-detail')
+const finishBooting = (): void => booting?.classList.add('done')
+const BOOTING_GIVE_UP_MS = 10_000
+const bootingTimer = setTimeout(finishBooting, BOOTING_GIVE_UP_MS)
+
+const transport = new HttpTransport((text, level) => {
+  setStatus(text, level)
+  // The banner is the honest detail line while starting: it is already saying what is happening.
+  if (bootingDetail !== null && level !== 'ok') bootingDetail.textContent = text
+})
 transport.onMessage((message) => {
   const settings = message as { type?: string; theme?: string }
-  if (settings.type === 'settings') applyTheme(settings.theme)
+  if (settings.type !== 'settings') return
+  applyTheme(settings.theme)
+  clearTimeout(bootingTimer)
+  finishBooting()
 })
 
 transport
   .connect()
   .then(() => createRoot(rootElement).render(<App transport={transport} />))
   .catch((error: unknown) => {
-    setStatus(error instanceof Error ? error.message : String(error))
+    // Nothing further is coming, so the screen must not sit there: show the panel and the reason.
+    clearTimeout(bootingTimer)
+    finishBooting()
+    setStatus(error instanceof Error ? error.message : String(error), 'error')
   })

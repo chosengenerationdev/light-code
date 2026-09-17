@@ -29,6 +29,7 @@ import { FileSecretStore } from './fileSecretStore.js'
 import { ReviewQueue } from './reviewQueue.js'
 import { toSharedProfileId } from './sharedProfiles.js'
 import { userVariableStoreFor } from './userVariables.js'
+import { hostedUser } from './hostedUser.js'
 import { createSession } from './session.js'
 
 /*
@@ -220,6 +221,12 @@ interface Connection {
   dispose: () => void
 }
 
+/** The platform's name for this user as a `Principal`, or nothing when it did not say. */
+function principalFromPlatform(): Principal | undefined {
+  const found = hostedUser()
+  return found === undefined ? undefined : { id: found.id, displayName: found.id }
+}
+
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const log = options.logSink ?? ((line: string) => process.stderr.write(`${line}\n`))
   /*
@@ -230,7 +237,18 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   setFrameAncestors(options.allowFrameAncestors ?? [])
   const identity =
     options.identity ??
-    (options.noToken === true ? new OpenIdentity() : new SingleUserIdentity(options.handoffSeconds))
+    (options.noToken === true
+      ? new OpenIdentity()
+      : /*
+         * Named by the platform when it says so, and still gated by the token either way.
+         *
+         * JupyterHub spawns a server per person and sets `JUPYTERHUB_USER` in it, so settings,
+         * secrets and history are filed under that person rather than under "local" — which is
+         * what somebody had otherwise to write a Python function to achieve. Read from this
+         * process's environment, never from a request: see `hostedUser.ts` for why the URL
+         * suffix carrying the same name is not the same fact.
+         */
+        new SingleUserIdentity(options.handoffSeconds, principalFromPlatform()))
   const roles = options.roles ?? SINGLE_USER_POLICY
   /*
    * The administrator's settings, kept in memory and refreshed when they are saved.

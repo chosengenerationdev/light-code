@@ -9800,6 +9800,16 @@ ${contents}
           }
           await postTasks()
           await postSettings()
+          /*
+           * The provider list, because the chat header cannot render without it.
+           *
+           * Reported as "it takes about five minutes for the saved providers to appear" on the
+           * Node host and never in the extension. Same cause as the missing light/dark control:
+           * `requestProfiles` is sent once at startup, and one lost while the stream was dropping
+           * is never repeated — so the list arrived only when something else happened to ask.
+           * A view that has just attached needs this as much as it needs the settings.
+           */
+          await postProfiles()
           await postSchedules()
         } catch (error) {
           logger.warn(

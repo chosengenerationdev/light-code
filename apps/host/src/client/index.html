@@ -13,6 +13,23 @@
       That keeps packages/ui identical across both hosts rather than branching on it.
     -->
     <div id="status" role="status"></div>
+    <!--
+      Shown until the server has sent the state the panel is built from.
+
+      Asked for directly, after "it takes about five minutes for the saved providers to appear".
+      The delay itself is fixed — the server pushes that state when a view attaches now — but an
+      empty chat with no providers in it is indistinguishable from a broken one, and on a slow link
+      there is still a gap. Saying "waiting" for two seconds is honest; showing an empty product
+      and hoping is not.
+
+      In the markup rather than in React so it is on screen before the bundle has parsed, which is
+      part of the wait it exists to cover.
+    -->
+    <div id="booting">
+      <div class="booting-label">Starting Light Code…</div>
+      <div class="booting-track"><div class="booting-bar"></div></div>
+      <div class="booting-detail" id="booting-detail">connecting to the server</div>
+    </div>
     <div id="root"></div>
     <script src="client.js"></script>
   </body>

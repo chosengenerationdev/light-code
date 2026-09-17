@@ -1,5 +1,36 @@
 # @chosengeneration/light-code
 
+## 0.76.0
+
+### Minor Changes
+
+- Finds the current user by itself, shows a starting screen, and stops waiting to be asked for the provider list
+
+  **The platform already knows who you are, so stop requiring a Python function to say it.** Asked
+  directly, having noticed the URL suffix carries the name. JupyterHub spawns a server per person and
+  sets `JUPYTERHUB_USER` in it, and settings, secrets and history are now filed under that name with
+  nothing to configure. `--identity-tool` remains for a deployment whose own libraries are the only
+  thing that knows; it is simply no longer the only answer.
+
+  It is read from **this process's environment, never from a request**. The URL suffix is the same
+  name and not the same fact: a path is chosen by whoever made the request, and identity taken from
+  one would be a way past the door. It also never falls back to `USER` or `USERNAME` — on a shared
+  host those name the _service_ account, so every person's settings would be filed under one name
+  while looking like it had worked. And it changes the name only: the bearer token still decides who
+  gets in.
+
+  **The provider list is pushed when a view attaches**, like the settings reply before it. Reported
+  as "about five minutes for the saved providers to appear", and it is the same fault: the browser
+  asks once, and a request lost while the stream was dropping was never repeated.
+
+  **And a starting screen until the panel has what it needs**, asked for as a fallback in case the
+  delay could not be fixed. An empty chat with no providers is indistinguishable from a broken one.
+  It waits for the settings reply rather than for the connection, so the panel appears furnished
+  rather than filling in — and it **always** comes down, on a timer as well, because a starting
+  screen that can stick makes the product unreachable rather than merely unfurnished. The bar is
+  indeterminate on purpose: nothing here knows how much is left, and a percentage that invents one
+  gets believed and then stalls.
+
 ## 0.75.0
 
 ### Minor Changes

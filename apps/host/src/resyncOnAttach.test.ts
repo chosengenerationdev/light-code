@@ -69,6 +69,25 @@ describe('a view that attaches without asking for anything', () => {
   }, 20_000)
 
   /*
+   * Reported separately as "about five minutes for the saved providers to appear", and it is the
+   * same fault: the chat header cannot render a provider selector it was never sent.
+   */
+  it('is sent the provider list too', async () => {
+    const url = await start()
+    await drain(url)
+
+    const seen: string[] = []
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline && !seen.includes('profiles')) {
+      seen.push(...(await drain(url)))
+      if (seen.includes('profiles')) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    expect(seen).toContain('profiles')
+  }, 20_000)
+
+  /*
    * Once per attach, not once per poll. A polling client asks several times a second, and a
    * resync per poll would rebuild the whole panel continuously — which is worse than the bug.
    */
