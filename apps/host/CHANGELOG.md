@@ -1,5 +1,38 @@
 # @chosengeneration/light-code
 
+## 0.70.0
+
+### Minor Changes
+
+- A remote MCP server can say which HTTP protocol it speaks
+
+  Reported from real use: an HTTP MCP server taking Jira and Confluence tokens as headers, working
+  in another client and answering 401 here.
+
+  **`type` was not in the schema, and zod strips what it does not declare.** A config pasted from
+  another client saying `"type": "sse"` parsed happily, lost that word, and was then driven with
+  Streamable HTTP — the only HTTP transport that existed here. §11 requires a pasted config to work
+  unchanged, and this is the field that decides whether it works at all. Confirmed by parsing one:
+  the headers survived, the protocol did not.
+
+  - `type` is now `sse`, `streamable-http`, or `http`, kept as written and obeyed. An unknown value
+    is refused rather than ignored, so a typo is visible instead of silently becoming a guess.
+  - **SSE is implemented**, using the SDK's own transport. Superseded by Streamable HTTP but widely
+    deployed, which §11 already said.
+  - Where nothing is declared, Streamable HTTP is tried and **SSE is the fallback** — the order the
+    specification recommends — so an undeclared server finds its own protocol instead of failing.
+    A declared `type` is never second-guessed: somebody who wrote it down should be told their
+    server is not answering, not have another protocol tried behind their back.
+  - The URL is deliberately not used to guess. Streamable HTTP endpoints are served at paths
+    containing `sse` often enough, and a wrong guess fails in an authentication-shaped way that
+    sends people to check a token that was never the problem.
+  - Editing a server in the MCP tab keeps `type`, like `disabled` and `disabledTools` — the form has
+    no control for it, and a save about a timeout must not turn a declared server back into a guess.
+
+  Configured headers reach the wire on both transports, including the SSE stream's own long-lived
+  GET — checked against the SDK rather than assumed, since that GET opening unauthenticated while
+  the POSTs carry the token is the classic version of this bug.
+
 ## 0.69.0
 
 ### Minor Changes

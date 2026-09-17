@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { SecretStore } from '../platform/secrets.js'
@@ -50,15 +51,48 @@ async function buildTransport(config: McpServerConfig, secrets: SecretStore): Pr
   }
 
   const headers = await interpolateSecrets(config.headers, secrets)
-  const httpTransport = new StreamableHTTPClientTransport(new URL(config.url), {
-    ...(Object.keys(headers).length > 0 ? { requestInit: { headers } } : {}),
-  })
+  return httpTransport(config.url, headers, httpKindOf(config))
+}
+
+/**
+ * Which HTTP protocol to try first.
+ *
+ * A declared `type` is obeyed. Absent, Streamable HTTP is tried first and SSE is the fallback —
+ * the order the specification itself recommends, since SSE is superseded but widely deployed
+ * (§11). **The URL is not used to guess**: plenty of Streamable HTTP endpoints are served at a
+ * path containing `sse`, and a guess that is wrong produces an authentication-shaped error
+ * rather than a transport-shaped one, which sends people to check their token.
+ */
+function httpKindOf(config: { type?: string | undefined }): 'sse' | 'streamable-http' {
+  return config.type === 'sse' ? 'sse' : 'streamable-http'
+}
+
+/**
+ * One HTTP transport, built for a named protocol.
+ *
+ * Configured headers go on `requestInit` for both. Checked against the SDK rather than assumed,
+ * because the usual trap here is an SSE stream opening unauthenticated while the POSTs carry the
+ * token: `SSEClientTransport._startOrAuth` builds the long-lived GET from `_commonHeaders()`,
+ * which folds in `requestInit.headers`, so one place covers both halves. Re-check on SDK upgrades
+ * — the failure would be a 401 on the stream alone, with a configuration that visibly holds the
+ * token.
+ */
+function httpTransport(
+  url: string,
+  headers: Record<string, string>,
+  kind: 'sse' | 'streamable-http',
+): Transport {
+  const options = Object.keys(headers).length > 0 ? { requestInit: { headers } } : {}
+  const transport =
+    kind === 'sse'
+      ? new SSEClientTransport(new URL(url), options)
+      : new StreamableHTTPClientTransport(new URL(url), options)
   // The SDK's own concrete transports are not assignable to its `Transport` interface
   // under `exactOptionalPropertyTypes` (`sessionId: string | undefined` vs `sessionId?:
   // string`). That is an upstream strictness mismatch, not a real incompatibility —
   // cast here rather than relaxing the setting for the whole package. Re-check on SDK
   // upgrades; if it is fixed upstream this cast can go.
-  return httpTransport as unknown as Transport
+  return transport as unknown as Transport
 }
 
 export interface McpToolDescriptor {
@@ -107,9 +141,39 @@ export class McpConnection {
       this.attachStderr(transport)
     }
 
-    await client.connect(transport)
+    try {
+      await client.connect(transport)
+    } catch (error) {
+      /*
+       * One retry on the other HTTP protocol, and only where nothing was declared.
+       *
+       * A server speaking the superseded SSE protocol, driven with Streamable HTTP, fails at the
+       * first POST — and how it fails is up to whatever is in front of it. Reported from real use
+       * as a 401 from a server another client talks to happily, which reads as a rejected token
+       * and sends people to check a credential that was never the problem.
+       *
+       * A declared `type` is never second-guessed: somebody who wrote it down wants to be told
+       * their server is not answering, not to have a different protocol tried behind their back.
+       */
+      const fallback = await this.fallbackTransport(error)
+      if (fallback === undefined) throw error
+      await client.connect(fallback)
+      this.client = client
+      this.transport = fallback
+      this.onLog(`Connected over SSE; Streamable HTTP was refused (${describeError(error)})`)
+      return
+    }
     this.client = client
     this.transport = transport
+  }
+
+  /** The other HTTP protocol, when this server never said which it speaks. */
+  private async fallbackTransport(error: unknown): Promise<Transport | undefined> {
+    const config = this.config
+    if (isStdioServer(config) || config.type !== undefined) return undefined
+    this.onLog(`Streamable HTTP failed (${describeError(error)}) — retrying as SSE`)
+    const headers = await interpolateSecrets(config.headers, this.secrets)
+    return httpTransport(config.url, headers, 'sse')
   }
 
   private attachStderr(transport: StdioClientTransport): void {
@@ -183,4 +247,9 @@ function renderToolResult(result: Awaited<ReturnType<Client['callTool']>>): stri
     return `[${typed.type ?? 'unknown'} content omitted]`
   })
   return parts.join('\n')
+}
+
+/** A one-line reason, for the server's own log in the MCP tab. Never carries a header value. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

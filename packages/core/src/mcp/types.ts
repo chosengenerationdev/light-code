@@ -46,6 +46,19 @@ export const stdioServerSchema = z.object({
 
 export const httpServerSchema = z.object({
   url: z.string().min(1).url(),
+  /**
+   * Which HTTP transport this server speaks.
+   *
+   * **It was not here, and zod strips what it does not declare** — so a config pasted from
+   * another client saying `"type": "sse"` parsed happily, lost that word, and was then driven
+   * with Streamable HTTP. §11 requires a pasted config to work unchanged, and this is the one
+   * field that decides whether it works at all. Reported from real use as a remote server that
+   * another client talks to and this one gets 401 from.
+   *
+   * Absent means "work it out" — see `buildTransport`. `http` is accepted as a spelling of
+   * `streamable-http` because both appear in the wild.
+   */
+  type: z.enum(['sse', 'streamable-http', 'http']).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   disabled: z.boolean().optional(),
   disabledTools: z.array(z.string()).optional(),

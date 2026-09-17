@@ -210,6 +210,14 @@ export function fromMcpServerForm(
     return {
       url: form.url.trim(),
       ...(Object.keys(form.headers).length > 0 ? { headers: form.headers } : {}),
+      /*
+       * Carried across, like the list-set fields above: the form has no control for it, and a
+       * save that dropped it would turn a server declared as SSE back into a guess — silently,
+       * from an edit about something else entirely.
+       */
+      ...(existing !== undefined && !isStdioServer(existing) && existing.type !== undefined
+        ? { type: existing.type }
+        : {}),
       ...timeout,
       ...preserved,
     }

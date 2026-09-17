@@ -48,6 +48,12 @@ const ALLOWED_HOSTS = new Map([
   // showing up should be a decision rather than an unnoticed diff, which is what this list is for.
   ['a', 'undici 5 Cache API placeholder Request — never fetched'],
 
+  // The MCP SDK's SSE transport carries the DOM `EventSource` typings, whose JSDoc links to MDN.
+  // Arrived with SSE support; the extension bundle is not minified, so the comments survive into
+  // the output. Verified before adding: all seven occurrences are on comment lines and none is in
+  // code — the only URL that transport ever opens is the one in the user's own MCP config.
+  ['developer.mozilla.org', 'MDN links in EventSource JSDoc — comments, never fetched'],
+
   // --- Placeholders shown as grey text in form fields.
   ['gateway.example.com', 'placeholder in the Apigee token URL field'],
   ['gw.example.com', 'placeholder'],
