@@ -1,5 +1,46 @@
 # light-code-vscode
 
+## 0.91.0
+
+### Minor Changes
+
+- A skills search widens through the alias list
+
+  Asked for directly: if a skill is not found in the first alias, try the next. Until now only the
+  first was ever searched — `skillAliases(config)[0]` — so the extra names the panel had just learned
+  to accept did nothing at all for skills.
+
+  The list is ordered most-specific-first, so this is "prefer the nearest circle, widen only when it
+  has nothing": a squad, then a department, then everyone. Stopped at the first that answers rather
+  than merged, because merging would put a stranger's skill in competition with your own squad's on
+  raw score and the ordering would stop meaning anything.
+
+  **What it deliberately does not do is judge relevance.** A nearest-neighbour search returns its
+  neighbours whether or not they are any good, so "empty" here means _the alias holds nothing_ — an
+  agreed name nobody has published to yet, which is the case actually worth widening past — and not
+  "my squad has nothing on this subject". Falling through on a low score would need a threshold on
+  embedding distance, which is not comparable between models and would silently prefer a stranger's
+  answer to the squad's own.
+
+  - An alias that does not exist yet is stepped over rather than failing the search.
+  - If **every** alias errors, that error is reported. "Nobody has written one" for a cluster that is
+    unreachable would send somebody off to write a skill when the fix is a connection.
+  - When the search widened, the result says so — which circle answered is ground truth about where
+    the knowledge lives, and a skill from the whole company is not a statement about how this team
+    works. On the ordinary path it would be noise, so it is absent.
+
+  **Collision detection walks the list the other way, on purpose.** "Is this name taken" is a
+  question about the whole pool, so it checks every alias and deduplicates; stopping at the first
+  squad with any skills would answer "no collision" while a colleague one circle out owns that exact
+  name. Same corpus, different question, different traversal.
+
+  `search_codebase` is deliberately unchanged: there the model names the scope it wants, and
+  answering a request for your squad's code with everyone's would be a different thing than asked
+  for.
+
+  Found while wiring it: the bridge declared its own copy of the team-skills option shape, and the
+  copy had already fallen behind. It uses the real type now.
+
 ## 0.90.0
 
 ### Minor Changes

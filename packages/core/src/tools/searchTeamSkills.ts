@@ -45,24 +45,27 @@ export function createSearchTeamSkillsTool(
     async execute(params): Promise<ToolResult> {
       const startedAt = Date.now()
       try {
-        const hits = await searchTeamSkills(options, params.query, params.size ?? 5)
+        const found = await searchTeamSkills(options, params.query, params.size ?? 5)
         options.observer?.record({
           at: startedAt,
           source: 'search_team_skills',
+          // The one that answered, not the one that was asked first — the log is evidence about
+          // what happened, and a widened search is exactly what somebody would want to see.
+          collection: found.collection ?? found.tried.join(' → '),
           query: params.query,
-          collection: options.collection,
-          hits: hits.length,
+          hits: found.hits.length,
           elapsedMs: Date.now() - startedAt,
           via: 'index',
         })
-        return { content: renderTeamSkillHits(hits, params.query) }
+        return { content: renderTeamSkillHits(found, params.query) }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         options.observer?.record({
           at: startedAt,
           source: 'search_team_skills',
           query: params.query,
-          collection: options.collection,
+          // Every name that would have been tried: the search failed before one could answer.
+          collection: options.collections.join(' → '),
           hits: 0,
           elapsedMs: Date.now() - startedAt,
           error: message,

@@ -74,7 +74,7 @@ describe('finding out whether a name is taken', () => {
       { id: '2', score: 0.8, text: 'x', path: 'skill:deployment-notes', owner: 'a.patel' },
     ]
     const found = await findTeamSkillsNamed(
-      { searcher: searcher(matches), embedder, collection: 'team-skills', owner: 'me' },
+      { searcher: searcher(matches), embedder, collections: ['team-skills'], owner: 'me' },
       'deployment',
     )
 
@@ -84,7 +84,7 @@ describe('finding out whether a name is taken', () => {
   it('marks your own copy as yours', async () => {
     const matches: VectorMatch[] = [{ id: '1', score: 0.9, text: 'x', path: 'skill:deployment', owner: 'me' }]
     const found = await findTeamSkillsNamed(
-      { searcher: searcher(matches), embedder, collection: 'team-skills', owner: 'me' },
+      { searcher: searcher(matches), embedder, collections: ['team-skills'], owner: 'me' },
       'deployment',
     )
 
@@ -131,20 +131,20 @@ describe('what the user is told about a collision', () => {
 
 describe('rendering team skills for the model', () => {
   it('says a colleague’s skill has no file to open', () => {
-    const rendered = renderTeamSkillHits([hit('pricing', 'r.silva', false)], 'pricing')
+    const rendered = renderTeamSkillHits({ hits: [hit('pricing', 'r.silva', false)], collection: 'team-skills', tried: ['team-skills'] }, 'pricing')
     expect(rendered).toContain('no file on this machine')
     expect(rendered).toContain('do not try to read_file')
   })
 
   it('distinguishes your own from a colleague’s', () => {
-    const rendered = renderTeamSkillHits([hit('mine', 'me', true), hit('theirs', 'r.silva', false)], 'x')
+    const rendered = renderTeamSkillHits({ hits: [hit('mine', 'me', true), hit('theirs', 'r.silva', false)], collection: 'team-skills', tried: ['team-skills'] }, 'x')
     expect(rendered).toContain('(yours)')
     expect(rendered).toContain('(r.silva)')
   })
 
   /** An empty result must not read as "the subject is undocumented". */
   it('distinguishes no matches from nothing being indexed', () => {
-    const rendered = renderTeamSkillHits([], 'pricing')
+    const rendered = renderTeamSkillHits({ hits: [], collection: 'team-skills', tried: ['team-skills'] }, 'pricing')
     expect(rendered).toContain('has not been built yet')
     expect(rendered).toContain('does not mean the subject is undocumented')
   })

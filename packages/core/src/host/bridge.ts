@@ -178,6 +178,7 @@ import {
   type DatasetConfig,
   type HarvestedMessage,
   findTeamSkillsNamed,
+  type TeamSkillsOptions,
   indexTeamSkills,
   createSearchTeamSkillsTool,
   parseDocEntryId,
@@ -1954,12 +1955,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * an embedder and a connection, both of which are awaited, and this function is synchronous
      * so the tool block stays byte-stable for a whole turn (§12).
      */
-    teamSkills?: {
-      searcher: VectorSearcher
-      embedder: Embedder
-      collection: string
-      owner?: string
-    },
+    /*
+     * The shape is `TeamSkillsOptions` itself rather than a copy of its fields. The copy had
+     * already fallen behind — `collection` where the type now says `collections` — which is the
+     * failure this project has paid for most, and a structural type is the version of it that
+     * cannot happen.
+     */
+    teamSkills?: TeamSkillsOptions,
     /**
      * Semantic ranking for indexed mail, when a store and embedder exist.
      *
@@ -3047,8 +3049,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ? {
               searcher: search.searcher,
               embedder,
-              // The first is the default circle, exactly as it is for the codebase index.
-              collection: skillAliases(config)[0] as string,
+              /*
+               * All of them, in order — the first is the ordinary circle and the rest are what a
+               * search widens into when it holds nothing. Handing over only the first is what
+               * made the extra names typed in the panel do nothing at all for skills.
+               */
+              collections: skillAliases(config),
               ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
             }
           : undefined,
