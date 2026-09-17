@@ -57,7 +57,7 @@ const theirs: VectorMatch = { id: 'b', score: 0.8, text: 'theirs()', path: 'src/
 describe('a hit that is not on this machine', () => {
   it('is marked, and the marking comes from the filesystem rather than the owner field', async () => {
     // `theirs` claims another owner but IS present here; `mine` claims to be mine and is NOT.
-    const result = await tool([mine, theirs], { owner: 'me', teamAlias: 'team' }).execute(
+    const result = await tool([mine, theirs], { owner: 'me', teamAliases: ['team'] }).execute(
       { query: 'x', scope: 'team' },
       context(['src/theirs.ts']),
     )
@@ -68,7 +68,7 @@ describe('a hit that is not on this machine', () => {
   })
 
   it('tells the model not to try opening it', async () => {
-    const result = await tool([theirs], { owner: 'me', teamAlias: 'team' }).execute(
+    const result = await tool([theirs], { owner: 'me', teamAliases: ['team'] }).execute(
       { query: 'x', scope: 'team' },
       context([]),
     )
@@ -102,7 +102,7 @@ describe('choosing what to search', () => {
       embedder,
       index: 'lc-mine',
       connectionLabel: 'test cluster',
-      teamAlias: 'team-all',
+      teamAliases: ['team-all'],
       owner: 'me',
     } as never)
 
@@ -132,7 +132,7 @@ describe('choosing what to search', () => {
       embedder,
       index: 'lc-mine',
       connectionLabel: 'test cluster',
-      teamAlias: 'team-all',
+      teamAliases: ['team-all'],
       owner: 'me',
     } as never)
 
@@ -152,7 +152,7 @@ describe('choosing what to search', () => {
       context(['src/mine.ts']),
     )
 
-    expect(result.content).toContain('no shared index is configured')
+    expect(result.content).toContain('none is configured')
     expect(result.content).toContain('their work was not looked at')
   })
 })
@@ -177,5 +177,57 @@ describe('labelling where a hit came from', () => {
 
   it('says nothing when there is nothing to say', () => {
     expect(describeOrigin(undefined, undefined, 'me')).toBe('')
+  })
+})
+
+/**
+ * Several aliases on one index, which is what makes levels of sharing possible.
+ *
+ * With one name there is one circle and you are either in it or out of it. An index may carry
+ * several — a squad, a department, everyone — and each is a scope somebody can search.
+ */
+describe('named scopes', () => {
+  /** Which collection the request actually went to, recorded through the searcher. */
+  async function searchedFor(scope: string): Promise<string | undefined> {
+    let collection: string | undefined
+    const instrumented = createSearchCodebaseTool({
+      searcher: searcher([mine], (options) => {
+        collection = options.collection
+      }),
+      embedder,
+      index: 'lc-mine',
+      connectionLabel: 'test cluster',
+      owner: 'me',
+      teamAliases: ['my-squad', 'everyone'],
+    } as never)
+    await instrumented.execute({ query: 'x', scope } as never, context(['src/mine.ts']))
+    return collection
+  }
+
+  it('searches the alias the scope names', async () => {
+    expect(await searchedFor('everyone')).toBe('everyone')
+  })
+
+  /* So a single-alias install behaves exactly as it did before scopes could be named. */
+  it('treats "team" as the first, which is the default circle', async () => {
+    expect(await searchedFor('team')).toBe('my-squad')
+  })
+
+  it('stays in this workspace for "mine"', async () => {
+    expect(await searchedFor('mine')).toBe('lc-mine')
+  })
+
+  /*
+   * A near-miss must never resolve to a different circle — that would show somebody a group they
+   * are not in, which is the one failure this cannot have. So it is reported, and the message
+   * names what does exist, which turns a dead end into a retry the model can get right.
+   */
+  it('refuses a scope it does not have, and says which it does', async () => {
+    const result = await tool([mine], {
+      owner: 'me',
+      teamAliases: ['my-squad', 'everyone'],
+    }).execute({ query: 'x', scope: 'my-squd' } as never, context(['src/mine.ts']))
+    expect(result.content).toContain('no shared scope called "my-squd"')
+    expect(result.content).toContain('my-squad, everyone')
   })
 })

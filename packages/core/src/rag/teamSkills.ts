@@ -213,7 +213,8 @@ export async function indexTeamSkills(options: {
   writer: VectorIndexWriter
   embedder: Embedder
   collection: string
-  alias?: string
+  /** Every name this collection should answer to. See `rag/aliases.ts`. */
+  aliases?: readonly string[]
   skills: readonly { skill: Skill; body: string }[]
   attribution: { owner?: string; project?: string }
   signal?: AbortSignal
@@ -221,8 +222,12 @@ export async function indexTeamSkills(options: {
   onProgress?: (done: number, total: number) => void
 }): Promise<number> {
   await options.writer.ensureCollection(options.collection, options.embedder.dimensions, options.signal)
-  if (options.alias !== undefined && options.writer.ensureAlias !== undefined) {
-    await options.writer.ensureAlias(options.collection, options.alias, options.signal)
+  if (options.writer.ensureAlias !== undefined) {
+    // Attached before anything is written, so a collection that already existed picks up a name
+    // added since. Idempotent, so the ones already attached cost a call and change nothing.
+    for (const alias of options.aliases ?? []) {
+      await options.writer.ensureAlias(options.collection, alias, options.signal)
+    }
   }
   if (options.skills.length === 0) return 0
 

@@ -47,6 +47,7 @@ import {
   type CustomRoleDefinition,
 } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
+import { codebaseAliases, skillAliases } from '../rag/aliases.js'
 import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
 import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
@@ -2814,7 +2815,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
         // Only when a pool actually exists: telling the model about a tool it has not been given
         // is how it comes to report that it looked somewhere it could not reach.
-        teamSkillsAvailable: config.embedder?.skillsAlias !== undefined,
+        teamSkillsAvailable: skillAliases(config).length > 0,
         /*
          * Read from config rather than from the registry, because the prompt is built before the
          * registry is. Only the *off* case is claimed: "on but uv is missing" leaves the model
@@ -3013,8 +3014,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                * to look and every hit can say whose it is. Both absent on a solo install,
                * where team scope is simply unavailable and says so.
                */
-              ...(config.embedder?.indexAlias !== undefined
-                ? { teamAlias: config.embedder.indexAlias }
+              ...(codebaseAliases(config).length > 0
+                ? { teamAliases: codebaseAliases(config) }
                 : {}),
               ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
             }
@@ -3034,11 +3035,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * The team's shared skills. Needs an alias, a connection and an embedder — without
          * all three there is nothing to search, and the tool is simply not offered.
          */
-        config.embedder?.skillsAlias !== undefined && search !== undefined && embedder !== undefined
+        skillAliases(config).length > 0 && search !== undefined && embedder !== undefined
           ? {
               searcher: search.searcher,
               embedder,
-              collection: config.embedder.skillsAlias,
+              // The first is the default circle, exactly as it is for the codebase index.
+              collection: skillAliases(config)[0] as string,
               ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
             }
           : undefined,
@@ -4680,8 +4682,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function handleAttachTeamAlias(): Promise<void> {
     const config = await loadSettings()
-    const alias = config.embedder?.indexAlias
-    if (alias === undefined) {
+    const aliases = codebaseAliases(config)
+    if (aliases.length === 0) {
       post({
         type: 'teamAliasAttached',
         error: 'Set a team index alias in Settings → Search first — there is nothing to attach to.',
@@ -4715,7 +4717,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         return
       }
 
-      await writer.ensureAlias(index, alias)
+      // Every configured name, so an index built before a second circle existed picks that one
+      // up too. Idempotent, so the ones already attached cost a call and change nothing.
+      for (const alias of aliases) await writer.ensureAlias(index, alias)
 
       // Attribution is a separate, optional step: without it a team search can find these
       // chunks but cannot say whose they are, which is most of the point.
@@ -4729,7 +4733,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
       }
 
-      post({ type: 'teamAliasAttached', alias, index, attributed })
+      post({ type: 'teamAliasAttached', alias: aliases.join(', '), index, attributed })
     } catch (error) {
       post({
         type: 'teamAliasAttached',
@@ -5788,9 +5792,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ),
         embedder,
         collection,
-        ...(config.embedder?.skillsAlias !== undefined
-          ? { alias: config.embedder.skillsAlias }
-          : {}),
+        aliases: skillAliases(config),
         skills: withBodies,
         signal,
         onProgress: (done: number, total: number) =>
@@ -6688,7 +6690,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const manifestFile = manifestPath(index, search.id)
     const owner = indexOwner(config)
     const project = indexProject()
-    const alias = config.embedder?.indexAlias
+    const aliases = codebaseAliases(config)
     try {
       const manifest = await loadIndexManifest(manifestFile, embedder)
       const isIgnored = await ignoredFilesPredicate()
@@ -6720,7 +6722,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          */
         ...(owner !== undefined ? { owner } : {}),
         ...(project !== undefined ? { project } : {}),
-        ...(alias !== undefined ? { alias } : {}),
+        alias: aliases,
         onProgress: (progress: IndexProgress) => post({ type: 'indexProgress', progress }),
         signal: indexingAbort.signal,
       })

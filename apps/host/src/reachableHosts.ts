@@ -58,7 +58,26 @@ export function reachableHosts(bindAddress: string, port: number, extra: readonl
     }
   }
 
-  for (const name of extra) add(name)
+  /*
+   * A declared name is taken *as declared*, as well as with the local port.
+   *
+   * Reported from JupyterHub: `--public-url https://hub` was refused with "Host \"hub\" is not
+   * the one this server answers to". `add` appends this process's port to any name that has none,
+   * so `hub` became `hub:64096` — while the browser sent `Host: hub`, because the page is https
+   * on 443 and a default port is not written.
+   *
+   * Appending a local port to a name that exists *because a proxy is in front* is a guess, and it
+   * is wrong in exactly the case the flag is for: the port the browser used is the proxy's, not
+   * ours. Both forms are added, so a declared name works whether it is reached through a proxy or
+   * straight at this port.
+   *
+   * It widens nothing that was not already declared: these are names the operator typed.
+   */
+  for (const name of extra) {
+    add(name)
+    const trimmed = name.trim().toLowerCase()
+    if (trimmed.length > 0) names.add(trimmed)
+  }
   return [...names]
 }
 

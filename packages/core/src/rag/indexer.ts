@@ -133,13 +133,16 @@ export interface IndexerOptions {
   /** The project's folder name. Enough to tell two checkouts apart in a list of hits. */
   project?: string
   /**
-   * A shared name to point at this index once it exists.
+   * The shared names to point at this index once it exists.
    *
-   * Applied after the index is created and on every run, since adding an alias that is already
-   * there is a no-op. Silently skipped on a backend with no alias concept — see
-   * `VectorIndexWriter.ensureAlias`.
+   * A list rather than one, because an index may belong to several circles at once — a squad, a
+   * department, everyone — and each name is a scope somebody can search. Applied after the index
+   * is created and on every run, since adding one already there is a no-op, which also means an
+   * index built before a circle existed picks that name up on its next run.
+   *
+   * Silently skipped on a backend with no alias concept — see `VectorIndexWriter.ensureAlias`.
    */
-  alias?: string
+  alias?: readonly string[]
 }
 
 function hashContent(content: string): string {
@@ -188,7 +191,10 @@ export async function indexWorkspace(options: IndexerOptions): Promise<IndexResu
    * would be a feature that only looks like it works.
    */
   if (options.alias !== undefined && writer.ensureAlias !== undefined) {
-    await writer.ensureAlias(index, options.alias, signal)
+    // Every configured name, so one index can belong to several circles at once — a squad, a
+    // department, everyone. `ensureAlias` is idempotent, so attaching the ones already attached
+    // costs a call and changes nothing.
+    for (const alias of options.alias) await writer.ensureAlias(index, alias, signal)
   }
 
   /*

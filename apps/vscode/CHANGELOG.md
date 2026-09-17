@@ -1,5 +1,37 @@
 # light-code-vscode
 
+## 0.87.0
+
+### Minor Changes
+
+- Several aliases per index, and a declared host is taken as declared
+
+  **`--public-url` was refused by the server that printed it.** Reported from JupyterHub:
+  `Host "jupyterhub-public-url" is not the one this server answers to`. `reachableHosts` appends this
+  process's port to any declared name without one, so `hub` became `hub:64096` — while the browser
+  sent `Host: hub`, because the page is https on 443 and a default port is not written.
+
+  Appending a _local_ port to a name that exists **because a proxy is in front** is a guess, and it is
+  wrong in exactly the case the flag is for: the port the browser used is the proxy's. A declared name
+  is now accepted as declared _and_ with the local port, so it works either way. Nothing else is
+  widened — these are names the operator typed, and a foreign host is still refused. Verified against
+  a running server: the proxy's headers get 200, loopback still works, `evil.example` still gets 403.
+
+  **An index may now carry several aliases**, which is what makes levels of sharing possible rather
+  than one pool. The same codebase index can answer to `my-squad`, `platform-team` and `everyone`, and
+  searching one reaches exactly the people who attached it. With a single name there is one circle and
+  you are either in it or out.
+
+  - `embedder.indexAliases` and `embedder.skillsAliases` are lists; the singular keys still work and
+    are read _through_ `rag/aliases.ts` with them, so the two spellings cannot drift.
+  - Order is meaningful: the first is the default, and is what `scope: "team"` resolves to — so a
+    single-alias install behaves exactly as it did before.
+  - `search_codebase`'s `scope` takes an alias name. An unrecognised one is **reported with the list
+    of those that exist**, never resolved to the nearest match: landing on a different circle would
+    show somebody a group they are not in, which is the one failure this cannot have.
+  - Attaching is idempotent, so an index built before a circle existed picks that name up on its next
+    run, and the attach-in-place button applies every configured name.
+
 ## 0.86.0
 
 ### Minor Changes

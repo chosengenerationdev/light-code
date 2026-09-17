@@ -91,3 +91,39 @@ describe('the origins those names produce', () => {
     expect(reachableOrigins(['localhost:7100'])).not.toContain('https://localhost:7100')
   })
 })
+
+/**
+ * A name the operator declared is taken as declared.
+ *
+ * Reported from JupyterHub: `--public-url https://hub` was refused with
+ * `Host "hub" is not the one this server answers to`. Every name here gets this process's port
+ * appended when it has none, so `hub` became `hub:64096` — while the browser sent `Host: hub`,
+ * because the page is https on 443 and a default port is not written.
+ *
+ * Appending a *local* port to a name that exists because a proxy is in front is a guess, and it is
+ * wrong in precisely the case the flag exists for: the port the browser used is the proxy's.
+ */
+describe('a declared host', () => {
+  it('is accepted without a port, as a browser on 443 sends it', () => {
+    expect(reachableHosts('127.0.0.1', 7100, ['hub.example'])).toContain('hub.example')
+  })
+
+  it('is still accepted with this port, for a proxy that forwards one', () => {
+    expect(reachableHosts('127.0.0.1', 7100, ['hub.example'])).toContain('hub.example:7100')
+  })
+
+  /* A declared name that carries its own port is taken exactly as written. */
+  it('leaves an explicit port alone', () => {
+    const hosts = reachableHosts('127.0.0.1', 7100, ['hub.example:8443'])
+    expect(hosts).toContain('hub.example:8443')
+    expect(hosts).not.toContain('hub.example:8443:7100')
+  })
+
+  /*
+   * And nothing else is widened. DNS rebinding turns on a *foreign* domain resolving here, and a
+   * foreign domain is exactly what is absent from this list.
+   */
+  it('still refuses anything nobody declared', () => {
+    expect(reachableHosts('127.0.0.1', 7100, ['hub.example'])).not.toContain('evil.example')
+  })
+})

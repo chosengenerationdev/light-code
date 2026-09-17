@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { z } from 'zod'
+import { aliasForScope } from '../rag/aliases.js'
 import type { Embedder } from '../rag/embedder.js'
 import type { SearchObserver } from '../rag/searchLog.js'
 import type { VectorSearcher } from '../rag/vectorStore.js'
@@ -15,14 +16,21 @@ const paramsSchema = z.object({
     .string()
     .optional()
     .describe('Restrict to a subtree, e.g. "packages/core/src". Omit to search everything indexed.'),
+  /*
+   * A free string rather than an enum, because the scopes are whatever the user configured.
+   *
+   * An index may carry several aliases — a squad, a department, everyone — and each is a level of
+   * sharing. The *description* names the ones that exist here, which is §12's carve-out: it varies
+   * with a setting rather than with the turn, so the tool block stays byte-stable for a session
+   * exactly as `ask_expert`'s does.
+   */
   scope: z
-    .enum(['mine', 'team'])
+    .string()
     .optional()
     .describe(
-      'Whose code to search. "mine" (default) is this workspace only. "team" also searches ' +
-        'colleagues\' indexed projects — use it for "how did anyone solve X", never for ' +
-        'questions about the code in front of you. Team results are NOT on this machine and ' +
-        'cannot be opened or edited.',
+      'Whose code to search. "mine" (default) is this workspace only. Anything else names a ' +
+        'shared scope — use it for "how did anyone solve X", never for questions about the code ' +
+        'in front of you. Shared results are NOT on this machine and cannot be opened or edited.',
     ),
 })
 export type SearchCodebaseParams = z.infer<typeof paramsSchema>
@@ -45,7 +53,13 @@ export interface SearchCodebaseOptions {
    * Absent means team scope is simply unavailable — on a backend with no alias concept, or an
    * install where nobody set one up. The tool says so rather than pretending.
    */
-  teamAlias?: string
+  /**
+   * Every shared name this install can search, most specific first.
+   *
+   * Empty means shared scope is simply unavailable — a backend with no alias concept, or an
+   * install where nobody set one up. The tool says so rather than pretending.
+   */
+  teamAliases?: readonly string[]
   /** Who this machine is, so "mine" stays "mine" even when the index is shared. */
   owner?: string
 }
@@ -152,16 +166,26 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
       const startedAt = Date.now()
       try {
         const size = params.size ?? DEFAULT_SIZE
-        const wantsTeam = params.scope === 'team'
+        const requested = params.scope?.trim() ?? 'mine'
+        const wantsTeam = requested.length > 0 && requested.toLowerCase() !== 'mine'
         /*
-         * Team scope needs somewhere to look. Rather than fail, it degrades to this
-         * workspace and *says so* — a dead end here would leave the model with nothing, and
-         * silently searching less than asked is the version that produces a confident wrong
-         * "nobody has done this before".
+         * Which shared index the requested scope names. `team` means the first, so a single-alias
+         * install behaves exactly as it did before scopes could be named.
+         *
+         * An unrecognised name resolves to nothing and is reported rather than guessed at: a
+         * near-miss landing on a different circle would show somebody a group they are not in,
+         * which is the one failure this must not have.
          */
-        const teamUnavailable = wantsTeam && options.teamAlias === undefined
-        const searchingTeam = wantsTeam && options.teamAlias !== undefined
-        const collection = searchingTeam ? (options.teamAlias as string) : options.index
+        const alias = aliasForScope(requested, options.teamAliases ?? [])
+        /*
+         * A shared scope needs somewhere to look. Rather than fail, it degrades to this workspace
+         * and *says so* — a dead end would leave the model with nothing, and silently searching
+         * less than was asked is the version that produces a confident wrong "nobody has done
+         * this before".
+         */
+        const teamUnavailable = wantsTeam && alias === undefined
+        const searchingTeam = wantsTeam && alias !== undefined
+        const collection = searchingTeam ? alias : options.index
 
         const vector = await options.embedder.embed(params.query)
 
@@ -235,9 +259,18 @@ export function createSearchCodebaseTool(options: SearchCodebaseOptions): Tool<S
             ...(teamUnavailable
               ? [
                   '',
-                  'Team scope was asked for but no shared index is configured, so only this ' +
-                    'workspace was searched. Do not conclude from this that no colleague has ' +
-                    'solved it — their work was not looked at.',
+                  /*
+                   * Which it was matters: nothing configured is a different thing to fix from a
+                   * scope that was misspelled, and naming the ones that exist turns a dead end
+                   * into a retry the model can get right.
+                   */
+                  (options.teamAliases ?? []).length === 0
+                    ? 'A shared scope was asked for but none is configured, so only this ' +
+                      'workspace was searched. Do not conclude from this that no colleague has ' +
+                      'solved it — their work was not looked at.'
+                    : `There is no shared scope called "${requested}". The ones configured here ` +
+                      `are: ${(options.teamAliases ?? []).join(', ')}. Only this workspace was ` +
+                      'searched, so do not conclude that no colleague has solved it.',
                 ]
               : []),
             ...(anyRemote ? ['', ...REMOTE_GUIDANCE] : []),

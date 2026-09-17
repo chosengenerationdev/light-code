@@ -611,6 +611,19 @@ export function skillRetrievalEnabled(retrieval: RetrievalConfig | undefined): b
  * proven for embeddings, and duplicating that configuration would mean two places to get
  * mutual TLS right instead of one.
  */
+/**
+ * What an alias may be called.
+ *
+ * The same rule for every one of them, written once: four copies of a regular expression is four
+ * chances for them to stop agreeing about what a valid name is.
+ */
+const aliasNameSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9._-]{0,48}$/,
+    'Start with a letter or digit, then lowercase letters, digits, dot, dash or underscore',
+  )
+
 export const embedderConfigSchema = z
   .object({
     profileId: z.string().min(1),
@@ -679,6 +692,27 @@ export const embedderConfigSchema = z
         /^[a-z0-9][a-z0-9._-]{0,48}$/,
         'Start with a letter or digit, then lowercase letters, digits, dot, dash or underscore',
       ),
+    /**
+     * Further names the codebase index answers to, beyond `indexAlias`.
+     *
+     * An index may carry several, and that is what makes *levels* of sharing possible rather than
+     * a single pool: the same index can be reachable as `my-squad`, as `platform-team` and as
+     * `everyone`, and searching one of those reaches exactly the people who attached it. With one
+     * name there is one circle, and you are either in it or out of it.
+     *
+     * Order is meaningful — the first is the default, and is what `scope: "team"` resolves to.
+     * Read through `rag/aliases.ts` together with the singular key, never directly, so the two
+     * spellings cannot drift.
+     */
+    indexAliases: z.array(aliasNameSchema).max(8).optional(),
+    /**
+     * The same for skills.
+     *
+     * Kept separate from the codebase list rather than derived from it, for the reason
+     * `skillsAlias` already records: pooling your source and pooling what you have *taught* the
+     * assistant are different decisions, and a team routinely wants one without the other.
+     */
+    skillsAliases: z.array(aliasNameSchema).max(8).optional(),
   })
   .partial()
 
