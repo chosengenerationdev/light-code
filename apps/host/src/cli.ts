@@ -210,6 +210,7 @@ async function main(): Promise<void> {
    */
   const printUrl = args.includes('--print-url')
   const publicUrl = valueOf(args, '--public-url')
+  const allowFrameAncestors = valuesOf(args, '--allow-frame-ancestor')
   const allowHosts = valuesOf(args, '--allow-host')
   const allowOrigins = valuesOf(args, '--allow-origin')
   const handoffSeconds = Math.min(
@@ -308,6 +309,7 @@ async function main(): Promise<void> {
      * Somebody who typed the address is telling us it is theirs, which is the same statement
      * `--allow-host` makes and this saves them making it twice.
      */
+    allowFrameAncestors,
     allowHosts: [...allowHosts, ...trustedFromPublicUrl(publicUrl).hosts],
     allowOrigins: [...allowOrigins, ...trustedFromPublicUrl(publicUrl).origins],
     /*
@@ -549,6 +551,7 @@ const KNOWN_FLAGS = new Set([
   '--print-url',
   '--allow-host',
   '--allow-origin',
+  '--allow-frame-ancestor',
   '--server',
   '--admin',
   '--admin-id',
@@ -669,6 +672,10 @@ Usage: light-code [options]
                       Under JupyterHub give only the hub's base URL — the
                       /user/<you>/proxy/<port>/ part is worked out, including the
                       port, which you cannot know before it starts.
+  --allow-frame-ancestor <o>  An origin allowed to embed this page in a frame, e.g.
+                      https://your-jupyterhub to show it inside JupyterLab. Off by
+                      default: framing is how clickjacking reaches an approval
+                      dialog, so each origin is named rather than guessed.
   --allow-host <h>    An extra name to answer to, e.g. a reverse proxy or a
                       container alias (repeatable)
   --allow-origin <o>  An extra origin allowed to call it, e.g. an app embedding

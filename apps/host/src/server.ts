@@ -21,6 +21,7 @@ import {
   readJsonBody,
   reject,
   securityHeaders,
+  setFrameAncestors,
   type OriginPolicy,
 } from './security.js'
 import type { SharedConfig, SharedConfigStore } from './sharedConfig.js'
@@ -142,6 +143,12 @@ export interface ServerOptions {
   /** Extra origins allowed to call it, e.g. the app embedding it in an iframe. */
   allowOrigins?: readonly string[]
   /**
+   * Origins allowed to embed this page in a frame. Empty means none, which is the default.
+   *
+   * See `setFrameAncestors` for why this is opt-in and why it never takes a wildcard.
+   */
+  allowFrameAncestors?: readonly string[]
+  /**
    * Loopback only unless deliberately changed. Binding the literal address rather than
    * `localhost` matters: the name resolves differently per machine and can dual-stack onto
    * an interface that is not loopback at all (§14).
@@ -204,6 +211,12 @@ interface Connection {
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
   const log = options.logSink ?? ((line: string) => process.stderr.write(`${line}\n`))
+  /*
+   * Before anything can answer a request, so every response carries the same policy — including
+   * the rejections, which are written from a path with no access to these options. A policy that
+   * is stricter on some responses than others is not a policy.
+   */
+  setFrameAncestors(options.allowFrameAncestors ?? [])
   const identity =
     options.identity ??
     (options.noToken === true ? new OpenIdentity() : new SingleUserIdentity(options.handoffSeconds))

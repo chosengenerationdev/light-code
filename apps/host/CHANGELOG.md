@@ -1,5 +1,35 @@
 # @chosengeneration/light-code
 
+## 0.68.0
+
+### Minor Changes
+
+- `--allow-frame-ancestor`, so the page can live inside JupyterLab
+
+  Asked for by somebody working in JupyterLab, where the natural way to see a local app is inside the
+  lab rather than in a separate browser tab — and an iframe is how that is done. The policy said
+  `frame-ancestors 'none'`, so every attempt was refused by the browser with nothing useful to read.
+
+  **It stays `'none'` unless an origin is named**, and that is deliberate rather than cautious.
+  `frame-ancestors` is what stops clickjacking: a hostile page embedding this one, overlaying it, and
+  collecting a click that lands on an approval. The approval gate is precisely the thing being
+  protected, so the relaxation is _named origins only_ — never a wildcard, never inferred. Declared,
+  not guessed, exactly as `--allow-host` is.
+
+      light-code --allow-frame-ancestor https://your-jupyterhub
+
+  Then in a notebook cell:
+
+      from IPython.display import IFrame
+      IFrame(src='/user/<you>/proxy/<port>/', width='100%', height=800)
+
+  The policy is set once as the server starts rather than passed per response, because
+  `securityHeaders()` is called from five places — three of them rejection paths with no access to the
+  server's options — and a policy that is stricter on some responses than others is not a policy.
+
+  Verified against a running server: the header carries the named origin and every other directive is
+  unchanged.
+
 ## 0.67.0
 
 ### Minor Changes
