@@ -143,9 +143,11 @@ export interface ServerOptions {
   /** Extra origins allowed to call it, e.g. the app embedding it in an iframe. */
   allowOrigins?: readonly string[]
   /**
-   * Origins allowed to embed this page in a frame. Empty means none, which is the default.
+   * Origins allowed to embed this page in a frame, **beyond its own**.
    *
-   * See `setFrameAncestors` for why this is opt-in and why it never takes a wildcard.
+   * Empty is the default and still permits same-origin framing, which is what a proxy serving this
+   * page under somebody's own host looks like. See `setFrameAncestors` for why that is safe and why
+   * a *different* origin is named rather than inferred.
    */
   allowFrameAncestors?: readonly string[]
   /**

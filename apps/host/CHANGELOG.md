@@ -4,31 +4,36 @@
 
 ### Minor Changes
 
-- `--allow-frame-ancestor`, so the page can live inside JupyterLab
+- The page can live inside JupyterLab, with nothing to configure
 
   Asked for by somebody working in JupyterLab, where the natural way to see a local app is inside the
   lab rather than in a separate browser tab — and an iframe is how that is done. The policy said
   `frame-ancestors 'none'`, so every attempt was refused by the browser with nothing useful to read.
 
-  **It stays `'none'` unless an origin is named**, and that is deliberate rather than cautious.
-  `frame-ancestors` is what stops clickjacking: a hostile page embedding this one, overlaying it, and
-  collecting a click that lands on an approval. The approval gate is precisely the thing being
-  protected, so the relaxation is _named origins only_ — never a wildcard, never inferred. Declared,
-  not guessed, exactly as `--allow-host` is.
+  **The default is `'self'` now, and the reason it is safe is that the case being refused was never
+  the attack.** `frame-ancestors` exists to stop clickjacking: a page you happen to visit embeds this
+  one invisibly, overlays it, and collects a click that lands on an approval — "run this command",
+  "write this file". The approval gate is precisely what is being protected. But a lab page at
+  `https://hub/user/ana/` embedding `https://hub/user/ana/proxy/8080/` is **the same origin framing
+  itself**, and somebody who already controls that origin has no need of an iframe. So `'self'`
+  permits the case that was asked for and refuses every case the directive was written for: a page on
+  any _other_ origin still cannot embed this one.
 
-      light-code --allow-frame-ancestor https://your-jupyterhub
-
-  Then in a notebook cell:
+  In a notebook cell, with no flag at all:
 
       from IPython.display import IFrame
       IFrame(src='/user/<you>/proxy/<port>/', width='100%', height=800)
+
+  `--allow-frame-ancestor <origin>` remains, for embedding from a **different** origin — a dashboard,
+  a portal. That is a real relaxation, so it is declared rather than inferred and never a wildcard,
+  the same rule `--allow-host` follows.
 
   The policy is set once as the server starts rather than passed per response, because
   `securityHeaders()` is called from five places — three of them rejection paths with no access to the
   server's options — and a policy that is stricter on some responses than others is not a policy.
 
-  Verified against a running server: the header carries the named origin and every other directive is
-  unchanged.
+  Verified against a running server: the header allows this origin and any named one, refuses a
+  foreign embedder, and every other directive is unchanged.
 
 ## 0.67.0
 

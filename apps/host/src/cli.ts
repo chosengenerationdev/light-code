@@ -672,10 +672,12 @@ Usage: light-code [options]
                       Under JupyterHub give only the hub's base URL — the
                       /user/<you>/proxy/<port>/ part is worked out, including the
                       port, which you cannot know before it starts.
-  --allow-frame-ancestor <o>  An origin allowed to embed this page in a frame, e.g.
-                      https://your-jupyterhub to show it inside JupyterLab. Off by
-                      default: framing is how clickjacking reaches an approval
-                      dialog, so each origin is named rather than guessed.
+  --allow-frame-ancestor <o>  A FURTHER origin allowed to embed this page in a
+                      frame. The page's own origin is always allowed, so a proxy
+                      serving it under your host - JupyterLab, say - can frame it
+                      with no flag at all. Name one here only to embed it from a
+                      different origin: framing is how clickjacking reaches an
+                      approval dialog, so those are named rather than guessed.
   --allow-host <h>    An extra name to answer to, e.g. a reverse proxy or a
                       container alias (repeatable)
   --allow-origin <o>  An extra origin allowed to call it, e.g. an app embedding

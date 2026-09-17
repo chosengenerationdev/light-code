@@ -113,7 +113,12 @@ describe('securityHeaders', () => {
     const csp = securityHeaders()['Content-Security-Policy'] ?? ''
     expect(csp).toContain("img-src 'self' data:")
     expect(csp).toContain("connect-src 'self'")
-    expect(csp).toContain("frame-ancestors 'none'")
+    /*
+     * `'self'` rather than `'none'`: a page framing itself is not the clickjacking this directive
+     * exists for, and a proxy serving this app under somebody's own host makes that the ordinary
+     * case. Cross-origin framing is still refused. `frameAncestors.test.ts` covers the rest.
+     */
+    expect(csp).toContain("frame-ancestors 'self'")
     expect(csp).toContain("form-action 'none'")
   })
 

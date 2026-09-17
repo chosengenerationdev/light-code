@@ -102,16 +102,29 @@ export function checkRequest(
 let frameAncestors: readonly string[] = []
 
 /**
- * Names the origins allowed to embed this page. Empty is `'none'`, which is the default.
+ * Origins allowed to embed this page, **beyond the page's own**.
+ *
+ * ## Why the default is `'self'` rather than `'none'`
  *
  * Asked for by somebody working in JupyterLab, where the natural way to see a local app is inside
- * the lab itself rather than in a separate tab — and an iframe is how that is done.
+ * the lab rather than in a separate tab. `'none'` refused that, and the request was to stop
+ * restricting framing altogether.
  *
- * **This is a real relaxation and it is opt-in for that reason.** `frame-ancestors` is what stops
- * clickjacking: a hostile page embedding this one, overlaying it, and collecting a click that
- * lands on an approval. The approval gate is precisely the thing being protected, so the answer is
- * *named origins only* — never a wildcard, and never inferred from anything. Declared, not
- * guessed, exactly as `--allow-host` is.
+ * Which would have been the wrong fix. `frame-ancestors` is what stops clickjacking: a page the
+ * user happens to visit embeds this one invisibly, overlays it, and collects a click that lands on
+ * an approval — "run this command", "write this file". The approval gate is precisely what is
+ * being protected, and invariant 8 exists so that what the user sees is what will happen.
+ *
+ * But the case that was refused did not need that protection removed. A lab page at
+ * `https://hub/user/ana/` embedding `https://hub/user/ana/proxy/8080/` is **the same origin**
+ * framing itself, and an attacker who already controls that origin does not need an iframe. So
+ * `'self'` allows it and blocks everything the directive was written for: a page on any *other*
+ * origin still cannot embed this one.
+ *
+ * ## And why anything further is still named
+ *
+ * A different origin — a dashboard, a portal — is a real relaxation, so it is declared rather than
+ * inferred, and never a wildcard. The same rule `--allow-host` follows.
  */
 export function setFrameAncestors(origins: readonly string[]): void {
   frameAncestors = origins.map((origin) => origin.trim()).filter((origin) => origin.length > 0)
@@ -132,9 +145,11 @@ export function securityHeaders(): Record<string, string> {
        * `'none'` unless somebody named an origin. A list here is a deliberate act by an operator
        * who wants this page inside another — a lab, a dashboard — and it names exactly which.
        */
-      frameAncestors.length === 0
-        ? "frame-ancestors 'none'"
-        : `frame-ancestors ${frameAncestors.join(' ')}`,
+      /*
+       * `'self'` always, plus whatever was declared. Same-origin framing is what a proxy serving
+       * this page under somebody's own host looks like, and refusing it protected nothing.
+       */
+      `frame-ancestors 'self'${frameAncestors.length === 0 ? '' : ` ${frameAncestors.join(' ')}`}`,
       "base-uri 'none'",
       "form-action 'none'",
     ].join('; '),
