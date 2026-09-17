@@ -1,52 +1,154 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-
-const loop = readFileSync(fileURLToPath(new URL('./loop.ts', import.meta.url)), 'utf8')
+import { z } from 'zod'
+import type { ChatMessage, ChatProvider, StreamChunk } from '../providers/types.js'
+import { PathDenylist } from '../fs/denylist.js'
+import { ToolRegistry, type Tool, type ToolExecutionContext, type ToolResult } from '../tools/index.js'
+import { runAgentTurn, type AgentTurnEvents } from './loop.js'
+import { Conversation } from './messages.js'
 
 /**
- * Reporting progress must not spend the budget meant for work.
+ * The step cap counts work done **unattended**.
  *
- * A planned task calls `plan_progress` twice per checkpoint, so a six-step plan was spending
- * twelve of twenty-five steps saying what it was about to do — the plan feature taxing the work it
- * exists to organise, surfacing as "stopped after 25 steps" in the middle of something healthy.
+ * It exists to stop a model looping on something it cannot get right while nobody is watching.
+ * Somebody typing mid-turn is direct evidence that this is not that situation — they are watching,
+ * and they have just changed what the work is. Charging the new instruction for the steps spent
+ * before it was given counts the wrong thing.
  *
- * Read from the source rather than driven through the loop: the property is about *which* calls
- * count, and a behavioural test would need a provider, a registry and twenty-five round trips to
- * observe one arithmetic decision.
+ * Requested in those terms: the count should reset when there is a user interaction in between.
  */
-describe('the step budget', () => {
-  it('refunds a bookkeeping call', () => {
-    expect(loop).toContain('BOOKKEEPING_TOOLS.has(toolCall.name)')
-    expect(loop).toContain('iteration -= 1')
+
+/** Repeats its last scripted turn for ever, so a test can count how many the loop allowed. */
+class ScriptedProvider implements ChatProvider {
+  private callIndex = 0
+  public calls = 0
+
+  constructor(private readonly turns: StreamChunk[][]) {}
+
+  async *streamChat(messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+    void messages
+    this.calls += 1
+    const turn = this.turns[Math.min(this.callIndex, this.turns.length - 1)] ?? []
+    this.callIndex += 1
+    for (const chunk of turn) yield chunk
+  }
+}
+
+const fakeTool = (name: string, run: () => Promise<ToolResult>): Tool => ({
+  name,
+  group: 'always',
+  description: 'test tool',
+  parametersSchema: z.object({}).loose(),
+  execute: run,
+})
+
+const context = (): ToolExecutionContext => ({
+  fs: {} as ToolExecutionContext['fs'],
+  terminal: {} as ToolExecutionContext['terminal'],
+  workspaceRoot: '/workspace',
+  denylist: new PathDenylist(),
+  readFiles: new Set(),
+})
+
+const collect = (): { events: AgentTurnEvents; errors: string[] } => {
+  const errors: string[] = []
+  const events = {
+    onText: () => {},
+    onToolCall: () => {},
+    onToolResult: () => {},
+    onError: (message: string) => errors.push(message),
+    onDone: () => {},
+  } as unknown as AgentTurnEvents
+  return { events, errors }
+}
+
+const callTool = (name: string): StreamChunk[] => [
+  { type: 'toolCall', toolCall: { id: `c${Math.random()}`, name, arguments: '{}' } },
+  { type: 'done' },
+]
+
+describe('a message typed while the turn is running', () => {
+  it('gives the turn its full budget back', async () => {
+    const provider = new ScriptedProvider([callTool('work')])
+    const registry = new ToolRegistry()
+    registry.register(fakeTool('work', async () => ({ content: 'ok' })))
+    const { events, errors } = collect()
+
+    // One message, delivered on the second step. Without the reset the turn would stop after 3
+    // provider calls; with it, the budget restarts and 3 more are allowed.
+    let remaining = ['actually, do this instead']
+    let step = 0
+    await runAgentTurn(provider, new Conversation(), 'go', registry, context(), events, {
+      maxIterations: 3,
+      drainQueuedMessages: () => {
+        step += 1
+        if (step === 2) {
+          const out = remaining
+          remaining = []
+          return out
+        }
+        return []
+      },
+    })
+
+    expect(provider.calls).toBe(5)
+    expect(errors[0]).toMatch(/after 3 steps/)
+  })
+
+  /* No message means nothing changes — the cap is still the cap. */
+  it('leaves the budget alone when nothing was typed', async () => {
+    const provider = new ScriptedProvider([callTool('work')])
+    const registry = new ToolRegistry()
+    registry.register(fakeTool('work', async () => ({ content: 'ok' })))
+    const { events } = collect()
+
+    await runAgentTurn(provider, new Conversation(), 'go', registry, context(), events, {
+      maxIterations: 3,
+      drainQueuedMessages: () => [],
+    })
+
+    expect(provider.calls).toBe(3)
+  })
+})
+
+describe('a form the user filled in', () => {
+  it('gives the budget back, like a typed message', async () => {
+    const provider = new ScriptedProvider([callTool('ask_user_form')])
+    const registry = new ToolRegistry()
+    registry.register(fakeTool('ask_user_form', async () => ({ content: 'name: ana' })))
+    const { events } = collect()
+
+    await runAgentTurn(provider, new Conversation(), 'go', registry, context(), events, {
+      maxIterations: 2,
+    })
+
+    /*
+     * Five resets, then the cap applies again: one call per reset while the allowance is being
+     * handed back, then the final two-step budget runs out. Seven in total.
+     *
+     * Bounded because the *model* chooses when to ask. Unbounded, it could hold a turn open
+     * indefinitely by asking a question whenever it ran low.
+     */
+    expect(provider.calls).toBe(7)
   })
 
   /*
-   * The bound is the part worth pinning. Without it a model calling nothing but `plan_progress`
-   * is never stopped, and a cap that cannot be reached is not a cap — which is precisely the
-   * thing this was asked to relax, not to remove.
+   * A dismissal is not an answer. Treating it as one would hand a fresh budget to a dialog
+   * nobody filled in — the unattended case wearing the costume of the attended one.
    */
-  it('bounds the refunds, so the cap can still be reached', () => {
-    expect(loop).toContain('refunded < MAX_REFUNDED_STEPS')
-    expect(loop).toMatch(/const MAX_REFUNDED_STEPS = \d+/)
-  })
+  it('does not give the budget back when the form was dismissed', async () => {
+    const provider = new ScriptedProvider([callTool('ask_user_form')])
+    const registry = new ToolRegistry()
+    registry.register(
+      fakeTool('ask_user_form', async () => ({
+        content: 'The user dismissed the form without answering. Ask in plain text instead, or continue without it.',
+      })),
+    )
+    const { events } = collect()
 
-  /*
-   * Only calls that change nothing the agent can react to. A `read_file` is work — it is how a
-   * model loops on something it cannot get right, which is the failure the cap catches — so
-   * widening this to "read-only tools" would quietly remove the cap for the commonest loop.
-   */
-  it('refunds only what reports, never what acts', () => {
-    const set = /const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(loop)
-    expect(set).not.toBeNull()
-    const names = (set?.[1] ?? '').match(/'[^']+'/g) ?? []
-    expect(names).toEqual(["'plan_progress'"])
-  })
+    await runAgentTurn(provider, new Conversation(), 'go', registry, context(), events, {
+      maxIterations: 3,
+    })
 
-  it('refunds after the result is recorded, so the transcript still shows it', () => {
-    const refundAt = loop.indexOf('BOOKKEEPING_TOOLS.has(toolCall.name)')
-    const recordAt = loop.indexOf('conversation.addToolResultMessage(toolCall.id, forModel)')
-    expect(recordAt).toBeGreaterThan(-1)
-    expect(refundAt).toBeGreaterThan(recordAt)
+    expect(provider.calls).toBe(3)
   })
 })

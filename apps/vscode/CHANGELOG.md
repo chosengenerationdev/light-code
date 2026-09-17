@@ -1,5 +1,31 @@
 # light-code-vscode
 
+## 0.90.0
+
+### Minor Changes
+
+- The step count restarts when you say something
+
+  Requested in those terms: the count should reset when there is a user interaction in between.
+
+  **The cap counts work done unattended.** It is there to stop a model looping on something it cannot
+  get right while nobody is watching. Somebody typing mid-turn is direct evidence that this is not
+  that situation — they are watching, and they have just changed what the work is. Charging the new
+  instruction for the twenty steps spent before it was given counts the wrong thing, and lands as
+  "stopped after 25 steps" immediately after you asked for something different.
+
+  - A message typed while the turn is running gives it the full allowance again. This cannot be
+    gamed: the model has no way to produce a user message, so every reset costs a person a keystroke.
+  - An **answered** `ask_user_form` does the same, bounded at five per turn — there the _model_
+    chooses when to ask, and unbounded it could hold a turn open indefinitely by asking again
+    whenever it ran low.
+  - A **dismissed** form does not. Declining to answer is not somebody redirecting the work, and
+    treating it as such would hand a fresh budget to a dialog nobody filled in — the unattended case
+    wearing the costume of the attended one.
+
+  The message now says "after 25 steps **since your last message**", which is what it has always
+  counted and now visibly so.
+
 ## 0.89.0
 
 ### Minor Changes

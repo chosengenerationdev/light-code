@@ -1945,7 +1945,13 @@ rather than copying fields.** Where a test can see the shape rather than the beh
   paths made it impossible — they do not.
 - **MCP tool documentation is indexed**, and reindexes on connect, disconnect and
   `tools/list_changed`, debounced and fingerprinted.
-- **The 25-step cap is per turn.** Replying "continue" grants a fresh 25.
+- **The 25-step cap counts steps since the user last said something**, not steps since the turn
+  began. Replying "continue" grants a fresh 25, and so does typing *while the turn is running* —
+  the cap exists to stop a model looping unattended, and somebody typing is direct evidence that
+  this is not that situation. A model cannot produce a user message, so each reset costs a person
+  a keystroke and the cap cannot be gamed. An **answered** `ask_user_form` resets it too, bounded
+  at five per turn because there the *model* chooses when to ask; a **dismissed** one does not,
+  since declining to answer is not somebody redirecting the work. `agent/stepBudget.test.ts`.
 - **Python-tool creation and skill writing always ask**, whatever is auto-approved
   (`ALWAYS_ASK_TOOLS`). Being asked repeatedly for *those* is by design, not a bug.
 

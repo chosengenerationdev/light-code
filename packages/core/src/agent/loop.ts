@@ -101,6 +101,25 @@ const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set(['plan_progress'])
 /** How many such calls a single turn may have refunded before the cap applies to them too. */
 const MAX_REFUNDED_STEPS = 20
 
+/**
+ * The text a dismissed `ask_user_form` returns, which is *not* an answer.
+ *
+ * Matched rather than flagged because the tool already says this in one place and a second
+ * representation of the same fact is the shape this project has paid for most. If the wording
+ * changes, `stepBudget.test.ts` fails rather than the distinction quietly disappearing.
+ */
+const FORM_DISMISSED = 'The user dismissed the form without answering.'
+
+/**
+ * How many times a form may buy back the step budget in one turn.
+ *
+ * Unbounded for a typed message — the model cannot produce one, so every reset costs a human a
+ * keystroke and a runaway loop is impossible. A form is different: the *model* decides to ask,
+ * so an unbounded reset would let it hold a turn open indefinitely by asking again whenever it
+ * ran low. Five is enough for any real conversation and short of a loop.
+ */
+const MAX_FORM_RESETS = 5
+
 const MAX_CONSECUTIVE_MISTAKES = 3
 
 /**
@@ -448,6 +467,19 @@ export async function runAgentTurn(
    * cap is for. Worst case the turn gets `maxIterations + MAX_REFUNDED_STEPS`.
    */
   let refunded = 0
+  /*
+   * The step cap counts work done *unattended*.
+   *
+   * It exists to stop a model looping on something it cannot get right while nobody is watching.
+   * Somebody typing mid-turn is direct evidence that this is not that situation: they are
+   * watching, and they have just changed what the work is. Charging the new instruction for the
+   * twenty steps spent before it was given is counting the wrong thing — the user asked for this
+   * in exactly those terms.
+   *
+   * It cannot be gamed, either. The model has no way to produce a user message, so every reset
+   * costs a person a keystroke.
+   */
+  let formResets = 0
   const mistakeCounts = new Map<string, number>()
   let continueNudges = 0
   const mode = options.mode ?? CODE_MODE
@@ -574,6 +606,16 @@ export async function runAgentTurn(
       conversation.addUserMessage(message)
       events.onQueuedMessageConsumed?.(message)
     }
+    /*
+     * A fresh budget from here, because from here it is a different instruction.
+     *
+     * `-1` rather than `0`: the loop's own increment runs next, so this lands on 0 and the turn
+     * gets the whole allowance again — the same trick the refund above uses.
+     */
+    if (queued.length > 0) {
+      iteration = -1
+      refunded = 0
+    }
 
     if (toolCall.name === 'attempt_completion' || toolCall.name === 'ask_followup_question') {
       events.onDone()
@@ -585,6 +627,24 @@ export async function runAgentTurn(
     if (BOOKKEEPING_TOOLS.has(toolCall.name) && refunded < MAX_REFUNDED_STEPS) {
       refunded += 1
       iteration -= 1
+    }
+
+    /*
+     * An answered form is a user interaction too, and resets the budget for the same reason.
+     *
+     * A *dismissed* one does not. Declining to answer is not somebody redirecting the work, and
+     * treating it as such would hand a turn a fresh twenty-five steps for a dialog nobody filled
+     * in — which is the unattended case the cap is for, wearing the costume of the attended one.
+     */
+    if (
+      toolCall.name === 'ask_user_form' &&
+      result.isError !== true &&
+      !result.content.startsWith(FORM_DISMISSED) &&
+      formResets < MAX_FORM_RESETS
+    ) {
+      formResets += 1
+      iteration = -1
+      refunded = 0
     }
 
     if (result.path !== undefined) {
@@ -607,7 +667,7 @@ export async function runAgentTurn(
    * says otherwise — the transcript is intact and another message resumes from here.
    */
   events.onError(
-    `Stopped after ${maxIterations} steps in one turn. Nothing is lost — send another message ` +
+    `Stopped after ${maxIterations} steps since your last message. Nothing is lost — send another message ` +
       `(for example "continue") to carry on from here. Raise the limit in Settings → Approvals ` +
       'if this task legitimately needs more.',
   )
