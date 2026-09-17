@@ -22,13 +22,13 @@ interface Recorded {
 function harness(): {
   transport: HttpTransport
   posts: Recorded[]
-  statuses: string[]
+  statuses: { text: string; level: string }[]
   polled: unknown[]
   pollCount: () => number
   openStream: () => void
 } {
   const posts: Recorded[] = []
-  const statuses: string[] = []
+  const statuses: { text: string; level: string }[] = []
   // Replies the server is holding for a client that cannot receive a stream.
   const polled: unknown[] = []
   let polls = 0
@@ -66,11 +66,22 @@ function harness(): {
      */
     const status = streamOpen || polls > 0 ? 202 : 409
     posts.push({ type, status })
-    return { ok: streamOpen, status, text: async () => 'No event stream open. Reload the page.' }
+    /*
+     * `ok` comes from the status, as it does in a real `fetch` — it was `ok: streamOpen`, which
+     * conflated "is the SSE stream up" with "did this POST succeed" and returned a **202 marked
+     * not-ok** to a polling client. The client correctly reported that as a refusal, so the
+     * harness was manufacturing a failure that no server produces and hiding what the polling
+     * path actually does.
+     */
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      text: async () => 'No event stream open. Reload the page.',
+    }
   })
 
   return {
-    transport: new HttpTransport((status) => statuses.push(status)),
+    transport: new HttpTransport((text, level) => statuses.push({ text, level })),
     posts,
     statuses,
     polled,
@@ -113,7 +124,7 @@ describe('posting before the event stream is open', () => {
     // carries `choosesTheme` — losing it is what removed the light/dark control.
     expect(posts.map((post) => post.type)).toEqual(startup)
     expect(posts.every((post) => post.status === 202)).toBe(true)
-    expect(statuses.filter((status) => status.includes('refused'))).toEqual([])
+    expect(statuses.filter((status) => status.text.includes('refused'))).toEqual([])
   })
 
   it('sends straight away once the stream is up, rather than queueing for ever', async () => {
@@ -158,7 +169,23 @@ describe('falling back to polling', () => {
       await vi.waitFor(() => {
         expect(posts.map((post) => post.type)).toEqual(['requestSettings'])
       })
-      expect(statuses.some((status) => status.includes('fetched instead'))).toBe(true)
+      /*
+       * Asserted as a *level*, not as words.
+       *
+       * Reported as "a red banner": every status shared the error style, so the fallback — which
+       * is the page working — announced itself as a failure. Matching on the sentence would also
+       * have made this test a check on the wording, which is the shape that gets loosened the
+       * first time somebody rewrites a message.
+       */
+/*
+       * Asserted as a *level*, not as words.
+       *
+       * Reported as "a red banner": every status shared the error style, so the fallback — which
+       * is the page working — announced itself as a failure. Matching on the sentence would also
+       * make this a test of the wording, which is the shape that gets loosened the first time
+       * somebody rewrites a message.
+       */
+      expect(statuses.at(-1)?.level).toBe('notice')
     } finally {
       vi.useRealTimers()
     }
@@ -193,7 +220,8 @@ describe('falling back to polling', () => {
       await vi.advanceTimersByTimeAsync(30_000)
 
       expect(pollCount()).toBe(0)
-      expect(statuses.some((status) => status.includes('fetched instead'))).toBe(false)
+      // The stream is working, so nothing ever falls back and no notice is raised.
+      expect(statuses.some((status) => status.level === 'notice')).toBe(false)
     } finally {
       vi.useRealTimers()
     }

@@ -208,6 +208,15 @@ interface Connection {
    * listening.
    */
   drain: () => unknown[]
+  /**
+   * Pushes the state a freshly attached view needs — transcript, tasks, settings, schedules.
+   *
+   * The browser asks for these once at startup, and a request lost while the stream was thrashing
+   * is never repeated: the panel stays half-built until a reload, missing whatever that reply
+   * carried. `choosesTheme` rides on the settings one, which is why it read as "the light/dark
+   * control has gone". The extension has never had this because it resyncs on every attach.
+   */
+  resync: () => void
   dispose: () => void
 }
 
@@ -332,6 +341,12 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 
     const connection: Connection = {
       transport,
+      /*
+       * Replaced below, once the bridge that owns the state exists. A no-op rather than a missing
+       * field so the object is a complete `Connection` from the moment it is built — a half-built
+       * one handed to anything in between is how a route ends up calling something undefined.
+       */
+      resync: () => undefined,
       deliver: (message) => {
         for (const listener of listeners) listener(message)
       },
@@ -470,6 +485,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     connection.dispose = () => {
       originalDispose()
       session.dispose()
+    }
+    // The bridge is built here, so this is the only place that can hand its resync out.
+    connection.resync = () => {
+      session.resync()
     }
     return connection
   }
@@ -645,6 +664,20 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       connection.attach(response)
 
       /*
+       * Push the state this view needs, rather than waiting to be asked for it.
+       *
+       * Reported from JupyterHub: chat working, but no light/dark control and an empty panel.
+       * The startup requests are sent once, and the ones sent while the stream was thrashing were
+       * lost — including `requestSettings`, which is what `choosesTheme` rides on. Nothing ever
+       * asked again, so the panel stayed half-built until a reload, and looked like an old build.
+       *
+       * The extension has never had this problem because it calls `resync()` whenever a webview
+       * attaches. The browser needs the same thing for the same reason, and the reason is
+       * stronger here: a webview is attached once, and this reattaches after every drop.
+       */
+      connection.resync()
+
+      /*
        * Told once, at the top of the stream, so the UI can mark what this session may change
        * before it renders a control the server will refuse. §15's "scope is visible in the UI"
        * applied to people rather than to config files: a field that will be rejected on save
@@ -705,6 +738,12 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       if (connection === undefined) {
         connection = await openConnection(principal)
         connections.set(principal.id, connection)
+        /*
+         * Same reason as the stream: this is a client attaching, and for a polling client it is
+         * the *only* attach it will ever do. Once, on creation — a resync per poll would rebuild
+         * the whole panel every few hundred milliseconds.
+         */
+        connection.resync()
       }
       respondJson(response, 200, { messages: connection.drain() })
       return

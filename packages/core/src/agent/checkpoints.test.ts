@@ -254,7 +254,12 @@ describe('the wiring, which no test of the parts can see', () => {
   })
 
   it('routes the user-set plan through the same owner as an approved update', () => {
-    expect(bridge).toContain('void applyPlan(message.plan)')
+    /*
+     * The call, not how its promise is handled. It was `void applyPlan(...)` and is now wrapped
+     * so a rejection is reported rather than dropped; what this test is about is that the plan
+     * the user sets goes through the same owner as an approved update, and that is the call.
+     */
+    expect(bridge).toContain('applyPlan(message.plan)')
   })
 
   it('tells agent team mode whether a plan already exists', () => {

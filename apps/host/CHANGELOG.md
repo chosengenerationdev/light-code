@@ -1,5 +1,42 @@
 # @chosengeneration/light-code
 
+## 0.75.0
+
+### Minor Changes
+
+- The panel builds itself even when a startup request was lost, and a working fallback stops looking broken
+
+  Three faults from one JupyterHub session, all reported together.
+
+  **The light/dark control was missing because the settings reply never arrived.** The browser asks
+  for its startup state once; the requests sent while the stream was dropping and reconnecting were
+  lost, `requestSettings` among them, and `choosesTheme` rides on that reply. Nothing ever asked
+  again, so the panel stayed half-built until a reload — and looked like an old build while being
+  perfectly current. The server now pushes that state whenever a view attaches, which is what the VS
+  Code extension has always done. The browser needs it more, not less: a webview attaches once, and
+  this reattaches after every drop. Once per attach, never per poll.
+
+  **"disconnected — retrying (stream failed: 599)" appeared over the top of a working fallback.** The
+  reconnect loop is still in flight when polling takes over, and its next failure overwrote a working
+  state with a red banner — telling somebody their session had dropped when nothing had. Polling owns
+  the status from the moment it starts; the console still records every drop.
+
+  **And the fallback's own banner was red.** Every status shared one error style, so a page that had
+  successfully adapted to a network which will not carry a stream announced itself as a failure —
+  reported, reasonably, as a bug. Statuses carry a level now: working-but-degraded is a notice, and
+  only genuine failure is red.
+
+  **A silent-failure class closed at the same time.** The bridge dispatched ninety-odd handlers as
+  `void handleX()`, and `void` discards a promise's rejection — so if `postSettings` threw, and it
+  reads config, which throws on a file that fails validation, the panel simply never heard back and
+  nothing was logged or shown. Every one of them now reports, to the log and to the UI, naming the
+  operation. This is §14's "a rejected reply must be reported", which the client already did, applied
+  to the other side of the wire.
+
+  Found by the client's own test harness while fixing the above: it set `ok` from whether the SSE
+  stream was up rather than from the status, so a **202 came back marked not-ok** and the polling
+  path was being tested against a failure no server produces.
+
 ## 0.74.0
 
 ### Minor Changes

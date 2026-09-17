@@ -133,7 +133,27 @@ body {
   display: none;
   padding: 6px 12px;
   font-size: 12px;
+  line-height: 1.4;
+}
+
+/*
+ * Broken. Nothing is getting through and the user has to do something.
+ */
+#status.error {
   background: var(--vscode-inputValidation-errorBackground);
   border-bottom: 1px solid var(--vscode-inputValidation-errorBorder);
   color: var(--vscode-inputValidation-errorForeground);
+}
+
+/*
+ * Working, with something worth knowing — the polling fallback.
+ *
+ * Every status used to share the error style, so a page that had successfully adapted to a
+ * network which will not carry a stream announced itself in red and was reported as a fault.
+ * People read the colour before the sentence, and it was saying the wrong thing.
+ */
+#status.notice {
+  background: var(--vscode-inputValidation-infoBackground, rgba(100, 148, 237, 0.12));
+  border-bottom: 1px solid var(--vscode-inputValidation-infoBorder, rgba(100, 148, 237, 0.5));
+  color: var(--vscode-foreground);
 }

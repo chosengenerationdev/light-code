@@ -1,6 +1,16 @@
 import type { Transport } from '@light-code/core/browser'
 
 /**
+ * How much a status line should alarm the reader.
+ *
+ * `notice` exists because of a report: the polling fallback's line was rendered in the error
+ * style, so a page that had successfully adapted to a network that will not carry a stream
+ * announced itself in red. Working-but-degraded and broken are different states and must not look
+ * the same — the colour is what people read first, and it was saying the wrong thing.
+ */
+export type StatusLevel = 'ok' | 'notice' | 'error'
+
+/**
  * The browser half of `Transport`: an SSE stream inbound, POSTs outbound.
  *
  * Chosen over a WebSocket deliberately. A WebSocket upgrade is **not** subject to CORS, so
@@ -188,7 +198,7 @@ export class HttpTransport implements Transport {
   /** Consecutive streams that opened and died too quickly to be useful. See the constant. */
   private shortStreams = 0
 
-  constructor(private readonly onStatus: (status: string) => void) {}
+  constructor(private readonly onStatus: (status: string, level: StatusLevel) => void) {}
 
   /**
    * Exchanges the launch fragment for a session token, then strips it from the address bar.
@@ -274,7 +284,7 @@ export class HttpTransport implements Transport {
           throw new Error(`stream failed: ${response.status}`)
         }
         trace('event stream open', { afterMs: Date.now() - openedAt })
-        this.onStatus('connected')
+        this.onStatus('connected', 'ok')
         // The server registers the session before it writes these headers, so by the time the
         // response is in hand a message posted now has somewhere to go.
         this.openStream()
@@ -305,9 +315,22 @@ export class HttpTransport implements Transport {
           afterMs: Date.now() - openedAt,
           reason: error instanceof Error ? error.message : String(error),
         })
-        this.onStatus(
-          `disconnected — retrying (${error instanceof Error ? error.message : String(error)})`,
-        )
+        /*
+         * Silent once polling has taken over, because then it is not news.
+         *
+         * Reported after the fallback was working: "disconnected — retrying (stream failed: 599)"
+         * appearing over the top of the notice. The reconnect loop is still in flight when
+         * polling starts, and its next failure overwrote a working state with a red banner —
+         * telling somebody their session had dropped when nothing had. Polling owns the status
+         * from the moment it starts; a stream this page has already stopped relying on failing
+         * again is a detail for the console, which still records it.
+         */
+        if (!this.polling) {
+          this.onStatus(
+            `disconnected — retrying (${error instanceof Error ? error.message : String(error)})`,
+            'error',
+          )
+        }
       }
 
       /*
@@ -364,6 +387,7 @@ export class HttpTransport implements Transport {
         this.onStatus(
           `still not connected, and ${String(MAX_QUEUED)} messages are already waiting — ` +
             'this one was dropped. Reload the page.',
+          'error',
         )
         return
       }
@@ -398,9 +422,19 @@ export class HttpTransport implements Transport {
       why: this.shortStreams > 0 ? 'the stream kept dropping' : 'the stream never opened',
       shortStreams: this.shortStreams,
     })
+    /*
+     * A notice, not an error, and the distinction is the whole point of the level.
+     *
+     * Reported as "a red banner": the text said "connected" while the styling said something had
+     * gone wrong, which is a contradiction the reader has to resolve — and they resolve it in
+     * favour of the colour. This *is* the working state. Something in the network does not carry
+     * streaming responses and the page has adapted; nothing is broken and nothing is lost.
+     */
     this.onStatus(
-      'connected — the event stream did not open, so replies are being fetched instead. ' +
-        'Something between this page and the server does not pass streaming responses through.',
+      'Replies are being fetched rather than streamed — something between this page and the ' +
+        'server does not pass streaming responses through. Everything works; text may arrive in ' +
+        'small bursts rather than as it is typed.',
+      'notice',
     )
     /*
      * The first poll goes *before* the queue is flushed, and the order is load-bearing.
@@ -451,7 +485,7 @@ export class HttpTransport implements Transport {
       this.pollFailures = 0
       if (this.pollReported) {
         this.pollReported = false
-        this.onStatus('connected.')
+        this.onStatus('connected', 'ok')
       }
       const messages = body.messages ?? []
       // Anything arriving means the conversation is live, so the next poll comes quickly.
@@ -480,6 +514,7 @@ export class HttpTransport implements Transport {
       'cannot reach the server — the event stream did not open and fetching replies is failing ' +
         'too, so nothing is being saved. Check that the address in the browser reaches the ' +
         'server light-code printed.',
+      'error',
     )
   }
 
@@ -520,6 +555,7 @@ export class HttpTransport implements Transport {
       const reason = (await response.text().catch(() => '')).trim()
       this.onStatus(
         `the server refused that (${String(response.status)})${reason.length > 0 ? `: ${reason}` : ''}`,
+        'error',
       )
     } catch (error) {
       if (attempt < POST_RETRIES) {
@@ -529,6 +565,7 @@ export class HttpTransport implements Transport {
       }
       this.onStatus(
         `could not reach the server: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
       )
     }
   }

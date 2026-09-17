@@ -338,7 +338,16 @@ export interface SessionOptions {
  * spilled tool results all live under a directory derived from the principal id, so adding
  * SSO changes who that is and nothing else.
  */
-export async function createSession(options: SessionOptions): Promise<{ dispose: () => void }> {
+/**
+ * A live session for one principal.
+ *
+ * `resync` is exposed as well as `dispose` because the server calls it when a view attaches: the
+ * browser asks for its startup state once, and a request lost while the stream was dropping is
+ * never repeated, leaving the panel half-built until a reload. See `Connection.resync`.
+ */
+export async function createSession(
+  options: SessionOptions,
+): Promise<{ dispose: () => void; resync: () => void }> {
   const userDir = path.join(options.dataDir, 'users', storageKeyFor(options.principal))
   await fs.mkdir(userDir, { recursive: true, mode: 0o700 })
 

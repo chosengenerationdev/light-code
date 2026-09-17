@@ -8220,6 +8220,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Runs a handler and **says so when it fails**, instead of dropping the failure on the floor.
+   *
+   * ## The reported failure
+   *
+   * A Node host with no light/dark control, an empty provider list, Save appearing to do nothing
+   * and Test Connection stuck on "Testing…" — with nothing in the terminal. Every one of those is
+   * a reply the panel was waiting for and never got.
+   *
+   * The dispatcher was ninety-odd `void handleX()` statements. `void` on a promise discards its
+   * rejection: if `postSettings` threw — and it reads config, which throws on a file that fails
+   * validation — the panel simply never heard back. Nothing was logged, nothing was shown, and
+   * from the outside it is indistinguishable from a build that never had the feature. That is how
+   * "the UI looks outdated" happens to a UI that is perfectly current.
+   *
+   * This is the same defect as the client's `fetch(...).catch(...)` in §14, on the other side of
+   * the wire: **a rejected reply must be reported.** Both halves of the round trip now do.
+   *
+   * The message names the operation, because "something failed" sends somebody looking
+   * everywhere, and the log line carries the same thing for a terminal nobody is watching live.
+   */
+  function reportFailure(operation: string, work: Promise<unknown>): void {
+    work.catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error)
+      logger.warn(`${operation} failed`, reason)
+      post({ type: 'error', message: `${operation} failed: ${reason}` })
+    })
+  }
+
   const unsubscribe = transport.onMessage((raw) => {
     const message = raw as UiToHostMessage
     if (message.type === 'sendMessage') {
@@ -8247,7 +8276,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }
       })()
     } else if (message.type === 'requestMentionCandidates') {
-      void handleMentionCandidates(message.query)
+      reportFailure('handleMentionCandidates', handleMentionCandidates(message.query))
     } else if (message.type === 'queueMessage') {
       queuedMessages.push(message.text)
       postQueued()
@@ -8278,21 +8307,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         pendingFormFields.delete(message.id)
       }
     } else if (message.type === 'approvalResponseAlways') {
-      void handleAlwaysAllow(message.id, message.scope)
+      reportFailure('handleAlwaysAllow', handleAlwaysAllow(message.id, message.scope))
     } else if (message.type === 'rollback') {
-      void handleRollback()
+      reportFailure('handleRollback', handleRollback())
     } else if (message.type === 'requestSettings') {
-      void postSettings()
+      reportFailure('postSettings', postSettings())
     } else if (message.type === 'requestTasks') {
-      void postTasks()
+      reportFailure('postTasks', postTasks())
     } else if (message.type === 'openTask') {
-      void openTask(message.id)
+      reportFailure('openTask', openTask(message.id))
     } else if (message.type === 'deleteTask') {
-      void deleteTask(message.id)
+      reportFailure('deleteTask', deleteTask(message.id))
     } else if (message.type === 'newTask') {
-      void startNewTask()
+      reportFailure('startNewTask', startNewTask())
     } else if (message.type === 'setMode') {
-      void handleSetMode(message.modeId)
+      reportFailure('handleSetMode', handleSetMode(message.modeId))
     } else if (message.type === 'setMaxIterations') {
       void configManager
         .save('user', { maxIterations: message.value })
@@ -8341,7 +8370,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setToolTimeoutFor') {
-      void handleSetToolTimeoutFor(message.name, message.seconds)
+      reportFailure('handleSetToolTimeoutFor', handleSetToolTimeoutFor(message.name, message.seconds))
     } else if (message.type === 'setToolTimeout') {
       void configManager
         .save('user', {
@@ -8374,57 +8403,60 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setAutoApprove') {
-      void handleSetAutoApprove(message.group, message.enabled)
+      reportFailure('handleSetAutoApprove', handleSetAutoApprove(message.group, message.enabled))
     } else if (message.type === 'revokeAllowedTool') {
-      void saveApprovals({
+      reportFailure('saveApprovals', saveApprovals({
         ...cachedApprovals,
         allowedTools: removeFromAllowlist(message.toolName, cachedApprovals.allowedTools ?? []),
-      })
+      }))
     } else if (message.type === 'revokeAllowedCommand') {
-      void saveApprovals({
+      reportFailure('saveApprovals', saveApprovals({
         ...cachedApprovals,
         allowedCommands: removeFromAllowlist(
           message.command,
           cachedApprovals.allowedCommands ?? [],
         ),
-      })
+      }))
     } else if (message.type === 'requestMcp') {
-      void handleRequestMcp()
+      reportFailure('handleRequestMcp', handleRequestMcp())
     } else if (message.type === 'saveMcpServers') {
-      void handleSaveMcpServers(message.json)
+      reportFailure('handleSaveMcpServers', handleSaveMcpServers(message.json))
     } else if (message.type === 'saveMcpServer') {
-      void handleSaveMcpServer(message.name, message.previousName, message.config)
+      reportFailure('handleSaveMcpServer', handleSaveMcpServer(message.name, message.previousName, message.config))
     } else if (message.type === 'duplicateMcpServer') {
-      void handleDuplicateMcpServer(message.name)
+      reportFailure('handleDuplicateMcpServer', handleDuplicateMcpServer(message.name))
     } else if (message.type === 'deleteMcpServer') {
-      void handleDeleteMcpServer(message.name)
+      reportFailure('handleDeleteMcpServer', handleDeleteMcpServer(message.name))
     } else if (message.type === 'browseForPath') {
-      void handleBrowseForPath(message.purpose, message.kind, message.extensions)
+      reportFailure('handleBrowseForPath', handleBrowseForPath(message.purpose, message.kind, message.extensions))
     } else if (message.type === 'probePythonEnv') {
-      void handleProbePythonEnv(message.venvDir, message.script)
+      reportFailure('handleProbePythonEnv', handleProbePythonEnv(message.venvDir, message.script))
     } else if (message.type === 'connectMcpServer') {
       void mcp.connectServer(message.name)
     } else if (message.type === 'restartMcpServer') {
       void mcp.restart(message.name)
     } else if (message.type === 'setMcpServerEnabled') {
-      void updateMcpServer(message.name, (entry) => ({
-        ...entry,
-        disabled: !message.enabled,
-      })).then(() => postMcp())
+      reportFailure(
+        'updateMcpServer',
+        updateMcpServer(message.name, (entry) => ({
+          ...entry,
+          disabled: !message.enabled,
+        })).then(() => postMcp()),
+      )
     } else if (message.type === 'setMcpToolTimeout') {
-      void handleSetToolTimeout(message.server, message.tool, message.seconds)
+      reportFailure('handleSetToolTimeout', handleSetToolTimeout(message.server, message.tool, message.seconds))
     } else if (message.type === 'setMcpToolPermission') {
-      void handleSetToolPermission(message.server, message.tool, message.permission)
+      reportFailure('handleSetToolPermission', handleSetToolPermission(message.server, message.tool, message.permission))
     } else if (message.type === 'requestSearch') {
-      void postSearch()
+      reportFailure('postSearch', postSearch())
       // The dispatcher and the query log live on the Search tab, so they ship with the same
       // request rather than needing three round trips to populate one panel.
-      void postDispatcher()
+      reportFailure('postDispatcher', postDispatcher())
       post({ type: 'searchLog', entries: [...searchLog.list()] })
     } else if (message.type === 'saveSearchConnection') {
-      void handleSaveSearchConnection(message.connection)
+      reportFailure('handleSaveSearchConnection', handleSaveSearchConnection(message.connection))
     } else if (message.type === 'deleteSearchConnection') {
-      void handleDeleteSearchConnection(message.id)
+      reportFailure('handleDeleteSearchConnection', handleDeleteSearchConnection(message.id))
     } else if (message.type === 'setActiveSearchConnection') {
       void (
         message.forProject === true
@@ -8437,21 +8469,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'requestProjectSettings') {
-      void postProjectSettings()
+      reportFailure('postProjectSettings', postProjectSettings())
     } else if (message.type === 'clearProjectSettings') {
-      void handleClearProjectSettings()
+      reportFailure('handleClearProjectSettings', handleClearProjectSettings())
     } else if (message.type === 'requestSearchIndexes') {
-      void handleRequestSearchIndexes(message.connection)
+      reportFailure('handleRequestSearchIndexes', handleRequestSearchIndexes(message.connection))
     } else if (message.type === 'testSearchConnection') {
-      void handleTestSearchConnection(message.connection)
+      reportFailure('handleTestSearchConnection', handleTestSearchConnection(message.connection))
     } else if (message.type === 'syncVectorStore') {
-      void handleSyncVectorStore(message.fromId)
+      reportFailure('handleSyncVectorStore', handleSyncVectorStore(message.fromId))
     } else if (message.type === 'clearDocsIndex') {
-      void handleClearDocsIndex(message.kind)
+      reportFailure('handleClearDocsIndex', handleClearDocsIndex(message.kind))
     } else if (message.type === 'clearCodebaseIndex') {
-      void handleClearCodebaseIndex()
+      reportFailure('handleClearCodebaseIndex', handleClearCodebaseIndex())
     } else if (message.type === 'openStandingSkill') {
-      void handleOpenStandingSkill()
+      reportFailure('handleOpenStandingSkill', handleOpenStandingSkill())
     } else if (message.type === 'setOffice') {
       void configManager
         .load()
@@ -8473,81 +8505,86 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'indexDocs') {
-      void handleIndexDocs(message.kind)
+      reportFailure('handleIndexDocs', handleIndexDocs(message.kind))
     } else if (message.type === 'runSearchProbe') {
-      void handleSearchProbe(message.query, message.target)
+      reportFailure('handleSearchProbe', handleSearchProbe(message.query, message.target))
     } else if (message.type === 'clearSearchLog') {
       searchLog.clear()
     } else if (message.type === 'setDispatcher') {
-      void saveRetrieval({ dispatcher: message.enabled })
-        .then(() => {
-          void postDispatcher()
+      reportFailure(
+        'saveRetrieval',
+        saveRetrieval({ dispatcher: message.enabled }).then(() => {
+          reportFailure('postDispatcher', postDispatcher())
           // Switching it on is the moment the index starts being consulted, and it may never
           // have been built. Off needs nothing — the index simply stops being read.
           if (message.enabled) scheduleDocsReindex('dispatcher enabled')
-        })
-        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+        }),
+      )
     } else if (message.type === 'setSkillRetrieval') {
-      void saveRetrieval({ skills: message.enabled })
-        .then(() => {
-          void postDispatcher()
+      reportFailure(
+        'saveRetrieval',
+        saveRetrieval({ skills: message.enabled }).then(() => {
+          reportFailure('postDispatcher', postDispatcher())
           // Same reason as the dispatcher: switching it on is when the index starts being
           // consulted for skills, and it may never have been built.
           if (message.enabled) scheduleDocsReindex('skill retrieval enabled')
-        })
-        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+        }),
+      )
     } else if (message.type === 'startIndexing') {
-      void handleStartIndexing()
+      reportFailure('handleStartIndexing', handleStartIndexing())
     } else if (message.type === 'attachTeamAlias') {
-      void handleAttachTeamAlias()
+      reportFailure('handleAttachTeamAlias', handleAttachTeamAlias())
     } else if (message.type === 'publishTeamSkills') {
-      void handlePublishTeamSkills()
+      reportFailure('handlePublishTeamSkills', handlePublishTeamSkills())
     } else if (message.type === 'syncMail') {
-      void runMailSync('requested')
+      reportFailure('runMailSync', runMailSync('requested'))
     } else if (message.type === 'pruneMail') {
-      void handlePruneMail()
+      reportFailure('handlePruneMail', handlePruneMail())
     } else if (message.type === 'requestOutlookFolders') {
-      void handleRequestOutlookFolders(message.depth, message.force === true)
+      reportFailure('handleRequestOutlookFolders', handleRequestOutlookFolders(message.depth, message.force === true))
     } else if (message.type === 'validateMailFolder') {
-      void handleValidateMailFolder(message.path)
+      reportFailure('handleValidateMailFolder', handleValidateMailFolder(message.path))
     } else if (message.type === 'requestMailStatus') {
       /*
        * Also where the timer is reconciled. The panel opening is the first moment the bridge is
        * reliably alive with settings loaded, and it is the same signal MCP already uses to
        * connect - so nothing is spawned at editor startup (§11).
        */
-      void loadSettings().then((config) => {
-        reconcileMailTimer(config)
-        reconcileDatasetTimers(config)
-        return postMailStatus()
-      })
+      reportFailure(
+        'loadSettings',
+        loadSettings().then((config) => {
+          reconcileMailTimer(config)
+          reconcileDatasetTimers(config)
+          return postMailStatus()
+        }),
+      )
     } else if (message.type === 'saveMailSettings') {
-      void handleSaveMailSettings({
+      reportFailure('handleSaveMailSettings', handleSaveMailSettings({
         enabled: message.enabled,
         folders: message.folders,
         includeSubfolders: message.includeSubfolders,
         syncMinutes: message.syncMinutes,
         retentionMonths: message.retentionMonths,
         ...(message.storeId !== undefined ? { storeId: message.storeId } : {}),
-      })
+      }))
     } else if (message.type === 'clearTeamSkills') {
-      void handleClearTeamSkills()
+      reportFailure('handleClearTeamSkills', handleClearTeamSkills())
     } else if (message.type === 'refreshMail') {
-      void handleRefreshMail(message.days)
+      reportFailure('handleRefreshMail', handleRefreshMail(message.days))
     } else if (message.type === 'requestDatasetStatus') {
-      void postDatasetStatus()
+      reportFailure('postDatasetStatus', postDatasetStatus())
     } else if (message.type === 'saveDataset') {
-      void handleSaveDataset(message.dataset)
+      reportFailure('handleSaveDataset', handleSaveDataset(message.dataset))
     } else if (message.type === 'deleteDataset') {
-      void handleDeleteDataset(message.id)
+      reportFailure('handleDeleteDataset', handleDeleteDataset(message.id))
     } else if (message.type === 'syncDataset') {
-      void runDatasetSync(message.id, 'manual')
+      reportFailure('runDatasetSync', runDatasetSync(message.id, 'manual'))
     } else if (message.type === 'clearDataset') {
-      void handleClearDataset(message.id, message.resync === true)
+      reportFailure('handleClearDataset', handleClearDataset(message.id, message.resync === true))
     } else if (message.type === 'clearMailIndex') {
-      void handleClearMailIndex(message.resync === true)
+      reportFailure('handleClearMailIndex', handleClearMailIndex(message.resync === true))
     } else if (message.type === 'saveSkillsAlias') {
-      void handleSaveSkillsAlias(message.aliases)
+      reportFailure('handleSaveSkillsAlias', handleSaveSkillsAlias(message.aliases))
     } else if (message.type === 'cancelIndexing') {
       // No kind means "whatever is running", which is what a user pressing Stop means.
       if (message.kind === undefined) {
@@ -8559,30 +8596,30 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         indexingAborts.get(message.kind)?.abort()
       }
     } else if (message.type === 'saveEmbedder') {
-      void handleSaveEmbedder(
+      reportFailure('handleSaveEmbedder', handleSaveEmbedder(
         message.profileId,
         message.model,
         message.dimensions,
         message.indexName,
         message.indexPrefix,
         message.indexAliases,
-      )
+      ))
     } else if (message.type === 'requestEmbedderModels') {
-      void handleRequestEmbedderModels(message.profileId)
+      reportFailure('handleRequestEmbedderModels', handleRequestEmbedderModels(message.profileId))
     } else if (message.type === 'openWalkthrough') {
       void ui.openWalkthrough?.()
     } else if (message.type === 'requestTools') {
-      void postTools()
+      reportFailure('postTools', postTools())
     } else if (message.type === 'requestSchedules') {
-      void postSchedules()
+      reportFailure('postSchedules', postSchedules())
     } else if (message.type === 'saveSchedule') {
-      void handleSaveSchedule(message.schedule)
+      reportFailure('handleSaveSchedule', handleSaveSchedule(message.schedule))
     } else if (message.type === 'duplicateSchedule') {
-      void handleDuplicateSchedule(message.id)
+      reportFailure('handleDuplicateSchedule', handleDuplicateSchedule(message.id))
     } else if (message.type === 'deleteSchedule') {
-      void handleDeleteSchedule(message.id)
+      reportFailure('handleDeleteSchedule', handleDeleteSchedule(message.id))
     } else if (message.type === 'setScheduleEnabled') {
-      void handleSetScheduleEnabled(message.id, message.enabled)
+      reportFailure('handleSetScheduleEnabled', handleSetScheduleEnabled(message.id, message.enabled))
     } else if (message.type === 'setTaskExpertLimits') {
       const next =
         message.maxSpendUsd === undefined && message.maxConsultations === undefined
@@ -8637,7 +8674,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'measureExpertCost') {
-      void handleMeasureExpertCost()
+      reportFailure('handleMeasureExpertCost', handleMeasureExpertCost())
     } else if (message.type === 'clearExpertPricing') {
       void configManager
         .load()
@@ -8650,23 +8687,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'assessJunior') {
-      void handleAssessJunior(message.profileId)
+      reportFailure('handleAssessJunior', handleAssessJunior(message.profileId))
     } else if (message.type === 'clearAssessment') {
-      void handleClearAssessment(message.model, message.profileLabel)
+      reportFailure('handleClearAssessment', handleClearAssessment(message.model, message.profileLabel))
     } else if (message.type === 'restartScheduler') {
       restartScheduleTimer()
       logger.info('schedule timer restarted by the user')
-      void postSchedules()
+      reportFailure('postSchedules', postSchedules())
     } else if (message.type === 'deleteScheduleRun') {
-      void handleDeleteScheduleRun(message.id, message.at)
+      reportFailure('handleDeleteScheduleRun', handleDeleteScheduleRun(message.id, message.at))
     } else if (message.type === 'clearScheduleRuns') {
-      void handleClearScheduleRuns(message.id)
+      reportFailure('handleClearScheduleRuns', handleClearScheduleRuns(message.id))
     } else if (message.type === 'openScheduleRun') {
-      void openRunTranscript(message.taskId, message.title)
+      reportFailure('openRunTranscript', openRunTranscript(message.taskId, message.title))
     } else if (message.type === 'runScheduleNow') {
-      void runSchedule(message.id, 'manual')
+      reportFailure('runSchedule', runSchedule(message.id, 'manual'))
     } else if (message.type === 'requestSkills') {
-      void postSkills()
+      reportFailure('postSkills', postSkills())
     } else if (message.type === 'saveSkillDirs') {
       void configManager
         .save('user', {
@@ -8678,34 +8715,34 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .then(() => postSkills())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'openManagedFile') {
-      void handleOpenManagedFile(message.path)
+      reportFailure('handleOpenManagedFile', handleOpenManagedFile(message.path))
     } else if (message.type === 'deletePythonTool') {
-      void handleDeletePythonTool(message.name)
+      reportFailure('handleDeletePythonTool', handleDeletePythonTool(message.name))
     } else if (message.type === 'approvePythonTool') {
-      void handleApprovePythonTool(message.name)
+      reportFailure('handleApprovePythonTool', handleApprovePythonTool(message.name))
     } else if (message.type === 'deleteSkillFile') {
-      void handleDeleteSkillFile(message.name)
+      reportFailure('handleDeleteSkillFile', handleDeleteSkillFile(message.name))
     } else if (message.type === 'requestPython') {
-      void postPython()
+      reportFailure('postPython', postPython())
     } else if (message.type === 'setPython') {
-      void handleSetPython(message)
+      reportFailure('handleSetPython', handleSetPython(message))
     } else if (message.type === 'requestNetwork') {
-      void postNetwork()
+      reportFailure('postNetwork', postNetwork())
     } else if (message.type === 'saveNetwork') {
-      void handleSaveNetwork(message.settings)
+      reportFailure('handleSaveNetwork', handleSaveNetwork(message.settings))
     } else if (message.type === 'requestExpert') {
-      void postExpert()
+      reportFailure('postExpert', postExpert())
     } else if (message.type === 'setPlan') {
       // Through `applyPlan` rather than inline, so the user's editor and an approved
       // `update_plan` cannot end up doing different things — pruning in particular.
-      void applyPlan(message.plan)
+      reportFailure('applyPlan', applyPlan(message.plan))
     } else if (message.type === 'requestPlan') {
       post({ type: 'plan', plan: activePlan ?? '' })
       postPlanProgress()
     } else if (message.type === 'requestPlanProgress') {
       postPlanProgress()
     } else if (message.type === 'requestAgents') {
-      void postAgents()
+      reportFailure('postAgents', postAgents())
     } else if (message.type === 'setAgentRole') {
       const assignment = message.assignment
       const role = message.role
@@ -8720,7 +8757,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
-      void saveAgents((current) => {
+      reportFailure('saveAgents', saveAgents((current) => {
         const roles = { ...(current.roles ?? {}) }
         /*
          * Unassigning deletes the entry rather than storing an empty one, so "nobody" and "somebody
@@ -8738,7 +8775,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           }
         }
         return { ...current, roles }
-      })
+      }))
     } else if (message.type === 'setAgentPrompt') {
       const role = message.role
       const prompt = message.prompt
@@ -8746,7 +8783,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
-      void saveAgents((current) => {
+      reportFailure('saveAgents', saveAgents((current) => {
         const roles = { ...(current.roles ?? {}) }
         const existing = roles[role]
         // Only stored when it differs, so an improved default still reaches somebody who has
@@ -8761,13 +8798,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           roles[role] = { ...(existing ?? { kind: 'profile' as const }), prompt }
         }
         return { ...current, roles }
-      })
+      }))
     } else if (message.type === 'setAgentBudget') {
       const matters = message.matters
-      void saveAgents((current) => ({ ...current, budgetMatters: matters }))
+      reportFailure('saveAgents', saveAgents((current) => ({ ...current, budgetMatters: matters })))
     } else if (message.type === 'setTeamGuidance') {
       const guidance = message.guidance
-      void saveAgents((current) => {
+      reportFailure('saveAgents', saveAgents((current) => {
         if (
           guidance === undefined ||
           guidance.trim().length === 0 ||
@@ -8781,18 +8818,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           return rest
         }
         return { ...current, teamGuidance: guidance }
-      })
+      }))
     } else if (message.type === 'saveCustomRole') {
-      void handleSaveCustomRole(message)
+      reportFailure('handleSaveCustomRole', handleSaveCustomRole(message))
     } else if (message.type === 'deleteCustomRole') {
-      void handleDeleteCustomRole(message.id)
+      reportFailure('handleDeleteCustomRole', handleDeleteCustomRole(message.id))
     } else if (message.type === 'setRoleThinking') {
       const role = message.role
       if (!isAgentRole(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
-      void saveAgents((current) => {
+      reportFailure('saveAgents', saveAgents((current) => {
         const roles = { ...(current.roles ?? {}) }
         const existing = roles[role] ?? { kind: 'profile' as const }
         if (message.level === undefined) {
@@ -8805,43 +8842,43 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           roles[role] = { ...existing, thinking: message.level }
         }
         return { ...current, roles }
-      })
+      }))
     } else if (message.type === 'setRoleEnabled') {
       const role = message.role
       if (!isAgentRole(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
-      void saveAgents((current) => {
+      reportFailure('saveAgents', saveAgents((current) => {
         const roles = { ...(current.roles ?? {}) }
         roles[role] = {
           ...(roles[role] ?? { kind: 'profile' as const }),
           enabled: message.enabled,
         }
         return { ...current, roles }
-      })
+      }))
     } else if (message.type === 'setRoleWrite') {
       const role = message.role
       if (!isAgentRole(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
-      void saveAgents((current) => {
+      reportFailure('saveAgents', saveAgents((current) => {
         const roles = { ...(current.roles ?? {}) }
         roles[role] = { ...(roles[role] ?? { kind: 'profile' as const }), write: message.canWrite }
         return { ...current, roles }
-      })
+      }))
     } else if (message.type === 'setRoleTools') {
       const role = message.role
       if (!isAgentRole(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
-      void saveAgents((current) => {
+      reportFailure('saveAgents', saveAgents((current) => {
         const roles = { ...(current.roles ?? {}) }
         roles[role] = { ...(roles[role] ?? { kind: 'profile' as const }), tools: message.usesTools }
         return { ...current, roles }
-      })
+      }))
     } else if (message.type === 'setAgentColor') {
       const role = message.role
       const color = message.color
@@ -8849,39 +8886,39 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }
-      void saveAgents((current) => ({
+      reportFailure('saveAgents', saveAgents((current) => ({
         ...current,
         colors: { ...(current.colors ?? {}), [role]: color },
-      }))
+      })))
     } else if (message.type === 'setExpert') {
-      void handleSetExpert(message.enabled, message.path, message.model, {
+      reportFailure('handleSetExpert', handleSetExpert(message.enabled, message.path, message.model, {
         ...(message.maxSpendUsd !== undefined ? { maxSpendUsd: message.maxSpendUsd } : {}),
         ...(message.maxConsultations !== undefined
           ? { maxConsultations: message.maxConsultations }
           : {}),
         ...(message.profileId !== undefined ? { profileId: message.profileId } : {}),
-      })
+      }))
     } else if (message.type === 'requestProfiles') {
-      void postProfiles()
+      reportFailure('postProfiles', postProfiles())
       // Capabilities travel with the profile list: switching profiles can change whether
       // the composer offers attachment at all.
-      void postCapabilities()
+      reportFailure('postCapabilities', postCapabilities())
     } else if (message.type === 'saveProfile') {
-      void handleSaveProfile(message.profile)
+      reportFailure('handleSaveProfile', handleSaveProfile(message.profile))
     } else if (message.type === 'requestModels') {
-      void handleRequestModels(message.profile)
+      reportFailure('handleRequestModels', handleRequestModels(message.profile))
     } else if (message.type === 'testConnection') {
-      void handleTestConnection(message.profile)
+      reportFailure('handleTestConnection', handleTestConnection(message.profile))
     } else if (message.type === 'duplicateProfile') {
-      void handleDuplicateProfile(message.id)
+      reportFailure('handleDuplicateProfile', handleDuplicateProfile(message.id))
     } else if (message.type === 'deleteProfile') {
-      void handleDeleteProfile(message.id)
+      reportFailure('handleDeleteProfile', handleDeleteProfile(message.id))
     } else if (message.type === 'setActiveProfile') {
-      void handleSetActiveProfile(message.id, message.forProject)
+      reportFailure('handleSetActiveProfile', handleSetActiveProfile(message.id, message.forProject))
     } else if (message.type === 'exportConfig') {
-      void handleExportConfig()
+      reportFailure('handleExportConfig', handleExportConfig())
     } else if (message.type === 'importConfig') {
-      void handleImportConfig()
+      reportFailure('handleImportConfig', handleImportConfig())
     }
   })
 
