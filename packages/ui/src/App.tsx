@@ -1,5 +1,6 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
 import { CUSTOM_ROLE_LIMIT, skillAliases } from '@light-code/core/browser'
+import type { S3Mirror } from './settings/S3Section.js'
 import type { CheckpointView, ProbeTarget } from '@light-code/core/browser'
 import {
   DEFAULT_MODE_ID,
@@ -1047,39 +1048,35 @@ export function App(props: AppProps): ReactElement {
         }
 
   const skillsS3 =
-    s3Props === undefined
+    s3Props === undefined || s3 === undefined
       ? undefined
       : {
           ...s3Props,
-          ...(s3?.skills !== undefined ? { mirror: s3.skills } : {}),
-          ...(s3?.skillsFolder !== undefined ? { folder: s3.skillsFolder } : {}),
-          ...(s3?.lastSkillsSync !== undefined ? { lastSync: s3.lastSkillsSync } : {}),
-          onSaveMirror: (connectionId: string, prefix: string, enabled: boolean) =>
+          mirrors: s3.skills,
+          folders: s3.skillsFolders,
+          ...(s3.lastSkillsSync !== undefined ? { lastSync: s3.lastSkillsSync } : {}),
+          onSaveMirrors: (mirrors: S3Mirror[]) =>
             props.transport.post({
-              type: 'saveS3Mirror',
+              type: 'saveS3Mirrors',
               kind: 'skills',
-              connectionId,
-              prefix,
-              enabled,
+              mirrors,
             } satisfies UiToHostMessage),
           onSync: () => props.transport.post({ type: 'syncS3', kind: 'skills' } satisfies UiToHostMessage),
         }
 
   const toolsS3 =
-    s3Props === undefined
+    s3Props === undefined || s3 === undefined
       ? undefined
       : {
           ...s3Props,
-          ...(s3?.tools !== undefined ? { mirror: s3.tools } : {}),
-          ...(s3?.toolsFolder !== undefined ? { folder: s3.toolsFolder } : {}),
-          ...(s3?.lastToolsSync !== undefined ? { lastSync: s3.lastToolsSync } : {}),
-          onSaveMirror: (connectionId: string, prefix: string, enabled: boolean) =>
+          mirrors: s3.tools,
+          folders: s3.toolsFolders,
+          ...(s3.lastToolsSync !== undefined ? { lastSync: s3.lastToolsSync } : {}),
+          onSaveMirrors: (mirrors: S3Mirror[]) =>
             props.transport.post({
-              type: 'saveS3Mirror',
+              type: 'saveS3Mirrors',
               kind: 'tools',
-              connectionId,
-              prefix,
-              enabled,
+              mirrors,
             } satisfies UiToHostMessage),
           onSync: () => props.transport.post({ type: 'syncS3', kind: 'tools' } satisfies UiToHostMessage),
         }

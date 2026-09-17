@@ -688,13 +688,21 @@ export type UiToHostMessage =
       sessionToken?: string
     }
   | { type: 'deleteS3Connection'; id: string }
-  /** Points skills or Python tools at a folder in a bucket. An empty `connectionId` unsets it. */
+  /**
+   * Replaces the whole list of bucket folders for one kind.
+   *
+   * The whole list rather than one row: the panel edits it as a list, and sending a single entry
+   * back would need an index both sides agreed about, which is one more thing to drift.
+   */
   | {
-      type: 'saveS3Mirror'
+      type: 'saveS3Mirrors'
       kind: 'skills' | 'tools'
-      connectionId: string
-      prefix?: string
-      enabled: boolean
+      mirrors: {
+        connectionId: string
+        prefix?: string | undefined
+        enabled?: boolean | undefined
+        publish?: boolean | undefined
+      }[]
     }
   /** Fetches now, rather than waiting for the next panel open. */
   | { type: 'syncS3'; kind: 'skills' | 'tools' }
@@ -1298,13 +1306,28 @@ export type HostToUiMessage =
       }[]
       /** Connections that could not be used, and why. */
       problems: { label: string; problem: string }[]
-      /** Where skills are mirrored from, when that is set up. */
-      skills?: { connectionId: string; prefix?: string | undefined; enabled?: boolean | undefined }
-      /** The same for Python tools. */
-      tools?: { connectionId: string; prefix?: string | undefined; enabled?: boolean | undefined }
+      /**
+       * Bucket folders skills are read from, in order.
+       *
+       * A list, mapping onto the split the local folders already have: any number of sources, and
+       * one of them (`publish`) also receiving new skills.
+       */
+      skills: {
+        connectionId: string
+        prefix?: string | undefined
+        enabled?: boolean | undefined
+        publish?: boolean | undefined
+      }[]
+      /** The same for Python tools. Nothing publishes there — a tool is written locally. */
+      tools: {
+        connectionId: string
+        prefix?: string | undefined
+        enabled?: boolean | undefined
+        publish?: boolean | undefined
+      }[]
       /** The local folders, stated so nobody has to guess where a mirror went. */
-      skillsFolder?: string
-      toolsFolder?: string
+      skillsFolders: string[]
+      toolsFolders: string[]
       /** The last sync, as one line each. */
       lastSkillsSync?: string
       lastToolsSync?: string

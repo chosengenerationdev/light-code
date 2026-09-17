@@ -601,12 +601,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   let skillsDir = defaultSkillsDir
   let extraSkillDirs: string[] = []
-  /** The mirrored bucket folder in the search path, when skills come from S3. */
-  let mirroredSkillsDir: string | undefined
-  /** The same for Python tools, reported so the tab can say where they landed. */
-  let mirroredToolsDir: string | undefined
-  /** The skills mirror as configured, so `write_skill` knows whether to publish. */
-  let cachedSkillMirror: { connectionId: string; prefix?: string | undefined; enabled?: boolean | undefined } | undefined
+  /** The mirrored bucket folders in the skill search path, one per configured source. */
+  let mirroredSkillsDirs: string[] = []
+  /** The same for Python tools, reported so the tab can say where each landed. */
+  let mirroredToolsDirs: string[] = []
+  /** The skills mirrors as configured, so `write_skill` knows where to publish. */
+  let cachedSkillMirrors: {
+    connectionId: string
+    prefix?: string | undefined
+    enabled?: boolean | undefined
+    publish?: boolean | undefined
+  }[] = []
   /** One line about the last sync of each, for the panel. */
   let lastSync: { skills?: string; tools?: string } = {}
 
@@ -1803,19 +1808,29 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * and still valid, and dropping them because a refresh failed would take somebody's skills
      * away over a network blip.
      */
-    const skillMirror = config.s3?.skills
-    cachedSkillMirror = skillMirror
-    if (skillMirror?.enabled === true) {
-      mirroredSkillsDir = mirrorFolder({
-        storageDir,
-        connectionId: skillMirror.connectionId,
-        kind: 'skills',
-        ...(skillMirror.prefix !== undefined ? { prefix: skillMirror.prefix } : {}),
-      })
-      if (mirroredSkillsDir !== undefined) extraSkillDirs.push(mirroredSkillsDir)
-    } else {
-      mirroredSkillsDir = undefined
-    }
+    cachedSkillMirrors = config.s3?.skills ?? []
+    mirroredSkillsDirs = cachedSkillMirrors
+      .filter((mirror) => mirror.enabled === true)
+      .map((mirror) =>
+        mirrorFolder({
+          storageDir,
+          connectionId: mirror.connectionId,
+          kind: 'skills',
+          ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+        }),
+      )
+    extraSkillDirs.push(...mirroredSkillsDirs)
+
+    mirroredToolsDirs = (config.s3?.tools ?? [])
+      .filter((mirror) => mirror.enabled === true)
+      .map((mirror) =>
+        mirrorFolder({
+          storageDir,
+          connectionId: mirror.connectionId,
+          kind: 'tools',
+          ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+        }),
+      )
 
     return config
   }
@@ -2222,11 +2237,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * unchanged for everyone else. A failure is reported in the tool result rather than failing
        * the write — the file is already on disk and correct.
        */
+      /*
+       * The one folder marked for publishing, of however many are read from.
+       *
+       * The same split the local folders already have: any number of places skills are read from,
+       * one place new ones are saved. Without that, "where did that skill go" would have no
+       * answer - or worse, several.
+       */
+      const publishTo = cachedSkillMirrors.find(
+        (mirror) => mirror.enabled === true && mirror.publish === true,
+      )
       const skillTarget =
-        cachedSkillMirror?.enabled === true
-          ? targetById(cachedS3, cachedSkillMirror.connectionId)
-          : undefined
-      const mirrorPrefix = cachedSkillMirror?.prefix
+        publishTo === undefined ? undefined : targetById(cachedS3, publishTo.connectionId)
+      const mirrorPrefix = publishTo?.prefix
       combined.register(
         createWriteSkillTool({
           ...context,
@@ -5862,10 +5885,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       type: 's3',
       connections,
       problems: cachedS3.problems,
-      ...(config.s3?.skills !== undefined ? { skills: config.s3.skills } : {}),
-      ...(config.s3?.tools !== undefined ? { tools: config.s3.tools } : {}),
-      ...(mirroredSkillsDir !== undefined ? { skillsFolder: mirroredSkillsDir } : {}),
-      ...(mirroredToolsDir !== undefined ? { toolsFolder: mirroredToolsDir } : {}),
+      skills: config.s3?.skills ?? [],
+      tools: config.s3?.tools ?? [],
+      skillsFolders: mirroredSkillsDirs,
+      toolsFolders: mirroredToolsDirs,
       ...(lastSync.skills !== undefined ? { lastSkillsSync: lastSync.skills } : {}),
       ...(lastSync.tools !== undefined ? { lastToolsSync: lastSync.tools } : {}),
     })
@@ -5944,40 +5967,63 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     const s3 = { ...(config.s3 ?? {}) }
     s3.connections = (s3.connections ?? []).filter((connection) => connection.id !== id)
-    // A mirror pointing at a connection that is gone would silently stop working.
-    if (s3.skills?.connectionId === id) delete s3.skills
-    if (s3.tools?.connectionId === id) delete s3.tools
+    /*
+     * Folders pointing at a connection that is gone are dropped, not left behind.
+     *
+     * One kept would silently stop working — and worse, its already-synced files stay on disk and
+     * keep being loaded, so the skills would still be there with nothing anywhere to say where
+     * they came from or why they had stopped updating.
+     */
+    s3.skills = (s3.skills ?? []).filter((mirror) => mirror.connectionId !== id)
+    s3.tools = (s3.tools ?? []).filter((mirror) => mirror.connectionId !== id)
+    if (s3.skills.length === 0) delete s3.skills
+    if (s3.tools.length === 0) delete s3.tools
 
     await configManager.save('user', { s3 } as never)
     await loadSettings()
     await postS3()
   }
 
-  async function handleSaveS3Mirror(
+  /**
+   * Replaces the whole list of folders for one kind.
+   *
+   * The whole list rather than one entry, because the panel edits it as a list and sending a
+   * single row back would need an index the two sides would have to agree about — which is one
+   * more thing to drift. The list is short and the message is cheap.
+   */
+  async function handleSaveS3Mirrors(
     kind: 'skills' | 'tools',
-    connectionId: string,
-    prefix: string | undefined,
-    enabled: boolean,
+    mirrors: {
+      connectionId: string
+      prefix?: string | undefined
+      enabled?: boolean | undefined
+      publish?: boolean | undefined
+    }[],
   ): Promise<void> {
     const { config } = await configManager.load()
     const s3 = { ...(config.s3 ?? {}) }
 
-    if (connectionId.trim().length === 0) delete s3[kind]
-    else {
-      s3[kind] = {
-        connectionId: connectionId.trim(),
-        ...(prefix !== undefined && prefix.trim().length > 0 ? { prefix: prefix.trim() } : {}),
-        enabled,
-      }
-    }
+    const cleaned = mirrors
+      .filter((mirror) => mirror.connectionId.trim().length > 0)
+      .map((mirror) => ({
+        connectionId: mirror.connectionId.trim(),
+        ...(mirror.prefix !== undefined && mirror.prefix.trim().length > 0
+          ? { prefix: mirror.prefix.trim() }
+          : {}),
+        ...(mirror.enabled === true ? { enabled: true } : {}),
+        ...(mirror.publish === true ? { publish: true } : {}),
+      }))
+
+    if (cleaned.length === 0) delete s3[kind]
+    else s3[kind] = cleaned
 
     await configManager.save('user', { s3 } as never)
     await loadSettings()
     /*
-     * Fetched straight away when switched on. Waiting for the next panel open to find out whether
-     * it works is the sort of delay that reads as the setting having done nothing at all.
+     * Fetched straight away. Waiting for the next panel open to find out whether a folder works
+     * is the sort of delay that reads as the setting having done nothing at all.
      */
-    if (enabled && connectionId.trim().length > 0) await handleSyncS3(kind)
+    if (cleaned.some((mirror) => mirror.enabled === true)) await handleSyncS3(kind)
     else await postS3()
   }
 
@@ -5989,54 +6035,64 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function handleSyncS3(kind: 'skills' | 'tools'): Promise<void> {
     const { config } = await configManager.load()
-    const mirror = config.s3?.[kind]
-    if (mirror === undefined) {
+    const mirrors = (config.s3?.[kind] ?? []).filter((mirror) => mirror.enabled === true)
+    if (mirrors.length === 0) {
       lastSync = { ...lastSync, [kind]: 'No bucket folder is configured.' }
       await postS3()
       return
     }
 
-    const target = targetById(cachedS3, mirror.connectionId)
-    if (target === undefined) {
-      lastSync = {
-        ...lastSync,
-        [kind]: 'That connection is not usable - check its key in the list above.',
+    /*
+     * Every folder is attempted, and one that fails does not stop the rest.
+     *
+     * Somebody with two sources and one stale key should still get the other — the same rule
+     * `resolveS3` follows for connections, for the same reason: a partial answer is useful and a
+     * blanket failure is not.
+     */
+    const lines: string[] = []
+    for (const mirror of mirrors) {
+      const target = targetById(cachedS3, mirror.connectionId)
+      const where = `${mirror.connectionId}/${mirror.prefix ?? ''}`
+      if (target === undefined) {
+        lines.push(`${where}: connection unusable - check its key above`)
+        continue
       }
-      await postS3()
-      return
+
+      const localDir = mirrorFolder({
+        storageDir,
+        connectionId: mirror.connectionId,
+        kind,
+        ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+      })
+
+      try {
+        const result = await syncFromS3({
+          target,
+          ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+          localDir,
+          fs: new NodeFileSystem(),
+          extensions: kind === 'skills' ? ['.md'] : ['.py'],
+        })
+        const parts = [
+          `${String(result.written.length)} updated`,
+          `${String(result.unchanged)} unchanged`,
+        ]
+        if (result.failed.length > 0) parts.push(`${String(result.failed.length)} failed`)
+        lines.push(`${target.label}${mirror.prefix === undefined ? '' : `/${mirror.prefix}`}: ${parts.join(', ')}`)
+        for (const failure of result.failed) {
+          logger.warn(`s3 ${kind}: ${failure.key}`, failure.problem)
+        }
+      } catch (error) {
+        lines.push(`${target.label}: ${error instanceof Error ? error.message : String(error)}`)
+      }
     }
 
-    const localDir = mirrorFolder({
-      storageDir,
-      connectionId: mirror.connectionId,
-      kind,
-      ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
-    })
-    if (kind === 'tools') mirroredToolsDir = localDir
+    lastSync = { ...lastSync, [kind]: `${new Date().toLocaleTimeString()} - ${lines.join('; ')}` }
 
-    try {
-      const result = await syncFromS3({
-        target,
-        ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
-        localDir,
-        fs: new NodeFileSystem(),
-        extensions: kind === 'skills' ? ['.md'] : ['.py'],
-      })
-      const parts = [
-        `${String(result.written.length)} updated`,
-        `${String(result.unchanged)} unchanged`,
-      ]
-      if (result.failed.length > 0) parts.push(`${String(result.failed.length)} failed`)
-      lastSync = { ...lastSync, [kind]: `${new Date().toLocaleTimeString()} - ${parts.join(', ')}` }
-      for (const failure of result.failed) logger.warn(`s3 ${kind}: ${failure.key}`, failure.problem)
-
-      // The folder is in the search path, so what was just written has to be picked up.
-      if (kind === 'skills') {
-        await refreshSkills()
-        postSkills()
-      }
-    } catch (error) {
-      lastSync = { ...lastSync, [kind]: error instanceof Error ? error.message : String(error) }
+    // The folders are in the search path, so what was just written has to be picked up.
+    if (kind === 'skills') {
+      await refreshSkills()
+      postSkills()
     }
     await postS3()
   }
@@ -8905,11 +8961,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
     } else if (message.type === 'deleteS3Connection') {
       reportFailure('handleDeleteS3Connection', handleDeleteS3Connection(message.id))
-    } else if (message.type === 'saveS3Mirror') {
-      reportFailure(
-        'handleSaveS3Mirror',
-        handleSaveS3Mirror(message.kind, message.connectionId, message.prefix, message.enabled),
-      )
+    } else if (message.type === 'saveS3Mirrors') {
+      reportFailure('handleSaveS3Mirrors', handleSaveS3Mirrors(message.kind, message.mirrors))
     } else if (message.type === 'syncS3') {
       reportFailure('handleSyncS3', handleSyncS3(message.kind))
     } else if (message.type === 'saveSkillsAlias') {

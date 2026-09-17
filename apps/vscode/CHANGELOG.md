@@ -1,5 +1,34 @@
 # light-code-vscode
 
+## 0.93.0
+
+### Minor Changes
+
+- Several bucket folders, not one
+
+  Asked for directly: a bucket folder should work the way "Also read skills from" already does. So
+  both skills and Python tools take a **list** of bucket folders rather than a single one, added and
+  removed in the panel, read in the order shown.
+
+  That maps onto the split the local folders have had all along — any number of places skills are
+  read from, and one place new ones are saved. **At most one folder can be the publish target**, and
+  ticking it unticks the rest, because two folders both receiving new skills makes "where did that
+  one go" unanswerable. Python tools have no publish target at all: a tool is written here and
+  approved here.
+
+  Each folder mirrors to its own place on disk, keyed by connection _and_ prefix, so two sources
+  never write over each other — which would otherwise leave only the skills of whichever synced last,
+  silently.
+
+  A sync now attempts every folder and reports each on its own line. One with a stale key does not
+  stop the others: somebody with two sources and one problem should still get the working one, which
+  is the rule `resolveS3` already follows for connections.
+
+  Deleting a connection drops every folder pointing at it, rather than leaving one behind. A folder
+  left would not merely stop working — its already-synced files stay on disk and keep being loaded,
+  so the skills would still be there with nothing to say where they came from or why they had stopped
+  changing.
+
 ## 0.92.0
 
 ### Minor Changes

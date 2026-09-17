@@ -37,6 +37,8 @@ export interface S3Mirror {
   connectionId: string
   prefix?: string | undefined
   enabled?: boolean | undefined
+  /** New skills are also copied to this one. At most one folder carries it. */
+  publish?: boolean | undefined
 }
 
 export interface S3SectionProps {
@@ -44,9 +46,10 @@ export interface S3SectionProps {
   problems: { label: string; problem: string }[]
   /** Which mirror this instance edits. The Skills tab shows `skills`, the Python tab `tools`. */
   kind: 'skills' | 'tools'
-  mirror?: S3Mirror | undefined
-  /** Where the files land, stated rather than left to be guessed. */
-  folder?: string | undefined
+  /** Bucket folders read from, in order. Several is the ordinary case, not a special one. */
+  mirrors: S3Mirror[]
+  /** Where each lands, stated rather than left to be guessed. */
+  folders: string[]
   lastSync?: string | undefined
   onSaveConnection: (
     connection: {
@@ -64,7 +67,7 @@ export interface S3SectionProps {
     sessionToken: string,
   ) => void
   onDeleteConnection: (id: string) => void
-  onSaveMirror: (connectionId: string, prefix: string, enabled: boolean) => void
+  onSaveMirrors: (mirrors: S3Mirror[]) => void
   onSync: () => void
   /** Only the Skills tab offers connection management; Python just picks one. */
   manageConnections?: boolean
@@ -88,14 +91,22 @@ export function S3Section(props: S3SectionProps): ReactElement {
   const [sessionToken, setSessionToken] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | undefined>(undefined)
 
-  const [connectionId, setConnectionId] = useState(props.mirror?.connectionId ?? '')
-  const [prefix, setPrefix] = useState(props.mirror?.prefix ?? '')
-  useEffect(() => {
-    setConnectionId(props.mirror?.connectionId ?? '')
-    setPrefix(props.mirror?.prefix ?? '')
-  }, [props.mirror?.connectionId, props.mirror?.prefix])
+  /*
+   * Edited as a whole list and saved as one.
+   *
+   * Resynced from props by value rather than by reference: the array is rebuilt on every message
+   * from the host, so depending on its identity would discard whatever was half-typed each time
+   * anything unrelated arrived.
+   */
+  const saved = JSON.stringify(props.mirrors)
+  const [rows, setRows] = useState<S3Mirror[]>(props.mirrors)
+  useEffect(() => setRows(JSON.parse(saved) as S3Mirror[]), [saved])
+  const dirty = JSON.stringify(rows) !== saved
 
-  const enabled = props.mirror?.enabled === true
+  const setRow = (index: number, change: Partial<S3Mirror>): void => {
+    setRows(rows.map((row, at) => (at === index ? { ...row, ...change } : row)))
+  }
+
   const what = props.kind === 'skills' ? 'skills' : 'Python tools'
   const extension = props.kind === 'skills' ? '.md' : '.py'
 
@@ -349,56 +360,130 @@ export function S3Section(props: S3SectionProps): ReactElement {
       )}
 
       <div style={{ marginTop: 14 }}>
-        <label style={labelStyle()}>Folder holding your {what}</label>
+        <label style={labelStyle()}>Folders holding your {what}</label>
         {props.connections.length === 0 ? (
           <p style={{ margin: 0, color: colors.muted, fontSize: 12 }}>
             Add a bucket {props.manageConnections === true ? 'above' : 'in the Skills tab'} first.
           </p>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Select
-                value={connectionId}
-                onChange={setConnectionId}
-                options={[
-                  { value: '', label: 'Not used' },
-                  ...props.connections.map((connection) => ({
+            {rows.length === 0 && (
+              <p style={{ margin: '0 0 6px', color: colors.muted, fontSize: 12 }}>
+                None yet. Add a folder to read {what} from it.
+              </p>
+            )}
+            {rows.map((row, index) => (
+              <div
+                key={index}
+                style={{
+                  display: 'flex',
+                  gap: 6,
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  padding: '4px 0',
+                }}
+              >
+                <Select
+                  value={row.connectionId}
+                  onChange={(value) => setRow(index, { connectionId: value })}
+                  options={props.connections.map((connection) => ({
                     value: connection.id,
                     label: connection.label,
-                  })),
-                ]}
-              />
-              <input
-                type="text"
-                value={prefix}
-                placeholder={props.kind === 'skills' ? 'skills/' : 'tools/'}
-                spellCheck={false}
-                onChange={(event) => setPrefix(event.target.value)}
-                style={{ ...textFieldStyle(), flex: 1, minWidth: 140 }}
-              />
+                  }))}
+                />
+                <input
+                  type="text"
+                  value={row.prefix ?? ''}
+                  placeholder={props.kind === 'skills' ? 'skills/' : 'tools/'}
+                  spellCheck={false}
+                  onChange={(event) => setRow(index, { prefix: event.target.value })}
+                  style={{ ...textFieldStyle(), flex: 1, minWidth: 120 }}
+                />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={row.enabled === true}
+                    onChange={(event) => setRow(index, { enabled: event.target.checked })}
+                  />
+                  Use
+                </label>
+                {props.kind === 'skills' && (
+                  /*
+                   * At most one, enforced here rather than left to the user.
+                   *
+                   * Two folders both receiving new skills would make "where did that go"
+                   * unanswerable - so ticking one unticks the rest, which is the same shape the
+                   * local folders already have: many read from, one written to.
+                   */
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={row.publish === true}
+                      onChange={(event) =>
+                        setRows(
+                          rows.map((other, at) => ({
+                            ...other,
+                            publish: event.target.checked ? at === index : false,
+                          })),
+                        )
+                      }
+                    />
+                    Save new here
+                  </label>
+                )}
+                <button
+                  type="button"
+                  style={secondaryButtonStyle()}
+                  onClick={() => setRows(rows.filter((_, at) => at !== index))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 style={secondaryButtonStyle()}
-                onClick={() => props.onSaveMirror(connectionId, prefix, connectionId !== '')}
+                onClick={() =>
+                  setRows([
+                    ...rows,
+                    { connectionId: props.connections[0]?.id ?? '', prefix: '', enabled: true },
+                  ])
+                }
               >
-                {enabled ? 'Update' : 'Use this'}
+                Add a folder
               </button>
-              {enabled && (
+              <button
+                type="button"
+                style={primaryButtonStyle(!dirty)}
+                disabled={!dirty}
+                onClick={() => props.onSaveMirrors(rows)}
+              >
+                {dirty ? 'Save folders' : 'Saved'}
+              </button>
+              {props.mirrors.some((mirror) => mirror.enabled === true) && (
                 <button type="button" style={secondaryButtonStyle()} onClick={() => props.onSync()}>
                   Sync now
                 </button>
               )}
             </div>
             <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
-              Only {extension} files are copied. Nothing here is deleted when a file disappears from
-              the bucket, so a failed sync never takes your {what} away.
+              Only {extension} files are copied, and they are read in the order shown. Nothing here
+              is deleted when a file disappears from a bucket, so a failed sync never takes your{' '}
+              {what} away.
             </span>
           </>
         )}
 
-        {props.folder !== undefined && (
+        {props.folders.length > 0 && (
           <div style={{ marginTop: 8, fontSize: 11, color: colors.muted, wordBreak: 'break-all' }}>
-            Copied to <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>{props.folder}</code>
+            Copied to:
+            {props.folders.map((folder) => (
+              <div key={folder}>
+                <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>{folder}</code>
+              </div>
+            ))}
           </div>
         )}
         {props.lastSync !== undefined && (

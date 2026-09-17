@@ -832,6 +832,15 @@ const s3MirrorSchema = z.object({
   prefix: z.string().optional(),
   /** Off by default: reading a bucket on every panel open is somebody's money and latency. */
   enabled: z.boolean().optional(),
+  /**
+   * New skills written here are also copied up to this folder.
+   *
+   * At most one folder should carry it, and the bridge takes the first that does. The rest are
+   * read-only sources, which is the same split the local folders already have: one place new
+   * skills are saved, and any number of folders they are *also* read from. A list where every
+   * entry was writable would make "where did that skill go" unanswerable.
+   */
+  publish: z.boolean().optional(),
 })
 
 export const s3ConfigSchema = z.object({
@@ -841,8 +850,12 @@ export const s3ConfigSchema = z.object({
    *
    * Only the *files* move. They are still loaded, watched and indexed exactly as local ones are —
    * indexing stays as configured — so this names a sync, not a second kind of skill.
+   *
+   * A **list**, because it maps onto the split the local folders already have: any number of
+   * folders skills are read from, and one place new ones are saved. A bucket folder is one more
+   * source, so several of them is the ordinary case rather than a special one.
    */
-  skills: s3MirrorSchema.optional(),
+  skills: z.array(s3MirrorSchema).max(8).optional(),
   /**
    * The same for Python tools, with one difference that is not a detail.
    *
@@ -851,7 +864,7 @@ export const s3ConfigSchema = z.object({
    * and approval still happens on each one. Anybody with write access to the bucket would
    * otherwise be running code as this user on every machine that syncs.
    */
-  tools: s3MirrorSchema.optional(),
+  tools: z.array(s3MirrorSchema).max(8).optional(),
 })
 
 export type S3ConnectionConfig = z.infer<typeof s3ConnectionSchema>
