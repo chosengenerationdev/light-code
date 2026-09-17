@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { z } from 'zod'
 import { resolveToolPath } from './paths.js'
+import { describeRipgrepFailure } from './ripgrepError.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -96,7 +97,7 @@ export const listFilesTool: Tool<ListFilesParams> = {
               : '(no files found — .gitignore-excluded files are skipped; retry with includeIgnored: true)',
         }
       } catch (error) {
-        return { content: `Could not list files: ${error instanceof Error ? error.message : String(error)}`, isError: true }
+        return { content: describeRipgrepFailure(error, 'Listing files recursively'), isError: true }
       }
     }
 

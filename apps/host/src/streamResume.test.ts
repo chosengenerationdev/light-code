@@ -35,7 +35,7 @@ async function start(): Promise<string> {
     workspaceRoot: undefined,
     dataDir,
     clientDir: path.join(dataDir, 'client'),
-    ripgrepPath: undefined,
+    ripgrepPath: () => undefined,
     noToken: true,
     logSink: (line) => lines.push(line),
   })

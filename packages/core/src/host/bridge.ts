@@ -420,7 +420,7 @@ export interface ChatBridge {
 }
 
 export function wireChatBridge(services: HostServices): ChatBridge {
-  const { transport, secrets, ui, workspaceRoot, storageDir, ripgrepPath } = services
+  const { transport, secrets, ui, workspaceRoot, storageDir } = services
   const logger = new Logger({ level: 'debug', sink: services.logSink })
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
@@ -2894,9 +2894,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // that stops to wait for one would never finish.
         ...(schedule === undefined ? { requestForm } : {}),
         signal: activeAbortController.signal,
-        // Supplied by the host, not imported by core: the binary is platform-specific and
-        // lives in the VSIX, so resolving it is a host concern (§4).
-        ...(ripgrepPath !== undefined ? { ripgrepPath } : {}),
+        /*
+          * Supplied by the host, not imported by core: the binary is platform-specific and
+          * lives in the VSIX, so resolving it is a host concern (§4).
+          *
+          * Asked per turn rather than captured once, because a VS Code extension update
+          * deletes the folder the previous answer pointed into. See `HostServices`.
+          */
+        ...((): { ripgrepPath?: string } => {
+          const resolved = services.ripgrepPath()
+          return resolved !== undefined ? { ripgrepPath: resolved } : {}
+        })(),
       }
 
       /*
@@ -5928,6 +5936,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * information", and the indexer then relies on its own skip list alone.
    */
   async function ignoredFilesPredicate(): Promise<((relative: string) => boolean) | undefined> {
+    // Asked now rather than at startup: an extension update moves the binary out from
+    // under a session that is still running. See `HostServices.ripgrepPath`.
+    const ripgrepPath = services.ripgrepPath()
     if (workspaceRoot === undefined || ripgrepPath === undefined) return undefined
     try {
       const listed = await new Promise<string>((resolve, reject) => {

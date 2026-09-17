@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { z } from 'zod'
 import { resolveToolPath } from './paths.js'
+import { describeRipgrepFailure } from './ripgrepError.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -75,7 +76,7 @@ export const searchFilesTool: Tool<SearchFilesParams> = {
             : '(no matches — .gitignore-excluded files were not searched; retry with includeIgnored: true)',
       }
     } catch (error) {
-      return { content: `Search failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
+      return { content: describeRipgrepFailure(error, 'Search'), isError: true }
     }
   },
 }

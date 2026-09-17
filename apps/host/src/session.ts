@@ -283,7 +283,7 @@ export interface SessionOptions {
   workspaceRoot: string | undefined
   /** Root for all per-user data. Each principal gets a subdirectory beneath it. */
   dataDir: string
-  ripgrepPath: string | undefined
+  ripgrepPath: () => string | undefined
   logSink: (line: string) => void
   /**
    * The administrator's shared entries, read fresh so a change reaches an open session.

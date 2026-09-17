@@ -1,5 +1,29 @@
 # light-code-vscode
 
+## 0.87.1
+
+### Patch Changes
+
+- Search no longer breaks until you reload the window
+
+  Reported from real use: `search_files` failing with `rg.exe ENOENT`, intermittently, and working
+  again later.
+
+  **The path to ripgrep was resolved once at activation, with a comment saying the answer could not
+  change while running.** It can. A VS Code extension lives in a version-stamped folder, and
+  installing a newer build writes a new one, marks the old in the extensions directory's `.obsolete`
+  file and deletes it — while the extension host that resolved an absolute path into it carries on.
+  `existsSync` passed at activation, so nothing noticed until `spawn` returned ENOENT. Confirmed on a
+  real install, where five older versions were listed as obsolete and each had carried its own copy.
+  That is the "sometimes": it needs an update to land mid-session, and a reload hides the evidence.
+
+  The host is asked per turn now — the same shape as `sessionEnv` beside it — and re-resolves when
+  its answer stops existing, including from a newer install of the extension alongside it, because
+  the working binary is in a folder with a different name. A still-valid answer costs one stat.
+
+  And if it genuinely cannot be found, the message says so in those terms and names the reload that
+  fixes it, instead of `spawn rg.exe ENOENT`.
+
 ## 0.87.0
 
 ### Minor Changes

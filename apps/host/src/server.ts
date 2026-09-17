@@ -113,7 +113,7 @@ export interface ServerOptions {
   dataDir: string
   /** Directory holding the built browser bundle. */
   clientDir: string
-  ripgrepPath: string | undefined
+  ripgrepPath: () => string | undefined
   /** A Python function that fetches credentials, when one is configured. See `credentialTool.ts`. */
   credentialTool?: { interpreter: string; file: string }
   identity?: IdentityProvider

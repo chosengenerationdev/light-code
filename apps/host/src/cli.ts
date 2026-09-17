@@ -295,7 +295,10 @@ async function main(): Promise<void> {
     workspaceRoot,
     dataDir,
     clientDir: path.join(here, 'client'),
-    ripgrepPath: resolveRipgrep(),
+    // A function because `HostServices` asks per turn — see there for the extension update
+    // that made a single resolution wrong. Resolved once here and handed over as a constant:
+    // nothing moves a server's own `node_modules` under it mid-run.
+    ripgrepPath: ((resolved) => () => resolved)(resolveRipgrep()),
     ...(credentialTool !== undefined
       ? { credentialTool: { interpreter: credentialPython, file: credentialTool } }
       : {}),

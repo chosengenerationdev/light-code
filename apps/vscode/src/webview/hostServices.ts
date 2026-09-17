@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import { Logger, mentionExcludeGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
-import { resolveRipgrepPath } from '../platform/ripgrep.js'
+import { createRipgrepResolver } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
 import { WebviewTransport } from '../platform/transport.js'
 
@@ -116,9 +116,14 @@ export function createVSCodeHostServices(
     ui,
     workspaceRoot,
     storageDir: context.globalStorageUri.fsPath,
-    // Resolved once per session: the answer cannot change while running, and a missing
-    // binary should be logged once rather than on every turn.
-    ripgrepPath: resolveRipgrepPath(context.extensionPath, logger),
+    /*
+      * Asked per turn, not once. `context.extensionPath` names a version-stamped folder, and
+      * installing a newer build deletes the one this session resolved into — which surfaced as
+      * `search_files` failing with `rg.exe ENOENT` until the window was reloaded. The resolver
+      * re-resolves when its answer stops existing, and still reports a genuinely missing binary
+      * only once.
+      */
+     ripgrepPath: createRipgrepResolver(context.extensionPath, logger),
     logSink,
   }
 }

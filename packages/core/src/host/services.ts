@@ -149,14 +149,27 @@ export interface HostServices {
   /** Per-user directory for tasks, spilled tool results and the user-scope config. */
   storageDir: string
   /**
-   * Absolute path to a ripgrep binary, or undefined to degrade `search_files` and
-   * `list_files` with a clear message.
+   * Where ripgrep is **right now**, or undefined to degrade `search_files` and `list_files`
+   * with a clear message.
    *
    * Supplied by the host and never resolved here: ripgrep ships one binary per platform,
    * which is a platform concern, and a top-level import of `@vscode/ripgrep` from core once
    * shipped a VSIX that could not activate at all (§19). Core must not know it exists.
+   *
+   * ## Why this is a function, asked every turn
+   *
+   * It was a string resolved once at activation, with a comment claiming the answer could not
+   * change while running. **It can.** A VS Code extension lives in a version-stamped folder,
+   * and installing a newer build marks the old one obsolete and deletes it while the extension
+   * host keeps running — so the absolute path that existed at activation stops existing, and
+   * the next search fails with a raw `ENOENT` naming `rg.exe`. Reported from real use as
+   * intermittent, because it needs an update mid-session and a window reload cures it.
+   *
+   * So the host answers per turn and may re-resolve. Same shape and same reason as
+   * `sessionEnv` beside it: a fact the host owns, read when it is needed rather than copied
+   * once into somewhere that cannot see it change.
    */
-  ripgrepPath: string | undefined
+  ripgrepPath: () => string | undefined
   /** Appends one line to wherever this host shows diagnostics. */
   logSink: (line: string) => void
   /**
