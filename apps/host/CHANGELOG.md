@@ -1,16 +1,16 @@
 # @chosengeneration/light-code
 
-## 0.68.0
+## 0.69.0
 
 ### Minor Changes
 
-- The page can live inside JupyterLab, with nothing to configure
+- Same-origin framing is trusted, so JupyterLab needs no flag
 
-  Asked for by somebody working in JupyterLab, where the natural way to see a local app is inside the
-  lab rather than in a separate browser tab — and an iframe is how that is done. The policy said
-  `frame-ancestors 'none'`, so every attempt was refused by the browser with nothing useful to read.
+  0.68.0 added `--allow-frame-ancestor` and kept the default at `frame-ancestors 'none'`. Asked
+  straight afterwards: "can you make it not to restrict iframe loading", then "if iframe is loaded in
+  same server, make it to trust it".
 
-  **The default is `'self'` now, and the reason it is safe is that the case being refused was never
+  **The default is `'self'` now, and the reason that is safe is that the case being refused was never
   the attack.** `frame-ancestors` exists to stop clickjacking: a page you happen to visit embeds this
   one invisibly, overlays it, and collects a click that lands on an approval — "run this command",
   "write this file". The approval gate is precisely what is being protected. But a lab page at
@@ -19,21 +19,48 @@
   permits the case that was asked for and refuses every case the directive was written for: a page on
   any _other_ origin still cannot embed this one.
 
-  In a notebook cell, with no flag at all:
+  In a notebook cell, with nothing configured:
 
       from IPython.display import IFrame
       IFrame(src='/user/<you>/proxy/<port>/', width='100%', height=800)
 
-  `--allow-frame-ancestor <origin>` remains, for embedding from a **different** origin — a dashboard,
-  a portal. That is a real relaxation, so it is declared rather than inferred and never a wildcard,
-  the same rule `--allow-host` follows.
+  `--allow-frame-ancestor <origin>` still does what 0.68.0 documented, and is now only needed to embed
+  this page from a **different** origin — a dashboard, a portal. That is a real relaxation, so it stays
+  declared rather than inferred, and never a wildcard.
+
+  Verified against a running server: the default sends `frame-ancestors 'self'`, a named origin is
+  appended beside it, no wildcard appears, no `X-Frame-Options` is sent, and every other directive is
+  unchanged.
+
+## 0.68.0
+
+### Minor Changes
+
+- `--allow-frame-ancestor`, so the page can live inside JupyterLab
+
+  Asked for by somebody working in JupyterLab, where the natural way to see a local app is inside the
+  lab rather than in a separate browser tab — and an iframe is how that is done. The policy said
+  `frame-ancestors 'none'`, so every attempt was refused by the browser with nothing useful to read.
+
+  **It stays `'none'` unless an origin is named**, and that is deliberate rather than cautious.
+  `frame-ancestors` is what stops clickjacking: a hostile page embedding this one, overlaying it, and
+  collecting a click that lands on an approval. The approval gate is precisely the thing being
+  protected, so the relaxation is _named origins only_ — never a wildcard, never inferred. Declared,
+  not guessed, exactly as `--allow-host` is.
+
+      light-code --allow-frame-ancestor https://your-jupyterhub
+
+  Then in a notebook cell:
+
+      from IPython.display import IFrame
+      IFrame(src='/user/<you>/proxy/<port>/', width='100%', height=800)
 
   The policy is set once as the server starts rather than passed per response, because
   `securityHeaders()` is called from five places — three of them rejection paths with no access to the
   server's options — and a policy that is stricter on some responses than others is not a policy.
 
-  Verified against a running server: the header allows this origin and any named one, refuses a
-  foreign embedder, and every other directive is unchanged.
+  Verified against a running server: the header carries the named origin and every other directive is
+  unchanged.
 
 ## 0.67.0
 
