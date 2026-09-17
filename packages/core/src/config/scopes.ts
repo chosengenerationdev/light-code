@@ -27,6 +27,15 @@ export const USER_SCOPE_ONLY_KEYS = [
   // Per-project settings live here, keyed by path. Same reasoning as `approvals` exactly: a repo
   // that could write its own entry would choose its own vector store and model for itself.
   'workspaces',
+  /*
+   * Holds a bucket, an endpoint and the reference to a key that can read and write it.
+   *
+   * The sharpest kind of entry on this list: a repository able to set it would point the upload
+   * tool at a bucket of its choosing, and everything copied "into S3" would go to somebody else —
+   * with the user watching a tool succeed. Same shape as `embedder`, with whatever the user
+   * uploads as the payload.
+   */
+  's3',
   // `expert.path` names an executable. A workspace able to set it would run a program of
   // its choosing as soon as the panel opened — the same threat as `python.uvPath`.
   // `expert.enabled` is here too, so a repo cannot switch on paid API calls by itself.

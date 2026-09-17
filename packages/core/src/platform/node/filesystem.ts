@@ -30,6 +30,11 @@ export class NodeFileSystem implements FileSystem {
     await fs.writeFile(path, contents, 'utf8')
   }
 
+  /** The counterpart of `readBytes`, and deliberately as bare as `writeFile` beside it. */
+  async writeBytes(path: string, contents: Uint8Array): Promise<void> {
+    await fs.writeFile(path, contents)
+  }
+
   async stat(path: string): Promise<FileStat> {
     const stat = await fs.lstat(path)
     return {

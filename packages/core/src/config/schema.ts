@@ -789,6 +789,59 @@ export const mailIndexConfigSchema = z
   .partial()
 export type MailIndexConfig = z.infer<typeof mailIndexConfigSchema>
 
+/**
+ * One S3 bucket this install can reach.
+ *
+ * The secret is a **reference** into secret storage, never a literal (§15) — the same shape every
+ * other credential here uses, so an exported config carries no keys by construction rather than by
+ * somebody remembering to strip them.
+ */
+export const s3ConnectionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  bucket: z.string().min(1),
+  region: z.string().min(1),
+  accessKeyId: z.string().min(1),
+  secretAccessKeyRef: z.string().min(1),
+  /** Only for temporary credentials. */
+  sessionTokenRef: z.string().optional(),
+  /** Absent means the ordinary AWS endpoint for the region. */
+  endpoint: z.string().url().optional(),
+  /** `host/bucket/key` instead of `bucket.host/key`, which internal deployments usually need. */
+  pathStyle: z.boolean().optional(),
+  /**
+   * Everything is confined to this prefix, when one is set.
+   *
+   * Not a convenience. It is the only thing bounding what the tools can reach in a bucket that may
+   * hold far more than this project, and it is enforced on every key rather than trusted to the
+   * model — `confine()`'s argument applied to a bucket instead of a disk.
+   */
+  prefix: z.string().optional(),
+  /** Refuses every write, so a bucket can be attached for reading with nothing to go wrong. */
+  readOnly: z.boolean().optional(),
+})
+
+export const s3ConfigSchema = z.object({
+  connections: z.array(s3ConnectionSchema).max(20).optional(),
+  /**
+   * Where skills are kept, when they live in a bucket rather than on this disk.
+   *
+   * Only the *files* move. They are still loaded, watched and indexed exactly as local ones are —
+   * indexing stays as configured — so this names a sync, not a second kind of skill.
+   */
+  skills: z
+    .object({
+      connectionId: z.string().min(1),
+      prefix: z.string().optional(),
+      /** Off by default: reading a bucket on every panel open is somebody's money and latency. */
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+})
+
+export type S3ConnectionConfig = z.infer<typeof s3ConnectionSchema>
+export type S3Config = z.infer<typeof s3ConfigSchema>
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
@@ -811,6 +864,8 @@ export const configSchema = z
      * embedder would exfiltrate whatever gets indexed — sharper than the existing entries,
      * because the payload is source code.
      */
+    /** User-scope only (invariant 5): it holds a bucket and a key that can write to it. */
+    s3: s3ConfigSchema,
     vectorStores: z.record(z.string(), vectorStoreSchema),
     activeVectorStoreId: z.string(),
     embedder: embedderConfigSchema,

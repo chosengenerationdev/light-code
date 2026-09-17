@@ -26,6 +26,9 @@ class RealFileSystem implements FileSystem {
   async writeFile(target: string, contents: string): Promise<void> {
     await fs.writeFile(target, contents, 'utf8')
   }
+  async writeBytes(target: string, contents: Uint8Array): Promise<void> {
+    await fs.writeFile(target, contents)
+  }
   async stat(target: string): Promise<FileStat> {
     const stats = await fs.stat(target)
     return {

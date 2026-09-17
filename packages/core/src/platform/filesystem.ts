@@ -41,6 +41,14 @@ export interface FileSystem {
    */
   readBytesSlice(path: string, start: number, end: number): Promise<Buffer>
   writeFile(path: string, contents: string): Promise<void>
+  /**
+   * Raw bytes, the counterpart of `readBytes`.
+   *
+   * Added for S3 downloads: a PDF or a parquet file written through `writeFile` is decoded as
+   * UTF-8 on the way out and arrives corrupted, with nothing to indicate it — the same reasoning
+   * that made `readBytes` its own method rather than an encoding argument.
+   */
+  writeBytes(path: string, contents: Uint8Array): Promise<void>
   stat(path: string): Promise<FileStat>
   readdir(path: string): Promise<DirEntry[]>
   exists(path: string): Promise<boolean>

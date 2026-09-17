@@ -34,6 +34,15 @@ export interface HttpRequestOptions {
   method?: string
   headers?: Record<string, string>
   body?: string
+  /**
+   * A body that is bytes rather than text. Wins over `body` when both are set.
+   *
+   * Separate from `body` rather than widening it, deliberately. A string body is encoded as UTF-8,
+   * which silently corrupts anything that is not text — a PNG round-tripped through a string is a
+   * file nobody can open, and nothing reports it. Making binary its own field means a caller
+   * chooses it on purpose, and it left every existing caller and test fake untouched.
+   */
+  bodyBytes?: Uint8Array
   signal?: AbortSignal
   tls?: TlsOptions
 }
@@ -174,6 +183,9 @@ export class FetchHttpClient implements HttpClient {
     if (options.method !== undefined) init.method = options.method
     if (options.headers !== undefined) init.headers = options.headers
     if (options.body !== undefined) init.body = options.body
+    // After `body`, so bytes win: the two are never both meant, and silently sending the text one
+    // would be the corruption this field exists to avoid.
+    if (options.bodyBytes !== undefined) init.body = options.bodyBytes
     if (options.signal !== undefined) init.signal = options.signal
 
     /*
