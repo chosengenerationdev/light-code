@@ -1,5 +1,5 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
-import { CUSTOM_ROLE_LIMIT } from '@light-code/core/browser'
+import { CUSTOM_ROLE_LIMIT, skillAliases } from '@light-code/core/browser'
 import type { CheckpointView, ProbeTarget } from '@light-code/core/browser'
 import {
   DEFAULT_MODE_ID,
@@ -1053,7 +1053,7 @@ export function App(props: AppProps): ReactElement {
         dimensions: number,
         indexName: string,
         indexPrefix: string,
-        indexAlias: string,
+        indexAliases: string[],
       ) => {
         setError(undefined)
         props.transport.post({
@@ -1061,9 +1061,17 @@ export function App(props: AppProps): ReactElement {
           profileId,
           model,
           dimensions,
-          ...(indexName.length > 0 ? { indexName } : {}),
-          ...(indexPrefix.length > 0 ? { indexPrefix } : {}),
-          ...(indexAlias.length > 0 ? { indexAlias } : {}),
+          /*
+           * Sent whatever their value, including empty.
+           *
+           * They were conditional spreads, which slip past excess-property checking — so a field
+           * renamed in the protocol kept compiling while going nowhere. And an empty string here
+           * is a real answer: somebody cleared the box, and the host deletes the key. Omitting it
+           * would mean "unchanged" and the box would spring back on the next load.
+           */
+          indexName,
+          indexPrefix,
+          indexAliases,
         } satisfies UiToHostMessage)
       },
       onAttachTeamAlias: () => {
@@ -1604,11 +1612,13 @@ export function App(props: AppProps): ReactElement {
             search={searchProps}
             skills={{
               team: {
-                alias: embedder?.skillsAlias,
-                onSaveAlias: (alias: string) =>
+                // Both spellings, merged by the one function that owns them — a config written
+                // before the list existed still reads back as a one-name list.
+                aliases: skillAliases({ embedder } as never),
+                onSaveAliases: (aliases: string[]) =>
                   props.transport.post({
                     type: 'saveSkillsAlias',
-                    alias,
+                    aliases,
                   } satisfies UiToHostMessage),
                 onPublish: () => {
                   setTeamSkillsResult(undefined)

@@ -1,5 +1,42 @@
 # @chosengeneration/light-code
 
+## 0.71.0
+
+### Minor Changes
+
+- Several aliases, set from the panel instead of by hand
+
+  The schema has taken a list of aliases for a while — an index can belong to a squad, a department
+  and everyone at once, and each is a level of sharing — but there was no way to enter one. Both
+  panels had a single box. A mechanism nothing can reach is the same as absent, which this project
+  has now shipped four times.
+
+  - **Settings → Search** takes a list of codebase aliases, comma-separated, most specific first.
+  - **Skills → Team** takes the same for the shared skills pool.
+  - The first is the one a search uses when it is not told which, so the order is an answer and is
+    kept as typed rather than sorted.
+  - Configs written before this show up as a one-name list; `rag/aliases.ts` merges both spellings
+    and is the only place that knows how they fit together, so the panel and the search cannot
+    disagree about which circle is the default.
+
+  **Two bugs found while wiring it, both pre-existing:**
+
+  Saving the embedder **erased the shared skills alias.** `ConfigManager` merges a patch shallowly,
+  so naming `embedder` replaces the whole block — and the handler rebuilt it from the indexing
+  panel's own fields, silently dropping what the Skills tab had written there. Proved against a real
+  ConfigManager before fixing. The block is carried forward now, and clearing a field is said
+  explicitly rather than expressed as an omission, because those two stopped being the same thing.
+
+  The alias reached the host through a **conditional spread**, which slips past excess-property
+  checking — so a field renamed in the protocol kept compiling while going nowhere.
+
+  **And a line in the MCP server log saying what is about to be sent** — the URL, the protocol, and
+  the header **names**, never their values. Written for a report this could not otherwise answer: a
+  remote server replying "double check your token or domain" while the configuration plainly held a
+  token. Four different fixes hide behind that one message — the header was never sent, sent empty,
+  sent under a name the server does not read, or sent over the wrong protocol — and nothing told
+  them apart from outside. The line is safe to paste into a bug report.
+
 ## 0.70.0
 
 ### Minor Changes

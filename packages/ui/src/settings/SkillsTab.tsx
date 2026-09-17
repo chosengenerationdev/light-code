@@ -1,4 +1,4 @@
-import type { ProbeTarget } from '@light-code/core/browser'
+import { formatAliases, parseAliases, type ProbeTarget } from '@light-code/core/browser'
 import { IndexProbe } from './IndexProbe.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { useEffect, useState, type ReactElement } from 'react'
@@ -47,8 +47,15 @@ export interface SkillsTabProps {
    * to and the section explains that rather than offering a button that cannot work.
    */
   team: {
-    alias: string | undefined
-    onSaveAlias: (alias: string) => void
+    /**
+     * Every name the pool answers to, most specific first.
+     *
+     * A list because one collection can be a squad's and the whole department's at once, and each
+     * is a level of sharing. The first is what a search defaults to, so the order is an answer and
+     * is kept as typed rather than sorted.
+     */
+    aliases?: string[]
+    onSaveAliases: (aliases: string[]) => void
     onPublish: () => void
     onClear: () => void
     onStop: () => void
@@ -77,9 +84,20 @@ export interface SkillsTabProps {
  * taught your assistant to colleagues is a decision, and one worth making deliberately.
  */
 function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
-  const [alias, setAlias] = useState(props.alias ?? '')
+  /*
+   * Read once, with an absent list meaning none.
+   *
+   * A fresh install has no aliases at all, and that is the state `SettingsNavigation.test.tsx`
+   * renders every tab in — the path this component has to survive before anybody has configured
+   * anything. Derived here so no later line has to remember.
+   */
+  const aliases = props.aliases ?? []
+  const saved = formatAliases(aliases)
+  const [alias, setAlias] = useState(saved)
   const [confirmingClear, setConfirmingClear] = useState(false)
-  useEffect(() => setAlias(props.alias ?? ''), [props.alias])
+  useEffect(() => setAlias(saved), [saved])
+  // Compared as parsed lists, so re-typing the same names in a different spacing is not an edit.
+  const unsaved = formatAliases(parseAliases(alias)) !== saved
 
   return (
     <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
@@ -92,17 +110,21 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
       </p>
 
       <label htmlFor="lc-skills-alias" style={labelStyle()}>
-        Shared skills alias <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
+        Shared skills aliases <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
       </label>
       <input
         id="lc-skills-alias"
         type="text"
         value={alias}
         spellCheck={false}
-        placeholder="e.g. my-team-skills"
+        placeholder="e.g. my-team-skills, platform-skills"
         onChange={(event) => setAlias(event.target.value)}
         style={textFieldStyle()}
       />
+      <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
+        Separate several with commas, most specific first &mdash; a squad, a department, everyone.
+        The first is the one a search uses when it is not told which. Up to 8.
+      </span>
 
       {/*
         Two separate acts, and the labels say which is which.
@@ -115,16 +137,16 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={alias.trim() === (props.alias ?? '')}
-          onClick={() => props.onSaveAlias(alias.trim())}
+          disabled={!unsaved}
+          onClick={() => props.onSaveAliases(parseAliases(alias))}
         >
-          {alias.trim() === (props.alias ?? '') ? '1. Name saved' : '1. Save this name'}
+          {unsaved ? '1. Save these names' : '1. Names saved'}
         </button>
         <button
           type="button"
-          style={primaryButtonStyle(props.alias === undefined)}
-          disabled={props.alias === undefined || props.publishing === true}
-          title={props.alias === undefined ? 'Save the name first' : 'Embeds your skills and writes them to the shared collection'}
+          style={primaryButtonStyle(aliases.length === 0)}
+          disabled={aliases.length === 0 || props.publishing === true}
+          title={aliases.length === 0 ? 'Save the name first' : 'Embeds your skills and writes them to the shared collection'}
           onClick={props.onPublish}
         >
           {props.publishing === true ? 'Sending…' : '2. Send my skills to the team'}
@@ -160,7 +182,7 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
             <button
               type="button"
               style={secondaryButtonStyle()}
-              disabled={props.alias === undefined || props.publishing === true}
+              disabled={aliases.length === 0 || props.publishing === true}
               onClick={() => setConfirmingClear(true)}
             >
               Remove mine from the pool

@@ -664,7 +664,13 @@ export type UiToHostMessage =
       storeId?: string
     }
   /** Names the pool. Empty removes it, which turns team skill search back off. */
-  | { type: 'saveSkillsAlias'; alias: string }
+  /**
+   * Names the shared skills pool answers to, most specific first. Empty removes them.
+   *
+   * A list for the same reason the codebase one is: a skill pool can be a squad's and the whole
+   * department's at once, and which one `search_team_skills` defaults to is the first.
+   */
+  | { type: 'saveSkillsAlias'; aliases: string[] }
   /**
    * Rebuilds the documentation index. `kind` narrows it to tools or skills only.
    *
@@ -711,8 +717,15 @@ export type UiToHostMessage =
       indexName?: string
       /** Front of every derived index name. Empty restores the default. */
       indexPrefix?: string
-      /** Shared name covering the whole team's indexes. Empty removes it. */
-      indexAlias?: string
+      /**
+       * Shared names covering the whole team's indexes, most specific first. Empty removes them.
+       *
+       * A list because an index may belong to several circles at once — a squad, a department,
+       * everyone — and each is a level of sharing. The first is what `scope: "team"` means when
+       * the assistant does not name one, so the order is the user's answer to "which is the
+       * ordinary one" and is preserved rather than sorted.
+       */
+      indexAliases?: string[]
     }
   /**
    * Lists models for an already-saved profile.
@@ -1398,6 +1411,15 @@ export type HostToUiMessage =
       indexAlias?: string
       /** The same for skills, which is a separate decision from sharing code. */
       skillsAlias?: string
+      /**
+       * The further names, beyond the two above.
+       *
+       * Both spellings travel, because the panel shows one merged list and cannot merge what it
+       * was not sent. `rag/aliases.ts` owns how they fit together — nothing else should combine
+       * them, or the panel and the search will disagree about which circle is the default.
+       */
+      indexAliases?: string[]
+      skillsAliases?: string[]
       indexedFiles: number
     }
   /** State of the Claude CLI expert: whether it is on, and whether it can actually run. */

@@ -1,4 +1,5 @@
 import type { IndexProgress, IndexResult, ProfileSummary } from '@light-code/core/browser'
+import { codebaseAliases, formatAliases, parseAliases } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
@@ -11,10 +12,20 @@ export interface EmbedderState {
   indexNameIsCustom?: boolean
   indexPrefix?: string
   defaultIndexPrefix?: string
-  /** A name pointing at every team member's index, so they can be searched together. */
+  /**
+   * A name pointing at every team member's index, so they can be searched together.
+   *
+   * Still singular here because this mirrors what the host sends, and the host writes both this
+   * and `indexAliases` — `codebaseAliases` merges them into the list the field shows. Older
+   * configs have only this one.
+   */
   indexAlias?: string
+  /** The further names, beyond `indexAlias`. See `rag/aliases.ts` for why there are two keys. */
+  indexAliases?: string[]
   /** The same for skills. Shown in the Skills tab rather than here. */
   skillsAlias?: string
+  /** The further skills names, carried so the Skills tab can merge them. */
+  skillsAliases?: string[]
   indexedFiles: number
 }
 
@@ -38,7 +49,7 @@ export interface IndexingSectionProps {
     dimensions: number,
     indexName: string,
     indexPrefix: string,
-    indexAlias: string,
+    indexAliases: string[],
   ) => void
   onStartIndexing: () => void
   /** Empties the index and forgets the manifest, so the next run rebuilds from nothing. */
@@ -67,6 +78,9 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
   const [indexName, setIndexName] = useState('')
   const [indexPrefix, setIndexPrefix] = useState('')
   const [indexAlias, setIndexAlias] = useState('')
+  // Both spellings, through the one function that owns them, so a config written before the
+  // list existed shows up as a one-name list rather than as nothing.
+  const savedAliases = formatAliases(codebaseAliases({ embedder: props.embedder } as never))
   const [confirming, setConfirming] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -79,7 +93,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
     // Only a *chosen* name populates the field; a derived one stays as the placeholder.
     setIndexName(props.embedder?.indexNameIsCustom === true ? (props.embedder.indexName ?? '') : '')
     setIndexPrefix(props.embedder?.indexPrefix ?? '')
-    setIndexAlias(props.embedder?.indexAlias ?? '')
+    setIndexAlias(savedAliases)
   }, [props.embedder])
 
   /**
@@ -88,7 +102,8 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
    * The distinction matters because attaching reads config, not this form. Anything that acts on
    * the *saved* value has to say so, or it reads as the button being broken.
    */
-  const aliasUnsaved = indexAlias.trim() !== (props.embedder?.indexAlias ?? '').trim()
+  // Compared as parsed lists, so re-spacing the same names is not an unsaved edit.
+  const aliasUnsaved = formatAliases(parseAliases(indexAlias)) !== savedAliases
 
   /*
    * Fetched on selection rather than behind a button. The user has already told us which
@@ -230,7 +245,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
             type="text"
             value={indexAlias}
             spellCheck={false}
-            placeholder="e.g. my-team-code"
+            placeholder="e.g. my-team-code, platform-code"
             onChange={(event) => setIndexAlias(event.target.value)}
             style={{ ...textFieldStyle(), flex: 1 }}
           />
@@ -246,7 +261,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
                 parsedDimensions,
                 indexName.trim(),
                 indexPrefix.trim(),
-                indexAlias.trim(),
+                parseAliases(indexAlias),
               )
             }
           >
@@ -254,7 +269,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           </button>
         </div>
         <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-          One name pointing at every teammate&rsquo;s index, so <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>search_codebase</code>{' '}
+          Names pointing at every teammate&rsquo;s index, so <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>search_codebase</code>{' '}
           can be asked to look across the team. Everyone still writes to their own index; set the
           same alias on each machine. Results from someone else are marked as not being in your
           workspace, so the assistant does not try to open them. <strong>OpenSearch only</strong> &mdash;
@@ -349,7 +364,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           type="button"
           style={secondaryButtonStyle()}
           disabled={!configured}
-          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim(), indexPrefix.trim(), indexAlias.trim())}
+          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim(), indexPrefix.trim(), parseAliases(indexAlias))}
         >
           Save embedder
         </button>

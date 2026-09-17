@@ -47,7 +47,7 @@ import {
   type CustomRoleDefinition,
 } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
-import { codebaseAliases, skillAliases } from '../rag/aliases.js'
+import { aliasFields, codebaseAliases, skillAliases } from '../rag/aliases.js'
 import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
 import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
@@ -5722,13 +5722,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * while the model and width are set from Search, and writing the whole block from either
    * would have one tab silently erasing the other's fields.
    */
-  async function handleSaveSkillsAlias(alias: string): Promise<void> {
+  async function handleSaveSkillsAlias(aliases: string[]): Promise<void> {
     try {
       const { config } = await configManager.load()
-      const trimmed = alias.trim()
       const embedder = { ...(config.embedder ?? {}) }
-      if (trimmed.length > 0) embedder.skillsAlias = trimmed
+      /*
+       * Split by the one function that also merges them back, so the two spellings cannot
+       * disagree about what was saved. See `rag/aliases.ts`.
+       */
+      const { primary, rest } = aliasFields(aliases)
+      if (primary !== undefined) embedder.skillsAlias = primary
       else delete embedder.skillsAlias
+      if (rest !== undefined) embedder.skillsAliases = rest
+      else delete embedder.skillsAliases
       await configManager.save('user', { embedder })
       const { config: next } = await configManager.load()
       await postEmbedder(next)
@@ -6963,6 +6969,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(config.embedder?.indexAlias !== undefined
         ? { indexAlias: config.embedder.indexAlias }
         : {}),
+      /*
+       * Both spellings of both, because the panel shows the merged list and cannot merge what it
+       * was never sent. The singular halves stay for older configs and older builds; the panel
+       * runs them through `codebaseAliases`/`skillAliases`, which is the one place that knows how
+       * the two fit together.
+       */
+      ...(config.embedder?.indexAliases !== undefined
+        ? { indexAliases: config.embedder.indexAliases }
+        : {}),
+      ...(config.embedder?.skillsAliases !== undefined
+        ? { skillsAliases: config.embedder.skillsAliases }
+        : {}),
       ...(config.embedder?.skillsAlias !== undefined
         ? { skillsAlias: config.embedder.skillsAlias }
         : {}),
@@ -6977,28 +6995,59 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     dimensions: number,
     indexName?: string,
     indexPrefix?: string,
-    indexAlias?: string,
+    indexAliases?: string[],
   ): Promise<void> {
     try {
-      await configManager.save('user', {
-        embedder: {
-          profileId,
-          model,
-          dimensions,
-          ...(indexName !== undefined && indexName.trim().length > 0
-            ? { indexName: indexName.trim() }
-            : {}),
-          // Absent rather than empty when cleared, so the default applies instead of a name
-          // beginning with a stray dash.
-          ...(indexPrefix !== undefined && indexPrefix.trim().length > 0
-            ? { indexPrefix: indexPrefix.trim() }
-            : {}),
-          // Same treatment: cleared means absent, which is what turns team scope back off.
-          ...(indexAlias !== undefined && indexAlias.trim().length > 0
-            ? { indexAlias: indexAlias.trim() }
-            : {}),
-        },
-      })
+      /*
+       * The block is carried forward, not rebuilt.
+       *
+       * `ConfigManager` merges a patch **shallowly**, so naming `embedder` replaces the whole
+       * block and anything absent here is deleted. The block is written from two panels — this
+       * one owns the model and the codebase aliases, the Skills tab owns the shared skills alias
+       * — so rebuilding it from this panel's fields alone silently erased the other's.
+       * `embedderSave.test.ts` pins both halves against a real ConfigManager.
+       */
+      const { config: current } = await configManager.load()
+      const embedder: Record<string, unknown> = {
+        ...(current.embedder ?? {}),
+        profileId,
+        model,
+        dimensions,
+      }
+
+      /*
+       * Three-valued, and all three have to be distinguishable.
+       *
+       * `undefined` is "this panel sent nothing about it" — a save from elsewhere in the block —
+       * and must leave the stored value alone. An empty string is somebody clearing the box,
+       * which deletes the key. Anything else is the new value.
+       *
+       * Spreading the existing block made that distinction load-bearing: before it, omitting a
+       * field deleted it for free, and a conditional spread was enough. Now an omitted field
+       * survives, so clearing has to say so.
+       */
+      const put = (key: string, value: string | undefined): void => {
+        if (value === undefined) return
+        if (value.trim().length > 0) embedder[key] = value.trim()
+        else delete embedder[key]
+      }
+
+      put('indexName', indexName)
+      // Absent rather than empty when cleared, so the default applies instead of a name
+      // beginning with a stray dash.
+      put('indexPrefix', indexPrefix)
+
+      // Cleared means absent, which is what turns team scope back off. Split by the one
+      // function that also merges them back — see `rag/aliases.ts`.
+      if (indexAliases !== undefined) {
+        const { primary, rest } = aliasFields(indexAliases)
+        if (primary !== undefined) embedder['indexAlias'] = primary
+        else delete embedder['indexAlias']
+        if (rest !== undefined) embedder['indexAliases'] = rest
+        else delete embedder['indexAliases']
+      }
+
+      await configManager.save('user', { embedder } as never)
       const { config } = await configManager.load()
       await postEmbedder(config)
       /*
@@ -8492,7 +8541,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'clearMailIndex') {
       void handleClearMailIndex(message.resync === true)
     } else if (message.type === 'saveSkillsAlias') {
-      void handleSaveSkillsAlias(message.alias)
+      void handleSaveSkillsAlias(message.aliases)
     } else if (message.type === 'cancelIndexing') {
       // No kind means "whatever is running", which is what a user pressing Stop means.
       if (message.kind === undefined) {
@@ -8510,7 +8559,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         message.dimensions,
         message.indexName,
         message.indexPrefix,
-        message.indexAlias,
+        message.indexAliases,
       )
     } else if (message.type === 'requestEmbedderModels') {
       void handleRequestEmbedderModels(message.profileId)

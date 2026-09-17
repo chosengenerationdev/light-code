@@ -146,3 +146,15 @@ export {
   type ChartType,
 } from './charts/types.js'
 export type { DatasetConfig, DatasetRecord } from './dataset/types.js'
+
+/*
+ * Alias text helpers.
+ *
+ * Deliberately through here rather than from the bare package: `packages/ui` importing a *value*
+ * from core's barrel pulls in `node:fs` and friends and breaks the webview bundle, which is what
+ * this second entry point exists to prevent. `rag/aliases.ts` imports only a type, so it is safe.
+ *
+ * They live beside the parser that reads them back, so the panel and the search cannot disagree
+ * about what "a, b" means.
+ */
+export { formatAliases, parseAliases, codebaseAliases, skillAliases, MAX_ALIASES } from './rag/aliases.js'

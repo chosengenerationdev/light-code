@@ -23,6 +23,9 @@ import type { LightCodeConfig } from '../config/schema.js'
  * configuration that lists `my-squad` before `everyone` is saying which is the ordinary one.
  */
 
+/** The most aliases one index may carry. Matches the schema's own cap. */
+export const MAX_ALIASES = 8
+
 /** Every name the codebase index answers to, most specific first, deduplicated. */
 export function codebaseAliases(config: LightCodeConfig | undefined): string[] {
   return merge(config?.embedder?.indexAlias, config?.embedder?.indexAliases)
@@ -56,4 +59,54 @@ function merge(single: string | undefined, many: readonly string[] | undefined):
     if (!out.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) out.push(trimmed)
   }
   return out
+}
+
+/**
+ * Splits a list of names back into the two config keys that hold them.
+ *
+ * The counterpart of `merge` below, and deliberately in the same file. The singular key is what
+ * earlier versions wrote and still read, so the first name goes there and the rest to the plural
+ * one: a config saved by a newer build keeps working if somebody rolls back, and `codebaseAliases`
+ * reassembles exactly the list that was typed, in order.
+ *
+ * That is the whole reason both spellings survive, and why writing them is one function rather
+ * than something each caller works out — the shape this project has paid for more than any other
+ * is one fact spelled two ways in two places. Here the split and the merge are four lines apart.
+ *
+ * An empty list clears both, which is how a name is removed.
+ */
+export function aliasFields(names: readonly string[]): {
+  primary: string | undefined
+  rest: string[] | undefined
+} {
+  const cleaned = merge(undefined, names)
+  const [primary, ...rest] = cleaned
+  return {
+    primary,
+    rest: rest.length > 0 ? rest : undefined,
+  }
+}
+
+/**
+ * The text of an alias list, for a one-line text field.
+ *
+ * Commas, matching `ask_user_form`'s `list` field — the one list-in-a-box convention this product
+ * already has, so the two do not disagree about what a user is expected to type.
+ */
+export function formatAliases(names: readonly string[] | undefined): string {
+  /*
+   * Takes undefined on purpose. `SettingsNavigation.test.tsx` renders every tab with nothing
+   * configured, and that path has now broken four times on a missing array — it is the state a
+   * fresh install is actually in. An absent list and an empty one mean the same thing to a text
+   * field, so there is nothing to distinguish and no reason to throw.
+   */
+  return (names ?? []).join(', ')
+}
+
+/** What somebody typed into that field. Split on commas *or* newlines, as `list` does. */
+export function parseAliases(text: string): string[] {
+  return merge(
+    undefined,
+    text.split(/[,\n]/).map((part) => part.trim()),
+  )
 }

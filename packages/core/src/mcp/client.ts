@@ -141,6 +141,8 @@ export class McpConnection {
       this.attachStderr(transport)
     }
 
+    this.onLog(await describeMcpRequest(this.config, this.secrets))
+
     try {
       await client.connect(transport)
     } catch (error) {
@@ -252,4 +254,41 @@ function renderToolResult(result: Awaited<ReturnType<Client['callTool']>>): stri
 /** A one-line reason, for the server's own log in the MCP tab. Never carries a header value. */
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * What is about to be sent, as one line for this server's log.
+ *
+ * **Header names, never values** (§15) — the point is a line somebody can paste into a bug report,
+ * and a token in it would be a leak on the way past.
+ *
+ * It exists because of a report this could not otherwise answer: a remote server replying "double
+ * check your token or domain" while the configuration plainly contained a token. From the outside
+ * there is no way to tell whether the header was never sent, sent empty, sent under a name the
+ * server does not read, or sent over the wrong protocol — four different fixes behind one message.
+ *
+ * A free function rather than a method so it can be tested without opening a socket: the version
+ * that called `connect()` to read its own log spent thirty seconds resolving a hostname that does
+ * not exist.
+ */
+export async function describeMcpRequest(
+  config: McpServerConfig,
+  secrets: SecretStore,
+): Promise<string> {
+  if (isStdioServer(config)) return `Starting ${config.command}`
+
+  const kind = config.type ?? 'streamable-http (no type set; SSE is the fallback)'
+  let names: string[]
+  try {
+    // Resolved, so a `${secret:NAME}` that is stored but empty is visible as such.
+    const resolved = await interpolateSecrets(config.headers, secrets)
+    names = Object.entries(resolved).map(([name, value]) =>
+      value.trim().length === 0 ? `${name} (EMPTY)` : name,
+    )
+  } catch (error) {
+    return `Connecting to ${config.url} as ${kind}; headers unresolved: ${describeError(error)}`
+  }
+
+  const headers = names.length === 0 ? 'no headers configured' : `headers: ${names.join(', ')}`
+  return `Connecting to ${config.url} as ${kind}; ${headers}`
 }
