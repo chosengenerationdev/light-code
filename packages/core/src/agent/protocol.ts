@@ -670,6 +670,35 @@ export type UiToHostMessage =
    * A list for the same reason the codebase one is: a skill pool can be a squad's and the whole
    * department's at once, and which one `search_team_skills` defaults to is the first.
    */
+  /** Adds or updates one bucket. `secret` absent means "leave the stored one alone". */
+  | {
+      type: 'saveS3Connection'
+      connection: {
+        id?: string
+        label: string
+        bucket: string
+        region: string
+        accessKeyId: string
+        endpoint?: string
+        pathStyle?: boolean
+        prefix?: string
+        readOnly?: boolean
+      }
+      secret?: string
+      sessionToken?: string
+    }
+  | { type: 'deleteS3Connection'; id: string }
+  /** Points skills or Python tools at a folder in a bucket. An empty `connectionId` unsets it. */
+  | {
+      type: 'saveS3Mirror'
+      kind: 'skills' | 'tools'
+      connectionId: string
+      prefix?: string
+      enabled: boolean
+    }
+  /** Fetches now, rather than waiting for the next panel open. */
+  | { type: 'syncS3'; kind: 'skills' | 'tools' }
+  | { type: 'requestS3' }
   | { type: 'saveSkillsAlias'; aliases: string[] }
   /**
    * Rebuilds the documentation index. `kind` narrows it to tools or skills only.
@@ -1246,6 +1275,39 @@ export type HostToUiMessage =
        * value.
        */
       settings: PythonSettings
+    }
+  /**
+   * The S3 buckets this install can reach, and where mirrored folders land.
+   *
+   * **No secret ever appears here** (invariant 7): `hasSecret` says whether one is stored, which
+   * is what the form needs to render "Set — replace?" without the value crossing the bridge.
+   */
+  | {
+      type: 's3'
+      connections: {
+        id: string
+        label: string
+        bucket: string
+        region: string
+        accessKeyId: string
+        hasSecret: boolean
+        endpoint?: string
+        pathStyle?: boolean
+        prefix?: string
+        readOnly?: boolean
+      }[]
+      /** Connections that could not be used, and why. */
+      problems: { label: string; problem: string }[]
+      /** Where skills are mirrored from, when that is set up. */
+      skills?: { connectionId: string; prefix?: string | undefined; enabled?: boolean | undefined }
+      /** The same for Python tools. */
+      tools?: { connectionId: string; prefix?: string | undefined; enabled?: boolean | undefined }
+      /** The local folders, stated so nobody has to guess where a mirror went. */
+      skillsFolder?: string
+      toolsFolder?: string
+      /** The last sync, as one line each. */
+      lastSkillsSync?: string
+      lastToolsSync?: string
     }
   | {
       type: 'skills'

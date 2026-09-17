@@ -54,6 +54,19 @@ const ALLOWED_HOSTS = new Map([
   // code — the only URL that transport ever opens is the one in the user's own MCP config.
   ['developer.mozilla.org', 'MDN links in EventSource JSDoc — comments, never fetched'],
 
+  /*
+   * S3's own endpoint, and it is a preset in exactly the sense the block at the top describes.
+   *
+   * `s3.` is the template `https://s3.${region}.amazonaws.com` seen by a scanner that cannot
+   * substitute the region; the fully-formed one is placeholder text in the endpoint field.
+   *
+   * Invariant 3 holds: a fresh install has no S3 connection, so nothing is contacted. The host is
+   * only formed once somebody has configured a bucket and a region — both of which they typed —
+   * and an internal or S3-compatible address replaces it entirely via the endpoint field.
+   */
+  ['s3.', 'template for the default AWS S3 endpoint; the region is substituted at run time'],
+  ['s3.eu-west-1.amazonaws.com', 'placeholder in the S3 endpoint field'],
+
   // --- Placeholders shown as grey text in form fields.
   ['gateway.example.com', 'placeholder in the Apigee token URL field'],
   ['gw.example.com', 'placeholder'],

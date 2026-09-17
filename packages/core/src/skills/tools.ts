@@ -42,6 +42,15 @@ export interface SkillToolContext {
    * exists, and handing it one would put a corpus in reach of an edit tool.
    */
   findTeamSkillsNamed?: ((name: string) => Promise<TeamSkillHit[]>) | undefined
+  /**
+   * Publishes a skill that was just written, when skills are kept in a bucket.
+   *
+   * Absent unless an S3 folder is configured and writable, so writing works exactly as before for
+   * everyone else. A failure here **does not fail the write**: the file is on disk and correct,
+   * and losing it because a bucket was unreachable would be the worse outcome. The tool result
+   * says the copy did not go up, so nothing is silently half-done.
+   */
+  onSaved?: ((name: string, content: string) => Promise<void>) | undefined
 }
 
 const writeParams = z.object({
@@ -146,6 +155,16 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
         await fs.writeFile(filePath, rendered, 'utf8')
         await context.onChanged()
 
+        // Reported, never thrown: see `onSaved`. The local file is already written and valid.
+        let publishProblem: string | undefined
+        if (context.onSaved !== undefined) {
+          try {
+            await context.onSaved(params.name, rendered)
+          } catch (error) {
+            publishProblem = error instanceof Error ? error.message : String(error)
+          }
+        }
+
         /*
          * Reported *after* the write, deliberately.
          *
@@ -162,6 +181,9 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
             `${existed ? 'Updated' : 'Recorded'} the skill "${params.name}" at ${filePath}.\n` +
             // Same rule as Python tools, same reason: the prompt prefix is fixed for a turn.
             'Its summary will appear in your context from the next message onward.' +
+            (publishProblem === undefined
+              ? ''
+              : `\n\nSaved here, but NOT copied to the bucket: ${publishProblem}`) +
             (collision === undefined ? '' : `\n\n${collision}`),
           path: filePath,
         }

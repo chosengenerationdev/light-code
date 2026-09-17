@@ -4,11 +4,22 @@ import { IndexingProgress, type IndexingProgressState } from './IndexingProgress
 import { useEffect, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { FolderListEditor } from './FolderListEditor.js'
+import { S3Section, type S3SectionProps } from './S3Section.js'
 import { DismissableProblems } from './DismissableProblems.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
+/**
+ * The S3 half, passed straight through to `S3Section`.
+ *
+ * The connection list lives here because pointing skill storage at a bucket is what people come to
+ * this tab to do — and it is shared: the Python tab picks from the same list rather than keeping
+ * its own, since one bucket edited in two places is the drift this project has paid for most.
+ */
+export type SkillsTabS3 = Omit<S3SectionProps, 'kind' | 'manageConnections'>
+
 export interface SkillsTabProps {
+  s3?: SkillsTabS3 | undefined
   skills: { name: string; description: string; filePath: string; sourceDir?: string; always?: boolean }[]
   issues: { filePath: string; detail: string }[]
   /** Where new skills are written. Undefined when no folder is open. */
@@ -423,6 +434,11 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         onSave={props.onSaveDirs}
       />
 
+      {/*
+        Below the folder list, because it is one more place skills come from — and the section
+        itself says the mirrored folder joins that list rather than replacing it.
+      */}
+      {props.s3 !== undefined && <S3Section {...props.s3} kind="skills" manageConnections />}
     </div>
   )
 }

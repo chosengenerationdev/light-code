@@ -821,6 +821,19 @@ export const s3ConnectionSchema = z.object({
   readOnly: z.boolean().optional(),
 })
 
+/**
+ * A folder of a bucket mirrored onto this disk.
+ *
+ * One shape for skills and for Python tools, because the requirement is identical and the only
+ * differences are the extension and where the files land. Two near-copies would drift.
+ */
+const s3MirrorSchema = z.object({
+  connectionId: z.string().min(1),
+  prefix: z.string().optional(),
+  /** Off by default: reading a bucket on every panel open is somebody's money and latency. */
+  enabled: z.boolean().optional(),
+})
+
 export const s3ConfigSchema = z.object({
   connections: z.array(s3ConnectionSchema).max(20).optional(),
   /**
@@ -829,14 +842,16 @@ export const s3ConfigSchema = z.object({
    * Only the *files* move. They are still loaded, watched and indexed exactly as local ones are —
    * indexing stays as configured — so this names a sync, not a second kind of skill.
    */
-  skills: z
-    .object({
-      connectionId: z.string().min(1),
-      prefix: z.string().optional(),
-      /** Off by default: reading a bucket on every panel open is somebody's money and latency. */
-      enabled: z.boolean().optional(),
-    })
-    .optional(),
+  skills: s3MirrorSchema.optional(),
+  /**
+   * The same for Python tools, with one difference that is not a detail.
+   *
+   * A mirrored `.py` is **not** loaded on arrival. The hash-pinned registry (§13) refuses any tool
+   * that was not approved with its source shown, so a bucket is how a tool *reaches* a machine,
+   * and approval still happens on each one. Anybody with write access to the bucket would
+   * otherwise be running code as this user on every machine that syncs.
+   */
+  tools: s3MirrorSchema.optional(),
 })
 
 export type S3ConnectionConfig = z.infer<typeof s3ConnectionSchema>

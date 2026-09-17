@@ -313,6 +313,14 @@ export function App(props: AppProps): ReactElement {
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
   const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
   const [pythonStatus, setPythonStatus] = useState<PythonStatus | undefined>(undefined)
+  /**
+   * Everything the panel knows about S3.
+   *
+   * Held whole rather than unpacked field by field — the defect this file carries a comment about
+   * in two other places, where a field added to the protocol was silently dropped on the way to a
+   * panel and the feature looked broken with the host perfectly correct.
+   */
+  const [s3, setS3] = useState<Extract<HostToUiMessage, { type: 's3' }> | undefined>(undefined)
   const [pythonSettings, setPythonSettings] = useState<PythonSettings | undefined>(undefined)
   const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>(
     [],
@@ -726,6 +734,8 @@ export function App(props: AppProps): ReactElement {
         setSkillIssues(message.issues)
         setSkillsDir(message.skillsDir)
         setSkillExtraDirs(message.extraDirs)
+      } else if (message.type === 's3') {
+        setS3(message)
       } else if (message.type === 'python') {
         setPythonStatus(message.status)
         setPythonSettings(message.settings)
@@ -886,6 +896,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestNetwork' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestPython' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestS3' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestVariables' } satisfies UiToHostMessage)
@@ -995,6 +1006,84 @@ export function App(props: AppProps): ReactElement {
     setTestResult(undefined)
     setTestRunning(false)
   }
+  /*
+   * One object, handed to both tabs.
+   *
+   * The Skills tab manages the connections and the Python tab only picks one, but they read the
+   * same list and post the same messages — built here so the two cannot drift into disagreeing
+   * about what is configured.
+   */
+  const s3Props =
+    s3 === undefined
+      ? undefined
+      : {
+          connections: s3.connections,
+          problems: s3.problems,
+          onSaveConnection: (
+            connection: {
+              id?: string
+              label: string
+              bucket: string
+              region: string
+              accessKeyId: string
+              endpoint?: string
+              pathStyle?: boolean
+              prefix?: string
+              readOnly?: boolean
+            },
+            secret: string,
+            sessionToken: string,
+          ) =>
+            props.transport.post({
+              type: 'saveS3Connection',
+              connection,
+              // Empty means "leave the stored one alone", never "clear it" — the field is
+              // write-only across the bridge, so a blank box is what a set key looks like.
+              ...(secret.trim().length > 0 ? { secret } : {}),
+              ...(sessionToken.trim().length > 0 ? { sessionToken } : {}),
+            } satisfies UiToHostMessage),
+          onDeleteConnection: (id: string) =>
+            props.transport.post({ type: 'deleteS3Connection', id } satisfies UiToHostMessage),
+        }
+
+  const skillsS3 =
+    s3Props === undefined
+      ? undefined
+      : {
+          ...s3Props,
+          ...(s3?.skills !== undefined ? { mirror: s3.skills } : {}),
+          ...(s3?.skillsFolder !== undefined ? { folder: s3.skillsFolder } : {}),
+          ...(s3?.lastSkillsSync !== undefined ? { lastSync: s3.lastSkillsSync } : {}),
+          onSaveMirror: (connectionId: string, prefix: string, enabled: boolean) =>
+            props.transport.post({
+              type: 'saveS3Mirror',
+              kind: 'skills',
+              connectionId,
+              prefix,
+              enabled,
+            } satisfies UiToHostMessage),
+          onSync: () => props.transport.post({ type: 'syncS3', kind: 'skills' } satisfies UiToHostMessage),
+        }
+
+  const toolsS3 =
+    s3Props === undefined
+      ? undefined
+      : {
+          ...s3Props,
+          ...(s3?.tools !== undefined ? { mirror: s3.tools } : {}),
+          ...(s3?.toolsFolder !== undefined ? { folder: s3.toolsFolder } : {}),
+          ...(s3?.lastToolsSync !== undefined ? { lastSync: s3.lastToolsSync } : {}),
+          onSaveMirror: (connectionId: string, prefix: string, enabled: boolean) =>
+            props.transport.post({
+              type: 'saveS3Mirror',
+              kind: 'tools',
+              connectionId,
+              prefix,
+              enabled,
+            } satisfies UiToHostMessage),
+          onSync: () => props.transport.post({ type: 'syncS3', kind: 'tools' } satisfies UiToHostMessage),
+        }
+
   const searchProps = {
     connections: searchConnections,
     activeConnectionId: activeSearchId,
@@ -1611,6 +1700,7 @@ export function App(props: AppProps): ReactElement {
             }}
             search={searchProps}
             skills={{
+              s3: skillsS3,
               team: {
                 // Both spellings, merged by the one function that owns them — a config written
                 // before the list existed still reads back as a one-name list.
@@ -1921,6 +2011,7 @@ export function App(props: AppProps): ReactElement {
                 }
               : {})}
             python={{
+              s3: toolsS3,
               /*
                * Only profiles that exist can be offered. A picker listing something deleted would
                * let someone choose a profile the generator then warns about on every settings load.

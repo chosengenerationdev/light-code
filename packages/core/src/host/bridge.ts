@@ -146,6 +146,10 @@ import {
   resolveConnectionTls,
   resolveS3,
   createS3Tools,
+  mirrorFolder,
+  syncFromS3,
+  uploadToS3,
+  targetById,
   type ResolvedS3,
   vectorStoreTls,
   OpenSearchClient,
@@ -597,6 +601,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   let skillsDir = defaultSkillsDir
   let extraSkillDirs: string[] = []
+  /** The mirrored bucket folder in the search path, when skills come from S3. */
+  let mirroredSkillsDir: string | undefined
+  /** The same for Python tools, reported so the tab can say where they landed. */
+  let mirroredToolsDir: string | undefined
+  /** The skills mirror as configured, so `write_skill` knows whether to publish. */
+  let cachedSkillMirror: { connectionId: string; prefix?: string | undefined; enabled?: boolean | undefined } | undefined
+  /** One line about the last sync of each, for the panel. */
+  let lastSync: { skills?: string; tools?: string } = {}
 
   /** Relative entries resolve against the workspace; absolute ones are taken as given. */
   function resolveSkillDir(entry: string): string | undefined {
@@ -1779,6 +1791,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     extraSkillDirs = (config.skills?.paths ?? [])
       .map(resolveSkillDir)
       .filter((dir): dir is string => dir !== undefined)
+
+    /*
+     * A bucket folder joins the search path as one more read-only extra.
+     *
+     * This is the whole of what "keep skills in S3" changes. Nothing downstream — the loader, the
+     * watcher, the tab, the documentation index, team publishing — learns that S3 exists; they see
+     * a folder. Which is why indexing stays exactly as configured, as asked.
+     *
+     * Added whether or not the last sync worked: the files from the previous one are still there
+     * and still valid, and dropping them because a refresh failed would take somebody's skills
+     * away over a network blip.
+     */
+    const skillMirror = config.s3?.skills
+    cachedSkillMirror = skillMirror
+    if (skillMirror?.enabled === true) {
+      mirroredSkillsDir = mirrorFolder({
+        storageDir,
+        connectionId: skillMirror.connectionId,
+        kind: 'skills',
+        ...(skillMirror.prefix !== undefined ? { prefix: skillMirror.prefix } : {}),
+      })
+      if (mirroredSkillsDir !== undefined) extraSkillDirs.push(mirroredSkillsDir)
+    } else {
+      mirroredSkillsDir = undefined
+    }
+
     return config
   }
 
@@ -2177,7 +2215,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             }
           : {}),
       }
-      combined.register(createWriteSkillTool(context))
+      /*
+       * Published back to the bucket when skills are kept in one.
+       *
+       * Absent unless the mirror is configured and the connection is writable, so writing is
+       * unchanged for everyone else. A failure is reported in the tool result rather than failing
+       * the write — the file is already on disk and correct.
+       */
+      const skillTarget =
+        cachedSkillMirror?.enabled === true
+          ? targetById(cachedS3, cachedSkillMirror.connectionId)
+          : undefined
+      const mirrorPrefix = cachedSkillMirror?.prefix
+      combined.register(
+        createWriteSkillTool({
+          ...context,
+          ...(skillTarget !== undefined && skillTarget.readOnly !== true
+            ? {
+                onSaved: async (name: string, content: string) => {
+                  await uploadToS3({
+                    target: skillTarget,
+                    ...(mirrorPrefix !== undefined ? { prefix: mirrorPrefix } : {}),
+                    relative: `${name}.md`,
+                    contents: Buffer.from(content, 'utf8'),
+                  })
+                },
+              }
+            : {}),
+        }),
+      )
       combined.register(createDeleteSkillTool(context))
     }
     /*
@@ -5767,6 +5833,214 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * while the model and width are set from Search, and writing the whole block from either
    * would have one tab silently erasing the other's fields.
    */
+  /** The panel's whole view of S3. Secrets never appear - only whether one is stored. */
+  async function postS3(): Promise<void> {
+    const { config } = await configManager.load()
+    const connections = await Promise.all(
+      (config.s3?.connections ?? []).map(async (connection) => ({
+        id: connection.id,
+        label: connection.label,
+        bucket: connection.bucket,
+        region: connection.region,
+        accessKeyId: connection.accessKeyId,
+        /*
+         * Asked of the secret store rather than inferred from config holding a reference.
+         *
+         * Config and the store are two stores that can diverge, and letting one assert what only
+         * the other knows is what made a vanished API key keep reading as "Set" for three
+         * releases (section 19).
+         */
+        hasSecret: (await secrets.get(connection.secretAccessKeyRef)) !== undefined,
+        ...(connection.endpoint !== undefined ? { endpoint: connection.endpoint } : {}),
+        ...(connection.pathStyle !== undefined ? { pathStyle: connection.pathStyle } : {}),
+        ...(connection.prefix !== undefined ? { prefix: connection.prefix } : {}),
+        ...(connection.readOnly !== undefined ? { readOnly: connection.readOnly } : {}),
+      })),
+    )
+
+    post({
+      type: 's3',
+      connections,
+      problems: cachedS3.problems,
+      ...(config.s3?.skills !== undefined ? { skills: config.s3.skills } : {}),
+      ...(config.s3?.tools !== undefined ? { tools: config.s3.tools } : {}),
+      ...(mirroredSkillsDir !== undefined ? { skillsFolder: mirroredSkillsDir } : {}),
+      ...(mirroredToolsDir !== undefined ? { toolsFolder: mirroredToolsDir } : {}),
+      ...(lastSync.skills !== undefined ? { lastSkillsSync: lastSync.skills } : {}),
+      ...(lastSync.tools !== undefined ? { lastToolsSync: lastSync.tools } : {}),
+    })
+  }
+
+  /** `s3:<id>:secret`, namespaced so deleting a connection reliably deletes its key (section 15). */
+  const s3SecretRef = (id: string): string => `s3:${id}:secret`
+  const s3TokenRef = (id: string): string => `s3:${id}:sessionToken`
+
+  async function handleSaveS3Connection(
+    input: {
+      id?: string
+      label: string
+      bucket: string
+      region: string
+      accessKeyId: string
+      endpoint?: string
+      pathStyle?: boolean
+      prefix?: string
+      readOnly?: boolean
+    },
+    secret?: string,
+    sessionToken?: string,
+  ): Promise<void> {
+    const { config } = await configManager.load()
+    const id = input.id ?? `s3-${Date.now().toString(36)}`
+    const existing = (config.s3?.connections ?? []).find((connection) => connection.id === id)
+
+    /*
+     * An empty secret means "leave the stored one alone", never "clear it".
+     *
+     * Invariant 7 makes the field write-only, so the form shows a blank box for a key that is
+     * perfectly well set. Read the other way, every save about a region or a prefix would wipe
+     * the key on the way past - the trap `python.env` documents in those words.
+     */
+    if (secret !== undefined && secret.trim().length > 0) {
+      await secrets.set(s3SecretRef(id), secret.trim())
+    }
+    if (sessionToken !== undefined && sessionToken.trim().length > 0) {
+      await secrets.set(s3TokenRef(id), sessionToken.trim())
+    }
+
+    const saved = {
+      id,
+      label: input.label.trim(),
+      bucket: input.bucket.trim(),
+      region: input.region.trim(),
+      accessKeyId: input.accessKeyId.trim(),
+      secretAccessKeyRef: s3SecretRef(id),
+      ...(existing?.sessionTokenRef !== undefined || (sessionToken ?? '').trim().length > 0
+        ? { sessionTokenRef: s3TokenRef(id) }
+        : {}),
+      ...(input.endpoint !== undefined && input.endpoint.trim().length > 0
+        ? { endpoint: input.endpoint.trim() }
+        : {}),
+      ...(input.pathStyle === true ? { pathStyle: true } : {}),
+      ...(input.prefix !== undefined && input.prefix.trim().length > 0
+        ? { prefix: input.prefix.trim() }
+        : {}),
+      ...(input.readOnly === true ? { readOnly: true } : {}),
+    }
+
+    const others = (config.s3?.connections ?? []).filter((connection) => connection.id !== id)
+    await configManager.save('user', {
+      s3: { ...(config.s3 ?? {}), connections: [...others, saved] },
+    } as never)
+    await loadSettings()
+    await postS3()
+  }
+
+  async function handleDeleteS3Connection(id: string): Promise<void> {
+    const { config } = await configManager.load()
+    // The secrets too, not just the entry: orphans accumulate invisibly otherwise (section 15).
+    await secrets.delete(s3SecretRef(id)).catch(() => undefined)
+    await secrets.delete(s3TokenRef(id)).catch(() => undefined)
+
+    const s3 = { ...(config.s3 ?? {}) }
+    s3.connections = (s3.connections ?? []).filter((connection) => connection.id !== id)
+    // A mirror pointing at a connection that is gone would silently stop working.
+    if (s3.skills?.connectionId === id) delete s3.skills
+    if (s3.tools?.connectionId === id) delete s3.tools
+
+    await configManager.save('user', { s3 } as never)
+    await loadSettings()
+    await postS3()
+  }
+
+  async function handleSaveS3Mirror(
+    kind: 'skills' | 'tools',
+    connectionId: string,
+    prefix: string | undefined,
+    enabled: boolean,
+  ): Promise<void> {
+    const { config } = await configManager.load()
+    const s3 = { ...(config.s3 ?? {}) }
+
+    if (connectionId.trim().length === 0) delete s3[kind]
+    else {
+      s3[kind] = {
+        connectionId: connectionId.trim(),
+        ...(prefix !== undefined && prefix.trim().length > 0 ? { prefix: prefix.trim() } : {}),
+        enabled,
+      }
+    }
+
+    await configManager.save('user', { s3 } as never)
+    await loadSettings()
+    /*
+     * Fetched straight away when switched on. Waiting for the next panel open to find out whether
+     * it works is the sort of delay that reads as the setting having done nothing at all.
+     */
+    if (enabled && connectionId.trim().length > 0) await handleSyncS3(kind)
+    else await postS3()
+  }
+
+  /**
+   * Brings a bucket folder down now.
+   *
+   * Reports what happened as one line rather than throwing: a sync that half worked is the
+   * ordinary case on a large folder, and "three updated, one failed" is more use than a failure.
+   */
+  async function handleSyncS3(kind: 'skills' | 'tools'): Promise<void> {
+    const { config } = await configManager.load()
+    const mirror = config.s3?.[kind]
+    if (mirror === undefined) {
+      lastSync = { ...lastSync, [kind]: 'No bucket folder is configured.' }
+      await postS3()
+      return
+    }
+
+    const target = targetById(cachedS3, mirror.connectionId)
+    if (target === undefined) {
+      lastSync = {
+        ...lastSync,
+        [kind]: 'That connection is not usable - check its key in the list above.',
+      }
+      await postS3()
+      return
+    }
+
+    const localDir = mirrorFolder({
+      storageDir,
+      connectionId: mirror.connectionId,
+      kind,
+      ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+    })
+    if (kind === 'tools') mirroredToolsDir = localDir
+
+    try {
+      const result = await syncFromS3({
+        target,
+        ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+        localDir,
+        fs: new NodeFileSystem(),
+        extensions: kind === 'skills' ? ['.md'] : ['.py'],
+      })
+      const parts = [
+        `${String(result.written.length)} updated`,
+        `${String(result.unchanged)} unchanged`,
+      ]
+      if (result.failed.length > 0) parts.push(`${String(result.failed.length)} failed`)
+      lastSync = { ...lastSync, [kind]: `${new Date().toLocaleTimeString()} - ${parts.join(', ')}` }
+      for (const failure of result.failed) logger.warn(`s3 ${kind}: ${failure.key}`, failure.problem)
+
+      // The folder is in the search path, so what was just written has to be picked up.
+      if (kind === 'skills') {
+        await refreshSkills()
+        postSkills()
+      }
+    } catch (error) {
+      lastSync = { ...lastSync, [kind]: error instanceof Error ? error.message : String(error) }
+    }
+    await postS3()
+  }
+
   async function handleSaveSkillsAlias(aliases: string[]): Promise<void> {
     try {
       const { config } = await configManager.load()
@@ -8622,6 +8896,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleClearDataset', handleClearDataset(message.id, message.resync === true))
     } else if (message.type === 'clearMailIndex') {
       reportFailure('handleClearMailIndex', handleClearMailIndex(message.resync === true))
+    } else if (message.type === 'requestS3') {
+      reportFailure('postS3', postS3())
+    } else if (message.type === 'saveS3Connection') {
+      reportFailure(
+        'handleSaveS3Connection',
+        handleSaveS3Connection(message.connection, message.secret, message.sessionToken),
+      )
+    } else if (message.type === 'deleteS3Connection') {
+      reportFailure('handleDeleteS3Connection', handleDeleteS3Connection(message.id))
+    } else if (message.type === 'saveS3Mirror') {
+      reportFailure(
+        'handleSaveS3Mirror',
+        handleSaveS3Mirror(message.kind, message.connectionId, message.prefix, message.enabled),
+      )
+    } else if (message.type === 'syncS3') {
+      reportFailure('handleSyncS3', handleSyncS3(message.kind))
     } else if (message.type === 'saveSkillsAlias') {
       reportFailure('handleSaveSkillsAlias', handleSaveSkillsAlias(message.aliases))
     } else if (message.type === 'cancelIndexing') {
@@ -9849,6 +10139,7 @@ ${contents}
            * A view that has just attached needs this as much as it needs the settings.
            */
           await postProfiles()
+          await postS3()
           await postSchedules()
         } catch (error) {
           logger.warn(

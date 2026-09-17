@@ -1,5 +1,44 @@
 # light-code-vscode
 
+## 0.92.0
+
+### Minor Changes
+
+- Keep skills and Python tools in an S3 bucket, and reach any bucket from the chat
+
+  **Settings → Skills** manages the buckets: name, region, access key, secret (write-only, so a blank
+  box means "unchanged" rather than "clear"), an optional endpoint for an internal address, path-style
+  addressing for non-AWS endpoints, a prefix everything is confined to, and a read-only switch.
+
+  The list is shared. **Settings → Python** picks from the same connections rather than keeping its
+  own — one bucket and key edited in two places is the drift this project has paid for more than any
+  other defect — and the Python tab offers only the picker, not the editor.
+
+  Pointing skills at a folder copies the `.md` files down and adds that folder to the skill search
+  path as one more read-only source. Nothing downstream learns that S3 exists: the loader, the
+  watcher, the tab, team publishing and the documentation index all see a folder, which is why
+  **indexing stays exactly as configured**. Writing a skill publishes it back up when the connection
+  allows it; if the bucket is unreachable the file is still written here and the result says the copy
+  did not go up, rather than losing the skill.
+
+  Python tools work the same way with one difference that is not a detail: **a downloaded `.py` is
+  not run until it is approved with its source shown**. The hash-pinned registry (§13) refuses
+  anything else. A bucket is how a tool reaches a machine, not a reason to trust it — otherwise
+  anyone with write access to it would be running code as you on every machine that syncs.
+
+  The local folder is `<storageDir>/s3/<connection>/<kind>-<prefix digest>`, and the panel states it:
+  a folder people cannot find is one they cannot inspect when a skill fails to appear.
+
+  **Four tools for any configured bucket** — `s3_list_files`, `s3_read_file`, `s3_download_file`,
+  `s3_upload_file` — each taking a `connection` name, so extra buckets can be kept around and used ad
+  hoc without reconfiguring anything. The name may be omitted when only one is set up. With several,
+  a missing name is refused **with the list** rather than resolved to the first: reading the wrong
+  bucket is merely wrong, and uploading to it cannot be undone from here.
+
+  Signed with hand-written SigV4 through core's one `HttpClient`, verified against AWS's published
+  worked example. No vendor SDK, so TLS, proxies and the corporate CA stay configured in the single
+  place §10 requires.
+
 ## 0.91.0
 
 ### Minor Changes
