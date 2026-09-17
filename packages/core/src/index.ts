@@ -716,3 +716,15 @@ export { createSearchDataTool } from './tools/searchData.js'
 export { mayPythonToolCall, describeNestedCall, PYTHON_CALL_DENIED } from './python/callPolicy.js'
 export { checkCollector, type CollectorCheck } from './dataset/checkCollector.js'
 export { createCheckCollectorTool } from './tools/checkCollectorTool.js'
+
+/*
+ * S3: a bucket as a place to read from, write to, and keep skills and Python tools in.
+ *
+ * Signed here rather than through a vendor SDK so every request goes out through the one
+ * `HttpClient` — invariant 2, and the same trade the three vector-store clients make.
+ */
+export { S3Client, parseListing, type S3Connection, type S3Object } from './s3/client.js'
+export { confineKey, displayKey, normalisePrefix } from './s3/keys.js'
+export { resolveS3, targetById, type ResolvedS3 } from './s3/resolve.js'
+export { syncFromS3, uploadToS3, type S3SyncResult } from './s3/sync.js'
+export { createS3Tools, type S3Target } from './s3/tools.js'

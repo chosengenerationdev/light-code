@@ -144,6 +144,9 @@ import {
   type IndexManifest,
   type IndexProgress,
   resolveConnectionTls,
+  resolveS3,
+  createS3Tools,
+  type ResolvedS3,
   vectorStoreTls,
   OpenSearchClient,
   createVectorSearcher,
@@ -1605,6 +1608,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** Mirrors `mail`, for the same reason. */
   let cachedMail: MailIndexConfig = {}
   let cachedDatasets: DatasetConfig[] = []
+  /**
+   * Buckets this install can reach, rebuilt whenever settings are loaded.
+   *
+   * Cached rather than passed down, like the datasets above: building a client needs a secret,
+   * which is async, and `currentToolRegistry` is synchronous on purpose so the tool block stays
+   * byte-stable for a whole turn (§12).
+   */
+  let cachedS3: ResolvedS3 = { targets: [], problems: [] }
   /*
    * Names and counts for the system prompt, refreshed with the settings rather than read per
    * request: the prompt is built every turn and hitting the disk for every dataset each time
@@ -1690,6 +1701,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedOffice = config.office ?? {}
     cachedMail = config.mail ?? {}
     cachedDatasets = config.datasets ?? []
+    /*
+     * Resolved here so the tools, the skills sync and the Python tools sync all see the same
+     * answer — three features resolving their own credentials would be three chances to get the
+     * endpoint or the prefix subtly different.
+     */
+    cachedS3 = await resolveS3({
+      config: config.s3,
+      http: httpClient,
+      secrets,
+      /*
+       * Through the one global resolver, so a corporate root certificate reaches S3 exactly as it
+       * reaches the gateway and the vector store. §10: do not add another place to configure a CA.
+       */
+      tls: await resolveConnectionTls({
+        ...(config.tls !== undefined ? { global: config.tls } : {}),
+        ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+        onPaths: (paths) => {
+          void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(() => undefined)
+        },
+      }),
+    })
     cachedPythonEnabled = config.python?.dynamicTools === 'on'
     datasetSummaryForPrompt = await Promise.all(
       cachedDatasets.map(async (dataset) => ({
@@ -2212,6 +2244,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * configured", and the model would keep reaching for it — the same argument that gates the
      * mail tools on indexing being switched on.
      */
+    /*
+     * Offered only when a bucket is configured, like every other connection-backed tool here.
+     * Registering them against nothing would advertise four tools that always fail, and the model
+     * would keep reaching for them.
+     */
+    for (const tool of createS3Tools(cachedS3.targets)) combined.register(tool)
+
     if (cachedDatasets.length > 0) {
       combined.register(
         createSearchDataTool({
