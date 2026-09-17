@@ -22,6 +22,41 @@ import type { Transport } from '@light-code/core/browser'
 const STREAM_PATIENCE_MS = 8_000
 
 /**
+ * How long a stream has to last to count as having worked.
+ *
+ * Reported from a JupyterHub deployment: the page connected, dropped, reconnected and dropped
+ * again, for ever — `stream failed: 599`, which is tornado's status for a proxied request its own
+ * HTTP client gave up on. Every reply produced in the gaps was lost, so the settings reply never
+ * landed and the page stayed half-built: no light/dark control, Save doing nothing, Test
+ * Connection saying "Testing…" for good.
+ *
+ * `awaitStream` could not catch that, because it is armed once and the stream *did* open — the
+ * comment there said a stream that opens and later drops is a different thing that the reconnect
+ * loop handles. It is not a different thing. **A stream that dies this quickly, repeatedly, is a
+ * stream that does not work**, and the honest response is the same one as never opening: stop
+ * depending on it.
+ */
+const STREAM_SHORT_LIFE_MS = 20_000
+
+/** How many short-lived streams before polling takes over for good. */
+const MAX_SHORT_STREAMS = 2
+
+/**
+ * Whether to narrate what the transport is doing to the browser console.
+ *
+ * On by default and asked for directly — *"can we print something in console to see what is going
+ * on?"*. There is no other way to see this from inside a deployment nobody can reach: a stream
+ * that opens and dies looks, from the page, exactly like a stream that never opened.
+ *
+ * **Never logs the token, a header, or a message body.** Statuses, timings and counts only, so
+ * the output is safe to paste into a bug report — the same rule the MCP connection line follows.
+ */
+const trace = (message: string, detail?: Record<string, unknown>): void => {
+  // eslint-disable-next-line no-console -- the point of the feature; see above.
+  console.info(`[light-code] ${message}`, detail ?? '')
+}
+
+/**
  * How often to ask for what is waiting, once polling — fast while something is happening, slow
  * when nothing is.
  *
@@ -150,6 +185,8 @@ export class HttpTransport implements Transport {
   private pollReported = false
   /** When something was last sent or received, which decides how eagerly to poll. */
   private lastActivity = Date.now()
+  /** Consecutive streams that opened and died too quickly to be useful. See the constant. */
+  private shortStreams = 0
 
   constructor(private readonly onStatus: (status: string) => void) {}
 
@@ -209,6 +246,8 @@ export class HttpTransport implements Transport {
 
   private async listen(): Promise<void> {
     for (;;) {
+      // Outside the try, because both the failure path and the short-life check below need it.
+      let openedAt = Date.now()
       try {
         /*
          * Which interface this tab is. Read from the address bar rather than stored, so the two
@@ -216,11 +255,25 @@ export class HttpTransport implements Transport {
          * what the first one is, and a reload of either lands where it was.
          */
         const view = window.location.pathname.startsWith('/admin') ? '?view=admin' : ''
+        trace('opening event stream', { url: `${API}api/events${view}` })
+        openedAt = Date.now()
         const response = await fetch(`${API}api/events${view}`, {
           headers: { Authorization: `Bearer ${this.token ?? ''}` },
         })
-        if (!response.ok || response.body === null)
+        if (!response.ok || response.body === null) {
+          /*
+           * 599 is not an HTTP status any server sends. It is tornado's — jupyter-server-proxy
+           * uses it for a request its own client gave up on — so seeing it means the proxy in
+           * front, not this server, ended the stream. Named here because the number is otherwise
+           * unsearchable and sends people to look at the wrong process.
+           */
+          trace('event stream refused', {
+            status: response.status,
+            note: response.status === 599 ? 'a proxy in front gave up on the request' : undefined,
+          })
           throw new Error(`stream failed: ${response.status}`)
+        }
+        trace('event stream open', { afterMs: Date.now() - openedAt })
         this.onStatus('connected')
         // The server registers the session before it writes these headers, so by the time the
         // response is in hand a message posted now has somewhere to go.
@@ -246,10 +299,32 @@ export class HttpTransport implements Transport {
             boundary = buffer.indexOf('\n\n')
           }
         }
+        trace('event stream ended cleanly', { afterMs: Date.now() - openedAt })
       } catch (error) {
+        trace('event stream dropped', {
+          afterMs: Date.now() - openedAt,
+          reason: error instanceof Error ? error.message : String(error),
+        })
         this.onStatus(
           `disconnected — retrying (${error instanceof Error ? error.message : String(error)})`,
         )
+      }
+
+      /*
+       * A stream that keeps dying young is a stream that does not work.
+       *
+       * Counted only when it actually opened: a refusal before that is what `awaitStream` already
+       * covers. Consecutive, and reset by any stream that lives a useful length of time, so an
+       * ordinary overnight drop never accumulates towards giving up on streaming altogether.
+       */
+      if (this.streamOpen) {
+        this.shortStreams = nextShortStreams(Date.now() - openedAt, this.shortStreams)
+        trace('stream closed', { lifeMs: Date.now() - openedAt, shortStreams: this.shortStreams })
+        if (shouldStopStreaming(this.shortStreams) && !this.polling) {
+          this.streamOpen = false
+          this.startPolling()
+          return
+        }
       }
       /*
        * Both ways out of the block above — the stream ending cleanly and it failing — mean there
@@ -293,6 +368,7 @@ export class HttpTransport implements Transport {
         return
       }
       this.queued.push(message)
+      trace('held — no stream yet', { type: typeOf(message), waiting: this.queued.length })
       return
     }
     // Sending is activity: the reply to this is what the user is waiting for.
@@ -318,6 +394,10 @@ export class HttpTransport implements Transport {
 
   private startPolling(): void {
     this.polling = true
+    trace('falling back to polling', {
+      why: this.shortStreams > 0 ? 'the stream kept dropping' : 'the stream never opened',
+      shortStreams: this.shortStreams,
+    })
     this.onStatus(
       'connected — the event stream did not open, so replies are being fetched instead. ' +
         'Something between this page and the server does not pass streaming responses through.',
@@ -429,6 +509,7 @@ export class HttpTransport implements Transport {
       })
       if (response.ok) return
 
+      trace('sent', { type: typeOf(message), status: response.status, attempt })
       if (response.status === 409 && attempt < POST_RETRIES) {
         await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
         await this.send(message, attempt + 1)
@@ -456,4 +537,31 @@ export class HttpTransport implements Transport {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
+}
+
+/**
+ * The `type` field of an outbound message, for a log line.
+ *
+ * Only the discriminant — never the body. A settings save carries an API key, and this output is
+ * meant to be pasteable into a bug report (§15).
+ */
+function typeOf(message: unknown): string {
+  const type = (message as { type?: unknown } | null)?.type
+  return typeof type === 'string' ? type : 'unknown'
+}
+
+/**
+ * How many consecutive short-lived streams there have been, after one that lasted `lifeMs`.
+ *
+ * Consecutive is the point: a stream that lived a useful length of time resets the count, so an
+ * ordinary overnight drop never accumulates towards abandoning streaming altogether. Only a
+ * *repeatedly* failing stream does.
+ */
+export function nextShortStreams(lifeMs: number, soFar: number): number {
+  return lifeMs < STREAM_SHORT_LIFE_MS ? soFar + 1 : 0
+}
+
+/** Whether to stop depending on the stream and fetch replies instead. */
+export function shouldStopStreaming(shortStreams: number): boolean {
+  return shortStreams >= MAX_SHORT_STREAMS
 }

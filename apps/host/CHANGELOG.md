@@ -1,5 +1,45 @@
 # @chosengeneration/light-code
 
+## 0.74.0
+
+### Minor Changes
+
+- Stop depending on a stream that keeps dropping, and say what is happening
+
+  Reported from a JupyterHub deployment: the page loads, then disconnects constantly with
+  `stream failed: 599`, the Appearance tab has no light/dark control, Save does nothing, and Test
+  Connection says "Testing…" for good.
+
+  **Those are all one fault.** 599 is not a status any server sends — it is tornado's, which is what
+  jupyter-server-proxy uses when its own HTTP client gives up on a request. So the proxy is killing
+  the long-lived stream. The page reconnects, gets a few seconds, and loses it again; every reply
+  produced in the gaps is gone, including the settings reply that carries `choosesTheme`. That is
+  why the theme switch is missing and the panel looks like an old build: it is not an old build, it
+  is a page that never received the answers it asked for.
+
+  The polling fallback existed for exactly this and **could not engage**, because it is armed once
+  and the stream _did_ open. The comment there said a stream that opens and later drops is a
+  different thing that the reconnect loop handles. It is not a different thing — a stream that dies
+  this quickly, repeatedly, is a stream that does not work, and the honest response is the same as
+  for one that never opened: stop depending on it. Two short-lived streams and replies are fetched
+  instead. Consecutive, and reset by any stream that lasts, so an ordinary overnight drop never
+  accumulates towards abandoning streaming.
+
+  **And it now narrates itself to the browser console**, asked for directly — there is no other way
+  to see this from inside a deployment nobody else can reach, where a stream that opens and dies
+  looks exactly like one that never opened:
+
+      [light-code] opening event stream { url: ... }
+      [light-code] event stream open { afterMs: 41 }
+      [light-code] event stream dropped { afterMs: 9120, reason: "stream failed: 599" }
+      [light-code] stream closed { lifeMs: 9120, shortStreams: 1 }
+      [light-code] falling back to polling { why: "the stream kept dropping", shortStreams: 2 }
+      [light-code] sent { type: "saveProfile", status: 202, attempt: 0 }
+
+  Statuses, timings and counts only — **never the token, a header, or a message body**, since a
+  settings save carries an API key. A test asserts that against the source, so the output stays safe
+  to paste into a bug report.
+
 ## 0.73.0
 
 ### Minor Changes
