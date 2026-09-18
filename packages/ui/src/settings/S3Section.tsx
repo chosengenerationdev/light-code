@@ -313,8 +313,13 @@ export function S3Section(props: S3SectionProps): ReactElement {
                   checked={editing.pathStyle}
                   onChange={(event) => setEditing({ ...editing, pathStyle: event.target.checked })}
                 />
-                Put the bucket in the path (needed by most non-AWS endpoints)
+                Put the bucket in the path &mdash; <code>endpoint/bucket/key</code>
               </label>
+              <span style={{ color: colors.muted, fontSize: 11, marginTop: -2 }}>
+                Worked out from the endpoint when you leave this alone: anything that is not AWS
+                uses the path, since an internal address would need wildcard DNS and a wildcard
+                certificate per bucket to do otherwise. Tick it to force either way.
+              </span>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <input
                   type="checkbox"

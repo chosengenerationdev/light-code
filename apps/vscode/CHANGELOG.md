@@ -1,5 +1,74 @@
 # light-code-vscode
 
+## 0.94.1
+
+### Patch Changes
+
+- An internal S3 endpoint is addressed the way it expects
+
+  Reported from real use: listing a bucket failed with "the host could not be resolved", and the
+  pattern that works in that office is `https://<endpoint>/<bucket>/<key>`.
+
+  The client was building `<bucket>.s3.<region>.amazonaws.com` — the bucket prepended as a subdomain,
+  which is virtual-host style — and asking the network to resolve a name it had never heard of. Path
+  style was supported all along, behind a checkbox nobody had a reason to suspect.
+
+  So the default now follows what the endpoint **is**. An address that is not AWS would need wildcard
+  DNS and a wildcard certificate for every bucket to serve virtual-host style, which internal
+  deployments do not have; AWS itself, including a VPC endpoint, keeps virtual-host style because
+  that is what it is built for. The checkbox still wins when it is ticked either way — "almost never"
+  is not never, and a rule with no escape is a guess nobody can correct.
+
+  The match is on the host ending in `amazonaws.com`, not a substring, so `notamazonaws.com` and
+  `amazonaws.com.internal.example` are both treated as internal.
+
+## 0.94.0
+
+### Minor Changes
+
+- ffbbb4d: Claude is named and coloured as Claude, and the extension honours your proxy
+
+  **"Informed by expert" now says "informed by claude"** when the Claude command line answered.
+  `consultationFromToolCall` returned the _seat_ rather than the answerer, which was right when there
+  was one expert and is not any more: the expert seat can be held by a configured provider, reached
+  through `ask_agent`, and a reply from that was labelled identically to one from Claude.
+
+  `ask_claude` and the legacy `ask_expert` are the command line and nothing else — the tool is only
+  registered when the CLI is runnable — so this is the one case where the answerer is known by name.
+  Old stored transcripts relabel with it, correctly, because those calls were the CLI too.
+
+  **And Claude has its own colour.** It shared the expert's coral, so a consultation answered by
+  Claude and one answered by a configured profile were painted the same — which is exactly what this
+  colour family exists to prevent, since it marks authorship. Configurable like every other, in
+  Appearance.
+
+  **The extension now honours `HTTPS_PROXY`.** It was constructing its HTTP client with no proxy
+  support at all, so on a corporate network anything not reachable directly failed — reported against
+  S3 as "the host could not be resolved", from a machine where nothing external resolves without the
+  proxy. The Node host has had this since it was written; the extension simply never did.
+
+  Not a widening: `proxyForUrl` returns nothing for loopback and obeys `NO_PROXY`. If you have
+  `HTTPS_PROXY` set and an internal gateway that should be reached directly, list it in `NO_PROXY` —
+  the same variable every other tool on that machine already needs.
+
+### Patch Changes
+
+- 6341a18: Attachments on a queued message are no longer lost
+
+  Reported from real use. A message typed while a turn is running is queued host-side and folded in
+  at the next safe point — but the queue held **only text**, and the composer dropped the images
+  before they ever left the panel. So the words arrived, the screenshot they were about did not, and
+  the model was asked about something it had never been shown. Nothing on screen said so, which makes
+  it read as the model ignoring the attachment.
+
+  The queue carries them now, on both paths: folded in mid-turn, and the leftover case where a turn
+  ended before reaching a safe point. That second one mattered more than it looks — there is no
+  visible seam there, so the loss would be even harder to notice.
+
+  The **same vision check** applies as on the ordinary path: a queued image for a model that does not
+  accept them is reported rather than sent, instead of failing somewhere much further along. And the
+  queued row in the composer now says `[1 image]`, so what is waiting is visible rather than implied.
+
 ## 0.93.1
 
 ### Patch Changes

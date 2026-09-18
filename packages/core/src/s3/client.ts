@@ -63,8 +63,9 @@ export class S3Client {
     const origin = new URL(endpoint ?? `https://s3.${region}.amazonaws.com`)
     const key = call.key ?? ''
 
-    const host = pathStyle === true ? origin.host : `${bucket}.${origin.host}`
-    const prefix = pathStyle === true ? `/${bucket}` : ''
+    const inPath = usesPathStyle(pathStyle, origin.host)
+    const host = inPath ? origin.host : `${bucket}.${origin.host}`
+    const prefix = inPath ? `/${bucket}` : ''
     // Encoded per segment, so a key with slashes stays a path and a space does not break the URL.
     const path =
       key === ''
@@ -247,4 +248,31 @@ function decodeEntities(value: string): string {
     .replaceAll('&quot;', '"')
     .replaceAll('&#39;', String.fromCharCode(39))
     .replaceAll('&amp;', '&')
+}
+
+/**
+ * Whether the bucket goes in the path rather than in the host name.
+ *
+ * ## Why this is inferred and not just a checkbox
+ *
+ * Reported from real use: a listing failed with "the host could not be resolved", and the working
+ * pattern in that office was `https://<endpoint>/<bucket>/<key>`. That is path style — the client
+ * supported it all along, behind a checkbox nobody had a reason to suspect, while the default
+ * built `<bucket>.s3.<region>.amazonaws.com` and asked the network to resolve a name it had never
+ * heard of.
+ *
+ * So the rule follows what the endpoint *is*. An address that is not AWS is almost never set up
+ * for virtual-host style: it would need a wildcard DNS entry and a wildcard certificate for every
+ * bucket, which internal deployments do not have. AWS itself, including a VPC endpoint, keeps
+ * virtual-host style, which is what it is built for.
+ *
+ * ## Why an explicit setting still wins
+ *
+ * "Almost never" is not never, and a rule that cannot be overridden is a guess with no escape. An
+ * explicit `pathStyle` — either way — is obeyed exactly; this only decides what happens when
+ * nobody said.
+ */
+export function usesPathStyle(configured: boolean | undefined, host: string): boolean {
+  if (configured !== undefined) return configured
+  return !/(^|\.)amazonaws\.com$/i.test(host)
 }
