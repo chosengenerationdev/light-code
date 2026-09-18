@@ -158,3 +158,15 @@ export type { DatasetConfig, DatasetRecord } from './dataset/types.js'
  * about what "a, b" means.
  */
 export { formatAliases, parseAliases, codebaseAliases, skillAliases, MAX_ALIASES } from './rag/aliases.js'
+
+/*
+ * How large a picture is drawn. One vocabulary for charts, diagrams and whatever comes next —
+ * see `display/size.ts` for why it is a word rather than a pixel count.
+ */
+export {
+  DISPLAY_SIZES,
+  DISPLAY_WIDTHS,
+  DEFAULT_DISPLAY_SIZE,
+  displayMaxWidth,
+  type DisplaySize,
+} from './display/size.js'

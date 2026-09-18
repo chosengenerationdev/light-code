@@ -1,3 +1,4 @@
+import { DISPLAY_SIZES, DISPLAY_SIZE_DESCRIPTION } from '../display/size.js'
 import { z } from 'zod'
 
 /**
@@ -195,6 +196,8 @@ export const diagramSpecSchema = z
           'label — a colour that stands for something, a shape used in a particular way. Explain ' +
           'the diagram, not the palette.',
       ),
+    /** See `display/size.ts` — the same field and the same words as a chart's. */
+    size: z.enum(DISPLAY_SIZES).optional().describe(DISPLAY_SIZE_DESCRIPTION),
     direction: z
       .enum(['down', 'right'])
       .optional()

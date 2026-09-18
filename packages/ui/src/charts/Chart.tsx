@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react'
-import { chartTotals, type ChartSpec, type ChartSeries } from '@light-code/core/browser'
+import { chartTotals, displayMaxWidth, type ChartSpec, type ChartSeries } from '@light-code/core/browser'
 
 import { colors } from '../theme.js'
 
@@ -133,6 +133,19 @@ export function Chart(props: ChartProps): ReactElement {
   const y = (value: number): number =>
     PAD.top + PLOT.height - ((value - axis.min) / (axis.max - axis.min)) * PLOT.height
 
+  /*
+   * Capped on the card rather than on the drawing.
+   *
+   * Reported from the Node host: a chart filled the whole window and asking for a smaller one got
+   * nowhere, because the svg is `width: 100%` and the card it sits in had no width of its own —
+   * so "how big is this chart" was answered entirely by how wide the panel happened to be. A cap
+   * here bounds the title, the legend and the numbers table with it, which a cap on the svg alone
+   * would leave sticking out.
+   *
+   * `undefined` for `full` leaves the previous behaviour exactly as it was.
+   */
+  const maxWidth = displayMaxWidth(chart.size)
+
   return (
     <div
       style={{
@@ -141,6 +154,7 @@ export function Chart(props: ChartProps): ReactElement {
         padding: 10,
         margin: '8px 0',
         background: colors.inputBackground,
+        ...(maxWidth !== undefined ? { maxWidth } : {}),
       }}
     >
       {chart.title !== undefined && (
@@ -172,7 +186,17 @@ export function Chart(props: ChartProps): ReactElement {
         ) : (
           <svg
             viewBox={`0 0 ${String(WIDTH)} ${String(HEIGHT)}`}
-            style={{ width: '100%', minWidth: 320, height: 'auto', display: 'block' }}
+            /*
+             * `minWidth` only while nothing smaller was asked for. It exists so a chart in a
+             * narrow sidebar stays legible, but it would silently overrule a `small` chart —
+             * the setting would appear to do nothing, which is worse than a slightly tight one.
+             */
+            style={{
+              width: '100%',
+              ...(maxWidth === undefined || maxWidth > 320 ? { minWidth: 320 } : {}),
+              height: 'auto',
+              display: 'block',
+            }}
             role="img"
             aria-label={chart.title ?? `${chart.type} chart`}
           >

@@ -1,3 +1,4 @@
+import { DISPLAY_SIZES, DISPLAY_SIZE_DESCRIPTION } from '../display/size.js'
 import { z } from 'zod'
 
 /**
@@ -70,6 +71,8 @@ export const chartSpecSchema = z
       .max(MAX_CATEGORIES)
       .describe('The x axis, or the pie slice labels. One per value in every series.'),
     series: z.array(chartSeriesSchema).min(1).max(MAX_SERIES),
+    /** See `display/size.ts` — the same field and the same words as a diagram's. */
+    size: z.enum(DISPLAY_SIZES).optional().describe(DISPLAY_SIZE_DESCRIPTION),
     xLabel: z.string().max(80).optional(),
     yLabel: z.string().max(80).optional(),
     note: z

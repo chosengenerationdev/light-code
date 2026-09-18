@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react'
-import {
+import { displayMaxWidth,
   diagramDataUri,
   diagramSvg,
   layoutDiagram,
@@ -31,6 +31,8 @@ export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
   const [copied, setCopied] = useState(false)
   const [saveError, setSaveError] = useState<string | undefined>(undefined)
 
+  // One vocabulary with charts: see `display/size.ts`.
+  const requested = displayMaxWidth(props.diagram.size)
   const { svg, uri, width, height } = useMemo(() => {
     /*
      * Resolved to real colours, because the SVG is a document of its own.
@@ -71,7 +73,16 @@ export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
          * Never wider than the panel, and never stretched past its own size in a wide one — an
          * eight-box flow blown up to fill a monitor looks like a mistake.
          */
-        style={{ maxWidth: '100%', width, height: 'auto', display: 'block' }}
+        /*
+         * The requested size, or the panel, whichever is smaller — and never wider than the
+         * diagram's own drawn width, so a small flow is not blown up to fill a monitor.
+         */
+        style={{
+          maxWidth: requested === undefined ? '100%' : `min(100%, ${String(requested)}px)`,
+          width,
+          height: 'auto',
+          display: 'block',
+        }}
       />
       {props.diagram.note !== undefined && (
         <div style={{ color: colors.muted, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
