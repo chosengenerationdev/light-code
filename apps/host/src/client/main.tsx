@@ -58,16 +58,24 @@ try {
 }
 
 /**
- * Takes the starting screen down once the panel has what it needs.
+ * Takes the starting screen down once the panel has everything it is built from.
  *
- * `settings` is the signal, because it is the reply the panel is built from — the one carrying
- * the theme, the mode and the approvals. Waiting for it rather than for the connection means the
- * chat appears furnished rather than empty and then filling in.
+ * ## Why more than one reply
  *
- * **It always comes down**, on a timer as well, and that is deliberate: a starting screen that
- * can get stuck is worse than none at all, because the product becomes unreachable rather than
- * merely unfurnished. If the state never arrives the user gets the panel plus whatever the status
- * banner says about why, which they can act on.
+ * It waited for `settings` alone, and was reported gone while the saved providers still were not
+ * there — which is the exact thing it was added to prevent. `settings` carries the theme, the mode
+ * and the approvals; the provider list is a *separate* reply, and the chat header cannot render a
+ * model selector without it. Showing the chat between the two is showing an unfinished panel, so
+ * both are waited for.
+ *
+ * Named rather than counted, so adding a third is a deliberate line here rather than a number
+ * somebody has to work out the meaning of.
+ *
+ * ## Why it always comes down anyway
+ *
+ * A starting screen that can stick makes the product unreachable, which is worse than one that
+ * lifts early: at least then you can see the panel and whatever the banner says about why it is
+ * empty. So the timer stays, and it is the backstop for a reply that never arrives at all.
  */
 const booting = document.getElementById('booting')
 const bootingDetail = document.getElementById('booting-detail')
@@ -75,17 +83,27 @@ const finishBooting = (): void => booting?.classList.add('done')
 const BOOTING_GIVE_UP_MS = 10_000
 const bootingTimer = setTimeout(finishBooting, BOOTING_GIVE_UP_MS)
 
+/** Every reply the panel needs before it is worth showing. Emptied as each arrives. */
+const awaiting = new Set(['settings', 'profiles'])
+
 const transport = new HttpTransport((text, level) => {
   setStatus(text, level)
   // The banner is the honest detail line while starting: it is already saying what is happening.
   if (bootingDetail !== null && level !== 'ok') bootingDetail.textContent = text
 })
 transport.onMessage((message) => {
-  const settings = message as { type?: string; theme?: string }
-  if (settings.type !== 'settings') return
-  applyTheme(settings.theme)
-  clearTimeout(bootingTimer)
-  finishBooting()
+  const incoming = message as { type?: string; theme?: string }
+  if (incoming.type === 'settings') applyTheme(incoming.theme)
+  if (incoming.type === undefined || !awaiting.delete(incoming.type)) return
+
+  if (bootingDetail !== null && awaiting.size > 0) {
+    // Says what is still outstanding rather than sitting on one sentence for the whole wait.
+    bootingDetail.textContent = `waiting for ${[...awaiting].join(', ')}`
+  }
+  if (awaiting.size === 0) {
+    clearTimeout(bootingTimer)
+    finishBooting()
+  }
 })
 
 transport

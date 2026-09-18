@@ -1,5 +1,39 @@
 # @chosengeneration/light-code
 
+## 0.80.1
+
+### Patch Changes
+
+- The starting screen waits for the providers too
+
+  Reported: the screen lifted while the saved providers still were not there — which is the exact
+  thing it was added to prevent.
+
+  It waited for `settings` alone. That reply carries the theme, the mode and the approvals; the
+  provider list is a **separate** reply, and the chat header cannot render a model selector without
+  it. Showing the chat between the two is showing an unfinished panel.
+
+  Both are waited for now, named rather than counted, so adding a third is a deliberate line rather
+  than a number whose meaning has to be worked out. While it waits, the detail line says what is
+  still outstanding instead of sitting on one sentence.
+
+  It still always comes down, on the timer as well: a starting screen that can stick makes the
+  product unreachable, which is worse than one that lifts early — at least then you can see the panel
+  and whatever the banner says about why it is empty.
+
+- 1fdcfb6: Choosing Claude's colour no longer says "There is no claude role"
+
+  Reported immediately after the colour shipped. The picker was there and the save refused it — a
+  control that exists and cannot work, which is worse than one that is missing.
+
+  **Colourable and assignable are not the same question**, and one guard was answering both. A colour
+  marks _authorship_ and belongs to anything that can author a reply; a role is a _seat_ a model can
+  be put in. Claude is the first thing that is one without being the other, and the colour handler
+  was asking about seats.
+
+  Only that handler changed. The four that configure a role still refuse anything that is not one —
+  a "claude" role would be assignable and mean nothing, since nothing consults it.
+
 ## 0.80.0
 
 ### Minor Changes
