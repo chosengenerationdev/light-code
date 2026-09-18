@@ -779,6 +779,14 @@ export type UiToHostMessage =
    */
   | { type: 'requestEmbedderModels'; profileId: string }
   | { type: 'requestSkills' }
+  /**
+   * One picture from a skill, fetched when somebody looks at it.
+   *
+   * On demand rather than with the skill list: the bytes cross the bridge as a `data:` URI, and
+   * shipping every picture of every skill so a panel can show a row of file names would be
+   * megabytes for something most people never open.
+   */
+  | { type: 'requestSkillImage'; skill: string; image: string }
   | { type: 'requestSchedules' }
   /** The whole tool catalogue, for the read-only Tools view. */
   | { type: 'requestTools' }
@@ -1346,6 +1354,14 @@ export type HostToUiMessage =
       lastToolsSync?: string
     }
   | {
+      type: 'skillImage'
+      skill: string
+      image: string
+      /** A `data:` URI, or undefined when it could not be read. */
+      dataUri?: string
+      problem?: string
+    }
+  | {
       type: 'skills'
       /**
        * `sourceDir` says which configured folder it came from — only the first is writable.
@@ -1356,6 +1372,8 @@ export type HostToUiMessage =
         name: string
         description: string
         filePath: string
+        /** File names of the pictures kept with it, so the tab can offer them without fetching. */
+        images?: string[]
         sourceDir?: string
         always?: boolean
       }[]

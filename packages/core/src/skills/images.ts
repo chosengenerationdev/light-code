@@ -132,3 +132,47 @@ export function appendSkillImages(body: string, images: readonly StoredSkillImag
   const trimmed = body.replace(/\s+$/, '')
   return [trimmed, '', '## Images', '', ...missing.map(renderSkillImage)].join('\n')
 }
+
+/**
+ * The pictures a skill on disk actually has.
+ *
+ * Listed from the folder rather than parsed out of the markdown, because those two can disagree:
+ * a reference can be edited to point at a file nobody added, and a file can be dropped in without
+ * a reference. What is on disk is the fact; the markdown is a description of it.
+ *
+ * Returns names only. Reading every picture to list them would mean megabytes crossing the bridge
+ * for a panel that is showing a row of file names, and most of them will never be opened.
+ */
+export async function listSkillImages(
+  skillFilePath: string,
+  fs: { readdir: (dir: string) => Promise<{ name: string; isDirectory: boolean }[]> },
+): Promise<string[]> {
+  // Only the folder layout has anywhere to keep them; a flat `name.md` has no images by definition.
+  const asPosix = skillFilePath.split(String.fromCharCode(92)).join('/')
+  if (!asPosix.toLowerCase().endsWith('/skill.md')) return []
+  const dir = `${skillFilePath.slice(0, skillFilePath.length - 'SKILL.md'.length)}${SKILL_IMAGE_DIR}`
+
+  try {
+    const entries = await fs.readdir(dir)
+    return entries
+      .filter((entry) => !entry.isDirectory && skillImageType(entry.name) !== undefined)
+      .map((entry) => entry.name)
+      .sort()
+  } catch {
+    // No folder is the ordinary case for a skill with no pictures, not a failure worth reporting.
+    return []
+  }
+}
+
+/**
+ * One picture, as something an `<img>` can show.
+ *
+ * A `data:` URI rather than a path or a served URL, because the webview's policy allows `data:`
+ * and nothing else — the same route the diagrams take. It means the bytes cross the bridge, which
+ * is why this is one picture on demand rather than all of them with the skill list.
+ */
+export function skillImageDataUri(name: string, bytes: Uint8Array): string | undefined {
+  const type = skillImageType(name)
+  if (type === undefined) return undefined
+  return `data:${type};base64,${Buffer.from(bytes).toString('base64')}`
+}

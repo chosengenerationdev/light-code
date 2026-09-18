@@ -323,6 +323,13 @@ export function App(props: AppProps): ReactElement {
    */
   const [s3, setS3] = useState<Extract<HostToUiMessage, { type: 's3' }> | undefined>(undefined)
   const [pythonSettings, setPythonSettings] = useState<PythonSettings | undefined>(undefined)
+  /**
+   * Pictures fetched from skills, keyed `skill/image`.
+   *
+   * Kept here rather than in the tab so they survive Settings being closed and reopened — the tab
+   * unmounts, and a cache inside it would make somebody fetch the same screenshot every visit.
+   */
+  const [skillImages, setSkillImages] = useState<Record<string, { dataUri?: string; problem?: string }>>({})
   const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>(
     [],
   )
@@ -730,6 +737,14 @@ export function App(props: AppProps): ReactElement {
         const { type: embedderDiscriminant, ...embedderState } = message
         void embedderDiscriminant
         setEmbedder(embedderState)
+      } else if (message.type === 'skillImage') {
+        setSkillImages((current) => ({
+          ...current,
+          [`${message.skill}/${message.image}`]: {
+            ...(message.dataUri !== undefined ? { dataUri: message.dataUri } : {}),
+            ...(message.problem !== undefined ? { problem: message.problem } : {}),
+          },
+        }))
       } else if (message.type === 'skills') {
         setSkills(message.skills)
         setSkillIssues(message.issues)
@@ -1708,6 +1723,13 @@ export function App(props: AppProps): ReactElement {
             search={searchProps}
             skills={{
               s3: skillsS3,
+              skillImages,
+              onRequestSkillImage: (skill: string, image: string) =>
+                props.transport.post({
+                  type: 'requestSkillImage',
+                  skill,
+                  image,
+                } satisfies UiToHostMessage),
               team: {
                 // Both spellings, merged by the one function that owns them — a config written
                 // before the list existed still reads back as a one-name list.

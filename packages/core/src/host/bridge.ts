@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
+import { listSkillImages, skillImageDataUri, SKILL_IMAGE_DIR } from '../skills/images.js'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -736,13 +737,29 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // `body` is deliberately dropped: only an `always` skill carries one, the tab says which
       // skill it is rather than showing the text, and there is no reason to put a whole standing
       // instruction on the wire twice.
-      skills: skills.map((skill) => ({
-        name: skill.name,
-        description: skill.description,
-        filePath: skill.filePath,
-        ...(skill.sourceDir !== undefined ? { sourceDir: skill.sourceDir } : {}),
-        ...(skill.always === true ? { always: true } : {}),
-      })),
+      skills: await Promise.all(
+        skills.map(async (skill) => {
+          /*
+           * Names only. The bytes are fetched when somebody opens one — shipping every picture of
+           * every skill so the tab can print a row of file names would be megabytes for something
+           * most people never look at.
+           */
+          const images = await listSkillImages(skill.filePath, {
+            readdir: async (dir) => {
+              const entries = await fs.readdir(dir, { withFileTypes: true })
+              return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
+            },
+          })
+          return {
+            name: skill.name,
+            description: skill.description,
+            filePath: skill.filePath,
+            ...(images.length > 0 ? { images } : {}),
+            ...(skill.sourceDir !== undefined ? { sourceDir: skill.sourceDir } : {}),
+            ...(skill.always === true ? { always: true } : {}),
+          }
+        }),
+      ),
       issues: skillIssues,
       ...(skillsDir !== undefined ? { skillsDir } : {}),
       extraDirs: extraSkillDirs,
@@ -6162,6 +6179,52 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await postS3()
   }
 
+  /**
+   * One picture from a skill, as a `data:` URI.
+   *
+   * Both halves are checked against what is on disk rather than trusted: the skill name picks a
+   * *known* skill, and the picture must be one the folder actually has. A name from a message is
+   * model- or panel-supplied text, and joining it into a path unchecked is how a request for a
+   * picture becomes a request for a private key.
+   */
+  async function handleSkillImage(skillName: string, image: string): Promise<void> {
+    const skill = skills.find((entry) => entry.name === skillName)
+    if (skill === undefined) {
+      post({ type: 'skillImage', skill: skillName, image, problem: 'No skill of that name.' })
+      return
+    }
+
+    try {
+      const available = await listSkillImages(skill.filePath, {
+        readdir: async (dir) => {
+          const entries = await fs.readdir(dir, { withFileTypes: true })
+          return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
+        },
+      })
+      if (!available.includes(image)) {
+        post({ type: 'skillImage', skill: skillName, image, problem: 'That skill has no such picture.' })
+        return
+      }
+
+      const folder = skill.filePath.slice(0, skill.filePath.length - 'SKILL.md'.length)
+      const bytes = await fs.readFile(path.join(folder, SKILL_IMAGE_DIR, image))
+      const dataUri = skillImageDataUri(image, bytes)
+      post({
+        type: 'skillImage',
+        skill: skillName,
+        image,
+        ...(dataUri !== undefined ? { dataUri } : { problem: 'Not a picture this can show.' }),
+      })
+    } catch (error) {
+      post({
+        type: 'skillImage',
+        skill: skillName,
+        image,
+        problem: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   async function handleSaveSkillsAlias(aliases: string[]): Promise<void> {
     try {
       const { config } = await configManager.load()
@@ -9022,6 +9085,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleClearDataset', handleClearDataset(message.id, message.resync === true))
     } else if (message.type === 'clearMailIndex') {
       reportFailure('handleClearMailIndex', handleClearMailIndex(message.resync === true))
+    } else if (message.type === 'requestSkillImage') {
+      reportFailure('handleSkillImage', handleSkillImage(message.skill, message.image))
     } else if (message.type === 'requestS3') {
       reportFailure('postS3', postS3())
     } else if (message.type === 'saveS3Connection') {

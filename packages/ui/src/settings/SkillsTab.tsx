@@ -20,7 +20,23 @@ export type SkillsTabS3 = Omit<S3SectionProps, 'kind' | 'manageConnections'>
 
 export interface SkillsTabProps {
   s3?: SkillsTabS3 | undefined
-  skills: { name: string; description: string; filePath: string; sourceDir?: string; always?: boolean }[]
+  skills: {
+    name: string
+    description: string
+    filePath: string
+    /** File names of the pictures kept with it. The bytes are fetched only when one is opened. */
+    images?: string[]
+    sourceDir?: string
+    always?: boolean
+  }[]
+  /**
+   * Pictures already fetched, keyed `skill/image`.
+   *
+   * Held by the caller rather than here so they survive this tab being unmounted and remounted —
+   * reopening Settings would otherwise re-fetch every picture somebody had already looked at.
+   */
+  skillImages?: Record<string, { dataUri?: string; problem?: string }> | undefined
+  onRequestSkillImage?: ((skill: string, image: string) => void) | undefined
   issues: { filePath: string; detail: string }[]
   /** Where new skills are written. Undefined when no folder is open. */
   skillsDir?: string | undefined
@@ -400,6 +416,58 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
               <div style={{ color: colors.muted, fontSize: 10, fontFamily: monospace, marginTop: 2 }}>
                 {skill.filePath}
               </div>
+
+              {/*
+                The pictures, shown on demand.
+
+                Names arrive with the skill and the bytes do not, so opening one is a request.
+                That keeps the common case — a list of skills nobody is inspecting — free, and
+                it is the same reason the diagram is a `data:` URI rather than a served file:
+                the webview's policy allows that and nothing else.
+              */}
+              {(skill.images ?? []).length > 0 && (
+                <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(skill.images ?? []).map((image) => {
+                    const key = `${skill.name}/${image}`
+                    const loaded = props.skillImages?.[key]
+                    return (
+                      <div key={key}>
+                        {loaded?.dataUri === undefined ? (
+                          <button
+                            type="button"
+                            style={secondaryButtonStyle()}
+                            onClick={() => props.onRequestSkillImage?.(skill.name, image)}
+                          >
+                            {loaded?.problem === undefined ? `Show ${image}` : `Retry ${image}`}
+                          </button>
+                        ) : (
+                          <figure style={{ margin: 0 }}>
+                            <img
+                              src={loaded.dataUri}
+                              alt={image}
+                              /* Bounded, because a screenshot is often far wider than this panel. */
+                              style={{
+                                maxWidth: '100%',
+                                borderRadius: 4,
+                                border: `1px solid ${colors.border}`,
+                                display: 'block',
+                              }}
+                            />
+                            <figcaption
+                              style={{ color: colors.muted, fontSize: 11, marginTop: 2, fontFamily: monospace }}
+                            >
+                              {image}
+                            </figcaption>
+                          </figure>
+                        )}
+                        {loaded?.problem !== undefined && (
+                          <div style={{ color: colors.error, fontSize: 11 }}>{loaded.problem}</div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
               {confirming === skill.name && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12 }}>
