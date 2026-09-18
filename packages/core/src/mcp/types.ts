@@ -6,6 +6,21 @@ import { z } from 'zod'
  * `command` is stdio, one with `url` is Streamable HTTP — that is how other clients'
  * configs are written, and requiring an explicit `type` would break pasting.
  */
+/**
+ * A call this server may never make.
+ *
+ * Declared by the user and never inferred — see `deny.ts` for why a rule that tried to *recognise*
+ * a dangerous call would be worse than none.
+ */
+export const mcpDenyRuleSchema = z.object({
+  /** Bare tool names this applies to. Omit for every tool on the server. */
+  tools: z.array(z.string().min(1)).max(50).optional(),
+  /** Refused when this text appears anywhere in the call's arguments. Case-insensitive. */
+  contains: z.string().min(1).max(200),
+  /** Told to the model and shown to the user when a call is refused. */
+  reason: z.string().max(300).optional(),
+})
+
 export const stdioServerSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
@@ -19,6 +34,8 @@ export const stdioServerSchema = z.object({
   disabled: z.boolean().optional(),
   /** Tool names disabled individually within this server. */
   disabledTools: z.array(z.string()).optional(),
+  /** Calls this server may never make. See `deny.ts`. */
+  deny: z.array(mcpDenyRuleSchema).max(50).optional(),
   /**
    * How long one tool call from this server may take, in seconds.
    *
@@ -62,6 +79,8 @@ export const httpServerSchema = z.object({
   headers: z.record(z.string(), z.string()).optional(),
   disabled: z.boolean().optional(),
   disabledTools: z.array(z.string()).optional(),
+  /** Calls this server may never make. See `deny.ts`. */
+  deny: z.array(mcpDenyRuleSchema).max(50).optional(),
   /** As above. A remote server is if anything more likely to be slow. */
   timeout: z.number().positive().max(3600).optional(),
   /**

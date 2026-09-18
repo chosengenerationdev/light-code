@@ -3,6 +3,7 @@ import type { Logger } from '../logging/logger.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
 import { McpConnection, type McpToolDescriptor } from './client.js'
+import { denyCheck } from './deny.js'
 import {
   isPackageRunnerCommand,
   isStdioServer,
@@ -255,8 +256,27 @@ export class McpRegistry {
         name,
         descriptors.map((descriptor) => ({
           descriptor,
-          tool: adaptTool(name, descriptor.name, descriptor.description, descriptor.inputSchema, (args) =>
-            connection.callTool(descriptor.name, args),
+          tool: adaptTool(
+            name,
+            descriptor.name,
+            descriptor.description,
+            descriptor.inputSchema,
+            async (args) => {
+              /*
+               * Checked here, at the one place a call leaves for the server.
+               *
+               * Not in the loop and not in the approval gate: those can be auto-approved, and a
+               * rule the user wrote to mean "never" must not be satisfiable by ticking a box. The
+               * rules are read at call time so an edit applies to the next call rather than after
+               * a restart — which is when somebody changes one, having just watched it not fire.
+               */
+              const decision = denyCheck(descriptor.name, args, this.servers[name]?.deny)
+              if (decision.denied) {
+                this.appendLog(name, decision.message ?? 'Refused by a deny rule.')
+                throw new Error(decision.message ?? 'Refused by a deny rule.')
+              }
+              return connection.callTool(descriptor.name, args)
+            },
           ),
         })),
       )
