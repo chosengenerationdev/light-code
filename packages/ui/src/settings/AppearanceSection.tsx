@@ -143,14 +143,41 @@ function ColourPicker(props: ColourPickerProps): ReactElement {
   )
 }
 
+/**
+ * A group heading.
+ *
+ * Reported as "all of them look like the same text": every control carried a `labelStyle()` label
+ * and nothing above them did, so a field label and the name of a whole section were typographically
+ * identical — eight settings in one undifferentiated column. A heading has to look unlike the
+ * things it heads or it is not a heading, so this is smaller, spaced, and separated by a rule.
+ */
+function GroupHeading(props: { children: string; first?: boolean }): ReactElement {
+  return (
+    <h4
+      style={{
+        margin: props.first === true ? '0 0 8px' : '20px 0 8px',
+        paddingTop: props.first === true ? 0 : 14,
+        borderTop: props.first === true ? 'none' : `1px solid ${colors.border}`,
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: colors.muted,
+      }}
+    >
+      {props.children}
+    </h4>
+  )
+}
+
 export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
   const clash = props.accentColor.toLowerCase() === props.expertColor.toLowerCase()
 
   return (
     <section>
+      {props.onChangeTheme !== undefined && <GroupHeading first>Theme</GroupHeading>}
       {props.onChangeTheme !== undefined && (
         <div style={{ marginBottom: 16 }}>
-          <label style={labelStyle()}>Theme</label>
           <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
             {(['system', 'light', 'dark'] as const).map((option) => {
               const selected = (props.theme ?? 'system') === option
@@ -181,6 +208,8 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
           </span>
         </div>
       )}
+      <GroupHeading first={props.onChangeTheme === undefined}>Colours</GroupHeading>
+
       <ColourPicker
         label="Accent colour"
         description="Buttons, your messages, selections and focus rings."
@@ -191,14 +220,39 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
         onChange={props.onChangeAccent}
       />
 
+      {/*
+        The seat, not the answerer.
+
+        This description used to say "answers that came from Claude", which was true when Claude
+        was the only thing that could hold the seat. It can now be a configured provider, and
+        Claude has a colour of its own below — so a description naming Claude here would point at
+        the wrong control.
+      */}
       <ColourPicker
         label="Expert colour"
-        description="Marks answers that came from Claude rather than from your own model. Kept separate from the accent so the two are told apart at a glance."
+        description="Marks answers from whatever holds the expert seat. Kept separate from the accent so the two are told apart at a glance."
         value={props.expertColor}
         presets={EXPERT_PRESETS}
         fallback={DEFAULT_EXPERT}
         inputId="lc-expert-hex"
         onChange={props.onChangeExpert}
+      />
+
+      {/*
+        Claude's own, because it is a different answerer rather than a role.
+
+        Without it there was nowhere to set this at all: the list below is built from team roles
+        and Claude is not one, so the colour existed and could not be changed — a setting that is
+        present and unreachable, which is the same as absent.
+      */}
+      <ColourPicker
+        label="Claude colour"
+        description="Marks answers from the Claude command line specifically, so they are told apart from an expert seat held by a configured model."
+        value={props.agentColors['claude'] ?? defaultAgentColor('claude')}
+        presets={EXPERT_PRESETS}
+        fallback={defaultAgentColor('claude')}
+        inputId="lc-agent-claude-hex"
+        onChange={(hex) => props.onChangeAgentColor('claude', hex)}
       />
 
       {/*
@@ -209,6 +263,9 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
         a test plan arriving in the same colour are two voices presented as one, and which
         specialist said it is exactly what the reader needs to know.
       */}
+      {props.agentRoles.filter((role) => role.role !== 'expert').length > 0 && (
+        <GroupHeading>Specialists</GroupHeading>
+      )}
       {props.agentRoles.length > 0 && (
         <div style={{ marginTop: 4 }}>
           {/*
@@ -250,8 +307,9 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
         </p>
       )}
 
-      <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 12 }}>
-        <span style={labelStyle()}>Preview</span>
+      {/* Its own group, so it reads as the result of the settings above rather than another one. */}
+      <div>
+        <GroupHeading>Preview</GroupHeading>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <span
