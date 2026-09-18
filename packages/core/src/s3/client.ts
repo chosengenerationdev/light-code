@@ -1,4 +1,5 @@
 import type { HttpClient, HttpResponse } from '../platform/http.js'
+import { describeTlsError } from '../providers/auth/apigeeMtls.js'
 import { signRequest } from './sigv4.js'
 
 /**
@@ -93,13 +94,30 @@ export class S3Client {
         : {}),
     })
 
-    const response = await this.http.request(url, {
-      method: call.method,
-      headers: signed.headers,
-      ...(call.bodyBytes !== undefined ? { bodyBytes: call.bodyBytes } : {}),
-      ...(call.signal !== undefined ? { signal: call.signal } : {}),
-      ...(this.tls !== undefined ? { tls: this.tls } : {}),
-    })
+    /*
+     * A request that never reaches S3 is diagnosed rather than passed on.
+     *
+     * Reported from real use as "fetch failed" — which is undici's wrapper for *every* transport
+     * failure, with the actual reason on `.cause`, sometimes nested twice (§19). On its own it is
+     * unactionable: an untrusted corporate root, a proxy that was not used, a name that does not
+     * resolve and a refused connection all look identical.
+     *
+     * `describeTlsError` already walks that chain for the gateway, so it is reused rather than
+     * written again — and the host is named, because "the host could not be resolved" is only
+     * useful alongside *which* host it tried.
+     */
+    let response: HttpResponse
+    try {
+      response = await this.http.request(url, {
+        method: call.method,
+        headers: signed.headers,
+        ...(call.bodyBytes !== undefined ? { bodyBytes: call.bodyBytes } : {}),
+        ...(call.signal !== undefined ? { signal: call.signal } : {}),
+        ...(this.tls !== undefined ? { tls: this.tls } : {}),
+      })
+    } catch (error) {
+      throw new Error(`Could not reach ${new URL(url).host}: ${describeTlsError(error)}`, { cause: error })
+    }
 
     const bytes = await readAll(response)
     return { status: response.status, text: bytes.toString('utf8'), bytes }

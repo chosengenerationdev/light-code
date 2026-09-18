@@ -1,5 +1,30 @@
 # light-code-vscode
 
+## 0.93.1
+
+### Patch Changes
+
+- "fetch failed" from an S3 bucket now says what actually failed
+
+  Reported from real use: adding a bucket and asking for a listing failed with `fetch failed`.
+
+  That is undici's wrapper for **every** transport failure, with the real reason on `.cause` and
+  sometimes nested twice — so an untrusted corporate root, a proxy that was not used, a host that
+  does not resolve and a refused connection all arrive looking identical, and none of them is
+  actionable. §19 records this exact trap for the gateway, where `describeTlsError` was written to
+  walk that chain; the S3 client simply was not using it.
+
+  It is now, and the host is named too, because "the host could not be resolved" is only useful
+  alongside _which_ host it tried. So instead of `fetch failed` you get one of:
+
+      Could not reach reports.s3.eu-west-1.amazonaws.com: the host could not be resolved.
+      Could not reach reports.s3.eu-west-1.amazonaws.com: the connection was refused.
+      Could not reach reports.s3.eu-west-1.amazonaws.com: the server certificate could not be
+        verified. If your network intercepts TLS, add the corporate root CA (caFile, or
+        NODE_EXTRA_CA_CERTS).
+
+  The original error is kept as `cause`, so nothing is lost on the way.
+
 ## 0.93.0
 
 ### Minor Changes
