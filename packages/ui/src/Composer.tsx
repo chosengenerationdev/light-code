@@ -62,7 +62,8 @@ export interface ComposerProps {
   /** Whether the Claude CLI expert is configured and runnable. */
   expertEnabled: boolean
   /** Messages typed during the current turn, waiting to be folded in. */
-  queued: string[]
+  /** Waiting to be folded into the turn. `images` is a count, which is all the row shows. */
+  queued: { text: string; images?: number }[]
   onUnqueue: (index: number) => void
   /** OpenSearch connections, and which one this session may search. */
   searchConnections: { id: string; label: string }[]
@@ -423,7 +424,7 @@ export function Composer(props: ComposerProps): ReactElement {
         <div style={{ padding: '6px 10px 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {props.queued.map((message, index) => (
             <div
-              key={`${index}-${message.slice(0, 24)}`}
+              key={`${index}-${message.text.slice(0, 24)}`}
               style={{
                 display: 'flex',
                 alignItems: 'flex-start',
@@ -435,7 +436,19 @@ export function Composer(props: ComposerProps): ReactElement {
               }}
             >
               <span style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {message}
+                {message.text}
+                {/*
+                  Said, because it was silently lost before this.
+                  A queued message's attachments were dropped on the way to the host, so the words
+                  arrived and the screenshot they were about did not — and nothing on screen
+                  indicated it. Showing the count is how somebody can tell it is still coming.
+                */}
+                {message.images !== undefined && message.images > 0 && (
+                  <span style={{ opacity: 0.8 }}>
+                    {' '}
+                    [{message.images} image{message.images === 1 ? '' : 's'}]
+                  </span>
+                )}
               </span>
               <button
                 type="button"

@@ -71,7 +71,8 @@ export interface ChatProps {
   activeProfileId: string | undefined
   onSelectProfile: (id: string) => void
   expertEnabled: boolean
-  queued: string[]
+  /** Waiting to be folded into the turn, passed straight to the composer. */
+  queued: { text: string; images?: number }[]
   onUnqueue: (index: number) => void
   searchConnections: { id: string; label: string }[]
   activeSearchId: string | undefined

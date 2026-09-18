@@ -254,7 +254,7 @@ export function App(props: AppProps): ReactElement {
   const [expert, setExpert] = useState<ExpertState | undefined>(undefined)
   const [network, setNetwork] = useState<NetworkSettingsSummary | undefined>(undefined)
   const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
-  const [queued, setQueued] = useState<string[]>([])
+  const [queued, setQueued] = useState<{ text: string; images?: number }[]>([])
   const [searchConnections, setSearchConnections] = useState<SearchConnectionSummary[]>([])
   const [activeSearchId, setActiveSearchId] = useState<string | undefined>(undefined)
   const [searchIndexes, setSearchIndexes] = useState<SearchIndex[]>([])
@@ -916,7 +916,17 @@ export function App(props: AppProps): ReactElement {
     if (isStreaming) {
       // Queued host-side: the loop consumes it mid-turn, and this webview can be destroyed
       // and rebuilt at any moment, so it cannot be the one holding the queue.
-      props.transport.post({ type: 'queueMessage', text } satisfies UiToHostMessage)
+      /*
+       * Images go with it.
+       *
+       * They were dropped here: a screenshot pasted into a message sent mid-turn reached nothing,
+       * silently, and the model was then asked about a picture it had never been given.
+       */
+      props.transport.post({
+        type: 'queueMessage',
+        text,
+        ...(images.length > 0 ? { images } : {}),
+      } satisfies UiToHostMessage)
       return
     }
     setError(undefined)

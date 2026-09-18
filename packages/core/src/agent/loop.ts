@@ -85,7 +85,13 @@ export interface RunAgentTurnOptions {
    * and before the next model call — never mid-tool-call. Returning an empty array is the
    * normal case and costs nothing.
    */
-  drainQueuedMessages?: () => string[]
+  /**
+   * Anything typed while this turn was running, taken in one go.
+   *
+   * Entries rather than strings, because a queued message can carry images and a screenshot that
+   * arrives without its text — or text without its screenshot — is worse than either alone.
+   */
+  drainQueuedMessages?: () => { text: string; images?: ImageAttachment[] }[]
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
@@ -603,8 +609,8 @@ export async function runAgentTurn(
     // no provider sees an unanswered tool_use.
     const queued = options.drainQueuedMessages?.() ?? []
     for (const message of queued) {
-      conversation.addUserMessage(message)
-      events.onQueuedMessageConsumed?.(message)
+      conversation.addUserMessage(message.text, message.images)
+      events.onQueuedMessageConsumed?.(message.text)
     }
     /*
      * A fresh budget from here, because from here it is a different instruction.

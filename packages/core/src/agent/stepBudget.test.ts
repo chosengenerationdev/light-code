@@ -75,7 +75,8 @@ describe('a message typed while the turn is running', () => {
 
     // One message, delivered on the second step. Without the reset the turn would stop after 3
     // provider calls; with it, the budget restarts and 3 more are allowed.
-    let remaining = ['actually, do this instead']
+    // Entries rather than bare strings: a queued message can carry images.
+    let remaining = [{ text: 'actually, do this instead' }]
     let step = 0
     await runAgentTurn(provider, new Conversation(), 'go', registry, context(), events, {
       maxIterations: 3,

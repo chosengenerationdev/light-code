@@ -948,10 +948,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * because the loop consumes them mid-turn, and the webview can be destroyed and rebuilt
    * at any moment (it is whenever the view is hidden).
    */
-  let queuedMessages: string[] = []
+  /**
+   * Typed while a turn was running, waiting to be folded in.
+   *
+   * Entries rather than strings. It held only text, so a screenshot pasted into a message sent
+   * mid-turn was dropped on the way in — the words arrived and the picture they were about did
+   * not, which from the outside reads as the model ignoring what it was shown.
+   */
+  let queuedMessages: { text: string; images?: ImageAttachmentInput[] }[] = []
 
   function postQueued(): void {
-    post({ type: 'queued', messages: [...queuedMessages] })
+    post({
+      type: 'queued',
+      // A count, not the attachments: the composer only needs to say one is there, and sending
+      // the bytes back for something already on screen would be waste.
+      messages: queuedMessages.map((entry) => ({
+        text: entry.text,
+        ...(entry.images !== undefined && entry.images.length > 0
+          ? { images: entry.images.length }
+          : {}),
+      })),
+    })
   }
 
   let activeAbortController: AbortController | undefined
@@ -3088,7 +3105,31 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           const drained = queuedMessages
           queuedMessages = []
           postQueued()
-          return drained
+          /*
+           * Attachments come through, and the same vision gate applies as on the main path.
+           *
+           * Without the gate a queued screenshot would be handed to a text-only model, which
+           * fails or is ignored somewhere much further along — the backstop above exists because
+           * that looks exactly like the model disregarding what it was shown.
+           */
+          return drained.map((entry) => {
+            const attachments = entry.images ?? []
+            if (attachments.length === 0) return { text: entry.text }
+            if (!capabilities.supportsVision) {
+              post({
+                type: 'error',
+                message: `${profile.model} does not accept images. The attachment on a queued message was not sent — set "Supports images" in the profile's advanced settings if that is wrong.`,
+              })
+              return { text: entry.text }
+            }
+            return {
+              text: entry.text,
+              images: attachments.map((image) => ({
+                mediaType: image.mediaType,
+                data: image.data,
+              })),
+            }
+          })
         },
       }
       // Silently dropping an image on a text-only model would look like the model ignoring
@@ -3407,10 +3448,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Whatever did not get folded in — a turn that ended before reaching a boundary —
       // starts the next turn rather than being silently dropped.
       if (queuedMessages.length > 0 && activeAbortController === undefined) {
-        const next = queuedMessages.join('\n\n')
+        /*
+         * Folded into one message, attachments included.
+         *
+         * Joining the text and dropping the images would lose exactly what this fix is about, and
+         * on this path the loss would be harder to notice: it happens when a turn ended early, so
+         * there is no visible seam where the picture went missing.
+         */
+        const next = queuedMessages.map((entry) => entry.text).join('\n\n')
+        const images = queuedMessages.flatMap((entry) => entry.images ?? [])
         queuedMessages = []
         postQueued()
-        void handleSendMessage(next)
+        void handleSendMessage(next, images.length > 0 ? images : undefined)
       }
     }
   }
@@ -8647,7 +8696,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'requestMentionCandidates') {
       reportFailure('handleMentionCandidates', handleMentionCandidates(message.query))
     } else if (message.type === 'queueMessage') {
-      queuedMessages.push(message.text)
+      queuedMessages.push({
+        text: message.text,
+        ...(message.images !== undefined && message.images.length > 0
+          ? { images: message.images }
+          : {}),
+      })
       postQueued()
     } else if (message.type === 'unqueueMessage') {
       queuedMessages.splice(message.index, 1)

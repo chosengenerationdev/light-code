@@ -477,8 +477,14 @@ export type UiToHostMessage =
   /** Ask the host to resolve `@` mentions for autocomplete as the user types. */
   | { type: 'requestMentionCandidates'; query: string }
   | { type: 'cancel' }
-  /** Typed while a turn was running. Folded in at the next safe point in the loop. */
-  | { type: 'queueMessage'; text: string }
+  /**
+   * Typed while a turn was running. Folded in at the next safe point in the loop.
+   *
+   * Carries images for the same reason `sendMessage` does. Without them a screenshot pasted into
+   * a message typed mid-turn was dropped on the way to the queue, silently — the text arrived and
+   * the picture it was about did not, which reads as the model ignoring what it was shown.
+   */
+  | { type: 'queueMessage'; text: string; images?: ImageAttachmentInput[] }
   /** Removed before it was consumed. */
   | { type: 'unqueueMessage'; index: number }
   | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
@@ -1245,7 +1251,14 @@ export type HostToUiMessage =
   /** History was summarised; the UI says so rather than silently losing detail. */
   | { type: 'compacted'; summarisedCount: number }
   /** The queue as the host holds it — the UI renders this rather than its own copy. */
-  | { type: 'queued'; messages: string[] }
+  /**
+   * What is waiting, for the composer to list.
+   *
+   * `images` is a count rather than the attachments: the panel only needs to say a message has
+   * one, and sending the data back would be bytes across the bridge for something already on
+   * screen.
+   */
+  | { type: 'queued'; messages: { text: string; images?: number }[] }
   /** A queued message entered the conversation; the UI shows it as an ordinary user turn. */
   | { type: 'queuedMessageConsumed'; text: string }
   /** Workspace-relative paths matching an `@` query, for composer autocomplete. */
