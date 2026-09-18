@@ -1,5 +1,20 @@
 # light-code-vscode
 
+## 0.94.2
+
+### Patch Changes
+
+- An S3 endpoint keeps any path it carries
+
+  Found while checking whether an existing connection would need editing: an endpoint written as
+  `https://host/s3api` had its path **silently dropped**, producing `https://host/bucket/key` and a
+  request to a route that was never going to answer.
+
+  That is a real shape — an internal store behind a gateway that routes by path — and it failed in a
+  way that looks exactly like the earlier subdomain problem, so it would have been easy to think the
+  addressing fix had not worked. The path is kept now, for both addressing styles, and a trailing
+  slash on the endpoint does not double up with the bucket segment.
+
 ## 0.94.1
 
 ### Patch Changes

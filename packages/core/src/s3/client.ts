@@ -65,7 +65,16 @@ export class S3Client {
 
     const inPath = usesPathStyle(pathStyle, origin.host)
     const host = inPath ? origin.host : `${bucket}.${origin.host}`
-    const prefix = inPath ? `/${bucket}` : ''
+    /*
+     * Anything the endpoint itself carries is kept.
+     *
+     * `https://host/s3api` is a real shape — an internal store behind a gateway that routes by
+     * path — and taking only the host dropped the `/s3api` silently, leaving a request to a path
+     * that was never going to answer. Trailing slash removed so it does not double up with the
+     * bucket segment below.
+     */
+    const mount = origin.pathname === '/' ? '' : origin.pathname.replace(/\/+$/, '')
+    const prefix = inPath ? `${mount}/${bucket}` : mount
     // Encoded per segment, so a key with slashes stays a path and a space does not break the URL.
     const path =
       key === ''

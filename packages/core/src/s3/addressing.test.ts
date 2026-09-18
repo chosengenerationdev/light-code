@@ -96,6 +96,28 @@ describe('the URL that comes out', () => {
     )
   })
 
+  /*
+   * An endpoint behind a path-routing gateway is a real shape, and taking only the host dropped
+   * it silently — a request to a path that was never going to answer.
+   */
+  it('keeps a path the endpoint itself carries', async () => {
+    expect(await urlFor({ ...base, endpoint: 'https://host.example/s3api' })).toBe(
+      'https://host.example/s3api/reports/notes.md',
+    )
+  })
+
+  it('does not double the separator when the endpoint ends in one', async () => {
+    expect(await urlFor({ ...base, endpoint: 'https://host.example/s3api/' })).toBe(
+      'https://host.example/s3api/reports/notes.md',
+    )
+  })
+
+  it('keeps it for virtual-host style too', async () => {
+    expect(
+      await urlFor({ ...base, endpoint: 'https://host.example/s3api', pathStyle: false }),
+    ).toBe('https://reports.host.example/s3api/notes.md')
+  })
+
   /* The access key belongs in the Authorization header and has never been in the URL. */
   it('never puts the access key in the URL', async () => {
     const url = await urlFor({ ...base, endpoint: 'https://s3.internal.example' })
