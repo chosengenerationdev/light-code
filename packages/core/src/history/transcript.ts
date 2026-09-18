@@ -206,9 +206,19 @@ export function toolCallSummary(
 
 export function consultationFromToolCall(name: string, rawArguments: string): string | undefined {
   const call = throughDispatch(name, rawArguments)
-  // Both names: the tool is `ask_claude` now, and every task saved before that holds calls
-  // under the old one. Dropping the old name would quietly unlabel every stored transcript.
-  if (call.name === ASK_CLAUDE_TOOL || call.name === LEGACY_ASK_EXPERT_TOOL) return 'expert'
+  /*
+   * `claude`, not `expert` — who answered, not which seat was consulted.
+   *
+   * These two tool names are the Claude command line and nothing else: the tool is only
+   * registered when the CLI is runnable, and a configured provider in the expert seat is reached
+   * through `ask_agent` below instead. So this is the one case where the answerer is known by
+   * name, and saying "expert" threw that away — which matters more now the seat can be held by
+   * something that is not Claude at all, and a reply would be labelled identically.
+   *
+   * Both names, because the tool was renamed and every task saved before that holds calls under
+   * the old one. Dropping it would quietly unlabel every stored transcript.
+   */
+  if (call.name === ASK_CLAUDE_TOOL || call.name === LEGACY_ASK_EXPERT_TOOL) return 'claude'
   if (call.name !== 'ask_agent') return undefined
   const decoded = call.args
   const role =

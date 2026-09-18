@@ -25,7 +25,10 @@ const bridge = readFileSync(
  */
 describe('which specialist answered', () => {
   it('recognises ask_expert as the expert, since it predates roles', () => {
-    expect(consultationFromToolCall('ask_expert', '{"question":"why"}')).toBe('expert')
+    // `claude`, not `expert`: this tool is the command line, and the expert *seat* can now be
+    // held by a configured provider reached through `ask_agent` instead. Two different answerers
+    // labelled identically is what the colour exists to prevent.
+    expect(consultationFromToolCall('ask_expert', '{"question":"why"}')).toBe('claude')
   })
 
   it('takes the role out of an ask_agent call', () => {

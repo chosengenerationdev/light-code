@@ -214,6 +214,15 @@ export function applyExpert(hex: string): void {
 export const DEFAULT_AGENT_COLORS: Record<string, string> = {
   // The expert keeps its established coral, so nobody's screen changes colour on upgrade.
   expert: DEFAULT_EXPERT,
+  /*
+   * Claude answers in its own colour, because it is a different answerer rather than a role.
+   *
+   * The expert *seat* can be held by a configured provider, and a consultation answered by that
+   * and one answered by the Claude command line were painted identically — which is precisely
+   * what this colour family exists to prevent: it marks authorship, so two authors sharing one
+   * colour is the failure, not the saving.
+   */
+  claude: '#C96442',
   programmer: '#8B7FD4',
   reviewer: '#3B9EDB',
   tester: '#D4A72C',

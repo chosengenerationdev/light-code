@@ -433,7 +433,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
   const configManager = new ConfigManager(services.configStore, services.workspaceRoot)
-  const httpClient = services.httpClient ?? new FetchHttpClient()
+  /*
+   * The proxy environment is honoured here too, not only on the Node host.
+   *
+   * It was `new FetchHttpClient()` — no proxy support — so the extension ignored `HTTPS_PROXY`
+   * entirely. On a corporate network that means anything not reachable directly simply fails, and
+   * the failure is a DNS error naming a host the machine was never going to resolve. Reported
+   * exactly that way against S3: "the host could not be resolved", from a network where nothing
+   * external resolves without the proxy.
+   *
+   * Safe to turn on rather than a widening: `proxyForUrl` returns nothing for loopback and obeys
+   * `NO_PROXY`, so a gateway that should be reached directly still is — provided it is listed
+   * there, which is what that variable is for. A gateway reachable without a proxy on a machine
+   * with `HTTPS_PROXY` set and no `NO_PROXY` is the one case this changes, and the fix for it is
+   * the same variable every other tool on that machine already needs.
+   */
+  const httpClient = services.httpClient ?? new FetchHttpClient({ useEnvProxy: true })
   const conversation = new Conversation(
     workspaceRoot !== undefined ? buildSystemPrompt(workspaceRoot) : undefined,
   )

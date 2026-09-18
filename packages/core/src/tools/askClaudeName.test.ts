@@ -33,8 +33,13 @@ describe('the Claude command line is named for what it is', () => {
    * to get right.
    */
   it('still attributes calls stored under the old name', () => {
-    expect(consultationFromToolCall(LEGACY_ASK_EXPERT_TOOL, '{}')).toBe('expert')
-    expect(consultationFromToolCall(ASK_CLAUDE_TOOL, '{}')).toBe('expert')
+    /*
+      * Both say `claude`, because both *are* the command line — the tool was renamed, and a task
+      * saved before that holds calls under the old name. What changed is only that the label now
+      * names who answered rather than which seat was asked.
+      */
+    expect(consultationFromToolCall(LEGACY_ASK_EXPERT_TOOL, '{}')).toBe('claude')
+    expect(consultationFromToolCall(ASK_CLAUDE_TOOL, '{}')).toBe('claude')
   })
 
   it('leaves no prose naming the old tool to the model', () => {

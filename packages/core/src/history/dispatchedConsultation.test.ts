@@ -31,11 +31,11 @@ describe('a consultation routed through call_tool', () => {
     expect(consultationFromToolCall('ask_agent', JSON.stringify({ role: 'reviewer' }))).toBe(
       'reviewer',
     )
-    expect(consultationFromToolCall('ask_expert', '{}')).toBe('expert')
+    expect(consultationFromToolCall('ask_expert', '{}')).toBe('claude')
   })
 
   it('sees the expert through the wrapper too', () => {
-    expect(consultationFromToolCall('call_tool', wrapped('ask_expert', {}))).toBe('expert')
+    expect(consultationFromToolCall('call_tool', wrapped('ask_expert', {}))).toBe('claude')
   })
 
   /*
