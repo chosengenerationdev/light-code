@@ -116,7 +116,11 @@ export default tseslint.config(
      * repository starts, and there is no HttpClient answer to "open an event stream and read
      * frames from it". Nothing here is published; the npm `files` list is `dist/**`.
      */
-    files: ['apps/host/src/streamResume.test.ts', 'apps/host/src/resyncOnAttach.test.ts'],
+    files: [
+      'apps/host/src/streamResume.test.ts',
+      'apps/host/src/resyncOnAttach.test.ts',
+      'apps/host/src/choosesTheme.test.ts',
+    ],
     rules: { 'no-restricted-globals': 'off' },
   },
   eslintConfigPrettier,
