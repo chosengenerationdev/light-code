@@ -1,5 +1,60 @@
 # @chosengeneration/light-code
 
+## 0.81.0
+
+### Minor Changes
+
+- 526a24d: A skill's pictures can be seen in the Skills tab
+
+  The screenshots a skill carries are shown where you would go to check them: Settings → Skills, on
+  the skill itself. **Show** fetches one and renders it beneath the description.
+
+  **On demand, not with the list.** The skill list carries file names; the bytes cross the bridge only
+  when somebody opens one. Shipping every picture of every skill so a panel can print a row of names
+  would be megabytes for something most people never look at.
+
+  A `data:` URI rather than a path or a served file, because that is what the webview's policy allows
+  — the same route the diagrams take. Already-fetched pictures are held above the tab, so closing and
+  reopening Settings does not re-fetch what you just looked at.
+
+  Both halves of a request are checked against what is on disk rather than trusted: the name must be
+  a skill that exists, and the picture one that folder actually has. A name arriving in a message is
+  supplied text, and joining it into a path unchecked is how a request for a screenshot becomes a
+  request for a private key.
+
+  Note what this does _not_ do: the picture is shown to **you**, not to the model. A tool result is
+  text, so a skill's screenshots never reach it — what reaches it is the description written beside
+  them, which is the whole reason that description is required to be prose.
+
+- f1ec1fb: A skill can carry pictures, and they are findable by what they show
+
+  Asked for with a concrete use: a screenshot of a form field, with what goes in it, kept so the
+  assistant can use it later.
+
+  `write_skill` takes `images` — a source path, a required `alt`, and an optional `description`. The
+  files are copied in beside the skill and the skill becomes the `name/SKILL.md` folder layout, which
+  is the layout §13 already reads and the only one with somewhere to put them. A skill that is
+  already a folder stays one, and a flat file left over from before is removed after a successful
+  write — both would load under one name and the search path would silently pick one.
+
+  **On indexing, the simpler answer is the better one.** A multimodal embedding would need a second
+  embedder and a second vector space, and §19 records what happens when vectors from different models
+  mix: confident, plausible, wrong neighbours with no error anywhere. Describing the image and
+  embedding the description avoids that — and the cleanest version builds no pipeline at all, because
+  **the description belongs in the skill's own markdown**. There it is indexed by the machinery that
+  already exists, found by `search_docs` for free, and read by anyone who opens the skill, including
+  a colleague whose copy cannot render images.
+
+  So: one embedding type, no image index, nothing to keep in sync.
+
+  The cost is stated rather than hidden: a description is written once and the picture can change
+  under it. That is why `alt` is required — something has to stay true when nobody refreshed the
+  prose — and why the description is ordinary visible markdown, so it can be corrected.
+
+  Sources go through the same path check as `read_file`, so the deny list and the workspace boundary
+  apply; names are reduced to one safe segment; 2 MB and twelve pictures each, because a skill is an
+  illustrated page and not an asset library.
+
 ## 0.80.1
 
 ### Patch Changes
