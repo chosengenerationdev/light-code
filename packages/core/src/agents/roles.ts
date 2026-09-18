@@ -84,6 +84,31 @@ export function isAgentRole(value: string, custom: readonly CustomRoleDefinition
   )
 }
 
+/**
+ * Things that are coloured but are not roles.
+ *
+ * `claude` marks answers from the Claude command line. It is an *answerer*, not a seat: the expert
+ * seat can be held by a configured provider, and the two must be told apart — which is what the
+ * colour is for. But it is not something a model can be assigned to, so it must not pass
+ * `isAgentRole`, or a "claude" role would become assignable and mean nothing.
+ */
+export const COLOURED_NON_ROLES = ['claude'] as const
+
+/**
+ * Whether this is something that can be given a colour.
+ *
+ * Deliberately a different question from `isAgentRole`. Colour marks *authorship* and applies to
+ * anything that can author a reply; a role is a seat a model can be put in. Conflating them is
+ * what produced "There is no claude role" when somebody tried to set the colour of the one
+ * answerer that is always named — the picker was there, and the save refused it.
+ */
+export function isColourableAgent(
+  value: string,
+  custom: readonly CustomRoleDefinition[] = [],
+): boolean {
+  return isAgentRole(value, custom) || (COLOURED_NON_ROLES as readonly string[]).includes(value)
+}
+
 /** Every role that exists on this machine, built-in first so the familiar ones lead. */
 export function knownRoles(custom: readonly CustomRoleDefinition[] = []): string[] {
   return [...AGENT_ROLES, ...custom.map((role) => role.id)]

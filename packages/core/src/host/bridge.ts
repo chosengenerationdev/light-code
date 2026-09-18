@@ -41,6 +41,7 @@ import {
   CUSTOM_ROLE_LIMIT,
   defaultPromptFor,
   isAgentRole,
+  isColourableAgent,
   isValidRoleId,
   knownRoles,
   roleInfo,
@@ -9333,7 +9334,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'setAgentColor') {
       const role = message.role
       const color = message.color
-      if (!isAgentRole(role, cachedAgentDefinitions)) {
+      /*
+       * Colourable, not assignable - and only here.
+       *
+       * The other guards on this function ask whether a model can be put in a seat, and must
+       * keep refusing `claude`: it is an answerer, not a seat, and a "claude" role would be
+       * assignable and mean nothing. Colour is the one question with a different answer,
+       * because it marks authorship - so anything that can author a reply may have one.
+       */
+      if (!isColourableAgent(role, cachedAgentDefinitions)) {
         post({ type: 'error', message: `There is no "${role}" role.` })
         return
       }

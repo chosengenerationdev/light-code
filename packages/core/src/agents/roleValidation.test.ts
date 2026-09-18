@@ -43,7 +43,16 @@ describe('validating a role id', () => {
   })
 
   it('guards each of the handlers that configure a role', () => {
-    for (const type of ['setAgentRole', 'setAgentPrompt', 'setAgentColor', 'setRoleTools', 'setRoleWrite']) {
+    /*
+     * `setAgentColor` is deliberately absent from this list.
+     *
+     * It asks a different question — see `colourable.test.ts`. Colour marks *authorship* and
+     * belongs to anything that can author a reply; these four put a *model in a seat*, and must
+     * keep refusing anything that is not one. Claude is the first thing that is one without being
+     * the other, and having a single guard for both is what produced "There is no claude role"
+     * from a picker that was sitting right there.
+     */
+    for (const type of ['setAgentRole', 'setAgentPrompt', 'setRoleTools', 'setRoleWrite']) {
       const at = bridge.indexOf(`message.type === '${type}'`)
       expect(at, `${type} is not handled`).toBeGreaterThan(-1)
       // The guard belongs with the handler, not somewhere upstream of it.
@@ -52,5 +61,12 @@ describe('validating a role id', () => {
         'isAgentRole(role, cachedAgentDefinitions)',
       )
     }
+  })
+
+  /* Still guarded, just by the question that fits it. */
+  it('guards the colour handler with the colour question', () => {
+    const at = bridge.indexOf(`message.type === 'setAgentColor'`)
+    expect(at).toBeGreaterThan(-1)
+    expect(bridge.slice(at, at + 900)).toContain('isColourableAgent(role, cachedAgentDefinitions)')
   })
 })
