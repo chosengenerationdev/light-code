@@ -1314,6 +1314,63 @@ copy. Both helpers `mkdir` first now, and `images.test.ts` has a real-filesystem
 
 ---
 
+### Skills in a bucket, and how one is removed (0.98.0)
+
+A bucket folder joins the skill search path as **one more read-only extra**. That is the whole of
+what "keep skills in S3" changes: the files are mirrored to disk under `storageDir` and nothing
+downstream — the loader, the watcher, the tab, the documentation index, team publishing — learns
+that S3 exists. Teaching five places to understand a second kind of storage is five places that
+have to agree, which is §19's most expensive recurring bug.
+
+- **The mirror is a cache**, at `<storageDir>/s3/<connection>/skills-<prefix digest>`. Deleting it
+  loses nothing: the next sync fetches it again. The prefix is part of the path so changing
+  `skills.prefix` gives a *fresh* folder rather than merging — and since the sync never deletes,
+  merged would mean skills from an abandoned prefix loading for ever with nothing to say why.
+- **`syncFromS3` is download-only and never deletes, locally or remotely.** A half-finished sync
+  that had already emptied the folder would take somebody's skills away over a network blip.
+
+**Deleting from a bucket was deliberately absent and is now a button** (`s3/remove.ts`), because
+the honest answer to "how do I remove this skill" had been "in the AWS console". Four rules hold
+it, and none is incidental:
+
+- **`S3Client.remove` is the only destructive call in `s3/`, and `remove.ts` is its only caller.**
+  Everything else is GET and PUT, which is what made it structurally impossible to lose a
+  colleague's file. That property is gone, so what replaces it is that nothing *automatic* can
+  reach the call: no sync, no refresh, no reconcile. A person presses a button.
+- **No tool calls it.** `delete_skill` stays rooted at the writable folder. Deleting a colleague's
+  shared skill is not something a model should initiate on its own reasoning — the approval gate
+  would show it, but the act belongs to a person reading the list.
+- **Two steps, and the second deletes exactly the keys the first displayed.** Invariant 8 applied
+  to a delete: the confirmation is the literal list of objects, not a count and not a description.
+  It fails in the safe direction — a colleague adding a file in between means that file survives,
+  which is a visible orphan rather than a deletion nobody was shown.
+- **The keys are re-checked host-side**, because they arrive from the UI and "the UI would not
+  send that" is not a boundary. `belongsToSkill` is exact rather than a prefix test: `deploy` must
+  never take `deployment.md`, and short names that prefix longer ones are the normal case, so that
+  mistake would be found by somebody else, later, with nothing to say what happened.
+
+Two consequences worth stating plainly:
+
+- **The local copy is removed after the bucket copy, and that half is not optional.** The sync
+  never deletes, so a skill gone from the bucket and left on disk would keep loading, keep being
+  indexed and keep appearing in the tab for ever — the worst of both, since the colleague's copy
+  vanishes and yours does not. It is best-effort and reported: the authoritative copy is already
+  gone, and failing the whole operation over a locked file would say the delete did not happen
+  when it did.
+- **The tab distinguishes "read-only on disk" from "deletable in the bucket"**, which are not the
+  same thing, and says *why* when a skill genuinely cannot be deleted — an unusable connection, a
+  read-only one. A missing button with no explanation is what left somebody with no way to remove
+  a skill at all.
+
+**Admin-only on the Node host.** `deleteSkillFromBucket` is caught by the `delete*` prefix rule;
+`previewBucketSkillDelete` is named in the list, since `preview*` is not a mutating prefix and
+reading what is in a shared bucket folder is not a normal user's business either.
+
+**Not verified against a real bucket.** The client, the key rules and the failure paths are
+covered by tests against a fake; a DELETE against a live S3 has never run.
+
+---
+
 ## 14. Node host and browser UI
 
 **Built.** `apps/host` — `npx @chosengeneration/light-code` starts a server on 127.0.0.1 and opens the

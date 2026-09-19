@@ -44,6 +44,14 @@ describe('which messages are an administrator’s', () => {
       'setReadRoots',
       'saveSchedule',
       'saveSearchConnection',
+      /*
+       * Removing a skill from a shared bucket, and listing what that would remove. The sharpest
+       * pair here: it deletes something every colleague who syncs that bucket depends on, and it
+       * cannot be undone from this end. `delete*` catches the act by prefix; `preview*` is not a
+       * mutating prefix, so the listing is named in the list rather than inferred.
+       */
+      'deleteSkillFromBucket',
+      'previewBucketSkillDelete',
     ]) {
       expect(isAdminOnly(type), type).toBe(true)
     }

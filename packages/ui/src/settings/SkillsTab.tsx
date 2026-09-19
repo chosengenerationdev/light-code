@@ -36,6 +36,14 @@ export interface SkillsTabProps {
     files?: string[]
     sourceDir?: string
     always?: boolean
+    /**
+     * Set when the skill came from a bucket mirror.
+     *
+     * The local copy is a cache the sync will replace, so removing it here would achieve nothing;
+     * the bucket is the only place it can go. `canDelete` is false for a read-only connection,
+     * with `reason` said out loud rather than the button quietly doing nothing.
+     */
+    bucket?: { label: string; canDelete: boolean; reason?: string }
   }[]
   /**
    * Pictures already fetched, keyed `skill/image`.
@@ -53,6 +61,19 @@ export interface SkillsTabProps {
   /** The configured value rather than the resolved one, so the field round-trips what was typed. */
   configuredDir: string
   onDelete: (name: string) => void
+  /**
+   * Asks what removing a bucket skill would delete. Lists; changes nothing.
+   *
+   * Two steps because this is the one delete here that reaches other people: the confirmation
+   * shows the literal objects rather than a count, and what runs is what was on screen.
+   */
+  onPreviewBucketDelete?: ((name: string, sourceDir: string) => void) | undefined
+  onDeleteFromBucket?: ((name: string, sourceDir: string, keys: string[]) => void) | undefined
+  /** The plan that came back, while a confirmation is open. */
+  bucketDeletePlan?:
+    | { name: string; sourceDir: string; label: string; keys: string[]; error?: string }
+    | undefined
+  onCancelBucketDelete?: (() => void) | undefined
   /** Opens the skill in an editor tab. A skill is markdown; editing it is editing a file. */
   onOpenFile: (path: string) => void
   /** Opens the standing-instructions skill, creating it from a template the first time. */
@@ -415,6 +436,30 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
                     <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(skill.name)}>
                       Remove
                     </button>
+                  ) : skill.bucket !== undefined ? (
+                    /*
+                      A bucket skill is read-only *on disk* and deletable in the bucket, which is
+                      not the same thing — and saying only "read-only" is what left somebody with
+                      no way to remove a skill at all. The reason is shown when it genuinely
+                      cannot be deleted, so the absence of a button is explained rather than
+                      merely observed.
+                    */
+                    skill.bucket.canDelete && props.onPreviewBucketDelete !== undefined ? (
+                      <button
+                        type="button"
+                        style={secondaryButtonStyle()}
+                        title={`Delete this skill from ${skill.bucket.label}, for everyone`}
+                        onClick={() =>
+                          props.onPreviewBucketDelete?.(skill.name, skill.sourceDir ?? '')
+                        }
+                      >
+                        Delete from bucket
+                      </button>
+                    ) : (
+                      <span style={{ color: colors.muted, fontSize: 10 }}>
+                        {skill.bucket.reason ?? 'read-only'}
+                      </span>
+                    )
                   ) : (
                     <span style={{ color: colors.muted, fontSize: 10 }}>read-only</span>
                   )}
@@ -488,6 +533,104 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
                 <div style={{ marginTop: 6, fontSize: 11, color: colors.muted }}>
                   <span>Reference files: </span>
                   <span style={{ fontFamily: monospace }}>{(skill.files ?? []).join(', ')}</span>
+                </div>
+              )}
+
+              {/*
+                The bucket confirmation, showing the literal objects.
+
+                Invariant 8 applied to a delete: a count is a description of what is about to
+                happen, and the keys are the thing itself. It also says who else this reaches,
+                because that is the part that makes this different from removing a local file -
+                somebody reading "Delete?" has no way to know a colleague loses it too.
+              */}
+              {props.bucketDeletePlan?.name === skill.name && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    padding: 8,
+                    border: `1px solid ${colors.error}`,
+                    borderRadius: 4,
+                    fontSize: 12,
+                  }}
+                >
+                  {props.bucketDeletePlan.error !== undefined ? (
+                    <>
+                      <div style={{ color: colors.error }}>{props.bucketDeletePlan.error}</div>
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), marginTop: 6 }}
+                        onClick={() => props.onCancelBucketDelete?.()}
+                      >
+                        Close
+                      </button>
+                    </>
+                  ) : props.bucketDeletePlan.keys.length === 0 ? (
+                    <>
+                      {/* A real answer, not a failure: somebody may already have removed it. */}
+                      <div>
+                        Nothing for &quot;{skill.name}&quot; is in {props.bucketDeletePlan.label} any
+                        more. The local copy will go when you close this.
+                      </div>
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), marginTop: 6 }}
+                        onClick={() => props.onCancelBucketDelete?.()}
+                      >
+                        Close
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontWeight: 600 }}>
+                        Delete {props.bucketDeletePlan.keys.length} object(s) from{' '}
+                        {props.bucketDeletePlan.label}?
+                      </div>
+                      <div style={{ color: colors.muted, marginTop: 2 }}>
+                        This removes it from the bucket for everyone who syncs it, and it cannot be
+                        undone from here. Your local copy goes too.
+                      </div>
+                      <ul
+                        style={{
+                          margin: '6px 0 0 0',
+                          padding: '0 0 0 16px',
+                          fontFamily: monospace,
+                          fontSize: 11,
+                          maxHeight: 160,
+                          overflowY: 'auto',
+                        }}
+                      >
+                        {props.bucketDeletePlan.keys.map((key) => (
+                          <li key={key}>{key}</li>
+                        ))}
+                      </ul>
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                        <button
+                          type="button"
+                          style={{ ...primaryButtonStyle(false), background: colors.error }}
+                          onClick={() => {
+                            // The keys that were shown, not a fresh listing - so what runs is what
+                            // was on screen. See `s3/remove.ts`.
+                            props.onDeleteFromBucket?.(
+                              skill.name,
+                              props.bucketDeletePlan?.sourceDir ?? '',
+                              props.bucketDeletePlan?.keys ?? [],
+                            )
+                            props.onCancelBucketDelete?.()
+                          }}
+                        >
+                          Delete from bucket
+                        </button>
+                        <button
+                          type="button"
+                          style={secondaryButtonStyle()}
+                          onClick={() => props.onCancelBucketDelete?.()}
+                        >
+                          Keep
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

@@ -313,6 +313,11 @@ export function App(props: AppProps): ReactElement {
   const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
   const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
+  /** The bucket-delete confirmation, while one is open. Whole message, never unpacked.
+   * See the note on `share` below for the shape of bug that costs. */
+  const [bucketDeletePlan, setBucketDeletePlan] = useState<
+    Extract<HostToUiMessage, { type: 'bucketSkillDeletePlan' }> | undefined
+  >(undefined)
   /**
    * The export or import chooser, while one is open.
    *
@@ -768,6 +773,8 @@ export function App(props: AppProps): ReactElement {
         setEmbedderModels(message.models)
         setEmbedderModelsWarning(message.warning)
         setEmbedderModelsLoading(false)
+      } else if (message.type === 'bucketSkillDeletePlan') {
+        setBucketDeletePlan(message)
       } else if (message.type === 'shareSections') {
         /*
          * Assigned whole rather than unpacked field by field.
@@ -1768,6 +1775,21 @@ export function App(props: AppProps): ReactElement {
             skills={{
               s3: skillsS3,
               skillImages,
+              onPreviewBucketDelete: (name: string, sourceDir: string) =>
+                props.transport.post({
+                  type: 'previewBucketSkillDelete',
+                  name,
+                  sourceDir,
+                } satisfies UiToHostMessage),
+              onDeleteFromBucket: (name: string, sourceDir: string, keys: string[]) =>
+                props.transport.post({
+                  type: 'deleteSkillFromBucket',
+                  name,
+                  sourceDir,
+                  keys,
+                } satisfies UiToHostMessage),
+              ...(bucketDeletePlan !== undefined ? { bucketDeletePlan } : {}),
+              onCancelBucketDelete: () => setBucketDeletePlan(undefined),
               onRequestSkillImage: (skill: string, image: string) =>
                 props.transport.post({
                   type: 'requestSkillImage',

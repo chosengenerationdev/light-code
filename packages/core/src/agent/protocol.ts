@@ -961,6 +961,15 @@ export type UiToHostMessage =
    * "3 providers, 2 MCP servers" rather than a list of category names — and those can only be
    * read host-side.
    */
+  /**
+   * What removing a skill from its bucket would delete. Lists; changes nothing.
+   *
+   * Separate from the delete because this is the one destructive act in `s3/` and the
+   * confirmation has to show the literal objects — invariant 8 applied to a delete.
+   */
+  | { type: 'previewBucketSkillDelete'; name: string; sourceDir: string }
+  /** Deletes exactly the keys the user was shown. See `s3/remove.ts`. */
+  | { type: 'deleteSkillFromBucket'; name: string; sourceDir: string; keys: string[] }
   | { type: 'requestShareSections' }
   /** `sections` omitted means every section, which is what the old whole-file export did. */
   | { type: 'exportConfig'; sections?: string[] }
@@ -1405,6 +1414,15 @@ export type HostToUiMessage =
         files?: string[]
         sourceDir?: string
         always?: boolean
+        /**
+         * Set when this skill came from a bucket mirror.
+         *
+         * Present so the tab can offer to delete it *there*, which is the only place it can be
+         * deleted from — a mirror is a read-only extra on disk, so removing the local copy would
+         * only have it reappear on the next sync. `canDelete` is false for a read-only connection,
+         * with `reason` saying so rather than the button silently doing nothing.
+         */
+        bucket?: { label: string; canDelete: boolean; reason?: string }
       }[]
       /** Files that could not be offered, and why. Shown, not just logged. */
       issues: { filePath: string; detail: string }[]
@@ -1442,6 +1460,21 @@ export type HostToUiMessage =
       /** The file a preview opened, passed back with the import so it is not chosen twice. */
       path?: string
       /** Set when the chosen file could not be read or did not validate. */
+      error?: string
+    }
+  /**
+   * What a bucket skill delete would remove, for the confirmation.
+   *
+   * The keys are handed back with the confirmation so what runs is what was on screen. A
+   * colleague adding a file in between means that file survives — the safe direction.
+   */
+  | {
+      type: 'bucketSkillDeletePlan'
+      name: string
+      sourceDir: string
+      /** The connection's own label, so the confirmation names where this is going to happen. */
+      label: string
+      keys: string[]
       error?: string
     }
   | { type: 'embedderSaved' }

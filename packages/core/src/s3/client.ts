@@ -42,7 +42,7 @@ export interface S3Object {
 
 /** Everything one request needs that the connection does not already say. */
 interface Call {
-  method: 'GET' | 'PUT'
+  method: 'GET' | 'PUT' | 'DELETE'
   key?: string
   query?: Record<string, string>
   bodyBytes?: Uint8Array
@@ -173,6 +173,31 @@ export class S3Client {
     })
     if (result.status !== 200) throw new Error(describeFailure(result.status, result.text, key))
     return result.bytes
+  }
+
+  /**
+   * Removes one object.
+   *
+   * The only destructive call this client has, and it was deliberately absent until somebody asked
+   * for it: everything else here is GET and PUT, so no amount of mis-wiring upstream could ever
+   * take a colleague's file out of a bucket. That property is gone now, which is why the caller is
+   * `s3/remove.ts` rather than anything that runs on its own — nothing syncs, refreshes or
+   * reconciles its way here. A person presses a button.
+   *
+   * **204 and 404 are both success, and that is S3's own semantics, not leniency.** A DELETE of a
+   * key that is not there returns 204 on AWS and 404 on some S3-compatible stores; both mean the
+   * object is gone, which is what was asked for. Treating 404 as a failure would make removing a
+   * skill somebody had already removed look like a broken connection.
+   */
+  async remove(key: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.send({
+      method: 'DELETE',
+      key,
+      ...(signal !== undefined ? { signal } : {}),
+    })
+    if (result.status !== 204 && result.status !== 200 && result.status !== 404) {
+      throw new Error(describeFailure(result.status, result.text, key))
+    }
   }
 
   async put(

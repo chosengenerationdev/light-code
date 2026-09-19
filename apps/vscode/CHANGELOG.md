@@ -1,5 +1,74 @@
 # light-code-vscode
 
+## 0.98.0
+
+### Minor Changes
+
+- Delete a skill from its bucket, from the Skills tab
+
+  Skills kept in an S3 bucket could only be removed in the bucket itself — the local mirror is a
+  cache the next sync replaces, so there was nowhere in Light Code to do it. The Skills tab now
+  offers **Delete from bucket** for a skill that came from a writable connection.
+
+  It asks twice, and the confirmation lists the actual objects it will remove — including a folder
+  skill's pictures and reference files — rather than a count. It removes exactly what was shown, so
+  a file a colleague adds in between survives rather than being deleted unseen. The local copy goes
+  with it, since the sync never deletes and the skill would otherwise load for ever after vanishing
+  from the bucket.
+
+  A read-only connection says so instead of offering a button that would fail. On a shared server
+  this is admin-only.
+
+## 0.97.0
+
+### Minor Changes
+
+- 75281cc: Calls an MCP server may never make
+
+  Asked for in these terms: the assistant may fill a web form and click Next, but must not click the
+  final submit — the person reviews and submits.
+
+  Guidance alone cannot promise that, and a heuristic that tried to _recognise_ a submit button would
+  be wrong often enough to be dangerous while sounding certain: plenty of forms submit from a `div`,
+  or a button labelled Confirm, or the Enter key. So the rule is **declared, never inferred** — the
+  same reasoning as the exact-match command allowlist and `--allow-host`. Where being wrong is
+  expensive, the product does not get to be clever.
+
+  On any MCP server:
+
+      "deny": [{ "tools": ["click"], "contains": "submit", "reason": "You review and submit." }]
+
+  Matched against the call's arguments as JSON, so it catches a selector, a visible label, an element
+  id or a URL without the rule knowing which field that server uses. Substrings rather than patterns,
+  because a regular expression typed into a settings box fails _open_ when it is subtly wrong and
+  nothing says so.
+
+  **Checked where the call leaves for the server** — not in the loop, and not in the approval gate.
+  Both of those can be auto-approved, and a rule written to mean "never" must not be satisfiable by
+  ticking a box. Read at call time, so an edit applies to the next call rather than after a restart.
+
+  What it honestly is: a reliable guard against what the model would ordinarily do. What it is not: a
+  defence against an adversary, since a determined model could phrase a call the rule does not match.
+  The approval gate remains the thing that cannot be talked past, and this is written into the module
+  rather than left for somebody to discover.
+
+- 47890fc: Share settings with the team, reference files in skills, Excel authoring, and Auto mode
+
+  - **Export and import settings by section.** Both buttons now open a chooser: on the way out it
+    says what each section holds ("3 providers", "2 MCP servers") and who will have to enter which
+    credentials; on the way in it shows what a colleague's file contains before anything changes.
+    Approvals and per-project overrides are never shared.
+  - **A skill can carry reference files** — a spreadsheet template, a starting config — kept beside
+    it and described in it. `use_skill_file` copies one into the workspace to work on, leaving the
+    skill's original untouched. The files themselves are never indexed.
+  - **Excel can create and save workbooks, and manage sheets**: `excel_create_workbook`,
+    `excel_save_workbook` and `excel_sheets` (list, add, rename, delete, copy, move). All three
+    always ask, and deleting a sheet shows what is on it first.
+  - **Auto mode**: the assistant works through the terminal by preference — reading, searching and
+    making mechanical changes with commands — keeping the file tools for edits worth reading as a
+    diff. Its shell edits are covered by the task checkpoint like any other.
+  - Fixes a bug where writing the first skill with pictures into an empty skills folder failed.
+
 ## 0.96.0
 
 ### Minor Changes

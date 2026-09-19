@@ -78,6 +78,15 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
    * reports what that file contains. Neither belongs to somebody who may not apply it.
    */
   'previewImport',
+  /*
+   * Removing a skill from a shared bucket, and listing what that would remove.
+   *
+   * The sharpest entry on this list: it deletes something every colleague who syncs that bucket
+   * depends on, and it cannot be undone from here. `delete*` catches the act by prefix; the
+   * preview is named because `preview*` is not a mutating prefix and reading what is in somebody
+   * else's bucket folder is not a normal user's business either.
+   */
+  'previewBucketSkillDelete',
   // Processes this machine will spawn.
   'saveMcpServer',
   'saveMcpServers',

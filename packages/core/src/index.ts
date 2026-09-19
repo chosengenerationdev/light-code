@@ -753,3 +753,9 @@ export { resolveS3, targetById, type ResolvedS3 } from './s3/resolve.js'
 export { syncFromS3, uploadToS3, type S3SyncResult } from './s3/sync.js'
 export { createS3Tools, type S3Target } from './s3/tools.js'
 export { mirrorFolder, type MirrorKind } from './s3/localFolder.js'
+export {
+  skillKeysInBucket,
+  removeSkillFromBucket,
+  belongsToSkill,
+  type RemoveSkillResult,
+} from './s3/remove.js'

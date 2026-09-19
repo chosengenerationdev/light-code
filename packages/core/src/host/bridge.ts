@@ -162,6 +162,8 @@ import {
   resolveS3,
   createS3Tools,
   mirrorFolder,
+  removeSkillFromBucket,
+  skillKeysInBucket,
   syncFromS3,
   uploadToS3,
   targetById,
@@ -773,6 +775,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             ...(files.length > 0 ? { files } : {}),
             ...(skill.sourceDir !== undefined ? { sourceDir: skill.sourceDir } : {}),
             ...(skill.always === true ? { always: true } : {}),
+            // Present only for a skill that came from a bucket; see `bucketFor`.
+            ...(() => {
+              const bucket = bucketFor(skill.sourceDir)
+              return bucket === undefined ? {} : { bucket }
+            })(),
           }
         }),
       ),
@@ -898,6 +905,161 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await python.refresh()
       await postPython()
       ui.showInfo(`py__${name} approved as it stands now.`)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * The bucket mirror a skill folder belongs to, when it is one.
+   *
+   * Matched on the folder rather than carried around with the skill, because `mirrorFolder` is
+   * deterministic — the same connection and prefix always give the same path — so the mapping is
+   * a computation rather than a second piece of state that could disagree with the search path.
+   */
+  function mirrorForDir(sourceDir: string | undefined): {
+    mirror: (typeof cachedSkillMirrors)[number]
+    localDir: string
+  } | undefined {
+    if (sourceDir === undefined) return undefined
+    const wanted = path.resolve(sourceDir).toLowerCase()
+    for (const mirror of cachedSkillMirrors) {
+      if (mirror.enabled !== true) continue
+      const localDir = mirrorFolder({
+        storageDir,
+        connectionId: mirror.connectionId,
+        kind: 'skills',
+        ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+      })
+      // Case-folded, per §16: Windows hands the same folder back spelled two ways.
+      if (path.resolve(localDir).toLowerCase() === wanted) return { mirror, localDir }
+    }
+    return undefined
+  }
+
+  /** How the tab describes a skill's bucket, or undefined when it did not come from one. */
+  function bucketFor(
+    sourceDir: string | undefined,
+  ): { label: string; canDelete: boolean; reason?: string } | undefined {
+    const found = mirrorForDir(sourceDir)
+    if (found === undefined) return undefined
+    const target = targetById(cachedS3, found.mirror.connectionId)
+    if (target === undefined) {
+      // Named rather than omitted: a skill that is plainly from a bucket, with no way to act on
+      // it and nothing saying why, reads as the feature being broken.
+      return { label: found.mirror.connectionId, canDelete: false, reason: 'its connection is unusable' }
+    }
+    if (target.readOnly === true) {
+      return { label: target.label, canDelete: false, reason: 'the connection is read-only' }
+    }
+    return { label: target.label, canDelete: true }
+  }
+
+  /**
+   * What deleting a bucket skill would remove. Lists; changes nothing.
+   *
+   * The literal keys, because this is the one destructive act in `s3/` and a count would be a
+   * description of what is about to happen rather than the thing itself (invariant 8).
+   */
+  async function handlePreviewBucketSkillDelete(name: string, sourceDir: string): Promise<void> {
+    const fail = (error: string): void => {
+      post({ type: 'bucketSkillDeletePlan', name, sourceDir, label: '', keys: [], error })
+    }
+    try {
+      const found = mirrorForDir(sourceDir)
+      if (found === undefined) {
+        fail('That skill did not come from a bucket, so there is nothing to delete there.')
+        return
+      }
+      const target = targetById(cachedS3, found.mirror.connectionId)
+      if (target === undefined) {
+        fail(`The connection "${found.mirror.connectionId}" is unusable — check its key in Settings.`)
+        return
+      }
+      if (target.readOnly === true) {
+        fail(`${target.label} is configured read-only, so nothing can be deleted from it.`)
+        return
+      }
+
+      const keys = await skillKeysInBucket({
+        target,
+        ...(found.mirror.prefix !== undefined ? { prefix: found.mirror.prefix } : {}),
+        name,
+      })
+      post({ type: 'bucketSkillDeletePlan', name, sourceDir, label: target.label, keys })
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /**
+   * Removes a skill from its bucket, and then the local mirrored copy.
+   *
+   * **In that order, and the local half is not optional.** The sync never deletes (see
+   * `s3/sync.ts`, which explains why), so a skill removed from the bucket and left on disk would
+   * keep loading, keep being indexed, and keep appearing in the tab for ever — with the bucket
+   * saying it is gone. That is the worst of both: the colleague's copy vanishes and yours does not.
+   *
+   * The local removal is best-effort and reported rather than thrown. The authoritative copy is
+   * already gone by then, and failing the whole operation over a locked file would say the delete
+   * did not happen when it did.
+   */
+  async function handleDeleteSkillFromBucket(
+    name: string,
+    sourceDir: string,
+    keys: string[],
+  ): Promise<void> {
+    try {
+      const found = mirrorForDir(sourceDir)
+      if (found === undefined) {
+        throw new Error('That skill did not come from a bucket, so there is nothing to delete there.')
+      }
+      const target = targetById(cachedS3, found.mirror.connectionId)
+      if (target === undefined) {
+        throw new Error(`The connection "${found.mirror.connectionId}" is unusable — check its key in Settings.`)
+      }
+
+      const result = await removeSkillFromBucket({
+        target,
+        ...(found.mirror.prefix !== undefined ? { prefix: found.mirror.prefix } : {}),
+        name,
+        keys,
+      })
+
+      // Both layouts, because either could be what was there. `force` so the one that was not
+      // present is not an error.
+      let localProblem: string | undefined
+      try {
+        await fs.rm(path.join(found.localDir, `${name}.md`), { force: true })
+        await fs.rm(path.join(found.localDir, name), { recursive: true, force: true })
+      } catch (error) {
+        localProblem = error instanceof Error ? error.message : String(error)
+      }
+
+      await postSkills()
+
+      const parts = [`Removed ${String(result.removed.length)} object(s) from ${target.label}.`]
+      if (result.failed.length > 0) {
+        parts.push(
+          `${String(result.failed.length)} could not be removed: ${result.failed
+            .map((failure: { key: string; problem: string }) => `${failure.key} (${failure.problem})`)
+            .join('; ')}`,
+        )
+      }
+      /*
+       * Reported rather than swallowed. A key refused here means the request did not match what
+       * the preview computed — stale, or malformed — and silently deleting fewer objects than the
+       * user agreed to would leave them believing the skill was gone.
+       */
+      if (result.rejected.length > 0) {
+        parts.push(`${String(result.rejected.length)} were not this skill's and were left alone.`)
+      }
+      if (localProblem !== undefined) {
+        parts.push(`The bucket copy is gone, but the local copy could not be removed: ${localProblem}`)
+      }
+
+      if (result.failed.length > 0 || localProblem !== undefined) ui.showWarning(parts.join(' '))
+      else ui.showInfo(parts.join(' '))
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -9576,6 +9738,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleDeleteProfile', handleDeleteProfile(message.id))
     } else if (message.type === 'setActiveProfile') {
       reportFailure('handleSetActiveProfile', handleSetActiveProfile(message.id, message.forProject))
+    } else if (message.type === 'previewBucketSkillDelete') {
+      reportFailure(
+        'handlePreviewBucketSkillDelete',
+        handlePreviewBucketSkillDelete(message.name, message.sourceDir),
+      )
+    } else if (message.type === 'deleteSkillFromBucket') {
+      reportFailure(
+        'handleDeleteSkillFromBucket',
+        handleDeleteSkillFromBucket(message.name, message.sourceDir, message.keys),
+      )
     } else if (message.type === 'requestShareSections') {
       reportFailure('handleRequestShareSections', handleRequestShareSections())
     } else if (message.type === 'previewImport') {
