@@ -45,6 +45,18 @@ const sample: LightCodeConfig = {
   approvals: { 'd:\\work': { allowedCommands: ['npm test'] } },
   workspaces: { 'd:\\work': { modeId: 'ask' } },
   identity: { owner: 'someone' },
+  vectorStores: {
+    cluster: { kind: 'opensearch', label: 'Team cluster', url: 'https://search.example.internal' },
+  },
+  activeVectorStoreId: 'cluster',
+  embedder: {
+    model: 'text-embedding-3-small',
+    dimensions: 1536,
+    // The name that identifies *this person's* index. Must not travel.
+    indexName: 'ana-workspace',
+    skillsAlias: 'platform-skills',
+  },
+  retrieval: { skillsIndex: 'ana-skills', docsIndex: 'ana-docs' },
   certDir: 'C:\\certs',
   ui: { accentColor: '#22C55E' },
 }
@@ -198,5 +210,75 @@ describe('applying an import', () => {
     // Half a section is a state neither person has ever run.
     const merged = applyImport(sample, { profiles: incoming.profiles ?? [] }, ['profiles'])
     expect(merged.activeProfileId).toBeUndefined()
+  })
+})
+
+describe('what a team needs, and what only one person may have', () => {
+  const everything = SHARE_SECTIONS.map((section) => section.id)
+
+  it('sends the things that must match across a team', () => {
+    // A colleague cannot join the pool without the store, the alias, and an embedding model of
+    // the same width - mixing widths gives confident, plausible, wrong neighbours with no error.
+    const exported = buildExport(sample, ['search'])
+    expect(exported.vectorStores?.['cluster']?.url).toBe('https://search.example.internal')
+    expect(exported.embedder?.skillsAlias).toBe('platform-skills')
+    expect(exported.embedder?.model).toBe('text-embedding-3-small')
+    expect(exported.embedder?.dimensions).toBe(1536)
+  })
+
+  it('never sends the index names that identify one person', () => {
+    /*
+     * Section 12g: everyone publishes to their **own** collection. An export carrying these would
+     * point the importer at the exporter's index, and the symptom is somebody's skills vanishing
+     * when a colleague reindexes - a long way from the thing they changed.
+     */
+    const exported = buildExport(sample, everything)
+    expect(exported.embedder?.indexName).toBeUndefined()
+    expect(exported.retrieval?.skillsIndex).toBeUndefined()
+    expect(exported.retrieval?.docsIndex).toBeUndefined()
+  })
+
+  it('does not mutate the live config while stripping', () => {
+    // `buildExport` assigns whole config values by reference, so deleting in place would take the
+    // exporter's own index name with it - discovered the next time they indexed.
+    buildExport(sample, everything)
+    expect(sample.embedder?.indexName).toBe('ana-workspace')
+    expect(sample.retrieval?.skillsIndex).toBe('ana-skills')
+  })
+
+  it("keeps the importer's own index names when taking a colleague's search settings", () => {
+    /*
+     * The symmetric half. A section is replaced whole, so without this an import would delete the
+     * importer's index name and silently re-derive their collection from the workspace hash,
+     * orphaning the index they had already built.
+     */
+    const theirs: LightCodeConfig = {
+      vectorStores: sample.vectorStores ?? {},
+      activeVectorStoreId: 'cluster',
+      embedder: {
+        model: 'text-embedding-3-small',
+        dimensions: 1536,
+        skillsAlias: 'platform-skills',
+      },
+    }
+    const merged = applyImport(sample, theirs, ['search'])
+
+    expect(merged.embedder?.skillsAlias).toBe('platform-skills')
+    expect(merged.embedder?.indexName).toBe('ana-workspace')
+    expect(merged.retrieval?.skillsIndex).toBe('ana-skills')
+  })
+
+  it('does not invent index names for somebody who never had any', () => {
+    // Carrying `undefined` across would write the key, and an empty `retrieval` object is not the
+    // same as not having one.
+    const merged = applyImport({}, buildExport(sample, ['search']), ['search'])
+    expect(merged.embedder?.indexName).toBeUndefined()
+    expect(merged.retrieval?.skillsIndex).toBeUndefined()
+  })
+
+  it('says in the chooser what it is leaving out', () => {
+    // An omission nobody mentions is read as a bug - or worse, not noticed at all.
+    const search = describeSections(sample).find((section) => section.id === 'search')
+    expect(search?.stripNote).toMatch(/index names/i)
   })
 })

@@ -77,6 +77,21 @@ export interface ShareSection {
   machineSpecific?: boolean
   /** Off unless the exporter says otherwise. See `machineSpecific` and the schedules entry. */
   offByDefault?: boolean
+  /**
+   * Dotted paths removed from this section on the way out.
+   *
+   * For a value that is *within* a section somebody genuinely wants to share, but which names
+   * **this person** rather than the team. The search section is the whole reason this exists:
+   * everything about where the cluster is and how text is embedded has to match across a team,
+   * and the index names have to differ, and they live under the same two keys.
+   *
+   * Stripping rather than splitting the section, because "share your search setup except the
+   * three names identifying you" is one decision, and a chooser offering it as two would invite
+   * taking half of it.
+   */
+  strip?: readonly string[]
+  /** Said beside the checkbox, so what `strip` removes is not a silent omission. */
+  stripNote?: string
 }
 
 /**
@@ -103,6 +118,23 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     label: 'Search and indexing',
     description: 'Vector stores, the embedder, and the dispatcher settings.',
     keys: ['vectorStores', 'activeVectorStoreId', 'embedder', 'retrieval'],
+    /*
+     * The names that identify *this person's* collections, and they are the one part of a search
+     * setup that must differ across a team.
+     *
+     * §12g's rule is that everyone publishes to their **own** collection: sharing one would make
+     * every person's re-index disturb everyone else's, and would leave nothing to attribute a hit
+     * to. But the natural thing to send a colleague is "my search settings", and these sit inside
+     * that — so an export carrying them would quietly point the importer at the exporter's own
+     * index, and the symptom is somebody's skills vanishing when a colleague reindexes.
+     *
+     * `skillsAlias` and `indexAlias` are deliberately *not* stripped: those are the team names,
+     * and they are the whole point of sending this.
+     */
+    strip: ['embedder.indexName', 'retrieval.skillsIndex', 'retrieval.docsIndex'],
+    stripNote:
+      'The index names identifying you are left out — everyone needs their own. The aliases, ' +
+      'the store and the embedding model are included, and those must match.',
   },
   {
     id: 'agents',
@@ -225,6 +257,8 @@ export interface SectionSummary {
   detail: string
   machineSpecific?: boolean
   offByDefault?: boolean
+  /** What this section deliberately leaves out, when it leaves anything out. */
+  stripNote?: string
   /**
    * Secret references this section carries.
    *
@@ -345,6 +379,7 @@ export function describeSections(config: LightCodeConfig): SectionSummary[] {
     secretRefs: secretRefsFor(section, config),
     ...(section.machineSpecific === true ? { machineSpecific: true } : {}),
     ...(section.offByDefault === true ? { offByDefault: true } : {}),
+    ...(section.stripNote !== undefined ? { stripNote: section.stripNote } : {}),
   }))
 }
 
@@ -373,8 +408,37 @@ export function buildExport(
     for (const key of section.keys) {
       if (has(config, key)) exported[key] = config[key]
     }
+    for (const path of section.strip ?? []) stripPath(exported, path)
   }
   return exported as LightCodeConfig
+}
+
+/**
+ * Removes one dotted path from the export, copying on the way down.
+ *
+ * The copy is not incidental. `buildExport` assigns whole config values by reference, so deleting
+ * in place would edit **the live configuration** — the export would work and the exporter would
+ * quietly lose their own index name, discovering it the next time they indexed. Each level is
+ * cloned only where something is actually being removed, so an untouched section still costs
+ * nothing.
+ *
+ * A path that is not there is not an error: a section legitimately strips a key the exporter never
+ * set, which is the ordinary case.
+ */
+function stripPath(target: Record<string, unknown>, path: string): void {
+  const [head, ...rest] = path.split('.')
+  if (head === undefined) return
+  const value = target[head]
+  if (value === undefined || value === null) return
+
+  if (rest.length === 0) {
+    delete target[head]
+    return
+  }
+  if (typeof value !== 'object') return
+  const copy = { ...(value as Record<string, unknown>) }
+  stripPath(copy, rest.join('.'))
+  target[head] = copy
 }
 
 /**
@@ -401,6 +465,43 @@ export function applyImport(
       if (has(imported, key)) merged[key] = imported[key]
       else delete merged[key]
     }
+    /*
+     * Whatever is stripped on the way out is *preserved* on the way in, and the symmetry is the
+     * point rather than tidiness.
+     *
+     * A section is replaced whole, so importing a colleague's search settings would otherwise
+     * delete the importer's own index name along with everything else — and their collection
+     * would silently be re-derived from the workspace hash, orphaning the index they had already
+     * built. Neither direction may touch the names that identify a person.
+     */
+    for (const path of section.strip ?? []) {
+      carryPath(existing as Record<string, unknown>, merged, path)
+    }
   }
   return merged as LightCodeConfig
+}
+
+/** Copies one dotted path from `from` into `to`, copying on the way down as `stripPath` does. */
+function carryPath(
+  from: Record<string, unknown>,
+  to: Record<string, unknown>,
+  path: string,
+): void {
+  const [head, ...rest] = path.split('.')
+  if (head === undefined) return
+  const source = from[head]
+
+  if (rest.length === 0) {
+    // Absent in the original stays absent: carrying `undefined` across would write the key.
+    if (source !== undefined) to[head] = source
+    return
+  }
+  if (typeof source !== 'object' || source === null) return
+
+  const target = to[head]
+  const copy = typeof target === 'object' && target !== null ? { ...(target as Record<string, unknown>) } : {}
+  carryPath(source as Record<string, unknown>, copy, rest.join('.'))
+  // Only written back when something was actually carried, so an import that brought no
+  // `retrieval` at all does not gain an empty one.
+  if (Object.keys(copy).length > 0) to[head] = copy
 }

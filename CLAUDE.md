@@ -1710,6 +1710,17 @@ section table and both directions now go through it.
   with nothing behind them. The embedder is deliberately absent from that list: it names a
   *profile*, whose key is already listed under Providers, and saying it twice sends somebody
   looking for a credential that does not exist.
+- **The search section strips the three names that identify a person, and an import preserves
+  them.** `embedder.indexName`, `retrieval.skillsIndex` and `retrieval.docsIndex`. This is the
+  case the whole feature is *for* — a colleague joining a team skills pool needs the store, the
+  alias, the embedding model and its width, all of which must match — and the index names are the
+  one part that must **differ**, because §12g requires everyone to publish to their own
+  collection. They sit inside the same two keys, so sharing the section would have pointed the
+  importer at the exporter's index; the symptom is somebody's skills vanishing when a colleague
+  reindexes, a long way from anything they changed. The aliases are deliberately *not* stripped:
+  those are the team's names and are the point of sending it. `stripPath` copies on the way down,
+  because assigning config values by reference means deleting in place would take the exporter's
+  own index name with it.
 - **An import posts every panel's data, not just the providers.** Before this, importing anything
   but providers left every other tab showing what was there a moment ago until Settings was
   reopened — which reads exactly like the import having silently done nothing.

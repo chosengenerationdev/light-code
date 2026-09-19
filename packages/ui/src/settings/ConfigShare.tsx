@@ -31,6 +31,8 @@ export interface ShareSectionView {
   detail: string
   machineSpecific?: boolean
   offByDefault?: boolean
+  /** What this section deliberately leaves out. Shown, because a silent omission is a surprise. */
+  stripNote?: string
   secretRefs: string[]
 }
 
@@ -111,6 +113,16 @@ export function ConfigShare(props: ConfigShareProps): ReactElement {
               <span style={{ fontWeight: 600 }}>{section.label}</span>
               <span style={{ color: colors.muted }}> — {section.detail}</span>
               <div style={{ color: colors.muted, fontSize: 11 }}>{section.description}</div>
+              {section.stripNote !== undefined && section.present && (
+                <div style={{ color: colors.muted, fontSize: 11 }}>
+                  {/*
+                    Said out loud on both sides. On the way out it explains why a colleague still
+                    has something to set; on the way in it explains why importing did not change
+                    a field they can see. An omission nobody mentions is read as a bug.
+                  */}
+                  {section.stripNote}
+                </div>
+              )}
               {section.machineSpecific === true && section.present && (
                 <div style={{ color: colors.muted, fontSize: 11 }}>
                   {/*
