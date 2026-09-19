@@ -485,6 +485,441 @@ export function createExcelListMacrosTool(options: OfficeToolOptions): Tool<{ wo
   }
 }
 
+const SAVEABLE_EXTENSIONS = ['.xlsx', '.xlsm', '.xlsb', '.xls', '.csv', '.txt']
+
+/**
+ * The extension, or undefined when there is none this can save as.
+ *
+ * Checked here as well as in the worker so the *approval prompt* can say it, rather than the user
+ * approving a create that was always going to fail. The worker keeps its own check because it is
+ * the thing that maps an extension to a format number and must never guess.
+ */
+function unsupportedExtension(target: string): string | undefined {
+  const dot = target.lastIndexOf('.')
+  const extension = dot === -1 ? '' : target.slice(dot).toLowerCase()
+  if (SAVEABLE_EXTENSIONS.includes(extension)) return undefined
+  return extension === ''
+    ? `"${target}" has no file extension, so Excel cannot tell what to write. Use one of ${SAVEABLE_EXTENSIONS.join(', ')}.`
+    : `Excel cannot save as "${extension}". Use one of ${SAVEABLE_EXTENSIONS.join(', ')}.`
+}
+
+const createSchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .describe('Full path for the new workbook, e.g. "C:\\\\reports\\\\March.xlsx".'),
+  sheets: z
+    .array(z.string().min(1))
+    .max(50)
+    .optional()
+    .describe(
+      'Sheet names, in order. The first replaces the default sheet rather than being added ' +
+        'beside it. Omit for a single default sheet.',
+    ),
+  overwrite: z
+    .boolean()
+    .optional()
+    .describe('Replace a file that is already there. Default false, and refused without it.'),
+})
+
+/**
+ * Creates a workbook on disk.
+ *
+ * ## Why this one saves, when nothing else here does
+ *
+ * Every other write leaves the workbook dirty so the user can look and close without keeping it.
+ * That rule exists to protect *their* file and their unsaved edits; a workbook that did not exist
+ * a moment ago has neither. And the request was to create files — an untitled `Book1` on screen is
+ * not a file anybody can be handed, so it would be the feature not working.
+ *
+ * ## What it refuses
+ *
+ * Writing over an existing file, unless `overwrite` says so in as many words. Excel's own SaveAs
+ * will do it silently once the alerts are suppressed, and "make me the March report" landing on
+ * February's is not a mistake that announces itself.
+ *
+ * ## Where it may write
+ *
+ * Through `resolveToolPath` with `write: true`, so the workspace is the boundary — the same rule
+ * `write_to_file` follows, and for the same reason: checkpoints snapshot the workspace, so a file
+ * created outside it would have no rollback at all. Somebody who wants a workbook on a share saves
+ * a copy there with `excel_save_workbook`, which is a separate decision they make explicitly.
+ */
+export function createExcelCreateTool(
+  options: OfficeToolOptions,
+): Tool<z.infer<typeof createSchema>> {
+  return {
+    name: 'excel_create_workbook',
+    group: 'edit',
+    description:
+      'Create a new Excel workbook at a path, optionally with named sheets, and save it. Starts ' +
+      'Excel if it is not running and leaves the workbook open, so excel_write_range can fill it ' +
+      'in next. Refuses to replace an existing file unless overwrite is set.',
+    parametersSchema: createSchema,
+
+    async preview(params): Promise<ToolPreview> {
+      return {
+        kind: 'text',
+        text: [
+          `Create a new workbook at ${params.path}.`,
+          params.sheets === undefined || params.sheets.length === 0
+            ? 'One default sheet.'
+            : `Sheets: ${params.sheets.join(', ')}`,
+          params.overwrite === true
+            ? 'REPLACES the file at that path if one is already there.'
+            : 'Refuses if a file is already there.',
+          unsupportedExtension(params.path) ?? '',
+          '',
+          'The file is written to disk immediately and left open in Excel.',
+        ]
+          .filter((line) => line !== '')
+          .join('\n'),
+      }
+    },
+
+    async execute(params, context): Promise<ToolResult> {
+      const unsupported = unsupportedExtension(params.path)
+      if (unsupported !== undefined) return { content: unsupported, isError: true }
+
+      let target: string
+      try {
+        // `write: true`: creating a file is an edit, and an edit outside the workspace has no
+        // checkpoint behind it.
+        const resolved = await resolveToolPath(context, params.path, { write: true })
+        if (!resolved.ok) return { content: resolved.message, isError: true }
+        target = resolved.realPath
+      } catch (error) {
+        return {
+          content: `Could not work out where "${params.path}" is: ${message(error)}`,
+          isError: true,
+        }
+      }
+
+      try {
+        const result = await options.bridge.request<{
+          workbook: string
+          fullName: string
+          sheets: string[]
+          started: boolean
+          replaced: boolean
+        }>({
+          op: 'excel.create',
+          path: target,
+          ...(params.sheets === undefined ? {} : { sheets: params.sheets }),
+          ...(params.overwrite === undefined ? {} : { overwrite: params.overwrite }),
+        })
+
+        return {
+          content: [
+            `${result.started ? 'Started Excel and created' : 'Created'} ${result.workbook}${result.replaced ? ' (replaced the file that was there)' : ''}`,
+            `  ${result.fullName}`,
+            `  sheets: ${result.sheets.join(', ')}`,
+            '',
+            'It is saved and open. Use excel_write_range to fill it in, then excel_save_workbook',
+            'to save those changes — a range write on its own leaves the workbook unsaved.',
+          ].join('\n'),
+          path: result.fullName,
+        }
+      } catch (error) {
+        return { content: message(error), isError: true }
+      }
+    },
+  }
+}
+
+const saveSchema = z.object({
+  workbook: workbookField,
+  path: z
+    .string()
+    .optional()
+    .describe(
+      'Full path to save a copy to. Omit to save the workbook where it already lives. The ' +
+        'extension decides the format, so saving as .csv really does write CSV.',
+    ),
+  overwrite: z
+    .boolean()
+    .optional()
+    .describe('Replace a file already at `path`. Default false, and refused without it.'),
+})
+
+/**
+ * Saves an open workbook, in place or to a new path.
+ *
+ * ## Why saving is its own tool
+ *
+ * `excel_write_range` and `excel_write_macro` deliberately leave the workbook dirty, so the escape
+ * hatch from a bad write is to close without saving. Folding a save into them would take that
+ * away, and it is the only undo this product has over somebody else's spreadsheet. So saving is a
+ * separate act, approved separately — which is also what makes "fill this in and save it" two
+ * decisions rather than one.
+ *
+ * ## Saving in place is not confined to the workspace, and saving a copy is
+ *
+ * These are different acts. Saving in place writes back to a file the user opened themselves,
+ * wherever it lives — refusing would make the tool useless for the workbook somebody is actually
+ * looking at, which is on a share more often than not, and it creates nothing new. Saving *a copy*
+ * names a new path, which is a write to somewhere of the model's choosing, and that goes through
+ * `resolveToolPath` like every other.
+ */
+export function createExcelSaveTool(options: OfficeToolOptions): Tool<z.infer<typeof saveSchema>> {
+  return {
+    name: 'excel_save_workbook',
+    group: 'edit',
+    description:
+      'Save an open workbook to disk, or save a copy to another path. Every other Excel write ' +
+      'leaves the workbook unsaved on purpose, so call this when the user wants the changes kept. ' +
+      'The extension of a new path decides the format.',
+    parametersSchema: saveSchema,
+
+    async preview(params): Promise<ToolPreview> {
+      const which = params.workbook ?? 'the active workbook'
+      if (params.path === undefined) {
+        return {
+          kind: 'text',
+          text: [
+            `Save ${which} over the file it was opened from.`,
+            '',
+            'This is the point of no return for the edits made so far — until now they existed',
+            'only in the open workbook and closing without saving would have discarded them.',
+          ].join('\n'),
+        }
+      }
+      return {
+        kind: 'text',
+        text: [
+          `Save ${which} to ${params.path}.`,
+          params.overwrite === true
+            ? 'REPLACES the file at that path if one is already there.'
+            : 'Refuses if a file is already there.',
+          unsupportedExtension(params.path) ?? '',
+          '',
+          'The open workbook becomes this new file; the original is left as it was on disk.',
+        ]
+          .filter((line) => line !== '')
+          .join('\n'),
+      }
+    },
+
+    async execute(params, context): Promise<ToolResult> {
+      let target: string | undefined
+      if (params.path !== undefined) {
+        const unsupported = unsupportedExtension(params.path)
+        if (unsupported !== undefined) return { content: unsupported, isError: true }
+        try {
+          const resolved = await resolveToolPath(context, params.path, { write: true })
+          if (!resolved.ok) return { content: resolved.message, isError: true }
+          target = resolved.realPath
+        } catch (error) {
+          return {
+            content: `Could not work out where "${params.path}" is: ${message(error)}`,
+            isError: true,
+          }
+        }
+      }
+
+      try {
+        const result = await options.bridge.request<{
+          workbook: string
+          fullName: string
+          savedAs: boolean
+          wasDirty: boolean
+          replaced: boolean
+        }>({
+          op: 'excel.save',
+          ...(params.workbook === undefined ? {} : { workbook: params.workbook }),
+          ...(target === undefined ? {} : { path: target }),
+          ...(params.overwrite === undefined ? {} : { overwrite: params.overwrite }),
+        })
+
+        return {
+          content: [
+            result.savedAs
+              ? `Saved ${result.workbook} to ${result.fullName}${result.replaced ? ' (replaced the file that was there)' : ''}.`
+              : `Saved ${result.workbook} to ${result.fullName}.`,
+            /*
+             * Said plainly, because it is the one case where the user's mental model and what
+             * happened can differ: asking to save a workbook nobody had changed is not a failure,
+             * but reporting it as an ordinary save would leave somebody believing an edit they
+             * expected to have been made was written.
+             */
+            result.wasDirty ? '' : 'It had no unsaved changes, so nothing on disk changed.',
+          ]
+            .filter((line) => line !== '')
+            .join('\n'),
+          path: result.fullName,
+        }
+      } catch (error) {
+        return { content: message(error), isError: true }
+      }
+    },
+  }
+}
+
+const sheetsSchema = z.object({
+  workbook: workbookField,
+  action: z
+    .enum(['list', 'add', 'rename', 'delete', 'copy', 'move'])
+    .describe('What to do. "list" changes nothing and is the safe way to see what is there.'),
+  sheet: z
+    .string()
+    .optional()
+    .describe('The sheet to act on — for rename, delete, copy and move. The new name for "add".'),
+  newName: z
+    .string()
+    .optional()
+    .describe('The new name, for "rename". For "copy", what to call the copy.'),
+  position: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('1-based tab position, for "add" and "move". Omit to append at the end.'),
+})
+
+/**
+ * The sheets of a workbook: list, add, rename, delete, copy, move.
+ *
+ * ## One tool, six actions
+ *
+ * CLAUDE.md section 17 prefers fewer general tools, and here that is not only about prompt size.
+ * These are six verbs over one noun sharing every argument, and a model choosing between six
+ * near-identical tool descriptions chooses worse than one choosing between six named actions —
+ * the descriptions are what it discriminates on, and they would differ by a single word.
+ *
+ * ## Nothing here saves, and `delete` is still an edit
+ *
+ * A structural change is exactly as reversible as a cell write — close without saving — and it
+ * should not be *less* reversible because it happened to be a sheet. But `delete` discards data
+ * that is not in the transcript and cannot be reconstructed from it, which is why the approval
+ * says what is on the sheet rather than only its name.
+ */
+export function createExcelSheetsTool(
+  options: OfficeToolOptions,
+): Tool<z.infer<typeof sheetsSchema>> {
+  return {
+    name: 'excel_sheets',
+    // `edit` as a whole, including `list`. Groups gate a tool, not a call: splitting the read out
+    // would mean two tools, which is what this deliberately is not. Listing is cheap to approve
+    // and the preview says plainly that it changes nothing.
+    group: 'edit',
+    description:
+      'Manage the sheets of an open workbook: list, add, rename, delete, copy or move them. Use ' +
+      'action "list" to see what is there before changing anything. The workbook is left unsaved, ' +
+      'so call excel_save_workbook to keep the change.',
+    parametersSchema: sheetsSchema,
+
+    async preview(params): Promise<ToolPreview> {
+      const which = params.workbook ?? 'the active workbook'
+      if (params.action === 'list') {
+        return { kind: 'text', text: `List the sheets of ${which}. Changes nothing.` }
+      }
+
+      const lines: string[] = []
+      switch (params.action) {
+        case 'add':
+          lines.push(`Add a sheet called "${params.sheet ?? ''}" to ${which}.`)
+          break
+        case 'rename':
+          lines.push(`Rename "${params.sheet ?? ''}" to "${params.newName ?? ''}" in ${which}.`)
+          break
+        case 'copy':
+          lines.push(
+            `Copy "${params.sheet ?? ''}" in ${which}${params.newName === undefined ? '' : ` as "${params.newName}"`}.`,
+          )
+          break
+        case 'move':
+          lines.push(`Move "${params.sheet ?? ''}" to position ${String(params.position ?? 1)} in ${which}.`)
+          break
+        case 'delete':
+          lines.push(`DELETE the sheet "${params.sheet ?? ''}" from ${which}.`)
+          break
+      }
+
+      if (params.action === 'delete') {
+        /*
+         * What is on the sheet, read live for the prompt.
+         *
+         * Invariant 8 applied to the thing being destroyed: "delete Sheet3" tells the user nothing
+         * about whether Sheet3 is empty or holds the source data for every formula in the file.
+         * A failure to read it must not block the approval — it degrades to saying so, because a
+         * preview that throws would become a delete nobody was asked about.
+         */
+        try {
+          const used = await options.bridge.request<{
+            cells: { address: string; value: unknown; text?: string }[]
+            range?: string
+          }>({
+            op: 'excel.readRange',
+            ...(params.workbook === undefined ? {} : { workbook: params.workbook }),
+            ...(params.sheet === undefined ? {} : { sheet: params.sheet }),
+            range: 'A1:H12',
+          })
+          const filled = used.cells.filter(
+            (cell) => cell.value !== null && cell.value !== undefined && String(cell.value) !== '',
+          )
+          lines.push(
+            '',
+            filled.length === 0
+              ? 'The top-left of that sheet is empty.'
+              : `--- what is on it (top-left corner) ---\n${filled
+                  .slice(0, 40)
+                  .map((cell) => `${cell.address}: ${String(cell.text ?? cell.value)}`)
+                  .join('\n')}`,
+          )
+        } catch {
+          lines.push('', 'Could not read what is on that sheet.')
+        }
+        lines.push(
+          '',
+          'Formulas elsewhere that reference this sheet will become #REF! and cannot be undone',
+          'by renaming it back.',
+        )
+      }
+
+      lines.push('', 'The workbook is left unsaved, so nothing reaches disk until it is saved.')
+      return { kind: 'text', text: lines.join('\n') }
+    },
+
+    async execute(params): Promise<ToolResult> {
+      try {
+        const result = await options.bridge.request<{
+          workbook: string
+          action: string
+          before: string[]
+          sheets: string[]
+          saved: boolean
+        }>({
+          op: 'excel.sheets',
+          action: params.action,
+          ...(params.workbook === undefined ? {} : { workbook: params.workbook }),
+          ...(params.sheet === undefined ? {} : { sheet: params.sheet }),
+          ...(params.newName === undefined ? {} : { newName: params.newName }),
+          ...(params.position === undefined ? {} : { position: params.position }),
+        })
+
+        if (params.action === 'list') {
+          return {
+            content: `${result.workbook} has ${String(result.sheets.length)} sheet(s): ${result.sheets.join(', ')}`,
+          }
+        }
+
+        return {
+          content: [
+            `${result.workbook} sheets are now: ${result.sheets.join(', ')}`,
+            `  (was: ${result.before.join(', ')})`,
+            '',
+            result.saved
+              ? 'The workbook reports no unsaved changes.'
+              : 'The workbook is NOT saved; call excel_save_workbook to keep this.',
+          ].join('\n'),
+        }
+      } catch (error) {
+        return { content: message(error), isError: true }
+      }
+    },
+  }
+}
+
 const macroSchema = z.object({
   workbook: workbookField,
   module: z.string().min(1).describe('Module name from excel_list_macros.'),

@@ -56,13 +56,20 @@ describe('the inlined PowerShell worker', () => {
   })
 
   /**
-   * Exactly one place may start Excel: `Invoke-ExcelOpen`, where the user has named a file.
+   * Only the two routines where the user has named a file may start Excel.
    *
-   * The rule above is about refusing to *guess*, and this test is what keeps it from eroding —
-   * without it, the launch added for open-by-path reads as permission to launch anywhere, and the
-   * next tool to hit a failed attach would quietly start a second invisible Excel.
+   * The rule above is about refusing to *guess*: answering "the spreadsheet I have open" with a
+   * second invisible copy holding a file lock is worse than saying "open it first". `Invoke-
+   * ExcelOpen` was the single exception because a named path leaves nothing to guess at, and
+   * `Invoke-ExcelCreate` joined it for exactly the same reason — a workbook that does not exist
+   * yet cannot be attached to, and refusing would only mean the user creates it by hand.
+   *
+   * This test is what keeps that from eroding. Without it, a launch added for one named-path case
+   * reads as permission to launch anywhere, and the next tool to hit a failed attach would quietly
+   * start a second invisible Excel. **Adding a name here should require this comment to still be
+   * true of it.**
    */
-  it('starts Excel only in the open-by-path routine', () => {
+  it('starts Excel only where the user named a file', () => {
     const launches = OFFICE_WORKER_SOURCE.split('\n')
       .map((line, index) => ({ line: line.trim(), index }))
       .filter((entry) => /New-Object -ComObject/.test(entry.line) && !entry.line.startsWith('#'))
@@ -76,7 +83,11 @@ describe('the inlined PowerShell worker', () => {
       }
       return '(top level)'
     })
-    expect([...new Set(owning)].sort()).toEqual(['Get-OfficeApp', 'Invoke-ExcelOpen'])
+    expect([...new Set(owning)].sort()).toEqual([
+      'Get-OfficeApp',
+      'Invoke-ExcelCreate',
+      'Invoke-ExcelOpen',
+    ])
   })
 
   /**

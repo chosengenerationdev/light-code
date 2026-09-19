@@ -57,6 +57,16 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   // section 13 requires approval showing the source, which cannot happen with nobody there.
   'excel_write_macro',
   'excel_write_range',
+  /*
+   * Creating, saving and restructuring somebody's workbook, unattended.
+   *
+   * The rule 9b already applies to `excel_write_range` - nobody is there to see what is being
+   * replaced - and these are the same act with a wider blast radius: one writes a file, one makes
+   * an edit permanent, and one can delete a sheet whose contents exist nowhere else.
+   */
+  'excel_create_workbook',
+  'excel_save_workbook',
+  'excel_sheets',
   // And running one: unattended execution of arbitrary VBA, with nobody to read the source.
   'excel_run_macro',
   /*

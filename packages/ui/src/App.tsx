@@ -313,6 +313,15 @@ export function App(props: AppProps): ReactElement {
   const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
   const [embedderSavedTick, setEmbedderSavedTick] = useState(0)
+  /**
+   * The export or import chooser, while one is open.
+   *
+   * Kept as the whole message rather than as separate pieces, because that is what the
+   * panel renders and splitting it is how a field added to the protocol goes missing.
+   */
+  const [share, setShare] = useState<Extract<HostToUiMessage, { type: 'shareSections' }> | undefined>(
+    undefined,
+  )
   const [pythonStatus, setPythonStatus] = useState<PythonStatus | undefined>(undefined)
   /**
    * Everything the panel knows about S3.
@@ -759,6 +768,15 @@ export function App(props: AppProps): ReactElement {
         setEmbedderModels(message.models)
         setEmbedderModelsWarning(message.warning)
         setEmbedderModelsLoading(false)
+      } else if (message.type === 'shareSections') {
+        /*
+         * Assigned whole rather than unpacked field by field.
+         *
+         * The handover notes name this exact shape as the bug that survived three rounds of
+         * inspection: `App.tsx` unpacked the expert message field by field, so every field added
+         * to the protocol was silently dropped on the way to the panel.
+         */
+        setShare(message)
       } else if (message.type === 'embedderSaved') {
         setEmbedderSavedTick((tick) => tick + 1)
       } else if (message.type === 'indexProgress') {
@@ -1334,11 +1352,34 @@ export function App(props: AppProps): ReactElement {
   const setActiveProfile = (id: string): void => {
     props.transport.post({ type: 'setActiveProfile', id } satisfies UiToHostMessage)
   }
+  /*
+   * Both buttons now *ask*, and the chooser appears when the host answers.
+   *
+   * Export used to write the whole file immediately and import used to read and save in one act,
+   * so the first sight of what a colleague's file contained was your own settings already
+   * replaced. See `config/share.ts`.
+   */
   const exportConfig = (): void => {
-    props.transport.post({ type: 'exportConfig' } satisfies UiToHostMessage)
+    setShare(undefined)
+    props.transport.post({ type: 'requestShareSections' } satisfies UiToHostMessage)
   }
   const importConfig = (): void => {
-    props.transport.post({ type: 'importConfig' } satisfies UiToHostMessage)
+    setShare(undefined)
+    props.transport.post({ type: 'previewImport' } satisfies UiToHostMessage)
+  }
+  const confirmShare = (selected: string[]): void => {
+    if (share === undefined) return
+    props.transport.post(
+      share.direction === 'export'
+        ? ({ type: 'exportConfig', sections: selected } satisfies UiToHostMessage)
+        : ({
+            type: 'importConfig',
+            sections: selected,
+            // The file the preview opened, so nobody is made to find it twice.
+            ...(share.path !== undefined ? { path: share.path } : {}),
+          } satisfies UiToHostMessage),
+    )
+    setShare(undefined)
   }
 
   const hasNoProviders = profilesLoaded && profiles.length === 0
@@ -1537,6 +1578,9 @@ export function App(props: AppProps): ReactElement {
             onSetActive={setActiveProfile}
             onExport={exportConfig}
             onImport={importConfig}
+            {...(share !== undefined ? { share } : {})}
+            onConfirmShare={confirmShare}
+            onCancelShare={() => setShare(undefined)}
             {...(session !== undefined ? { sharedProfileIds: session.sharedProfileIds } : {})}
             onRequestModels={requestModels}
             onTestConnection={runTestConnection}

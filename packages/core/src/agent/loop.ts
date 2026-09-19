@@ -333,16 +333,24 @@ async function runOneToolCall(
 
   const { tool, params } = prepared
 
-  // Snapshot before the *first* edit of the task, not before every one — CLAUDE.md §8.
-  // A failed snapshot must not silently proceed: the user would think they can roll back.
-  if (tool.group === 'edit' && !checkpoints.hasCheckpoint() && options.shadowGit !== undefined) {
+  /*
+   * Snapshot before the *first* edit of the task, not before every one — CLAUDE.md §8.
+   * A failed snapshot must not silently proceed: the user would think they can roll back.
+   *
+   * `commandsEdit` widens what counts as the first edit, and only for a mode that says its edits
+   * arrive as commands (Auto). Without it the checkpoint would be taken before an `apply_diff`
+   * that mode rarely reaches, so the Rollback button would be present and cover nothing — which
+   * is worse than its absence, because somebody would rely on it.
+   */
+  const mayEdit = tool.group === 'edit' || (mode.commandsEdit === true && tool.group === 'command')
+  if (mayEdit && !checkpoints.hasCheckpoint() && options.shadowGit !== undefined) {
     try {
       const checkpoint = await options.shadowGit.snapshot()
       checkpoints.markCheckpointTaken()
       events.onCheckpoint?.(checkpoint)
     } catch (error) {
       return {
-        content: `Could not create a checkpoint before editing, so the edit was not attempted: ${error instanceof Error ? error.message : String(error)}`,
+        content: `Could not create a checkpoint before editing, so the ${tool.group === 'command' ? 'command was not run' : 'edit was not attempted'}: ${error instanceof Error ? error.message : String(error)}`,
         isError: true,
       }
     }

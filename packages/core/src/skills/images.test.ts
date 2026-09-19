@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import { PathDenylist } from '../fs/denylist.js'
+import type { ToolExecutionContext } from '../tools/types.js'
+import { createWriteSkillTool } from './tools.js'
 
 import {
   appendSkillImages,
@@ -125,5 +132,49 @@ describe('which files a skill may carry', () => {
 
   it('is not fooled by case', () => {
     expect(skillImageType('A.PNG')).toBe('image/png')
+  })
+})
+
+/**
+ * The copy itself, against a real filesystem.
+ *
+ * Every test above this point is about strings, and the whole of the copying path had none — so
+ * the first skill ever written with pictures failed, with a containment error naming two paths one
+ * of which was plainly inside the other. `confine` realpaths its root, and the skill's own folder
+ * did not exist yet. A unit test of a name could not have seen it.
+ */
+describe('copying pictures in', () => {
+  let root: string
+  let skillsDir: string
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-skillimg-'))
+    skillsDir = path.join(root, '.lightcode', 'skills')
+    await fs.mkdir(skillsDir, { recursive: true })
+    await fs.writeFile(path.join(root, 'flow.png'), 'not-really-a-png')
+  })
+
+  afterEach(async () => {
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  it('works for the first skill in a folder that has no skill folders yet', async () => {
+    const result = await createWriteSkillTool({
+      skillsDir,
+      onChanged: async () => undefined,
+    }).execute(
+      {
+        name: 'deployment',
+        description: 'How we deploy.',
+        body: 'Look at the diagram.',
+        images: [{ source: 'flow.png', alt: 'the flow', description: 'Release stages.' }],
+      },
+      { workspaceRoot: root, denylist: new PathDenylist() } as unknown as ToolExecutionContext,
+    )
+
+    if (result.isError === true) throw new Error(result.content)
+    expect(
+      await fs.readFile(path.join(skillsDir, 'deployment', SKILL_IMAGE_DIR, 'flow.png'), 'utf8'),
+    ).toBe('not-really-a-png')
   })
 })

@@ -4,6 +4,7 @@ import { useState, type ReactElement } from 'react'
 import { CheckIcon, CopyIcon, EditIcon, TrashIcon } from '../icons.js'
 import { badgeStyle, colors, fontFamily, iconButtonStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
 import { ProviderForm, type ProviderFormValues } from './ProviderForm.js'
+import { ConfigShare, type ShareSectionView } from './ConfigShare.js'
 import { ScopeBadge } from './ScopeBadge.js'
 
 export interface ProvidersTabProps {
@@ -26,6 +27,23 @@ export interface ProvidersTabProps {
   onSetActive: (id: string) => void
   onExport: () => void
   onImport: () => void
+  /**
+   * The chooser's contents, once the host has answered.
+   *
+   * Held by the caller rather than here so it survives this tab being unmounted - and
+   * because it arrives as a message, which is the caller's business.
+   */
+  share?:
+    | {
+        direction: 'export' | 'import'
+        sections: ShareSectionView[]
+        selected: string[]
+        path?: string
+        error?: string
+      }
+    | undefined
+  onConfirmShare?: ((selected: string[]) => void) | undefined
+  onCancelShare?: (() => void) | undefined
   onRequestModels: (input: ProfileInput) => void
   onTestConnection: (input: ProfileInput) => void
   /** Results live here rather than in the form so they survive a re-render of the list. */
@@ -212,6 +230,9 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
 
       <div style={{ marginTop: 20, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
         <label style={labelStyle()}>Config file</label>
+        <div style={{ color: colors.muted, fontSize: 11, marginBottom: 6 }}>
+          Share a working setup with the team. Choose what travels; credentials never do.
+        </div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button type="button" style={secondaryButtonStyle()} onClick={props.onExport}>
             Export
@@ -220,6 +241,18 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
             Import
           </button>
         </div>
+        {props.share !== undefined && (
+          <ConfigShare
+            key={`${props.share.direction}:${props.share.path ?? ''}`}
+            direction={props.share.direction}
+            sections={props.share.sections}
+            initialSelected={props.share.selected}
+            {...(props.share.path !== undefined ? { path: props.share.path } : {})}
+            {...(props.share.error !== undefined ? { error: props.share.error } : {})}
+            onConfirm={(selected) => props.onConfirmShare?.(selected)}
+            onCancel={() => props.onCancelShare?.()}
+          />
+        )}
       </div>
     </div>
   )

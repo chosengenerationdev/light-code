@@ -173,6 +173,10 @@ now saves prompt at three tools where it used to cost. `agent/dispatch.test.ts` 
 rather than being re-baselined.
 | `attempt_completion` | always | Control tool; terminates the loop |
 
+Since then, and worth knowing they exist: `use_skill_file` (§13, a skill's own template
+copied into the workspace) and `excel_create_workbook` / `excel_save_workbook` / `excel_sheets`
+(§12c).
+
 **Explicitly not in v1:** browser automation, semantic/embedding codebase search,
 `insert_content`, `list_code_definition_names`, mode-switching and subtask tools, a fetch
 tool.
@@ -302,6 +306,8 @@ misapplied edit costs data.
 ### Checkpoints
 
 Shadow-git snapshot before the first edit of a task, allowing rollback. Borrowed from Roo.
+A mode that does its editing through the shell (`Mode.commandsEdit`, §12i) snapshots before its
+first *command* instead — otherwise the Rollback button is present and covers nothing.
 Cheap insurance, and it pairs well with the strict-matching decision.
 
 ### Modes and tool groups
@@ -311,6 +317,8 @@ excludes groups.
 
 - **Code** — all groups.
 - **Ask** — `read`, `mcp`, `always`. This *is* the read-only mode; it is not a separate flag.
+- **Auto** — the same groups as Code. Shell-first working; see §12i, including why it is the one
+  mode whose commands take a checkpoint.
 
 This mechanism doubles as the tool-profile system for context budgeting (§12). Custom
 user-defined modes are deferred.
@@ -823,6 +831,50 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   first version listed only the top level, so a nested folder was reachable by path and
   impossible to discover — reachable-but-invisible is the same failure as absent.
 
+- **Workbooks can be created, saved, and restructured** (0.97.0, requested directly). Three tools:
+  `excel_create_workbook`, `excel_save_workbook` and `excel_sheets` (list / add / rename / delete /
+  copy / move). All three are `edit`, in `ALWAYS_ASK_TOOLS`, and in `NEVER_AVAILABLE_TO_SCHEDULES`.
+  - **Create is the second routine allowed to start Excel**, joining `excel_open_workbook`. The
+    attach-only rule is about refusing to *guess* — answering "the spreadsheet I have open" with a
+    second invisible copy holding a file lock. A workbook that does not exist yet cannot be
+    attached to, so there is nothing to guess at, and refusing would only mean the user creates it
+    by hand. `office.test.ts` pins the set of routines that may launch, and its comment has to
+    stay true of anything added to it.
+  - **Create saves; nothing else does.** Every other write leaves the workbook dirty on purpose,
+    so closing without saving is the undo — and that is the only undo this product has over
+    somebody else's spreadsheet. A file that did not exist a moment ago has nothing to lose, and
+    the request was to create *files*: an untitled `Book1` on screen is not one.
+  - **Saving is therefore its own tool, approved separately.** Folding it into `excel_write_range`
+    would spend the escape hatch without asking. Saving *in place* is deliberately not confined to
+    the workspace — it writes back to a file the user opened themselves, creates nothing, and
+    confining it would make the tool useless for the workbook somebody is actually looking at,
+    which is on a share more often than not. Saving *a copy* names somewhere new, so it goes
+    through `resolveToolPath` like every other write.
+  - **The file format is named, never inferred.** `SaveAs` with no format argument writes whatever
+    the workbook currently is, so saving a new workbook as `report.csv` produces an xlsx *called*
+    `report.csv` — silent where it is made, read as data corruption wherever it is opened next.
+  - **Excel's own dialogs are suppressed around every call that raises one, and restored.** "Replace
+    the existing file?", "data may be lost in this format", "are you sure you want to delete this
+    sheet?" — with nobody to answer, the call does not fail, it *hangs* until the tool times out
+    and is reported as Excel being slow. Restoring matters as much: leaving alerts off would disarm
+    the confirmations the user gets working in Excel by hand afterwards.
+  - **Neither create nor save-a-copy will replace a file without `overwrite`.** Once alerts are
+    suppressed Excel does it without a murmur, and "make me the March report" landing on February's
+    is not a mistake that announces itself.
+  - **`excel_sheets` is one tool with six actions**, which is §17's rule and also the honest shape:
+    six verbs over one noun sharing every argument, where six tool descriptions would differ by a
+    word and a model discriminates on exactly those descriptions. Deleting shows **what is on the
+    sheet**, read live — invariant 8 applied to the thing being destroyed, because "delete Sheet3"
+    says nothing about whether Sheet3 holds the source data for every formula in the file. A
+    failure to read it degrades to saying so rather than blocking the prompt, since a preview that
+    throws would become a delete nobody was asked about.
+  - **Deleting the last sheet is refused here rather than left to Excel.** Excel refuses too — in a
+    dialog, which with alerts suppressed means the call does nothing and reports success.
+
+  **Not verified against real Excel.** The worker half is pinned by reading `worker.ps1`, as
+  `officeTrace.test.ts` does, and the tool half by a fake bridge. Creating, saving and deleting a
+  sheet against a live Excel is the first thing to check.
+
 **Verified against real Excel 16.0**: sessions, range reads, a three-level cross-sheet trace that
 correctly identified a zero divisor as the source of a `#DIV/0!`, and `excel_evaluate` returning
 `#N/A` and `#NAME?` for failing formulas.
@@ -1103,6 +1155,34 @@ never going to happen.
 
 ---
 
+## 12i. Auto mode, and the checkpoint that had to move (0.97.0)
+
+Requested as *"auto mode like yours"* — the way this assistant works when it reads with `cat`,
+searches with `grep`, and makes a mechanical change with `sed` or a heredoc, reaching for the
+dedicated file tools only where the shell cannot do the job. It is a **mode** (§8), because it is
+entirely guidance: the tool groups are Code's exactly, nothing is withheld, and §12's cache rule
+is satisfied because a mode is resolved once per turn.
+
+- **It moved the checkpoint, and that is the load-bearing part.** The loop snapshots before the
+  first tool in the `edit` group, which is where edits come from in every other mode. Auto mode
+  puts them in the shell, so without `Mode.commandsEdit` the first `sed -i` would run with no
+  rollback point and **the Rollback button would still be there**, covering nothing. A control
+  that is present and inert is worse than one that is absent. Scoped to the mode that asked for
+  it: a `git status` in Code mode taking a snapshot is a change nobody requested.
+- **What it trades is the diff, and the guidance says so rather than the release notes.**
+  `apply_diff` renders what changes and the user approves *that*; `sed -i 's/a/b/'` is ground
+  truth about the command and silent about the file. Invariant 8 holds either way — the literal
+  command is shown and it is what runs — but reading a command is not as easy as reading a change.
+  So the guidance sends mechanical work to the shell and keeps content edits on `apply_diff`,
+  which is also where each is better.
+- **`cat` is not `read_file`.** §6's read-before-edit set is populated by `read_file` alone, on
+  purpose. The guidance says so, because the alternative is learning it from a refused edit.
+- **Nothing widens the approval gate.** Twelve small commands ask twelve times, which is why the
+  guidance says to work in fewer, larger ones. This mode pairs with the exact-match command
+  allowlist (§8); it does not replace it.
+
+---
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -1190,6 +1270,47 @@ Markdown with frontmatter (`name`, `description`).
   unless frontmatter says otherwise. The folder watcher is recursive for the same reason.
 - A skill file is a **persistent prompt-injection vector** — prose nobody code-reviews.
   Writes go through approval; plain markdown in git is the main defence.
+
+### Skills carry reference files (0.97.0)
+
+Requested for what a skill cannot hold in prose: *"some skills may need reference files, like an
+excel template ... agent can use that template to fill some info and give the file back to user"*.
+`skills/files.ts` keeps them in the skill's own folder, so they travel with it into git, into a
+shared folder and into a colleague's checkout.
+
+- **Not indexed, and that is the point.** A `.xlsx` is a zip; embedding one produces a vector for
+  a compressed archive, which is not wrong so much as meaningless, and it would sit in the corpus
+  competing with real answers. On a team alias (§12g) it would put a colleague's template
+  *contents* into a shared index nobody expected to hold file contents. What is indexed is the
+  **description** — one line of prose per file, written into the skill's body where the existing
+  machinery already finds it. Required, unlike an image's, because a file nobody described is a
+  file the model will never know to reach for: present on disk, absent in every way that matters.
+- **`use_skill_file` copies; it never returns contents.** A template is opened by Excel, filled in
+  and handed back — none of that wants the bytes in the transcript, and a 300KB workbook base64'd
+  into context would be expensive and useless. It always writes a *new* file in the workspace and
+  never opens the skill's own copy for writing: filling in the original destroys the template for
+  the next person, and on a shared folder for everyone, silently, because a filled-in spreadsheet
+  still looks like a spreadsheet.
+- **It is an `edit`.** It creates a file in the workspace, possibly over one already there, so it
+  goes through the approval gate and behind the checkpoint — and the preview says plainly when
+  something will be replaced, which is the part somebody needs to see. `write: true` on
+  `resolveToolPath`, so the copy lands inside the workspace whatever destination is asked for.
+- **The "how to get it" line lives in the skill body, not only in the tool description.** A model
+  that has found the skill has found that text, and the next thing it needs is how to obtain the
+  file. Without it the model calls `read_file` on a workbook and reports that the template is
+  corrupt.
+- **Appended by heading, not by name.** Unlike images: a file is referred to by name in ordinary
+  sentences ("fill in template.xlsx"), so name-matching would read a mention in prose as a listing
+  and drop the block saying how to obtain it.
+- **`delete_skill` now removes the folder, not just `SKILL.md`.** It left the pictures and files
+  behind — invisible, because nothing loads them without a skill, and unbounded, because a
+  template is measured in megabytes.
+
+**A live bug in the shipped image path was found by writing this.** `copySkillImages` confines
+against the skill's own folder, which `resolveSkillPath` never created — so the *first* skill
+written with pictures failed with a containment error naming two paths, one plainly inside the
+other. It survived because every image test was about strings; nothing had ever exercised the
+copy. Both helpers `mkdir` first now, and `images.test.ts` has a real-filesystem test.
 
 ---
 
@@ -1495,7 +1616,46 @@ so the extension still feels native.
   badge rather than dropping them silently.
 - **Live reload** — watch the file so hand-edits and UI edits behave the same.
 - **Import/export** with secrets stripped and cert paths preserved. Colleagues will want to
-  share a working gateway config.
+  share a working gateway config. **Selective since 0.97.0 — see below.**
+
+### Sharing a config with the team (0.97.0)
+
+Requested so a working setup can be handed round: export, import, *"secrets can be left blank so
+that team members can update that alone by themselves"*, with a chooser on the way out and a
+summary on the way in. Export already existed and wrote the whole file; `config/share.ts` owns the
+section table and both directions now go through it.
+
+- **A section list, not a file.** Two reasons, and they are different. Some of a config is about
+  one *machine* — `certDir`, `filesystem.readRoots`, `python.venvPath` — and lands on the other
+  one pointing at nothing. Some of it is nobody else's business. A chooser turns both into a
+  decision the exporter makes visibly rather than a surprise the importer finds.
+- **`approvals` is absent from the table entirely, not offered and unticked.** It records which
+  shell commands have been approved in which workspace, so importing somebody's pre-approves
+  commands on your machine that you have never read — invariant 5's own threat, arriving through
+  a file a colleague sent rather than through a repository. A checkbox saying that is a checkbox
+  somebody eventually ticks. `workspaces` and `identity` are out for smaller but real reasons.
+- **The export is built by copying in what was chosen, never by deleting what was not.** A
+  delete-based version exports any key nobody has thought about yet, so over the life of the
+  schema the default drifts towards sharing everything. `share.test.ts` reads the schema's own
+  keys and fails when one belongs to neither the section table nor `NEVER_SHARED` — the decision
+  has to be made rather than defaulted into.
+- **A section is replaced, never merged.** Merging two lists of providers has no answer to "is
+  this the same entry as that one", and any answer it invented would duplicate everything on a
+  second import or overwrite an entry the two happened to share an id for. Take theirs or keep
+  yours, and the panel says so.
+- **Import previews before it applies.** It used to read and save in one act, so the first sight
+  of what a colleague's file held was your settings already replaced. `previewImport` opens and
+  validates; nothing is written until the chooser is confirmed, and the preview's path is handed
+  back so nobody picks the file twice.
+- **Credentials are named, not counted.** Both directions render the same list from the same
+  function: on the way out "they will need to enter", on the way in "you will need to enter".
+  Names only — an export has never held a value (§15) — and this says which pointers will land
+  with nothing behind them. The embedder is deliberately absent from that list: it names a
+  *profile*, whose key is already listed under Providers, and saying it twice sends somebody
+  looking for a credential that does not exist.
+- **An import posts every panel's data, not just the providers.** Before this, importing anything
+  but providers left every other tab showing what was there a moment ago until Settings was
+  reopened — which reads exactly like the import having silently done nothing.
 
 **Config writes are atomic and serialised. This is not a detail (added 2026-09-01, from a real
 corruption).** A user's `config.json` was destroyed while the junior assessment was saving, and

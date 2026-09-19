@@ -14,6 +14,17 @@ import {
   type SkillImageInput,
   type StoredSkillImage,
 } from './images.js'
+import {
+  appendSkillFiles,
+  listSkillFiles,
+  skillFileAssetName,
+  skillFilesDir,
+  MAX_SKILL_FILES,
+  MAX_SKILL_FILE_BYTES,
+  SKILL_FILE_DIR,
+  type SkillFileInput,
+  type StoredSkillFile,
+} from './files.js'
 import { resolveToolPath } from '../tools/paths.js'
 import type { ToolExecutionContext } from '../tools/types.js'
 
@@ -32,6 +43,17 @@ import type { ToolExecutionContext } from '../tools/types.js'
 
 export interface SkillToolContext {
   skillsDir: string
+  /**
+   * Every loaded skill, across every configured folder.
+   *
+   * `use_skill_file` needs it because a skill carrying a template is very often a *shared* one,
+   * read from a folder this install cannot write to — resolving against `skillsDir` alone would
+   * make exactly the skills worth distributing the ones whose files could not be reached.
+   *
+   * A callback rather than a list, because the folders are watched and the set changes underneath
+   * a long-lived registry.
+   */
+  listSkills?: (() => readonly { name: string; filePath: string }[]) | undefined
   onChanged: () => Promise<void>
   /**
    * Submits the text for someone else to approve, instead of writing it.
@@ -115,6 +137,35 @@ const writeParams = z.object({
         'else can reach. Copied in beside it. Reference them in the body as ' +
         '`![alt](images/name.png)`, or leave them out of the body and they are listed at the end.',
     ),
+  files: z
+    .array(
+      z.object({
+        source: z
+          .string()
+          .min(1)
+          .describe('The file as it is now, relative to the workspace root.'),
+        name: z
+          .string()
+          .optional()
+          .describe('What to call it inside the skill. Defaults to the source file name.'),
+        description: z
+          .string()
+          .min(1)
+          .describe(
+            'What it is and when to use it - "the monthly returns template; one row per trade, ' +
+              'totals in row 40". This line is what makes the file findable later, because the ' +
+              'file itself is never indexed.',
+          ),
+      }),
+    )
+    .max(MAX_SKILL_FILES)
+    .optional()
+    .describe(
+      'Working materials the skill needs: a spreadsheet template to fill in, a config the user ' +
+        'starts from, a sample document. Copied in beside the skill and listed in it. Their ' +
+        'contents are NOT loaded into context - use_skill_file copies one into the workspace ' +
+        'when it is needed.',
+    ),
 })
 export type WriteSkillParams = z.infer<typeof writeParams>
 
@@ -161,6 +212,13 @@ async function copySkillImages(
   context: ToolExecutionContext,
 ): Promise<StoredSkillImage[]> {
   if (images.length === 0) return []
+  /*
+   * The skill's own folder is created first, because `confine` realpaths its root and a root that
+   * does not exist yet cannot be resolved - so the *first* skill written with pictures failed
+   * with a containment error naming two paths, one of which was inside the other. Only reached
+   * against a real filesystem, which is why it survived: nothing exercised the copy.
+   */
+  await fs.mkdir(skillDir, { recursive: true })
   const target = await confine(path.join(skillDir, SKILL_IMAGE_DIR), skillDir)
   await fs.mkdir(target, { recursive: true })
 
@@ -191,6 +249,52 @@ async function copySkillImages(
     })
   }
   return stored
+}
+
+/**
+ * Copies the reference files in beside the skill.
+ *
+ * Same rules as the pictures - every source through `resolveToolPath`, so the deny list and the
+ * workspace boundary apply exactly as they do to `read_file`, and the destination name reduced to
+ * one safe segment. The size cap is larger because a workbook template legitimately is.
+ */
+async function copySkillFiles(
+  skillDir: string,
+  files: readonly SkillFileInput[],
+  context: ToolExecutionContext,
+): Promise<StoredSkillFile[]> {
+  if (files.length === 0) return []
+  // Same reason as `copySkillImages`: `confine` cannot resolve a root that is not there yet.
+  await fs.mkdir(skillDir, { recursive: true })
+  const target = await confine(path.join(skillDir, SKILL_FILE_DIR), skillDir)
+  await fs.mkdir(target, { recursive: true })
+
+  const stored: StoredSkillFile[] = []
+  for (const file of files) {
+    const name = skillFileAssetName(file)
+    const source = await resolveToolPath(context, file.source)
+    if (!source.ok) throw new Error(source.message)
+
+    const bytes = await fs.readFile(source.realPath)
+    if (bytes.length > MAX_SKILL_FILE_BYTES) {
+      throw new Error(
+        `"${file.source}" is ${String(Math.round(bytes.length / 1024 / 1024))} MB. A skill holds ` +
+          `working materials, so the limit is ${String(MAX_SKILL_FILE_BYTES / 1024 / 1024)} MB each.`,
+      )
+    }
+
+    await fs.writeFile(await confine(path.join(target, name), target), bytes)
+    stored.push({ name, description: file.description })
+  }
+  return stored
+}
+
+/** What the reference files will be called, without needing them to exist yet — used by `preview`. */
+function plannedFiles(params: { files?: SkillFileInput[] | undefined }): StoredSkillFile[] {
+  return (params.files ?? []).map((file) => ({
+    name: skillFileAssetName(file),
+    description: file.description,
+  }))
 }
 
 /** What the pictures will be called, without needing the files to exist yet — used by `preview`. */
@@ -264,14 +368,20 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
         after: renderSkill(
           params.name,
           params.description,
-          appendSkillImages(params.body, plannedImages(params)),
+          appendSkillFiles(
+            appendSkillImages(params.body, plannedImages(params)),
+            params.name,
+            plannedFiles(params),
+          ),
         ),
       }
     },
 
     async execute(params, toolContext): Promise<ToolResult> {
       try {
-        const wantsFolder = (params.images ?? []).length > 0
+        // Either kind of attachment forces the folder layout: a flat `name.md` has nowhere to
+        // keep them, which is the same reason pictures already did this.
+        const wantsFolder = (params.images ?? []).length > 0 || (params.files ?? []).length > 0
         const filePath = await resolveSkillPath(context.skillsDir, params.name, wantsFolder)
         const before = await readIfPresent(filePath)
         const existed = before.length > 0
@@ -285,10 +395,21 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
           wantsFolder && context.submitForReview === undefined
             ? await copySkillImages(path.dirname(filePath), params.images ?? [], toolContext)
             : plannedImages(params)
+        /*
+         * Copied on the same terms and for the same reason: a skill referencing a template that
+         * is not there is a broken link in a document somebody reads later and cannot explain.
+         *
+         * Not copied when the write is going to review - nothing is on disk yet, so there is no
+         * skill folder to put them beside, and the reviewer is approving text.
+         */
+        const storedFiles =
+          wantsFolder && context.submitForReview === undefined
+            ? await copySkillFiles(path.dirname(filePath), params.files ?? [], toolContext)
+            : plannedFiles(params)
         const rendered = renderSkill(
           params.name,
           params.description,
-          appendSkillImages(params.body, stored),
+          appendSkillFiles(appendSkillImages(params.body, stored), params.name, storedFiles),
         )
 
         // Before the write, not after: a skill that existed even briefly is one that could be
@@ -358,6 +479,145 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
   }
 }
 
+const useFileParams = z.object({
+  skill: z.string().describe('The skill the file belongs to.'),
+  file: z
+    .string()
+    .describe('The file name as the skill lists it, e.g. "returns-template.xlsx".'),
+  destination: z
+    .string()
+    .optional()
+    .describe(
+      'Where to put the copy, relative to the workspace root. Defaults to the file name at the ' +
+        'workspace root. Give a path when the user named one.',
+    ),
+})
+export type UseSkillFileParams = z.infer<typeof useFileParams>
+
+/**
+ * Copies a skill's reference file into the workspace so it can be worked on.
+ *
+ * ## Why a copy, and never the original
+ *
+ * The original is the template. Filling it in would destroy it for the next person, and on a
+ * shared or bucket-synced folder it would destroy it for everyone — silently, because a
+ * spreadsheet that has been filled in still looks like a spreadsheet. So this always writes a new
+ * file in the workspace and the skill's own copy is never opened for writing.
+ *
+ * ## Why it returns a path rather than contents
+ *
+ * A template is opened by Excel, filled in, and handed back. None of that wants the bytes in the
+ * transcript, and a workbook base64'd into context would be expensive and useless. Once the copy
+ * exists, `excel_open_workbook`, `read_file` and everything else apply to it as they would to any
+ * other file in the workspace.
+ *
+ * ## Why it is an `edit`
+ *
+ * It creates a file in the user's workspace, possibly over one that is already there. That is an
+ * edit by any reading, so it goes through the approval gate and behind the task checkpoint like
+ * one — and the preview says plainly when something is being overwritten, which is the part
+ * somebody actually needs to see.
+ */
+export function createUseSkillFileTool(context: SkillToolContext): Tool<UseSkillFileParams> {
+  /** The skill's own copy, resolved across every folder skills are read from. */
+  const locate = async (name: string, file: string): Promise<{ source: string; skillPath: string }> => {
+    const known = context.listSkills?.() ?? []
+    const skill = known.find((entry) => entry.name === name)
+    /*
+     * Falls back to this install's own folder when the skill is not loaded, so a name typed
+     * before a refresh still resolves. `resolveSkillPath` validates the name, which is what
+     * stops a name being a path.
+     */
+    const skillPath =
+      skill?.filePath ?? (await resolveSkillPath(context.skillsDir, name, true))
+
+    const dir = skillFilesDir(skillPath)
+    if (dir === undefined) {
+      throw new Error(
+        `The skill "${name}" keeps no reference files. Its text is at ${skillPath}.`,
+      )
+    }
+
+    // One safe segment, then confined: the name arrives from the model, and a skill's file list
+    // is not a reason to trust `../`.
+    const source = await confine(path.join(dir, path.basename(file)), dir)
+    if (!(await exists(source))) {
+      const available = await listSkillFiles(skillPath, {
+        readdir: async (target) => {
+          const entries = await fs.readdir(target, { withFileTypes: true })
+          return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
+        },
+      })
+      throw new Error(
+        available.length === 0
+          ? `The skill "${name}" has no reference files.`
+          : `"${file}" is not one of ${name}'s files. It has: ${available.join(', ')}.`,
+      )
+    }
+    return { source, skillPath }
+  }
+
+  return {
+    name: 'use_skill_file',
+    group: 'edit',
+    description:
+      'Copy a reference file kept with a skill - a spreadsheet template, a starting config, a ' +
+      'sample document - into the workspace so you can work on it. The skill lists the files it ' +
+      'has, under "Reference files". Always copies; the skill keeps its own original. Returns ' +
+      'the path of the copy, not its contents.',
+    parametersSchema: useFileParams,
+
+    async preview(params, toolContext): Promise<ToolPreview> {
+      const destination = params.destination ?? path.basename(params.file)
+      const lines = [
+        `Copy "${params.file}" from the skill "${params.skill}" into the workspace as ${destination}.`,
+      ]
+      try {
+        const { source } = await locate(params.skill, params.file)
+        const stat = await fs.stat(source)
+        lines.push('', `From: ${source}`, `Size: ${String(Math.max(1, Math.round(stat.size / 1024)))} KB`)
+
+        const target = await resolveToolPath(toolContext, destination, { write: true })
+        if (target.ok && (await exists(target.realPath))) {
+          // The one thing somebody needs to see before saying yes.
+          lines.push('', `WARNING: ${target.realPath} already exists and will be replaced.`)
+        }
+      } catch (error) {
+        // A preview that throws must never become an implicit approval, so it degrades to saying
+        // what it could not work out and the user is still asked.
+        lines.push('', `Could not inspect the source: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      return { kind: 'text', text: lines.join('\n') }
+    },
+
+    async execute(params, toolContext): Promise<ToolResult> {
+      try {
+        const { source } = await locate(params.skill, params.file)
+        const destination = params.destination ?? path.basename(params.file)
+
+        // `write: true`, so the copy lands inside the workspace whatever else is readable. An
+        // edit outside it would have no checkpoint behind it - see `ResolveOptions.write`.
+        const target = await resolveToolPath(toolContext, destination, { write: true })
+        if (!target.ok) return { content: target.message, isError: true }
+
+        await fs.mkdir(path.dirname(target.realPath), { recursive: true })
+        const replaced = await exists(target.realPath)
+        await fs.copyFile(source, target.realPath)
+
+        return {
+          content: [
+            `Copied ${params.file} to ${target.realPath}${replaced ? ' (replaced what was there)' : ''}.`,
+            "This is a copy - the skill's own original is untouched, so fill this one in freely.",
+          ].join('\n'),
+          path: target.realPath,
+        }
+      } catch (error) {
+        return { content: error instanceof Error ? error.message : String(error), isError: true }
+      }
+    },
+  }
+}
+
 export function createDeleteSkillTool(context: SkillToolContext): Tool<DeleteSkillParams> {
   return {
     name: 'delete_skill',
@@ -374,7 +634,21 @@ export function createDeleteSkillTool(context: SkillToolContext): Tool<DeleteSki
     async execute(params): Promise<ToolResult> {
       try {
         const filePath = await resolveSkillPath(context.skillsDir, params.name)
-        await fs.rm(filePath, { force: true })
+        /*
+         * A folder skill is removed whole, not just its SKILL.md.
+         *
+         * Removing only the text left the pictures and reference files behind - invisible,
+         * because nothing loads them without a skill, and unbounded, because a template can be
+         * tens of megabytes. Confined to the skills folder first, so `name` can never make this
+         * a recursive delete of somewhere else.
+         */
+        const folder = path.dirname(filePath)
+        const isFolderSkill = path.resolve(folder) !== path.resolve(context.skillsDir)
+        if (isFolderSkill) {
+          await fs.rm(await confine(folder, context.skillsDir), { recursive: true, force: true })
+        } else {
+          await fs.rm(filePath, { force: true })
+        }
         await context.onChanged()
         return { content: `Removed the skill "${params.name}".`, path: filePath }
       } catch (error) {

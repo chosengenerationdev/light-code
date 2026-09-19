@@ -70,6 +70,14 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
   'setDefaultProfile',
   // Writes a whole profile list, so it is not the same act as exporting one.
   'importConfig',
+  /*
+   * Opening a colleague's config and reading what is in it.
+   *
+   * Restricted with the import rather than with the export, because it is the first half of one
+   * act: it puts a file picker in front of a normal user on the server's own filesystem, and then
+   * reports what that file contains. Neither belongs to somebody who may not apply it.
+   */
+  'previewImport',
   // Processes this machine will spawn.
   'saveMcpServer',
   'saveMcpServers',
@@ -153,6 +161,12 @@ const PERSONAL_SETTINGS = new Set([
   'setActiveProfile',
   'testConnection',
   'exportConfig',
+  /*
+   * Reading the shape of the config for the export chooser - counts and category names, never
+   * values. Personal because `exportConfig` is: refusing the chooser while allowing the export
+   * would leave a user able to write the file and unable to see what was in it.
+   */
+  'requestShareSections',
   'setMode',
   'setAccentColor',
   'setExpertColor',

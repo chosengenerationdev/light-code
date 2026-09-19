@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { ApprovalDecision, ApprovalGate, ApprovalRequest } from '../approval/types.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
 import { PathDenylist } from '../fs/denylist.js'
-import { ASK_MODE, CODE_MODE } from '../modes/builtin.js'
+import { ASK_MODE, AUTO_MODE, CODE_MODE } from '../modes/builtin.js'
 import type { ChatProvider, StreamChunk } from '../providers/types.js'
 import { ToolRegistry, type Tool, type ToolExecutionContext, type ToolGroup, type ToolResult } from '../tools/index.js'
 import { runAgentTurn, type AgentTurnEvents } from './loop.js'
@@ -348,6 +348,48 @@ describe('checkpoints', () => {
       toolContext(),
       events,
       { shadowGit },
+    )
+
+    expect(shadowGit.snapshots).toBe(0)
+  })
+
+  it('snapshots before a command in a mode whose commands edit', async () => {
+    // Auto mode does its editing in the shell. Snapshotting only before an `edit` tool would
+    // leave the Rollback button present and covering nothing, which is worse than its absence.
+    const registry = new ToolRegistry()
+    registry.register(spyTool('execute_command', 'command'))
+    const shadowGit = fakeShadowGit()
+    const { events } = recordingEvents()
+
+    await runAgentTurn(
+      new ScriptedProvider(callThen('execute_command')),
+      new Conversation(),
+      'run something',
+      registry,
+      toolContext(),
+      events,
+      { shadowGit, mode: AUTO_MODE },
+    )
+
+    expect(shadowGit.snapshots).toBe(1)
+  })
+
+  it('does not snapshot before a command in ordinary Code mode', async () => {
+    // The widening is scoped to the mode that asked for it: a `git status` in Code mode taking a
+    // snapshot would be a behaviour change nobody requested.
+    const registry = new ToolRegistry()
+    registry.register(spyTool('execute_command', 'command'))
+    const shadowGit = fakeShadowGit()
+    const { events } = recordingEvents()
+
+    await runAgentTurn(
+      new ScriptedProvider(callThen('execute_command')),
+      new Conversation(),
+      'run something',
+      registry,
+      toolContext(),
+      events,
+      { shadowGit, mode: CODE_MODE },
     )
 
     expect(shadowGit.snapshots).toBe(0)

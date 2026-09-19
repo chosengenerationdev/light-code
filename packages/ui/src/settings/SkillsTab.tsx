@@ -26,6 +26,14 @@ export interface SkillsTabProps {
     filePath: string
     /** File names of the pictures kept with it. The bytes are fetched only when one is opened. */
     images?: string[]
+    /**
+     * Reference files kept with it — a template to fill in, a config to start from.
+     *
+     * Listed, never fetched. There is nothing useful to show of a workbook in a settings panel,
+     * and unlike a picture these are measured in megabytes. Somebody who wants to touch one opens
+     * the skill and works in the folder beside it.
+     */
+    files?: string[]
     sourceDir?: string
     always?: boolean
   }[]
@@ -466,6 +474,20 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
                       </div>
                     )
                   })}
+                </div>
+              )}
+
+              {/*
+                Reference files: named, with no way to open one from here.
+
+                Deliberate — see the prop. The point of listing them is that a skill carrying a
+                template should not look identical to one that does not, which is the whole
+                difference between "why does it not know about the form" and "there it is".
+              */}
+              {(skill.files ?? []).length > 0 && (
+                <div style={{ marginTop: 6, fontSize: 11, color: colors.muted }}>
+                  <span>Reference files: </span>
+                  <span style={{ fontFamily: monospace }}>{(skill.files ?? []).join(', ')}</span>
                 </div>
               )}
 

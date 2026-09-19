@@ -57,6 +57,26 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   // Changes a workbook somebody has open and has not saved, with no undo this product owns.
   'excel_write_range',
   /*
+   * Writing a file to disk, and the only Excel tool that does. `overwrite` makes it able to
+   * replace one, and "create the March report" landing on February's is not a mistake that
+   * announces itself - so the path is read once by a person.
+   */
+  'excel_create_workbook',
+  /*
+   * The point of no return for every other Excel write.
+   *
+   * Those deliberately leave the workbook dirty, so closing without saving is the undo. This is
+   * what spends it, and a category toggle standing in for that would quietly remove the only
+   * escape hatch the feature has.
+   */
+  'excel_save_workbook',
+  /*
+   * Deleting a sheet discards data that is nowhere in the transcript, and turns every formula
+   * referencing it into #REF! with no way back. Renaming and moving are milder, but splitting the
+   * tool to say so would produce six tool descriptions differing by a word - see `excel_sheets`.
+   */
+  'excel_sheets',
+  /*
    * Running a macro executes somebody else's VBA as the user: it can rewrite the workbook, write
    * files, or send mail. That is not something a category toggle should ever cover, and the
    * approval showing the actual source is the only thing standing between "run DoTheThing" and

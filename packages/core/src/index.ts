@@ -530,8 +530,32 @@ export {
 export {
   createWriteSkillTool,
   createDeleteSkillTool,
+  createUseSkillFileTool,
   type SkillToolContext,
 } from './skills/tools.js'
+export {
+  SHARE_SECTIONS,
+  NEVER_SHARED,
+  describeSections,
+  defaultSelection,
+  buildExport,
+  applyImport,
+  type ShareSection,
+  type ShareSectionId,
+  type SectionSummary,
+} from './config/share.js'
+export {
+  listSkillFiles,
+  skillFilesDir,
+  renderSkillFiles,
+  appendSkillFiles,
+  skillFileAssetName,
+  SKILL_FILE_DIR,
+  MAX_SKILL_FILES,
+  MAX_SKILL_FILE_BYTES,
+  type SkillFileInput,
+  type StoredSkillFile,
+} from './skills/files.js'
 
 export { PythonManager, type PythonStatus, type PythonManagerOptions } from './python/manager.js'
 export {

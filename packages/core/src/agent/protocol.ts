@@ -954,8 +954,29 @@ export type UiToHostMessage =
    */
   | { type: 'requestModels'; profile: ProfileInput }
   | { type: 'testConnection'; profile: ProfileInput }
-  | { type: 'exportConfig' }
-  | { type: 'importConfig' }
+  /**
+   * What is in this machine's config, section by section, for the export chooser.
+   *
+   * Asked for separately from `exportConfig` because the counts are what somebody decides on —
+   * "3 providers, 2 MCP servers" rather than a list of category names — and those can only be
+   * read host-side.
+   */
+  | { type: 'requestShareSections' }
+  /** `sections` omitted means every section, which is what the old whole-file export did. */
+  | { type: 'exportConfig'; sections?: string[] }
+  /**
+   * Opens a file and says what is in it, without saving anything.
+   *
+   * The import used to read and save in one act, so the first sight of what a colleague's file
+   * contained was the settings already changed. Splitting it is the whole of the "show what is
+   * going to be imported" half of the request.
+   */
+  | { type: 'previewImport' }
+  /**
+   * Applies a previewed file. `path` names the file the preview opened, so the user is not asked
+   * to find it twice — and `sections` is what they ticked.
+   */
+  | { type: 'importConfig'; path?: string; sections?: string[] }
 
 export type HostToUiMessage =
   /**
@@ -1374,6 +1395,14 @@ export type HostToUiMessage =
         filePath: string
         /** File names of the pictures kept with it, so the tab can offer them without fetching. */
         images?: string[]
+        /**
+         * Reference files kept with it — a template to fill in, a config to start from.
+         *
+         * Names only, and unlike the pictures there is no way to fetch the bytes: nothing in the
+         * tab would show a workbook, and a preview is not what these are for. The tab lists them
+         * so somebody can see what a skill carries, and opens the folder to touch them.
+         */
+        files?: string[]
         sourceDir?: string
         always?: boolean
       }[]
@@ -1386,6 +1415,35 @@ export type HostToUiMessage =
     }
   /** Kept apart from `models` so the provider form and this tab cannot overwrite each other. */
   | { type: 'embedderModels'; models: string[]; warning?: string }
+  /**
+   * The export chooser's contents, or an opened import file's.
+   *
+   * One message for both directions because it is the same question — what is in this config —
+   * asked of two different configs. A second message shaped identically is the drift the handover
+   * notes keep returning to.
+   */
+  | {
+      type: 'shareSections'
+      /** `export` describes this machine; `import` describes the file at `path`. */
+      direction: 'export' | 'import'
+      sections: {
+        id: string
+        label: string
+        description: string
+        present: boolean
+        detail: string
+        machineSpecific?: boolean
+        offByDefault?: boolean
+        /** Names of credentials the importing machine will have to supply. Never values. */
+        secretRefs: string[]
+      }[]
+      /** Which to start ticked. */
+      selected: string[]
+      /** The file a preview opened, passed back with the import so it is not chosen twice. */
+      path?: string
+      /** Set when the chosen file could not be read or did not validate. */
+      error?: string
+    }
   | { type: 'embedderSaved' }
   | { type: 'indexProgress'; progress: IndexProgress }
   /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */

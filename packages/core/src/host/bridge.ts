@@ -3,6 +3,15 @@ import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { listSkillImages, skillImageDataUri, SKILL_IMAGE_DIR } from '../skills/images.js'
+import { listSkillFiles } from '../skills/files.js'
+import {
+  applyImport,
+  buildExport,
+  defaultSelection,
+  describeSections,
+  SHARE_SECTIONS,
+  type ShareSectionId,
+} from '../config/share.js'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -63,6 +72,9 @@ import {
   createExcelReadMacroTool,
   createExcelWriteMacroTool,
   createExcelWriteRangeTool,
+  createExcelCreateTool,
+  createExcelSaveTool,
+  createExcelSheetsTool,
   createOutlookFoldersTool,
   createOutlookSearchTool,
   createOutlookReadTool,
@@ -133,6 +145,7 @@ import {
   PythonManager,
   createWriteSkillTool,
   createDeleteSkillTool,
+  createUseSkillFileTool,
   loadSkills,
   renderSkillsForPrompt,
   renderSkillsHintForPrompt,
@@ -744,17 +757,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            * every skill so the tab can print a row of file names would be megabytes for something
            * most people never look at.
            */
-          const images = await listSkillImages(skill.filePath, {
-            readdir: async (dir) => {
-              const entries = await fs.readdir(dir, { withFileTypes: true })
-              return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
-            },
-          })
+          const readdir = async (dir: string) => {
+            const entries = await fs.readdir(dir, { withFileTypes: true })
+            return entries.map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
+          }
+          const images = await listSkillImages(skill.filePath, { readdir })
+          // Names only, same rule as the pictures — and here it is not even a choice, since a
+          // template is measured in megabytes and nothing in the tab would show its contents.
+          const files = await listSkillFiles(skill.filePath, { readdir })
           return {
             name: skill.name,
             description: skill.description,
             filePath: skill.filePath,
             ...(images.length > 0 ? { images } : {}),
+            ...(files.length > 0 ? { files } : {}),
             ...(skill.sourceDir !== undefined ? { sourceDir: skill.sourceDir } : {}),
             ...(skill.always === true ? { always: true } : {}),
           }
@@ -2259,6 +2275,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         skillsDir,
         onChanged: refreshSkills,
         /*
+         * Every loaded skill, so `use_skill_file` can reach a template in a read-only shared
+         * folder. A closure over the live array rather than a copy: the folders are watched, and
+         * a registry built once per turn would otherwise hold a list from before the last change.
+         */
+        listSkills: () => skills,
+        /*
          * So a new skill can say "a colleague already has one of these".
          *
          * A callback rather than the searcher itself: an edit tool has no business holding a
@@ -2318,6 +2340,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }),
       )
       combined.register(createDeleteSkillTool(context))
+      // Registered beside them because it is the same feature: a skill that carries a template
+      // is worth nothing if there is no way to get the template out of it.
+      combined.register(createUseSkillFileTool(context))
     }
     /*
      * Scheduling from the chat. Offered only where somebody can answer the form and where there
@@ -2445,6 +2470,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createExcelReadMacroTool(officeOptions))
         combined.register(createExcelWriteMacroTool(officeOptions))
         combined.register(createExcelWriteRangeTool(officeOptions))
+        combined.register(createExcelCreateTool(officeOptions))
+        combined.register(createExcelSaveTool(officeOptions))
+        combined.register(createExcelSheetsTool(officeOptions))
         combined.register(createExcelCheckMacroTool(officeOptions))
         combined.register(createExcelEvaluateTool(officeOptions))
         combined.register(createExcelRunMacroTool(officeOptions))
@@ -7853,29 +7881,117 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  /** Config export never includes secrets — the config file only ever holds `apiKeyRef` pointers, never key values. */
-  async function handleExportConfig(): Promise<void> {
+  /** What this machine has to offer, so the chooser shows counts rather than category names. */
+  async function handleRequestShareSections(): Promise<void> {
     try {
       const { config } = await configManager.load()
+      post({
+        type: 'shareSections',
+        direction: 'export',
+        sections: describeSections(config),
+        selected: defaultSelection(config),
+      })
+    } catch (error) {
+      post({
+        type: 'shareSections',
+        direction: 'export',
+        sections: [],
+        selected: [],
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
+   * Opens an import file and reports what is in it, changing nothing.
+   *
+   * Split out of `handleImportConfig` because the import used to read and save in one act — so the
+   * first sight of what a colleague's file contained was your own settings already replaced. This
+   * is the "show what is going to be imported" half, and it is also what makes the section
+   * chooser possible on the way in as well as out.
+   */
+  async function handlePreviewImport(): Promise<void> {
+    const fail = (message: string): void => {
+      post({ type: 'shareSections', direction: 'import', sections: [], selected: [], error: message })
+    }
+    try {
+      const source = await ui.showOpenDialog({ kind: 'file', extensions: ['json'] })
+      if (source === undefined) return
+
+      // Validated here, so a malformed file is reported before anything is ticked rather than
+      // after it is approved. `parseConfig` throws with a readable, field-level message.
+      const imported = parseConfig(await fs.readFile(source, 'utf8'))
+      post({
+        type: 'shareSections',
+        direction: 'import',
+        sections: describeSections(imported),
+        /*
+         * Only what the file actually has. `defaultSelection` also drops the off-by-default
+         * sections, which is right on the way out and wrong here: somebody who deliberately
+         * exported their schedules and sent them expects to see them offered.
+         */
+        selected: describeSections(imported)
+          .filter((section) => section.present)
+          .map((section) => section.id),
+        path: source,
+      })
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /**
+   * Config export never includes secrets — the config file only ever holds `apiKeyRef` pointers,
+   * never key values (§15). What `sections` controls is which *settings* travel, which is a
+   * separate question: some of a config is about one machine, and some of it is nobody else's
+   * business. See `config/share.ts`.
+   */
+  async function handleExportConfig(sections?: string[]): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const chosen =
+        sections ?? SHARE_SECTIONS.map((section) => section.id)
+      const exported = buildExport(config, chosen as ShareSectionId[])
+
       const target = await ui.showSaveDialog({
         defaultName: 'light-code-config.json',
         extensions: ['json'],
       })
       if (target === undefined) return
-      await fs.writeFile(target, JSON.stringify(config, null, 2), 'utf8')
-      ui.showInfo(`Config exported to ${target}`)
+      await fs.writeFile(target, JSON.stringify(exported, null, 2), 'utf8')
+
+      /*
+       * Counted from what was actually written, not from what was ticked. A section can be
+       * selected and contribute nothing, and telling somebody they exported eight things when the
+       * file holds three is how a colleague ends up debugging an import that was never going to
+       * carry what they expected.
+       */
+      const written = describeSections(exported).filter((section) => section.present)
+      const needed = written.flatMap((section) => section.secretRefs)
+      ui.showInfo(
+        needed.length === 0
+          ? `Exported ${String(written.length)} section(s) to ${target}.`
+          : `Exported ${String(written.length)} section(s) to ${target}. Whoever imports it will need to enter: ${needed.join(', ')}.`,
+      )
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
-  async function handleImportConfig(): Promise<void> {
+  async function handleImportConfig(request: { path?: string; sections?: string[] }): Promise<void> {
     try {
-      const source = await ui.showOpenDialog({ kind: 'file', extensions: ['json'] })
+      // Reuses the file the preview opened when there is one, so nobody is made to find it twice.
+      const source = request.path ?? (await ui.showOpenDialog({ kind: 'file', extensions: ['json'] }))
       if (source === undefined) return
 
       const raw = await fs.readFile(source, 'utf8')
       const imported = parseConfig(raw) // throws ConfigValidationError with a readable message on bad input
+      const chosen = (request.sections ?? SHARE_SECTIONS.map((section) => section.id)) as ShareSectionId[]
+
+      const { config: existing } = await configManager.load()
+      // Section by section, replacing rather than merging — see `applyImport` for why merging a
+      // list has no honest answer.
+      const merged = applyImport(existing, imported, chosen)
 
       // Exports deliberately carry no secrets, so an imported profile's `apiKeyRef`
       // points at a secret this machine may not have. Downgrade those to `none` rather
@@ -7883,7 +7999,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // the affected profiles so the user knows exactly which keys to re-enter.
       const needKeys: string[] = []
       const reconciled = await Promise.all(
-        (imported.profiles ?? []).map(async (profile): Promise<ProviderProfile> => {
+        (merged.profiles ?? []).map(async (profile): Promise<ProviderProfile> => {
           if (profile.auth.type !== 'apiKey') return profile
           if ((await secrets.get(profile.auth.apiKeyRef)) !== undefined) return profile
           needKeys.push(profile.label)
@@ -7891,15 +8007,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }),
       )
 
-      await configManager.save('user', { ...imported, profiles: reconciled })
+      await configManager.save('user', {
+        ...merged,
+        ...(merged.profiles === undefined ? {} : { profiles: reconciled }),
+      })
       await postProfiles()
       // The Agents tab lists these as the models a role can be given, so it goes stale the moment
       // the list changes — a provider added and then not offered reads as the tab being broken.
       await postAgents()
+      /*
+       * Everything else an import can have moved. Before this, importing anything but providers
+       * left every other tab showing what was there a moment ago until the panel was reopened —
+       * which reads exactly like the import having silently done nothing.
+       */
+      await postSkills()
+      await postSettings()
 
+      /*
+       * Named individually rather than counted. "Re-enter 3 credentials" leaves somebody hunting
+       * through tabs; naming them is the difference between a to-do and a puzzle.
+       */
+      const stillNeeded = describeSections(merged)
+        .filter((section) => chosen.includes(section.id as ShareSectionId))
+        .flatMap((section) => section.secretRefs)
+        .filter((ref) => !needKeys.some((label) => ref.startsWith(`${label}:`)))
+
+      const toEnter = [...needKeys.map((label) => `${label}: API key`), ...stillNeeded]
       ui.showInfo(
-        needKeys.length > 0
-          ? `Config imported. Re-enter the API key for: ${needKeys.join(', ')} (exports never include secrets).`
+        toEnter.length > 0
+          ? `Config imported. Credentials to enter: ${toEnter.join(', ')} (exports never include secrets).`
           : 'Config imported.',
       )
     } catch (error) {
@@ -9440,10 +9576,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleDeleteProfile', handleDeleteProfile(message.id))
     } else if (message.type === 'setActiveProfile') {
       reportFailure('handleSetActiveProfile', handleSetActiveProfile(message.id, message.forProject))
+    } else if (message.type === 'requestShareSections') {
+      reportFailure('handleRequestShareSections', handleRequestShareSections())
+    } else if (message.type === 'previewImport') {
+      reportFailure('handlePreviewImport', handlePreviewImport())
     } else if (message.type === 'exportConfig') {
-      reportFailure('handleExportConfig', handleExportConfig())
+      reportFailure('handleExportConfig', handleExportConfig(message.sections))
     } else if (message.type === 'importConfig') {
-      reportFailure('handleImportConfig', handleImportConfig())
+      reportFailure('handleImportConfig', handleImportConfig(message))
     }
   })
 

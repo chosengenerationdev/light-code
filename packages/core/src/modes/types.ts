@@ -22,4 +22,13 @@ export interface Mode {
    * disable it in the picker and say why.
    */
   requiresExpert?: boolean
+  /**
+   * This mode does its editing with `execute_command`, so a command may change the workspace.
+   *
+   * The loop snapshots before the first **edit** of a task, because that is where edits come
+   * from in every other mode. Auto mode moves them into the shell, and without this the first
+   * `sed -i` would run with no checkpoint behind it — rollback would silently cover nothing,
+   * which is worse than having no rollback at all because the button is still there.
+   */
+  commandsEdit?: boolean
 }

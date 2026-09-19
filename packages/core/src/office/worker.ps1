@@ -842,6 +842,295 @@ function Invoke-ExcelWriteRange {
     }
 }
 
+<#
+  The file format for a path's extension.
+
+  Named rather than inferred by Excel, because `SaveAs` with no format argument writes whatever
+  the workbook currently is - so saving a new workbook as `report.csv` produces an xlsx file
+  called `report.csv`, which opens as a garbled single cell somewhere else entirely and is
+  reported as data corruption. The mismatch is silent at the point it is made.
+#>
+function Get-ExcelFormat {
+    param([string]$Path)
+
+    switch ([IO.Path]::GetExtension($Path).ToLowerInvariant()) {
+        '.xlsx' { return 51 }   # xlOpenXMLWorkbook
+        '.xlsm' { return 52 }   # xlOpenXMLWorkbookMacroEnabled
+        '.xlsb' { return 50 }   # xlExcel12
+        '.xls'  { return 56 }   # xlExcel8
+        '.csv'  { return 6 }    # xlCSV
+        '.txt'  { return -4158 }# xlCurrentPlatformText
+        default { throw "Cannot save as '$([IO.Path]::GetExtension($Path))'. Use .xlsx, .xlsm, .xlsb, .xls, .csv or .txt." }
+    }
+}
+
+<#
+  Runs something with Excel's own prompts suppressed, and always puts them back.
+
+  Every dialog Excel raises here has nobody to answer it: "a file named that already exists,
+  replace it?", "data may be lost in this format", "are you sure you want to delete this sheet?".
+  Left on, the call does not fail - it *hangs* until the tool's timeout, and the reported symptom
+  is Excel being slow. Restored in a finally, because leaving alerts off would silently disarm the
+  confirmations the user gets when they work in Excel themselves afterwards.
+#>
+function Invoke-WithoutAlerts {
+    param($App, [scriptblock]$Action)
+
+    $previous = $App.DisplayAlerts
+    try {
+        $App.DisplayAlerts = $false
+        return & $Action
+    } finally {
+        try { $App.DisplayAlerts = $previous } catch { }
+    }
+}
+
+<#
+  Creates a workbook and saves it to a path.
+
+  ## Why it saves immediately rather than leaving it unsaved
+
+  Everything else here leaves the workbook dirty on purpose: it is somebody's open file and they
+  decide whether the change is kept. A workbook that does not exist yet has nothing to lose and no
+  previous state to preserve, and an unsaved `Book1` is not a file anyone can be handed - the
+  request was to create files, so it creates a file.
+
+  ## What it refuses
+
+  It will not write over an existing file unless asked in so many words. Excel's own SaveAs would
+  do it without a murmur once alerts are off, and "create me a report" landing on last quarter's
+  is not a mistake that announces itself.
+#>
+function Invoke-ExcelCreate {
+    param($Request)
+
+    $path = $Request.path
+    if ([string]::IsNullOrWhiteSpace($path)) { throw 'No path was given.' }
+
+    # Resolved against nothing: the caller has already confined it, and re-resolving a relative
+    # path here would resolve it against the worker's own directory.
+    if (-not [IO.Path]::IsPathRooted($path)) { throw "'$path' is not a full path." }
+    $format = Get-ExcelFormat -Path $path
+
+    $overwrite = $false
+    if ($null -ne $Request.overwrite) { $overwrite = [bool]$Request.overwrite }
+    $existed = Test-Path -LiteralPath $path
+    if ($existed -and -not $overwrite) {
+        throw "There is already a file at '$path'. Ask for overwrite if replacing it is intended."
+    }
+
+    $folder = [IO.Path]::GetDirectoryName($path)
+    if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
+        throw "The folder '$folder' does not exist."
+    }
+
+    $app = $null
+    $started = $false
+    try {
+        $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    } catch {
+        $app = New-Object -ComObject Excel.Application
+        $script:apps['Excel.Application'] = $app
+        $started = $true
+    }
+    $app.Visible = $true
+
+    $names = @()
+    if ($null -ne $Request.sheets) { $names = @($Request.sheets) }
+
+    $wb = $app.Workbooks.Add()
+    try {
+        if ($names.Count -gt 0) {
+            # The first sheet is renamed rather than added-then-deleted, so a new workbook never
+            # passes through a state with two sheets one of which is about to vanish.
+            $wb.Worksheets.Item(1).Name = [string]$names[0]
+            for ($i = 1; $i -lt $names.Count; $i++) {
+                $added = $wb.Worksheets.Add([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))
+                $added.Name = [string]$names[$i]
+            }
+        }
+
+        Invoke-WithoutAlerts -App $app -Action { $wb.SaveAs($path, $format) } | Out-Null
+    } catch {
+        # A workbook that could not be saved must not be left open and untitled: the next call
+        # would find a stray `Book1` and the user would be looking at a window nobody asked for.
+        try { Invoke-WithoutAlerts -App $app -Action { $wb.Close($false) } | Out-Null } catch { }
+        throw
+    }
+
+    return @{
+        workbook = $wb.Name
+        fullName = $wb.FullName
+        sheets   = @(Get-SheetNames -Workbook $wb)
+        started  = $started
+        replaced = $existed
+    }
+}
+
+<#
+  Saves an open workbook, optionally to a new path.
+
+  Separate from every write tool on purpose. `excel_write_range` and `excel_write_macro` leave the
+  workbook dirty so somebody can look at the result and close without saving, and folding a save
+  into them would remove the only escape hatch those writes have. Saving is therefore its own act,
+  asked for separately.
+#>
+function Invoke-ExcelSave {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $wasDirty = -not [bool]$wb.Saved
+
+    $path = $Request.path
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        if ([bool]$wb.ReadOnly) {
+            throw "'$($wb.Name)' is open read-only, so it cannot be saved in place. Give a path to save a copy instead."
+        }
+        <#
+          A workbook that has never been saved has no path to save to.
+
+          `Save()` on one does not fail - it opens the Save As dialog, and with alerts suppressed
+          it blocks until the tool times out. Refusing with a sentence is better than a timeout
+          that points at nothing.
+        #>
+        if ($wb.Path -eq '') {
+            throw "'$($wb.Name)' has never been saved, so there is nowhere to save it. Give a path."
+        }
+        Invoke-WithoutAlerts -App $app -Action { $wb.Save() } | Out-Null
+        return @{
+            workbook = $wb.Name
+            fullName = $wb.FullName
+            savedAs  = $false
+            wasDirty = $wasDirty
+            replaced = $false
+        }
+    }
+
+    if (-not [IO.Path]::IsPathRooted($path)) { throw "'$path' is not a full path." }
+    $format = Get-ExcelFormat -Path $path
+
+    $overwrite = $false
+    if ($null -ne $Request.overwrite) { $overwrite = [bool]$Request.overwrite }
+    $existed = Test-Path -LiteralPath $path
+    if ($existed -and -not $overwrite) {
+        throw "There is already a file at '$path'. Ask for overwrite if replacing it is intended."
+    }
+
+    $folder = [IO.Path]::GetDirectoryName($path)
+    if (-not [string]::IsNullOrWhiteSpace($folder) -and -not (Test-Path -LiteralPath $folder)) {
+        throw "The folder '$folder' does not exist."
+    }
+
+    Invoke-WithoutAlerts -App $app -Action { $wb.SaveAs($path, $format) } | Out-Null
+    return @{
+        workbook = $wb.Name
+        fullName = $wb.FullName
+        savedAs  = $true
+        wasDirty = $wasDirty
+        replaced = $existed
+    }
+}
+
+<#
+  Adding, renaming, deleting, copying and reordering sheets.
+
+  One operation with an action rather than five tools, which is CLAUDE.md section 17's rule and
+  here it is also the honest shape: these are five verbs over one noun, they share every argument,
+  and a model choosing between five nearly identical tool descriptions chooses worse than one
+  choosing between five named actions.
+
+  Nothing here saves. A structural change to somebody's workbook is exactly as reversible as a
+  cell write - close without saving - and it should not be less so because it happened to be a
+  sheet rather than a range.
+#>
+function Invoke-ExcelSheets {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $action = [string]$Request.action
+    $before = @(Get-SheetNames -Workbook $wb)
+
+    switch ($action) {
+        'list' { }
+
+        'add' {
+            $name = [string]$Request.sheet
+            if ([string]::IsNullOrWhiteSpace($name)) { throw 'No sheet name was given to add.' }
+            if ($before -contains $name) { throw "'$($wb.Name)' already has a sheet called '$name'." }
+            # Added at the end unless a position is given, because appending is what somebody means
+            # by "add a sheet" and inserting before the active one is a surprise.
+            $sheet = $wb.Worksheets.Add([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))
+            $sheet.Name = $name
+            if ($null -ne $Request.position) {
+                $index = [int]$Request.position
+                if ($index -lt 1) { $index = 1 }
+                if ($index -gt $wb.Worksheets.Count) { $index = $wb.Worksheets.Count }
+                if ($index -eq 1) { $sheet.Move($wb.Worksheets.Item(1)) }
+                else { $sheet.Move([System.Reflection.Missing]::Value, $wb.Worksheets.Item($index - 1)) }
+            }
+        }
+
+        'rename' {
+            $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+            $name = [string]$Request.newName
+            if ([string]::IsNullOrWhiteSpace($name)) { throw 'No new name was given.' }
+            if (($before -contains $name) -and ($sheet.Name -ne $name)) {
+                throw "'$($wb.Name)' already has a sheet called '$name'."
+            }
+            $sheet.Name = $name
+        }
+
+        'delete' {
+            $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+            <#
+              Refused here rather than left to Excel.
+
+              Excel will not delete the last visible sheet either, but it says so in a dialog -
+              which, with alerts suppressed, means the call simply does nothing and reports
+              success. Saying it plainly is the difference between an answer and a lie.
+            #>
+            if ($wb.Worksheets.Count -le 1) {
+                throw "'$($sheet.Name)' is the only sheet in $($wb.Name); a workbook must keep one."
+            }
+            Invoke-WithoutAlerts -App $app -Action { $sheet.Delete() } | Out-Null
+        }
+
+        'copy' {
+            $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+            $name = [string]$Request.newName
+            if (($name -ne '') -and ($before -contains $name)) {
+                throw "'$($wb.Name)' already has a sheet called '$name'."
+            }
+            $sheet.Copy([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))
+            # The copy is the active sheet immediately afterwards, which is how it is renamed -
+            # Excel names it "Sheet (2)" and there is no handle returned by Copy to use instead.
+            if ($name -ne '') { $wb.ActiveSheet.Name = $name }
+        }
+
+        'move' {
+            $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+            if ($null -eq $Request.position) { throw 'No position was given to move it to.' }
+            $index = [int]$Request.position
+            if ($index -lt 1) { $index = 1 }
+            if ($index -gt $wb.Worksheets.Count) { $index = $wb.Worksheets.Count }
+            if ($index -eq 1) { $sheet.Move($wb.Worksheets.Item(1)) }
+            else { $sheet.Move([System.Reflection.Missing]::Value, $wb.Worksheets.Item($index)) }
+        }
+
+        default { throw "Unknown sheet action '$action'. Use list, add, rename, delete, copy or move." }
+    }
+
+    return @{
+        workbook = $wb.Name
+        action   = $action
+        before   = $before
+        sheets   = @(Get-SheetNames -Workbook $wb)
+        saved    = [bool]$wb.Saved
+    }
+}
+
 function Invoke-ExcelReadRange {
     param($Request)
 
@@ -1962,6 +2251,9 @@ function Invoke-Request {
         'excel.diagnose'        { return Invoke-ExcelDiagnose }
         'excel.readRange'       { return Invoke-ExcelReadRange -Request $Request }
         'excel.writeRange'      { return Invoke-ExcelWriteRange -Request $Request }
+        'excel.create'          { return Invoke-ExcelCreate -Request $Request }
+        'excel.save'            { return Invoke-ExcelSave -Request $Request }
+        'excel.sheets'          { return Invoke-ExcelSheets -Request $Request }
         'excel.trace'           { return Invoke-ExcelTrace -Request $Request }
         'excel.listMacros'      { return Invoke-ExcelListMacros -Request $Request }
         'excel.readMacro'       { return Invoke-ExcelReadMacro -Request $Request }

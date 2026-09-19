@@ -327,6 +327,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onSetActive={props.onSetActive}
             onExport={props.onExport}
             onImport={props.onImport}
+            {...(props.share !== undefined ? { share: props.share } : {})}
+            {...(props.onConfirmShare !== undefined ? { onConfirmShare: props.onConfirmShare } : {})}
+            {...(props.onCancelShare !== undefined ? { onCancelShare: props.onCancelShare } : {})}
             onRequestModels={props.onRequestModels}
             onTestConnection={props.onTestConnection}
             onEditingChange={props.onEditingChange}
