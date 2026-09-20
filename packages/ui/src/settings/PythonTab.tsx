@@ -625,13 +625,22 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                       >
                         Open
                       </button>
-                      <button
-                        type="button"
-                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
-                        onClick={() => setConfirming(tool.name)}
-                      >
-                        Delete
-                      </button>
+                      {/*
+                        Shared tools show why there is no Delete rather than simply lacking one. Only
+                        the first folder is writable, and a Delete that was always refused would be
+                        worse than its absence - the same rule the Skills tab follows.
+                      */}
+                      {tool.sourceDir === status.toolsDir ? (
+                        <button
+                          type="button"
+                          style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                          onClick={() => setConfirming(tool.name)}
+                        >
+                          Delete
+                        </button>
+                      ) : (
+                        <span style={{ color: colors.muted, fontSize: 10 }}>shared</span>
+                      )}
                     </span>
                   </div>
                   {tool.description.length > 0 && (

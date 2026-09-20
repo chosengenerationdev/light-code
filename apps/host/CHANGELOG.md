@@ -1,5 +1,27 @@
 # @chosengeneration/light-code
 
+## 0.84.0
+
+### Minor Changes
+
+- Python tools can be shared with a team
+
+  A bucket folder of Python tools is now read as well as written. Publish a tool and it joins the
+  folder your team reads; a colleague's tool appears in your Python tab, where you read the source
+  and approve it before it can run.
+
+  Approval is per machine, and that is the point. Each folder keeps its own registry, so a tool
+  synced from a bucket arrives **unapproved** and a tool that changes after you approved it stops
+  loading until you have read the change. Publishing cannot cause code to run on anybody else's
+  machine.
+
+  Only your own folder is writable: a shared tool cannot be deleted from here, and the tab says so
+  rather than offering a button that would be refused. Writing a tool of the same name is allowed
+  and shadows the shared one, so you can fix a colleague's tool locally without editing everyone's
+  copy.
+
+  Previously the folder was synced and then ignored — the files arrived and nothing loaded them.
+
 ## 0.83.1
 
 ### Patch Changes

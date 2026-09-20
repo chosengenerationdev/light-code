@@ -78,6 +78,25 @@ export interface PythonToolContext {
         producedBy?: string
       }) => Promise<string>)
     | undefined
+  /**
+   * Where a loaded tool of this name actually lives.
+   *
+   * Needed because `toolsDir` is only the *writable* folder now: a tool can come from a shared
+   * one, and both editing and deleting have to know which. Absent means there are no shared
+   * folders, and everything behaves exactly as it did.
+   */
+  findTool?: ((name: string) => { filePath: string; sourceDir: string } | undefined) | undefined
+  /**
+   * Publishes a tool that was just written, when tools are kept in a bucket.
+   *
+   * Absent unless a folder is configured and writable, so writing works exactly as before for
+   * everyone else. A failure here **does not fail the write** — the file is on disk, approved and
+   * callable, and losing it because a bucket was unreachable would be the worse outcome. The tool
+   * result says the copy did not go up, so nothing is silently half-done.
+   *
+   * The same shape and the same reasoning as `write_skill`'s `onSaved`.
+   */
+  onSaved?: ((name: string, source: string) => Promise<void>) | undefined
 }
 
 const createParams = z.object({
@@ -367,10 +386,28 @@ function makeWriteTool(
         await approveTool(context.toolsDir, params.name, source, described)
         await context.onChanged()
 
+        /*
+         * Reported, never thrown: see `onSaved`. The file is on disk, approved and callable, so
+         * a bucket that could not be reached must not undo any of that.
+         */
+        let publishProblem: string | undefined
+        if (context.onSaved !== undefined) {
+          try {
+            await context.onSaved(params.name, source)
+          } catch (error) {
+            publishProblem = error instanceof Error ? error.message : String(error)
+          }
+        }
+
         return {
           content:
             `Saved and registered as py__${params.name}.\n` +
             (verifyWarning === undefined ? '' : `\n${verifyWarning}\n\n`) +
+            (publishProblem === undefined
+              ? ''
+              : `Saved here, but NOT copied to the bucket: ${publishProblem}
+
+`) +
             `Description: ${described.description || '(none — add a module docstring)'}\n` +
             `Parameters: ${JSON.stringify(described.schema)}\n\n` +
             // Accurate about *when*. The tool block is fixed for the whole turn so the
@@ -495,6 +532,27 @@ export function createDeletePythonTool(context: PythonToolContext): Tool<DeleteP
 
     async execute(params): Promise<ToolResult> {
       try {
+        /*
+         * Only the writable folder can be deleted from.
+         *
+         * A shared folder is a mirror of somebody else's, and one person's assistant must not be
+         * able to remove a tool every colleague depends on. Said explicitly rather than left to
+         * `force: true`, which would report success while deleting nothing — the tool would still
+         * be listed afterwards with no explanation. The same rule skills already follow.
+         */
+        const existing = context.findTool?.(params.name)
+        if (
+          existing !== undefined &&
+          path.resolve(existing.sourceDir) !== path.resolve(context.toolsDir)
+        ) {
+          return {
+            content:
+              `py__${params.name} lives in ${existing.sourceDir}, which is a read-only tools ` +
+              'folder. Delete it where it is published, or remove the folder in Settings.',
+            isError: true,
+          }
+        }
+
         const filePath = await resolveToolPath(context.toolsDir, params.name)
         await fs.rm(filePath, { force: true })
         await forgetTool(context.toolsDir, params.name)

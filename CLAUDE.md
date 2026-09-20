@@ -1329,20 +1329,44 @@ have to agree, which is §19's most expensive recurring bug.
 - **`syncFromS3` is download-only and never deletes, locally or remotely.** A half-finished sync
   that had already emptied the folder would take somebody's skills away over a network blip.
 
-**The Python tools half of the mirror is not finished, and reads as though it were.** `s3.tools`
-is configurable, `syncFromS3` brings the `.py` files down, and the S3 panel reports the folder they
-landed in — but `PythonManager` holds exactly one `toolsDir` and never looks at them, and
-`create_python_tool` has no `onSaved` publish hook the way `write_skill` does. So a tool put in a
-bucket is downloaded and ignored, in both directions, with a panel saying it was copied. The commit
-that built the mirror is explicit that this was future work (*"which is how skills and Python tools
-**will** live in a bucket"*), but nothing in the running product says so.
+### Python tools live in more than one folder now (0.99.0)
 
-Finishing it is not just wiring: §13 records that **tool folders stay singular on purpose**,
-because read-only extras were thought to need a second approval-hash store, which is §15's
-two-stores-that-diverge problem on the sharpest surface in the project. That may be answerable —
-a mirrored folder could carry its own `.registry.json`, so a synced change breaks its own hash and
-is refused until approved — but it is a decision to take deliberately, not a gap to close by
-adding a path. **Do not depict team-shared Python tools as working until it is.**
+**This reverses §13's "tool folders stay singular", and the objection it rested on turned out to be
+wrong.** That decision said read-only extras would need a second approval-hash store outside
+`.registry.json` — §15's two-stores-that-diverge problem, on the sharpest surface in the project.
+They do not. **Each folder carries its own `.registry.json`**, written on this machine when the
+user approves, so there is one store per folder and never two describing the same thing.
+
+What that buys is the security property intact, per folder:
+
+- A `.py` synced out of a bucket arrives with **no registry entry here**, so it is `unapproved` and
+  never loads. A file appearing on disk is still not enough to run it.
+- A synced *change* breaks the hash recorded in that folder's own registry and is refused until
+  somebody reads it and approves it again.
+- Approval is therefore **per machine**. A colleague publishing a tool cannot cause it to run on
+  anybody else's machine, which is the whole question for executable code arriving from a bucket.
+
+The rest follows the skills folders exactly, because it is the same shape: a search path where the
+**first entry is the only writable one**, earlier folders win a name collision, and a shadowed tool
+is reported rather than dropped. `delete_python_tool` refuses a tool that lives in a read-only
+folder and says where it lives — one person's assistant must not remove a tool every colleague
+depends on. Creating one of the same name is *allowed*, and shadows, which is how somebody fixes a
+colleague's tool locally without editing everyone's copy.
+
+`create_python_tool` publishes through `onToolSaved`, the same hook and the same rules as
+`write_skill`'s `onSaved`: only to the folder marked `publish`, never to a read-only connection,
+and a failure is **reported in the tool result rather than thrown** — the file is on disk, approved
+and callable, and losing that because a bucket was unreachable would be the worse outcome.
+
+**How this was found is the part worth keeping.** `s3.tools` shipped configurable, syncing, and
+reported in the S3 panel — with nothing on the other end. `mirroredToolsDirs` was computed and used
+for one line of UI, and never handed to `PythonManager`. Everything looked present: a config key, a
+sync, a panel saying "Copied to:". The commit that built the mirror had said in its own words that
+this was future work — *"which is how skills and Python tools **will** live in a bucket"* — and
+nothing in the running product repeated it. It surfaced only because an animation claimed the
+feature and somebody asked whether it worked. `python/sharedWiring.test.ts` reads `bridge.ts` and
+fails if the folders stop reaching `configure`, for the reason `config/retrieval.test.ts` does: a
+decision that never reaches its owner is invisible to every test of the owner.
 
 **Deleting from a bucket was deliberately absent and is now a button** (`s3/remove.ts`), because
 the honest answer to "how do I remove this skill" had been "in the AWS console". Four rules hold
@@ -2587,10 +2611,10 @@ pending the changeset in `.changeset/`). Marketplace was on 0.11.0 at last check
   undefined and the tools are simply not offered; `search_codebase` and `search_opensearch`
   return tool errors; `search_docs` falls back to lexical; index listing catches to `[]`; the
   auto-reindex logs and retries. Chat, editing, commands, MCP and the expert never touch it.
-- **Python tool folders stay singular, deliberately** (decided 2026-08-14). A tool is executable
-  code and §13's real mitigation is that it lives in the repo under review. Read-only extras
-  would also need a second approval-hash store outside `.registry.json`, which is the
-  two-stores-that-diverge problem §15 warns about, on the sharpest surface in the project.
+- ~~**Python tool folders stay singular, deliberately**~~ (decided 2026-08-14, **reversed 0.99.0**).
+  The reasoning was that read-only extras would need a second approval-hash store outside
+  `.registry.json`. They do not — each folder carries its own, so the pin works per folder and
+  nothing is stored twice. See "Python tools live in more than one folder now".
 
 ### Components can be render-tested now — use it
 

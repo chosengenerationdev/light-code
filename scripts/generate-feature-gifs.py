@@ -196,97 +196,98 @@ TOOL_CAPTIONS = (
     (0, "A skill says what analysis is needed - the assistant writes the tool for it"),
     (30, "You approve the source. Nothing runs until you have read it"),
     (54, "Registered, and callable from the next message"),
-    (78, "Reused every time that question comes up again"),
+    (76, "Publish it, and it joins the team's shelf"),
+    (100, "A colleague's tool arrives unapproved - they read it before it can run"),
 )
 
 TOOL_NOTES = (
     (0, "create_python_tool"),
     (30, "approval shows the full source  -  hash-pinned once approved"),
     (54, "py__margin_rows"),
-    (78, "the file is the source of truth; the registry is a generated cache"),
+    (76, "s3.tools  -  many folders read from, one published to"),
+    (100, "each folder keeps its own .registry.json, so approval is per machine"),
 )
 
-LATER_ASKS = (
-    ("last week's margins for the north region", "py__margin_rows(region='north', weeks=1)"),
-    ("and the same for the last quarter", "py__margin_rows(region='north', weeks=13)"),
+TEAM_TOOLS = (
+    ("py__margin_rows", GREEN, "Ana"),
+    ("py__ledger_fetch", BLUE, "Ben"),
+    ("py__risk_export", ORANGE, "Cara"),
 )
 
 
 def scene_python_tools(frame: int):
-    """The life of one Python tool.
+    """The life of one Python tool, including the team's shelf.
 
-    ## What this deliberately does *not* show
+    ## The claim this makes, and why it is safe to make
 
-    An earlier version ended with the three-person shelf the skills animation has, captioned
-    "everyone's tools, available to everyone's assistant". **That is not true today**, and the
-    picture was drawn before it was checked. `s3.tools` exists, `syncFromS3` brings the `.py` files
-    down, and the panel reports where they landed — but `PythonManager` reads exactly one
-    `toolsDir`, so nothing ever loads them, and `create_python_tool` has no publish hook the way
-    `write_skill` does. The commit that added the mirror says so in its own words: "which is how
-    skills and Python tools *will* live in a bucket".
-
-    So the scene stops where the product does. It is the exact failure the header of this file
-    warns about — a diagram that overstates gets believed, shown to other people, and nothing fails
-    when it stops being true — and it got past the check once already.
+    An earlier cut of this ended on the shelf captioned "everyone's tools, available to everyone's
+    assistant" — and that was **false when it shipped**: `s3.tools` synced the files down and
+    nothing loaded them. It is true now, and the last beat is deliberately not "everyone has
+    everyone's". A colleague's tool arrives **unapproved**, because each folder carries its own
+    `.registry.json` and approval is per machine. Drawing it as instantly available would overstate
+    it in exactly the direction that matters: this is executable code arriving from a bucket.
     """
     c = Canvas(
-        "Tools it writes for itself",
+        "Tools the team writes for itself",
         latest(TOOL_CAPTIONS, frame),
         latest(TOOL_NOTES, frame),
     )
 
-    # --- the skill that asked for it
-    c.panel(48, 110, 196, 196, title="Skill", subtitle="weekly-margin-review", accent=PURPLE)
-    for index, line in enumerate(
-        ("Compare margin by", "region, four weeks", "at a time.", "", "Rows come from the",
-         "ledger service.")
-    ):
-        c.label(62, 178 + index * 19, line, font=F_SMALL,
-                fill=blend(PANEL, MUTED, ramp(frame, 1 + index * 2, 4)))
-
-    c.arrow(248, 208, 276, 208, ramp(frame, 12, 5), blend(BG, PURPLE, 0.7))
-
     # --- the source, typed out and then approved
-    c.panel(280, 110, 372, 196, title="margin_rows.py", subtitle="written to .lightcode/tools/",
+    c.panel(48, 110, 372, 196, title="margin_rows.py", subtitle="written to .lightcode/tools/",
             tone=SUNKEN, accent=GREEN if frame >= 34 else None)
     for index, line in enumerate(TOOL_SOURCE):
-        alpha = ramp(frame, 14 + index * 3, 5)
+        alpha = ramp(frame, 2 + index * 3, 5)
         if alpha <= 0.01:
             continue
-        c.label(294, 178 + index * 19, line, font=F_MONO_S,
+        c.label(62, 178 + index * 19, line, font=F_MONO_S,
                 fill=blend(SUNKEN, TEXT if index >= 4 else MUTED, alpha))
 
     approved = ramp(frame, 34, 8)
     if approved > 0:
-        c.label(294, 292, "approved - source hash pinned", font=F_SMALL,
+        c.label(62, 292, "approved - source hash pinned", font=F_SMALL,
                 fill=blend(SUNKEN, GREEN, approved))
 
-    # --- registered
+    # --- the registry
     live = ramp(frame, 56, 10)
-    c.panel(688, 110, 224, 196, title="Your tools", subtitle="callable from the next message",
+    c.panel(456, 110, 244, 196, title="Your tools", subtitle="callable from the next message",
             alpha=max(live, 0.25))
     if live > 0:
-        c.chip(702, 178, 196, 26, "py__margin_rows", GREEN, alpha=live)
-        c.label(702, 220, "region: str", font=F_MONO_S, fill=blend(PANEL, MUTED, live))
-        c.label(702, 240, "weeks: int = 4", font=F_MONO_S, fill=blend(PANEL, MUTED, live))
-        c.label(702, 268, "schema from the type hints,", font=F_MINI,
-                fill=blend(PANEL, MUTED, live))
-        c.label(702, 282, "never hand-maintained", font=F_MINI, fill=blend(PANEL, MUTED, live))
-    c.arrow(656, 208, 684, 208, ramp(frame, 52, 6), blend(BG, GREEN, 0.7))
+        c.chip(470, 178, 216, 26, "py__margin_rows", GREEN, alpha=live)
+    c.arrow(424, 208, 452, 208, ramp(frame, 52, 6), blend(BG, GREEN, 0.7))
 
-    # --- reused later
-    for index, (question, call) in enumerate(LATER_ASKS):
-        alpha = ramp(frame, 80 + index * 14, 9)
-        if alpha <= 0.01:
+    # --- the shared shelf
+    shelf = ramp(frame, 78, 10)
+    c.panel(736, 110, 176, 196, title="Team shelf" if shelf > 0.3 else None,
+            subtitle="s3.tools" if shelf > 0.3 else None, tone=SUNKEN, accent=PURPLE, alpha=shelf)
+    for index, (name, colour, _) in enumerate(TEAM_TOOLS):
+        c.chip(750, 178 + index * 32, 148, 26, name, colour, over=SUNKEN,
+               alpha=ramp(frame, 82 + index * 5, 8), font=F_MINI)
+    c.arrow(704, 208, 732, 208, ramp(frame, 76, 6), blend(BG, PURPLE, 0.7))
+    c.travellers(704, 208, 732, 208, frame, 78, 10, PURPLE, count=2)
+
+    # --- what each person ends up with
+    for index, (_, colour, who) in enumerate(TEAM_TOOLS):
+        x = 48 + index * 296
+        alpha = ramp(frame, 100 + index * 5, 10)
+        c.panel(x, 340, 268, 104, alpha=alpha)
+        if alpha <= 0.2:
             continue
-        y = 336 + index * 56
-        c.panel(48, y, 604, 48, tone=SUNKEN, alpha=alpha)
-        c.label(62, y + 24, f'"{question}"', font=F_BODY,
-                fill=blend(SUNKEN, TEXT, alpha), anchor="lm")
-        c.panel(688, y, 224, 48, tone=SUNKEN, accent=GREEN, alpha=alpha)
-        c.label(702, y + 24, call.split("(")[0], font=F_MONO_S,
-                fill=blend(SUNKEN, GREEN, alpha), anchor="lm")
-        c.arrow(656, y + 24, 684, y + 24, ramp(frame, 84 + index * 14, 5), blend(BG, GREEN, 0.6))
+        c.avatar(x + 14, 354, who, colour)
+        for slot, (name, tone, owner) in enumerate(TEAM_TOOLS):
+            sx = x + 14 + (slot % 2) * 128
+            sy = 388 + (slot // 2) * 26
+            mine = owner == who
+            # Solid is yours and already running; an outline is a colleague's, downloaded and
+            # waiting to be read. The difference is the whole point of the last beat.
+            c.chip(sx, sy, 122, 22, name, tone, solid=mine,
+                   alpha=ramp(frame, 104 + index * 5 + slot, 8), font=F_MINI)
+        c.arrow(x + 134, 336, x + 134, 312, ramp(frame, 98, 8), blend(BG, PURPLE, 0.5), head=False)
+
+    waiting = ramp(frame, 116, 8)
+    if waiting > 0:
+        c.label(48, 456, "outlined = downloaded, not yet approved here", font=F_SMALL,
+                fill=blend(BG, MUTED, waiting))
 
     return c.image
 

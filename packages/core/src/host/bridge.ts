@@ -495,6 +495,30 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // a child is about to start, so rotating it reaches the next worker with nothing to clear.
     secrets,
     /*
+     * Publishes a new tool to the bucket folder marked for it.
+     *
+     * A closure over the cached config rather than a value, because the manager is constructed
+     * once for the window and the mirrors can be reconfigured at any time — a value captured here
+     * would keep publishing to whatever was set when the panel opened.
+     *
+     * The same split the skills folders have: any number of folders read from, exactly one written
+     * to. Without that, "where did that tool go" has several answers.
+     */
+    onToolSaved: async (name: string, source: string) => {
+      const publishTo = cachedToolMirrors.find(
+        (mirror) => mirror.enabled === true && mirror.publish === true,
+      )
+      if (publishTo === undefined) return
+      const target = targetById(cachedS3, publishTo.connectionId)
+      if (target === undefined || target.readOnly === true) return
+      await uploadToS3({
+        target,
+        ...(publishTo.prefix !== undefined ? { prefix: publishTo.prefix } : {}),
+        relative: `${name}.py`,
+        contents: Buffer.from(source, 'utf8'),
+      })
+    },
+    /*
      * Lets one Python tool call another, or an MCP tool.
      *
      * Here rather than in the Python package because this is the only place that can see all
@@ -644,6 +668,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     enabled?: boolean | undefined
     publish?: boolean | undefined
   }[] = []
+  /** And the same for Python tools, so `create_python_tool` knows where to publish. */
+  let cachedToolMirrors: typeof cachedSkillMirrors = []
   /** One line about the last sync of each, for the panel. */
   let lastSync: { skills?: string; tools?: string } = {}
 
@@ -888,11 +914,39 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function handleApprovePythonTool(name: string): Promise<void> {
     try {
-      const dir = python.toolsDirectory()
-      if (dir.length === 0) return
       if (!isValidToolName(name)) throw new Error(`"${name}" is not a valid tool name.`)
 
-      const filePath = path.join(dir, toolFileName(name))
+      /*
+       * Searched across every folder, not just the writable one.
+       *
+       * A tool mirrored from a bucket arrives with no registry entry, so it is listed as
+       * unapproved and this is the button that fixes it — approving into `toolsDir` instead would
+       * write an entry in a folder that does not hold the file, and the tool would stay
+       * unapproved with a registry claiming otherwise. Each folder keeps its own `.registry.json`,
+       * which is what makes approvals per-machine and a synced change refuse itself.
+       */
+      const onDisk = async (candidate: string): Promise<boolean> => {
+        try {
+          await fs.stat(candidate)
+          return true
+        } catch {
+          return false
+        }
+      }
+      let dir: string | undefined
+      let filePath = ''
+      for (const candidate of python.toolDirectories()) {
+        const attempt = path.join(candidate, toolFileName(name))
+        if (await onDisk(attempt)) {
+          dir = candidate
+          filePath = attempt
+          break
+        }
+      }
+      if (dir === undefined) {
+        throw new Error(`No file for "${name}" was found in any configured tools folder.`)
+      }
+
       const source = await fs.readFile(filePath, 'utf8')
       const described = await python.describe(name, filePath)
       if (described === undefined) {
@@ -2049,6 +2103,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
     extraSkillDirs.push(...mirroredSkillsDirs)
 
+    cachedToolMirrors = config.s3?.tools ?? []
     mirroredToolsDirs = (config.s3?.tools ?? [])
       .filter((mirror) => mirror.enabled === true)
       .map((mirror) =>
@@ -3243,7 +3298,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // actually needs its tools. Failures are per-server and surface in the MCP tab.
       await syncMcpFromConfig(config)
       await mcp.ensureConnected()
-      await python.configure(config.python ?? {})
+      await python.configure({ ...(config.python ?? {}), extraToolDirs: mirroredToolsDirs })
 
       const toolContext: ToolExecutionContext = {
         fs: new NodeFileSystem(),
@@ -7626,7 +7681,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       // Applied immediately rather than at the next turn: switching it on should show the
       // environment coming up, not sit silent until the user happens to send a message.
-      await python.configure(config.python ?? {})
+      await python.configure({ ...(config.python ?? {}), extraToolDirs: mirroredToolsDirs })
       await postPython()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })

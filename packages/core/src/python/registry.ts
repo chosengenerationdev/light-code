@@ -32,6 +32,15 @@ export interface RegisteredTool {
   hash: string
   /** Absolute path. Derived from the tools directory and never stored. */
   filePath: string
+  /**
+   * The folder it was loaded from.
+   *
+   * Only the *first* folder is writable, so this is what `delete_python_tool` checks before
+   * removing a file everyone else on the team depends on — the same rule skills follow. Derivable
+   * from `filePath`, and carried explicitly anyway: a writability decision taken by re-deriving a
+   * path in three places is three chances to derive it differently.
+   */
+  sourceDir: string
 }
 
 export interface RegistryFile {
@@ -43,6 +52,8 @@ export type ToolLoadIssue =
   | { kind: 'hash-mismatch'; name: string; filePath: string; expected: string; actual: string }
   | { kind: 'unapproved'; name: string; filePath: string }
   | { kind: 'invalid'; name: string; filePath: string; detail: string }
+  /** Two folders offer a tool of the same name; the earlier one won. */
+  | { kind: 'shadowed'; name: string; filePath: string; winner: string }
 
 export interface LoadedRegistry {
   tools: RegisteredTool[]
@@ -137,7 +148,14 @@ export async function loadRegistry(
       continue
     }
 
-    tools.push({ name, description: approved.description, schema: approved.schema, hash: actual, filePath })
+    tools.push({
+      name,
+      description: approved.description,
+      schema: approved.schema,
+      hash: actual,
+      filePath,
+      sourceDir: toolsDir,
+    })
   }
 
   // Only consulted to refresh a description; the cache is authoritative for what may load.
@@ -188,5 +206,70 @@ export function describeIssue(issue: ToolLoadIssue): string {
       return `"${issue.name}" is not approved and was not loaded. A .py file appearing on disk is never enough to run it.`
     case 'invalid':
       return `"${issue.name}" could not be loaded: ${issue.detail}`
+    case 'shadowed':
+      return `"${issue.name}" in ${issue.filePath} is hidden by the one in ${issue.winner}, which takes precedence.`
   }
+}
+
+/**
+ * Loads every configured folder, in order, and merges them.
+ *
+ * ## Earlier folders win
+ *
+ * A search path, like `PATH` and like the skills folders. The first entry is the only writable one,
+ * so a tool you wrote yourself overrides one of the same name from a shared folder — which is the
+ * direction people expect, and the only one that lets somebody fix a colleague's tool locally
+ * without editing everyone's copy.
+ *
+ * A shadowed tool is **reported** rather than dropped silently. Two folders quietly disagreeing
+ * about what `margin_rows` does is exactly the kind of thing that cannot be diagnosed from the
+ * outside.
+ *
+ * ## Why this needs no second approval store
+ *
+ * §13 kept tool folders singular partly because read-only extras looked like they would need an
+ * approval-hash store outside `.registry.json` — §15's two-stores-that-diverge problem, on the
+ * sharpest surface in the project. They do not. **Each folder carries its own `.registry.json`**,
+ * written on this machine when the user approves. A synced `.py` arrives with no entry and is
+ * `unapproved`; a synced *change* breaks the hash recorded here and is refused. The existing
+ * mechanism does exactly its job, per folder, and nothing is stored twice.
+ *
+ * Duplicate paths are collapsed, since configuring the same folder twice — easy when one entry is
+ * relative and another absolute — would otherwise make every tool in it shadow itself.
+ */
+export async function loadRegistries(
+  dirs: readonly string[],
+  worker: PythonWorker | undefined,
+  logger: Logger,
+): Promise<LoadedRegistry> {
+  const ordered = dirs.map((dir) => path.resolve(dir))
+  const unique = ordered.filter((dir, index) => ordered.indexOf(dir) === index)
+
+  const tools: RegisteredTool[] = []
+  const issues: ToolLoadIssue[] = []
+  const claimed = new Map<string, RegisteredTool>()
+
+  for (const dir of unique) {
+    const loaded = await loadRegistry(dir, worker, logger)
+    issues.push(...loaded.issues)
+    for (const tool of loaded.tools) {
+      const winner = claimed.get(tool.name)
+      if (winner !== undefined) {
+        issues.push({
+          kind: 'shadowed',
+          name: tool.name,
+          filePath: tool.filePath,
+          winner: winner.filePath,
+        })
+        continue
+      }
+      claimed.set(tool.name, tool)
+      tools.push(tool)
+    }
+  }
+
+  // Sorted so the prompt's tool block has a stable order regardless of how the folders are
+  // arranged — the same cache reasoning as everything else at the front of the prompt (§12).
+  tools.sort((a, b) => a.name.localeCompare(b.name))
+  return { tools, issues }
 }

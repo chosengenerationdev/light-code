@@ -6,7 +6,12 @@ import type { SecretStore } from '../platform/secrets.js'
 import { pythonEnvEntries, resolvePythonEnv, type PythonEnvEntry } from './env.js'
 import type { Tool } from '../tools/types.js'
 import type { CodeGenerator } from './codeGenerator.js'
-import { describeIssue, loadRegistry, type RegisteredTool, type ToolLoadIssue } from './registry.js'
+import {
+  describeIssue,
+  loadRegistries,
+  type RegisteredTool,
+  type ToolLoadIssue,
+} from './registry.js'
 import {
   adaptPythonTool,
   createCollectorTool,
@@ -68,7 +73,13 @@ export interface PythonStatus {
    * tool. Naming the variable points at the thing that is actually wrong, and the fix is one box.
    */
   missingEnv?: string[]
-  tools: { name: string; description: string; filePath: string }[]
+  /**
+   * `sourceDir` says which configured folder it came from — only the first is writable, so the tab
+   * can mark a shared tool read-only rather than offering a Remove that would be refused.
+   */
+  tools: { name: string; description: string; filePath: string; sourceDir: string }[]
+  /** Read-only folders searched after `toolsDir`, in order. */
+  extraToolDirs?: string[]
   /**
    * Refused tools, surfaced rather than logged — see `registry.ts`.
    *
@@ -107,6 +118,14 @@ export interface PythonManagerOptions {
    */
   onToolsChanged?: () => void
   /**
+   * Publishes a newly written tool, when tools are kept in a bucket.
+   *
+   * Supplied by the host, because the manager has no business knowing S3 exists — it sees a
+   * callback, exactly as it sees folders rather than mirrors. Absent unless a folder is configured
+   * and writable, so nothing changes for anyone who has not set one up.
+   */
+  onToolSaved?: ((name: string, source: string) => Promise<void>) | undefined
+  /**
    * Session variables to add to the worker's environment, read at spawn time.
    *
    * A function rather than a value because the worker outlives an edit: reading it here means a
@@ -144,6 +163,14 @@ export class PythonManager {
   private detail = 'Dynamic Python tools are off.'
   private enabled = false
   private toolsDir = ''
+  /**
+   * Read-only folders searched after `toolsDir`, in order.
+   *
+   * Supplied by the host rather than read from config, because today they are bucket mirrors and
+   * the manager has no business knowing S3 exists — it sees folders, exactly as the skill loader
+   * does. Only the first folder is ever written to.
+   */
+  private extraToolDirs: string[] = []
   private venvPath = ''
   private venvSource: PythonStatus['venvSource'] = 'none'
   private venvIsUvManaged = false
@@ -188,6 +215,8 @@ export class PythonManager {
     env?:
       | Record<string, string | { value?: string | undefined; secret?: boolean | undefined }>
       | undefined
+    /** Read-only folders to search after `toolsDir`. See `extraToolDirs`. */
+    extraToolDirs?: readonly string[] | undefined
   }): Promise<void> {
     const enabled = config.dynamicTools === 'on'
     if (!enabled) {
@@ -238,6 +267,7 @@ export class PythonManager {
     // Inside the workspace by default, deliberately: changes land in git and get reviewed,
     // which is the main real mitigation available (§13).
     this.toolsDir = config.toolsDir ?? path.join(this.options.workspaceRoot, '.lightcode', 'tools')
+    this.extraToolDirs = [...(config.extraToolDirs ?? [])]
     this.indexUrl = config.indexUrl
     this.extraIndexUrls = config.extraIndexUrls ?? []
     this.offline = config.offline === true
@@ -360,14 +390,24 @@ export class PythonManager {
     }
   }
 
-  /** Where tool files live, so the host can open and remove them on the user's behalf. */
+  /** Where *new* tool files are written, so the host can open and remove them on the user's behalf. */
   toolsDirectory(): string {
     return this.toolsDir
   }
 
+  /** Every folder searched, writable first. The host opens files from any of them. */
+  toolDirectories(): string[] {
+    return [this.toolsDir, ...this.extraToolDirs].filter((dir) => dir.length > 0)
+  }
+
+  /** A loaded tool by name, so a caller can tell where it lives before acting on it. */
+  findTool(name: string): RegisteredTool | undefined {
+    return this.registered.find((tool) => tool.name === name)
+  }
+
   async refresh(): Promise<void> {
     if (!this.enabled || this.toolsDir.length === 0) return
-    const loaded = await loadRegistry(this.toolsDir, this.worker, this.options.logger)
+    const loaded = await loadRegistries(this.toolDirectories(), this.worker, this.options.logger)
     this.registered = loaded.tools
     this.issues = loaded.issues
     this.options.onToolsChanged?.()
@@ -450,6 +490,12 @@ export class PythonManager {
       ...(generated !== undefined ? { generateSource: generated } : {}),
       worker,
       onChanged: () => this.refresh(),
+      // So `delete_python_tool` can tell a tool of its own from one mirrored out of a shared
+      // folder, which it may not remove.
+      findTool: (name: string) => this.findTool(name),
+      ...(this.options.onToolSaved !== undefined
+        ? { onSaved: this.options.onToolSaved }
+        : {}),
       /*
        * No installing against an interpreter we do not own.
        *
@@ -559,10 +605,12 @@ export class PythonManager {
       ready: this.ready,
       detail: this.detail,
       ...(this.missingEnv.length > 0 ? { missingEnv: [...this.missingEnv] } : {}),
+      ...(this.extraToolDirs.length > 0 ? { extraToolDirs: [...this.extraToolDirs] } : {}),
       tools: this.registered.map((tool) => ({
         name: tool.name,
         description: tool.description,
         filePath: tool.filePath,
+        sourceDir: tool.sourceDir,
       })),
       issues: this.issues.map((issue) => ({
         detail: describeIssue(issue),
