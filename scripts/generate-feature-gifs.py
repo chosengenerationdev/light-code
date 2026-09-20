@@ -199,6 +199,7 @@ TOOL_CAPTIONS = (
     (76, "Publish it to an S3 bucket, and it joins the team's shelf"),
     (100, "A colleague's tool arrives unapproved - it cannot run yet"),
     (124, "You read it and approve it, from the chat"),
+    (154, "There are two ways to share tools, and they are not the same"),
 )
 
 TOOL_NOTES = (
@@ -208,6 +209,7 @@ TOOL_NOTES = (
     (76, "s3.tools  -  a bucket. A shared folder shares trust, not just files"),
     (100, "each folder keeps its own .registry.json, so approval is per machine"),
     (124, "Approve all shows every source first  -  and Decline can be undone"),
+    (154, "s3.tools   vs   python.toolsDir pointed at a network path"),
 )
 
 TEAM_TOOLS = (
@@ -328,6 +330,64 @@ def scene_python_tools(frame: int):
                                       outline=blend(SUNKEN, tone, alpha * 0.7), width=1)
                 c.label(bx + 54, y + 11, label, font=F_MINI,
                         fill=blend(SUNKEN, TEXT, alpha), anchor="mm")
+
+    # --- the two routes, side by side
+    #
+    # Added because the first version marked the shelf "S3 bucket only", which is not true: a
+    # network folder set as everyone's `toolsDir` does share the tools. What it does not do is
+    # keep the approval private, and that difference is invisible from the outside - both look
+    # like "the team's tools appear". So it is drawn rather than described.
+    compare = ramp(frame, 156, 10)
+    if compare > 0:
+        c.d.rectangle((0, 100, WIDTH, 478), fill=BG)
+        routes = (
+            (
+                48,
+                "An S3 bucket",
+                "s3.tools",
+                GREEN,
+                (
+                    "the .py files are copied",
+                    "to a folder on your disk",
+                    "the registry beside them",
+                    "is yours - nobody else writes it",
+                ),
+                "each person approves",
+                None,
+            ),
+            (
+                492,
+                "A shared folder",
+                "everyone's toolsDir on one path",
+                AMBER,
+                (
+                    "everyone opens the same",
+                    "folder, registry included",
+                    "the maintainer's approval",
+                    "is already in the file you read",
+                ),
+                "shared trust, no checkpoint",
+                "two people writing at once race that one registry",
+            ),
+        )
+        for x, title, subtitle, tone, lines, verdict, caveat in routes:
+            c.panel(x, 110, 420, 268, title=title, subtitle=subtitle, tone=SUNKEN, accent=tone,
+                    alpha=compare)
+            for index, line in enumerate(lines):
+                gap = 8 if index >= 2 else 0
+                c.label(x + 16, 182 + index * 22 + gap, line, font=F_SMALL,
+                        fill=blend(SUNKEN, MUTED, ramp(frame, 160 + index * 3, 7)))
+            hit = ramp(frame, 174, 8)
+            c.d.rounded_rectangle((x + 16, 300, x + 260, 326), radius=4,
+                                  fill=blend(SUNKEN, blend(tone, SUNKEN, 0.42), hit),
+                                  outline=blend(SUNKEN, tone, hit), width=1)
+            c.label(x + 138, 313, verdict, font=F_CHIP, fill=blend(SUNKEN, TEXT, hit), anchor="mm")
+            if caveat is not None:
+                c.label(x + 16, 344, caveat, font=F_MINI,
+                        fill=blend(SUNKEN, MUTED, ramp(frame, 180, 8)))
+
+        c.label(48, 400, "Both make the tools available. Only one asks each person.",
+                font=F_BODY, fill=blend(BG, TEXT, ramp(frame, 186, 8)))
 
     return c.image
 
@@ -809,7 +869,7 @@ def scene_mail_charts(frame: int):
 # quietly stop matching the captions it is supposed to follow.
 SCENES = (
     ("skills-from-wiki", scene_skills_from_wiki, 126, SKILL_CAPTIONS),
-    ("python-tools", scene_python_tools, 152, TOOL_CAPTIONS),
+    ("python-tools", scene_python_tools, 202, TOOL_CAPTIONS),
     ("form-filling", scene_form_filling, 112, FORM_CAPTIONS),
     ("scheduled-logs", scene_scheduled_logs, 122, LOG_CAPTIONS),
     ("excel-investigation", scene_excel, 116, EXCEL_CAPTIONS),

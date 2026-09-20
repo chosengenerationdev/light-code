@@ -23,7 +23,7 @@ the diff then shows what the picture now claims, which a replaced binary never c
 | File | What it claims | Where that lives |
 |---|---|---|
 | `skills-from-wiki.gif` | A wiki page becomes a skill; the skill is embedded; semantic search finds it later | `write_skill`, `embedder`, `search_docs` |
-| `team-skills.gif` | Everyone writes their own skills, publishes to their own collection, and one alias spans them | §12g, `embedder.skillsAlias`, `search_team_skills` |
+| `team-skills.gif` | Everyone writes their own skills and one alias spans them, plus the three ways skills reach a team | §12g, `skills.paths`, `s3.skills`, `embedder.skillsAlias` |
 | `python-tools.gif` | A Python tool is written, approved, published, and reviewed by each colleague before it runs | §13, `create_python_tool`, `s3.tools` |
 | `form-filling.gif` | A skill holds the procedure, an MCP server acts, and a deny rule stops the final submit | `mcp` `deny`, §18 |
 | `scheduled-logs.gif` | Scheduled runs leave logs in a cluster, and they are read back and answered | §9b, `search_opensearch` |
@@ -37,14 +37,24 @@ A GIF cannot be paused — PowerPoint plays one start to finish with no scrub ba
 `slides/` holds each animation cut into its own beats: every segment plays once, stops on its last
 frame, and waits there while you talk. See [slides/README.md](slides/README.md).
 
-## One limit the picture names out loud
+## Both sharing animations end on a comparison
 
-`python-tools.gif` marks the team shelf **an S3 bucket**, because a shared network folder looks
-like it would do the same job and does not. A bucket mirror syncs only `.py` files into your own
-storage, so the approval registry beside them is yours — which is what makes the review per person.
-Pointing everyone's `python.toolsDir` at one network folder *does* share the tools, but it shares
-the registry with them: one person's approval becomes everybody's, and two people writing at once
-race the same file. The footer note says as much.
+Because "the team's tools appear" and "the team's skills appear" look identical from the outside
+whichever route produced them, and the routes are not equivalent.
+
+`python-tools.gif` ends on **bucket vs shared folder**. Both make the tools available. A bucket
+copies the `.py` files to your own disk, so the approval registry beside them is yours and each
+person approves for themselves. A shared folder is the same folder for everyone, registry
+included — the maintainer's approval is already in the file you read, so nobody else is asked, and
+two people writing at once race that one file. Neither is wrong; one has a checkpoint and the
+other is shared trust.
+
+`team-skills.gif` ends on **shared folder vs bucket vs shared pool**, and the honest news there is
+that all three work. The first two put the *files* in your skill search path (`skills.paths` and
+`s3.skills`); the third puts the *meaning* in an index and hands back the body
+(`embedder.skillsAlias`). None of them asks you to approve anything — a skill is prose, not code —
+which is a fact about skills rather than about those routes being safer, and it is why a shared
+skill is worth reading in git.
 
 ## Three claims that were corrected before being drawn
 

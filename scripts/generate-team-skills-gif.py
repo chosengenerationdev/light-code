@@ -138,6 +138,23 @@ def chip(draw, x, y, w, h, label, colour, *, solid=True, alpha=1.0, over=PANEL):
     draw.text((x + 12, y + h / 2), label, font=face, fill=ink, anchor="lm")
 
 
+def panel(draw, x, y, w, h, *, title=None, subtitle=None, accent=None, alpha=1.0):
+    """A titled box. Local rather than imported, because this file draws with a bare `draw`
+    rather than gifkit's `Canvas` - the scene predates it, and porting the whole scene to buy
+    one rectangle would be a lot of churn for no change on screen."""
+    outline = BORDER if accent is None else blend(BORDER, accent, 0.55)
+    draw.rounded_rectangle(
+        (x, y, x + w, y + h),
+        radius=10,
+        fill=blend(BG, PANEL, alpha),
+        outline=blend(BG, outline, alpha),
+        width=1,
+    )
+    if title is not None:
+        draw.text((x + 14, y + 14), title, font=F_NAME, fill=blend(PANEL, TEXT, alpha))
+    if subtitle is not None:
+        draw.text((x + 14, y + 36), subtitle, font=F_SMALL, fill=blend(PANEL, MUTED, alpha))
+
 def card(draw, x, name, colour):
     draw.rounded_rectangle(
         (x, CARD_Y, x + CARD_W, CARD_Y + CARD_H), radius=10, fill=PANEL, outline=BORDER, width=1
@@ -175,13 +192,15 @@ WRITE_START, WRITE_STEP, WRITE_LEN = 1, 4, 5
 TRAVEL_START, TRAVEL_STEP, TRAVEL_LEN = 30, 3, 14
 POOL_FULL = TRAVEL_START + TRAVEL_STEP * 5 + TRAVEL_LEN  # 59
 SHARE_START, SHARE_STEP, SHARE_LEN = 68, 5, 9
-TOTAL = 112
+COMPARE_START = 116
+TOTAL = 168
 
 CAPTIONS = (
     (0, "Everyone records what they know, in their own folder"),
     (TRAVEL_START, "Each publishes to their own collection"),
     (POOL_FULL, "One alias spans every collection"),
     (SHARE_START, "Now anyone can find anyone's"),
+    (COMPARE_START, "Three ways skills reach a team - all of them work"),
 )
 
 NOTES = (
@@ -189,6 +208,7 @@ NOTES = (
     (TRAVEL_START, "publish"),
     (POOL_FULL, "embedder.skillsAlias"),
     (SHARE_START, "search_team_skills  -  returns the body, not a path"),
+    (COMPARE_START, "skills.paths   |   s3.skills   |   embedder.skillsAlias"),
 )
 
 
@@ -298,6 +318,72 @@ def render(frame: int) -> Image.Image:
         for position, (_, _, label, colour) in enumerate(others):
             sx, sy, sw, sh = shared_slot(index, position)
             chip(draw, sx, sy, sw, sh, label, colour, solid=False, alpha=alpha)
+
+    # --- the three routes, side by side
+    #
+    # Added because the pool is only one of them, and somebody watching this would reasonably
+    # conclude it was the only one. A shared folder and a bucket both put the *files* in your
+    # search path; the pool puts the *meaning* in an index and hands back the body. All three are
+    # supported, and unlike Python tools none of them asks for approval - which is a fact about
+    # skills being prose rather than about these routes being safer.
+    compare = ramp(frame, COMPARE_START + 2, 10)
+    if compare > 0:
+        draw.rectangle((0, 100, WIDTH, 478), fill=BG)
+        routes = (
+            (
+                48,
+                "A shared folder",
+                "skills.paths",
+                GREEN,
+                ("the files live on the share", "always current - no sync step",
+                 "needs the share reachable"),
+            ),
+            (
+                344,
+                "A bucket",
+                "s3.skills",
+                BLUE,
+                ("synced to a folder on your disk", "works away from the network",
+                 "press Sync to pick up changes"),
+            ),
+            (
+                640,
+                "A shared pool",
+                "embedder.skillsAlias",
+                ORANGE,
+                ("found by meaning, not by folder", "the body comes from the index",
+                 "no local file to read after"),
+            ),
+        )
+        for x, title, subtitle, tone, lines in routes:
+            panel(draw, x, 110, 272, 212, title=title, subtitle=subtitle, accent=tone, alpha=compare)
+            for index, line in enumerate(lines):
+                draw.text(
+                    (x + 14, 178 + index * 38),
+                    line,
+                    font=F_SMALL,
+                    fill=blend(PANEL, MUTED, ramp(frame, COMPARE_START + 6 + index * 4, 7)),
+                )
+
+        settled = ramp(frame, COMPARE_START + 24, 10)
+        draw.text(
+            (48, 352),
+            "The first two put the files in your skill search path. The third answers a question.",
+            font=F_CAPTION,
+            fill=blend(BG, TEXT, settled),
+        )
+        draw.text(
+            (48, 382),
+            "None of them asks you to approve anything - a skill is prose, not code. That is also",
+            font=F_SMALL,
+            fill=blend(BG, MUTED, ramp(frame, COMPARE_START + 32, 10)),
+        )
+        draw.text(
+            (48, 402),
+            "why a shared skill is worth reading in git: it steers every conversation that finds it.",
+            font=F_SMALL,
+            fill=blend(BG, MUTED, ramp(frame, COMPARE_START + 32, 10)),
+        )
 
     draw.text(
         (48, HEIGHT - 44), latest(NOTES, frame), font=F_MONO, fill=blend(MUTED, TEXT, 0.25)
