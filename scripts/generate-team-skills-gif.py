@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draws `docs/team-skills.gif`: how a team's skills come to be shared.
+"""Draws `docs/gifs/team-skills.gif`: how a team's skills come to be shared.
 
 ## Why a generator rather than a hand-made file
 
@@ -311,7 +311,7 @@ def main() -> None:
     base = frames[0].quantize(colors=128, method=Image.MEDIANCUT)
     quantised = [base] + [f.quantize(palette=base, dither=Image.NONE) for f in frames[1:]]
 
-    out = Path(__file__).resolve().parent.parent / "docs" / "team-skills.gif"
+    out = Path(__file__).resolve().parent.parent / "docs" / "gifs" / "team-skills.gif"
     out.parent.mkdir(parents=True, exist_ok=True)
     quantised[0].save(
         out,

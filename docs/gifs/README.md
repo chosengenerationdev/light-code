@@ -1,0 +1,52 @@
+# Feature animations
+
+Eight looping diagrams, one per capability. Generated, never hand-drawn — see
+`scripts/generate-feature-gifs.py` and `scripts/generate-team-skills-gif.py`, which share
+`scripts/gifkit.py`. Regenerate with:
+
+```bash
+pip install Pillow
+python scripts/generate-feature-gifs.py
+python scripts/generate-team-skills-gif.py
+```
+
+They are **not** built by `pnpm build` and not checked in CI, so nobody installing this repository
+gains a Python dependency.
+
+## The rule
+
+Every caption is a claim about the product, and each was checked against the code before it was
+drawn. A diagram that overstates is worse than none: it gets believed, it gets shown to other
+people, and nothing fails when it stops being true. When a mechanism changes, edit the generator —
+the diff then shows what the picture now claims, which a replaced binary never could.
+
+| File | What it claims | Where that lives |
+|---|---|---|
+| `skills-from-wiki.gif` | A wiki page becomes a skill; the skill is embedded; semantic search finds it later | `write_skill`, `embedder`, `search_docs` |
+| `team-skills.gif` | Everyone writes their own skills, publishes to their own collection, and one alias spans them | §12g, `embedder.skillsAlias`, `search_team_skills` |
+| `python-tools.gif` | The assistant writes a Python tool, you approve the source, and a team pools them | §13, `create_python_tool`, `s3.tools` |
+| `form-filling.gif` | A skill holds the procedure, an MCP server acts, and a deny rule stops the final submit | `mcp` `deny`, §18 |
+| `scheduled-logs.gif` | Scheduled runs leave logs in a cluster, and they are read back and answered | §9b, `search_opensearch` |
+| `excel-investigation.gif` | It attaches to an open workbook and traces a formula to the cell that broke it | §12c, `excel_trace_cell` |
+| `technical-diagrams.gif` | It reads a page or a repository and draws the flow it found | `show_diagram` |
+| `mail-insights.gif` | Chosen Outlook folders are indexed on a timer, and questions are answered as charts | §12f, `mail.syncMinutes`, `show_chart` |
+
+## Three claims that were corrected before being drawn
+
+These are the interesting ones, because the first description of each was wrong in a way that
+would have been believed:
+
+- **Light Code does not fill forms.** There is no browser tool and §18 says there never will be —
+  browser access is a user-configured MCP server. So the skill holds the *procedure*, the MCP
+  server does the acting, and the thing worth showing is the `deny` rule: a final submit is never
+  clicked. It is declared and never inferred, because a heuristic that tried to *recognise* a
+  submit button would be wrong often enough to be dangerous while sounding certain.
+- **Light Code ships no log shipper.** `search_opensearch` is read-only by construction; no model
+  action can create, modify or delete an index. A scheduled run's output reaches the cluster
+  through a tool configured to put it there, and what the diagram shows on the Light Code side is
+  the *reading*.
+- **A skill's reference files are not embedded.** Only its text is. That is the whole reason
+  `use_skill_file` copies a file rather than reading it, and a picture implying otherwise would
+  teach the opposite of how it works.
+
+Names, hostnames and sample data are invented, and must stay invented.
