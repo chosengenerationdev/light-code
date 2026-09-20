@@ -24,7 +24,7 @@ the diff then shows what the picture now claims, which a replaced binary never c
 |---|---|---|
 | `skills-from-wiki.gif` | A wiki page becomes a skill; the skill is embedded; semantic search finds it later | `write_skill`, `embedder`, `search_docs` |
 | `team-skills.gif` | Everyone writes their own skills, publishes to their own collection, and one alias spans them | §12g, `embedder.skillsAlias`, `search_team_skills` |
-| `python-tools.gif` | The assistant writes a Python tool, you approve the source, and a team pools them | §13, `create_python_tool`, `s3.tools` |
+| `python-tools.gif` | The assistant writes a Python tool, you approve the source, and it is reused | §13, `create_python_tool` |
 | `form-filling.gif` | A skill holds the procedure, an MCP server acts, and a deny rule stops the final submit | `mcp` `deny`, §18 |
 | `scheduled-logs.gif` | Scheduled runs leave logs in a cluster, and they are read back and answered | §9b, `search_opensearch` |
 | `excel-investigation.gif` | It attaches to an open workbook and traces a formula to the cell that broke it | §12c, `excel_trace_cell` |
@@ -51,6 +51,13 @@ would have been believed:
   action can create, modify or delete an index. A scheduled run's output reaches the cluster
   through a tool configured to put it there, and what the diagram shows on the Light Code side is
   the *reading*.
+- **Python tools are not shared across a team.** This one got past the check and shipped: the
+  scene ended with the three-person shelf the skills animation has, captioned "everyone's tools,
+  available to everyone's assistant". `s3.tools` exists, `syncFromS3` brings the `.py` files down,
+  and the panel reports where they landed — but `PythonManager` reads exactly one `toolsDir`, so
+  nothing loads them, and `create_python_tool` has no publish hook the way `write_skill` does. The
+  commit that added the mirror says as much in its own words: *"which is how skills and Python
+  tools **will** live in a bucket"*. The scene now stops where the product does.
 - **A skill's reference files are not embedded.** Only its text is. That is the whole reason
   `use_skill_file` copies a file rather than reading it, and a picture implying otherwise would
   teach the opposite of how it works.

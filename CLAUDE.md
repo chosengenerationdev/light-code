@@ -1329,6 +1329,21 @@ have to agree, which is §19's most expensive recurring bug.
 - **`syncFromS3` is download-only and never deletes, locally or remotely.** A half-finished sync
   that had already emptied the folder would take somebody's skills away over a network blip.
 
+**The Python tools half of the mirror is not finished, and reads as though it were.** `s3.tools`
+is configurable, `syncFromS3` brings the `.py` files down, and the S3 panel reports the folder they
+landed in — but `PythonManager` holds exactly one `toolsDir` and never looks at them, and
+`create_python_tool` has no `onSaved` publish hook the way `write_skill` does. So a tool put in a
+bucket is downloaded and ignored, in both directions, with a panel saying it was copied. The commit
+that built the mirror is explicit that this was future work (*"which is how skills and Python tools
+**will** live in a bucket"*), but nothing in the running product says so.
+
+Finishing it is not just wiring: §13 records that **tool folders stay singular on purpose**,
+because read-only extras were thought to need a second approval-hash store, which is §15's
+two-stores-that-diverge problem on the sharpest surface in the project. That may be answerable —
+a mirrored folder could carry its own `.registry.json`, so a synced change breaks its own hash and
+is refused until approved — but it is a decision to take deliberately, not a gap to close by
+adding a path. **Do not depict team-shared Python tools as working until it is.**
+
 **Deleting from a bucket was deliberately absent and is now a button** (`s3/remove.ts`), because
 the honest answer to "how do I remove this skill" had been "in the AWS console". Four rules hold
 it, and none is incidental:
