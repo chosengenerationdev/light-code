@@ -54,6 +54,8 @@ export type ToolLoadIssue =
   | { kind: 'invalid'; name: string; filePath: string; detail: string }
   /** Two folders offer a tool of the same name; the earlier one won. */
   | { kind: 'shadowed'; name: string; filePath: string; winner: string }
+  /** You said no to these exact bytes. Listed so it can be undone, never hidden outright. */
+  | { kind: 'declined'; name: string; filePath: string }
 
 export interface LoadedRegistry {
   tools: RegisteredTool[]
@@ -106,6 +108,8 @@ export async function loadRegistry(
   toolsDir: string,
   worker: PythonWorker | undefined,
   logger: Logger,
+  /** `name -> hash` the user declined. See `declinedTools` in the config schema. */
+  declined?: Record<string, string> | undefined,
 ): Promise<LoadedRegistry> {
   const registry = await readRegistryFile(toolsDir)
   const tools: RegisteredTool[] = []
@@ -126,12 +130,6 @@ export async function loadRegistry(
       continue
     }
 
-    const approved = registry.tools[name]
-    if (approved === undefined) {
-      issues.push({ kind: 'unapproved', name, filePath })
-      continue
-    }
-
     let source: string
     try {
       source = await fs.readFile(filePath, 'utf8')
@@ -139,8 +137,25 @@ export async function loadRegistry(
       issues.push({ kind: 'invalid', name, filePath, detail: String(error) })
       continue
     }
-
     const actual = hashSource(source)
+
+    /*
+     * Declined, and still on disk.
+     *
+     * Checked against the hash rather than the name, so a *changed* version comes back for review
+     * — your "no" was about the bytes you read, not about the tool for ever. Reported rather than
+     * skipped silently: a tool that vanished with no explanation is the one nobody can recover.
+     */
+    if (declined?.[name] === actual) {
+      issues.push({ kind: 'declined', name, filePath })
+      continue
+    }
+
+    const approved = registry.tools[name]
+    if (approved === undefined) {
+      issues.push({ kind: 'unapproved', name, filePath })
+      continue
+    }
     if (actual !== approved.hash) {
       // Loudly refused, never quietly reloaded. This is the case the pin exists for.
       issues.push({ kind: 'hash-mismatch', name, filePath, expected: approved.hash, actual })
@@ -208,6 +223,8 @@ export function describeIssue(issue: ToolLoadIssue): string {
       return `"${issue.name}" could not be loaded: ${issue.detail}`
     case 'shadowed':
       return `"${issue.name}" in ${issue.filePath} is hidden by the one in ${issue.winner}, which takes precedence.`
+    case 'declined':
+      return `"${issue.name}" was declined, so it is not loaded. Restore it to review it again.`
   }
 }
 
@@ -241,6 +258,7 @@ export async function loadRegistries(
   dirs: readonly string[],
   worker: PythonWorker | undefined,
   logger: Logger,
+  declined?: Record<string, string> | undefined,
 ): Promise<LoadedRegistry> {
   const ordered = dirs.map((dir) => path.resolve(dir))
   const unique = ordered.filter((dir, index) => ordered.indexOf(dir) === index)
@@ -250,7 +268,7 @@ export async function loadRegistries(
   const claimed = new Map<string, RegisteredTool>()
 
   for (const dir of unique) {
-    const loaded = await loadRegistry(dir, worker, logger)
+    const loaded = await loadRegistry(dir, worker, logger, declined)
     issues.push(...loaded.issues)
     for (const tool of loaded.tools) {
       const winner = claimed.get(tool.name)

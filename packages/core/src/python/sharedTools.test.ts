@@ -187,3 +187,57 @@ describe('delete_python_tool', () => {
     await expect(fs.stat(path.join(mine, toolFileName('margin_rows')))).rejects.toThrow()
   })
 })
+
+describe('declining, and getting it back', () => {
+  it('hides a tool whose exact bytes were declined', async () => {
+    await put(shared, 'ledger_fetch', OTHER)
+    const loaded = await loadRegistries([mine, shared], undefined, logger, {
+      ledger_fetch: hashSource(OTHER),
+    })
+    expect(loaded.tools).toEqual([])
+    expect(loaded.issues[0]?.kind).toBe('declined')
+  })
+
+  it('deletes nothing, so restoring costs nothing', async () => {
+    // Recovery has to be cheaper than the mistake. The file never moved; the entry is what hid it.
+    await put(shared, 'ledger_fetch', OTHER)
+    await loadRegistries([mine, shared], undefined, logger, { ledger_fetch: hashSource(OTHER) })
+    await expect(fs.stat(path.join(shared, toolFileName('ledger_fetch')))).resolves.toBeTruthy()
+
+    const restored = await loadRegistries([mine, shared], undefined, logger, {})
+    expect(restored.tools.map((tool) => tool.name)).toEqual(['ledger_fetch'])
+  })
+
+  it('brings a changed version back on its own', async () => {
+    /*
+     * The reason the decline is pinned to a hash rather than a name. Saying no was about the code
+     * that was read; a version published later is different code and deserves the same look. A
+     * name-only list would suppress every future version, invisibly.
+     */
+    await put(shared, 'ledger_fetch', OTHER)
+    const declined = { ledger_fetch: hashSource('something else entirely') }
+
+    const loaded = await loadRegistries([mine, shared], undefined, logger, declined)
+    expect(loaded.tools.map((tool) => tool.name)).toEqual(['ledger_fetch'])
+  })
+
+  it('reports a declined tool rather than hiding it outright', async () => {
+    // A tool that vanished with no explanation is the one nobody can recover.
+    await put(shared, 'ledger_fetch', OTHER)
+    const loaded = await loadRegistries([mine, shared], undefined, logger, {
+      ledger_fetch: hashSource(OTHER),
+    })
+    expect(describeIssue(loaded.issues[0]!)).toMatch(/declined/i)
+    expect(describeIssue(loaded.issues[0]!)).toMatch(/restore/i)
+  })
+
+  it('declining is checked before approval, so a declined tool stays hidden', async () => {
+    // Otherwise "approved once, declined later" would keep loading, and the later decision — the
+    // one the user made most recently — would be the one that did nothing.
+    await put(shared, 'ledger_fetch', OTHER)
+    const loaded = await loadRegistries([mine, shared], undefined, logger, {
+      ledger_fetch: hashSource(OTHER),
+    })
+    expect(loaded.tools).toEqual([])
+  })
+})

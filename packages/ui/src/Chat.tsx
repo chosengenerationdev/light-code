@@ -1,3 +1,7 @@
+import {
+  PendingToolApprovals,
+  type PendingToolApprovalsProps,
+} from './PendingToolApprovals.js'
 import type {
   ApprovalDecision,
   CheckpointView,
@@ -36,6 +40,14 @@ export interface ChatProps {
    * eventually light up the wrong row.
    */
   planCheckpoints: CheckpointView[]
+  /**
+   * Python tools waiting to be read, rendered just above the composer.
+   *
+   * Placed there rather than in the transcript because it is **state, not an event**: it stays
+   * until somebody deals with it, and a card scrolled away with yesterday's messages would be
+   * exactly as unnoticed as the Settings tab it exists to replace.
+   */
+  pendingTools?: PendingToolApprovalsProps | undefined
   /** Specialists that can answer, for the `#` picker. */
   directRoles: { role: string; name: string; summary: string }[]
   onSetPlan: (plan: string) => void
@@ -282,6 +294,7 @@ export function Chat(props: ChatProps): ReactElement {
           </button>
         </div>
       )}
+      {props.pendingTools !== undefined && <PendingToolApprovals {...props.pendingTools} />}
       <ExpertSpend {...props.expertSpend} />
       <TokenBar usage={props.usage} />
       <Composer

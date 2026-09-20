@@ -34,6 +34,23 @@ export const pythonConfigSchema = z
      * feature does not exist until someone turns it on.
      */
     dynamicTools: z.enum(['off', 'on']),
+    /**
+     * Tools you said no to, as `name -> sha256 of the source you declined`.
+     *
+     * ## Why the hash, and not just the name
+     *
+     * Declining pins **those exact bytes**. If the team publishes a changed version, the hash no
+     * longer matches and it comes back for review — which is the behaviour you want, because it is
+     * new code and your earlier "no" was about something else. A name-only list would silently
+     * suppress every future version of a tool, and the suppression would be invisible.
+     *
+     * ## Why it is recoverable
+     *
+     * Declining is a judgement made in a second, and people make it by mistake. So it removes
+     * nothing: the file stays on disk, the entry here is what hides it, and clearing the entry
+     * brings it straight back as pending. Nothing has to be fetched again to undo a "no".
+     */
+    declinedTools: z.record(z.string(), z.string()),
     uvPath: z.string(),
     /**
      * Defaults to `.lightcode/tools/` **inside the workspace**, deliberately. Changes then

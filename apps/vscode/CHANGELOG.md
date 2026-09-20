@@ -1,5 +1,23 @@
 # light-code-vscode
 
+## 0.100.0
+
+### Minor Changes
+
+- Approve synced Python tools from the chat, and undo a "no"
+
+  Tools that arrive from the team's bucket now appear above the composer, and stay there until you
+  deal with them — rather than sitting in a Settings tab nobody was looking at. Each row shows the
+  source on request and approves on its own; **Review all** expands every source and then offers to
+  approve the lot, so a bulk approval still means the code was on screen.
+
+  **Decline** hides one without deleting anything. It records the exact source you said no to, so
+  Settings → Python can restore it with nothing to download again, and a version your team publishes
+  later comes back for review on its own.
+
+  Tools that changed after you approved them are marked as changed rather than lumped in with new
+  ones — that is the case worth reading carefully.
+
 ## 0.99.0
 
 ### Minor Changes

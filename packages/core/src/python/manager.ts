@@ -93,6 +93,8 @@ export interface PythonStatus {
     filePath: string
     /** True when approving the file as it stands would resolve it. */
     recoverable: boolean
+    /** Which kind, so the UI can say "new" and "changed" rather than flattening both. */
+    kind: 'hash-mismatch' | 'unapproved' | 'invalid' | 'shadowed' | 'declined'
   }[]
 }
 
@@ -171,6 +173,8 @@ export class PythonManager {
    * does. Only the first folder is ever written to.
    */
   private extraToolDirs: string[] = []
+  /** `name -> hash` the user declined. See `declinedTools` in the config schema. */
+  private declinedTools: Record<string, string> = {}
   private venvPath = ''
   private venvSource: PythonStatus['venvSource'] = 'none'
   private venvIsUvManaged = false
@@ -217,6 +221,8 @@ export class PythonManager {
       | undefined
     /** Read-only folders to search after `toolsDir`. See `extraToolDirs`. */
     extraToolDirs?: readonly string[] | undefined
+    /** `name -> hash` the user declined, so those exact bytes are not offered. */
+    declinedTools?: Record<string, string> | undefined
   }): Promise<void> {
     const enabled = config.dynamicTools === 'on'
     if (!enabled) {
@@ -268,6 +274,7 @@ export class PythonManager {
     // which is the main real mitigation available (§13).
     this.toolsDir = config.toolsDir ?? path.join(this.options.workspaceRoot, '.lightcode', 'tools')
     this.extraToolDirs = [...(config.extraToolDirs ?? [])]
+    this.declinedTools = { ...(config.declinedTools ?? {}) }
     this.indexUrl = config.indexUrl
     this.extraIndexUrls = config.extraIndexUrls ?? []
     this.offline = config.offline === true
@@ -407,7 +414,12 @@ export class PythonManager {
 
   async refresh(): Promise<void> {
     if (!this.enabled || this.toolsDir.length === 0) return
-    const loaded = await loadRegistries(this.toolDirectories(), this.worker, this.options.logger)
+    const loaded = await loadRegistries(
+      this.toolDirectories(),
+      this.worker,
+      this.options.logger,
+      this.declinedTools,
+    )
     this.registered = loaded.tools
     this.issues = loaded.issues
     this.options.onToolsChanged?.()
@@ -619,6 +631,13 @@ export class PythonManager {
         // `invalid` means the file does not load at all — approving it would pin a broken
         // tool. Only a pin problem can be fixed by re-pinning.
         recoverable: issue.kind === 'hash-mismatch' || issue.kind === 'unapproved',
+        /*
+         * Carried as well as `recoverable`, because the two recoverable kinds need different
+         * words. "New, never approved here" and "changed since you approved it" are not the same
+         * news, and a card saying only "needs approval" would flatten the second into the first -
+         * which is the one worth reading carefully.
+         */
+        kind: issue.kind,
       })),
     }
   }

@@ -1358,6 +1358,28 @@ colleague's tool locally without editing everyone's copy.
 and a failure is **reported in the tool result rather than thrown** — the file is on disk, approved
 and callable, and losing that because a bucket was unreachable would be the worse outcome.
 
+**Approving them happens in the chat, and saying no is recoverable** (0.100.0). A tool synced from
+a bucket is useless until it is approved, and the moment anybody discovers that is the moment they
+asked for something and it could not be done — the Python tab had listed refused tools all along
+and nobody was looking. So the list sits above the composer until it is dealt with.
+
+- **Derived state, not a posted message.** Rendered from the Python status the panel already
+  receives, so it appears when a sync brings something down, survives a reload, and clears itself
+  when the list empties. A message would have to be cleaned up by somebody.
+- **"Approve all" shows every source first.** §13 asks that a human sees the source once, not that
+  they click per file — so a bulk action is legitimate exactly when the code was on screen, and the
+  button expands all of them before it will approve anything. Two clicks instead of one, and the
+  difference between them is whether anybody could have read it. `PendingToolApprovals.test.tsx`
+  pins that, because it is the whole of what stands between a bucket and running code.
+- **Declining deletes nothing.** It records `name -> hash of what was read` in
+  `python.declinedTools`; the file stays and that entry is what hides it, so Restore costs nothing
+  and needs no download. A judgement made in a second has to be undoable in one.
+- **Pinned to the hash, not the name.** A version published later comes back for review on its
+  own, because the "no" was about the bytes somebody read. A name-only list would suppress every
+  future version of a tool, invisibly — which is the failure mode worth avoiding here.
+- **The decline is checked before the approval**, so "approved once, declined later" stays hidden:
+  the most recent decision is the one that must win.
+
 **How this was found is the part worth keeping.** `s3.tools` shipped configurable, syncing, and
 reported in the S3 panel — with nothing on the other end. `mirroredToolsDirs` was computed and used
 for one line of UI, and never handed to `PythonManager`. Everything looked present: a config key, a

@@ -26,7 +26,9 @@ describe('the bucket tools folders reach the Python manager', () => {
     // its own, and a pattern stopping at the first one would pass on a call it had only half read.
     const calls: string[] = []
     for (let at = bridge.indexOf('python.configure('); at !== -1; at = bridge.indexOf('python.configure(', at + 1)) {
-      calls.push(bridge.slice(at, bridge.indexOf(String.fromCharCode(10), at)))
+      // A window rather than the rest of the line: the call is written across several lines in
+      // places, and a line-bounded read would report a call it had only half seen.
+      calls.push(bridge.slice(at, at + 260))
     }
     expect(calls.length).toBeGreaterThan(0)
     for (const call of calls) {

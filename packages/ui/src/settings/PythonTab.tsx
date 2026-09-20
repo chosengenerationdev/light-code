@@ -53,6 +53,8 @@ export interface PythonTabProps {
     onSelect: (id: string) => void
   }
   onDeleteTool: (name: string) => void
+  /** Undoes a decline. Absent on a host that does not offer it; the button is then not shown. */
+  onRestoreTool?: ((name: string) => void) | undefined
   /** Re-pins a tool the user has edited by hand — see the hash pin in `registry.ts`. */
   onApproveTool: (name: string) => void
 }
@@ -580,6 +582,23 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                         onClick={() => props.onApproveTool(issue.name)}
                       >
                         Approve this version
+                      </button>
+                    )}
+                    {/*
+                      The way back from a "no" said too quickly.
+
+                      Declining deletes nothing - it records the hash of what was read - so this
+                      removes that entry and the tool returns to the pending list with no file to
+                      fetch again. Recovery has to be cheaper than the mistake.
+                    */}
+                    {issue.kind === 'declined' && props.onRestoreTool !== undefined && (
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                        title="Put it back on the list to be reviewed. Nothing was deleted."
+                        onClick={() => props.onRestoreTool?.(issue.name)}
+                      >
+                        Restore
                       </button>
                     )}
                     <button

@@ -839,6 +839,26 @@ export type UiToHostMessage =
    * only route back is asking the model to rewrite a file the user has already fixed.
    */
   | { type: 'approvePythonTool'; name: string }
+  /**
+   * Approves several at once, after their sources have been shown.
+   *
+   * A separate message rather than a loop of the single one, so the host reports a single outcome
+   * — "4 approved, 1 could not be loaded" — instead of the panel receiving five results and having
+   * to decide what happened.
+   */
+  | { type: 'approvePythonTools'; names: string[] }
+  /**
+   * Says no to a tool, for the bytes it has right now.
+   *
+   * Nothing is deleted: the file stays and the decline is what hides it, so `restorePythonTool`
+   * undoes it with nothing to fetch again. A changed version comes back on its own, because the
+   * decline is pinned to the source that was read.
+   */
+  | { type: 'declinePythonTools'; names: string[] }
+  /** Undoes a decline, which is how somebody recovers from saying no by mistake. */
+  | { type: 'restorePythonTool'; name: string }
+  /** Fetches one tool's source so the chat can show it before anybody approves it. */
+  | { type: 'requestPythonToolSource'; name: string }
   /** Replaces the whole skills folder configuration. Empty `dir` restores the default. */
   | { type: 'saveSkillDirs'; dir: string; paths: string[] }
   | { type: 'requestPython' }
@@ -1477,6 +1497,14 @@ export type HostToUiMessage =
       keys: string[]
       error?: string
     }
+  /**
+   * One Python tool's source, for the pending-approval card in the chat.
+   *
+   * Fetched on demand rather than shipped with the status: most tools are already approved, and
+   * sending every file every time the status changes would put the whole tools folder on the wire
+   * for a card that is usually empty.
+   */
+  | { type: 'pythonToolSource'; name: string; source?: string; problem?: string }
   | { type: 'embedderSaved' }
   | { type: 'indexProgress'; progress: IndexProgress }
   /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */

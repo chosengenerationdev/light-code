@@ -100,6 +100,8 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
   'setPython',
   'deletePythonTool',
   'approvePythonTool',
+  // The bulk form is the same act several times over, so it is the same decision.
+  'approvePythonTools',
   // Names an executable that costs money to run.
   'setExpert',
   'assessJunior',

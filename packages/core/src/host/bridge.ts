@@ -100,7 +100,13 @@ import {
 } from '../tools/askUserForm.js'
 import { confineToAny, normalizeForComparison } from '../fs/confine.js'
 import { isValidEnvName, pythonEnvEntries, pythonEnvSecretRef } from '../python/env.js'
-import { approveTool, forgetTool, isValidToolName, toolFileName } from '../python/registry.js'
+import {
+  approveTool,
+  forgetTool,
+  hashSource,
+  isValidToolName,
+  toolFileName,
+} from '../python/registry.js'
 import { isTranscriptMessage } from './backgroundMessages.js'
 import {
   ConfigManager,
@@ -912,6 +918,166 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * through the same validation a model-authored one gets — a tool that does not load must not
    * be pinned, or the pin would start certifying broken code.
    */
+  /**
+   * Approves one tool, returning what happened rather than telling the user.
+   *
+   * Split out so the bulk path can report a single outcome for several tools. Approving five
+   * tools must not produce five toasts, and it must not stop at the first that will not load —
+   * the other four are fine and the user needs to know which one is not.
+   */
+  async function approveOnePythonTool(name: string): Promise<string | undefined> {
+    if (!isValidToolName(name)) return `"${name}" is not a valid tool name.`
+
+    const onDisk = async (candidate: string): Promise<boolean> => {
+      try {
+        await fs.stat(candidate)
+        return true
+      } catch {
+        return false
+      }
+    }
+    let dir: string | undefined
+    let filePath = ''
+    for (const candidate of python.toolDirectories()) {
+      const attempt = path.join(candidate, toolFileName(name))
+      if (await onDisk(attempt)) {
+        dir = candidate
+        filePath = attempt
+        break
+      }
+    }
+    if (dir === undefined) return `no file for "${name}" in any configured tools folder`
+
+    const source = await fs.readFile(filePath, 'utf8')
+    const described = await python.describe(name, filePath)
+    // A tool that does not load must not be pinned, or the pin starts certifying broken code.
+    if (described === undefined) return `"${name}" could not be loaded, so it was not approved`
+
+    await approveTool(dir, name, source, described)
+    return undefined
+  }
+
+  /** One tool's source, so the chat can show it before anybody approves it. */
+  async function handleRequestPythonToolSource(name: string): Promise<void> {
+    try {
+      if (!isValidToolName(name)) throw new Error(`"${name}" is not a valid tool name.`)
+      for (const candidate of python.toolDirectories()) {
+        const attempt = path.join(candidate, toolFileName(name))
+        try {
+          post({ type: 'pythonToolSource', name, source: await fs.readFile(attempt, 'utf8') })
+          return
+        } catch {
+          // Next folder. A tool lives in exactly one of them.
+        }
+      }
+      post({ type: 'pythonToolSource', name, problem: 'The file could not be found.' })
+    } catch (error) {
+      post({
+        type: 'pythonToolSource',
+        name,
+        problem: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
+   * Approves several, after the chat has shown their sources.
+   *
+   * §13's requirement is that a human sees the source once, not that they press a button per file
+   * — so a bulk action is legitimate exactly when the code was on screen, which is what the card
+   * enforces by rendering every source before this can be reached.
+   */
+  async function handleApprovePythonTools(names: readonly string[]): Promise<void> {
+    try {
+      const problems: string[] = []
+      let approved = 0
+      for (const name of names) {
+        const problem = await approveOnePythonTool(name)
+        if (problem === undefined) approved += 1
+        else problems.push(problem)
+      }
+
+      await python.refresh()
+      await postPython()
+
+      const summary = `${String(approved)} tool(s) approved.`
+      if (problems.length === 0) ui.showInfo(summary)
+      else ui.showWarning(`${summary} ${problems.join('; ')}.`)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Records a "no" against the bytes a tool has right now.
+   *
+   * **Deletes nothing.** A decline is a judgement made in a second and people make them by
+   * mistake, so the file stays where it is and this entry is what hides it — which makes
+   * `restorePythonTool` free, with nothing to fetch again. Pinned to the hash, so a version the
+   * team publishes later comes back for review on its own: the earlier "no" was about code that
+   * is no longer what is on offer.
+   */
+  async function handleDeclinePythonTools(names: readonly string[]): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const declined = { ...(config.python?.declinedTools ?? {}) }
+
+      let recorded = 0
+      for (const name of names) {
+        if (!isValidToolName(name)) continue
+        for (const candidate of python.toolDirectories()) {
+          try {
+            const source = await fs.readFile(path.join(candidate, toolFileName(name)), 'utf8')
+            declined[name] = hashSource(source)
+            recorded += 1
+            break
+          } catch {
+            // Next folder.
+          }
+        }
+      }
+
+      await configManager.save('user', {
+        ...config,
+        python: { ...(config.python ?? {}), declinedTools: declined },
+      })
+      await python.configure({
+        ...((await configManager.load()).config.python ?? {}),
+        extraToolDirs: mirroredToolsDirs,
+      })
+      await python.refresh()
+      await postPython()
+      ui.showInfo(
+        `${String(recorded)} tool(s) declined. They are still on disk — restore one in Settings → Python.`,
+      )
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /** Undoes a decline. The file never went anywhere, so this only removes the entry that hid it. */
+  async function handleRestorePythonTool(name: string): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const declined = { ...(config.python?.declinedTools ?? {}) }
+      delete declined[name]
+
+      await configManager.save('user', {
+        ...config,
+        python: { ...(config.python ?? {}), declinedTools: declined },
+      })
+      await python.configure({
+        ...((await configManager.load()).config.python ?? {}),
+        extraToolDirs: mirroredToolsDirs,
+      })
+      await python.refresh()
+      await postPython()
+      ui.showInfo(`"${name}" is back, waiting to be approved.`)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleApprovePythonTool(name: string): Promise<void> {
     try {
       if (!isValidToolName(name)) throw new Error(`"${name}" is not a valid tool name.`)
@@ -9793,6 +9959,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleDeleteProfile', handleDeleteProfile(message.id))
     } else if (message.type === 'setActiveProfile') {
       reportFailure('handleSetActiveProfile', handleSetActiveProfile(message.id, message.forProject))
+    } else if (message.type === 'declinePythonTools') {
+      reportFailure('handleDeclinePythonTools', handleDeclinePythonTools(message.names))
+    } else if (message.type === 'restorePythonTool') {
+      reportFailure('handleRestorePythonTool', handleRestorePythonTool(message.name))
+    } else if (message.type === 'approvePythonTools') {
+      reportFailure('handleApprovePythonTools', handleApprovePythonTools(message.names))
+    } else if (message.type === 'requestPythonToolSource') {
+      reportFailure('handleRequestPythonToolSource', handleRequestPythonToolSource(message.name))
     } else if (message.type === 'previewBucketSkillDelete') {
       reportFailure(
         'handlePreviewBucketSkillDelete',

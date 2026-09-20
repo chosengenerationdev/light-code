@@ -329,6 +329,16 @@ export function App(props: AppProps): ReactElement {
   )
   const [pythonStatus, setPythonStatus] = useState<PythonStatus | undefined>(undefined)
   /**
+   * Sources fetched for the pending-approval card, keyed by tool name.
+   *
+   * Held here rather than in the card so they survive it re-rendering as the status changes —
+   * approving one tool re-posts the whole status, and a source fetched a moment ago must not have
+   * to be fetched again for the tools still on the list.
+   */
+  const [pythonSources, setPythonSources] = useState<
+    Record<string, { source?: string; problem?: string }>
+  >({})
+  /**
    * Everything the panel knows about S3.
    *
    * Held whole rather than unpacked field by field — the defect this file carries a comment about
@@ -773,6 +783,14 @@ export function App(props: AppProps): ReactElement {
         setEmbedderModels(message.models)
         setEmbedderModelsWarning(message.warning)
         setEmbedderModelsLoading(false)
+      } else if (message.type === 'pythonToolSource') {
+        setPythonSources((current) => ({
+          ...current,
+          [message.name]: {
+            ...(message.source !== undefined ? { source: message.source } : {}),
+            ...(message.problem !== undefined ? { problem: message.problem } : {}),
+          },
+        }))
       } else if (message.type === 'bucketSkillDeletePlan') {
         setBucketDeletePlan(message)
       } else if (message.type === 'shareSections') {
@@ -2141,6 +2159,8 @@ export function App(props: AppProps): ReactElement {
                 props.transport.post({ type: 'deletePythonTool', name } satisfies UiToHostMessage),
               onApproveTool: (name: string) =>
                 props.transport.post({ type: 'approvePythonTool', name } satisfies UiToHostMessage),
+              onRestoreTool: (name: string) =>
+                props.transport.post({ type: 'restorePythonTool', name } satisfies UiToHostMessage),
               onSave: (settings) =>
                 /*
                  * Every field, always — empty included.
@@ -2201,6 +2221,39 @@ export function App(props: AppProps): ReactElement {
              */
             plan={plan}
             planCheckpoints={planCheckpoints}
+            pendingTools={{
+              /*
+               * Derived from the status the panel already has, so the card appears when a sync
+               * brings something down and clears itself when the list empties. `invalid` is
+               * excluded because approving a file that does not load would pin broken code, and
+               * `shadowed`/`declined` are not waiting on anybody.
+               */
+              tools: (pythonStatus?.issues ?? [])
+                .filter(
+                  (issue) => issue.kind === 'unapproved' || issue.kind === 'hash-mismatch',
+                )
+                .map((issue) => ({
+                  name: issue.name,
+                  filePath: issue.filePath,
+                  kind: issue.kind as 'unapproved' | 'hash-mismatch',
+                })),
+              sources: pythonSources,
+              onRequestSource: (name: string) =>
+                props.transport.post({
+                  type: 'requestPythonToolSource',
+                  name,
+                } satisfies UiToHostMessage),
+              onApprove: (names: string[]) =>
+                props.transport.post({
+                  type: 'approvePythonTools',
+                  names,
+                } satisfies UiToHostMessage),
+              onDecline: (names: string[]) =>
+                props.transport.post({
+                  type: 'declinePythonTools',
+                  names,
+                } satisfies UiToHostMessage),
+            }}
             /*
              * Only specialists that can actually answer, and derived from the same roles message
              * the Agents tab renders — so the picker cannot offer somebody the host would then
