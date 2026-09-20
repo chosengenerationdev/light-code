@@ -196,7 +196,7 @@ TOOL_CAPTIONS = (
     (0, "A skill says what analysis is needed - the assistant writes the tool for it"),
     (30, "You approve the source. Nothing runs until you have read it"),
     (54, "Registered, and callable from the next message"),
-    (76, "Publish it, and it joins the team's shelf"),
+    (76, "Publish it to an S3 bucket, and it joins the team's shelf"),
     (100, "A colleague's tool arrives unapproved - it cannot run yet"),
     (124, "You read it and approve it, from the chat"),
 )
@@ -205,7 +205,7 @@ TOOL_NOTES = (
     (0, "create_python_tool"),
     (30, "approval shows the full source  -  hash-pinned once approved"),
     (54, "py__margin_rows"),
-    (76, "s3.tools  -  many folders read from, one published to"),
+    (76, "s3.tools  -  a bucket. A shared folder shares trust, not just files"),
     (100, "each folder keeps its own .registry.json, so approval is per machine"),
     (124, "Approve all shows every source first  -  and Decline can be undone"),
 )
@@ -265,6 +265,18 @@ def scene_python_tools(frame: int):
     for index, (name, colour, _) in enumerate(TEAM_TOOLS):
         c.chip(750, 178 + index * 32, 148, 26, name, colour, over=SUNKEN,
                alpha=ramp(frame, 82 + index * 5, 8), font=F_MINI)
+    # Named on the picture, not only in the notes, because a shared drive looks like it would
+    # do the same job and does not do the same job. A bucket mirror syncs only `.py` into your
+    # own storage, so the approval registry beside them is yours - which is what makes the
+    # review per person. Pointing everyone's `toolsDir` at one network folder does share the
+    # tools, but it shares the registry with them: one person's "yes" becomes everybody's.
+    # The badge says what this shelf *is*; the note below says what the other route costs.
+    if shelf > 0.5:
+        c.d.rounded_rectangle((750, 272, 898, 294), radius=4,
+                              fill=blend(SUNKEN, blend(AMBER, SUNKEN, 0.4), shelf),
+                              outline=blend(SUNKEN, AMBER, shelf * 0.9), width=1)
+        c.label(824, 283, "an S3 bucket", font=F_MINI,
+                fill=blend(SUNKEN, TEXT, shelf), anchor="mm")
     c.arrow(704, 208, 732, 208, ramp(frame, 76, 6), blend(BG, PURPLE, 0.7))
     c.travellers(704, 208, 732, 208, frame, 78, 10, PURPLE, count=2)
 

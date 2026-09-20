@@ -37,6 +37,15 @@ A GIF cannot be paused — PowerPoint plays one start to finish with no scrub ba
 `slides/` holds each animation cut into its own beats: every segment plays once, stops on its last
 frame, and waits there while you talk. See [slides/README.md](slides/README.md).
 
+## One limit the picture names out loud
+
+`python-tools.gif` marks the team shelf **an S3 bucket**, because a shared network folder looks
+like it would do the same job and does not. A bucket mirror syncs only `.py` files into your own
+storage, so the approval registry beside them is yours — which is what makes the review per person.
+Pointing everyone's `python.toolsDir` at one network folder *does* share the tools, but it shares
+the registry with them: one person's approval becomes everybody's, and two people writing at once
+race the same file. The footer note says as much.
+
 ## Three claims that were corrected before being drawn
 
 These are the interesting ones, because the first description of each was wrong in a way that
