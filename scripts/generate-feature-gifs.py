@@ -197,7 +197,8 @@ TOOL_CAPTIONS = (
     (30, "You approve the source. Nothing runs until you have read it"),
     (54, "Registered, and callable from the next message"),
     (76, "Publish it, and it joins the team's shelf"),
-    (100, "A colleague's tool arrives unapproved - they read it before it can run"),
+    (100, "A colleague's tool arrives unapproved - it cannot run yet"),
+    (124, "You read it and approve it, from the chat"),
 )
 
 TOOL_NOTES = (
@@ -206,6 +207,7 @@ TOOL_NOTES = (
     (54, "py__margin_rows"),
     (76, "s3.tools  -  many folders read from, one published to"),
     (100, "each folder keeps its own .registry.json, so approval is per machine"),
+    (124, "Approve all shows every source first  -  and Decline can be undone"),
 )
 
 TEAM_TOOLS = (
@@ -284,10 +286,36 @@ def scene_python_tools(frame: int):
                    alpha=ramp(frame, 104 + index * 5 + slot, 8), font=F_MINI)
         c.arrow(x + 134, 336, x + 134, 312, ramp(frame, 98, 8), blend(BG, PURPLE, 0.5), head=False)
 
-    waiting = ramp(frame, 116, 8)
-    if waiting > 0:
+    waiting = ramp(frame, 116, 6)
+    if waiting > 0 and frame < 124:
         c.label(48, 456, "outlined = downloaded, not yet approved here", font=F_SMALL,
                 fill=blend(BG, MUTED, waiting))
+
+    # --- and how you deal with them, without leaving the conversation
+    card = ramp(frame, 126, 10)
+    if card > 0:
+        # Drawn over the member row rather than beside it: this is the same three tools, seen
+        # from the one place somebody is actually looking when they find out a tool will not run.
+        c.d.rectangle((40, 330, 920, 470), fill=BG)
+        c.panel(48, 336, 864, 128, tone=SUNKEN, accent=AMBER, alpha=card)
+        c.label(62, 352, "2 Python tools waiting for you", font=F_NAME,
+                fill=blend(SUNKEN, TEXT, card))
+        c.label(62, 374, "Read the source before approving. Nothing here can run until you do.",
+                font=F_SMALL, fill=blend(SUNKEN, MUTED, card))
+
+        for index, (name, colour, _) in enumerate(TEAM_TOOLS[1:]):
+            y = 396 + index * 30
+            alpha = ramp(frame, 130 + index * 4, 8)
+            c.label(62, y + 11, name, font=F_MONO_S, fill=blend(SUNKEN, TEXT, alpha), anchor="lm")
+            for offset, (label, tone) in enumerate(
+                (("View source", MUTED), ("Approve", GREEN), ("Decline", MUTED))
+            ):
+                bx = 560 + offset * 118
+                c.d.rounded_rectangle((bx, y, bx + 108, y + 22), radius=4,
+                                      fill=blend(SUNKEN, blend(tone, SUNKEN, 0.55), alpha),
+                                      outline=blend(SUNKEN, tone, alpha * 0.7), width=1)
+                c.label(bx + 54, y + 11, label, font=F_MINI,
+                        fill=blend(SUNKEN, TEXT, alpha), anchor="mm")
 
     return c.image
 
@@ -769,7 +797,7 @@ def scene_mail_charts(frame: int):
 # quietly stop matching the captions it is supposed to follow.
 SCENES = (
     ("skills-from-wiki", scene_skills_from_wiki, 126, SKILL_CAPTIONS),
-    ("python-tools", scene_python_tools, 126, TOOL_CAPTIONS),
+    ("python-tools", scene_python_tools, 152, TOOL_CAPTIONS),
     ("form-filling", scene_form_filling, 112, FORM_CAPTIONS),
     ("scheduled-logs", scene_scheduled_logs, 122, LOG_CAPTIONS),
     ("excel-investigation", scene_excel, 116, EXCEL_CAPTIONS),

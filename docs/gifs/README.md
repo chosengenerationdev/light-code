@@ -24,7 +24,7 @@ the diff then shows what the picture now claims, which a replaced binary never c
 |---|---|---|
 | `skills-from-wiki.gif` | A wiki page becomes a skill; the skill is embedded; semantic search finds it later | `write_skill`, `embedder`, `search_docs` |
 | `team-skills.gif` | Everyone writes their own skills, publishes to their own collection, and one alias spans them | §12g, `embedder.skillsAlias`, `search_team_skills` |
-| `python-tools.gif` | The assistant writes a Python tool, you approve the source, and a team pools them | §13, `create_python_tool`, `s3.tools` |
+| `python-tools.gif` | A Python tool is written, approved, published, and reviewed by each colleague before it runs | §13, `create_python_tool`, `s3.tools` |
 | `form-filling.gif` | A skill holds the procedure, an MCP server acts, and a deny rule stops the final submit | `mcp` `deny`, §18 |
 | `scheduled-logs.gif` | Scheduled runs leave logs in a cluster, and they are read back and answered | §9b, `search_opensearch` |
 | `excel-investigation.gif` | It attaches to an open workbook and traces a formula to the cell that broke it | §12c, `excel_trace_cell` |
