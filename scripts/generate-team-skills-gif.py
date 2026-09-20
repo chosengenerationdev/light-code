@@ -42,6 +42,8 @@ try:
 except ImportError:  # pragma: no cover - a human running this gets told what to install
     sys.exit("This needs Pillow: pip install Pillow")
 
+from gifkit import write_gif
+
 # --- canvas -------------------------------------------------------------------------------
 
 WIDTH, HEIGHT = 960, 530
@@ -304,27 +306,29 @@ def render(frame: int) -> Image.Image:
 
 
 def main() -> None:
+    """Writes the looping animation, and the same thing cut into beats for presenting.
+
+    Both go through `gifkit.write_gif`. This file used to carry its own copy of the writer, which
+    is how it kept the frame-0 palette defect after `gifkit` had been fixed — one fact in two
+    places, drifting, with nothing failing. The scene-drawing here is still its own; only the
+    output is shared.
+    """
     frames = [render(frame) for frame in range(TOTAL)]
+    root = Path(__file__).resolve().parent.parent / "docs" / "gifs"
+    write_gif(frames, root / "team-skills.gif", frame_ms=FRAME_MS)
 
-    # One palette for the whole animation. Per-frame adaptive palettes make flat colours shimmer
-    # between frames, which on a diagram reads as a rendering fault rather than a style.
-    base = frames[0].quantize(colors=128, method=Image.MEDIANCUT)
-    quantised = [base] + [f.quantize(palette=base, dither=Image.NONE) for f in frames[1:]]
-
-    out = Path(__file__).resolve().parent.parent / "docs" / "gifs" / "team-skills.gif"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    quantised[0].save(
-        out,
-        save_all=True,
-        append_images=quantised[1:],
-        duration=[FRAME_MS] * (TOTAL - 1) + [600],  # a beat before it loops; see below
-        loop=0,
-        # Pillow merges runs of identical frames and sums their durations, so the closing hold is
-        # already seconds long before this adds to it — which is why the extra is small.
-        optimize=True,
-        disposal=2,
-    )
-    print(f"[gif] {TOTAL} frames -> {out} ({out.stat().st_size / 1024:.0f} KB)")
+    # Cut on the captions, for the same reason as the feature animations: the captions already mark
+    # the moment the thing being described changes, so anywhere else would put a caption change in
+    # the middle of a segment somebody is talking over.
+    bounds = [at for at, _ in CAPTIONS] + [TOTAL]
+    for index in range(len(CAPTIONS)):
+        start, stop = bounds[index], bounds[index + 1]
+        if stop <= start:
+            continue
+        stem = f"team-skills-{index + 1}"
+        write_gif(frames[start:stop], root / "slides" / f"{stem}.gif", frame_ms=FRAME_MS,
+                  end_hold=2000, once=True)
+        frames[stop - 1].save(root / "slides" / f"{stem}.png")
 
 
 if __name__ == "__main__":

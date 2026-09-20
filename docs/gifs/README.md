@@ -31,6 +31,12 @@ the diff then shows what the picture now claims, which a replaced binary never c
 | `technical-diagrams.gif` | It reads a page or a repository and draws the flow it found | `show_diagram` |
 | `mail-insights.gif` | Chosen Outlook folders are indexed on a timer, and questions are answered as charts | §12f, `mail.syncMinutes`, `show_chart` |
 
+## Presenting them
+
+A GIF cannot be paused — PowerPoint plays one start to finish with no scrub bar and no stop. So
+`slides/` holds each animation cut into its own beats: every segment plays once, stops on its last
+frame, and waits there while you talk. See [slides/README.md](slides/README.md).
+
 ## Three claims that were corrected before being drawn
 
 These are the interesting ones, because the first description of each was wrong in a way that

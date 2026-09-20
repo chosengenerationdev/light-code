@@ -67,6 +67,7 @@ from gifkit import (
 )
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "gifs"
+SLIDES = OUT / "slides"
 
 
 # =============================================================================================
@@ -743,20 +744,59 @@ def scene_mail_charts(frame: int):
 
 # =============================================================================================
 
+# `captions` is carried here as well as inside each scene, because it is what the beats are cut
+# on — see `write_slides`. One table read twice, rather than a second list of boundaries that would
+# quietly stop matching the captions it is supposed to follow.
 SCENES = (
-    ("skills-from-wiki.gif", scene_skills_from_wiki, 126),
-    ("python-tools.gif", scene_python_tools, 126),
-    ("form-filling.gif", scene_form_filling, 112),
-    ("scheduled-logs.gif", scene_scheduled_logs, 122),
-    ("excel-investigation.gif", scene_excel, 116),
-    ("technical-diagrams.gif", scene_diagrams, 116),
-    ("mail-insights.gif", scene_mail_charts, 130),
+    ("skills-from-wiki", scene_skills_from_wiki, 126, SKILL_CAPTIONS),
+    ("python-tools", scene_python_tools, 126, TOOL_CAPTIONS),
+    ("form-filling", scene_form_filling, 112, FORM_CAPTIONS),
+    ("scheduled-logs", scene_scheduled_logs, 122, LOG_CAPTIONS),
+    ("excel-investigation", scene_excel, 116, EXCEL_CAPTIONS),
+    ("technical-diagrams", scene_diagrams, 116, DIAGRAM_CAPTIONS),
+    ("mail-insights", scene_mail_charts, 130, MAIL_CAPTIONS),
 )
 
 
+def write_slides(name: str, frames, captions) -> None:
+    """Cuts one animation into the beats it already has, for presenting.
+
+    ## Why this exists rather than "pause the gif"
+
+    A GIF cannot be paused. PowerPoint plays one start to finish with no scrub bar and no stop, so
+    the only way to talk over a step is for the animation to *end* there. Each segment therefore
+    plays once and holds on its final frame; the next click starts the next one.
+
+    ## Why the caption table is the cut
+
+    Because the captions are already the beats — each one marks the moment the thing being
+    described changes. Cutting anywhere else would mean a segment whose caption changes halfway
+    through, which is exactly the moment somebody is talking over it.
+
+    Each segment renders from frame 0 of the scene, so the state it opens on is whatever had been
+    built by then: the scenes are pure functions of the frame number, which is what makes this a
+    slice rather than a separate storyboard.
+
+    A still is written beside each one. The GIF already freezes on that frame, so the PNG is for
+    printing, for a handout, and for the case where a GIF will not play at all.
+    """
+    bounds = [at for at, _ in captions] + [len(frames)]
+    for index in range(len(captions)):
+        start, stop = bounds[index], bounds[index + 1]
+        if stop <= start:
+            continue
+        segment = frames[start:stop]
+        stem = f"{name}-{index + 1}"
+        # A longer tail than the looping version: this one is being read aloud, not watched.
+        write_gif(segment, SLIDES / f"{stem}.gif", end_hold=2000, once=True)
+        segment[-1].save(SLIDES / f"{stem}.png")
+
+
 def main() -> None:
-    for name, scene, total in SCENES:
-        write_gif([scene(frame) for frame in range(total)], OUT / name)
+    for name, scene, total, captions in SCENES:
+        frames = [scene(frame) for frame in range(total)]
+        write_gif(frames, OUT / f"{name}.gif")
+        write_slides(name, frames, captions)
 
 
 if __name__ == "__main__":

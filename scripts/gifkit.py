@@ -247,7 +247,9 @@ class Canvas:
 # --- output -------------------------------------------------------------------------------
 
 
-def write_gif(frames, path: Path, *, frame_ms: int = FRAME_MS, end_hold: int = 600) -> None:
+def write_gif(
+    frames, path: Path, *, frame_ms: int = FRAME_MS, end_hold: int = 600, once: bool = False
+) -> None:
     """Quantises to one palette and writes the animation.
 
     A single palette for every frame, because per-frame adaptive palettes make flat colours shimmer
@@ -272,13 +274,20 @@ def write_gif(frames, path: Path, *, frame_ms: int = FRAME_MS, end_hold: int = 6
     quantised = [f.quantize(palette=base, dither=Image.NONE) for f in frames]
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    quantised[0].save(
-        path,
-        save_all=True,
-        append_images=quantised[1:],
-        duration=[frame_ms] * (len(frames) - 1) + [end_hold],
-        loop=0,
-        optimize=True,
-        disposal=2,
-    )
+
+    # `once` plays through and stops on the last frame, for a slide you talk over. Done by
+    # **omitting** the loop extension rather than setting a count: GIF's repeat count is the
+    # Netscape extension, and readers disagree about whether `1` means "play once" or "play once
+    # more", while with no extension at all every reader plays once. Verified rather than assumed -
+    # Pillow writes no NETSCAPE block when `loop` is not passed.
+    options = {
+        "save_all": True,
+        "append_images": quantised[1:],
+        "duration": [frame_ms] * (len(frames) - 1) + [end_hold],
+        "optimize": True,
+        "disposal": 2,
+    }
+    if not once:
+        options["loop"] = 0
+    quantised[0].save(path, **options)
     print(f"[gif] {len(frames):3d} frames -> {path.name} ({path.stat().st_size / 1024:.0f} KB)")
