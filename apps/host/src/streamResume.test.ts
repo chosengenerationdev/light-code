@@ -314,18 +314,32 @@ describe('a client that cannot receive a stream', () => {
       body: JSON.stringify({ type: 'requestSettings' }),
     })
 
-    let first: { type: string }[] = []
+    /*
+     * Waits for `settings` specifically rather than for any message at all. A session posts
+     * unrelated traffic of its own as it starts - `schedules`, among others - so "the first
+     * non-empty batch" is whatever happened to be ready, and the reply this test is about may
+     * still be in flight.
+     */
+    const first: string[] = []
     const deadline = Date.now() + 4000
-    while (Date.now() < deadline && first.length === 0) {
+    while (Date.now() < deadline && !first.includes('settings')) {
       const response = await fetch(`${url}/api/poll`, { headers: { Origin: url } })
-      first = ((await response.json()) as { messages: { type: string }[] }).messages
-      if (first.length > 0) break
+      first.push(
+        ...((await response.json()) as { messages: { type: string }[] }).messages.map((m) => m.type),
+      )
+      if (first.includes('settings')) break
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
 
     const second = await fetch(`${url}/api/poll`, { headers: { Origin: url } })
-    const again = ((await second.json()) as { messages: unknown[] }).messages
-    expect(first.length).toBeGreaterThan(0)
-    expect(again).toEqual([])
+    const again = ((await second.json()) as { messages: { type: string }[] }).messages
+    expect(first).toContain('settings')
+    /*
+     * The property is that a delivered reply is not delivered again - not that nothing else ever
+     * arrives. Asserting an empty second batch said both, and the extra half failed under load
+     * whenever a background message landed in the gap: a flake in the publish gate, which is
+     * worse than no test, because the next person cannot tell it from a break.
+     */
+    expect(again.map((message) => message.type)).not.toContain('settings')
   }, 30_000)
 })

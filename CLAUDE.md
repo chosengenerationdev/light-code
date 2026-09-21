@@ -2103,8 +2103,8 @@ the first run reported a failure that the source had already fixed.
 
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
-workflow has never run. **0.79.1 is live as of 2026-09-12**, queried from the gallery, and it matches
-the local manifest exactly.
+workflow has never run. **0.103.0 is live as of 2026-09-21**, queried from the gallery. The local
+manifest is **0.103.2**, packaged and unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same
@@ -2115,8 +2115,8 @@ was anything wrong. Wait and query again before concluding an upload failed — 
 Every previous edition of this paragraph was stale, several of them by many releases, and each
 was repeated to the user as fact. Query the gallery.
 
-Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.56.1 is live as of
-2026-09-12**, queried from the registry, and it matches the local manifest exactly. The bare name
+Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.80.1 is live as of
+2026-09-21**, queried from the registry. The local manifest is **0.89.1**, built and unpublished. The bare name
 `light-code` belongs to an unrelated package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -2132,7 +2132,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.50.0, host 0.28.0 — and keep working from
+**Next:** publish the pending versions — extension 0.103.2, host 0.89.1 — and keep working from
 what real use reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

@@ -1,5 +1,15 @@
 # @chosengeneration/light-code
 
+## 0.89.1
+
+### Patch Changes
+
+- The operator guide and the npm README no longer contradict what ships. Both still said Excel,
+  Outlook and indexed mail were "in the VS Code extension only", which stopped being true in 0.89.0 —
+  the exclusion belongs to `--server`, not to the Node host. Neither mentioned `--export-pkg` or
+  `--export-code`, which exist for exactly the reader these documents have; `docs/hosting.md` gains a
+  section on both, reachable from the top.
+
 ## 0.89.0
 
 ### Minor Changes
