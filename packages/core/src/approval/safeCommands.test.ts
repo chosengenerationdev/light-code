@@ -73,6 +73,91 @@ describe('what qualifies', () => {
     expect(isSafeCommand('python -c print(1)')).toBe(false)
   })
 
+  it('compiles a project, not only one file', () => {
+    // `compileall` was missing, which is how anybody compiles more than a single file.
+    expect(isSafeCommand('python -m compileall .')).toBe(true)
+    expect(isSafeCommand('python -m compileall src')).toBe(true)
+  })
+
+  it('knows how Python is actually spelled on Windows', () => {
+    /*
+     * Reported from real use: compiling still asked in Auto mode. Every one of these is the same
+     * act as `python -m py_compile`, written the way this platform writes it - through the `py`
+     * launcher, through an `.exe`, or through the interpreter inside a virtualenv, which is what
+     * this product's own Python tooling uses. Each miss is a prompt, and enough of them is the
+     * mode being unusable rather than careful.
+     */
+    for (const text of [
+      'py -m py_compile app.py',
+      'python.exe -m py_compile app.py',
+      '.venv\\Scripts\\python.exe -m py_compile app.py',
+      'D:\\proj\\.venv\\Scripts\\python -m py_compile app.py',
+      '"C:\\Program Files\\Python\\python.exe" -m py_compile app.py',
+      '/usr/bin/python3 -m py_compile app.py',
+    ]) {
+      expect(isSafeCommand(text), text).toBe(true)
+    }
+  })
+
+  it('reaching the interpreter by path does not make running a script safe', () => {
+    // The path is normalised; what it is asked to *do* is judged exactly as before.
+    expect(isSafeCommand('python.exe app.py')).toBe(false)
+    expect(isSafeCommand('.venv\\Scripts\\python.exe app.py')).toBe(false)
+    expect(isSafeCommand('py app.py')).toBe(false)
+    expect(isSafeCommand('/usr/bin/python3 -c print(1)')).toBe(false)
+  })
+
+  it('refuses a metacharacter hiding in the program path', () => {
+    /*
+     * The order this pins: chain check first, normalisation second. Normalising removes the
+     * directory, so doing it the other way round would strip the `&` and vouch for the result.
+     */
+    expect(isSafeCommand('C:\\a&b\\python.exe -m py_compile app.py')).toBe(false)
+    expect(isSafeCommand('/opt/a;b/python3 -m py_compile app.py')).toBe(false)
+  })
+
+  it('normalises a Windows shim, since npm and pnpm are one', () => {
+    expect(isSafeCommand('npm.cmd --version')).toBe(true)
+  })
+
+  it('sees the action behind an interpreter flag', () => {
+    /*
+     * Asked directly, about `-X`. It is not dangerous and cannot be: the interpreter accepts
+     * `-X` keys it has never heard of - measured, `python -X totally_made_up_key --version` just
+     * prints the version - because they are data in `sys._xoptions`, not code to run. It was
+     * stopping for approval only because a literal prefix cannot see past a flag, so the modifier
+     * hid the action from the rule.
+     */
+    for (const text of [
+      'python -X utf8 -m py_compile app.py',
+      'python -X dev -m py_compile app.py',
+      'python -Xdev -m py_compile app.py',
+      'python -X utf8 -X dev -m compileall .',
+      'python -B -m py_compile app.py',
+      'python -W ignore -m py_compile app.py',
+      'python -I -O -m compileall src',
+      'py -3.12 -m py_compile app.py',
+      '.venv\\Scripts\\python.exe -X utf8 -m py_compile app.py',
+    ]) {
+      expect(isSafeCommand(text), text).toBe(true)
+    }
+  })
+
+  it('skipping a flag never turns running into compiling', () => {
+    /*
+     * The half that matters. The flags are skipped so the *action* can be judged, and the action
+     * is judged exactly as it was before: `-c`, `-m <anything nobody vouched for>` and a bare
+     * filename all still ask, however many modifiers precede them.
+     */
+    expect(isSafeCommand('python -X dev app.py')).toBe(false)
+    expect(isSafeCommand('python -X utf8 -c print(1)')).toBe(false)
+    expect(isSafeCommand('python -X dev -m pytest')).toBe(false)
+    expect(isSafeCommand('python -m pip install requests')).toBe(false)
+    expect(isSafeCommand('py -3 app.py')).toBe(false)
+    // No action at all is an interactive interpreter, which would sit waiting on stdin.
+    expect(isSafeCommand('python -X dev')).toBe(false)
+  })
+
   it('does not vouch for a longer program with the same start', () => {
     // `ls` must not cover `lsof`, nor `pwd` cover `pwdx`.
     expect(isSafeCommand('lsof -i :3000')).toBe(false)

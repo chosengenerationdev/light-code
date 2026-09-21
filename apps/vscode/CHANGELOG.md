@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.104.0
+
+### Minor Changes
+
+- Auto mode stops asking about compiling Python. The safe-command list was written in bare Unix
+  program names, so it covered `python -m py_compile` and none of the spellings Windows actually
+  produces — the `py` launcher, an `.exe` suffix, or the interpreter inside a virtualenv, which is
+  what this product's own Python tooling uses. A command's leading program is now reduced to a bare
+  name before it is matched, so all of those are one entry rather than none. `compileall` joins
+  `py_compile`, since compiling a project is the usual case.
+
+  The safety argument is unchanged: the chain check still runs on the original command, so a
+  metacharacter hiding in a program's path still refuses, and reaching the interpreter by path does
+  not make running a script through it safe.
+
+  Interpreter flags are skipped too, so `python -X utf8 -m py_compile app.py` is judged on the
+  compile rather than stopping at the flag. `-X` cannot name code to run — the interpreter accepts
+  keys it has never heard of, since they are data in `sys._xoptions` — so what decides remains
+  `-c`, `-m` or a filename, and `python -X dev app.py` still asks.
+
 ## 0.103.2
 
 ### Patch Changes

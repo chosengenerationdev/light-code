@@ -344,6 +344,25 @@ misapplied edit costs data.
   Scoped to the mode via `Mode.autoApproveSafeCommands`, checked **after** the risky list so
   safety can skip a prompt and never silence one, and read per request so switching out of Auto
   takes the relaxation with it in the same turn.
+- **The list was written in Unix program names, on a product whose primary platform is Windows**
+  (0.104.0, reported: compiling Python still asked in Auto mode). `python -m py_compile` was on it;
+  `py -m py_compile`, `python.exe`, `.venv\\Scripts\\python.exe` and an absolute interpreter path were
+  not - and the last is what this product's own Python tooling uses. **Every miss is a prompt, and
+  enough of them is the mode being unusable rather than careful**, which is the failure the mode
+  exists to fix arriving through its own list. `compileall` was missing for the same kind of
+  reason: `py_compile` takes one file, and people compile projects.
+  Two normalisations answer it, both applied to the *already unchainable* command so no grammar is
+  involved. `normaliseProgram` reduces the leading token to a bare name, which concedes that the
+  list vouches for a program *name* rather than a binary - already true of anything resolved
+  through `PATH`. `stripInertPythonFlags` skips interpreter options so the **action** is where a
+  prefix can see it. **Order is load-bearing: the chain check runs on the original**, because
+  normalising removes the directory and would take a `&` hiding in a path with it.
+  **`-X` is not dangerous and the reasoning is worth keeping**, because it was asked directly. It
+  cannot name code to run - measured, `python -X totally_made_up_key --version` prints the version,
+  since unknown keys are data in `sys._xoptions`. What decides is `-c`, `-m` or a filename, so
+  skipping flags never turns running into compiling and `python -X dev app.py` still asks. **Never
+  add a flag to that list without that property**, and `-m` in particular stays off it: `-m
+  py_compile` is a phrase somebody vouched for, `-m` alone is not.
 - **The attach button was disabled mid-turn** (0.103.0, reported as "the attachment doesn't seem
   to be queued, only message is passed on"). Everything downstream was right - the composer sends
   images, the host queues them, the loop consumes them - and the button was left over from when a

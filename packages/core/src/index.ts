@@ -459,6 +459,7 @@ export {
 export {
   isSafeCommand,
   couldChain,
+  normaliseProgram,
   DEFAULT_SAFE_COMMANDS,
   type SafeCommandOptions,
 } from './approval/safeCommands.js'
