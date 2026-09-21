@@ -20,6 +20,10 @@ npx @chosengeneration/light-code --port 7100 --no-open
 The bare name `light-code` on npm belongs to an unrelated package, hence the scope. The
 installed command is still `light-code`.
 
+If the machine that needs it cannot reach npm at all, see
+[section 1e](#1e-carrying-it-to-a-machine-that-has-only-node): the bundle can write itself out as a
+single file to carry there, and can write out its own source as well.
+
 From a clone instead:
 
 ```bash
@@ -562,9 +566,11 @@ rather than one opaque error.
 
 ### What the server deliberately does not have
 
-- **No Excel, Outlook or indexed mail.** They attach over COM to applications running on somebody's
-  desktop, which a service account has no route to, and a mailbox belongs to a person rather than to
-  the account this runs as. They remain in the VS Code extension.
+- **No Excel, Outlook or indexed mail** — *in shared mode only*. They attach over COM to
+  applications running on somebody's desktop, which a service account has no route to, and a mailbox
+  belongs to a person rather than to the account this runs as. **Running it for yourself on Windows
+  you get all three**, exactly as in the extension: same desktop, same session, so the reason to
+  withhold them does not apply. `--server` is what turns them off, not the Node host.
 - **No Claude CLI expert, and nothing about cost.** The expert is any provider profile you have
   configured. There is no budget, no per-consultation price, no savings figure and no keep-alive:
   those exist because the CLI charges per call, and a spend cap over something nothing meters would
@@ -654,6 +660,64 @@ administrator has to diff them to find the current one.
 
 An administrator's own tools and skills are unaffected: they get the ordinary in-chat prompt, which
 is the same mechanism with the approver already at the screen.
+
+---
+
+## 1e. Carrying it to a machine that has only Node
+
+For somebody who can install Node but cannot reach a registry to `npm install` from, and cannot
+reach the repository either. Two flags, and between them the bundle carries both what it needs to
+run and what it is made of.
+
+### `--export-pkg` — the application as one file
+
+```bash
+light-code --export-pkg light-code-pkg
+```
+
+Copy that file anywhere and run it:
+
+```bash
+node light-code-pkg
+```
+
+No `npm install`, no `node_modules`, no network. The browser assets are inside the bundle, so
+nothing has to sit beside it.
+
+It copies **the bundle that is running**, not a build artefact kept for the purpose, so what you
+hand over is byte-for-byte what you just tested.
+
+**Leave the name extensionless, or end it `.cjs`.** Node decides a file's module kind from its
+extension and this bundle is CommonJS, so `light-code-pkg` and `light-code-pkg.cjs` both work while
+`light-code-pkg.mjs` would not.
+
+The one thing it cannot carry is ripgrep, which is a per-platform binary rather than JavaScript.
+`search_files` and `list_files` say so and everything else works. This is not something the other
+flag fixes either — `--export-code` builds with `--ignore-scripts`, so the binary is not fetched
+there either. On a machine with no route out, there is no search. Reading named files, editing,
+commands, MCP, Python and the browser UI are all unaffected.
+
+### `--export-code` — the source, to keep working on it
+
+```bash
+light-code --export-code light-code-src
+cd light-code-src
+pnpm install --ignore-scripts
+pnpm build
+node apps/host/dist/cli.cjs
+```
+
+Around six hundred files — `apps/host`, `packages/core`, `packages/ui`, the build scripts and the
+manifests — gzipped inside the bundle and written out as an ordinary working tree. The lockfile
+travels too, so your mirror resolves the versions this was built against rather than whatever is
+newest that day.
+
+`apps/vscode` is not included. This is the Node half.
+
+**It refuses a directory that is not empty.** It writes several hundred files, and the machine this
+exists for is the one with no `git` to undo them with.
+
+The tests come with it: `pnpm test` runs the same suite this repository does.
 
 ---
 

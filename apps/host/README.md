@@ -17,6 +17,19 @@ npx @chosengeneration/light-code --port 7100 --no-open
 npx @chosengeneration/light-code --help
 ```
 
+### No registry on the machine that needs it?
+
+```bash
+light-code --export-pkg light-code-pkg   # then: node light-code-pkg
+light-code --export-code light-code-src  # the source, to work on it there
+```
+
+The first writes a copy of the running bundle as a single file. Carry it to anything with
+Node and run it — no `npm install`, no `node_modules`, no network. The second writes out the
+source this is built from, lockfile included. See
+[the operator guide](https://github.com/chosengenerationdev/light-code/blob/main/docs/hosting.md)
+or `light-code --guide`.
+
 ## Setting it up
 
 For a laptop, the command above is the whole setup: open the browser, add a provider in
@@ -145,9 +158,11 @@ agent executes on your instruction run with your privileges, exactly as if you h
 them. The approval gate is what stands between the model and your machine; there is no
 second layer behind it.
 
-The Excel and Outlook integration, and the indexed-mail search, are in the **VS Code
-extension only**. They attach to applications running on somebody's desktop, which a server
-has no route to.
+The Excel and Outlook integration, and the indexed-mail search, need **Windows and your own
+desktop**. They attach to applications already running in your session, so running this for
+yourself on Windows you get all three, exactly as in the extension. Started with `--server`
+they are absent: a service account has no route to anybody's desktop, and a mailbox belongs
+to a person rather than to the account the process runs as.
 
 ## Security
 

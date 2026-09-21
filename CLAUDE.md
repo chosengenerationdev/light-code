@@ -1601,6 +1601,23 @@ and `sourcePack.test.ts` fails if either stops being empty.
 The way both were found is the point: the exported tree was installed, built, run and tested. No
 reading of the file list would have shown either.
 
+**The two operator documents lagged the release by a version, and each asserted the opposite of what
+shipped** (fixed 2026-09-21, when the user asked whether they were current). `docs/hosting.md` said
+"No Excel, Outlook or indexed mail ... They remain in the VS Code extension", which had become false
+for anybody running the host on their own Windows desktop, and neither it nor `apps/host/README.md`
+mentioned the export flags at all. **A document that states the negative of a shipped feature is
+worse than one that omits it** — somebody reads it and stops looking. The exclusion is a property of
+`--server`, not of the Node host, and both now say that. Note `docs/hosting.md` is baked
+(`generated/operatorGuide.ts`) and a test asserts the two match byte for byte, so
+`scripts/generate-operator-guide.mjs` has to run with the edit.
+
+Writing it also caught a **claim that was about to be invented**: a draft said search could be
+restored by putting `rg` on the `PATH`. `resolveRipgrep()` only tries `require('@vscode/ripgrep')`
+and never consults `PATH`, and `--export-code` does not help either because the build installs with
+`--ignore-scripts`, so the binary is never fetched. On a machine with no route out there is no
+search, and the guide now says exactly that. **Check the resolver before documenting a remedy** — a
+plausible workaround that does nothing costs the reader more than an honest limitation.
+
 ### Identity and credentials from the operator's own Python (2026-09-11)
 
 Requested for a host whose own libraries are the only thing that knows who is logged in and where
