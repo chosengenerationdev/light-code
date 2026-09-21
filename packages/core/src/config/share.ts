@@ -56,6 +56,7 @@ export type ShareSectionId =
   | 'datasets'
   | 'schedules'
   | 'tools'
+  | 'commands'
   | 'network'
   | 'workspace'
   | 'appearance'
@@ -202,6 +203,18 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     keys: ['tools'],
   },
   {
+    id: 'commands',
+    label: 'Risky commands',
+    description: 'Commands that always ask, whatever else is switched on.',
+    keys: ['commands'],
+    /*
+     * Shareable, unlike `approvals`, and the asymmetry is the point. Importing somebody's
+     * *approvals* removes gates on your machine — which is why it is in `NEVER_SHARED`. Importing
+     * their risky-command rules can only add prompts, so "here is what our team always reviews" is
+     * exactly the kind of thing worth sending, and it fails safe if it is wrong.
+     */
+  },
+  {
     id: 'network',
     label: 'TLS and certificates',
     description: 'The CA, client certificate and certificate folder. Paths, never key material.',
@@ -305,6 +318,8 @@ function detailFor(section: ShareSection, config: LightCodeConfig): string {
       return count((config.s3?.connections ?? []).length, 'connection')
     case 'datasets':
       return count((config.datasets ?? []).length, 'dataset')
+    case 'commands':
+      return count((config.commands?.risky ?? []).length, 'rule')
     case 'schedules':
       return count(Object.keys(config.schedules ?? {}).length, 'schedule')
     case 'mail':

@@ -448,6 +448,14 @@ export {
   type WorkspaceApprovals,
 } from './approval/policy.js'
 export { isCommandAllowlisted, addToAllowlist, removeFromAllowlist } from './approval/commands.js'
+export {
+  riskyCommandRules,
+  matchRiskyCommand,
+  describeRiskyMatch,
+  DEFAULT_RISKY_COMMANDS,
+  type RiskyCommandRule,
+  type RiskyCommandMatch,
+} from './approval/riskyCommands.js'
 export { ShadowGit, type Checkpoint } from './checkpoints/shadowGit.js'
 /*
  * The plan's steps. Deliberately does NOT re-export its `Checkpoint` type: `Checkpoint` already

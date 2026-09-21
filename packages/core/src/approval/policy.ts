@@ -1,6 +1,7 @@
 import type { AutoApproveSettings, WorkspaceApprovals } from '../config/schema.js'
 import type { ApprovableGroup, ToolGroup, ToolPreview } from '../tools/types.js'
 import { isCommandAllowlisted } from './commands.js'
+import { matchRiskyCommand, type RiskyCommandRule } from './riskyCommands.js'
 import { requiresApproval, type ApprovalDecision, type ApprovalGate, type ApprovalRequest } from './types.js'
 
 // Both shapes are inferred from the config schema so the validator and the runtime type
@@ -106,6 +107,13 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
 export function decideFromPolicy(
   request: ApprovalRequest,
   approvals: WorkspaceApprovals | undefined,
+  /**
+   * Commands the user marked risky, already merged with the built-in list.
+   *
+   * See `riskyCommands.ts` for why patterns are allowed here and forbidden in the allowlist, and
+   * why there are built-in ones at all.
+   */
+  risky?: readonly RiskyCommandRule[] | undefined,
 ): ApprovalDecision | undefined {
   if (!requiresApproval(request.group)) return 'approve'
 
@@ -115,6 +123,19 @@ export function decideFromPolicy(
    * ordinary edit.
    */
   if (ALWAYS_ASK_TOOLS.has(request.toolName)) return undefined
+
+  /*
+   * Checked before the allowlist, before the category toggle, and before `approvals` is even
+   * looked at — so a risky command still asks in a workspace that has no approvals entry.
+   *
+   * The same precedence §11 gives MCP tools: **never beats always.** A stale "always allow" must
+   * not resurrect a command the user has since marked risky, and "auto-approve commands" is a
+   * statement about ordinary commands rather than about the handful somebody singled out.
+   */
+  if (request.group === 'command') {
+    const command = commandFromPreview(request.preview)
+    if (command !== undefined && matchRiskyCommand(command, risky) !== undefined) return undefined
+  }
 
   if (approvals === undefined) return undefined
 
@@ -147,11 +168,35 @@ export class PolicyApprovalGate implements ApprovalGate {
   constructor(
     private readonly inner: ApprovalGate,
     private readonly getApprovals: () => WorkspaceApprovals | undefined,
+    /**
+     * The risky-command rules in force, read per request rather than captured.
+     *
+     * A function for the same reason `getApprovals` is one: the settings can change mid-session,
+     * and a list captured when the gate was constructed would apply the rules somebody had before
+     * they went and added the one they were worried about.
+     */
+    private readonly getRisky?: () => readonly RiskyCommandRule[] | undefined,
   ) {}
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalDecision> {
-    const decided = decideFromPolicy(request, this.getApprovals())
+    const risky = this.getRisky?.()
+    const decided = decideFromPolicy(request, this.getApprovals(), risky)
     if (decided !== undefined) return decided
+
+    /*
+     * A refusing rule stops here rather than reaching the prompt.
+     *
+     * `decideFromPolicy` answers "who decides", and the answer for any risky command is "the
+     * user" — so refusal cannot live in there without conflating the two. `refuse` means the user
+     * has already decided, in advance, that this one is never run from here; putting it in front
+     * of them again would only invite the click they were protecting themselves from.
+     */
+    const command = commandFromPreview(request.preview)
+    if (request.group === 'command' && command !== undefined) {
+      const match = matchRiskyCommand(command, risky)
+      if (match?.rule.refuse === true) return 'deny'
+    }
+
     return this.inner.requestApproval(request)
   }
 }

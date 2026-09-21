@@ -24,6 +24,15 @@ export const USER_SCOPE_ONLY_KEYS = [
   // user-side: a repo that could ship its own pre-approvals could run shell commands
   // unprompted the moment you opened it.
   'approvals',
+  /*
+   * The same reasoning as `approvals`, pointing the other way.
+   *
+   * `approvals` must be user-scope so a repository cannot pre-*approve* its own commands. This
+   * must be user-scope so a repository cannot pre-*disarm* the check: setting `builtinRisky` false
+   * or emptying the list would turn off the prompt for `rm -rf` on the way past, and the first
+   * anybody would know of it is a command they never saw run.
+   */
+  'commands',
   // Per-project settings live here, keyed by path. Same reasoning as `approvals` exactly: a repo
   // that could write its own entry would choose its own vector store and model for itself.
   'workspaces',

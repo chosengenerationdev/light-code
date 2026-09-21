@@ -1020,6 +1020,41 @@ export const configSchema = z
       .partial(),
     approvals: z.record(z.string(), workspaceApprovalsSchema),
     /**
+     * Commands that always ask, whatever else is switched on.
+     *
+     * **User-scope only** (invariant 5), and the reason is the same one as `approvals`, pointing
+     * the other way: a repository able to write here could set `builtinRisky: false` or empty the
+     * list, and the first thing you would know about it is a command you never saw running.
+     *
+     * Global rather than per-workspace, unlike `approvals`. "Never run `rm -rf` without asking me"
+     * is a statement about how somebody works, not about one project, and having to repeat it per
+     * repository is how it ends up missing from the one that mattered.
+     *
+     * See `approval/riskyCommands.ts` for why these may be patterns when the *allowlist* may not,
+     * and for what is on the built-in list.
+     */
+    commands: z
+      .object({
+        risky: z
+          .array(
+            z.object({
+              /** Matched case-insensitively anywhere in the command the tool will really run. */
+              contains: z.string().min(1).max(200),
+              /** Shown in the prompt, so a rule that fires explains itself. */
+              reason: z.string().max(300).optional(),
+              /** Refuse rather than ask. Off by default — see the type for why. */
+              refuse: z.boolean().optional(),
+            }),
+          )
+          .max(100),
+        /**
+         * The built-in list of destructive commands. **On unless explicitly false**, because a
+         * protection that has to be configured first arrives after the first accident.
+         */
+        builtinRisky: z.boolean(),
+      })
+      .partial(),
+    /**
      * Per-project settings, keyed by workspace path (0.47.0).
      *
      * **User-scope only, like `approvals`, and for the same reason** — the values here are ones a

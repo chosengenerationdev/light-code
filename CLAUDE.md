@@ -303,6 +303,29 @@ misapplied edit costs data.
 - "Always allow" scopes to a specific tool in a specific workspace. Never global.
 - Approval UI renders ground truth (invariant 8).
 
+- **Risky commands always ask, and there is a built-in list** (0.102.0, requested for Auto mode).
+  `approval/riskyCommands.ts`. Checked before the allowlist, before the category toggle, and
+  before `approvals` is read at all - so it works in a workspace with nothing configured. Same
+  precedence section 11 gives MCP tools: **never beats always**, so a stale "always allow" cannot
+  resurrect a command the user has since marked risky.
+  **Patterns are permitted here although section 8 forbids them in the allowlist**, and the
+  asymmetry is the whole justification: a wrong *allow* rule fails open and runs something
+  dangerous unapproved, while a wrong *risky* rule fails closed - an extra prompt, or no match and
+  the command sits in front of the ordinary prompt anyway. Substrings rather than regular
+  expressions, which is `mcp/deny.ts`'s call for `mcp/deny.ts`'s reason: a regex typed into a
+  settings box fails open when it is subtly wrong and nothing says so.
+  **The built-in list is on unless `commands.builtinRisky` is false**, because a protection that
+  has to be configured first arrives after the first accident. It is deliberately short: an entry
+  that fires on everyday work gets the feature switched off, so a false positive costs more than a
+  gap. Two drafts proved that - `format ` caught `npm run format`, and the matcher's own `trim()`
+  destroyed the significant trailing space in `checkout -- ` so it caught `checkout --track`. Both
+  were found by the "leaves ordinary work alone" test, which is the half of that file worth
+  keeping.
+  `commands` is **user-scope only** (invariant 5) for `approvals`' reason pointing the other way:
+  a repository able to write here would pre-*disarm* the check rather than pre-approve, and the
+  first anybody would know is a command that never stopped. It **is** exportable, unlike
+  `approvals`, because importing somebody's rules can only add prompts.
+
 ### Checkpoints
 
 Shadow-git snapshot before the first edit of a task, allowing rollback. Borrowed from Roo.

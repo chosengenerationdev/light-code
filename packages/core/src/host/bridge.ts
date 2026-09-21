@@ -123,6 +123,8 @@ import {
   McpRegistry,
   PathDenylist,
   PolicyApprovalGate,
+  riskyCommandRules,
+  type RiskyCommandRule,
   ShadowGit,
   ToolRegistry,
   addToAllowlist,
@@ -1668,6 +1670,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
   // Cached so the policy gate can answer synchronously mid-turn without re-reading config.
   let cachedApprovals: WorkspaceApprovals = {}
+  /** The risky-command rules in force: the user's, plus the built-in list unless switched off. */
+  let cachedRiskyCommands: readonly RiskyCommandRule[] = riskyCommandRules()
   /** Mirrors config so the loop and the settings message agree without re-reading. */
   let cachedMaxIterations = 25
   // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
@@ -2138,6 +2142,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function loadSettings(): Promise<LightCodeConfig> {
     const { config } = await configManager.load()
     cachedApprovals = approvalsFrom(config.approvals)
+    cachedRiskyCommands = riskyCommandRules(config.commands)
     cachedCodeGenerator = codeGeneratorFor(config)
 
     /*
@@ -2402,7 +2407,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   const userGate = new WebviewApprovalGate(post)
   // Policy answers what it can from settings; anything else falls through to the user.
-  const approvalGate = new PolicyApprovalGate(userGate, () => cachedApprovals)
+  const approvalGate = new PolicyApprovalGate(
+    userGate,
+    () => cachedApprovals,
+    // Read per request, so a rule added mid-session applies to the next command rather than
+    // after a reload - which is when somebody adds one.
+    () => cachedRiskyCommands,
+  )
 
   let mcpJson = '{\n  "mcpServers": {}\n}'
   /**

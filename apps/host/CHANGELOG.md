@@ -1,5 +1,27 @@
 # @chosengeneration/light-code
 
+## 0.87.0
+
+### Minor Changes
+
+- Risky commands always stop and ask
+
+  Destructive commands now stop for approval whatever else is switched on — `rm -rf`, `--force`,
+  `git reset --hard`, `git clean -fd`, `mkfs`, `DROP TABLE`, `curl … | sh`, `sudo`, `shutdown` and a
+  few more. **This works before you configure anything**, because a protection you have to think of
+  first arrives after the first accident.
+
+  You can add your own in Settings' config as `commands.risky` — plain text matched anywhere in the
+  command, with a reason that is shown in the prompt, and `refuse` for the handful you never want run
+  from here at all. `commands.builtinRisky: false` turns the built-in list off.
+
+  A risky command beats the "always allow" list and beats the auto-approve toggle, so a rule you add
+  today covers a command you allowed last week. Matching is substrings rather than regular
+  expressions: a regex typed into a settings box fails open when it is subtly wrong, and nothing
+  tells you.
+
+  Written for Auto mode, where most of the work arrives as commands, but it applies in every mode.
+
 ## 0.86.0
 
 ### Minor Changes
