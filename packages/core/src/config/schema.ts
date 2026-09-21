@@ -648,9 +648,15 @@ export const embedderConfigSchema = z
     /** Required to create the `knn_vector` mapping — OpenSearch needs a fixed dimension. */
     dimensions: z.number().int().positive(),
     /**
-     * The index this workspace is written to. Unset derives one from the workspace path,
-     * which is collision-free but unreadable — and on a shared cluster the person looking at
-     * the index list has no way to tell whose `light-code-a3f2…` it is.
+     * The index this workspace is written to. Unset derives one from **the owner and the
+     * workspace path** - see `rag/indexNaming.ts`, which owns that derivation and explains why
+     * both are in it. The short version: the path alone is collision-free between projects and
+     * not between people, and two colleagues cloning to the same place is a standardised build
+     * rather than a strange one.
+     *
+     * The derived name reads `light-code-<you>-<digest>`, so a shared cluster's index list says
+     * whose is whose. It moves if `identity.owner` changes, which is correct - that is a
+     * different owner's index by definition - and the next run re-embeds into the new one.
      *
      * Also the escape hatch for a width change: a vector field's dimension is fixed at
      * creation, so switching embedding model means a new index, and naming it is how.

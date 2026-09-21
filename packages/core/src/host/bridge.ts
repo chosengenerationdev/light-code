@@ -59,6 +59,10 @@ import {
 } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
 import { aliasFields, codebaseAliases, skillAliases } from '../rag/aliases.js'
+import {
+  deriveIndexName,
+  DEFAULT_INDEX_PREFIX as DERIVED_INDEX_PREFIX,
+} from '../rag/indexNaming.js'
 import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
 import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
@@ -5273,7 +5277,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Front of every derived index name, overridable so a shared cluster can distinguish teams.
    * Changing it points at *new* collections — the old ones keep their data until deleted.
    */
-  const DEFAULT_INDEX_PREFIX = 'light-code'
+  // Re-exported from `rag/indexNaming.ts`, which owns the derived name this prefixes.
+  const DEFAULT_INDEX_PREFIX = DERIVED_INDEX_PREFIX
 
   /** The index Light Code writes this workspace into. User-set or derived; never model-supplied. */
   /**
@@ -6306,14 +6311,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const chosen = config?.embedder?.indexName?.trim()
     if (chosen !== undefined && chosen.length > 0) return chosen
     if (workspaceRoot === undefined) return undefined
-    // Derived from the workspace path so two projects on one cluster do not collide, and
-    // so the same project reindexes into the same place. Hashed because an index name
-    // cannot contain most path characters.
-    const digest = createHash('sha256')
-      .update(path.resolve(workspaceRoot).toLowerCase())
-      .digest('hex')
-      .slice(0, 16)
-    return `${config?.embedder?.indexPrefix ?? DEFAULT_INDEX_PREFIX}-${digest}`
+    /*
+     * Derived from the owner *and* the workspace path. `rag/indexNaming.ts` holds the derivation
+     * and the reasoning — the short version is that the path alone is collision-free between
+     * projects and not between people, and two colleagues who clone to the same place is a
+     * standardised build rather than a strange one.
+     */
+    return deriveIndexName({
+      ...(config?.embedder?.indexPrefix !== undefined
+        ? { prefix: config.embedder.indexPrefix }
+        : {}),
+      ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) } : {}),
+      workspaceRoot,
+    })
   }
 
   /**

@@ -928,6 +928,19 @@ find it in the local as it belongs to different user or project"*.
   case that forced it is team code in a shared cluster and personal mail in a local Qdrant.
   `storeIdFor()` owns the fallback, because the alternative is every call site remembering it
   and one of them not doing so.
+- **A derived index name carries the owner, not just the workspace path** (0.101.0).
+  `codebaseIndexName()` hashed the absolute path alone, which is collision-free between *projects*
+  and not between *people*: two colleagues who both clone to `C:\dev\payments` — a standardised
+  build, not an exotic one — derived the same name and wrote to the same index. Nothing would have
+  looked broken, because owner filtering still attributes hits correctly; it would just have been
+  slower and noisier for everyone for ever, with no symptom pointing at the cause.
+  `rag/indexNaming.ts` owns the derivation now: `<prefix>-<owner slug>-<digest>`, with the
+  **normalised owner in the digest as well as the slug**. That second part was wrong in the first
+  version — the slug was hashed, so `A Smith` and `a.smith` collided in the digest exactly as they
+  do in the name, which is a readable name that misleads. Its own test caught it.
+  One-time cost, taken deliberately before more people had indexes to rebuild: every derived name
+  changes, so the next run re-embeds and the old index sits in the cluster until somebody removes
+  it. An explicit `embedder.indexName` and every alias are untouched, so team search is unaffected.
 - **`identity.owner` is user-scope only** (invariant 5), defaulting to the OS user name resolved
   at the host boundary. A repository able to set it could attribute what it indexed to a
   colleague — the sort of claim nobody thinks to go and check.

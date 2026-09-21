@@ -1,5 +1,23 @@
 # @chosengeneration/light-code
 
+## 0.86.0
+
+### Minor Changes
+
+- A derived index name now includes who you are
+
+  When you have not named an index yourself, Light Code derived one from the workspace path alone.
+  Two colleagues who both clone to the same path — a standardised build, not an exotic one — derived
+  the same name and wrote to the same index. Searches still attributed hits correctly, so nothing
+  looked broken; it was simply slower and noisier for everyone, permanently.
+
+  The derived name is now `light-code-<you>-<digest>`, which also makes a shared cluster's index list
+  readable: you can tell whose is whose.
+
+  **This renames your derived index, so the next index run re-embeds from scratch and the old index
+  stays in the cluster until you delete it.** If you set `embedder.indexName` yourself, nothing
+  changes. Aliases are untouched, so team search keeps working across the change.
+
 ## 0.85.0
 
 ### Minor Changes
