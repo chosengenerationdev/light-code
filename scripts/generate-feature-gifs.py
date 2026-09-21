@@ -864,6 +864,308 @@ def scene_mail_charts(frame: int):
 
 # =============================================================================================
 
+# =============================================================================================
+# 8. A second opinion, and what it costs
+# =============================================================================================
+
+EXPERT_CAPTIONS = (
+    (0, "In Code mode, ask for a second opinion when you want one"),
+    (26, "It reads the code itself rather than being handed a summary"),
+    (54, "The answer comes back marked as theirs, not as the assistant's"),
+    (80, "In Agent team mode it consults on its own, without being asked"),
+    (106, "A budget you set stops it before the credit does"),
+)
+
+EXPERT_NOTES = (
+    (0, "ask_expert  -  asking for it wins over the frugality guidance"),
+    (26, "Read, Grep, Glob only  -  it cannot edit or run anything"),
+    (80, "agent team: consulted as part of the work"),
+    (106, "expert.maxSpendUsd / maxConsultations, per chat"),
+)
+
+
+def scene_expert(frame: int):
+    """Consulting a stronger model, and the two things that keep it honest.
+
+    The read-only half is section 12b's load-bearing decision and is drawn rather than described:
+    a second agent that could edit the repository would sit outside the approval gate entirely.
+    The budget half is drawn because a number nobody sees cannot be managed - which is the reason
+    the meter exists in the product at all.
+    """
+    c = Canvas("A second opinion", latest(EXPERT_CAPTIONS, frame), latest(EXPERT_NOTES, frame))
+
+    # --- the ask
+    c.panel(48, 110, 300, 128, tone=SUNKEN, alpha=ramp(frame, 1, 6))
+    c.label(62, 128, "Code mode", font=F_SMALL, fill=blend(SUNKEN, MUTED, ramp(frame, 1, 6)))
+    for index, line in enumerate(('"this migration keeps', 'deadlocking - ask claude', 'what I am missing"')):
+        c.label(62, 152 + index * 22, line, font=F_BODY,
+                fill=blend(SUNKEN, TEXT, ramp(frame, 3 + index * 3, 6)))
+
+    c.arrow(352, 174, 384, 174, ramp(frame, 20, 6), blend(BG, ORANGE, 0.7))
+
+    # --- what it may and may not do
+    c.panel(388, 110, 264, 212, title="The expert" if frame >= 26 else None,
+            subtitle="a stronger model" if frame >= 26 else None, accent=ORANGE,
+            alpha=ramp(frame, 22, 8))
+    for index, (label, allowed) in enumerate(
+        (("Read", True), ("Grep", True), ("Glob", True), ("Bash", False), ("Write", False),
+         ("Edit", False))
+    ):
+        y = 176 + index * 24
+        alpha = ramp(frame, 28 + index * 3, 7)
+        if alpha <= 0.01:
+            continue
+        tone = GREEN if allowed else RED
+        c.d.rounded_rectangle((402, y, 486, y + 20), radius=4,
+                              fill=blend(PANEL, blend(tone, PANEL, 0.45), alpha),
+                              outline=blend(PANEL, tone, alpha * 0.8), width=1)
+        c.label(444, y + 10, label, font=F_MINI, fill=blend(PANEL, TEXT, alpha), anchor="mm")
+        c.label(500, y + 10, "may" if allowed else "may not", font=F_MINI,
+                fill=blend(PANEL, MUTED, alpha), anchor="lm")
+
+    c.arrow(656, 200, 684, 200, ramp(frame, 50, 6), blend(BG, ORANGE, 0.7))
+
+    # --- the advice, attributed
+    advice = ramp(frame, 56, 10)
+    c.panel(688, 110, 224, 212, title="Its answer" if advice > 0.3 else None, accent=ORANGE,
+            alpha=advice)
+    if advice > 0.3:
+        c.d.rounded_rectangle((702, 150, 786, 170), radius=4,
+                              fill=blend(PANEL, blend(ORANGE, PANEL, 0.45), advice),
+                              outline=blend(PANEL, ORANGE, advice), width=1)
+        c.label(744, 160, "claude", font=F_MINI, fill=blend(PANEL, TEXT, advice), anchor="mm")
+        for index, line in enumerate(
+            ("Two transactions take", "the same two rows in", "opposite order. Order", "them the same way in",
+             "both paths.")
+        ):
+            c.label(702, 188 + index * 22, line, font=F_SMALL,
+                    fill=blend(PANEL, MUTED, ramp(frame, 60 + index * 3, 7)))
+
+    # --- agent team consults without being asked
+    auto = ramp(frame, 82, 10)
+    if auto > 0:
+        c.panel(48, 344, 420, 96, tone=SUNKEN, accent=PURPLE, alpha=auto)
+        c.label(62, 362, "Agent team mode", font=F_SMALL, fill=blend(SUNKEN, MUTED, auto))
+        c.label(62, 386, "consults as part of the work -", font=F_BODY,
+                fill=blend(SUNKEN, TEXT, auto))
+        c.label(62, 406, "you do not have to remember to ask", font=F_BODY,
+                fill=blend(SUNKEN, TEXT, auto))
+
+    # --- the budget
+    money = ramp(frame, 108, 10)
+    if money > 0:
+        c.panel(492, 344, 420, 96, tone=SUNKEN, accent=GREEN, alpha=money)
+        c.label(506, 362, "Budget for this chat", font=F_SMALL, fill=blend(SUNKEN, MUTED, money))
+        spent = 0.42 * min(1.0, ramp(frame, 112, 16))
+        c.bar(506, 384, 300, 8, spent / 2.0, blend(SUNKEN, GREEN, 0.9), over=SUNKEN)
+        c.label(506, 402, f"${spent:.2f} of $2.00 - it stops, and says so", font=F_MINI,
+                fill=blend(SUNKEN, MUTED, money))
+        c.label(816, 388, "you set it", font=F_MINI, fill=blend(SUNKEN, MUTED, money), anchor="lm")
+
+    return c.image
+
+
+# =============================================================================================
+# 9. A team with roles
+# =============================================================================================
+
+ROLES = (
+    ("expert", "plans the change", ORANGE),
+    ("reviewer", "reads the finished diff", BLUE),
+    ("tester", "says what is untested", GREEN),
+    ("security", "looks for the sharp edges", RED),
+)
+
+TEAM_CAPTIONS = (
+    (0, "Give each role a model - they need not all be the same one"),
+    (28, "With no plan, it asks the expert for one and proposes it"),
+    (56, "You approve the plan before any of it happens"),
+    (82, "Then it works the plan, consulting whoever fits the step"),
+    (112, "A role chip means that specialist really was consulted"),
+)
+
+TEAM_NOTES = (
+    (0, "agents.roles  -  each a configured profile, or Claude"),
+    (28, "update_plan  -  always asks, never auto-approved"),
+    (82, "ask_agent"),
+    (112, "recorded host-side, not claimed by the assistant"),
+)
+
+PLAN_STEPS = (
+    ("Order the lock acquisition", "expert", ORANGE),
+    ("Add a regression test", "tester", GREEN),
+    ("Review the finished diff", "reviewer", BLUE),
+)
+
+
+def scene_agent_team(frame: int):
+    """Roles, a plan, and why the chips are trustworthy.
+
+    The last beat is the one that matters and the easiest to draw dishonestly. Section 12h: a role
+    chip is **ground truth** - who contributed is recorded host-side from consultations that
+    actually ran, not declared by the assistant. A coloured row reads as "the reviewer did this",
+    which is exactly the sort of claim nobody thinks to go and check.
+    """
+    c = Canvas("A team, with roles", latest(TEAM_CAPTIONS, frame), latest(TEAM_NOTES, frame))
+
+    # --- the roster
+    c.panel(48, 110, 300, 212, title="Your team", subtitle="agents.roles", accent=PURPLE)
+    for index, (role, what, tone) in enumerate(ROLES):
+        y = 176 + index * 34
+        alpha = ramp(frame, 2 + index * 5, 7)
+        if alpha <= 0.01:
+            continue
+        c.d.ellipse((62, y + 2, 78, y + 18), fill=blend(tone, PANEL, 0.25 + 0.6 * (1 - alpha)))
+        c.label(88, y + 10, role, font=F_CHIP, fill=blend(PANEL, TEXT, alpha), anchor="lm")
+        c.label(170, y + 10, what, font=F_MINI, fill=blend(PANEL, MUTED, alpha), anchor="lm")
+
+    # --- the plan, proposed and approved
+    proposed = ramp(frame, 30, 10)
+    c.panel(388, 110, 524, 212, title="The plan" if proposed > 0.3 else None,
+            subtitle="proposed by the expert" if proposed > 0.3 else None,
+            accent=ORANGE if frame < 56 else GREEN, alpha=proposed)
+    for index, (step, who, tone) in enumerate(PLAN_STEPS):
+        y = 176 + index * 40
+        alpha = ramp(frame, 34 + index * 6, 8)
+        if alpha <= 0.01:
+            continue
+        c.label(402, y + 12, f"{index + 1}.", font=F_MONO_S, fill=blend(PANEL, MUTED, alpha))
+        c.label(430, y + 12, step, font=F_BODY, fill=blend(PANEL, TEXT, alpha), anchor="lm")
+
+        # The chip appears only once that step has been worked and somebody was actually consulted.
+        chip_alpha = ramp(frame, 114 + index * 8, 8)
+        if chip_alpha > 0.01:
+            c.d.rounded_rectangle((760, y + 2, 850, y + 24), radius=4,
+                                  fill=blend(PANEL, blend(tone, PANEL, 0.45), chip_alpha),
+                                  outline=blend(PANEL, tone, chip_alpha), width=1)
+            c.label(805, y + 13, who, font=F_MINI, fill=blend(PANEL, TEXT, chip_alpha), anchor="mm")
+
+    approved = ramp(frame, 58, 8)
+    if approved > 0:
+        c.d.rounded_rectangle((402, 296, 520, 316), radius=4,
+                              fill=blend(PANEL, blend(GREEN, PANEL, 0.45), approved),
+                              outline=blend(PANEL, GREEN, approved), width=1)
+        c.label(461, 306, "you approved it", font=F_MINI,
+                fill=blend(PANEL, TEXT, approved), anchor="mm")
+
+    # --- consulting as the work goes
+    for index, (role, _, tone) in enumerate(ROLES[:3]):
+        alpha = ramp(frame, 86 + index * 8, 9)
+        if alpha <= 0.01:
+            continue
+        x = 48 + index * 300
+        c.panel(x, 344, 276, 96, tone=SUNKEN, accent=tone, alpha=alpha)
+        c.label(x + 14, 362, role, font=F_NAME, fill=blend(SUNKEN, TEXT, alpha))
+        c.label(x + 14, 388, ("what order should the", "anything wrong with", "is this covered by a")[index],
+                font=F_SMALL, fill=blend(SUNKEN, MUTED, alpha))
+        c.label(x + 14, 406, ("locks be taken in?", "the finished diff?", "test already?")[index],
+                font=F_SMALL, fill=blend(SUNKEN, MUTED, alpha))
+
+    truth = ramp(frame, 130, 8)
+    if truth > 0:
+        c.label(48, 456, "a chip appears only where that specialist was really consulted",
+                font=F_SMALL, fill=blend(BG, MUTED, truth))
+
+    return c.image
+
+
+# =============================================================================================
+# 10. Auto mode
+# =============================================================================================
+
+AUTO_CAPTIONS = (
+    (0, "Auto mode works through the terminal by preference"),
+    (26, "Reading and searching happen as commands"),
+    (52, "Commands you have allowed run without stopping"),
+    (78, "A destructive one stops anyway - even with auto-approve on"),
+    (106, "And you can name your own, in your own words"),
+)
+
+AUTO_NOTES = (
+    (0, "mode: Auto  -  the same tools as Code, a different habit"),
+    (52, "auto-approve, or the exact-match allowlist"),
+    (78, "built in, on by default  -  commands.builtinRisky"),
+    (106, "commands.risky  -  plain text, with your reason"),
+)
+
+AUTO_COMMANDS = (
+    ("sed -n 200,260p src/ledger.ts", "read 61 lines", GREEN, False),
+    ("rg -n 'acquireLock' src", "7 matches", GREEN, False),
+    ("pnpm test --filter ledger", "42 passed", GREEN, False),
+    ("rm -rf .cache/ledger", "", RED, True),
+)
+
+
+def scene_auto_mode(frame: int):
+    """Shell-first working, and the brake.
+
+    ## The caption that had to be corrected
+
+    Described as "safe commands are auto executed and risky ones come for approval", which is half
+    true and the wrong half to leave standing: **nothing runs unasked by default.** Auto-approve
+    ships off, so a command runs without a prompt only where somebody turned that on or put it on
+    the exact-match allowlist. What *is* unconditional is the other direction - a destructive
+    command stops even when auto-approve is on - and that is the part worth showing.
+    """
+    c = Canvas("Auto mode", latest(AUTO_CAPTIONS, frame), latest(AUTO_NOTES, frame))
+
+    c.panel(48, 110, 560, 330, title="Terminal", subtitle="where the work happens", tone=SUNKEN)
+    for index, (command, result, tone, risky) in enumerate(AUTO_COMMANDS):
+        y = 176 + index * 66
+        alpha = ramp(frame, 4 + index * 24, 8)
+        if alpha <= 0.01:
+            continue
+        c.label(62, y, "$", font=F_MONO, fill=blend(SUNKEN, MUTED, alpha))
+        c.label(80, y, command, font=F_MONO_S, fill=blend(SUNKEN, TEXT, alpha))
+
+        if not risky:
+            done = ramp(frame, 10 + index * 24, 8)
+            c.label(80, y + 20, result, font=F_MONO_S, fill=blend(SUNKEN, MUTED, done))
+            if index == 2:
+                c.badge(470, y - 4, 118, 22, "ran unprompted", GREEN,
+                        alpha=ramp(frame, 54, 8), over=SUNKEN)
+        else:
+            stopped = ramp(frame, 82, 8)
+            c.badge(430, y - 4, 158, 22, "stopped for approval", RED, alpha=stopped, over=SUNKEN)
+
+    # --- why it stopped
+    why = ramp(frame, 88, 10)
+    if why > 0:
+        c.panel(636, 110, 276, 172, tone=SUNKEN, accent=RED, alpha=why)
+        c.label(650, 128, "Waiting for you", font=F_NAME, fill=blend(SUNKEN, TEXT, why))
+        for index, line in enumerate(
+            ('This matches a command', 'marked risky: "rm -rf".', '', 'Recursive delete.')
+        ):
+            c.label(650, 158 + index * 20, line, font=F_SMALL,
+                    fill=blend(SUNKEN, MUTED, ramp(frame, 92 + index * 2, 6)))
+        for offset, (label, tone) in enumerate((("Approve", GREEN), ("Deny", MUTED))):
+            bx = 650 + offset * 118
+            c.d.rounded_rectangle((bx, 244, bx + 108, 266), radius=4,
+                                  fill=blend(SUNKEN, blend(tone, SUNKEN, 0.55), why),
+                                  outline=blend(SUNKEN, tone, why * 0.8), width=1)
+            c.label(bx + 54, 255, label, font=F_MINI, fill=blend(SUNKEN, TEXT, why), anchor="mm")
+
+    # --- and it beats the toggle
+    beats = ramp(frame, 96, 8)
+    if beats > 0:
+        c.label(636, 296, "It stops even with auto-approve on.", font=F_SMALL,
+                fill=blend(BG, TEXT, beats))
+        c.label(636, 316, "Never beats always.", font=F_SMALL, fill=blend(BG, MUTED, beats))
+
+    # --- your own rules
+    own = ramp(frame, 108, 10)
+    if own > 0:
+        c.panel(636, 344, 276, 96, tone=SUNKEN, accent=AMBER, alpha=own)
+        c.label(650, 358, "Your own rules", font=F_NAME, fill=blend(SUNKEN, TEXT, own))
+        for index, line in enumerate(('contains: "deploy.sh"', 'reason: "ask me first"')):
+            c.label(650, 386 + index * 20, line, font=F_MONO_S,
+                    fill=blend(SUNKEN, MUTED, ramp(frame, 112 + index * 4, 6)))
+        c.label(650, 424, "plain text, not a regex", font=F_MINI,
+                fill=blend(SUNKEN, MUTED, ramp(frame, 120, 6)))
+
+    return c.image
+
+
 # `captions` is carried here as well as inside each scene, because it is what the beats are cut
 # on — see `write_slides`. One table read twice, rather than a second list of boundaries that would
 # quietly stop matching the captions it is supposed to follow.
@@ -875,6 +1177,9 @@ SCENES = (
     ("excel-investigation", scene_excel, 116, EXCEL_CAPTIONS),
     ("technical-diagrams", scene_diagrams, 116, DIAGRAM_CAPTIONS),
     ("mail-insights", scene_mail_charts, 130, MAIL_CAPTIONS),
+    ("expert-opinion", scene_expert, 148, EXPERT_CAPTIONS),
+    ("agent-team", scene_agent_team, 160, TEAM_CAPTIONS),
+    ("auto-mode", scene_auto_mode, 148, AUTO_CAPTIONS),
 )
 
 

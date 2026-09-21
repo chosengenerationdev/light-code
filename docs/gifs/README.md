@@ -30,12 +30,23 @@ the diff then shows what the picture now claims, which a replaced binary never c
 | `excel-investigation.gif` | It attaches to an open workbook and traces a formula to the cell that broke it | §12c, `excel_trace_cell` |
 | `technical-diagrams.gif` | It reads a page or a repository and draws the flow it found | `show_diagram` |
 | `mail-insights.gif` | Chosen Outlook folders are indexed on a timer, and questions are answered as charts | §12f, `mail.syncMinutes`, `show_chart` |
+| `expert-opinion.gif` | Asking a stronger model in Code mode, consulting automatically in Agent team, and the budget that bounds it | §12b, `ask_expert`, `expert.maxSpendUsd` |
+| `agent-team.gif` | Roles with their own models, a plan you approve, and chips that record who was really consulted | §12h, `agents.roles`, `ask_agent` |
+| `auto-mode.gif` | Shell-first working, with destructive commands stopping even when auto-approve is on | §12i, `commands.risky` |
 
 ## Presenting them
 
 A GIF cannot be paused — PowerPoint plays one start to finish with no scrub bar and no stop. So
 `slides/` holds each animation cut into its own beats: every segment plays once, stops on its last
 frame, and waits there while you talk. See [slides/README.md](slides/README.md).
+
+## A caption corrected in `auto-mode.gif`
+
+It was described as "safe commands are auto executed and risky ones come for approval", which
+is half true and the wrong half to leave standing: **nothing runs unasked by default.**
+Auto-approve ships off, so a command runs without a prompt only where somebody turned that on or
+put it on the exact-match allowlist. What *is* unconditional is the other direction - a
+destructive command stops even when auto-approve is on - and that is what the animation shows.
 
 ## Both sharing animations end on a comparison
 
