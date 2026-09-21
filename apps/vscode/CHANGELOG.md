@@ -1,5 +1,25 @@
 # light-code-vscode
 
+## 0.103.0
+
+### Minor Changes
+
+- Auto mode stops asking about reading, and attachments queue mid-turn
+
+  **Reading and compiling no longer interrupt you in Auto mode.** `ls`, `cat`, `sed -n`, `rg`, `wc`,
+  `git status`/`log`/`diff`/`show`, `python -m py_compile`, `tsc --noEmit` and a few more run without
+  a prompt — but only when the command contains no shell metacharacter at all, so `grep foo && rm -rf
+/` is never one of them. Add your own with `commands.safe`; turn the built-ins off with
+  `commands.builtinSafe: false`. Risky rules are checked first, so a command that trips one still
+  asks. Every other mode is unchanged.
+
+  `find` and `python yourscript.py` are deliberately not on the list: `find . -delete` needs no
+  metacharacter, and running a script is running whatever is in it.
+
+  **Fixed: attaching a file while the assistant was working.** The attach button was disabled during
+  a turn, so only the text was queued — which looked exactly like the attachment being dropped.
+  Pasting and dragging always worked; now the button does too.
+
 ## 0.102.0
 
 ### Minor Changes

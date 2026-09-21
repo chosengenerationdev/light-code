@@ -1052,6 +1052,16 @@ export const configSchema = z
          * protection that has to be configured first arrives after the first accident.
          */
         builtinRisky: z.boolean(),
+        /**
+         * Extra prefixes that may run unprompted in a mode that allows it (Auto).
+         *
+         * Held to the same rule as the built-in ones: a command containing any shell
+         * metacharacter never qualifies, whatever it starts with. See `approval/safeCommands.ts`
+         * for why that is what makes prefix matching sound here and unsound in the allowlist.
+         */
+        safe: z.array(z.string().min(1).max(120)).max(100),
+        /** The built-in safe list. On unless explicitly false. */
+        builtinSafe: z.boolean(),
       })
       .partial(),
     /**

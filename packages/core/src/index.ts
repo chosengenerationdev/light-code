@@ -456,6 +456,12 @@ export {
   type RiskyCommandRule,
   type RiskyCommandMatch,
 } from './approval/riskyCommands.js'
+export {
+  isSafeCommand,
+  couldChain,
+  DEFAULT_SAFE_COMMANDS,
+  type SafeCommandOptions,
+} from './approval/safeCommands.js'
 export { ShadowGit, type Checkpoint } from './checkpoints/shadowGit.js'
 /*
  * The plan's steps. Deliberately does NOT re-export its `Checkpoint` type: `Checkpoint` already

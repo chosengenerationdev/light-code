@@ -326,6 +326,32 @@ misapplied edit costs data.
   first anybody would know is a command that never stopped. It **is** exportable, unlike
   `approvals`, because importing somebody's rules can only add prompts.
 
+- **Auto mode runs read-only and compile-only commands unprompted** (0.103.0, reported from real
+  use: compiling a Python file still asked, which in a mode where nearly all the work is commands
+  is the mode being unusable rather than careful). `approval/safeCommands.ts`.
+  **The naive version is exactly what section 8 forbids**: a safe-prefix allowlist auto-approves
+  `grep foo && rm -rf /`, which begins with a harmless prefix, and section 8 refuses prefix
+  matching because deciding what a pattern covers means tokenising the shell.
+  That objection is answered **not by parsing better but by refusing to look at anything that
+  could chain**: a command qualifies only when it contains no shell metacharacter at all - no
+  `;`, `&`, `|`, redirect, substitution, backtick or newline. There is no grammar to get wrong,
+  only a character test, and anything uncertain falls through to the prompt. A quoted `;` is
+  refused too, which is the conservative direction and the one this can afford.
+  Two absences are the load-bearing part of the list: **`find`**, because `find . -delete` needs
+  no metacharacter and the risk is the program's own flags rather than the program; and
+  **`python foo.py`**, because running a script is running whatever is in it - `python -m
+  py_compile` is in because compiling is not executing, and `python -c` is out because it is.
+  Scoped to the mode via `Mode.autoApproveSafeCommands`, checked **after** the risky list so
+  safety can skip a prompt and never silence one, and read per request so switching out of Auto
+  takes the relaxation with it in the same turn.
+- **The attach button was disabled mid-turn** (0.103.0, reported as "the attachment doesn't seem
+  to be queued, only message is passed on"). Everything downstream was right - the composer sends
+  images, the host queues them, the loop consumes them - and the button was left over from when a
+  message sent during a turn was refused outright. Paste and drop were never disabled, so it was
+  the one way in that still silently said no, and from the outside that is indistinguishable from
+  the attachment being dropped. `ComposerAttach.test.tsx` is a render test because the defect was
+  a single prop, invisible to every test of the behaviour it prevented.
+
 ### Checkpoints
 
 Shadow-git snapshot before the first edit of a task, allowing rollback. Borrowed from Roo.

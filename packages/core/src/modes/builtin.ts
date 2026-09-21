@@ -113,6 +113,14 @@ export const AUTO_MODE: Mode = {
   // Edits arrive as commands here, so the task's rollback point has to be taken before the
   // first command rather than before the first `edit` tool. See `Mode.commandsEdit`.
   commandsEdit: true,
+  /*
+   * Reading and searching stop being twenty prompts an hour.
+   *
+   * Reported from real use — compiling and reading both asked, which in a mode where nearly all
+   * the work is commands is the mode being unusable rather than careful. Narrow by construction:
+   * see `approval/safeCommands.ts` for what qualifies and why `find` and `python foo.py` do not.
+   */
+  autoApproveSafeCommands: true,
   guidance: [
     '## Working through the terminal',
     '',

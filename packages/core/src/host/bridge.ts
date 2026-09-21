@@ -1672,6 +1672,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedApprovals: WorkspaceApprovals = {}
   /** The risky-command rules in force: the user's, plus the built-in list unless switched off. */
   let cachedRiskyCommands: readonly RiskyCommandRule[] = riskyCommandRules()
+  /** The safe-command lists, as configured. Whether they *apply* is the mode's business. */
+  let cachedSafeCommands: { extra?: string[]; builtin?: boolean } = {}
   /** Mirrors config so the loop and the settings message agree without re-reading. */
   let cachedMaxIterations = 25
   // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
@@ -2143,6 +2145,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const { config } = await configManager.load()
     cachedApprovals = approvalsFrom(config.approvals)
     cachedRiskyCommands = riskyCommandRules(config.commands)
+    cachedSafeCommands = {
+      ...(config.commands?.safe !== undefined ? { extra: config.commands.safe } : {}),
+      ...(config.commands?.builtinSafe !== undefined
+        ? { builtin: config.commands.builtinSafe }
+        : {}),
+    }
     cachedCodeGenerator = codeGeneratorFor(config)
 
     /*
@@ -2413,6 +2421,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Read per request, so a rule added mid-session applies to the next command rather than
     // after a reload - which is when somebody adds one.
     () => cachedRiskyCommands,
+    /*
+     * Read per request too, and it depends on the **mode** rather than on config alone: switching
+     * back from Auto must take the relaxation with it, in the same turn.
+     */
+    () => ({
+      // `cachedModeId` rather than the turn-local mode: this closure outlives any one turn.
+      enabled: findMode(cachedModeId).autoApproveSafeCommands === true,
+      ...(cachedSafeCommands.extra !== undefined ? { extra: cachedSafeCommands.extra } : {}),
+      ...(cachedSafeCommands.builtin !== undefined
+        ? { builtin: cachedSafeCommands.builtin }
+        : {}),
+    }),
   )
 
   let mcpJson = '{\n  "mcpServers": {}\n}'

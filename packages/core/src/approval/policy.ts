@@ -2,6 +2,17 @@ import type { AutoApproveSettings, WorkspaceApprovals } from '../config/schema.j
 import type { ApprovableGroup, ToolGroup, ToolPreview } from '../tools/types.js'
 import { isCommandAllowlisted } from './commands.js'
 import { matchRiskyCommand, type RiskyCommandRule } from './riskyCommands.js'
+import { isSafeCommand, type SafeCommandOptions } from './safeCommands.js'
+
+/**
+ * Whether safe commands may run unprompted, and which count.
+ *
+ * `enabled` is the mode's business (`Mode.autoApproveSafeCommands`); the lists are the user's. Two
+ * separate questions, so neither can be answered by accident from the other.
+ */
+export interface SafeCommandPolicy extends SafeCommandOptions {
+  enabled: boolean
+}
 import { requiresApproval, type ApprovalDecision, type ApprovalGate, type ApprovalRequest } from './types.js'
 
 // Both shapes are inferred from the config schema so the validator and the runtime type
@@ -114,6 +125,13 @@ export function decideFromPolicy(
    * why there are built-in ones at all.
    */
   risky?: readonly RiskyCommandRule[] | undefined,
+  /**
+   * Read-only commands that may run unprompted, when the active mode allows it.
+   *
+   * Absent means nothing qualifies, which is every mode but Auto. See `safeCommands.ts` for why
+   * this may match a prefix when the allowlist may not.
+   */
+  safe?: SafeCommandPolicy | undefined,
 ): ApprovalDecision | undefined {
   if (!requiresApproval(request.group)) return 'approve'
 
@@ -135,6 +153,18 @@ export function decideFromPolicy(
   if (request.group === 'command') {
     const command = commandFromPreview(request.preview)
     if (command !== undefined && matchRiskyCommand(command, risky) !== undefined) return undefined
+  }
+
+  /*
+   * After the risky check and before everything else.
+   *
+   * After, so a rule can never be skipped by a command that also looks safe. Before `approvals`,
+   * because this is a property of the *mode* rather than of what the workspace has allowed — and a
+   * fresh workspace is exactly where twenty prompts an hour would be met first.
+   */
+  if (request.group === 'command' && safe?.enabled === true) {
+    const command = commandFromPreview(request.preview)
+    if (command !== undefined && isSafeCommand(command, safe)) return 'approve'
   }
 
   if (approvals === undefined) return undefined
@@ -176,11 +206,18 @@ export class PolicyApprovalGate implements ApprovalGate {
      * they went and added the one they were worried about.
      */
     private readonly getRisky?: () => readonly RiskyCommandRule[] | undefined,
+    /**
+     * Whether safe commands may run unprompted right now.
+     *
+     * A function because it depends on the **mode**, which the user changes between turns — a
+     * value captured here would keep Auto mode's relaxation after they had switched back.
+     */
+    private readonly getSafe?: () => SafeCommandPolicy | undefined,
   ) {}
 
   async requestApproval(request: ApprovalRequest): Promise<ApprovalDecision> {
     const risky = this.getRisky?.()
-    const decided = decideFromPolicy(request, this.getApprovals(), risky)
+    const decided = decideFromPolicy(request, this.getApprovals(), risky, this.getSafe?.())
     if (decided !== undefined) return decided
 
     /*

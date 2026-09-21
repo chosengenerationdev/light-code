@@ -728,8 +728,16 @@ export function Composer(props: ComposerProps): ReactElement {
               : 'Attach a file. Text is included in the message; this model is not known to accept images'
           }
           aria-label="Attach a file"
-          style={iconButtonStyle('secondary', props.isStreaming)}
-          disabled={props.isStreaming}
+          /*
+           * Offered mid-turn too.
+           *
+           * It was disabled while streaming, left over from when a message sent during a turn was
+           * refused outright. Queuing has carried attachments for a while — and paste and drop
+           * were never disabled — so the button was the only way in that still said no. Reported
+           * as "the attachment doesn't seem to be queued, only the message is passed on", which is
+           * exactly what it looks like: you click, nothing happens, and the text goes on its own.
+           */
+          style={iconButtonStyle('secondary', false)}
           onClick={() => fileInputRef.current?.click()}
         >
           <AttachIcon />

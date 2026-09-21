@@ -31,4 +31,16 @@ export interface Mode {
    * which is worse than having no rollback at all because the button is still there.
    */
   commandsEdit?: boolean
+  /**
+   * Read-only and compile-only commands may run without a prompt in this mode.
+   *
+   * Set for Auto mode alone, and it is a real relaxation rather than a convenience — so what it
+   * covers is narrow and enforced in one place (`approval/safeCommands.ts`), not inferred here.
+   *
+   * §8's "all auto-approve toggles ship off" still holds: this is not a toggle, it is what the
+   * mode *is*. Somebody choosing a mode called Auto, where nearly all the work arrives as
+   * commands, is asking for `cat` and `grep` not to interrupt them twenty times an hour. Nothing
+   * that writes, deletes or executes qualifies, and a risky rule still beats it.
+   */
+  autoApproveSafeCommands?: boolean
 }
