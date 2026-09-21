@@ -1818,6 +1818,11 @@ export function App(props: AppProps): ReactElement {
                 // Both spellings, merged by the one function that owns them — a config written
                 // before the list existed still reads back as a one-name list.
                 aliases: skillAliases({ embedder } as never),
+                // Resolved host-side; the panel only reports it, because it is derived rather
+                // than chosen and `embedder.indexName` is where it is changed.
+                ...(embedder?.skillsIndexName !== undefined
+                  ? { collection: embedder.skillsIndexName }
+                  : {}),
                 onSaveAliases: (aliases: string[]) =>
                   props.transport.post({
                     type: 'saveSkillsAlias',

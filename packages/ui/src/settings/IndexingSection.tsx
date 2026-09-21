@@ -10,6 +10,15 @@ export interface EmbedderState {
   dimensions?: number
   indexName?: string
   indexNameIsCustom?: boolean
+  /**
+   * What skills and tool documentation actually resolve to, alongside the codebase index.
+   *
+   * Resolved rather than configured, and shown read-only: somebody has to be able to match what
+   * Light Code writes against what is in the cluster. They were computed in four places and
+   * displayed in none.
+   */
+  skillsIndexName?: string
+  docsIndexName?: string
   indexPrefix?: string
   defaultIndexPrefix?: string
   /**
@@ -351,6 +360,37 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           onChange={(event) => setIndexName(event.target.value)}
           style={textFieldStyle()}
         />
+        {/*
+          The two that follow from it, named.
+
+          Both are derived from this one and neither had anywhere to be seen, so "where did my
+          skills go" had no answer short of listing the cluster and guessing. Shown together
+          because changing the field above moves all three at once, which is the thing worth
+          knowing before changing it.
+        */}
+        {(props.embedder?.skillsIndexName !== undefined ||
+          props.embedder?.docsIndexName !== undefined) && (
+          <span
+            style={{
+              display: 'block',
+              color: colors.muted,
+              fontSize: 11,
+              marginTop: 4,
+              fontFamily: 'var(--vscode-editor-font-family, monospace)',
+              wordBreak: 'break-all',
+            }}
+          >
+            {props.embedder.skillsIndexName !== undefined && (
+              <>skills → {props.embedder.skillsIndexName}</>
+            )}
+            {props.embedder.docsIndexName !== undefined && (
+              <>
+                <br />
+                tool docs → {props.embedder.docsIndexName}
+              </>
+            )}
+          </span>
+        )}
         <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
           Leave blank and one is derived from this folder&apos;s path — collision-free, but nobody
           looking at the cluster can tell whose it is. Name it if you share a cluster. Also how you

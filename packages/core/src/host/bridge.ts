@@ -7939,6 +7939,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(config.embedder?.skillsAlias !== undefined
         ? { skillsAlias: config.embedder.skillsAlias }
         : {}),
+      /*
+       * The collections these actually resolve to, as well as the codebase one.
+       *
+       * They were computed in four places and shown in none: the Search tab offered the codebase
+       * index as a placeholder and the skills and docs names appeared nowhere at all. That is a
+       * gap rather than a decision, and it got sharper once the derived name started carrying the
+       * owner — the point of a readable name is that somebody can match it against a cluster, and
+       * they could not see what it was.
+       */
+      ...(() => {
+        // Resolved once each: `exactOptionalPropertyTypes` will not take a `string | undefined`
+        // through a spread, and calling them twice to satisfy the narrowing would be two answers
+        // to one question.
+        const skills = skillsIndexName(config)
+        const docs = docsIndexName(config)
+        return {
+          ...(skills !== undefined ? { skillsIndexName: skills } : {}),
+          ...(docs !== undefined ? { docsIndexName: docs } : {}),
+        }
+      })(),
       defaultIndexPrefix: DEFAULT_INDEX_PREFIX,
       indexedFiles,
     })

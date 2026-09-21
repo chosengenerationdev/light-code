@@ -1,5 +1,19 @@
 # @chosengeneration/light-code
 
+## 0.88.1
+
+### Patch Changes
+
+- The skills and tool-doc collections are named in Settings
+
+  Everyone publishes their skills to their own collection and an alias spans them — but nothing in
+  Light Code ever said which collection yours was. Attaching an alias by hand, or matching what you
+  see in the cluster against what Light Code writes, meant guessing.
+
+  The Skills tab now says which collection this machine publishes into, and Settings → Search lists
+  what skills and tool documentation resolve to beneath the index name that derives them. Read-only:
+  `embedder.indexName` is still where all three are changed, and changing it moves all three.
+
 ## 0.88.0
 
 ### Minor Changes

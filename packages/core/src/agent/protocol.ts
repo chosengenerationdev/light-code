@@ -1640,6 +1640,16 @@ export type HostToUiMessage =
       indexNameIsCustom?: boolean
       /** The configured prefix, absent when the default is in use. */
       indexPrefix?: string
+      /**
+       * The collections skills and tool documentation actually resolve to.
+       *
+       * Resolved, not configured — unlike `indexPrefix` above, which round-trips what was typed.
+       * These are read-only in the UI: somebody needs to be able to match what Light Code writes
+       * against what is in the cluster, which is the whole point of the derived name being
+       * readable, and until now they were computed everywhere and shown nowhere.
+       */
+      skillsIndexName?: string
+      docsIndexName?: string
       /** What the prefix falls back to, so the field can show it as a placeholder. */
       defaultIndexPrefix: string
       /** Shared name across the team's indexes, absent when team scope is not set up. */

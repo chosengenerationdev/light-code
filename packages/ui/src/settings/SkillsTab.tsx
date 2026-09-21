@@ -111,6 +111,15 @@ export interface SkillsTabProps {
      * is kept as typed rather than sorted.
      */
     aliases?: string[]
+    /**
+     * The collection this machine publishes into, resolved.
+     *
+     * Shown because everyone publishes to their **own** and the alias spans them — so the one
+     * thing somebody needs when attaching an alias by hand, or matching what they see in the
+     * cluster against what Light Code writes, is this name. It was computed in four places and
+     * displayed in none.
+     */
+    collection?: string
     onSaveAliases: (aliases: string[]) => void
     onPublish: () => void
     onClear: () => void
@@ -164,6 +173,21 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         on each machine. Colleagues&rsquo; skills are returned in full, because they have no file
         on your disk to open. <strong>OpenSearch only.</strong>
       </p>
+
+      {/*
+        Your own collection, named.
+
+        The section already says "everyone publishes to their own collection" and then never said
+        which — so attaching an alias by hand, or matching what is in the cluster against what
+        Light Code writes, meant guessing. Read-only: it is derived from the owner and the
+        workspace, and `embedder.indexName` is where it is changed.
+      */}
+      {props.collection !== undefined && (
+        <div style={{ marginBottom: 10, fontSize: 11, color: colors.muted }}>
+          This machine publishes into{' '}
+          <code style={{ fontFamily: monospace, color: colors.foreground }}>{props.collection}</code>
+        </div>
+      )}
 
       <label htmlFor="lc-skills-alias" style={labelStyle()}>
         Shared skills aliases <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
