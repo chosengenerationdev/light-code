@@ -322,6 +322,16 @@ export interface SessionOptions {
   /** Where a shared profile's API key lives. Absent outside shared mode. */
   sharedSecrets?: SecretStore
   /**
+   * This server has more than one user.
+   *
+   * The same flag the role split reads, passed in rather than inferred from whether the shared
+   * stores happen to be present — "is this shared" is one fact, and deriving it twice is how two
+   * parts of the product end up disagreeing about it.
+   *
+   * Absent means a single user on their own machine, which is what `npx light-code` is.
+   */
+  shared?: boolean
+  /**
    * Submits a tool or skill for review instead of saving it.
    *
    * Supplied only for a session that may not approve its own work. An administrator's session gets
@@ -390,16 +400,26 @@ export async function createSession(
       new FetchHttpClient({ useEnvProxy: true }),
     ),
     /*
-     * No Excel, no Outlook, no mail index on a server.
+     * Excel, Outlook and the mail index — on your own machine, but never on a shared server.
      *
-     * Both attach over COM to an application running on somebody's *desktop*, which a service
-     * account has no route to even on Windows, and a mailbox belongs to a person rather than to
-     * the account this process runs as. So the feature is declined here rather than shipped and
-     * failing: the tools are not registered and the tab is not listed.
+     * This was a flat `false`, on the reasoning that both attach over COM to an application on
+     * somebody's *desktop*, which a service account has no route to even on Windows, and that a
+     * mailbox belongs to a person rather than to the account the process runs as.
      *
-     * The extension says nothing and keeps all of it — that is where the feature is used.
+     * **All of that is still true, and it is only true of a server.** The premise changed: the
+     * Node host also runs on a person's own Windows machine — somebody who can install Node but
+     * cannot reach a registry to install the extension — and there Excel and Outlook are exactly
+     * as reachable as they are from the extension, because it is the same desktop and the same
+     * session.
+     *
+     * So the decision is made from what actually distinguishes the two cases rather than from
+     * which host this is. `shared` is the same flag the role split reads, so the server case keeps
+     * precisely the behaviour it had.
+     *
+     * The platform half is not repeated here: `officeAvailable()` in the bridge already requires
+     * Windows, so a Linux server declines twice over and a Linux desktop declines once.
      */
-    offersOffice: false,
+    offersOffice: options.shared !== true,
     transport: options.transport,
     /*
      * A shared profile's API key belongs to the administrator and lives beside the shared config;

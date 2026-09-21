@@ -1520,7 +1520,15 @@ none of, so its behaviour is byte-identical to before. `apps/host/src/noOffice.t
 `providerExpert.test.ts` each end by asserting the extension declares neither — that is the half
 that keeps "node only" true as this grows.
 
-- **No Excel, no Outlook, no mail index** (`offersOffice: false`). Both attach over COM to an
+- ~~**No Excel, no Outlook, no mail index**~~ (`offersOffice: false`) — **revised 0.89.0.** The
+  argument below is unchanged and is only true of a *server*; the premise changed. The Node host
+  also runs on a person's own Windows machine — somebody who can install Node but cannot reach a
+  registry to install the extension — and there Excel and Outlook are exactly as reachable as they
+  are from the extension, because it is the same desktop and the same session. So the decision is
+  made from what actually separates the two cases: `offersOffice: options.shared !== true`, reading
+  the same flag the role split reads. A shared server keeps precisely the behaviour it had, and the
+  platform half is unchanged because `officeAvailable()` still requires Windows. The original
+  reasoning follows. Both attach over COM to an
   application on somebody's *desktop*, which a service account has no route to even on Windows,
   and a mailbox belongs to a person rather than to the account the process runs as. The tools are
   not registered and the Outlook tab is **not listed** — absent beats present-and-apologising, the
@@ -1548,6 +1556,50 @@ that keeps "node only" true as this grows.
   profile, and a description carrying it would make the model hoard consultations that cost
   nothing and expect a memory that does not exist. The *name* stays `ask_expert`, because the
   approval gate, the transcript, `recall_expert_advice` and the Junior guidance all refer to it.
+
+### The host carries itself: `--export-pkg` and `--export-code` (0.89.0)
+
+Asked for by somebody whose colleagues can install Node but cannot reach an artifactory, and who
+cannot reach GitHub from the office. Two flags, one idea: **the bundle carries everything it
+needs and everything it is made of.**
+
+- **`--export-pkg [file]`** writes a copy of the running bundle. It copies `__filename` rather
+  than a build artifact kept for the purpose, so nothing can go stale - what is handed over is
+  byte-for-byte what just ran, which is the failure mode that once put a dead `extension.js` in a
+  VSIX. Verified by running the copy in an empty directory: it served the page, the 960 KB
+  browser bundle and a guide SVG with no `node_modules` present.
+- **`--export-code [dir]`** writes the Node half of the repository, gzipped into the bundle
+  (6 MB of source to 1.7 MB). Files rather than an archive, because the person on the other end
+  wants a working tree. It refuses a directory that is not empty: it writes six hundred files,
+  and this is the machine with no `git` to undo them with.
+
+**The bundle is CommonJS now, and the extension on the output file is load-bearing.** Node decides
+a file's module kind from its extension, so an ESM bundle named `light-code-pkg` fails with
+"Cannot use import statement outside a module" - a baffling error for somebody handed a file and
+told to run it. CommonJS runs under any name, which is why `node light-code-pkg` works as asked.
+Inside the package the output must be `dist/cli.cjs`, because `apps/host` is `"type": "module"`
+and Node reads the nearest manifest before it reads the file.
+
+**The client assets are inlined and no longer shipped beside the bundle.** They were the last
+thing read from disk; with them in, `dist/cli.cjs` needs nothing next to it. Both stubs
+(`generated/clientAssets.ts`, `generated/sourcePack.ts`) are empty in the repository and replaced
+by esbuild plugins - committing the real ones would put megabytes of base64 into every diff -
+and `sourcePack.test.ts` fails if either stops being empty.
+
+**Two defects the round trip found, neither visible by inspection:**
+
+- **`.tsbuildinfo` was packed.** TypeScript's record of what it has already compiled, consulted
+  by `composite` projects before doing any work - so a packed one made `tsc` report success and
+  emit **nothing**, leaving `packages/core` with no `dist` and `packages/ui` unable to resolve
+  `@light-code/core/browser`. The error pointed at a module that was plainly present, which sends
+  you looking at the import rather than at the build.
+- **Importing `cli.ts` started a server.** `main()` ran at module scope, so a test that imported
+  `writeSourceTree` bound a port and printed a launch URL into the test output. Nothing failed,
+  which is what made it worth fixing. Guarded with `require.main === module`, behind `typeof`
+  checks because the tests run the file as ESM.
+
+The way both were found is the point: the exported tree was installed, built, run and tested. No
+reading of the file list would have shown either.
 
 ### Identity and credentials from the operator's own Python (2026-09-11)
 

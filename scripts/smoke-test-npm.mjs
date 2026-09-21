@@ -85,11 +85,19 @@ try {
 
   const installed = path.join(project, 'node_modules', manifest.name)
 
-  check('every asset the client needs is in the package', () => {
-    const missing = ['dist/cli.js', 'dist/client/client.js', 'dist/client/index.html', 'dist/client/client.css'].filter(
-      (asset) => !fs.existsSync(path.join(installed, asset)),
-    )
-    if (missing.length > 0) throw new Error(`missing ${missing.join(', ')}`)
+  check('the package is one self-contained file', () => {
+    /*
+     * The client used to be shipped beside the bundle and read from disk. It is inlined now, so
+     * shipping it as well would be a megabyte of the same bytes twice — and a second copy that
+     * nothing reads is a second thing to wonder about when a page looks wrong.
+     *
+     * What proves the inlining is not a file listing but the page actually being served, which
+     * the last check in this file does against a running server.
+     */
+    if (!fs.existsSync(path.join(installed, 'dist/cli.cjs'))) throw new Error('no dist/cli.cjs')
+    if (fs.existsSync(path.join(installed, 'dist/client'))) {
+      throw new Error('dist/client is still being shipped; it is inlined into the bundle now')
+    }
   })
 
   /*
@@ -100,17 +108,30 @@ try {
    * that once shipped a VSIX that could not activate.
    */
   check('the guide ships with its diagrams', () => {
-    const dir = path.join(installed, 'dist/client/guide')
-    if (!fs.existsSync(dir)) throw new Error('dist/client/guide is not in the package')
-    const svgs = fs.readdirSync(dir).filter((file) => file.endsWith('.svg'))
-    // Two palettes per step, and a step without both is a broken image for half the users.
-    if (svgs.length < 20) throw new Error(`only ${String(svgs.length)} diagrams packaged`)
-    const lopsided = svgs.filter((file) => !fs.existsSync(path.join(dir, file.replace('-light.svg', '-dark.svg'))))
-    if (lopsided.length > 0) throw new Error(`no dark variant for ${lopsided.join(', ')}`)
+    /*
+     * This caught the diagrams being left out of the tarball once, when `files` listed .js,
+     * .html and .css and the SVGs matched none of them: every published install would have shown
+     * fourteen broken images, and nothing else in the pipeline looks at what the *package*
+     * contains as opposed to what the build produced.
+     *
+     * It looks inside the bundle now rather than at the filesystem, because that is where they
+     * live. The property is unchanged - both palettes of every step reach the user - and so is
+     * the reason for checking it here.
+     */
+    const bundle = fs.readFileSync(path.join(installed, 'dist/cli.cjs'), 'utf8')
+    const names = [...bundle.matchAll(/guide\/([a-z0-9-]+)-(light|dark)\.svg/g)]
+    const steps = new Set(names.map((match) => match[1]))
+    if (steps.size < 10) throw new Error(`only ${String(steps.size)} guide steps inlined`)
+    for (const step of steps) {
+      for (const theme of ['light', 'dark']) {
+        if (!bundle.includes(`guide/${step}-${theme}.svg`)) {
+          throw new Error(`no ${theme} diagram for ${step}`)
+        }
+      }
+    }
   })
-
   check('the entry point keeps its shebang', () => {
-    const first = fs.readFileSync(path.join(installed, 'dist/cli.js'), 'utf8').split('\n')[0]
+    const first = fs.readFileSync(path.join(installed, 'dist/cli.cjs'), 'utf8').split('\n')[0]
     if (!first.startsWith('#!')) throw new Error(`first line is ${JSON.stringify(first)}`)
   })
 
@@ -139,7 +160,7 @@ try {
    * module resolution for the whole bundle without binding a port or writing anything.
    */
   check('it runs — every external resolves at runtime', () => {
-    const output = execFileSync(process.execPath, [path.join(installed, 'dist/cli.js'), '--help'], {
+    const output = execFileSync(process.execPath, [path.join(installed, 'dist/cli.cjs'), '--help'], {
       cwd: project,
       encoding: 'utf8',
       timeout: 30_000,
@@ -153,7 +174,7 @@ try {
     const port = 53987
     const child = execFileSync(
       process.execPath,
-      ['-e', startAndProbe(path.join(installed, 'dist/cli.js'), port, dataDir)],
+      ['-e', startAndProbe(path.join(installed, 'dist/cli.cjs'), port, dataDir)],
       { cwd: project, encoding: 'utf8', timeout: 60_000, stdio: 'pipe' },
     )
     const report = JSON.parse(child.trim().split('\n').pop())

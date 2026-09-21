@@ -34,7 +34,9 @@ async function start(): Promise<string> {
   running = await startServer({
     workspaceRoot: undefined,
     dataDir,
-    clientDir: path.join(dataDir, 'client'),
+    // The browser bundle is inlined at build time; these tests never fetch a page, so an
+    // empty map is the honest stand-in for it.
+    clientAssets: {},
     ripgrepPath: () => undefined,
     noToken: true,
     logSink: (line) => lines.push(line),

@@ -27,13 +27,16 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
 import { describeProxyEnvironment } from '@light-code/core'
 import type { IdentityProvider } from './identity.js'
 import { PythonToolIdentity, resolveIdentity } from './identityTool.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
 import { adminListPolicy } from './roles.js'
+import { gunzipSync } from 'node:zlib'
+import { CLIENT_ASSET_BYTES } from './generated/clientAssets.js'
+import { SOURCE_PACK } from './generated/sourcePack.js'
 import { OPERATOR_GUIDE } from './generated/operatorGuide.js'
 import { guidePage } from './guideHtml.js'
 import { renderGuide } from './guideText.js'
@@ -104,6 +107,36 @@ async function main(): Promise<void> {
     await fs.writeFile(file, guidePage(OPERATOR_GUIDE), 'utf8')
     process.stdout.write(`Opening the guide: ${file}\n(--guide --no-open prints it instead.)\n`)
     openBrowser(pathToFileURL(file).href)
+    return
+  }
+
+  /*
+   * The source, for somewhere GitHub cannot be reached.
+   *
+   * Baked into this bundle, so the single file `--export-pkg` writes carries its own source as
+   * well as the application. One thing to take in, which is the whole point where nothing can be
+   * downloaded on arrival.
+   */
+  if (args.includes('--export-code')) {
+    await exportCode(valueOf(args, '--export-code'))
+    return
+  }
+
+  /*
+   * A copy of this bundle, to carry somewhere that has Node and nothing else.
+   *
+   * Asked for by somebody whose colleagues can install Node but cannot reach an artifactory: a
+   * tarball is no use if `npm install` cannot resolve it. The server has bundled its own
+   * dependencies for a while for that reason; inlining the browser assets finished the job, so
+   * this file needs nothing beside it.
+   *
+   * **It copies the running file rather than a build artifact kept for the purpose.** There is
+   * then nothing that can go stale: what you hand over is byte-for-byte what just ran. The
+   * alternative — building a second `standalone.js` and shipping it — is one more thing to
+   * rebuild and exactly the shape that once put a dead `extension.js` in a VSIX (§19).
+   */
+  if (args.includes('--export-pkg')) {
+    await exportPackage(valueOf(args, '--export-pkg'))
     return
   }
 
@@ -290,11 +323,22 @@ async function main(): Promise<void> {
     await sharedConfig.save({ adminIds: effectiveAdminIds })
   }
 
-  const here = path.dirname(fileURLToPath(import.meta.url))
   const server = await startServer({
     workspaceRoot,
     dataDir,
-    clientDir: path.join(here, 'client'),
+    /*
+     * Decoded once, at startup.
+     *
+     * Per request would re-decode a megabyte of base64 for every page load, and the map is fixed
+     * for the life of the process — the build produced it. This is also the last thing that read
+     * from disk beside the bundle, which is what makes `--export-pkg` a single file.
+     */
+    clientAssets: Object.fromEntries(
+      Object.entries(CLIENT_ASSET_BYTES).map(([name, encoded]) => [
+        name,
+        Buffer.from(encoded, 'base64'),
+      ]),
+    ),
     // A function because `HostServices` asks per turn — see there for the extension update
     // that made a single resolution wrong. Resolved once here and handed over as a constant:
     // nothing moves a server's own `node_modules` under it mid-run.
@@ -541,6 +585,8 @@ async function main(): Promise<void> {
  */
 const KNOWN_FLAGS = new Set([
   '--help',
+  '--export-pkg',
+  '--export-code',
   '-h',
   '--version',
   '-v',
@@ -618,6 +664,135 @@ function resolveRipgrep(): string | undefined {
   }
 }
 
+/**
+ * Writes a copy of this bundle somewhere it can be carried.
+ *
+ * ## Why it copies itself
+ *
+ * Nothing can go stale: what is handed over is byte-for-byte what just ran. Building a separate
+ * `standalone.js` and shipping it would be one more artifact to keep in step, which is exactly the
+ * shape that once put a dead `extension.js` into a VSIX (§19).
+ *
+ * ## Why the extension matters and is chosen rather than accepted
+ *
+ * Node decides a file's module kind from its extension, and this bundle is CommonJS precisely so
+ * that `node light-code-pkg` works under any name. A name with an extension is taken as given —
+ * somebody who asks for `.mjs` gets `.mjs` and a clear failure — but a bare name is left bare,
+ * because that is the form people were told to use and CommonJS runs under it.
+ *
+ * `source` is passed in rather than read here so this is testable without a bundle to run.
+ */
+export async function writePackageCopy(
+  source: string,
+  target: string | undefined,
+): Promise<string> {
+  const destination = path.resolve(target ?? 'light-code-pkg')
+  await fs.mkdir(path.dirname(destination), { recursive: true })
+  await fs.copyFile(source, destination)
+  return destination
+}
+
+/**
+ * Writes the baked source tree into a directory.
+ *
+ * ## Why files rather than an archive
+ *
+ * A zip or a tar would need a format implementing or a dependency adding, and the person on the
+ * other end wants a working tree, not a file to unpack. Writing the files directly skips both.
+ *
+ * ## Why it refuses a directory that is not empty
+ *
+ * It writes several hundred files. Pointed at a folder somebody is already working in, the damage
+ * is indistinguishable from a bad merge and there is nothing to undo it with — this is precisely
+ * the machine where there is no `git`. Refusing costs one command; the other way round costs a
+ * day. An existing *empty* directory is fine, which is what a freshly made one is.
+ */
+export async function writeSourceTree(pack: string, target: string): Promise<number> {
+  if (pack.length === 0) {
+    throw new Error(
+      'This build carries no source. That happens when the bundle was not produced by ' +
+        '`pnpm build` — see apps/host/esbuild.mjs.',
+    )
+  }
+
+  const destination = path.resolve(target)
+  try {
+    const existing = await fs.readdir(destination)
+    if (existing.length > 0) {
+      throw new Error(
+        `${destination} is not empty. Give a new directory — this writes several hundred files ` +
+          'and will not merge them into work that is already there.',
+      )
+    }
+  } catch (error) {
+    // Not existing is the ordinary case, and the only one worth continuing past.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+
+  const files = JSON.parse(
+    gunzipSync(Buffer.from(pack, 'base64')).toString('utf8'),
+  ) as Record<string, string>
+
+  for (const [relative, contents] of Object.entries(files)) {
+    /*
+     * Every path is checked, although every path came from our own build.
+     *
+     * This writes to an arbitrary directory on somebody's machine, and "the build would not
+     * produce that" is not a boundary — the same rule `syncFromS3` follows about keys from a
+     * bucket that is trusted.
+     */
+    if (relative.split('/').includes('..') || path.isAbsolute(relative)) {
+      throw new Error(`Refusing to write "${relative}": it would land outside ${destination}.`)
+    }
+    const file = path.join(destination, relative)
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, contents, 'utf8')
+  }
+  return Object.keys(files).length
+}
+
+async function exportCode(target: string | undefined): Promise<void> {
+  const destination = path.resolve(target ?? 'light-code-src')
+  const count = await writeSourceTree(SOURCE_PACK, destination)
+  process.stdout.write(
+    `Wrote ${String(count)} files to ${destination}\n` +
+      `\n` +
+      `To build it there:\n` +
+      `  cd ${path.basename(destination)}\n` +
+      `  pnpm install --ignore-scripts\n` +
+      `  pnpm build
+` +
+      `  node apps/host/dist/cli.cjs\n` +
+      `\n` +
+      `The lockfile travels with it, so install resolves the same versions rather than\n` +
+      `whatever is newest on your mirror. This is the Node half: the VS Code extension\n` +
+      `(apps/vscode) is not included, so the root package and smoke scripts are not either.\n`,
+  )
+}
+
+async function exportPackage(target: string | undefined): Promise<void> {
+  /*
+   * `__filename` rather than `process.argv[1]`.
+   *
+   * An installed package is reached through a shim in `node_modules/.bin`, and argv[1] is that
+   * shim — copying it would hand somebody a two-line launcher that points at a `node_modules`
+   * they do not have. `__filename` is this bundle, which is the thing worth carrying. It exists
+   * because the bundle is CommonJS; see `esbuild.mjs` for why it is.
+   */
+  const written = await writePackageCopy(__filename, target)
+  const size = (await fs.stat(written)).size
+  process.stdout.write(
+    `Wrote ${written} (${String(Math.round(size / 1024))} KB)\n` +
+      `\n` +
+      `Copy it to a machine with Node ${'≥'} 17 and run:\n` +
+      `  node ${path.basename(written)}\n` +
+      `\n` +
+      `It needs nothing else — no npm install, no node_modules, no network.\n` +
+      `Search is the one exception: ripgrep is not bundled, so search_files and\n` +
+      `list_files say so and the rest works.\n`,
+  )
+}
+
 function openBrowser(url: string): void {
   const command =
     process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open'
@@ -688,6 +863,12 @@ Usage: light-code [options]
   --guide             Open the operator guide in your browser — setting up
                       shared mode, who can change what, and what it does not
                       protect against. Add --no-open to print it instead
+  --export-pkg [file] Write a single-file copy of this bundle (default
+                      light-code-pkg). Run it anywhere with Node and nothing
+                      else: no npm install, no node_modules, no network
+  --export-code [dir] Write the Node source it was built from (default
+                      light-code-src), for working on it where this
+                      repository cannot be reached
   -h, --help          This message
 
 Binds 127.0.0.1 unless --bind says otherwise. Anything that can reach the port
@@ -701,7 +882,24 @@ else. Read docs/hosting.md before sharing it.
 `
 }
 
-void main().catch((error: unknown) => {
-  process.stderr.write(`light-code: ${error instanceof Error ? error.message : String(error)}\n`)
-  process.exit(1)
-})
+/**
+ * Only when this file is what Node was asked to run.
+ *
+ * It used to start unconditionally, which is fine for a bundle nobody imports and wrong the moment
+ * anything does: a test that imported `writeSourceTree` from here **started a server**, bound a
+ * port and printed a launch URL into the test output. Nothing failed, which is what made it worth
+ * fixing — a stray listener in a test run is the kind of thing that is blamed on something else
+ * weeks later.
+ *
+ * `typeof` guards on both, because these are CommonJS globals and the tests run this file as ESM,
+ * where referencing either directly is a ReferenceError rather than `undefined`.
+ */
+const isEntryPoint =
+  typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module
+
+if (isEntryPoint) {
+  void main().catch((error: unknown) => {
+    process.stderr.write(`light-code: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  })
+}

@@ -1,24 +1,21 @@
 {
   "name": "@chosengeneration/light-code",
-  "version": "0.88.1",
+  "version": "0.89.0",
   "description": "A minimal agentic coding assistant, served to your browser from a local Node server",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "light-code": "dist/cli.js"
+    "light-code": "dist/cli.cjs"
   },
   "files": [
-    "dist/**/*.js",
-    "dist/**/*.html",
-    "dist/**/*.css",
-    "dist/**/*.svg",
+    "dist/**/*.cjs",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "node ../../scripts/generate-operator-guide.mjs && node esbuild.mjs",
     "typecheck": "tsc -b tsconfig.json",
-    "start": "node ./dist/cli.js",
+    "start": "node ./dist/cli.cjs",
     "generate:guide": "node ../../scripts/generate-operator-guide.mjs"
   },
   "devDependencies": {

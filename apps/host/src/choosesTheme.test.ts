@@ -37,7 +37,9 @@ describe('the settings the browser is sent', () => {
     running = await startServer({
       workspaceRoot: undefined,
       dataDir,
-      clientDir: path.join(dataDir, 'client'),
+      // The browser bundle is inlined at build time; these tests never fetch a page, so an
+      // empty map is the honest stand-in for it.
+      clientAssets: {},
       ripgrepPath: () => undefined,
       noToken: true,
       logSink: () => undefined,

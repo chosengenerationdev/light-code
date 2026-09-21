@@ -113,7 +113,14 @@ export interface ServerOptions {
   workspaceRoot: string | undefined
   dataDir: string
   /** Directory holding the built browser bundle. */
-  clientDir: string
+  /**
+   * The browser bundle, in memory, keyed by the names in `CLIENT_ASSETS`.
+   *
+   * Handed in rather than read from disk beside the bundle, which is what makes the server a
+   * single file somebody can copy to a machine with Node and no registry (`--export-pkg`). The
+   * build inlines them; see `generated/clientAssets.ts`.
+   */
+  clientAssets: Record<string, Buffer>
   ripgrepPath: () => string | undefined
   /** A Python function that fetches credentials, when one is configured. See `credentialTool.ts`. */
   credentialTool?: { interpreter: string; file: string }
@@ -432,6 +439,15 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       dataDir: options.dataDir,
       ripgrepPath: options.ripgrepPath,
       logSink: log,
+      /*
+       * The one fact, passed once.
+       *
+       * Decides whether Office is offered: on a shared server it is not, because COM reaches the
+       * service account's desktop rather than anybody's. `roles.shared` is already the answer to
+       * "is more than one person here", so the session reads it rather than re-deriving it from
+       * whichever shared store happens to be configured.
+       */
+      shared: roles.shared,
       // Passed straight through: the server owns no opinion about credentials, it only knows
       // whether the operator configured a source for them.
       ...(options.credentialTool !== undefined ? { credentialTool: options.credentialTool } : {}),
@@ -1024,20 +1040,21 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       reject(response, { status: 404, reason: 'Not found.' })
       return
     }
-    try {
-      // Only ever a value from the fixed table above, so no traversal is reachable here.
-      const body = await fs.readFile(path.join(options.clientDir, asset))
-      response.writeHead(200, {
-        'Content-Type': CONTENT_TYPES[path.extname(asset)] ?? 'application/octet-stream',
-        ...securityHeaders(),
-      })
-      response.end(body)
-    } catch {
+    // Only ever a value from the fixed table above, so no traversal is reachable here — and now
+    // there is no path at all, only a key into a map the build produced.
+    const body = options.clientAssets[asset]
+    if (body === undefined) {
       reject(response, {
         status: 500,
         reason: `Missing client asset "${asset}". Rebuild with pnpm build.`,
       })
+      return
     }
+    response.writeHead(200, {
+      'Content-Type': CONTENT_TYPES[path.extname(asset)] ?? 'application/octet-stream',
+      ...securityHeaders(),
+    })
+    response.end(body)
   }
 
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, bindAddress, resolve))

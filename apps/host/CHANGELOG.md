@@ -1,5 +1,28 @@
 # @chosengeneration/light-code
 
+## 0.89.0
+
+### Minor Changes
+
+- Carry Light Code to a machine that has Node and nothing else
+
+  **`light-code --export-pkg [file]`** writes a single file you can copy anywhere. Run it with
+  `node light-code-pkg` — no `npm install`, no `node_modules`, no network. The browser UI and the
+  guide diagrams are inside it; ripgrep is the one exception, so search degrades with a clear message
+  and everything else works.
+
+  **`light-code --export-code [dir]`** writes the Node source it was built from, lockfile included,
+  for working on it where this repository cannot be reached. `pnpm install --ignore-scripts && pnpm
+build` there and you have the same bundle back.
+
+  **Excel, Outlook and the mail index are available in the Node host again**, on your own machine.
+  They were declined outright because a service account on a server has no route to anybody's
+  desktop — which is still true, and only true of a server. Running it for yourself on Windows, they
+  work exactly as they do in the extension. A shared server (`--server`) still declines them.
+
+  The published bundle is now CommonJS at `dist/cli.cjs`, and the client assets are inside it rather
+  than beside it.
+
 ## 0.88.1
 
 ### Patch Changes
