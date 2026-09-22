@@ -1,5 +1,32 @@
 # @chosengeneration/light-code
 
+## 0.93.0
+
+### Minor Changes
+
+- Light Code can now answer questions about itself.
+
+  Ask it "why does it keep asking me to approve git status", "where is the config file", "how do I
+  turn Excel on", "how do I run something every morning" — and it reads its own handbook before
+  answering instead of telling you what it half-remembers about products with similar names. Fifteen
+  topics covering modes, approvals, providers and gateways, skills, Python tools, MCP, search,
+  Excel and Outlook, schedules, agents, Jupyter, context and cost, checkpoints, appearance, and what
+  to check when something is not working.
+
+  **It works on a fresh install with nothing configured.** The obvious home was the documentation
+  index, and that was the wrong one: it needs an embedder and a vector store, both off by default —
+  a help system that only works once you have set up search is missing exactly when you are stuck
+  setting things up. This is text in the bundle, matched by hand, reaching the model as a tool
+  result where it costs nothing at the front of the prompt.
+
+  **It is kept honest by a test rather than by discipline.** Every config key the handbook names is
+  checked against the real schema, and every mode and settings tab against the real ones, so a
+  rename breaks the build instead of leaving the assistant confidently telling you to set something
+  that does nothing. A document that has drifted from the software is worse than no document,
+  because you read it and stop looking.
+
+  **And it says when it does not know** rather than returning the nearest thing it has.
+
 ## 0.92.0
 
 ### Minor Changes

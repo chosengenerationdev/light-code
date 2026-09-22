@@ -5,6 +5,7 @@ import { askFollowupQuestionTool } from './askFollowupQuestion.js'
 import { createAskUserFormTool } from './askUserForm.js'
 import { attemptCompletionTool } from './attemptCompletion.js'
 import { executeCommandTool } from './executeCommand.js'
+import { createLightCodeHelpTool } from './help.js'
 import { listFilesTool } from './listFiles.js'
 import { readFileTool } from './readFile.js'
 import { readDocumentTool } from './readDocument.js'
@@ -37,6 +38,7 @@ export {
 } from './askUserForm.js'
 export { attemptCompletionTool } from './attemptCompletion.js'
 export { createReadToolResultTool } from './readToolResult.js'
+export { createLightCodeHelpTool, type LightCodeHelpParams } from './help.js'
 
 /**
  * The eight tools that don't require MCP (use_mcp_tool is Phase 5's job — there are no
@@ -55,6 +57,14 @@ export function createDefaultToolRegistry(): ToolRegistry {
   registry.register(createAskUserFormTool())
   registry.register(createShowChartTool())
   registry.register(createShowDiagramTool())
+  /*
+   * Light Code's own documentation, so it can answer questions about itself.
+   *
+   * A built-in rather than something registered conditionally, because there is nothing to
+   * configure: it reads a constant in the bundle and touches neither disk nor network. See
+   * `tools/help.ts` for why it stays advertised when the dispatcher hides most things.
+   */
+  registry.register(createLightCodeHelpTool())
   registry.register(attemptCompletionTool)
   return registry
 }

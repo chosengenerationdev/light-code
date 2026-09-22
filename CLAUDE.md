@@ -1410,6 +1410,52 @@ the dataframe already loaded, the model already fitted. `python.jupyterConnectio
 - A value that will not serialise comes back as its `repr`, **said out loud** (`resultIsRepr`), so
   nobody reads a picture of a DataFrame as the structure.
 
+## 12m. Light Code's own documentation, as a tool (0.107.0)
+
+Asked for directly: *"possible to provide built knowledge about light code to light code itself,
+so that it can answer me on how to use certain features or how to make certain config changes?"*
+`help/topics.ts` is the handbook and `tools/help.ts` the tool - `light_code_help`.
+
+- **A bundled corpus, not retrieval.** `search_docs` is the obvious home and the wrong one: it
+  needs an embedder and a vector store, both off by default. **A help system that only works once
+  you have configured search is absent exactly when somebody is stuck configuring things.** This
+  is plain text in the bundle, matched lexically, working on a fresh install with nothing set up.
+- **A tool, not prompt text.** The handbook is far too large for the prompt, and section 12's
+  cache rule means it could not be swapped in per turn anyway. As a tool it arrives as a *result*,
+  mid-conversation, where it costs nothing at the prefix - the carve-out section 12 already makes.
+- **Advertised even when the dispatcher hides everything else.** "How do I turn Excel on?" does
+  not look like a request to go and search for a tool, so a model that has to *think of searching*
+  answers from what it half-remembers about products with similar names instead. One stable entry
+  at the front of the prompt is the price, and a stable entry is what the cache rule asks for.
+- **`topics.test.ts` reads every config key the handbook names and fails if the schema lacks it.**
+  A document that describes a product it has drifted from is worse than none - section 14 records
+  that happening to `docs/hosting.md` - and this one is worse placed still, because the assistant
+  repeats it to the user as fact. Modes and settings tabs are checked the same way. Prose cannot
+  be, which is why entries are about mechanisms rather than about where buttons sit.
+
+**Four ranking faults, every one found by driving it with ordinary questions rather than by
+reading it.** They are pinned as a set in `topics.test.ts` because each is a different lesson:
+
+- **A long catch-all topic wins on volume.** `troubleshooting` mentions every feature in passing,
+  so "run something every morning" landed there rather than on `schedules`. The body's
+  contribution is capped: a body hit means the topic *touches* the subject, a title or keyword hit
+  means it *is* the subject, and only the second should decide.
+- **Filler in a title scores as the subject.** "how do I teach it about our internal library" went
+  to Approvals, whose title was "stopping it asking **about** everything".
+- **A generic verb in a title magnetises the commonest shape of question.** "change" sat in
+  Checkpoints' title and caught "how do I change the colour"; "writes" sat in the Python tools
+  title and caught "can it write an email for me". Both retitled. **In a help system, "how do I
+  change X" is most of the questions** - so a title must name its subject and nothing else.
+- **A compound keyword must not contribute its separate words.** `config file` gave the overview
+  topic "file", which then scored as strongly on "it is not finding my files" as the topic
+  actually about that. Splitting a compound does not add specificity, it spends it. A matched
+  phrase now outranks any single word, because it is strictly more specific.
+
+**And it says when it has nothing.** Below the body cap no topic is *about* the question, so
+returning the top of a pile of noise would be a coin toss presented as an answer - "nothing
+happens when I send a message" came back as the Outlook topic, which would have had the model
+explaining mail to somebody with a broken session.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
