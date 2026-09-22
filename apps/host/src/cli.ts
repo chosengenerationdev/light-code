@@ -29,7 +29,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
-import { describeProxyEnvironment } from '@light-code/core'
+import { checkConnectionFile, describeProxyEnvironment, JUPYTER_CONNECTION_ENV } from '@light-code/core'
 import type { IdentityProvider } from './identity.js'
 import { PythonToolIdentity, resolveIdentity } from './identityTool.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
@@ -214,6 +214,32 @@ async function main(): Promise<void> {
    */
   const credentialTool = valueOf(args, '--credential-tool')
   const credentialPython = valueOf(args, '--credential-python') ?? identityPython
+  /*
+   * The Jupyter kernel this session's Python tools run inside.
+   *
+   * For the case this exists for: a notebook launches Light Code and wants its tools to see the
+   * session's own state. The notebook passes its own connection file, because a kernel is the
+   * only thing that knows which kernel it is - `from ipykernel import get_connection_file`.
+   *
+   * Set into the environment rather than threaded through `startServer`, because that variable
+   * is what the Python worker reads in any case, and a second route to the same fact is the
+   * drift this repository keeps paying for. It also means a notebook that spawns us can set the
+   * variable directly and skip the flag entirely.
+   */
+  const jupyterKernel = valueOf(args, '--jupyter-kernel')
+  if (jupyterKernel !== undefined) {
+    const resolved = path.resolve(jupyterKernel)
+    const check = await checkConnectionFile(resolved)
+    if (!check.ok) {
+      // Refused at startup rather than at the first tool call, for Test Connection's reason
+      // (section 10): a path that is wrong should say so while somebody is looking at it.
+      process.stderr.write(`light-code: ${check.problem}
+`)
+      process.exitCode = 1
+      return
+    }
+    process.env[JUPYTER_CONNECTION_ENV] = resolved
+  }
   const workspaceRoot = path.resolve(valueOf(args, '--workspace') ?? process.cwd())
   const dataDir = valueOf(args, '--data-dir') ?? envPaths('light-code', { suffix: '' }).data
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
@@ -610,6 +636,7 @@ const KNOWN_FLAGS = new Set([
   '--identity-python',
   '--credential-tool',
   '--credential-python',
+  '--jupyter-kernel',
   '--bind',
   '--guide',
 ])

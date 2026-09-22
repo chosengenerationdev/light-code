@@ -37,7 +37,7 @@ export interface S3Mirror {
   connectionId: string
   prefix?: string | undefined
   enabled?: boolean | undefined
-  /** New skills are also copied to this one. At most one folder carries it. */
+  /** Newly written skills or tools are also uploaded here. At most one folder carries it. */
   publish?: boolean | undefined
 }
 
@@ -106,6 +106,15 @@ export function S3Section(props: S3SectionProps): ReactElement {
   const setRow = (index: number, change: Partial<S3Mirror>): void => {
     setRows(rows.map((row, at) => (at === index ? { ...row, ...change } : row)))
   }
+
+  /**
+   * Whether the folder's connection refuses writes.
+   *
+   * The host declines an upload to one silently, so this is what keeps "Save new here" from
+   * being a tick that looks applied and does nothing.
+   */
+  const isReadOnly = (connectionId: string): boolean =>
+    props.connections.find((connection) => connection.id === connectionId)?.readOnly === true
 
   const what = props.kind === 'skills' ? 'skills' : 'Python tools'
   const extension = props.kind === 'skills' ? '.md' : '.py'
@@ -412,30 +421,59 @@ export function S3Section(props: S3SectionProps): ReactElement {
                   />
                   Use
                 </label>
-                {props.kind === 'skills' && (
-                  /*
-                   * At most one, enforced here rather than left to the user.
-                   *
-                   * Two folders both receiving new skills would make "where did that go"
-                   * unanswerable - so ticking one unticks the rest, which is the same shape the
-                   * local folders already have: many read from, one written to.
-                   */
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-                    <input
-                      type="checkbox"
-                      checked={row.publish === true}
-                      onChange={(event) =>
-                        setRows(
-                          rows.map((other, at) => ({
-                            ...other,
-                            publish: event.target.checked ? at === index : false,
-                          })),
-                        )
-                      }
-                    />
-                    Save new here
-                  </label>
-                )}
+                {/*
+                 * At most one, enforced here rather than left to the user.
+                 *
+                 * Two folders both receiving new files would make "where did that go"
+                 * unanswerable - so ticking one unticks the rest, which is the same shape the
+                 * local folders already have: many read from, one written to.
+                 *
+                 * **Shown for Python tools as well as skills**, which it was not. The host half
+                 * had always been there - `onToolSaved` uploads a newly created tool to whichever
+                 * mirror is `publish` - but no control ever set that flag on a tools folder, so
+                 * the condition was unreachable and a tool written here never left this machine.
+                 * Downloading worked, which is what made it look like syncing worked: files
+                 * arrived, nothing ever went back, and there was nothing on screen to suggest a
+                 * direction had been left out.
+                 */}
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 12,
+                    /*
+                     * A read-only connection cannot receive an upload, and the host simply
+                     * declines - so a tick on one would be a setting that looks applied and does
+                     * nothing. Said here rather than discovered when the first tool fails to
+                     * appear for anybody else.
+                     */
+                    opacity: isReadOnly(row.connectionId) ? 0.5 : 1,
+                  }}
+                  title={
+                    isReadOnly(row.connectionId)
+                      ? 'This connection is marked read-only, so nothing can be uploaded to it.'
+                      : props.kind === 'skills'
+                        ? 'New skills are uploaded to this folder as well as saved here.'
+                        : 'New Python tools are uploaded to this folder as well as saved here. ' +
+                          'Colleagues still approve each one on their own machine before it runs.'
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    disabled={isReadOnly(row.connectionId)}
+                    checked={row.publish === true && !isReadOnly(row.connectionId)}
+                    onChange={(event) =>
+                      setRows(
+                        rows.map((other, at) => ({
+                          ...other,
+                          publish: event.target.checked ? at === index : false,
+                        })),
+                      )
+                    }
+                  />
+                  Save new here
+                </label>
                 <button
                   type="button"
                   style={secondaryButtonStyle()}

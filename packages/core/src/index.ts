@@ -20,7 +20,7 @@ export {
   type ResolveTlsOptions,
 } from './platform/connectionTls.js'
 
-export type { LightCodeConfig } from './config/schema.js'
+export type { CommandRules, LightCodeConfig } from './config/schema.js'
 export { configSchema, parseConfig, ConfigValidationError } from './config/schema.js'
 export {
   resolveSessionVariables,
@@ -65,6 +65,15 @@ export {
   mentionExcludes,
 } from './context/mentionExcludes.js'
 export { compareMentionCandidates, matchesMentionQuery } from './context/mentionRanking.js'
+export { mentionGlob, mentionSegment } from './context/mentionGlob.js'
+export {
+  JUPYTER_CONNECTION_ENV,
+  checkConnectionFile,
+  describeKernels,
+  discoverKernels,
+  runtimeDirs,
+  type KernelCandidate,
+} from './python/jupyter.js'
 export {
   GUIDE_STEPS,
   GUIDE_TITLE,

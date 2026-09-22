@@ -75,6 +75,23 @@ export const pythonConfigSchema = z
      */
     interpreterPath: z.string(),
     /**
+     * A running Jupyter kernel to execute tools **inside**, named by its connection file.
+     *
+     * Set so a notebook can drive Light Code and have its tools see the session's own state —
+     * the dataframe already loaded, the model already fitted. With it, a tool call is executed
+     * in that kernel rather than in this worker's own interpreter.
+     *
+     * **The notebook names it; nothing here guesses.** A kernel knows its own connection file
+     * and nothing outside it does, so with two kernels running a guess means executing inside
+     * the wrong notebook. See `python/jupyter.ts` for the argument and for the one line a
+     * notebook needs.
+     *
+     * Covered by `python` being user-scope only (invariant 5), and it belongs there on its own
+     * merits: a repository able to set it would run this machine's approved tools against a
+     * session of its choosing.
+     */
+    jupyterConnectionFile: z.string(),
+    /**
      * Package index for tool dependencies. §3 treats `uv` resolving PyPI as *our* egress
      * rather than the user's, so pointing it at an internal mirror is the expected
      * corporate configuration, not an edge case.
@@ -1133,6 +1150,15 @@ export const configSchema = z
   .partial()
 
 export type LightCodeConfig = z.infer<typeof configSchema>
+
+/**
+ * The user's command rules: what always asks, and what Auto mode may run unprompted.
+ *
+ * Derived from the schema rather than written out again, so the panel that edits these and the
+ * loader that validates them cannot drift — §15's single-schema rule, which this file already
+ * applies to `WorkspaceApprovals`.
+ */
+export type CommandRules = NonNullable<LightCodeConfig['commands']>
 
 export class ConfigValidationError extends Error {
   constructor(

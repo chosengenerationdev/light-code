@@ -1,7 +1,7 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
 import { CUSTOM_ROLE_LIMIT, skillAliases } from '@light-code/core/browser'
 import type { S3Mirror } from './settings/S3Section.js'
-import type { CheckpointView, ProbeTarget } from '@light-code/core/browser'
+import type { CheckpointView, CommandRules, ProbeTarget } from '@light-code/core/browser'
 import {
   DEFAULT_MODE_ID,
   type ApprovalDecision,
@@ -146,6 +146,8 @@ export function App(props: AppProps): ReactElement {
   const [maxIterations, setMaxIterations] = useState(25)
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [readRoots, setReadRoots] = useState<string[]>([])
+  /** The user's own command rules — global, unlike `approvals`. */
+  const [commandRules, setCommandRules] = useState<CommandRules>({})
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   /**
    * The team, as the host resolved it.
@@ -552,6 +554,7 @@ export function App(props: AppProps): ReactElement {
         setMaxIterations(message.maxIterations)
         setAccentColor(message.accentColor)
         setReadRoots(message.readRoots)
+        setCommandRules(message.commandRules)
         setExpertColor(message.expertColor)
         // Applied straight to the document root rather than threaded through props: the
         // stylesheet reads the CSS variables, and it cannot read React state.
@@ -1623,6 +1626,10 @@ export function App(props: AppProps): ReactElement {
             readRoots={readRoots}
             onSetReadRoots={(roots) =>
               props.transport.post({ type: 'setReadRoots', roots } satisfies UiToHostMessage)
+            }
+            commandRules={commandRules}
+            onSetCommandRules={(rules) =>
+              props.transport.post({ type: 'setCommandRules', rules } satisfies UiToHostMessage)
             }
             accentColor={accentColor}
             onSetAccentColor={(value) => {

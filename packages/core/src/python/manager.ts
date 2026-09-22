@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Logger } from '../logging/logger.js'
 import type { SecretStore } from '../platform/secrets.js'
+import { JUPYTER_CONNECTION_ENV } from './jupyter.js'
 import { pythonEnvEntries, resolvePythonEnv, type PythonEnvEntry } from './env.js'
 import type { Tool } from '../tools/types.js'
 import type { CodeGenerator } from './codeGenerator.js'
@@ -191,6 +192,8 @@ export class PythonManager {
    * changed variable would apply at the next window rather than the next call.
    */
   private envEntries: PythonEnvEntry[] = []
+  /** The Jupyter kernel tools run in, when this session was given one. See `jupyter.ts`. */
+  private jupyterConnectionFile: string | undefined
   private envFingerprint = ''
   private missingEnv: string[] = []
 
@@ -223,6 +226,13 @@ export class PythonManager {
     extraToolDirs?: readonly string[] | undefined
     /** `name -> hash` the user declined, so those exact bytes are not offered. */
     declinedTools?: Record<string, string> | undefined
+    /**
+     * A Jupyter kernel to run tools *inside*, named by its connection file.
+     *
+     * The notebook tells us; we never guess which kernel is which. `jupyter.ts` has the whole
+     * argument and the one line a notebook needs.
+     */
+    jupyterConnectionFile?: string | undefined
   }): Promise<void> {
     const enabled = config.dynamicTools === 'on'
     if (!enabled) {
@@ -253,7 +263,29 @@ export class PythonManager {
      * one, and the next call spawns a fresh worker.
      */
     this.envEntries = pythonEnvEntries(config.env)
-    const fingerprint = JSON.stringify(this.envEntries)
+    /*
+     * The kernel is part of the environment fingerprint below, on purpose.
+     *
+     * Pointing a session at a different notebook has to restart the worker for the same reason
+     * a changed variable does: a child takes its environment once, at construction, and this
+     * one is long-lived. Without it, choosing a kernel would appear to do nothing until the
+     * window was reopened - and the failure would be silent, because the tools would keep
+     * working, just in the wrong place.
+     */
+    /*
+     * The session's own kernel beats the stored one, and that order is deliberate.
+     *
+     * A session started by a notebook - `--jupyter-kernel`, or the variable set when it spawned
+     * us - was told which kernel by the only thing that knows. A value in config is standing,
+     * and a stored connection file is stale the moment that kernel restarts, because Jupyter
+     * writes a new one. So the specific, current statement wins over the general, possibly old
+     * one.
+     */
+    const fromEnvironment = (process.env[JUPYTER_CONNECTION_ENV] ?? '').trim()
+    const fromConfig = (config.jupyterConnectionFile ?? '').trim()
+    const kernel = fromEnvironment.length > 0 ? fromEnvironment : fromConfig
+    this.jupyterConnectionFile = kernel.length > 0 ? kernel : undefined
+    const fingerprint = JSON.stringify([this.envEntries, this.jupyterConnectionFile])
     if (fingerprint !== this.envFingerprint) {
       this.envFingerprint = fingerprint
       if (this.worker !== undefined) {
@@ -657,7 +689,24 @@ export class PythonManager {
   private async childEnv(): Promise<NodeJS.ProcessEnv> {
     const resolved = await resolvePythonEnv(this.envEntries, this.options.secrets)
     this.missingEnv = resolved.missing
-    return minimalPythonEnv({ ...(this.options.sessionEnv?.() ?? {}), ...resolved.env })
+    return minimalPythonEnv({
+      ...(this.options.sessionEnv?.() ?? {}),
+      /*
+       * The Jupyter kernel tools run in, when the session was given one.
+       *
+       * Here rather than at the spawn site for this function's own reason: the worker, `uv
+       * venv` and a dependency install must all agree about which environment they are in, and
+       * a variable set at one of three places is the drift this file exists to prevent.
+       *
+       * Before `resolved.env`, so a user who declares the same name in `python.env` wins. They
+       * have said something more specific than the session default, and silently overriding a
+       * declaration would be the setting not working.
+       */
+      ...(this.jupyterConnectionFile !== undefined
+        ? { [JUPYTER_CONNECTION_ENV]: this.jupyterConnectionFile }
+        : {}),
+      ...resolved.env,
+    })
   }
 
   async dispose(): Promise<void> {

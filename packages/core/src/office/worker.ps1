@@ -2133,6 +2133,140 @@ function Invoke-OutlookHarvest {
   `Display` opens Outlook's own read window - the real message, with its formatting, exactly as
   the user would see it if they had found it themselves. Nothing is modified and nothing is sent.
 #>
+<#
+  Composes a message and puts it on screen. It never sends one.
+
+  ## The rule this is built around
+
+  Requested in exactly these terms: create the mail, attach what it needs, fill in the
+  recipients if they were given, show it to the user, and let *them* press Send. So there is
+  no Send call in here at all - not behind a flag, not behind a parameter. A flag would be one
+  typo away from sending somebody's half-written mail to a distribution list, and the whole
+  value of the feature is that a person reads it first.
+
+  ## Why it is not saved either
+
+  Display() shows the message without filing it. Closing the window then offers to save it,
+  which is Outlook's own behaviour and the user's escape hatch - the same reasoning that leaves
+  an edited workbook dirty rather than saving it for them. Saving to Drafts here would leave
+  an item behind every time somebody decided against sending.
+
+  ## Recipients are resolved, not just typed in
+
+  Assigning a string to .To leaves it unresolved, so an unknown or ambiguous name sits there
+  looking correct and fails at send time in front of whoever is sending it. Recipients.Add plus
+  ResolveAll checks each one now, and the ones that did not resolve are reported back by name
+  so the assistant can say which. An unresolvable address is still left in place rather than
+  dropped: it may be an external address Outlook has no entry for, and silently removing a
+  recipient is the worst of the available failures.
+#>
+function Invoke-OutlookCreateDraft {
+    param($Request)
+
+    # Attached, never launched, exactly as everything else here is. Creating an item on an
+    # application that is not running would start Outlook invisibly and put the draft somewhere
+    # nobody is looking.
+    $app = Get-OfficeApp -ProgId 'Outlook.Application' -AttachOnly $true
+    $mail = $app.CreateItem(0)   # olMailItem
+
+    $unresolved = @()
+    # olTo = 1, olCC = 2, olBCC = 3.
+    $buckets = @(
+        @{ Values = $Request.to;  Type = 1 },
+        @{ Values = $Request.cc;  Type = 2 },
+        @{ Values = $Request.bcc; Type = 3 }
+    )
+    foreach ($bucket in $buckets) {
+        if ($null -eq $bucket.Values) { continue }
+        foreach ($address in $bucket.Values) {
+            $text = [string]$address
+            if ([string]::IsNullOrWhiteSpace($text)) { continue }
+            $recipient = $mail.Recipients.Add($text.Trim())
+            $recipient.Type = $bucket.Type
+            if (-not $recipient.Resolve()) { $unresolved += $text.Trim() }
+        }
+    }
+
+    if ($null -ne $Request.subject) { $mail.Subject = [string]$Request.subject }
+
+    <#
+      Attachments are added before the body is written, and that ordering is load-bearing.
+
+      An inline image is an attachment carrying a content id that the HTML refers to as
+      "cid:whatever". Setting HTMLBody first and attaching afterwards leaves Outlook holding a
+      body whose img tags point at nothing - it renders as a broken-image placeholder, which
+      looks like the picture failed to attach rather than like the order being wrong.
+    #>
+    $attached = @()
+    $missing = @()
+    $inlineCids = @{}
+
+    if ($null -ne $Request.attachments) {
+        foreach ($file in $Request.attachments) {
+            $path = [string]$file
+            if ([string]::IsNullOrWhiteSpace($path)) { continue }
+            if (-not (Test-Path -LiteralPath $path)) { $missing += $path; continue }
+            $null = $mail.Attachments.Add((Resolve-Path -LiteralPath $path).Path)
+            $attached += (Split-Path -Leaf $path)
+        }
+    }
+
+    if ($null -ne $Request.inlineImages) {
+        foreach ($image in $Request.inlineImages) {
+            $path = [string]$image.path
+            if ([string]::IsNullOrWhiteSpace($path)) { continue }
+            if (-not (Test-Path -LiteralPath $path)) { $missing += $path; continue }
+
+            $item = $mail.Attachments.Add((Resolve-Path -LiteralPath $path).Path)
+            $cid = [string]$image.cid
+            if ([string]::IsNullOrWhiteSpace($cid)) { $cid = 'img' + [string]($inlineCids.Count + 1) }
+
+            <#
+              PR_ATTACH_CONTENT_ID_W. This is what makes an attachment an *embedded* picture
+              rather than a paperclip: without it the file is attached and the img tag has
+              nothing to resolve against.
+
+              Wrapped because the property is refused on some stores and some older builds, and
+              an image that arrives as an ordinary attachment is a far better outcome than a
+              draft that could not be created at all. What it degrades to is reported rather
+              than hidden, so the assistant can say the picture is attached but not inline.
+            #>
+            try {
+                $item.PropertyAccessor.SetProperty(
+                    'http://schemas.microsoft.com/mapi/proptag/0x3712001F', $cid)
+                $inlineCids[$cid] = (Split-Path -Leaf $path)
+            } catch {
+                $attached += (Split-Path -Leaf $path)
+            }
+        }
+    }
+
+    $body = if ($null -ne $Request.body) { [string]$Request.body } else { '' }
+    if ($Request.html -eq $true) {
+        $mail.HTMLBody = $body
+    } else {
+        $mail.Body = $body
+    }
+
+    <#
+      Shown, not sent and not saved.
+
+      Display($false) is the non-modal form: the worker must not block waiting for a window
+      somebody may leave open for an hour, and a modal call here would hold the single request
+      pipe and time out every other Office tool behind it.
+    #>
+    $mail.Display($false)
+
+    return @{
+        displayed   = $true
+        subject     = [string]$mail.Subject
+        attached    = @($attached)
+        inline      = @($inlineCids.Keys)
+        missing     = @($missing)
+        unresolved  = @($unresolved)
+    }
+}
+
 function Invoke-OutlookDisplay {
     param($Request)
 
@@ -2263,6 +2397,7 @@ function Invoke-Request {
         'outlook.folders'       { return Invoke-OutlookFolders -Request $Request }
         'outlook.validateFolder' { return Invoke-OutlookValidateFolder -Request $Request }
         'outlook.harvest'       { return Invoke-OutlookHarvest -Request $Request }
+        'outlook.createDraft'   { return Invoke-OutlookCreateDraft -Request $Request }
         'outlook.display'       { return Invoke-OutlookDisplay -Request $Request }
         'outlook.search'        { return Invoke-OutlookSearch -Request $Request }
         'outlook.read'          { return Invoke-OutlookRead -Request $Request }

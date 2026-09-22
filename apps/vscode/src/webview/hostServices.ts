@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { Logger, mentionExcludeGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
+import { Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { createRipgrepResolver } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
@@ -95,7 +95,16 @@ export function createVSCodeHostServices(
      * ended up in the picker. Passing `undefined` restores the editor's own handling, which is
      * what an emptied list should mean.
      */
-    async findFiles(pattern, limit, excludeFolders) {
+    async findFiles(segment, limit, excludeFolders) {
+      /*
+       * Compiled here, because this is the host whose index speaks glob.
+       *
+       * `findFiles` is ripgrep underneath, so a pattern built by interpolating what the user
+       * typed is both case-sensitive and open to their keystrokes being read as syntax. Both
+       * were real and both looked like the search failing rather than the pattern — see
+       * `context/mentionGlob.ts`, which owns the compilation and records what was measured.
+       */
+      const pattern = mentionGlob(segment)
       const exclude = mentionExcludeGlob(excludeFolders)
       const found =
         exclude === undefined

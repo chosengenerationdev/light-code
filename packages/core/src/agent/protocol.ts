@@ -11,7 +11,7 @@ import type { ResolvedVariable, SessionVariable } from '../session/variables.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
-import type { VectorStoreKind } from '../config/schema.js'
+import type { CommandRules, VectorStoreKind } from '../config/schema.js'
 import type { JuniorAssessment } from '../expert/assessment.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
@@ -533,6 +533,14 @@ export type UiToHostMessage =
   | { type: 'setMaxIterations'; value: number }
   /** Folders tools may read outside the workspace. Replaces the whole list. */
   | { type: 'setReadRoots'; roots: string[] }
+  /**
+   * The user's command rules, replaced as a whole.
+   *
+   * One message for both lists and both built-in switches, because they are edited together on
+   * one panel and saving them separately would let a half-applied change sit there looking
+   * complete — the two lists are read as a pair on every command.
+   */
+  | { type: 'setCommandRules'; rules: CommandRules }
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
   | { type: 'setExpertColor'; value: string }
@@ -1134,6 +1142,17 @@ export type HostToUiMessage =
       expertColor: string
       /** Folders tools may read beyond the workspace. Reading only — writes stay confined. */
       readRoots: string[]
+      /**
+       * The user's own command rules: what always asks, and what Auto mode may run unprompted.
+       *
+       * Both lists existed in the config schema and in the approval path from the day they were
+       * added, and neither had anywhere to be edited — so the honest answer to "how do I add my
+       * own rule" was "hand-edit `config.json`", which nobody was told either. Reported here
+       * rather than with `approvals` because the two are scoped differently: approvals are per
+       * workspace, these are global, since "never run `rm -rf` without asking me" is a statement
+       * about how somebody works rather than about one project.
+       */
+      commandRules: CommandRules
       /**
        * Which profile writes Python tool source, or absent when the chat model does.
        *

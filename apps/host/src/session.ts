@@ -198,12 +198,17 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
      * A plain recursive walk, since there is no editor index to borrow. Pruned at the
      * directories that would otherwise dominate the result and the runtime.
      */
-    async findFiles(pattern, limit, excludeFolders) {
+    async findFiles(segment, limit, excludeFolders) {
       if (workspaceRoot === undefined) return []
-      const needle = pattern
-        .replace(/^\*\*\//, '')
-        .replace(/\*/g, '')
-        .toLowerCase()
+      /*
+       * Compared directly, because this host walks the tree itself and has no glob to speak.
+       *
+       * It used to be handed a pattern and strip the `*`s back out to recover the text. That
+       * worked only while the pattern was a bare interpolation — the moment the editor host
+       * started compiling a case-insensitive one, `[aA][pP][pP]` would have become the needle
+       * and matched nothing. One fact, expressed once by whoever needs it.
+       */
+      const needle = segment.toLowerCase()
       // The same list the editor host applies, resolved from config by the bridge.
       const skip = new Set(excludeFolders)
       const found: string[] = []

@@ -1,5 +1,6 @@
 import { CustomDataTab, type CustomDataTabProps } from './CustomDataTab.js'
 import type {
+  CommandRules,
   ApprovableGroup,
   McpPlatform,
   McpServerConfig,
@@ -52,6 +53,9 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetMaxIterations: (value: number) => void
   readRoots: string[]
   onSetReadRoots: (roots: string[]) => void
+  /** The user's own command rules. Global, unlike `approvals`. */
+  commandRules: CommandRules
+  onSetCommandRules: (rules: CommandRules) => void
   accentColor: string
   onSetAccentColor: (value: string) => void
   expertColor: string
@@ -349,6 +353,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onSetMaxIterations={props.onSetMaxIterations}
             readRoots={props.readRoots}
             onSetReadRoots={props.onSetReadRoots}
+            commandRules={props.commandRules}
+            onSetCommandRules={props.onSetCommandRules}
           />
         ) : shown === 'search' ? (
           <SearchTab {...props.search} />

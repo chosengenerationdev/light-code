@@ -1264,6 +1264,125 @@ is satisfied because a mode is resolved once per turn.
 
 ---
 
+## 12j. Five reported faults, and where each one actually was (0.105.0)
+
+Reported together. Two of them were features that looked present and had no other end, which is
+the shape §19 keeps recording; one was a pattern nobody had thought of as code.
+
+- **The `@` picker was blind to case, and it is the picker's own glob that was wrong** (reported:
+  "still not finding many files in my local code base... any cache has to be cleared?"). No cache.
+  `vscode.workspace.findFiles` is ripgrep underneath and ripgrep globs match case exactly —
+  measured against the shipped `rg.exe`: `**/*app*` returns **nothing** for `App.tsx`, `**/*App*`
+  returns it. So lowercase typing never found a PascalCase filename, which in a TypeScript or
+  Python repository is most of them. **Every other part of the feature had already decided this
+  the other way** — `compareMentionCandidates` and `matchesMentionQuery` lowercase both sides, and
+  the Node host's walk does `toLowerCase().includes()`. One place disagreed, which is why it read
+  as the *search* being broken rather than the pattern.
+  The second half: the typed text went into a glob parser unescaped, so `@data[1].csv` was a
+  character class and matched nothing — the picker went empty exactly when somebody was being most
+  specific.
+  **`context/mentionGlob.ts` owns the compilation, and the segment now crosses the host boundary
+  as text rather than as a pattern.** The Node host used to be handed a glob and strip the `*`s
+  back out to recover the text; that worked only while the pattern was a bare interpolation, and
+  `[aA][pP][pP]` would have become its needle. One fact, expressed once by whoever needs it.
+- **Python tools could not be published to a bucket, and the missing part was a checkbox.**
+  `onToolSaved` had uploaded a newly created tool to whichever mirror carries `publish` since
+  0.99.0, and `python/sharedWiring.test.ts` asserts it does. `S3Section` rendered that checkbox
+  under `kind === 'skills'`, so no *tools* folder could ever carry the flag and the host's
+  condition was unreachable. Downloading worked, which is what made it look like syncing worked:
+  files arrived, nothing went back, and nothing on screen suggested a direction had been left out.
+  `S3Section.test.tsx` is a render test for the same reason `ComposerAttach.test.tsx` is one — the
+  defect was a single rendering condition, invisible to every test of the behaviour it prevented.
+- **Auto mode's own rules had nowhere to be edited** (asked as "how to add own rules for auto
+  mode?"). `commands.risky` and `commands.safe` have been in the schema and in
+  `decideFromPolicy` since they were added, and the honest answer was "hand-edit `config.json`",
+  which nobody was told either. `settings/CommandRules.tsx` now edits both, under Approvals.
+  **The two lists are worded differently on purpose and must stay that way:** a wrong risky rule
+  fails closed (an extra prompt), a wrong safe rule fails open (something runs unseen). That
+  asymmetry is why one matches a substring anywhere and the other a prefix, and why the safe half
+  spends its words on what it gives away.
+- **And the mode was not the one anybody thought.** The reported symptom was Auto mode asking
+  about `git status`, which `safeCommands.ts` has covered since 0.103.0. Reading the running
+  config settled it in one line: `modeId` was `junior`, which `RENAMED` maps to `agent-team`, and
+  that mode has no `autoApproveSafeCommands`. Nothing was broken. **Check which mode is actually
+  selected before reading the approval path** — and note the general habit held again: the file
+  said in one line what three rounds of source inspection had not.
+
+## 12k. `outlook_create_draft` (0.105.0)
+
+Compose a message in the running Outlook — recipients, cc, bcc, subject, body, attachments, and
+images embedded in the body — and put it on screen. Requested in exactly those terms: fill it in,
+show it, and let the user press Send.
+
+- **There is no send, not behind a flag.** A `send` parameter is one wrong argument away from a
+  half-written message reaching a distribution list, and the model generating that argument is the
+  one that wrote the body. `outlookDraft.test.ts` asserts `.Send(` appears nowhere in the worker,
+  the way `office.test.ts` pins the absence of `Invoke-Expression`.
+- **Displayed, never saved.** Closing the window is what offers to file it, so deciding against
+  sending leaves nothing behind — the same escape hatch the Excel tools keep by leaving a workbook
+  dirty. `Display($false)`, because a modal call would hold the single request pipe.
+- **In `ALWAYS_ASK_TOOLS`**, and the preview names every recipient and every file rather than
+  counting them (invariant 8): "send to 12 people" hides which twelve, and the recipient list is
+  the part of a draft that does the damage when it is wrong.
+- **Attachments are added before the body is written**, and that ordering is load-bearing: an
+  inline image is an attachment carrying a content id the HTML refers to, so setting `HTMLBody`
+  first leaves Outlook holding img tags that resolve to nothing — which renders as the picture
+  having failed to attach rather than as the order being wrong.
+- **Recipients are resolved, not just assigned.** Assigning a string to `.To` leaves an unknown
+  name sitting there looking correct and failing at send time, in front of whoever is sending.
+  Unresolved ones are named back and **left in place** — they may be external addresses the
+  address book has no entry for, and silently dropping a recipient is the worst available failure.
+- **Not in `NEVER_AVAILABLE_TO_SCHEDULES`**, deliberately. Everything on that list authorises a
+  capability or changes state nobody will review; this does neither, because the review *is* the
+  feature. Closer to `open_email` than to `excel_write_range`.
+- Paths go through `resolveToolPath`, so the deny list, confinement and the out-of-workspace
+  prompt apply exactly as they do to `read_file`.
+- **Not verified against live Outlook.** The worker half is pinned by reading `worker.ps1` and the
+  tool half by a fake bridge; a draft has never been composed against a real mailbox.
+
+## 12l. Python tools inside a live Jupyter kernel (0.105.0)
+
+Asked for a notebook that drives the Node host and wants tools to see the session's own state —
+the dataframe already loaded, the model already fitted. `python.jupyterConnectionFile`, or
+`light-code --jupyter-kernel <connection file>`, and tool calls execute **in that kernel**.
+
+- **The notebook names its kernel; nothing here guesses, and that was the question asked.** A
+  kernel knows its own connection file (`ipykernel.get_connection_file()`) and nothing outside it
+  does. From another process all you can do is list `<runtime-dir>/kernel-*.json` and pick, and
+  with two kernels running — ordinary for anybody using Jupyter — a guess means running a tool
+  inside the wrong notebook. **Newest-by-mtime is right most of the time and silently wrong the
+  rest**, which is the worst shape a default can have. Same refusal §12c makes about attaching to
+  an Excel session. `discoverKernels` therefore *offers*; `describeKernels` says plainly when it
+  cannot tell two apart, and calls a single candidate a candidate, because a connection file
+  outlives a kernel that was killed.
+- **The session variable beats the stored one.** A session launched by a notebook was told by the
+  only thing that knows; a stored path is stale the moment that kernel restarts, because Jupyter
+  writes a new file. Specific and current beats general and possibly old.
+- **The kernel is part of the worker's environment fingerprint**, so pointing at a different
+  notebook restarts the worker. A child takes its environment once, and without this the tools
+  would keep working — in the wrong place, silently. Set inside `PythonManager.childEnv()`, which
+  §13 requires to be the only owner.
+- **The registry is untouched by this.** A tool still had to be approved here, with its source
+  shown, before it could be called at all — so this widens *where* code runs, never *who* may run
+  it.
+- **Verified against a real kernel end to end, and that is how two defects were found**, neither
+  visible by reading:
+  - **`_kernel_preamble` was defined and never called.** Every tool call reached a kernel that had
+    never heard of `_lc_json` and died with a `NameError` on line 1 of the cell — which reads as
+    the *tool* being broken. Nothing in the config, the schema or the wiring was wrong. The same
+    shape as `s3.tools` shipping with nothing on the other end.
+  - **`import light_code` failed in the kernel.** The worker registers that helper in its own
+    `sys.modules`, which the kernel has never heard of, so moving a tool into a kernel turned a
+    working tool into an ImportError pointing at the tool. It is installed in the kernel now, with
+    `session` bound to the notebook's namespace and `call_tool` **raising with a reason** — the
+    callback rides on the worker's stdio and the kernel has no route back to the host, so an
+    honest refusal beats a name that exists and hangs.
+- **The result comes back behind a marker**, never read off the output: a kernel is full of
+  libraries that print banners and deprecations on the same channel as the answer. §14 records
+  this going wrong in the identity and credential wrappers.
+- A value that will not serialise comes back as its `repr`, **said out loud** (`resultIsRepr`), so
+  nobody reads a picture of a DataFrame as the structure.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2122,8 +2241,9 @@ the first run reported a failure that the source had already fixed.
 
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
-workflow has never run. **0.103.0 is live as of 2026-09-21**, queried from the gallery. The local
-manifest is **0.103.2**, packaged and unpublished.
+workflow has never run. **0.104.0 is live as of 2026-09-22**, queried from the gallery — this paragraph said 0.103.0
+until then, stale again. The local manifest is **0.105.0**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.105.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same
@@ -2135,7 +2255,8 @@ Every previous edition of this paragraph was stale, several of them by many rele
 was repeated to the user as fact. Query the gallery.
 
 Also on npm: `@chosengeneration/light-code` (the Node host, §14). **0.80.1 is live as of
-2026-09-21**, queried from the registry. The local manifest is **0.89.1**, built and unpublished. The bare name
+2026-09-21**, queried from the registry. The local manifest is **0.91.0**, built and smoke-tested
+(`pnpm smoke:npm`), unpublished. The bare name
 `light-code` belongs to an unrelated package, hence the scope. **Publishing automation is not wanted** — the user decided against it
 on 2026-08-19 and manual upload stays, for both registries.
 
@@ -2151,7 +2272,7 @@ self-identification), 0.3.0 (reasoning traces, expert markers, icons, composer l
 0.3.1 (an explicit request to consult the expert now wins over the frugality guidance),
 0.4.0 (changelog).
 
-**Next:** publish the pending versions — extension 0.103.2, host 0.89.1 — and keep working from
+**Next:** publish the pending versions — extension 0.105.0, host 0.91.0 — and keep working from
 what real use reports. The plan phases are done; changes now come from daily use.
 
 **`git push` had not run for 97 commits** when it was finally noticed on 2026-08-31. Nothing was

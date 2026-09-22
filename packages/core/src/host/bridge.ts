@@ -15,6 +15,7 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 
+import { mentionSegment } from '../context/mentionGlob.js'
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
@@ -83,6 +84,7 @@ import {
   createOutlookSearchTool,
   createOutlookReadTool,
 } from '../tools/office.js'
+import { createOutlookDraftTool } from '../tools/outlookDraft.js'
 import {
   createExcelCheckMacroTool,
   createExcelEvaluateTool,
@@ -284,6 +286,7 @@ import {
   type ProbeTarget,
   type IndexingKind,
   type ImageAttachmentInput,
+  type CommandRules,
   type LightCodeConfig,
   dispatcherEnabled,
   skillRetrievalEnabled,
@@ -1674,6 +1677,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedRiskyCommands: readonly RiskyCommandRule[] = riskyCommandRules()
   /** The safe-command lists, as configured. Whether they *apply* is the mode's business. */
   let cachedSafeCommands: { extra?: string[]; builtin?: boolean } = {}
+  /**
+   * The user's own rules, as written, for the panel that edits them.
+   *
+   * Separate from the two caches above because those are *resolved* — `cachedRiskyCommands` has
+   * the built-in list already merged in, so showing it would offer somebody forty entries of ours
+   * to delete and then save back as theirs.
+   */
+  let cachedCommandRules: CommandRules = {}
   /** Mirrors config so the loop and the settings message agree without re-reading. */
   let cachedMaxIterations = 25
   // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
@@ -2145,6 +2156,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const { config } = await configManager.load()
     cachedApprovals = approvalsFrom(config.approvals)
     cachedRiskyCommands = riskyCommandRules(config.commands)
+    // Reported to the panel exactly as stored, so what is shown is what the approval path reads.
+    cachedCommandRules = config.commands ?? {}
     cachedSafeCommands = {
       ...(config.commands?.safe !== undefined ? { extra: config.commands.safe } : {}),
       ...(config.commands?.builtinSafe !== undefined
@@ -2347,6 +2360,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ? {}
         : { toolTimeoutSeconds: cachedToolTimeoutSeconds }),
       readRoots: cachedReadRoots,
+      commandRules: cachedCommandRules,
       ...(cachedProgrammingProfileId !== undefined
         ? { programmingProfileId: cachedProgrammingProfileId }
         : {}),
@@ -2359,6 +2373,50 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await configManager.save('user', { approvals: { ...config.approvals, [approvalsKey]: next } })
     cachedApprovals = next
     post(settingsMessageFrom(next))
+  }
+
+  /**
+   * The user's command rules, replaced as a whole.
+   *
+   * **User scope, never workspace** (invariant 5, and `commands` is on that list). A repository
+   * able to write here would pre-*disarm* the check rather than pre-approve, and the first
+   * anybody would know is a command that never stopped.
+   *
+   * Written as a whole rather than merged, because a list edited to remove an entry has no other
+   * way to say so — a merge would make deletion impossible while looking like it had worked.
+   * Empty lists and the default switches are dropped instead of stored, so a file somebody has
+   * not touched stays empty rather than filling with the defaults written out.
+   *
+   * `loadSettings` then re-derives both caches, so the next command is judged by the new rules
+   * rather than the next session being — which is when it matters, since the reason anybody edits
+   * these is that a command just asked when it should not have, or did not when it should.
+   */
+  async function handleSetCommandRules(rules: CommandRules): Promise<void> {
+    const risky = (rules.risky ?? [])
+      .map((rule) => ({
+        contains: rule.contains.trim(),
+        ...(rule.reason !== undefined && rule.reason.trim().length > 0
+          ? { reason: rule.reason.trim() }
+          : {}),
+        ...(rule.refuse === true ? { refuse: true } : {}),
+      }))
+      .filter((rule) => rule.contains.length > 0)
+    const safe = (rules.safe ?? [])
+      .map((prefix) => prefix.trim())
+      .filter((prefix) => prefix.length > 0)
+
+    const commands: CommandRules = {
+      ...(risky.length > 0 ? { risky } : {}),
+      ...(safe.length > 0 ? { safe } : {}),
+      // Both default on, so only the switched-off case is worth recording.
+      ...(rules.builtinRisky === false ? { builtinRisky: false } : {}),
+      ...(rules.builtinSafe === false ? { builtinSafe: false } : {}),
+    }
+
+    await configManager.save('user', { commands })
+    // Reloads the caches and reports back in one step, so the panel redraws from what was stored
+    // rather than from what it sent.
+    await postSettings()
   }
 
   /*
@@ -2924,6 +2982,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createOutlookFoldersTool(officeOptions))
         combined.register(createOutlookSearchTool(officeOptions))
         combined.register(createOutlookReadTool(officeOptions))
+        /*
+         * Registered with the rest of Outlook rather than behind the mail index, because it
+         * does not read the mailbox at all - it composes. Gating it on indexing would make
+         * "draft this email" unavailable to everybody who switched Outlook on and left the
+         * index off, for a reason that has nothing to do with drafting.
+         */
+        combined.register(createOutlookDraftTool(officeOptions))
       }
     }
 
@@ -4339,19 +4404,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * The wider fetch is capped too, because `@` runs on every keystroke.
        */
       /*
-       * The glob asks about the **last path segment only**, and the ranking then judges the
-       * whole path.
+       * The index is asked about the **last path segment only**, and the ranking then judges
+       * the whole path.
        *
        * `*` does not cross a separator, so `**\/*src/api*` — the obvious pattern for someone
        * typing `src/api` — matches almost nothing, and the picker went empty exactly when the
-       * user was being *more* specific. Globbing one segment is something globs do reliably;
-       * everything else is a comparison, and comparisons belong in code where they can be
-       * tested.
+       * user was being *more* specific. Matching one segment is something an index does
+       * reliably; everything else is a comparison, and comparisons belong in code where they
+       * can be tested.
+       *
+       * The segment goes across as **text**, not as a pattern. How it is spelled to a file index
+       * is the host's business, and getting that wrong is invisible from here — see
+       * `context/mentionGlob.ts` for the two ways it was wrong, and how each was measured.
        */
-      const segment = query.slice(query.lastIndexOf('/') + 1)
-      const pattern = segment.length > 0 ? `**/*${segment}*` : '**/*'
       const found = await ui.findFiles(
-        pattern,
+        mentionSegment(query),
         MENTION_SCAN_LIMIT,
         mentionExcludes(cachedMentionExcludes),
       )
@@ -9434,6 +9501,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setCommandRules') {
+      reportFailure('handleSetCommandRules', handleSetCommandRules(message.rules))
     } else if (message.type === 'setAccentColor') {
       /*
        * Saved to user scope, not workspace: an accent is a preference about the person's

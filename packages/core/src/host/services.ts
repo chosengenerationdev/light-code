@@ -89,19 +89,23 @@ export interface HostUi {
     extensions?: string[] | undefined
   }): Promise<string | undefined>
   /**
-   * Workspace-relative paths matching a glob, for `@` autocomplete.
-   *
-   * A host with an editor's index should use it — VS Code's honours `files.exclude` for
-   * free. A plain filesystem walk is an acceptable substitute.
-   */
-  /**
    * Candidate paths for an `@` mention.
    *
+   * **`segment` is what the user typed, not a pattern.** It is the last path segment of the
+   * query, and each host expresses it in whatever its own index speaks: the editor compiles it
+   * with `mentionGlob` because `findFiles` takes a glob, the server compares strings because it
+   * walks the tree itself. Handing over a glob instead made the server unpick one — stripping
+   * `*` back out to recover the text — which is two representations of one fact, and the second
+   * of them broke the moment the first learned about case (see `context/mentionGlob.ts`).
+   *
+   * Matching is expected to be **case-insensitive** and to treat the segment as literal text.
+   * A host that cannot manage that will find nothing for the ordinary case of somebody typing
+   * `app` at a file called `App.tsx`.
+   *
    * `excludeFolders` is a list of folder names to skip at any depth, resolved by the caller from
-   * config. Passed rather than read here because each host excludes differently — the editor has
-   * an index that already understands globs, the server walks the tree itself.
+   * config. Passed rather than read here because each host excludes differently.
    */
-  findFiles(pattern: string, limit: number, excludeFolders: readonly string[]): Promise<string[]>
+  findFiles(segment: string, limit: number, excludeFolders: readonly string[]): Promise<string[]>
 }
 
 /**

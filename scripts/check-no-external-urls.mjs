@@ -55,6 +55,20 @@ const ALLOWED_HOSTS = new Map([
   ['developer.mozilla.org', 'MDN links in EventSource JSDoc — comments, never fetched'],
 
   /*
+   * A MAPI property identifier, not an address.
+   *
+   * `http://schemas.microsoft.com/mapi/proptag/0x3712001F` is the documented *name* of
+   * PR_ATTACH_CONTENT_ID_W, which is what `outlook_create_draft` sets to make an attachment an
+   * embedded image rather than a paperclip. It is passed to `PropertyAccessor.SetProperty` as a
+   * string and is never dereferenced - by us, by Outlook, or by anything else. Microsoft chose a
+   * URL shape for these names; nothing on the other end has ever been contacted.
+   *
+   * Verified before adding: it appears in the inlined PowerShell worker and nowhere else, and
+   * the worker is `powershell.exe` driving COM, which has no HTTP in it at all.
+   */
+  ['schemas.microsoft.com', 'MAPI property name (PR_ATTACH_CONTENT_ID_W) — a string, never fetched'],
+
+  /*
    * S3's own endpoint, and it is a preset in exactly the sense the block at the top describes.
    *
    * `s3.` is the template `https://s3.${region}.amazonaws.com` seen by a scanner that cannot

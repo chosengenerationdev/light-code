@@ -96,6 +96,16 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    */
   'excel_run_macro',
   /*
+   * It reads files off this machine and puts them into a message addressed to other people.
+   *
+   * Nothing is sent - the draft opens on screen and the user decides - so the act being approved
+   * is the composing, and specifically which files and which recipients. "Auto-approve commands"
+   * is a statement about running commands, and reading it as permission to attach whatever the
+   * model names to whoever it names is a grant nobody knowingly made. The preview lists both by
+   * name rather than by count, which is only useful if somebody is shown it.
+   */
+  'outlook_create_draft',
+  /*
    * The plan is what holds the assistant to work the user agreed, so a category toggle must
    * never stand in for reading the change. Auto-approving this would mean an agent could widen
    * its own instructions and then point at them as authority — and both the panel and the

@@ -111,7 +111,7 @@ export type {
 } from './agent/protocol.js'
 
 /** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */
-export type { VectorStoreKind } from './config/schema.js'
+export type { CommandRules, VectorStoreKind } from './config/schema.js'
 export type { JuniorAssessment, ProbeResult } from './expert/assessment.js'
 /*
  * The diagram feature, browser side: the spec type, the layout and the serialiser.

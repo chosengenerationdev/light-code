@@ -1,5 +1,51 @@
 # light-code-vscode
 
+## 0.105.0
+
+### Minor Changes
+
+- Five things from real use, and a new tool.
+
+  **The `@` picker was blind to half of most codebases.** `vscode.workspace.findFiles` is ripgrep
+  underneath, and ripgrep globs match case exactly — measured against the shipped `rg.exe`,
+  `**/*app*` returns nothing for a file called `App.tsx`. So typing lowercase never found a
+  PascalCase filename, which in a TypeScript or Python repository is most of it. Everything else
+  about the feature had already decided this the other way: the ranking and the Node host's own
+  walk both lowercase both sides. Typing a name containing `[`, `]`, `{`, `}`, `?` or `*` was also
+  passed to a glob parser unescaped, so `@data[1].csv` matched nothing at all — the picker went
+  empty exactly when you were being most specific. Both fixed, both pinned. There is no cache to
+  clear; it was the pattern, not the index.
+
+  **Python tools can now be published to a bucket.** The host half had always been there —
+  a newly created tool is uploaded to whichever bucket folder is marked "Save new here" — but that
+  checkbox was only ever rendered for skills, so no tools folder could carry the flag and the
+  condition was unreachable. Tools came down from a bucket and never went back up, which looks
+  exactly like syncing being broken rather than half of it being missing. The box is disabled with
+  a reason on a read-only connection, rather than accepting a tick that does nothing.
+
+  **Your own command rules are editable.** Both lists have been in the config schema and in the
+  approval path since they were added, with nowhere to edit them — so the answer to "how do I stop
+  it asking about _this_ command in Auto mode" was to hand-edit `config.json`, and nobody was told
+  that either. Settings → Approvals now has both: commands that always ask (matched anywhere,
+  optionally refused outright), and commands Auto mode may run unprompted (matched at the start).
+  Each built-in list can be switched off. The safe list is still refused for anything that could be
+  two commands, so `grep foo && rm -rf /` keeps asking whatever is on it.
+
+  **`outlook_create_draft`.** Composes a message in the running Outlook — recipients, cc, bcc,
+  subject, body, attachments, and images embedded in the body — and puts it on screen. It never
+  sends: there is no send call in the worker at all, not behind a flag, and a test asserts that.
+  The approval names every recipient and every file rather than counting them, and the draft is
+  displayed rather than saved, so closing it is the way out.
+
+  **Python tools can run inside a live Jupyter kernel.** Point a session at a kernel with
+  `light-code --jupyter-kernel <connection file>` and tool calls execute _in that kernel_, so they
+  see the session's own state — the dataframe already loaded, the model already fitted — through a
+  `session` name and through `light_code.session`. The notebook names its own kernel
+  (`from ipykernel import get_connection_file`) and nothing guesses: a kernel is the only thing
+  that knows which kernel it is, and with two running a guess means executing inside the wrong
+  notebook. Verified against a real kernel end to end, which is how two defects were found that no
+  amount of reading would have shown.
+
 ## 0.104.0
 
 ### Minor Changes
