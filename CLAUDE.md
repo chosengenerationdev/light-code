@@ -1456,6 +1456,59 @@ returning the top of a pile of noise would be a coin toss presented as an answer
 happens when I send a message" came back as the Outlook topic, which would have had the model
 explaining mail to somebody with a broken session.
 
+## 12n. Auto mode on Windows, which is the platform it is used on (0.108.0)
+
+Asked for directly: *"windows is my main operating system in office, please make sure auto mode
+works 100% as advertised in windows"*. Three faults, all Windows-only, all found by **running the
+shell** rather than by reading the code.
+
+- **The guidance named the wrong shell.** It said *"On Windows that is PowerShell unless it has
+  been configured otherwise"*. It is **cmd.exe**: `NodeTerminal` spawns with `shell: true`, which
+  is `%ComSpec%`, and nothing had ever configured it otherwise **because there was no setting to
+  do so**. Measured: `Get-ChildItem` in that shell returns exit 1 and *"is not recognized as an
+  internal or external command"*. So on this product's primary platform, the mode's own
+  instructions produced commands that could not run - and the model would keep producing them,
+  because the prompt said to.
+- **Its advice about cost was backwards.** It told the model to work in *fewer, larger, chained*
+  commands, because each is approved separately. True in Code mode; **wrong in Auto**, where the
+  safe list refuses anything containing `&` and so a chained command can never be auto-approved.
+  Following it converted several free commands into one prompt. The mode built to remove
+  interruptions was instructing the model to create them.
+- **It named tools without checking they exist.** A developer machine with Git for Windows has
+  `grep`, `sed` and `head` and they work in cmd; a locked-down corporate build has none, and
+  guidance naming them yields a run of "not recognized" errors that reads as the assistant being
+  broken rather than as the prompt being wrong about the machine.
+
+**The fix is not a better hard-coded sentence.** `modes/autoGuidance.ts` *generates* the guidance
+from `platform/node/shell.ts`, which resolves the real shell and probes PATH - the move
+`buildTeamGuidance` already made, for the same reason: a prompt that **states** the environment is
+a second copy of a fact the host already knows, and it drifts the moment either changes. `AUTO_MODE`
+now carries no `guidance` string at all, and a test asserts that.
+
+**`commands.shell` is the setting §16 always specified and nothing implemented** ("pwsh if
+present, else cmd, configurable" - only the last word was true). **The default is deliberately
+unchanged.** Switching to PowerShell would silently break `ls -la`, `head -5`, `sort file`,
+`diff a b` and `where x`: every one is a cmdlet alias there and fails on those arguments. Verified
+both ways by running them - default gives cmd.exe and refuses `Get-ChildItem`; `powershell.exe`
+gives 5.1 and runs it.
+
+**`autoGuidance.test.ts` asserts every idiom the guidance recommends is auto-approved**, across
+four environments. That is the whole of what "works as advertised" means here, and it is the only
+check that could catch the promise breaking *silently*: the mode tells the user reading will not
+interrupt them, and an example in its own prompt that is not on the safe list means the model obeys
+and the user gets exactly the prompts the mode exists to remove, with nothing anywhere to say why.
+
+**Two smaller things, both measured.** A Windows `%ComSpec%` is an absolute path, so the shell is
+named by basename - putting `C:\WINDOWS\system32\cmd.exe` in a prompt is noise that also invites
+invocation by path. And the "invoke by bare name" example list is drawn from tools that are
+*present*: the first draft named `rg` on a machine without it, which is this section's own fault
+reintroduced in a footnote.
+
+**Still true and worth not forgetting:** a program reached by a path under `Program Files (x86)`
+contains brackets, which `couldChain` refuses, so it prompts. The metacharacter rule is not
+weakened for it - that rule is absolute on purpose and has no grammar to get wrong. The guidance
+tells the model to use bare names instead, which resolve through PATH.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

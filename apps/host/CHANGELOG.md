@@ -1,5 +1,38 @@
 # @chosengeneration/light-code
 
+## 0.94.0
+
+### Minor Changes
+
+- Auto mode now works as advertised on Windows.
+
+  **It was telling the model the wrong shell.** Auto mode's instructions said "On Windows that is
+  PowerShell unless it has been configured otherwise". It is **cmd.exe** — commands spawn through
+  `%ComSpec%`, and nothing had ever configured it otherwise because there was no setting to do so.
+  Measured: `Get-ChildItem` there returns "is not recognized as an internal or external command". So
+  on the platform this is mainly used on, the mode's own guidance produced commands that could not
+  run, and it kept producing them, because the prompt said to.
+
+  **Its advice about cost was backwards.** It told the model to work in fewer, larger, chained
+  commands because each is approved separately. That is right in Code mode and wrong in Auto: a
+  command containing `&` can never be auto-approved, so chaining turns several free commands into
+  one that stops and asks. The mode built to remove interruptions was instructing the model to
+  create them. It now says the opposite, and says what to do when a command you expected to be free
+  asks anyway.
+
+  **And it named tools without checking they exist.** A machine with Git for Windows has `grep`,
+  `sed` and `head`; a locked-down corporate build has none, and guidance naming them produces a run
+  of "not recognized" errors that reads as the assistant being broken.
+
+  All three are fixed the same way: the guidance is **generated** from the shell that will actually
+  run and the tools really on PATH, rather than asserted. A test checks that every idiom it
+  recommends is auto-approved, across four different machines — which is the only way the promise
+  could break silently.
+
+  **`commands.shell` lets you choose the shell**, which was always specified and never implemented.
+  The default is deliberately unchanged: in PowerShell, `ls`, `sort`, `diff` and `where` are cmdlet
+  aliases and fail on arguments like `ls -la` that work today, so nobody is moved without asking.
+
 ## 0.93.0
 
 ### Minor Changes

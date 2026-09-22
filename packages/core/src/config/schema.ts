@@ -1079,6 +1079,22 @@ export const configSchema = z
         safe: z.array(z.string().min(1).max(120)).max(100),
         /** The built-in safe list. On unless explicitly false. */
         builtinSafe: z.boolean(),
+        /**
+         * The shell `execute_command` runs in. Absent means the platform default.
+         *
+         * Section 16 always specified "pwsh if present, else cmd, **configurable**", and only
+         * the last word of that was ever true: there was no setting, so Windows always got
+         * `%ComSpec%` - cmd.exe - while Auto mode's guidance told the model it was PowerShell.
+         *
+         * The default is deliberately left alone. Switching to PowerShell would silently break
+         * `ls -la`, `head -5`, `sort file`, `diff a b` and `where x`, every one of which is an
+         * alias for a cmdlet there and fails on those arguments. Somebody who wants it can say
+         * so; nobody gets moved without asking.
+         *
+         * User-scope only with the rest of `commands`, and it earns that on its own: a
+         * repository able to set it would choose the interpreter every command runs through.
+         */
+        shell: z.string().min(1).max(400),
       })
       .partial(),
     /**

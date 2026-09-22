@@ -119,6 +119,17 @@ reading a change, which is why content edits stay on the diff tools.
 
 **\`cat\` is not \`read_file\`.** A file must have been read with \`read_file\` in this session
 before it can be edited, and reading it in the terminal does not count.
+
+**Which shell commands run in.** On Windows it is **cmd.exe** by default, not PowerShell — so
+cmdlets like \`Get-ChildItem\` fail with "is not recognized". Auto mode's instructions are built
+from the shell that will actually run and from the tools really on PATH, so the assistant is told
+the truth rather than a guess. config:commands.shell changes it — set it to \`powershell.exe\` or
+\`pwsh\` if you would rather. The default is left alone on purpose: in PowerShell, \`ls\`,
+\`sort\`, \`diff\` and \`where\` are cmdlet aliases and fail on GNU arguments like \`ls -la\`.
+
+**In Auto mode, do not chain commands to save approvals — it costs one.** Anything containing
+\`&\`, \`|\`, \`;\`, a redirect or \`$\` can never be auto-approved, so three separate reads are
+free where the same three joined together stop and ask.
 `,
   },
   {
@@ -670,6 +681,11 @@ more of the name narrows it; matching is case-insensitive and matches letters in
 MCP server can have its own; the Tools tab shows which number applies. If raising it changes
 nothing, stop raising it: a timeout is the right instrument for something slow and the wrong one
 for something that is not going to finish.
+
+**A command fails with "is not recognized"** — you are in cmd.exe, and something emitted
+PowerShell. config:commands.shell switches it if you would rather work in PowerShell. The same
+message for \`grep\` or \`sed\` means this machine has no Git-for-Windows tools on PATH; Auto mode
+detects that and says so in its own instructions.
 
 **An MCP server will not start** — the MCP tab keeps its stderr. A package-runner command needs the
 network when the panel opens.

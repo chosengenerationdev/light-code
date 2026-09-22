@@ -608,6 +608,7 @@ export {
 
 export {
   AGENT_TEAM_MODE,
+  AUTO_MODE,
   BUILTIN_MODES,
   CODE_MODE,
   ASK_MODE,

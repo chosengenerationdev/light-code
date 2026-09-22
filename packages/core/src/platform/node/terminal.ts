@@ -62,11 +62,24 @@ class NodeTerminalProcess implements TerminalProcess {
  * terminal, shell-reported exit codes) — see CLAUDE.md §19 for the open question.
  */
 export class NodeTerminal implements Terminal {
+  /**
+   * @param shell A shell to run commands in, overriding the platform default.
+   *
+   * Section 16 always specified "pwsh if present, else cmd, configurable", and only the last
+   * word of it existed - there was no setting, so `shell: true` meant `%ComSpec%` on Windows and
+   * nothing could change that. The default is unchanged on purpose: making PowerShell the
+   * default now would silently break `ls -la`, `head -5`, `sort`, `diff` and `where`, every one
+   * of which is a cmdlet alias there. See `platform/node/shell.ts`.
+   */
+  constructor(private readonly shell?: string | undefined) {}
+
   run(command: string, options: TerminalRunOptions = {}): TerminalProcess {
+    const chosen = this.shell?.trim()
     const child = spawn(command, {
       cwd: options.cwd,
       env: options.env ? { ...process.env, ...options.env } : process.env,
-      shell: true,
+      // `true` is Node's own default shell, which is what has always run. A string names one.
+      shell: chosen !== undefined && chosen.length > 0 ? chosen : true,
       detached: process.platform !== 'win32',
     })
     return new NodeTerminalProcess(child)

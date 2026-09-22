@@ -16,6 +16,8 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { mentionSegment } from '../context/mentionGlob.js'
+import { buildAutoGuidance } from '../modes/autoGuidance.js'
+import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
@@ -255,6 +257,7 @@ import {
   deriveTitle,
   AGENT_TEAM_MODE,
   findMode,
+  AUTO_MODE,
   listModels,
   mcpServersSchema,
   venvPythonCandidates,
@@ -1685,6 +1688,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * to delete and then save back as theirs.
    */
   let cachedCommandRules: CommandRules = {}
+  /**
+   * Which command-line tools this machine has, probed once.
+   *
+   * Once rather than per turn: it is a dozen filesystem lookups, the answer does not change
+   * while the window is open, and it lands in the cached system-prompt prefix - which §12 needs
+   * to be byte-stable for the session. Re-probing could make the prefix differ between turns
+   * for no reason at all.
+   */
+  let probedTools: CommandToolset | undefined
+  const commandToolset = (): CommandToolset => (probedTools ??= detectCommandTools())
   /** Mirrors config so the loop and the settings message agree without re-reading. */
   let cachedMaxIterations = 25
   // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
@@ -3548,6 +3561,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 activePlan !== undefined && activePlan.trim().length > 0,
               ),
             )
+          } else if (activeMode.id === AUTO_MODE.id) {
+            /*
+             * Built from what this machine actually has, not asserted.
+             *
+             * The static version claimed Windows meant PowerShell; it means cmd.exe, so the
+             * mode's own instructions produced commands that could not run. Generated here for
+             * `buildTeamGuidance`'s reason — a prompt that states the environment is a second
+             * copy of a fact the host already knows, and it drifts.
+             *
+             * Resolved once per turn along with the mode, so the cached prefix is stable (§12).
+             */
+            parts.push(
+              buildAutoGuidance({
+                shell: resolveShell(cachedCommandRules.shell),
+                tools: commandToolset(),
+                platform: process.platform,
+              }),
+            )
           } else if (
             activeMode.guidance !== undefined &&
             (activeMode.requiresExpert !== true || expertCliInfo !== undefined)
@@ -3568,7 +3599,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       const toolContext: ToolExecutionContext = {
         fs: new NodeFileSystem(),
-        terminal: new NodeTerminal(),
+        // The shell the user chose, or the platform default. Read per turn, so changing it
+        // applies to the next command rather than after a restart.
+        terminal: new NodeTerminal(cachedCommandRules.shell),
         workspaceRoot,
         denylist,
         readFiles,

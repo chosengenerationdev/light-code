@@ -121,47 +121,16 @@ export const AUTO_MODE: Mode = {
    * see `approval/safeCommands.ts` for what qualifies and why `find` and `python foo.py` do not.
    */
   autoApproveSafeCommands: true,
-  guidance: [
-    '## Working through the terminal',
-    '',
-    'Use execute_command wherever a command can do the job, in preference to the dedicated file',
-    'tools:',
-    '',
-    '- **Reading**: print the part you need rather than a whole file — the equivalent of',
-    '  `sed -n 200,260p`, `head`, or `tail` in whatever shell you are in.',
-    '- **Searching**: grep/ripgrep and find, including for things no tool covers — counting',
-    '  matches, listing by modification time, piping one search into another.',
-    '- **Mechanical edits**: renames, moves, deletions, a substitution across many files, running',
-    '  a formatter or codemod, creating a file from a heredoc.',
-    '- **Everything a command already does well**: git, the package manager, the test runner,',
-    '  building, and reading their output.',
-    '',
-    '### What stays on the dedicated tools',
-    '',
-    '- **Edits to code a person would want to read before approving.** Use apply_diff or',
-    '  write_to_file for those. The approval prompt renders a real diff for them and can only',
-    '  show the command line for a shell edit, so the user is judging a substitution rather than',
-    '  a change. Mechanical is fine in the shell; consequential is not.',
-    '- **read_file before any apply_diff or write_to_file on an existing file.** Reading it in the',
-    '  terminal does not count, and the edit will be refused. That is deliberate, not a bug.',
-    '',
-    '### Two things that make this cheaper',
-    '',
-    '- **Every command is approved separately.** Do the work in fewer, larger commands rather',
-    '  than a sequence of small ones — a chained command, or one short script, costs the user one',
-    '  decision instead of six.',
-    '- **Some commands always stop and ask**, whatever the user has auto-approved: destructive and',
-    '  history-rewriting ones, and anything they have marked risky themselves. Do not try to work',
-    '  around a prompt by rephrasing the command — say what you want to do and why, and let them',
-    '  decide.',
-    '- **Use the shell you are actually in.** On Windows that is PowerShell unless it has been',
-    '  configured otherwise, and PowerShell 5.1 has no `&&`, no `head`/`tail`/`which`, and its own',
-    "  redirection rules. If you are unsure which shell you have, find out with one cheap command",
-    '  rather than guessing and reading the parse error.',
-    '',
-    'Your edits through the shell are covered by the task checkpoint exactly like any other edit,',
-    'so the user can still roll the workspace back.',
-  ].join('\n'),
+  /*
+   * **No static guidance, deliberately.** It is built per turn by `buildAutoGuidance` from
+   * the shell that will actually run and the tools this machine actually has.
+   *
+   * The version that used to sit here asserted "On Windows that is PowerShell", which was
+   * false - commands run in cmd.exe - so on the primary platform the mode's own instructions
+   * produced commands that could not run. A prompt that *states* the environment is a second
+   * copy of something the host already knows, and it drifts the moment either changes. See
+   * `modes/autoGuidance.ts`.
+   */
 }
 
 export const BUILTIN_MODES: readonly Mode[] = [CODE_MODE, ASK_MODE, AUTO_MODE, AGENT_TEAM_MODE]
