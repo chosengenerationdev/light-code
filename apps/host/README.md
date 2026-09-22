@@ -135,6 +135,11 @@ If you configured a credential function, put `tool:<name>` in the API key field.
   documentation.
 - **Python tools** — off by default. Read §13 of the project's CLAUDE.md before enabling it:
   it makes the *body* of a tool model-authored.
+- **A Jupyter kernel** — start it with `--jupyter-kernel $(python -c "from ipykernel import
+  get_connection_file; print(get_connection_file())")` from inside a notebook, and Python tools run
+  *in that kernel*: they see the dataframe you already loaded, through a `session` dict. The
+  notebook names its own kernel, because nothing outside a kernel can tell which one is asking.
+  See the guide (`light-code --guide`) for the details.
 
 ## What it does
 
@@ -158,8 +163,9 @@ agent executes on your instruction run with your privileges, exactly as if you h
 them. The approval gate is what stands between the model and your machine; there is no
 second layer behind it.
 
-The Excel and Outlook integration, and the indexed-mail search, need **Windows and your own
-desktop**. They attach to applications already running in your session, so running this for
+The Excel and Outlook integration — including composing a mail with attachments and embedded
+images, which it shows you rather than sends — and the indexed-mail search, need **Windows and
+your own desktop**. They attach to applications already running in your session, so running this for
 yourself on Windows you get all three, exactly as in the extension. Started with `--server`
 they are absent: a service account has no route to anybody's desktop, and a mailbox belongs
 to a person rather than to the account the process runs as.

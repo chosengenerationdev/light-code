@@ -112,6 +112,16 @@ export type {
 
 /** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */
 export type { CommandRules, VectorStoreKind } from './config/schema.js'
+/*
+ * The built-in command rules, so the panel can *show* them.
+ *
+ * Values rather than types, which is a deliberate addition to this file (see its header): the
+ * alternative is the UI carrying its own copy of both lists, and one fact in two places is the
+ * defect this repository has paid for more than any other. Somebody deciding what to add needs to
+ * see what is already covered, and a summary sentence is not that.
+ */
+export { DEFAULT_SAFE_COMMANDS } from './approval/safeCommands.js'
+export { DEFAULT_RISKY_COMMANDS, type RiskyCommandRule } from './approval/riskyCommands.js'
 export type { JuniorAssessment, ProbeResult } from './expert/assessment.js'
 /*
  * The diagram feature, browser side: the spec type, the layout and the serialiser.

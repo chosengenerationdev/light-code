@@ -1308,6 +1308,33 @@ the shape §19 keeps recording; one was a pattern nobody had thought of as code.
   selected before reading the approval path** — and note the general habit held again: the file
   said in one line what three rounds of source inspection had not.
 
+- **The safe list was Unix-named, and `execute_command` runs through cmd.exe** (0.106.0, reported:
+  Auto mode "still asks for a lot of read-only commands"). `NodeTerminal` spawns with
+  `shell: true`, which on Windows is `%ComSpec%` - so the shell in front of every command is cmd,
+  and `type` and `findstr`, the two commonest read-only operations there, were **not on the list at
+  all**. Nor was anything else cmd provides.
+  **This is 0.104.0's fault one level up.** That one covered `python` and missed `py`,
+  `python.exe` and an interpreter reached by path; this one covered `cat` and `grep` and missed
+  the shell they would have to run in. The list went from 40 entries to 131: cmd natives, the
+  read-only git subcommands an agent actually reaches for, version flags, and the checkers that
+  cannot rewrite what they check.
+  **The two questions still decide every entry**, and the near-misses are worth keeping written
+  down: `eslint` and `ruff check` take `--fix`, so the program can write through its own flags;
+  `black` writes unless `--check` is given, so only that phrase is vouched for; `pytest` runs what
+  it collects; and `git tag` **lists** with no argument and **creates a ref** with one, which a
+  prefix cannot tell apart, so it is absent rather than guessed at.
+  **`date` is on it only as `date /t`**, because a bare `date` in cmd *prompts* and waits on
+  stdin - auto-approving something that hangs means the tool sits until its timeout and reports
+  it as the command being slow.
+- **And the panel now says whether the list is in force.** The reported symptom was Auto mode
+  ignoring its own rules; the stored `modeId` was `junior`, which resolves to Agent team, which
+  has no relaxation at all. Nothing was broken and nothing said so. **A panel that describes a
+  rule without saying whether it applies is one you can read twice and still be wrong about.**
+- **The built-in lists are rendered, not summarised.** Both come from core's own constants through
+  `browser.ts`, so the panel and the approval path cannot disagree about what is covered - and the
+  question that brings anybody to this panel is "why did it ask about X?", which three examples in
+  a sentence cannot answer.
+
 ## 12k. `outlook_create_draft` (0.105.0)
 
 Compose a message in the running Outlook — recipients, cc, bcc, subject, body, attachments, and

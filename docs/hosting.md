@@ -425,6 +425,58 @@ tool whose imports are already satisfied works; one declaring a dependency that 
 refused at creation, naming the package, so you install it the way you install everything else
 there. The Python tab says which mode is in use and why.
 
+### Running tools inside a live Jupyter kernel
+
+If the thing launching Light Code is a notebook, its tools can run **in that kernel** rather than
+in an interpreter of their own — so they see the session's own state: the dataframe already
+loaded, the model already fitted, the connection already opened.
+
+```python
+import subprocess
+from ipykernel import get_connection_file
+
+subprocess.Popen(["light-code", "--jupyter-kernel", get_connection_file()])
+```
+
+`LIGHT_CODE_JUPYTER_CONNECTION_FILE` does the same thing if you would rather set it when you
+spawn the process, and `python.jupyterConnectionFile` sets it in the config file. A session
+launched with the flag or the variable wins over the config file, because a stored path goes stale
+the moment that kernel restarts — Jupyter writes a new connection file each time.
+
+**The notebook has to name its own kernel; Light Code will not guess.** A kernel knows its
+connection file and nothing outside it does. From another process the most you can do is list the
+`kernel-*.json` files in Jupyter's runtime directory, and with two kernels running there is no way
+to tell which one is asking — so a guess is right most of the time and silently wrong the rest,
+which here means running your tool inside somebody else's notebook. One line in the notebook
+settles it, so that is what it asks for.
+
+Inside a tool, the session is a plain dict:
+
+```python
+"""Describes a dataframe that is already loaded."""
+
+
+def run(name: str) -> str:
+    """Args:
+        name: the variable to look at.
+    """
+    return f"{name}: {session[name].shape}"     # `session` is the notebook's namespace
+```
+
+`light_code.session` is the same object, for a tool that prefers the import.
+
+Three things to know before you rely on it:
+
+- **`jupyter_client` must be importable** from the interpreter the worker runs as. It ships with
+  Jupyter, so this is usually already true.
+- **`light_code.call_tool` does not work in this mode**, and says so rather than hanging. The
+  callback channel belongs to the worker and a kernel has no route back to the host.
+- **A kernel runs one thing at a time.** A tool call waits behind whatever cell you just ran, so
+  the per-tool timeout is what bounds it.
+
+Approval is unchanged. A Python tool still had to be approved on this machine, with its source
+shown, before it could be called at all — so this widens *where* code runs, never *who* may run it.
+
 ## 1b-ii. Setting a server up, in order
 
 The pieces below depend on each other in roughly this order. Each one is optional; a laptop needs

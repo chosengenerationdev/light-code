@@ -1631,6 +1631,7 @@ export function App(props: AppProps): ReactElement {
             onSetCommandRules={(rules) =>
               props.transport.post({ type: 'setCommandRules', rules } satisfies UiToHostMessage)
             }
+            modeId={modeId}
             accentColor={accentColor}
             onSetAccentColor={(value) => {
               // Applied locally first so dragging through swatches is instant; config catches

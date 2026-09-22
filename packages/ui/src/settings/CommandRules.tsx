@@ -1,4 +1,8 @@
-import type { CommandRules } from '@light-code/core/browser'
+import {
+  DEFAULT_RISKY_COMMANDS,
+  DEFAULT_SAFE_COMMANDS,
+  type CommandRules,
+} from '@light-code/core/browser'
 import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
 
@@ -38,6 +42,16 @@ const monospace = 'var(--vscode-editor-font-family, monospace)'
 export interface CommandRulesSectionProps {
   rules: CommandRules
   onSave: (rules: CommandRules) => void
+  /**
+   * The mode in force, so the panel can say whether the safe list applies *right now*.
+   *
+   * This exists because of how the reported bug actually read. Somebody said Auto mode was
+   * asking about read-only commands; the stored mode was `junior`, which resolves to Agent team,
+   * which has no safe-command relaxation at all. Nothing was broken and nothing said so. A panel
+   * that describes a rule without saying whether it is in force is a panel you can read twice
+   * and still be wrong about.
+   */
+  modeId?: string | undefined
 }
 
 export function CommandRulesSection(props: CommandRulesSectionProps): ReactElement {
@@ -167,12 +181,28 @@ export function CommandRulesSection(props: CommandRulesSectionProps): ReactEleme
         />
         Also use the built-in list
       </label>
-      <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 2 }}>
-        Recursive deletes, force pushes, dropping tables, piping a download into a shell, and a
-        few others. Deliberately short, so it stays out of the way of ordinary work.
-      </span>
+      <BuiltinList
+        summary={`Show the ${String(DEFAULT_RISKY_COMMANDS.length)} built-in rules`}
+        entries={DEFAULT_RISKY_COMMANDS.map((rule) => rule.contains)}
+        note="Deliberately short, so it stays out of the way of ordinary work."
+      />
 
       <label style={{ ...labelStyle(), marginTop: 16 }}>Run without asking, in Auto mode</label>
+      {props.modeId !== undefined && (
+        <p
+          style={{
+            color: props.modeId === 'auto' ? colors.muted : colors.warning,
+            fontSize: 11,
+            margin: '0 0 8px',
+            lineHeight: 1.5,
+          }}
+        >
+          {props.modeId === 'auto'
+            ? 'Auto mode is selected, so these are in force now.'
+            : 'You are not in Auto mode at the moment, so none of this applies — every command ' +
+              'is being approved one at a time. Switch the mode above the message box to Auto.'}
+        </p>
+      )}
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px', lineHeight: 1.5 }}>
         Matched at the <strong>start</strong> of the command, and only while the mode is Auto
         &mdash; every other mode still asks for all of these. A command that could be more than one
@@ -221,13 +251,14 @@ export function CommandRulesSection(props: CommandRulesSectionProps): ReactEleme
         />
         Also use the built-in list
       </label>
-      <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 2 }}>
-        <code style={{ fontFamily: monospace }}>ls</code>,{' '}
-        <code style={{ fontFamily: monospace }}>cat</code>,{' '}
-        <code style={{ fontFamily: monospace }}>grep</code>, the read-only{' '}
-        <code style={{ fontFamily: monospace }}>git</code> subcommands, version checks, and
-        compiling Python.
-      </span>
+      <BuiltinList
+        summary={`Show the ${String(DEFAULT_SAFE_COMMANDS.length)} built-in commands`}
+        entries={DEFAULT_SAFE_COMMANDS}
+        note={
+          'Reading and searching in cmd.exe and in a POSIX shell, the read-only git subcommands, ' +
+          'version checks, and compiling. If something you run often is missing, add it above.'
+        }
+      />
 
       <div style={{ marginTop: 12 }}>
         <button
@@ -240,5 +271,62 @@ export function CommandRulesSection(props: CommandRulesSectionProps): ReactEleme
         </button>
       </div>
     </section>
+  )
+}
+
+/**
+ * A built-in list, shown rather than summarised.
+ *
+ * Somebody deciding what to add needs to see what is already covered. A sentence naming three
+ * examples cannot answer "why did it ask about `findstr`?" — which is the question that brought
+ * anybody to this panel.
+ *
+ * Collapsed by default and scrolled, because there are over a hundred entries and this sits
+ * inside a sidebar. `<details>` rather than state: it is exactly what the element is for, it
+ * keeps its own open/closed, and it needs no re-render.
+ */
+function BuiltinList(props: {
+  summary: string
+  entries: readonly string[]
+  note: string
+}): ReactElement {
+  return (
+    <details style={{ marginTop: 6 }}>
+      <summary style={{ color: colors.muted, fontSize: 11, cursor: 'pointer' }}>
+        {props.summary}
+      </summary>
+      <p style={{ color: colors.muted, fontSize: 11, margin: '6px 0', lineHeight: 1.5 }}>
+        {props.note}
+      </p>
+      <div
+        style={{
+          maxHeight: 180,
+          overflowY: 'auto',
+          border: `1px solid ${colors.border}`,
+          borderRadius: 4,
+          padding: '6px 8px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 4,
+        }}
+      >
+        {props.entries.map((entry) => (
+          <code
+            key={entry}
+            style={{
+              fontFamily: monospace,
+              fontSize: 11,
+              color: colors.foreground,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 3,
+              padding: '1px 5px',
+              whiteSpace: 'pre',
+            }}
+          >
+            {entry}
+          </code>
+        ))}
+      </div>
+    </details>
   )
 }

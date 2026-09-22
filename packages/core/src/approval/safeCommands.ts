@@ -56,7 +56,28 @@ const SHELL_METACHARACTERS = [';', '&', '|', '>', '<', '`', '$', '(', ')', '{', 
  * list — `cat ` must not match `catalogue-build`.
  */
 export const DEFAULT_SAFE_COMMANDS: readonly string[] = [
-  // Reading and printing.
+  /*
+   * ## Windows first, because that is where this runs
+   *
+   * Reported from real use: Auto mode still asked about "a lot of read-only commands". The list
+   * was written entirely in Unix program names, and `execute_command` spawns with `shell: true`,
+   * which on Windows is `%ComSpec%` - **cmd.exe**. So the two commonest read-only operations on
+   * the primary platform, `type` and `findstr`, were not on the list at all, and neither was
+   * anything else cmd provides.
+   *
+   * This is the same fault as 0.104.0's, one level up: that one covered `python` and missed
+   * `py`, `python.exe` and an interpreter reached by path. This one covered `cat` and `grep` and
+   * missed the shell they would have to run in. **Every miss is a prompt, and enough of them is
+   * the mode being unusable rather than careful.**
+   */
+  // Reading and printing - cmd.exe.
+  'type ',
+  'more ',
+  'tree',
+  'vol',
+  'ver',
+  'chdir',
+  // Reading and printing - POSIX, and the same names under Git Bash or WSL.
   'ls',
   'dir ',
   'pwd',
@@ -69,15 +90,59 @@ export const DEFAULT_SAFE_COMMANDS: readonly string[] = [
   'echo ',
   'which ',
   'where ',
-  'sed -n',
+  'whoami',
+  'hostname',
+  'uname',
+  /*
+   * `date /t` and not `date`. In cmd.exe a bare `date` **prompts** for a new one and waits on
+   * stdin, so auto-approving it would hang the tool until its timeout and report that as the
+   * command being slow. `/t` prints and exits. POSIX `date` prints either way, and a shell that
+   * has it will not have been reached by this entry.
+   */
+  'date /t',
+  'printenv',
+  'basename ',
+  'dirname ',
+  'realpath ',
+  'readlink ',
+  'nl ',
+  'cut ',
+  'comm ',
+  'paste ',
   'sort ',
   'uniq ',
   'diff ',
-  // Searching. `find` is deliberately absent — see the note above.
+  'cmp ',
+  'du ',
+  'df ',
+  /*
+   * `sed -n` and not `sed`, deliberately. `sed -i` edits in place - the program is only
+   * read-only in part, so the phrase is what gets vouched for rather than the name. Same reason
+   * `git status` is here and `git` is not.
+   */
+  'sed -n',
+  // Hashes and dumps, for "is this the same file".
+  'md5sum ',
+  'sha1sum ',
+  'sha256sum ',
+  'cksum ',
+  'od ',
+  'xxd ',
+  'certutil -hashfile',
+  // Searching. `find` is deliberately absent - see the note above.
   'grep ',
+  'findstr ',
   'rg ',
   'fd ',
-  // Git, read-only subcommands only.
+  'ag ',
+  /*
+   * ## Git, read-only subcommands only
+   *
+   * Named one phrase at a time rather than trusting the program, because `git` as a whole is
+   * emphatically not read-only. Anything that writes a ref, an object or the working tree is
+   * absent: no `tag` (it lists with no argument and *creates* with one, and a prefix cannot tell
+   * them apart), no `stash` beyond `list`, no `fetch`, no `checkout`, no `restore`.
+   */
   'git status',
   'git log',
   'git diff',
@@ -85,30 +150,105 @@ export const DEFAULT_SAFE_COMMANDS: readonly string[] = [
   'git branch',
   'git blame',
   'git remote -v',
+  'git rev-parse',
+  'git rev-list',
+  'git ls-files',
+  'git ls-tree',
+  'git ls-remote',
+  'git for-each-ref',
+  'git show-ref',
+  'git symbolic-ref',
+  'git cat-file',
+  'git describe',
+  'git shortlog',
+  'git name-rev',
+  'git whatchanged',
+  'git diff-tree',
+  'git grep',
+  'git check-ignore',
+  'git count-objects',
+  'git stash list',
+  'git config --get',
+  'git config --list',
+  'git --version',
   /*
-   * Versions and compiling. Compiling is not executing; `python -c` and `python <file>` are.
+   * ## Versions
    *
-   * `compileall` is here on the same terms as `py_compile` — it walks a tree and writes bytecode
-   * beside the sources, and it never imports what it compiles. It was missing, which mattered
-   * because it is how anybody compiles a *project* rather than one file.
-   *
-   * `py` is the Windows launcher, and its absence was the sharper gap: on the platform section 16
-   * calls the primary one, `py -m py_compile` is the ordinary spelling.
+   * A version flag cannot be made to do anything else, and "which toolchain is this" is the
+   * question an agent asks first in an unfamiliar repository.
    */
   'python --version',
   'python3 --version',
   'py --version',
+  'python -V',
+  'python3 -V',
+  'py -V',
+  'node --version',
+  'node -v',
+  'npm --version',
+  'npm -v',
+  'pnpm --version',
+  'pnpm -v',
+  'yarn --version',
+  'npx --version',
+  'pip --version',
+  'tsc --version',
+  'go version',
+  'cargo --version',
+  'rustc --version',
+  'java -version',
+  'javac -version',
+  'dotnet --version',
+  'dotnet --info',
+  'ruby --version',
+  'perl --version',
+  'php --version',
+  'terraform version',
+  'docker --version',
+  /*
+   * ## Listing what is installed
+   *
+   * All read-only. `npm install` and friends are a long way from here: these are the query
+   * subcommands, named individually for the same reason the git ones are.
+   */
+  'pip list',
+  'pip show ',
+  'pip freeze',
+  'npm ls',
+  'npm list',
+  'pnpm list',
+  'pnpm why ',
+  /*
+   * ## Compiling and checking, which is not running
+   *
+   * `python -m py_compile` is here because compiling is not executing; `python -c` is not,
+   * because it is. `compileall` walks a tree and writes bytecode beside the sources without ever
+   * importing them, and it is how anybody compiles a *project* rather than one file.
+   *
+   * **Three near-misses are deliberately absent, and each fails one of the two questions:**
+   * `eslint` and `ruff check` both take `--fix` and rewrite the files, so the program can write
+   * through its own flags; `black` writes unless `--check` is given, so only the phrase carrying
+   * `--check` is vouched for; and `pytest` runs the code it collects, which is the second
+   * question, not the first.
+   */
   'python -m py_compile',
   'python3 -m py_compile',
   'py -m py_compile',
   'python -m compileall',
   'python3 -m compileall',
   'py -m compileall',
-  'node --version',
-  'npm --version',
-  'pnpm --version',
+  'python -m json.tool',
   'tsc --noEmit',
   'npx tsc --noEmit',
+  'mypy ',
+  'pyright ',
+  'flake8 ',
+  'pylint ',
+  'black --check',
+  'prettier --check',
+  'cargo check',
+  'go vet',
+  'go build -n',
 ]
 
 /** Whether a command could be more than one command. Conservative by construction. */

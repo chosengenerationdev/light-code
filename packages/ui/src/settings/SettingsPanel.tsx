@@ -56,6 +56,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   /** The user's own command rules. Global, unlike `approvals`. */
   commandRules: CommandRules
   onSetCommandRules: (rules: CommandRules) => void
+  /** The active mode, so Approvals can say whether the safe-command list is in force. */
+  modeId?: string | undefined
   accentColor: string
   onSetAccentColor: (value: string) => void
   expertColor: string
@@ -355,6 +357,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onSetReadRoots={props.onSetReadRoots}
             commandRules={props.commandRules}
             onSetCommandRules={props.onSetCommandRules}
+            {...(props.modeId !== undefined ? { modeId: props.modeId } : {})}
           />
         ) : shown === 'search' ? (
           <SearchTab {...props.search} />

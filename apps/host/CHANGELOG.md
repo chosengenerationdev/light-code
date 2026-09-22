@@ -1,5 +1,35 @@
 # @chosengeneration/light-code
 
+## 0.92.0
+
+### Minor Changes
+
+- Auto mode stops asking about read-only commands, and you can see and change the list.
+
+  **The safe-command list was written in Unix program names, and commands run through cmd.exe.**
+  `execute_command` spawns with `shell: true`, which on Windows is `%ComSpec%` — so `type` and
+  `findstr`, the two commonest read-only operations on the primary platform, were not on the list at
+  all, and neither was anything else cmd provides. That is the same fault as the last release's, one
+  level up: that one covered `python` and missed `py` and `python.exe`; this one covered `cat` and
+  `grep` and missed the shell they would have to run in. The list is now 131 entries rather than 40 —
+  cmd natives, the read-only `git` subcommands an agent actually reaches for, version flags, and the
+  checkers that cannot rewrite what they check.
+
+  The rule that decides an entry has not changed, and the near-misses are the interesting part:
+  `eslint` and `ruff check` take `--fix`, so they can write through their own flags; `black` writes
+  unless `--check` is given, so only that phrase is vouched for; `pytest` runs what it collects; and
+  `git tag` lists with no argument and creates a ref with one, which a prefix cannot tell apart. A
+  bare `date` is out too — in cmd it prompts and waits, so auto-approving it would hang the tool.
+
+  **Settings → Approvals now shows both built-in lists in full** and lets you add your own, rather
+  than describing them in a sentence. It also says whether the safe list is in force right now: it
+  applies in Auto mode only, and the panel tells you when you are in a different mode instead of
+  leaving you to wonder why a rule you can see is not being used.
+
+  **The npm package's documentation is current with the release** — `light-code --guide` and the
+  package README now cover driving Light Code from a Jupyter notebook, and the Outlook mail drafting
+  added in the previous version.
+
 ## 0.91.0
 
 ### Minor Changes

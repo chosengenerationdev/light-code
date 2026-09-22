@@ -28,8 +28,20 @@ afterEach(() => {
   container.remove()
 })
 
-function render(rules: CommandRules, onSave: (next: CommandRules) => void = () => {}): void {
-  act(() => root.render(<CommandRulesSection rules={rules} onSave={onSave} />))
+function render(
+  rules: CommandRules,
+  onSave: (next: CommandRules) => void = () => {},
+  modeId?: string,
+): void {
+  act(() =>
+    root.render(
+      <CommandRulesSection
+        rules={rules}
+        onSave={onSave}
+        {...(modeId !== undefined ? { modeId } : {})}
+      />,
+    ),
+  )
 }
 
 function button(label: string): HTMLButtonElement | undefined {
@@ -90,11 +102,38 @@ describe('CommandRulesSection', () => {
     expect(boxes[1]?.checked).toBe(false)
   })
 
+  it('shows the built-in commands rather than summarising them', () => {
+    /*
+     * The question that brings anybody to this panel is "why did it ask about X?", and a
+     * sentence naming three examples cannot answer it. The list is rendered from core's own
+     * constant, so the panel and the approval path cannot disagree about what is covered.
+     */
+    render({})
+    expect(container.textContent).toContain('findstr ')
+    expect(container.textContent).toContain('type ')
+    expect(container.textContent).toContain('git rev-parse')
+  })
+
   it('says that Auto mode is the only mode the safe list applies in', () => {
     // The list is a real relaxation, and somebody reading this panel has to be able to tell
     // which of the two halves is the one that fails open.
     render({})
     expect(container.textContent).toContain('Run without asking, in Auto mode')
+  })
+
+  it('says plainly when the safe list is not in force', () => {
+    /*
+     * The reported bug read as Auto mode ignoring its own list. The stored mode was `junior`,
+     * which resolves to Agent team, which has no safe-command relaxation - so nothing was broken
+     * and nothing said so. A panel describing a rule without saying whether it applies is one you
+     * can read twice and still be wrong about.
+     */
+    render({}, () => {}, 'agent-team')
+    expect(container.textContent).toContain('not in Auto mode')
+
+    render({}, () => {}, 'auto')
+    expect(container.textContent).toContain('in force now')
+    expect(container.textContent).not.toContain('not in Auto mode')
   })
 
   it('survives being rendered before the host has answered', () => {

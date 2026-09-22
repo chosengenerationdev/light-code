@@ -229,3 +229,68 @@ describe('the mode declares it', () => {
     expect(CODE_MODE.autoApproveSafeCommands).toBeUndefined()
   })
 })
+
+/**
+ * The platform the product actually runs on.
+ *
+ * Reported from real use: Auto mode "still asks for a lot of read-only commands". The list was
+ * written entirely in Unix program names, and `execute_command` spawns with `shell: true`, which
+ * on Windows is cmd.exe - so `type` and `findstr`, the two commonest read-only operations there,
+ * were not on it at all. Same fault as 0.104.0's `py`/`.exe` gap, one level up: that one missed
+ * spellings of a program, this one missed the shell.
+ */
+describe('the shell this actually runs in', () => {
+  it('covers what cmd.exe gives you for reading and searching', () => {
+    expect(isSafeCommand('type package.json')).toBe(true)
+    expect(isSafeCommand('findstr /s /i TODO src')).toBe(true)
+    expect(isSafeCommand('tree /f src')).toBe(true)
+    expect(isSafeCommand('more README.md')).toBe(true)
+  })
+
+  it('does not auto-approve a bare `date`, which prompts in cmd and would hang', () => {
+    // Auto-approving something that waits on stdin means the tool sits until its timeout and
+    // reports that as the command being slow.
+    expect(isSafeCommand('date')).toBe(false)
+    expect(isSafeCommand('date /t')).toBe(true)
+  })
+
+  it('covers the read-only git subcommands an agent actually reaches for', () => {
+    expect(isSafeCommand('git rev-parse --abbrev-ref HEAD')).toBe(true)
+    expect(isSafeCommand('git ls-files src')).toBe(true)
+    expect(isSafeCommand('git config --get user.email')).toBe(true)
+  })
+
+  it('still refuses every git subcommand that writes', () => {
+    /*
+     * The list names phrases, never the program. `git tag` is the sharp one: with no argument it
+     * lists and with one it creates a ref, and a prefix cannot tell those apart - so it is absent
+     * rather than guessed at.
+     */
+    expect(isSafeCommand('git tag v1.0.0')).toBe(false)
+    expect(isSafeCommand('git checkout main')).toBe(false)
+    expect(isSafeCommand('git stash pop')).toBe(false)
+    expect(isSafeCommand('git fetch origin')).toBe(false)
+    expect(isSafeCommand('git config user.email me@example.com')).toBe(false)
+  })
+
+  it('refuses the checkers that can rewrite the files they check', () => {
+    // The first of the two questions: can it write through its own flags? These can.
+    expect(isSafeCommand('eslint src --fix')).toBe(false)
+    expect(isSafeCommand('eslint src')).toBe(false)
+    expect(isSafeCommand('ruff check --fix .')).toBe(false)
+    expect(isSafeCommand('black .')).toBe(false)
+    // And the second: can it run what it was handed?
+    expect(isSafeCommand('pytest tests')).toBe(false)
+    // But the phrase that cannot write is fine.
+    expect(isSafeCommand('black --check .')).toBe(true)
+    expect(isSafeCommand('mypy src')).toBe(true)
+  })
+
+  it('leaves a longer name starting with a listed one alone', () => {
+    // The boundary rule, re-checked against the new short entries: a prefix with no trailing
+    // space must still end at a word boundary or `ver` vouches for `verify-everything`.
+    expect(isSafeCommand('verify-everything --now')).toBe(false)
+    expect(isSafeCommand('treeshake build')).toBe(false)
+    expect(isSafeCommand('datestamp files')).toBe(false)
+  })
+})

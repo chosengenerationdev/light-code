@@ -27,6 +27,13 @@ configure a provider.
 - **MCP servers** over stdio or Streamable HTTP, with per-server and per-tool controls.
 - **Approval that shows ground truth** — the literal command, the computed diff — never the
   model's description of what it intends to do.
+- **Modes.** Code, Ask (read-only), Agent team, and **Auto** — shell-first working, where
+  reading and searching and compiling run without stopping you, and anything that writes,
+  deletes or executes still asks. What counts as read-only is a list you can see and add to.
+- **Excel and Outlook on Windows**, opt-in and off by default. Attach to the workbook you
+  already have open and trace a `#DIV/0!` back through its precedents across sheets; search
+  your mail; compose a message with attachments and embedded images, which it **shows you
+  rather than sends**.
 - **Checkpoints.** A shadow-git snapshot before the first edit of a task, so you can undo
   everything in one click. Your own git repository is never touched.
 - **Task history.** Conversations survive closing the panel, reloading the window, and
