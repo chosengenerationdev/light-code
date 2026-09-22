@@ -1,6 +1,6 @@
 import type { ApprovableGroup, CommandRules, WorkspaceApprovals } from '@light-code/core/browser'
 import { TrashIcon } from '../icons.js'
-import { CommandRulesSection } from './CommandRules.js'
+import { CommandRulesSection, type CommandRulesSectionProps } from './CommandRules.js'
 import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
 import { colors, fontFamily, iconButtonStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
@@ -20,6 +20,8 @@ export interface ApprovalsTabProps {
   onSetCommandRules: (rules: CommandRules) => void
   /** The active mode, so the rules panel can say whether the safe list is in force. */
   modeId?: string | undefined
+  /** The resolved shell, reported by the host. */
+  shell?: CommandRulesSectionProps['shell']
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -170,6 +172,7 @@ export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
         rules={props.commandRules}
         onSave={props.onSetCommandRules}
         {...(props.modeId !== undefined ? { modeId: props.modeId } : {})}
+        {...(props.shell !== undefined ? { shell: props.shell } : {})}
       />
 
     </div>

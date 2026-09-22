@@ -2,6 +2,9 @@ import type { DatasetStatus } from './settings/CustomDataTab.js'
 import { CUSTOM_ROLE_LIMIT, skillAliases } from '@light-code/core/browser'
 import type { S3Mirror } from './settings/S3Section.js'
 import type { CheckpointView, CommandRules, ProbeTarget } from '@light-code/core/browser'
+
+/** The settings message, named once so the shell block does not have to be written out again. */
+type SettingsMessage = Extract<HostToUiMessage, { type: 'settings' }>
 import {
   DEFAULT_MODE_ID,
   type ApprovalDecision,
@@ -148,6 +151,8 @@ export function App(props: AppProps): ReactElement {
   const [readRoots, setReadRoots] = useState<string[]>([])
   /** The user's own command rules — global, unlike `approvals`. */
   const [commandRules, setCommandRules] = useState<CommandRules>({})
+  /** The shell the host resolved, so Approvals can state it rather than guess. */
+  const [commandShell, setCommandShell] = useState<SettingsMessage['shell'] | undefined>(undefined)
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   /**
    * The team, as the host resolved it.
@@ -555,6 +560,7 @@ export function App(props: AppProps): ReactElement {
         setAccentColor(message.accentColor)
         setReadRoots(message.readRoots)
         setCommandRules(message.commandRules)
+        setCommandShell(message.shell)
         setExpertColor(message.expertColor)
         // Applied straight to the document root rather than threaded through props: the
         // stylesheet reads the CSS variables, and it cannot read React state.
@@ -1632,6 +1638,7 @@ export function App(props: AppProps): ReactElement {
               props.transport.post({ type: 'setCommandRules', rules } satisfies UiToHostMessage)
             }
             modeId={modeId}
+            {...(commandShell !== undefined ? { commandShell } : {})}
             accentColor={accentColor}
             onSetAccentColor={(value) => {
               // Applied locally first so dragging through swatches is instant; config catches

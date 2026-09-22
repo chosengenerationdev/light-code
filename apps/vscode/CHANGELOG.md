@@ -1,5 +1,24 @@
 # light-code-vscode
 
+## 0.109.0
+
+### Minor Changes
+
+- The shell commands run in is now a setting you can see and change.
+
+  **Settings → Approvals → "Shell commands run in".** It was config-file only, which is the same gap
+  the command rules had: the mechanism shipped and nothing could reach it.
+
+  It states **which shell is actually running** rather than only what is set — the setting is
+  normally empty, because the default is the platform's, and "empty" tells you nothing about what
+  your commands are going through. That was the whole of the Auto-mode fault: a claim about the
+  shell that nobody could check. It also names the command-line tools this machine does not have,
+  since that is what stops the assistant reaching for them.
+
+  Choosing PowerShell warns you first rather than after a command stops working: `ls`, `sort`,
+  `diff` and `where` are cmdlet aliases there, so `ls -la` and `head -5 file` begin to fail. That is
+  why it is not the default.
+
 ## 0.108.0
 
 ### Minor Changes

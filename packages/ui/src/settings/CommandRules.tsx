@@ -6,6 +6,7 @@ import {
 import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
 
+import { Select } from '../Select.js'
 import { TrashIcon } from '../icons.js'
 import { colors, iconButtonStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
@@ -52,6 +53,23 @@ export interface CommandRulesSectionProps {
    * and still be wrong about.
    */
   modeId?: string | undefined
+  /**
+   * The shell commands really run in, resolved by the host.
+   *
+   * Reported rather than worked out here: a webview has no `process.platform`, no `%ComSpec%`
+   * and no PATH, so anything this panel decided for itself would be a guess - and guessing this
+   * is exactly what put "On Windows that is PowerShell" into the prompt while commands ran in
+   * cmd.exe.
+   */
+  shell?:
+    | {
+        label: string
+        kind: 'cmd' | 'powershell' | 'pwsh' | 'posix'
+        configured?: string
+        toolsPresent: string[]
+        toolsMissing: string[]
+      }
+    | undefined
 }
 
 export function CommandRulesSection(props: CommandRulesSectionProps): ReactElement {
@@ -88,6 +106,21 @@ export function CommandRulesSection(props: CommandRulesSectionProps): ReactEleme
         These apply in every workspace, not just this one, and are kept with your own settings so
         no repository can change them.
       </p>
+
+      <ShellField
+        {...(props.shell !== undefined ? { shell: props.shell } : {})}
+        value={draft.shell ?? ''}
+        onChange={(value) =>
+          setDraft(
+            value.trim().length > 0
+              ? { ...draft, shell: value }
+              : // Cleared means "the platform default", which is an *absent* key rather than an
+                // empty string - the schema requires a non-empty one, and a blank would fail to
+                // save with nothing on screen to say why.
+                Object.fromEntries(Object.entries(draft).filter(([key]) => key !== 'shell')),
+          )
+        }
+      />
 
       <label style={labelStyle()}>Always ask about</label>
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px', lineHeight: 1.5 }}>
@@ -328,5 +361,105 @@ function BuiltinList(props: {
         ))}
       </div>
     </details>
+  )
+}
+
+
+/**
+ * Which shell `execute_command` runs in.
+ *
+ * ## Why it shows the resolved shell rather than only the setting
+ *
+ * The setting is usually empty, because the default is the platform's. "Empty" tells somebody
+ * nothing about what is actually running, and what is actually running is the question - the
+ * whole Auto-mode fault was a claim about the shell that nobody could check. So the resolved
+ * name is stated first, and the control below it is how you change it.
+ *
+ * ## Why the warning about PowerShell is here rather than in the release notes
+ *
+ * Its aliases shadow the GNU tools: `ls`, `sort`, `diff`, `where` and `cat` are cmdlets there, so
+ * `ls -la` and `head -5` stop working. That is a surprise worth meeting *before* switching rather
+ * than afterwards, from a command that used to work.
+ */
+function ShellField(props: {
+  shell?:
+    | {
+        label: string
+        kind: 'cmd' | 'powershell' | 'pwsh' | 'posix'
+        configured?: string
+        toolsPresent: string[]
+        toolsMissing: string[]
+      }
+    | undefined
+  value: string
+  onChange: (value: string) => void
+}): ReactElement {
+  const windowsLike = props.shell?.kind !== 'posix'
+  const choices = [
+    { value: '', label: 'Default for this machine' },
+    ...(windowsLike
+      ? [
+          { value: 'cmd.exe', label: 'cmd.exe' },
+          { value: 'powershell.exe', label: 'Windows PowerShell 5.1' },
+          { value: 'pwsh', label: 'PowerShell 7 (pwsh)' },
+        ]
+      : [
+          { value: '/bin/bash', label: 'bash' },
+          { value: '/bin/zsh', label: 'zsh' },
+          { value: '/bin/sh', label: 'sh' },
+        ]),
+  ]
+  // A path somebody typed is kept as an option of its own, or the Select would show nothing
+  // selected and the next change would silently discard it.
+  const known = choices.some((choice) => choice.value === props.value)
+  const options = known ? choices : [...choices, { value: props.value, label: props.value }]
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={labelStyle()}>Shell commands run in</label>
+      {props.shell !== undefined && (
+        <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px', lineHeight: 1.5 }}>
+          Right now: <strong style={{ color: colors.foreground }}>{props.shell.label}</strong>
+          {props.shell.configured === undefined ? ' (this machine\u2019s default)' : ' (you chose this)'}.
+          {props.shell.toolsMissing.length > 0 && (
+            <>
+              {' '}
+              Not on this machine:{' '}
+              <code style={{ fontFamily: monospace }}>
+                {props.shell.toolsMissing.join(', ')}
+              </code>
+              . Auto mode is told which tools exist, so it does not reach for these.
+            </>
+          )}
+        </p>
+      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Select value={props.value} onChange={props.onChange} options={options} />
+        <input
+          type="text"
+          value={props.value}
+          placeholder="or a full path to a shell"
+          spellCheck={false}
+          aria-label="Shell executable"
+          onChange={(event) => props.onChange(event.target.value)}
+          style={{ ...textFieldStyle(), fontFamily: monospace, flex: 1, minWidth: 160 }}
+        />
+      </div>
+      {(props.value === 'powershell.exe' || props.value === 'pwsh') && (
+        <p style={{ color: colors.warning, fontSize: 11, margin: '6px 0 0', lineHeight: 1.5 }}>
+          In PowerShell, <code style={{ fontFamily: monospace }}>ls</code>,{' '}
+          <code style={{ fontFamily: monospace }}>sort</code>,{' '}
+          <code style={{ fontFamily: monospace }}>diff</code> and{' '}
+          <code style={{ fontFamily: monospace }}>where</code> are aliases for cmdlets, so
+          arguments that work today &mdash; <code style={{ fontFamily: monospace }}>ls -la</code>,{' '}
+          <code style={{ fontFamily: monospace }}>head -5 file</code> &mdash; will start failing.
+          That is why it is not the default.
+        </p>
+      )}
+      <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 6 }}>
+        Applies to the next command, not just the next session. Auto mode&rsquo;s instructions are
+        built from whichever shell this is, so the assistant is told the truth rather than a guess.
+      </span>
+    </div>
   )
 }

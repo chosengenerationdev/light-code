@@ -1154,6 +1154,24 @@ export type HostToUiMessage =
        */
       commandRules: CommandRules
       /**
+       * The shell commands will really run in, and what is really on PATH.
+       *
+       * Reported rather than left to the panel to work out: the panel runs in a webview and has
+       * no `process.platform`, no `%ComSpec%` and no PATH, so anything it displayed would be a
+       * guess. Guessing this is what put "On Windows that is PowerShell" into Auto mode's prompt
+       * while commands ran in cmd.exe.
+       */
+      shell: {
+        /** How it is named to a person: "cmd.exe", "Windows PowerShell 5.1". */
+        label: string
+        kind: 'cmd' | 'powershell' | 'pwsh' | 'posix'
+        /** What the user set, when they set one. Absent means the platform default. */
+        configured?: string
+        /** Command-line tools found on PATH, and those looked for and not found. */
+        toolsPresent: string[]
+        toolsMissing: string[]
+      }
+      /**
        * Which profile writes Python tool source, or absent when the chat model does.
        *
        * Reported with the rest of settings rather than with the profile list, because it is a

@@ -1,4 +1,5 @@
 import { CustomDataTab, type CustomDataTabProps } from './CustomDataTab.js'
+import type { CommandRulesSectionProps } from './CommandRules.js'
 import type {
   CommandRules,
   ApprovableGroup,
@@ -58,6 +59,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetCommandRules: (rules: CommandRules) => void
   /** The active mode, so Approvals can say whether the safe-command list is in force. */
   modeId?: string | undefined
+  /** The resolved shell, reported by the host. */
+  commandShell?: CommandRulesSectionProps['shell']
   accentColor: string
   onSetAccentColor: (value: string) => void
   expertColor: string
@@ -358,6 +361,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             commandRules={props.commandRules}
             onSetCommandRules={props.onSetCommandRules}
             {...(props.modeId !== undefined ? { modeId: props.modeId } : {})}
+            {...(props.commandShell !== undefined ? { shell: props.commandShell } : {})}
           />
         ) : shown === 'search' ? (
           <SearchTab {...props.search} />

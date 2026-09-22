@@ -1504,6 +1504,16 @@ invocation by path. And the "invoke by bare name" example list is drawn from too
 *present*: the first draft named `rg` on a machine without it, which is this section's own fault
 reintroduced in a footnote.
 
+**The setting reached the UI one release later** (0.109.0), which from the outside is the same as
+not having it - the gap `always: true` and the per-project override each shipped with. Settings ->
+Approvals -> "Shell commands run in". It **states the shell that is actually running**, not just
+the stored value: that value is normally empty, because the default is the platform's, and "empty"
+says nothing about what commands are going through - which is the whole fault this section is
+about, in miniature. The resolved shell and the PATH probe are computed host-side and reported,
+because a webview has no `%ComSpec%` and no PATH, so a panel deciding for itself would be guessing
+exactly as the prompt was. Choosing PowerShell warns **before** the switch rather than after a
+command stops working.
+
 **Still true and worth not forgetting:** a program reached by a path under `Program Files (x86)`
 contains brackets, which `couldChain` refuses, so it prompts. The metacharacter rule is not
 weakened for it - that rule is absolute on purpose and has no grammar to get wrong. The guidance

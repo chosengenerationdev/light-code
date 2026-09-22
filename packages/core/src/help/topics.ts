@@ -123,7 +123,9 @@ before it can be edited, and reading it in the terminal does not count.
 **Which shell commands run in.** On Windows it is **cmd.exe** by default, not PowerShell — so
 cmdlets like \`Get-ChildItem\` fail with "is not recognized". Auto mode's instructions are built
 from the shell that will actually run and from the tools really on PATH, so the assistant is told
-the truth rather than a guess. config:commands.shell changes it — set it to \`powershell.exe\` or
+the truth rather than a guess. **Settings -> Approvals -> "Shell commands run in"** changes it,
+and states which shell is running right now and which tools are missing from this machine
+(config:commands.shell). Set it to \`powershell.exe\` or
 \`pwsh\` if you would rather. The default is left alone on purpose: in PowerShell, \`ls\`,
 \`sort\`, \`diff\` and \`where\` are cmdlet aliases and fail on GNU arguments like \`ls -la\`.
 
@@ -683,7 +685,8 @@ nothing, stop raising it: a timeout is the right instrument for something slow a
 for something that is not going to finish.
 
 **A command fails with "is not recognized"** — you are in cmd.exe, and something emitted
-PowerShell. config:commands.shell switches it if you would rather work in PowerShell. The same
+PowerShell. Settings -> Approvals -> "Shell commands run in" says which shell is actually running
+and switches it (config:commands.shell). The same
 message for \`grep\` or \`sed\` means this machine has no Git-for-Windows tools on PATH; Auto mode
 detects that and says so in its own instructions.
 

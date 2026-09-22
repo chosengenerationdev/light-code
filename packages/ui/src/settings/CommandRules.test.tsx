@@ -28,10 +28,18 @@ afterEach(() => {
   container.remove()
 })
 
+const cmdShell = {
+  label: 'cmd.exe',
+  kind: 'cmd' as const,
+  toolsPresent: ['findstr', 'type', 'git'],
+  toolsMissing: ['rg', 'grep'],
+}
+
 function render(
   rules: CommandRules,
   onSave: (next: CommandRules) => void = () => {},
   modeId?: string,
+  shell?: typeof cmdShell,
 ): void {
   act(() =>
     root.render(
@@ -39,6 +47,7 @@ function render(
         rules={rules}
         onSave={onSave}
         {...(modeId !== undefined ? { modeId } : {})}
+        {...(shell !== undefined ? { shell } : {})}
       />,
     ),
   )
@@ -134,6 +143,50 @@ describe('CommandRulesSection', () => {
     render({}, () => {}, 'auto')
     expect(container.textContent).toContain('in force now')
     expect(container.textContent).not.toContain('not in Auto mode')
+  })
+
+  it('states the shell that is really running, rather than only the setting', () => {
+    /*
+     * The setting is usually empty, because the default is the platform's - and "empty" says
+     * nothing about what is actually running, which is the question. The whole Auto-mode fault
+     * was a claim about the shell that nobody could check.
+     */
+    render({}, () => {}, 'auto', cmdShell)
+    expect(container.textContent).toContain('cmd.exe')
+    expect(container.textContent).toContain('default')
+    // And what is missing, since that is what stops the assistant reaching for it.
+    expect(container.textContent).toContain('rg, grep')
+  })
+
+  it('warns before you switch to PowerShell, not after a command stops working', () => {
+    // `ls`, `sort`, `diff` and `where` are cmdlet aliases there, so `ls -la` starts failing.
+    render({ shell: 'powershell.exe' }, () => {}, 'auto', cmdShell)
+    expect(container.textContent).toContain('aliases for cmdlets')
+  })
+
+  it('saves a chosen shell, and clears the key rather than storing a blank', async () => {
+    let saved: CommandRules | undefined
+    render({ shell: 'powershell.exe' }, (next) => void (saved = next), 'auto', cmdShell)
+
+    const field = [...container.querySelectorAll('input[type="text"]')].find(
+      (input) => (input as HTMLInputElement).value === 'powershell.exe',
+    ) as HTMLInputElement
+    expect(field).toBeDefined()
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter?.call(field, '')
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => button('Save rules')?.click())
+
+    /*
+     * Absent, not empty. The schema requires a non-empty string, so a blank would be refused on
+     * save with nothing on screen to say why - and "use the platform default" is exactly what an
+     * absent key means everywhere else in this file.
+     */
+    expect(saved).toBeDefined()
+    expect('shell' in (saved as object)).toBe(false)
   })
 
   it('survives being rendered before the host has answered', () => {

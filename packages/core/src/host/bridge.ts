@@ -2374,6 +2374,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         : { toolTimeoutSeconds: cachedToolTimeoutSeconds }),
       readRoots: cachedReadRoots,
       commandRules: cachedCommandRules,
+      /*
+       * Ground truth, computed here where `%ComSpec%` and PATH exist. The panel cannot work any
+       * of this out for itself, and a panel that guessed would be the same mistake the prompt
+       * made.
+       */
+      shell: (() => {
+        const resolved = resolveShell(cachedCommandRules.shell)
+        const tools = commandToolset()
+        return {
+          label: resolved.label,
+          kind: resolved.kind,
+          ...(cachedCommandRules.shell !== undefined
+            ? { configured: cachedCommandRules.shell }
+            : {}),
+          toolsPresent: tools.present,
+          toolsMissing: tools.missing,
+        }
+      })(),
       ...(cachedProgrammingProfileId !== undefined
         ? { programmingProfileId: cachedProgrammingProfileId }
         : {}),
