@@ -1,5 +1,23 @@
 # light-code-vscode
 
+## 0.113.0
+
+### Minor Changes
+
+- "Send my skills to the team" said publishing needed a search connection and an embedding model,
+  reported from an office deployment where both were already configured.
+
+  The message was true of four different causes and could not tell you which: never configured,
+  the active connection deleted from under you, the embedder's provider profile gone stale, or the
+  connection simply unreachable. All four produced the identical sentence, which reads as "you
+  haven't set this up" even while looking at a filled-in Settings → Search panel — the model and
+  dimensions stay saved when only the profile reference underneath them has gone bad, so the
+  section looks complete and isn't.
+
+  Publishing and clearing team skills now name the actual gap: no active connection, a connection
+  that no longer exists, an unsaved embedder, a dead profile reference, or the specific error from
+  trying to reach the connection.
+
 ## 0.112.1
 
 ### Patch Changes

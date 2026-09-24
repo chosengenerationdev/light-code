@@ -7030,6 +7030,53 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Says exactly which precondition team-skill publishing is missing, in place of one message
+   * that covered four unrelated causes identically.
+   *
+   * Reported from real use: "I already set up embedding" — and that was true. `resolveSearch`
+   * and `resolveEmbedder` collapse "never configured", "the active connection was deleted",
+   * "the embedder's provider profile no longer exists" and "the connection is unreachable" into
+   * the same `undefined`, so every one of those produced the identical "needs a search
+   * connection and an embedding model" — which reads as "you haven't set this up" even to
+   * someone looking at a filled-in Settings → Search panel. The likeliest of the four in
+   * practice is the profile going stale: the model and dimensions are still saved, so the
+   * section looks configured, while the `profileId` it points at has been edited, duplicated
+   * or removed. Checked in the same order `resolveSearch`/`resolveEmbedder` short-circuit, so
+   * the message names the first thing that is actually missing rather than a later symptom of it.
+   */
+  async function describeTeamSkillsSetupGap(config: LightCodeConfig): Promise<string> {
+    const id = config.activeVectorStoreId
+    if (id === undefined) {
+      return 'No search connection is set active. Open Settings → Search, add a connection, and click "Use in chat" (or "Use in this project").'
+    }
+    const store = config.vectorStores?.[id]
+    if (store === undefined) {
+      return `The active search connection ("${id}") no longer exists. Choose one again in Settings → Search.`
+    }
+
+    const settings = config.embedder
+    if (
+      settings?.profileId === undefined ||
+      settings.model === undefined ||
+      settings.dimensions === undefined
+    ) {
+      return 'No embedding model is saved. Open Settings → Search, fill in the embedder section (profile, model, dimensions) and save it.'
+    }
+    const profile = config.profiles?.find((candidate) => candidate.id === settings.profileId)
+    if (profile === undefined) {
+      return "The embedder's provider profile no longer exists. Reselect a profile for the embedder in Settings → Search."
+    }
+
+    try {
+      await vectorSearcherFor(store, id)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return `Could not connect to the search connection "${store.label}": ${reason}`
+    }
+    return 'Could not build the embedding model. Check the embedder settings in Settings → Search.'
+  }
+
   async function handlePublishTeamSkills(): Promise<void> {
     const config = await loadSettings()
     const collection = skillsIndexName(config)
@@ -7040,7 +7087,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       post({
         type: 'teamSkillsPublished',
         error:
-          'Publishing skills needs a search connection and an embedding model in Settings → Search.',
+          collection === undefined
+            ? 'Open a folder first, or name a skills index in Settings → Search.'
+            : await describeTeamSkillsSetupGap(config),
       })
       return
     }
@@ -7116,7 +7165,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const search = await resolveSearch(config)
 
     if (collection === undefined || search === undefined) {
-      post({ type: 'teamSkillsPublished', error: 'No search connection configured.' })
+      post({
+        type: 'teamSkillsPublished',
+        error:
+          collection === undefined
+            ? 'Open a folder first, or name a skills index in Settings → Search.'
+            : await describeTeamSkillsSetupGap(config),
+      })
       return
     }
 
