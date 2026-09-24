@@ -44,6 +44,16 @@ export interface PendingToolApprovalsProps {
   onRequestSource: (name: string) => void
   onApprove: (names: string[]) => void
   onDecline: (names: string[]) => void
+  /**
+   * Why an approval did not take, keyed by tool.
+   *
+   * A tool that parses but fails to load cannot be approved at all - pinning it would have the
+   * registry certifying broken code. That is right, and it used to be invisible: the row looked
+   * like every other one, the reason went into a toast that scrolled past, and the only thing
+   * left to do was press Approve again and watch nothing happen. Reported here, this is the row
+   * that says so.
+   */
+  problems?: Record<string, string> | undefined
 }
 
 export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactElement | null {
@@ -94,7 +104,12 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
           const fetched = props.sources[tool.name]
           const expanded = open.includes(tool.name)
           return (
-            <div key={tool.name} style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 6 }}>
+            /*
+             * Keyed by path, not by name. The same tool can legitimately sit in two folders - a
+             * bucket mirror beside the local one - and two rows sharing a React key is a list
+             * React cannot update predictably as it shrinks.
+             */
+            <div key={tool.filePath} style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontFamily: monospace, fontSize: 12 }}>py__{tool.name}</span>
                 {tool.kind === 'hash-mismatch' && (
@@ -134,6 +149,12 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
               >
                 {tool.filePath}
               </div>
+              {props.problems?.[tool.name] !== undefined && (
+                <div style={{ color: colors.error, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
+                  Could not be approved: {props.problems[tool.name]}. Approving again will not
+                  help &mdash; fix the file, or Decline to hide it.
+                </div>
+              )}
               {expanded && (
                 <pre
                   style={{

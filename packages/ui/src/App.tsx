@@ -153,6 +153,8 @@ export function App(props: AppProps): ReactElement {
   const [commandRules, setCommandRules] = useState<CommandRules>({})
   /** The shell the host resolved, so Approvals can state it rather than guess. */
   const [commandShell, setCommandShell] = useState<SettingsMessage['shell'] | undefined>(undefined)
+  /** Why an approval did not take, per tool, so the row can say so rather than a toast. */
+  const [pythonApprovalProblems, setPythonApprovalProblems] = useState<Record<string, string>>({})
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   /**
    * The team, as the host resolved it.
@@ -800,6 +802,10 @@ export function App(props: AppProps): ReactElement {
             ...(message.problem !== undefined ? { problem: message.problem } : {}),
           },
         }))
+      } else if (message.type === 'pythonApprovalProblems') {
+        // Replaced wholesale, never merged: an empty map is how a row that has since been fixed
+        // stops showing the reason it failed last time.
+        setPythonApprovalProblems(message.problems)
       } else if (message.type === 'bucketSkillDeletePlan') {
         setBucketDeletePlan(message)
       } else if (message.type === 'shareSections') {
@@ -2258,6 +2264,7 @@ export function App(props: AppProps): ReactElement {
                   kind: issue.kind as 'unapproved' | 'hash-mismatch',
                 })),
               sources: pythonSources,
+              problems: pythonApprovalProblems,
               onRequestSource: (name: string) =>
                 props.transport.post({
                   type: 'requestPythonToolSource',

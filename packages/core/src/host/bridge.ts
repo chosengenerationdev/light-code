@@ -1002,6 +1002,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function handleApprovePythonTools(names: readonly string[]): Promise<void> {
     try {
       const problems: string[] = []
+      /** Keyed by tool, so the row that failed can say why rather than a toast saying it once. */
+      const perTool: Record<string, string> = {}
       let approved = 0
       /*
        * Deduplicated, because the panel lists one row per *file* and the same tool can sit in
@@ -1012,11 +1014,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       for (const name of [...new Set(names)]) {
         const problem = await approveOnePythonTool(name)
         if (problem === undefined) approved += 1
-        else problems.push(problem)
+        else {
+          problems.push(problem)
+          perTool[name] = problem
+        }
       }
 
       await python.refresh()
       await postPython()
+      /*
+       * Posted every time, including when empty - that is what clears a stale reason from a row
+       * that has since been fixed and approved. A message only sent on failure would leave the
+       * last failure's text under a tool that is now fine.
+       */
+      post({ type: 'pythonApprovalProblems', problems: perTool })
 
       const summary = `${String(approved)} tool(s) approved.`
       if (problems.length === 0) ui.showInfo(summary)

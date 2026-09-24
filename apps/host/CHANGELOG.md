@@ -1,5 +1,27 @@
 # @chosengeneration/light-code
 
+## 0.97.0
+
+### Minor Changes
+
+- A tool approval that cannot succeed now says so, in the row.
+
+  Following the approval panel fix: "I am guessing last approval in the list only getting stuck"
+  pointed at a second cause, and it is the more annoying one.
+
+  A Python tool that **parses but fails to load** — a missing dependency, an import that raises —
+  can never be approved, because recording an approval for it would have the registry certifying
+  code that does not run. That is correct. It was also invisible: the row looked like every other
+  one, the reason went into a notification that began "1 tool(s) approved" and scrolled past, and
+  the only thing left to do was press Approve again and watch nothing happen.
+
+  The reason is now shown in that tool's own row, in red, together with the fact that approving
+  again will not help and that Decline will hide it. A dead end that looks like a button is worse
+  than an error.
+
+  **Also fixed:** the rows were keyed by tool name, and two folders can legitimately hold the same
+  name — so two rows shared a key, which is a list that cannot update predictably as it shrinks.
+
 ## 0.96.0
 
 ### Minor Changes

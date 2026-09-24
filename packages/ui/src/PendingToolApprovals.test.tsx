@@ -149,3 +149,68 @@ describe('the pending approval card', () => {
     expect(container.textContent).toContain('could not be found')
   })
 })
+
+
+/**
+ * The row that cannot be approved, and the row that appears twice.
+ *
+ * Reported as "I am guessing last approval in the list only getting stuck". Two things produce
+ * that, and only one of them was a bug in the approval path itself.
+ */
+describe('a tool that cannot be approved', () => {
+  const stuck: PendingTool[] = [
+    { name: 'good_tool', filePath: '/tools/good_tool.py', kind: 'unapproved' },
+    { name: 'broken_tool', filePath: '/tools/broken_tool.py', kind: 'unapproved' },
+  ]
+
+  it('says why, in the row, instead of leaving it looking like every other one', () => {
+    /*
+     * A tool that parses but fails to load can never be approved - pinning it would have the
+     * registry certifying broken code, which §13 forbids. That is correct and it was invisible:
+     * the reason went into a toast, the row was unchanged, and the only thing left to do was
+     * press Approve again and watch nothing happen.
+     */
+    render({
+      tools: stuck,
+      problems: { broken_tool: '"broken_tool" could not be loaded, so it was not approved' },
+    })
+    expect(container.textContent).toContain('Could not be approved')
+    expect(container.textContent).toContain('Approving again will not help')
+    // And it says what *will* help, since the row is otherwise a dead end.
+    expect(container.textContent).toContain('Decline')
+  })
+
+  it('marks only the tool that failed', () => {
+    render({
+      tools: stuck,
+      problems: { broken_tool: 'could not be loaded' },
+    })
+    expect(container.querySelectorAll('div')).not.toHaveLength(0)
+    // One reason shown, not one per row.
+    expect(container.textContent?.match(/Could not be approved/g)).toHaveLength(1)
+  })
+
+  it('shows nothing when nothing failed', () => {
+    render({ tools: stuck })
+    expect(container.textContent).not.toContain('Could not be approved')
+  })
+})
+
+describe('the same tool in two folders', () => {
+  it('renders both rows, keyed by path rather than by name', () => {
+    /*
+     * A bucket mirror beside the local folder is the supported case, so two rows can share a
+     * name. Keyed by name they shared a React key, which is a list React cannot update
+     * predictably as it shrinks - the other half of "the last one gets stuck".
+     */
+    render({
+      tools: [
+        { name: 'shared_tool', filePath: '/local/shared_tool.py', kind: 'unapproved' },
+        { name: 'shared_tool', filePath: '/mirror/shared_tool.py', kind: 'unapproved' },
+      ],
+    })
+    expect(container.textContent).toContain('/local/shared_tool.py')
+    expect(container.textContent).toContain('/mirror/shared_tool.py')
+    expect(container.textContent).toContain('2 Python tools waiting')
+  })
+})

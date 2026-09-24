@@ -1551,6 +1551,19 @@ about case-insensitive path comparison, in a function that had never applied it 
 `approvals` hit when it keyed a workspace path in JSON. And because the panel sends one name per
 row, a duplicate made `handleApprovePythonTools` report "2 tool(s) approved" for one tool.
 
+**"I am guessing last approval in the list only getting stuck" pointed at a *second* cause**, and
+it is the one worth remembering. A tool that **parses but fails to load** - a missing dependency,
+an import that raises - is reported `unapproved` and can never be approved, because pinning it
+would have the registry certifying broken code (§13). That is correct behaviour and it was
+completely invisible: the row looked like every other one, the reason went into a toast that said
+"1 tool(s) approved" first and scrolled past, and the only move left was to press Approve again
+and watch nothing happen. **A dead end that looks like a button is worse than an error.** The
+reason is now reported per tool and shown in the row, with what will actually help.
+
+**And the rows were keyed by name.** Two folders can legitimately hold one name, so two rows
+shared a React key - a list React cannot update predictably as it shrinks, which is the other
+half of "the last one sticks". Keyed by path now.
+
 **`sharedWiring.test.ts` was reading a different function than it named.** It sliced from
 `'async function handleApprovePythonTool'`, which is a **prefix of** `handleApprovePythonTools`, so
 it matched the plural one first and passed only because a third function happened to fall inside

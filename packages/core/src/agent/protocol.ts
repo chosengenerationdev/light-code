@@ -1542,6 +1542,16 @@ export type HostToUiMessage =
    * for a card that is usually empty.
    */
   | { type: 'pythonToolSource'; name: string; source?: string; problem?: string }
+  /**
+   * Why an approval did not take, per tool.
+   *
+   * A tool that parses but fails to load - a missing dependency, an import that raises - is
+   * reported `unapproved` and **can never be approved**, because pinning a tool that does not
+   * load would have the registry certifying broken code. Correct, and until now invisible: the
+   * row looked exactly like every other one, the reason went into a toast that scrolled past,
+   * and the only thing left to do was press Approve again. Reported here so the row can say it.
+   */
+  | { type: 'pythonApprovalProblems'; problems: Record<string, string> }
   | { type: 'embedderSaved' }
   | { type: 'indexProgress'; progress: IndexProgress }
   /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */
