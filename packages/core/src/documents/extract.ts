@@ -1,4 +1,5 @@
 import { describePdfProblem, extractPdfText } from './pdf.js'
+import { CompoundFileError, parseMsg, renderMsg } from './msg.js'
 import { ZipArchive, ZipError } from './zip.js'
 
 /**
@@ -16,7 +17,7 @@ import { ZipArchive, ZipError } from './zip.js'
  * dependency is a bigger download for everyone.
  */
 
-export type DocumentKind = 'docx' | 'xlsx' | 'html' | 'pdf' | 'text'
+export type DocumentKind = 'docx' | 'xlsx' | 'html' | 'pdf' | 'msg' | 'text'
 
 export interface ExtractedDocument {
   kind: DocumentKind
@@ -41,6 +42,12 @@ export function documentKindFor(filePath: string): DocumentKind {
   if (lower.endsWith('.xlsx') || lower.endsWith('.xlsm')) return 'xlsx'
   if (lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.xhtml')) return 'html'
   if (lower.endsWith('.pdf')) return 'pdf'
+  /*
+   * A saved Outlook message. Without this it fell through to `text` and was decoded as
+   * UTF-8 - which for a compound file is mojibake with fragments of the real subject in it,
+   * and a model handed that summarises it confidently.
+   */
+  if (lower.endsWith('.msg')) return 'msg'
   return 'text'
 }
 
@@ -241,6 +248,23 @@ export function extractDocument(filePath: string, buffer: Buffer, options: Extra
     if (kind === 'docx') return extractDocx(buffer)
     if (kind === 'xlsx') return extractXlsx(buffer, options.sheet)
     if (kind === 'html') return extractHtml(buffer.toString('utf8'))
+    if (kind === 'msg') {
+      const parsed = parseMsg(buffer)
+      return {
+        kind: 'msg',
+        text: renderMsg(parsed),
+        // Attachments are named in the text; this says plainly that their *contents* are
+        // not here, so nobody reads a filename as having read the file.
+        ...(parsed.attachments.length > 0
+          ? {
+              note:
+                `${String(parsed.attachments.length)} attachment` +
+                `${parsed.attachments.length === 1 ? '' : 's'}, listed above. Their contents are ` +
+                'not included - save one out of Outlook to read it.',
+            }
+          : {}),
+      }
+    }
     if (kind === 'pdf') {
       const out = extractPdfText(buffer)
       /*
@@ -258,6 +282,16 @@ export function extractDocument(filePath: string, buffer: Buffer, options: Extra
     return { kind: 'text', text: buffer.toString('utf8') }
   } catch (error) {
     if (error instanceof DocumentError) throw error
+    if (error instanceof CompoundFileError) {
+      /*
+       * Named rather than allowed to escape. Each of these has something the user can act on
+       * - it is not really a `.msg`, or it is damaged - and the alternative is the mojibake
+       * this replaces, which a model reads as content.
+       */
+      throw new DocumentError(
+        `${filePath} could not be read as an Outlook message: ${error.message}.`,
+      )
+    }
     if (error instanceof ZipError) {
       throw new DocumentError(
         `${filePath} could not be opened as ${kind === 'docx' ? 'a Word document' : 'an Excel workbook'}: ${error.message}`,

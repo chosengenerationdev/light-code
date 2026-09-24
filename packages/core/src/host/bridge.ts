@@ -17,6 +17,7 @@ import path from 'node:path'
 
 import { mentionSegment } from '../context/mentionGlob.js'
 import { buildAutoGuidance } from '../modes/autoGuidance.js'
+import { describeMigration, planMigration, runMigration } from '../migrate/folders.js'
 import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
@@ -967,6 +968,144 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     await approveTool(dir, name, source, described)
     return undefined
+  }
+
+  /**
+   * Copies skills or Python tools in from a folder that used to hold them.
+   *
+   * Asked for: changing the folder left everything behind, and turning on a bucket published only
+   * what was written next. Nothing is moved and nothing is overwritten - see `migrate/folders.ts`.
+   *
+   * **A copied Python tool arrives unapproved**, and that is not an oversight. Approval is
+   * recorded per folder in that folder's own `.registry.json` (§13), which is what makes it
+   * per-machine; the plan skips dotfiles so the old registry never travels. A tool appearing in a
+   * folder must not become runnable because a file was copied there.
+   */
+  async function handleMigrateFolder(kind: 'skills' | 'tools', from: string): Promise<void> {
+    try {
+      const source = from.trim()
+      if (source.length === 0) throw new Error('Name the folder to copy from.')
+
+      const to = kind === 'skills' ? skillsDir : python.toolDirectories()[0]
+      if (to === undefined || to.length === 0) {
+        throw new Error(
+          kind === 'skills'
+            ? 'There is no skills folder configured to copy into.'
+            : 'Python tools are not switched on, so there is no folder to copy into.',
+        )
+      }
+
+      const plan = await planMigration({ from: source, to, kind })
+      if (plan.copy.length === 0) {
+        ui.showInfo(
+          plan.skip.length > 0
+            ? `Nothing to copy - all ${String(plan.skip.length)} are already here.`
+            : `Nothing in ${source} to copy.`,
+        )
+        return
+      }
+
+      /*
+       * Named, never counted. This is the same rule the approval prompts follow: "copy 12 files"
+       * hides which twelve, and the whole risk of this operation is bringing in something you did
+       * not mean to.
+       */
+      const shown = plan.copy.slice(0, 12).map((item) => item.name).join(', ')
+      const more = plan.copy.length > 12 ? `, and ${String(plan.copy.length - 12)} more` : ''
+      const confirmed = await ui.showActionMessage(
+        `Copy into ${to}: ${shown}${more}.` +
+          (plan.skip.length > 0 ? ` ${String(plan.skip.length)} already here and left alone.` : '') +
+          (kind === 'tools' ? ' They will arrive unapproved, to be read before they can run.' : ''),
+        'Copy',
+        'info',
+      )
+      if (!confirmed) return
+
+      const result = await runMigration(plan)
+      if (kind === 'skills') await refreshSkills()
+      else {
+        await python.refresh()
+        await postPython()
+      }
+      postSkills()
+      const line = describeMigration(result, kind)
+      if (result.failed.length > 0) ui.showWarning(line)
+      else ui.showInfo(line)
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Uploads everything already here to the bucket folder marked for publishing.
+   *
+   * `onSaved` and `onToolSaved` fire on a *write*, so turning a bucket on published only what you
+   * wrote afterwards and a folder of existing skills stayed invisible to the team. This is the
+   * one-off that closes that gap; it is a person pressing a button, never automatic.
+   */
+  async function handlePublishAllToBucket(kind: 'skills' | 'tools'): Promise<void> {
+    try {
+      const mirrors = kind === 'skills' ? cachedSkillMirrors : cachedToolMirrors
+      const mirror = mirrors.find((each) => each.enabled === true && each.publish === true)
+      if (mirror === undefined) {
+        throw new Error(
+          `No bucket folder is marked "Save new here" for ${kind === 'skills' ? 'skills' : 'Python tools'}.`,
+        )
+      }
+      const target = targetById(cachedS3, mirror.connectionId)
+      if (target === undefined || target.readOnly === true) {
+        throw new Error('That connection is unusable or read-only, so nothing can be uploaded.')
+      }
+
+      const dir = kind === 'skills' ? skillsDir : python.toolDirectories()[0]
+      if (dir === undefined || dir.length === 0) throw new Error('There is no local folder to upload from.')
+
+      const suffix = kind === 'skills' ? '.md' : '.py'
+      let entries: string[] = []
+      try {
+        entries = (await fs.readdir(dir)).filter(
+          (entry) => !entry.startsWith('.') && entry.toLowerCase().endsWith(suffix),
+        )
+      } catch {
+        entries = []
+      }
+      if (entries.length === 0) {
+        ui.showInfo(`Nothing in ${dir} to upload.`)
+        return
+      }
+
+      const confirmed = await ui.showActionMessage(
+        `Upload ${String(entries.length)} file(s) to ${target.label}: ${entries.slice(0, 12).join(', ')}` +
+          `${entries.length > 12 ? ', and more' : ''}.`,
+        'Upload',
+        'info',
+      )
+      if (!confirmed) return
+
+      const failed: string[] = []
+      let uploaded = 0
+      for (const entry of entries) {
+        try {
+          await uploadToS3({
+            target,
+            ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
+            relative: entry,
+            contents: await fs.readFile(path.join(dir, entry)),
+          })
+          uploaded += 1
+        } catch (error) {
+          // Each on its own, so one locked file does not cost the rest - `handleSyncS3`'s rule.
+          failed.push(`${entry} (${error instanceof Error ? error.message : String(error)})`)
+        }
+      }
+
+      const line = `${String(uploaded)} uploaded.${failed.length > 0 ? ` Failed: ${failed.join('; ')}.` : ''}`
+      if (failed.length > 0) ui.showWarning(line)
+      else ui.showInfo(line)
+      await postS3()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
   }
 
   /** One tool's source, so the chat can show it before anybody approves it. */
@@ -9569,6 +9708,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
         .then(() => postSettings())
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'migrateFolder') {
+      reportFailure('handleMigrateFolder', handleMigrateFolder(message.kind, message.from))
+    } else if (message.type === 'publishAllToBucket') {
+      reportFailure('handlePublishAllToBucket', handlePublishAllToBucket(message.kind))
     } else if (message.type === 'setCommandRules') {
       reportFailure('handleSetCommandRules', handleSetCommandRules(message.rules))
     } else if (message.type === 'setAccentColor') {

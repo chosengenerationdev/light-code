@@ -1,5 +1,29 @@
 # light-code-vscode
 
+## 0.112.0
+
+### Minor Changes
+
+- Outlook `.msg` files are readable, and skills and tools can be brought in from an old folder.
+
+  **`.msg`** was failing in the worst available way. It is a compound file, and with no case for it
+  Light Code decoded it as UTF-8 — so it came back as pages of mojibake with fragments of the real
+  subject buried in it, which a model reads as content and summarises confidently. `read_document`
+  now returns the Subject, From, To, Cc, Sent time and attachment names above the body. No Outlook
+  needed, on any platform, with no new dependency. Attachment contents are not included, and it says
+  so rather than leaving you to infer it from a filename.
+
+  **Bringing skills and tools in from another folder.** Changing where they live left everything
+  behind, and turning a bucket on published only what you wrote _next_ — the automatic publish fires
+  on a write, so a folder of twenty existing skills stayed invisible to your team for ever.
+  Settings → Skills and Settings → Python now have "Bring them in from another folder", plus a
+  one-off "Upload all existing … to the bucket".
+
+  Nothing is moved and nothing is overwritten. The old folder is untouched, a name already present
+  is skipped and named back to you, and the confirmation lists what will be copied rather than
+  counting it. A copied Python tool arrives **unapproved** — approvals are recorded per folder, so
+  you read it once here before it can run.
+
 ## 0.111.0
 
 ### Minor Changes

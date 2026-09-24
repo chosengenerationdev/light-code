@@ -541,6 +541,16 @@ export type UiToHostMessage =
    * complete — the two lists are read as a pair on every command.
    */
   | { type: 'setCommandRules'; rules: CommandRules }
+  /**
+   * Copy skills or Python tools in from a folder that used to hold them.
+   *
+   * Changing `skills.dir` or `python.toolsDir` left everything behind, and starting to use a
+   * bucket published only what was written *next* - so a folder of existing skills stayed
+   * invisible. Nothing is moved, nothing is overwritten; see `migrate/folders.ts`.
+   */
+  | { type: 'migrateFolder'; kind: 'skills' | 'tools'; from: string }
+  /** Upload every skill or tool already here to the bucket folder marked for publishing. */
+  | { type: 'publishAllToBucket'; kind: 'skills' | 'tools' }
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
   | { type: 'setExpertColor'; value: string }

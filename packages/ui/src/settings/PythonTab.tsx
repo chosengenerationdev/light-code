@@ -10,6 +10,7 @@ import {
 } from '../theme.js'
 import { Select } from '../Select.js'
 import { PathField, type BrowseRequest } from './PathField.js'
+import { MigrateFolder, type MigrateFolderProps } from './MigrateFolder.js'
 import { S3Section, type S3SectionProps } from './S3Section.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -17,6 +18,8 @@ const monospace = 'var(--vscode-editor-font-family, monospace)'
 export interface PythonTabProps {
   /** Reads the same connections the Skills tab manages; no editing here on purpose. */
   s3?: Omit<S3SectionProps, 'kind' | 'manageConnections'> | undefined
+  /** Copying tools in from a folder that used to hold them. See `MigrateFolder`. */
+  migrate?: Omit<MigrateFolderProps, 'kind'> | undefined
   status: PythonStatus | undefined
   /** What is saved in config — the source for these fields. See the `python` message. */
   settings: PythonSettings | undefined
@@ -719,6 +722,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
         be edited in two places is the drift this project has paid for most.
       */}
       {props.s3 !== undefined && <S3Section {...props.s3} kind="tools" />}
+      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="tools" />}
     </div>
   )
 }

@@ -257,6 +257,14 @@ and the assistant copies it into the workspace with \`use_skill_file\` rather th
 bytes into the conversation. Describe each file in one line in the skill body; a file nobody
 described is one the assistant will never know to reach for.
 
+**Moving them.** Changed where skills live, or turned a bucket on after you already had some?
+Settings -> Skills -> "Bring skills in from another folder" copies them in. Nothing is moved and
+nothing is overwritten: the old folder is untouched and a name already present is skipped and
+named back to you. The same section offers a one-off upload of everything you already have to a
+bucket folder marked "Save new here" - the automatic publish only fires on a *write*, so it never
+covered what was there before. Settings -> Python has the same for tools, where a copied tool
+arrives **unapproved** because approvals are recorded per folder.
+
 **Sharing.** Skills can be published to a team collection and found with \`search_team_skills\`,
 or mirrored from an S3 bucket. Everyone publishes to their own collection and an alias spans them,
 so one person re-indexing never disturbs anybody else.
@@ -414,6 +422,10 @@ separately approved tool.
 
 **VBA needs one Trust Center setting**: "Trust access to the VBA project object model". Without it
 the project reads as empty rather than blocked, so the tools say which setting to turn on.
+
+**A saved \`.msg\` file** is read with \`read_document\`, on any platform and with no Outlook
+running - subject, from, to, cc, sent time and attachment names above the body. The attachments
+themselves are not included; save one out of Outlook to read it.
 
 **Outlook.** List folders, search, read a message, and open one on screen. Mail formatting is
 preserved as annotations — in an alerting mailbox the red line often *is* the message, and the

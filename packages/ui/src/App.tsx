@@ -1376,6 +1376,40 @@ export function App(props: AppProps): ReactElement {
     } satisfies UiToHostMessage)
   }
 
+  /**
+   * The props for "bring them in from another folder", for either kind.
+   *
+   * One builder rather than two blocks, because the two differ only in a word - and two copies of
+   * one fact is the defect this repository has paid for more than any other.
+   */
+  const migrateProps = (
+    kind: 'skills' | 'tools',
+    s3: { mirrors?: { enabled?: boolean | undefined; publish?: boolean | undefined }[] } | undefined,
+  ): {
+    destination?: string
+    onMigrate: (from: string) => void
+    onBrowse: () => void
+    picked?: string
+    canPublishAll: boolean
+    onPublishAll: () => void
+  } => {
+    const purpose = `migrate-${kind}`
+    const destination =
+      kind === 'skills' ? skillsDir : pythonStatus?.toolsDir
+    return {
+      ...(destination !== undefined ? { destination } : {}),
+      onMigrate: (from: string) =>
+        props.transport.post({ type: 'migrateFolder', kind, from } satisfies UiToHostMessage),
+      onBrowse: () => browseForPath({ purpose, kind: 'folder' }),
+      ...(pickedPath?.purpose === purpose ? { picked: pickedPath.path } : {}),
+      // Offered only where there is somewhere to publish to, rather than shown and failing.
+      canPublishAll:
+        s3?.mirrors?.some((mirror) => mirror.enabled === true && mirror.publish === true) === true,
+      onPublishAll: () =>
+        props.transport.post({ type: 'publishAllToBucket', kind } satisfies UiToHostMessage),
+    }
+  }
+
   const rollback = (): void => {
     props.transport.post({ type: 'rollback' } satisfies UiToHostMessage)
   }
@@ -1813,6 +1847,7 @@ export function App(props: AppProps): ReactElement {
             search={searchProps}
             skills={{
               s3: skillsS3,
+              migrate: migrateProps('skills', skillsS3),
               skillImages,
               onPreviewBucketDelete: (name: string, sourceDir: string) =>
                 props.transport.post({
@@ -2178,6 +2213,7 @@ export function App(props: AppProps): ReactElement {
                 : {}),
               status: pythonStatus,
               settings: pythonSettings,
+              migrate: migrateProps('tools', toolsS3),
               onBrowse: browseForPath,
               pickedPath,
               onOpenFile: openManagedFile,

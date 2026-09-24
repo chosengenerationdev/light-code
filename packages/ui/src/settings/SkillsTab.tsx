@@ -4,6 +4,7 @@ import { IndexingProgress, type IndexingProgressState } from './IndexingProgress
 import { useEffect, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { FolderListEditor } from './FolderListEditor.js'
+import { MigrateFolder, type MigrateFolderProps } from './MigrateFolder.js'
 import { S3Section, type S3SectionProps } from './S3Section.js'
 import { DismissableProblems } from './DismissableProblems.js'
 
@@ -18,8 +19,13 @@ const monospace = 'var(--vscode-editor-font-family, monospace)'
  */
 export type SkillsTabS3 = Omit<S3SectionProps, 'kind' | 'manageConnections'>
 
+/** Copying skills in from a folder that used to hold them. See `MigrateFolder`. */
+export type SkillsTabMigrate = Omit<MigrateFolderProps, 'kind'>
+
 export interface SkillsTabProps {
   s3?: SkillsTabS3 | undefined
+  /** Copying skills in from a folder that used to hold them. */
+  migrate?: SkillsTabMigrate | undefined
   skills: {
     name: string
     description: string
@@ -696,6 +702,7 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         itself says the mirrored folder joins that list rather than replacing it.
       */}
       {props.s3 !== undefined && <S3Section {...props.s3} kind="skills" manageConnections />}
+      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="skills" />}
     </div>
   )
 }

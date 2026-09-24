@@ -1571,6 +1571,59 @@ its 1800-byte window. Adding a comment broke it - the right outcome from the wro
 anchors on full signatures and slices to the function's own closing brace, and checks **both**
 approval paths.
 
+## 12p. Reading a `.msg`, and moving folders (0.112.0)
+
+Two asks: *"is it possible to sync tools and skills from previously used folder to newly using
+folder or bucket?"* and *"light couldnt read the outlook msg file, do we have tool for it?"*
+
+### `.msg` (`documents/cfbf.ts`, `documents/msg.ts`)
+
+**It failed in the worst available way.** A `.msg` is a compound file, and `extractDocument` had
+no case for it - so it fell through to `buffer.toString('utf8')` and came back as mojibake with
+fragments of the real subject in it. `pdf.ts` already refuses to return glyph soup for exactly
+this reason: a model handed fragments summarises them confidently. Measured side by side, which is
+the clearest justification this feature has.
+
+- **Hand-written, like the PDF reader and for the same reason**: a library is megabytes every user
+  downloads whether or not they open one. What is needed is narrow - read named streams out of a
+  directory - rather than the whole of MS-CFB.
+- **The mini stream is the part readers get wrong.** A subject is far under the 4096-byte cutoff,
+  so it lives in the mini stream chained by the mini FAT. A reader that only understood ordinary
+  sectors would return nothing for the one field everybody wants and look like it had worked.
+- **The directory is walked, not searched.** It is a red-black tree per storage, and walking needs
+  no understanding of the colouring or ordering - both of which real files get wrong often enough
+  that libraries carry workarounds.
+- **The HTML body is a fallback, never a pass-through.** `office/mailFormat.ts` records why: an
+  Outlook body is thousands of tokens of `mso-` markup around a few lines of text. The plain-text
+  body wins, and when it is missing the reader is **told** the text came from HTML - because in
+  work email the formatting is often the message.
+- **The fixture is validated by somebody else.** `scratchpad` writes it and reads it back with
+  `olefile`, a third-party implementation, which confirms the signature, directory and stream
+  contents. A fixture produced by the code under test agrees with that code whatever either does.
+  **Not verified against a message saved by real Outlook** - that is the first thing to check.
+
+### Moving folders (`migrate/folders.ts`)
+
+Changing `skills.dir` or `python.toolsDir` left everything behind, and turning a bucket on
+published only what was written *next* - `onSaved` fires on a write, so an existing folder stayed
+invisible to the team for ever.
+
+- **A copy, never a move, and never an overwrite.** The old folder is untouched, so a migration to
+  the wrong place costs nothing to undo; a name already at the destination is **skipped and
+  named**. Replacing would mean somebody's newer version being silently overwritten by the older
+  one they were migrating away from - the worst outcome for an operation whose point is not losing
+  anything. `errorOnExist` is the second lock, because a sync can bring a name down between
+  planning and running.
+- **A copied Python tool arrives unapproved**, and dotfiles are skipped so `.registry.json` never
+  travels. Approval is per folder because that is what makes it per machine (§13); a tool must not
+  become runnable because a file was copied next to it.
+- **The confirmation is the preview.** The host must read the folder to know what is in it and has
+  to confirm anyway, so a second list rendered in the panel would be one fact computed from two
+  reads of a folder that can change between them. It **names** what it will copy rather than
+  counting it.
+- **The path stays typeable** (§19): a browser has no picker, so a Browse-only field would make
+  the feature absent on the Node host - and an old folder is often on a share anyway.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

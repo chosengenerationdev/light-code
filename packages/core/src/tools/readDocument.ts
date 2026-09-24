@@ -34,8 +34,10 @@ export const readDocumentTool: Tool<ReadDocumentParams> = {
   name: 'read_document',
   group: 'read',
   description:
-    'Read a Word document (.docx), spreadsheet (.xlsx), PDF or HTML page as plain text. ' +
-    'Use this instead of read_file for those formats — read_file returns unreadable binary for them. ' +
+    'Read a Word document (.docx), spreadsheet (.xlsx), PDF, HTML page or saved Outlook ' +
+    'message (.msg) as plain text. Use this instead of read_file for those formats — read_file ' +
+    'returns unreadable binary for them. A .msg comes back with its Subject, From, To, Cc, Sent ' +
+    'time and attachment names above the body; the attachments themselves are not included. ' +
     'Supports offset/limit for long documents, and a sheet name for workbooks.',
   parametersSchema: paramsSchema,
 
