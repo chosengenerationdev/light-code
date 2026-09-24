@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
+import { readDebugSession, startTrackingDebugSessions } from '../platform/debugSession.js'
 import { createRipgrepResolver } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
 import { WebviewTransport } from '../platform/transport.js'
@@ -20,6 +21,9 @@ export function createVSCodeHostServices(
   const logSink = (line: string): void => outputChannel.appendLine(line)
   const logger = new Logger({ level: 'debug', sink: logSink })
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  // Registered once, at activation: a debug adapter only ever pushes its output forward as it
+  // happens, so this has to be listening before a session starts, not asked to catch up after.
+  startTrackingDebugSessions(context)
 
   const ui: HostUi = {
     showInfo: (message) => void vscode.window.showInformationMessage(`Light Code: ${message}`),
@@ -134,5 +138,6 @@ export function createVSCodeHostServices(
       */
      ripgrepPath: createRipgrepResolver(context.extensionPath, logger),
     logSink,
+    readDebugSession,
   }
 }

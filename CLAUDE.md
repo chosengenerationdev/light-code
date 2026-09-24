@@ -174,8 +174,9 @@ rather than being re-baselined.
 | `attempt_completion` | always | Control tool; terminates the loop |
 
 Since then, and worth knowing they exist: `use_skill_file` (§13, a skill's own template
-copied into the workspace) and `excel_create_workbook` / `excel_save_workbook` / `excel_sheets`
-(§12c).
+copied into the workspace), `excel_create_workbook` / `excel_save_workbook` / `excel_sheets`
+(§12c), and `read_debug_session` (§12q, the call stack and variables of a paused debug session —
+any language VS Code can debug, via the Debug Adapter Protocol).
 
 **Explicitly not in v1:** browser automation, semantic/embedding codebase search,
 `insert_content`, `list_code_definition_names`, mode-switching and subtask tools, a fetch
@@ -1634,6 +1635,60 @@ invisible to the team for ever.
   bridge cannot disagree, and `toolsFolder.test.ts` pins both halves - including that the manager
   really does report nothing when the feature is off, so the reason the bridge stopped asking it
   stays visible.
+
+## 12q. Reading a live debug session (0.116.0)
+
+Asked for as "read from terminal and the current debug session, for investigation, ideally for
+more than Python." Two different asks that turned out to have very different answers.
+
+- **Terminal reading was dropped, not built.** VS Code gives an extension no "read what is
+  currently on screen in this terminal" API — only ways to send text to one, or to capture output
+  from a command the extension itself started with shell integration. Neither covers "read a
+  terminal the user is typing into by hand," so building a version that only sort-of worked would
+  have been worse than not offering it. Said plainly rather than shipped as a half feature.
+- **A debug session is a genuinely different case, and the reason is the whole justification for
+  building this at all: every debugger VS Code hosts — Python, Node, Go, C++, whatever is
+  installed — speaks the same Debug Adapter Protocol underneath.** `read_debug_session` is built
+  against DAP requests (`stackTrace`, `scopes`, `variables`) rather than anything
+  language-specific, so "if possible for other languages too" is answered by the mechanism itself
+  rather than by adding per-language cases. `session.type` (`python`, `node`, `go`, …) is read and
+  reported, never branched on — a test asserts the renderer produces correct output for a
+  `node`-typed and a `go`-typed session with no Python involved at all.
+- **A tool, not an `@` mention** — the other fork this was asked about. "Investigation" is the
+  model noticing it needs debug state (a crash, an exception, unexpected behaviour) and reaching
+  for it, not the user remembering to type `@debug` every time. `read_debug_session` is `read`
+  group, ordinarily advertised like the Excel/Outlook tools, gated only on whether the host can
+  offer it at all.
+- **Output has to be watched forward, not asked for after the fact.** A debug adapter has no "give
+  me the last 50 lines" request — `output` events only ever arrive pushed forward as they happen.
+  `apps/vscode/src/platform/debugSession.ts` registers one wildcard tracker
+  (`registerDebugAdapterTrackerFactory('*', …)`) at first bridge construction and keeps a bounded
+  per-session buffer, so the tool answers instantly from what has already arrived rather than
+  querying the adapter for something it cannot answer.
+- **No cross-session lookup, and no `sessionId` parameter.** The tool always answers for
+  `vscode.debug.activeDebugSession` — "whichever one you are looking at" is the only session a
+  chat running alongside it can mean without asking.
+- **Read-only by construction**, the same restriction §12b puts on the Claude CLI expert and for
+  the same shape of reason: this is in the `read` group, can inspect a call stack and its
+  variables, and cannot step, continue, or set a breakpoint. A tool that could also drive the
+  program the user is looking at is a different, larger decision than the one this was asked for.
+- **No privacy toggle, deliberately, and the reasoning is the comparison worth keeping.** A paused
+  program's variables can hold a secret — an API key sitting in a local variable mid-request. But
+  unlike Office or mail, this is not a standing background capability watching something of the
+  user's; it only ever answers for a debugger the user personally started, in this window, right
+  now, and it goes through the same `read`-group approval every tool that can see secrets already
+  does — `read_file` carries the identical risk and has no special toggle either. Adding one here
+  would be protecting against a risk `read_file` already carries and nobody asked to gate.
+- **Absent rather than present-and-failing, the rule every other host-specific tool here
+  follows.** `HostServices.readDebugSession` is optional; the Node host and the browser UI have no
+  `vscode.debug` API and simply do not supply it, so the tool is not registered there at all —
+  same shape as `offersOffice`.
+
+**Not verified against a real Extension Host or a live debugger of any language.** The rendering
+and the tool's own logic are covered by `tools/debugSession.test.ts`; the DAP wiring in
+`apps/vscode/src/platform/debugSession.ts` — the tracker, the buffer, the `stackTrace`/`scopes`/
+`variables` sequence — has only been read, not run against a real paused program. That is the
+first thing to check.
 
 ## 13. Python interop and skills (phase 9)
 

@@ -71,6 +71,7 @@ import {
 import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
 import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
+import { createReadDebugSessionTool } from '../tools/debugSession.js'
 import {
   createExcelOpenTool,
   createExcelDiagnoseTool,
@@ -3214,6 +3215,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          */
         combined.register(createOutlookDraftTool(officeOptions))
       }
+    }
+
+    /*
+     * Debug-session reading, offered only when the host has one to give — the Node host and the
+     * browser UI have no `vscode.debug` API, so `services.readDebugSession` is simply absent
+     * there rather than present and always answering "nothing running". No settings toggle: it
+     * only ever answers for a debugger the user personally started in this window, and it is
+     * approval-gated exactly like `read_file`, which can see secrets too.
+     */
+    if (services.readDebugSession !== undefined) {
+      combined.register(createReadDebugSessionTool({ read: services.readDebugSession }))
     }
 
     const hasHiddenTools = dispatcher && combined.dispatchOnlyList().length > 0

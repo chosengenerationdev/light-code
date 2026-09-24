@@ -319,6 +319,15 @@ export {
 } from './tools/searchTeamSkills.js'
 export { createExcelDiagnoseTool } from './tools/office.js'
 export {
+  createReadDebugSessionTool,
+  renderDebugSnapshot,
+  type DebugSessionSnapshot,
+  type DebugSessionToolOptions,
+  type DebugStackFrame,
+  type DebugScope,
+  type DebugVariable,
+} from './tools/debugSession.js'
+export {
   createSearchMailTool,
   createMailPatternsTool,
   createOpenEmailTool,

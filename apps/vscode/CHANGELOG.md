@@ -1,5 +1,27 @@
 # light-code-vscode
 
+## 0.116.0
+
+### Minor Changes
+
+- A new tool, `read_debug_session`, reads the active VS Code debug session for investigating a
+  crash or unexpected behaviour: the call stack and local variables at the point it is paused,
+  plus recent console output. It works for any language VS Code can debug — Python, Node.js, Go,
+  and others — not just one, because it is built on the Debug Adapter Protocol every debugger
+  speaks underneath rather than anything language-specific.
+
+  Reading an arbitrary terminal's on-screen output was asked for alongside this and deliberately
+  not built: VS Code has no API for it, only ways to send text to a terminal or capture output
+  from a command started with shell integration, neither of which covers a terminal you typed
+  into by hand.
+
+  Read-only — it cannot step, continue, or set a breakpoint — and ordinarily advertised like the
+  Excel/Outlook tools rather than hidden behind search. No settings toggle: it only ever answers
+  for a debugger you personally started in this window, and goes through the same approval every
+  tool that can see secrets already does.
+
+  Not yet verified against a real Extension Host or a live debugger.
+
 ## 0.115.2
 
 ### Patch Changes

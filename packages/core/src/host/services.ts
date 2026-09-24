@@ -2,6 +2,7 @@ import type { ConfigStore } from '../platform/config.js'
 import type { HttpClient } from '../platform/http.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Transport } from '../platform/transport.js'
+import type { DebugSessionSnapshot } from '../tools/debugSession.js'
 
 /**
  * Everything the chat bridge needs from its host.
@@ -233,4 +234,13 @@ export interface HostServices {
    * hand-edited file cannot change what `create_python_tool` asks for.
    */
   allowProgrammingProfile?: boolean
+  /**
+   * A snapshot of the active debug session — the call stack and variables at the point it is
+   * paused, plus recent console output — or undefined when nothing is being debugged.
+   *
+   * Absent means this host has no debug session to offer: the Node host and the browser UI have
+   * no `vscode.debug` API, so `read_debug_session` is simply not registered there, the same rule
+   * every other host-specific tool follows.
+   */
+  readDebugSession?: () => Promise<DebugSessionSnapshot | undefined>
 }
