@@ -316,12 +316,15 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         minute ago and edited since should not still read as "indexed". Same reasoning §12e gives
         for checking locality against the filesystem rather than trusting a stored label.
 
-        Scoped to skills authored on this machine: one brought in from a bucket is a copy, and
-        "indexed" is a question about your own publishing of it, not about the copy itself.
+        Covers every currently loaded skill, matching what "Send my skills to the team" actually
+        sends — including ones brought in from a bucket. It used to exclude those, on the
+        reasoning that "indexed" should mean "you authored it"; but publish was never given that
+        restriction, so a skill living entirely in a synced folder could be genuinely published
+        and still show as structurally uncheckable here. Narrow both together, or neither.
       */}
       <div style={{ marginTop: 14, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-          <strong style={{ fontSize: 12 }}>Your skills in the index</strong>
+          <strong style={{ fontSize: 12 }}>Skills in the index</strong>
           <button
             type="button"
             style={secondaryButtonStyle()}
@@ -337,10 +340,7 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         {props.statusError === undefined &&
           props.status !== undefined &&
           (props.status.length === 0 ? (
-            <p style={{ color: colors.muted, fontSize: 11, margin: 0 }}>
-              Nothing authored on this machine yet — skills brought in from a bucket are not
-              counted here.
-            </p>
+            <p style={{ color: colors.muted, fontSize: 11, margin: 0 }}>None loaded.</p>
           ) : (
             <div>
               {props.status.map((entry) => (

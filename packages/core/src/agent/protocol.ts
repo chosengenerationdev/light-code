@@ -1590,8 +1590,8 @@ export type HostToUiMessage =
       error?: string
     }
   /**
-   * One row per skill authored on this machine — skills mirrored in from a bucket are excluded,
-   * since "indexed" is a question about *your* publishing, not about a copy you merely hold.
+   * One row per currently loaded skill — the same set `publishTeamSkills` sends, so a skill this
+   * machine actually published is never structurally invisible to its own status check.
    */
   | {
       type: 'teamSkillsIndexStatus'

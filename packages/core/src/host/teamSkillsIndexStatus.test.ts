@@ -5,12 +5,13 @@ import { describe, expect, it } from 'vitest'
 
 /**
  * `requestTeamSkillsIndexStatus` / `handleTeamSkillsIndexStatus`: a live green/red check of
- * which locally-authored skills currently have a matching document in the team collection.
+ * which currently loaded skills have a matching document in the team collection.
  *
  * Read the source rather than invoking `wireChatBridge`, for the reason `config/retrieval.test.ts`
  * and `teamSkillsSetupGap.test.ts` both give: the closure needs a large host mock to run, and what
- * would regress here is the *wiring* — a message the UI can send with no handler, or a handler
- * that forgot to exclude bucket-mirrored skills — which source inspection sees directly.
+ * would regress here is the *wiring* — a message the UI can send with no handler, or a check that
+ * silently disagrees with what `handlePublishTeamSkills` actually sends — which source inspection
+ * sees directly.
  */
 describe('the team-skills index status check', () => {
   it('is reachable from the message the UI actually sends', async () => {
@@ -22,18 +23,23 @@ describe('the team-skills index status check', () => {
   })
 
   /**
-   * "Indexed" is a question about *your* publishing of a skill, not about a copy of somebody
-   * else's you merely hold — the same distinction `handlePublishTeamSkills` itself does not make
-   * (§the team-skills duplication conversation), which is exactly why this one has to.
+   * Reported from real use: someone whose skills live entirely in an S3-synced folder published
+   * successfully and then saw "nothing authored on this machine yet". The status check used to
+   * filter to skills with no bucket `sourceDir`, on the reasoning that "indexed" should mean "you
+   * authored it" — but `handlePublishTeamSkills` was never given that same restriction, so a
+   * bucket-sourced skill could be genuinely published and still be structurally excluded from
+   * ever being reported as indexed. It must check the same set publish sends, whatever that set
+   * is, or the two can disagree exactly like this again.
    */
-  it('excludes bucket-mirrored skills before reporting status', async () => {
+  it('checks the same skills publish actually sends, with no filtering by source', async () => {
     const bridge = url.fileURLToPath(new URL('./bridge.ts', import.meta.url))
     const source = await fs.readFile(bridge, 'utf8')
 
     const body = source.slice(source.indexOf('async function handleTeamSkillsIndexStatus'))
     const scoped = body.slice(0, body.indexOf('\n  function skillsIndexName'))
 
-    expect(scoped).toContain('mirrorForDir(skill.sourceDir) === undefined')
+    expect(scoped).toContain('skills.map((skill)')
+    expect(scoped).not.toContain('mirrorForDir')
   })
 
   /**

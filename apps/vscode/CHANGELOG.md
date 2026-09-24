@@ -1,5 +1,18 @@
 # light-code-vscode
 
+## 0.115.2
+
+### Patch Changes
+
+- The team-skills status check still showed "nothing authored on this machine yet" for someone
+  whose skills live entirely in an S3-synced folder, right after a successful publish. It
+  filtered out bucket-mirrored skills before checking, on the reasoning that "indexed" should
+  mean "you authored it" — but publishing was never given that same restriction, so a
+  bucket-sourced skill could be genuinely sent to the team collection and still be structurally
+  invisible to its own status check. It now checks every currently loaded skill, matching exactly
+  what "Send my skills to the team" sends. If publishing is later scoped to locally-authored
+  skills only, this has to be narrowed the same way at the same time.
+
 ## 0.115.1
 
 ### Patch Changes

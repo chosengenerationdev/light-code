@@ -7217,8 +7217,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /**
-   * Which of *this machine's own* skills currently have a matching document in the team
-   * collection — one row per skill authored here, green or red.
+   * Which currently loaded skills have a matching document in the team collection — one row per
+   * skill, green or red.
    *
    * A live check against the store, not a record kept locally from the last publish. Publishing
    * writes here; a skill edited afterwards, or never published at all, has to show as such, and
@@ -7226,9 +7226,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * nothing to say so — the same reasoning §12e gives for checking locality against the
    * filesystem rather than trusting a stored owner label.
    *
-   * Skills mirrored in from a bucket are excluded entirely: "indexed" is a question about
-   * *your* publishing of *your own* skill, not about whether a copy you merely hold happens to
-   * be in the collection under someone else's name.
+   * **Covers every loaded skill, bucket-mirrored included** — this used to exclude those, on the
+   * reasoning that "indexed" should mean "you authored it". But `handlePublishTeamSkills` was
+   * never given that same restriction: it publishes everything loaded, so a skill living
+   * entirely in a synced folder could be genuinely published and still be structurally invisible
+   * to this check. Reported from real use: "it says nothing authored here" from a machine whose
+   * skills live in an S3 mirror. If publish is later scoped to locally-authored skills only,
+   * narrow this the same way at the same time — never one without the other.
    */
   async function handleTeamSkillsIndexStatus(): Promise<void> {
     const config = await loadSettings()
@@ -7247,7 +7251,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     try {
-      const mine = skills.filter((skill) => mirrorForDir(skill.sourceDir) === undefined)
+      // No filtering by source — see the function comment above.
       const writer = createVectorIndexWriter(
         httpClient,
         search.store,
@@ -7259,7 +7263,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const existing = new Set(await writer.listPaths(collection))
       post({
         type: 'teamSkillsIndexStatus',
-        entries: mine.map((skill) => ({
+        entries: skills.map((skill) => ({
           name: skill.name,
           indexed: existing.has(teamSkillPath(skill)),
         })),
