@@ -35,6 +35,11 @@ export interface S3SyncResult {
   unchanged: number
   /** Keys that could not be fetched, with the reason. Reported, never thrown. */
   failed: { key: string; problem: string }[]
+  /**
+   * There were more matching files under this prefix than `limit` allows, or more raw objects
+   * than this sync was willing to look through to find them. Some files were not brought down.
+   */
+  truncated: boolean
 }
 
 export interface SyncOptions {
@@ -47,24 +52,55 @@ export interface SyncOptions {
   /** Only these extensions are brought down, e.g. `['.md']`. */
   extensions: readonly string[]
   signal?: AbortSignal
-  /** How many files to bring down at most, so a misconfigured prefix cannot fill a disk. */
+  /** How many *matching* files to bring down at most, so a misconfigured prefix cannot fill a disk. */
   limit?: number
 }
 
 const DEFAULT_LIMIT = 500
 
+/**
+ * How many raw bucket objects a sync is willing to look through, at most, to find `limit`
+ * matching files.
+ *
+ * A skill's own reference files (§13) — a picture, an `.xlsx` template — live in the same bucket
+ * folder and share its prefix, so counting the *limit* against raw objects rather than matching
+ * ones meant fifty skills with a couple of reference files each could exhaust a 500-object cap
+ * having found only a fraction of the actual `.md` files — silently, with nothing in the result
+ * to say a limit had even been hit. Reported from real use: a team storing skills in S3 saw the
+ * agent find "not many" of them.
+ *
+ * Scanning further than `limit` costs nothing but a few extra `list` pages against objects
+ * already excluded by extension, so this over-scans generously while keeping a hard ceiling so a
+ * prefix pointed at an entire large bucket by mistake still cannot walk it forever.
+ */
+const MAX_RAW_SCAN = 20000
+
 export async function syncFromS3(options: SyncOptions): Promise<S3SyncResult> {
   const base = normalisePrefix(options.target.prefix)
   const where = normalisePrefix(`${base}${options.prefix ?? ''}`)
-  const result: S3SyncResult = { written: [], unchanged: 0, failed: [] }
+  const result: S3SyncResult = { written: [], unchanged: 0, failed: [], truncated: false }
+  const limit = options.limit ?? DEFAULT_LIMIT
 
-  const objects = await options.target.client.list(where, options.limit ?? DEFAULT_LIMIT, options.signal)
+  const rawCeiling = Math.min(MAX_RAW_SCAN, Math.max(limit * 20, limit))
+  const objects = await options.target.client.list(where, rawCeiling, options.signal)
+  // The raw listing itself hit its own ceiling — there may be matching files this scan never
+  // even looked at, which is as much a truncation as running past `limit` matches below.
+  if (objects.length >= rawCeiling) result.truncated = true
 
+  let matched = 0
   for (const object of objects) {
     const relative = object.key.slice(where.length)
     // A "folder" in S3 is a zero-byte key ending in `/`. There is nothing to write for one.
     if (relative === '' || relative.endsWith('/')) continue
     if (!options.extensions.some((extension) => relative.toLowerCase().endsWith(extension))) continue
+
+    if (matched >= limit) {
+      // Still a match, just past the budget — noted rather than silently dropped.
+      result.truncated = true
+      continue
+    }
+    matched += 1
+
     /*
      * A key that would escape the folder is skipped rather than written.
      *

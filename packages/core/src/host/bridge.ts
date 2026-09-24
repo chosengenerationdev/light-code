@@ -6922,6 +6922,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           `${String(result.unchanged)} unchanged`,
         ]
         if (result.failed.length > 0) parts.push(`${String(result.failed.length)} failed`)
+        // Named rather than left to be discovered later as "some skills are just missing" — the
+        // previous version hit this silently, which read as OpenSearch indexing being broken
+        // when the files never reached this disk in the first place.
+        if (result.truncated) parts.push('more than the per-sync limit exist — not all were brought down')
         lines.push(`${target.label}${mirror.prefix === undefined ? '' : `/${mirror.prefix}`}: ${parts.join(', ')}`)
         for (const failure of result.failed) {
           logger.warn(`s3 ${kind}: ${failure.key}`, failure.problem)

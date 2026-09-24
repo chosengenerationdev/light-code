@@ -1,5 +1,31 @@
 # light-code-vscode
 
+## 0.114.0
+
+### Minor Changes
+
+- Skills stored in S3 could sync down only a fraction of what was actually in the bucket, reported
+  from a team where the agent "doesn't see much" of them in the index.
+
+  Bringing a bucket folder down capped how many raw objects it would look at before giving up, and
+  a skill's own reference files (a picture, an `.xlsx` template) share its folder and its prefix —
+  so with enough of them ahead of the `.md` files in key order, the cap could be spent entirely on
+  pictures and templates before a single actual skill was ever seen. Nothing said this had
+  happened; the sync just quietly reported "N updated" for a much smaller N than the bucket held,
+  which reads as OpenSearch indexing being broken when the files never reached the machine to be
+  indexed in the first place.
+
+  The same sync also serves Python tools brought in from a bucket, so this covers both.
+
+  Syncing now looks through far more of the raw listing to find the files that actually match,
+  while still capping how many it brings down in one pass, and says so in the sync report when
+  more exist than that pass allowed through.
+
+- Verified the documentation-index pipeline that `search_docs` runs on (embedding and writing tool
+  and skill entries to OpenSearch) separately, since it shares no code with the S3 sync above: it
+  batches and writes every entry with no equivalent cap, so tool-doc indexing was not affected by
+  the same class of bug.
+
 ## 0.113.0
 
 ### Minor Changes

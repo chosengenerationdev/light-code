@@ -194,6 +194,96 @@ describe('bringing a folder down', () => {
   })
 })
 
+/**
+ * A bucket whose `list` actually honours the limit it is given, the way real S3 does — sorted by
+ * key and cut off, rather than the fixture above which always hands back everything regardless.
+ * Needed to exercise the raw-object ceiling itself, not just the matched-file cap.
+ */
+function boundedBucket(contents: Record<string, string>): { target: S3Target } {
+  const target: S3Target = {
+    id: 'c1',
+    label: 'team',
+    bucket: 'team-bucket',
+    prefix: 'shared/',
+    readOnly: false,
+    client: {
+      list: async (prefix: string, limit = 1000): Promise<S3Object[]> =>
+        Object.keys(contents)
+          .filter((key) => key.startsWith(prefix))
+          .sort()
+          .slice(0, limit)
+          .map((key) => ({ key, size: contents[key]?.length ?? 0, lastModified: '2026-01-01T00:00:00Z' })),
+      get: async (key: string) => Buffer.from(contents[key] ?? ''),
+      put: async () => undefined,
+    } as unknown as S3Target['client'],
+  }
+  return { target }
+}
+
+describe('reference files must not crowd matching files out of the limit', () => {
+  /*
+   * Reported from real use: a team storing skills in S3 saw the agent find "not many" of them.
+   * A skill's own reference files (§13) share its folder and its prefix, so a limit counted
+   * against raw objects rather than matches meant enough pictures and templates ahead of the
+   * `.md` files, in key order, could push every actual skill file past the cutoff — with nothing
+   * in the result to say a limit had even been hit.
+   */
+  it('still finds every matching file behind a wall of non-matching ones', async () => {
+    const contents: Record<string, string> = {}
+    for (let i = 1; i <= 20; i += 1) contents[`shared/skills/aaa-ref-${String(i)}.png`] = 'binary'
+    for (let i = 1; i <= 8; i += 1) contents[`shared/skills/zzz-skill-${String(i)}.md`] = `skill ${String(i)}`
+    const { target } = boundedBucket(contents)
+    const local = disk()
+
+    const result = await syncFromS3({
+      target,
+      prefix: 'skills',
+      localDir: '/cache/skills',
+      fs: local.fs,
+      extensions: ['.md'],
+      limit: 5,
+    })
+
+    expect(result.written).toHaveLength(5)
+    expect(result.written.every((name) => name.endsWith('.md'))).toBe(true)
+  })
+
+  /** More matches exist than the limit allows, and that has to be visible rather than silent. */
+  it('says so when more matching files exist than the limit allowed through', async () => {
+    const contents: Record<string, string> = {}
+    for (let i = 1; i <= 20; i += 1) contents[`shared/skills/aaa-ref-${String(i)}.png`] = 'binary'
+    for (let i = 1; i <= 8; i += 1) contents[`shared/skills/zzz-skill-${String(i)}.md`] = `skill ${String(i)}`
+    const { target } = boundedBucket(contents)
+    const local = disk()
+
+    const result = await syncFromS3({
+      target,
+      prefix: 'skills',
+      localDir: '/cache/skills',
+      fs: local.fs,
+      extensions: ['.md'],
+      limit: 5,
+    })
+
+    expect(result.truncated).toBe(true)
+  })
+
+  it('is not truncated when everything fits', async () => {
+    const { target } = bucket({ 'shared/skills/a.md': 'x', 'shared/skills/b.md': 'y' })
+    const local = disk()
+
+    const result = await syncFromS3({
+      target,
+      prefix: 'skills',
+      localDir: '/cache/skills',
+      fs: local.fs,
+      extensions: ['.md'],
+    })
+
+    expect(result.truncated).toBe(false)
+  })
+})
+
 describe('publishing one file back', () => {
   it('puts it under the same folder the sync reads', async () => {
     const { target, puts } = bucket({})
