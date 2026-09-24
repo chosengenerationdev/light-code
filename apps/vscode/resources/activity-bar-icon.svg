@@ -1,11 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Light Code">
-  <path d="M 12 3.2 C 4.6 3.2 4.6 12.1 7.4 16.7 L 16.6 16.7 C 19.4 12.1 19.4 3.2 12 3.2 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-  <g fill="none" stroke="currentColor" stroke-width="1.53" stroke-linecap="round">
-    <path d="M 12 6.3 L 12 15.6"/>
-    <path d="M 9.0 10.0 L 15.0 10.0"/>
+  <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9.5 6.5 L5.5 12 L9.5 17.5"/>
+    <path d="M14.5 6.5 L18.5 12 L14.5 17.5"/>
   </g>
-  <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none">
-    <path d="M 8.3 18.3 L 15.7 18.3"/>
-    <path d="M 9.5 21.0 L 14.5 21.0"/>
-  </g>
+  <path d="M12 9.2 L14.8 12 L12 14.8 L9.2 12 Z" fill="currentColor"/>
 </svg>

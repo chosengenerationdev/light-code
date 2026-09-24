@@ -2632,31 +2632,6 @@ the option open; it is not — `rag/opensearch/*` is concrete and `vectorStoreSc
 
 ---
 
-## The icon is generated too (0.112.2)
-
-`scripts/generate-icons.mjs` draws everything in `apps/vscode/resources/`. Same reason the
-walkthrough art and the GIFs are generated: a binary dropped into the repository can only be
-replaced, never reviewed, and the diff is what says what the picture now claims. Run by hand -
-it rasterises by screenshotting SVG in Edge, which a developer machine has and a build agent may
-not, and it **checks the file was written** rather than trusting the exit status, because Edge
-exits non-zero after a successful screenshot often enough that its status says nothing.
-
-Two decisions in the mark, both from being shown the thing rather than reasoning about it:
-
-- **The cross is the filament, not a badge.** The first draft was a bold filled cross inside the
-  glass; it reads as a first-aid symbol and takes the whole icon over. Drawn as the wire inside
-  the bulb it is what a filament actually looks like, and it is noticed rather than announced.
-- **The activity-bar icon fills its box, and has no rays.** A screenshot of the real activity bar
-  settled it: the old mark stood about half the height of its neighbours, which is not a style
-  choice - it is the icon looking like it matters less. VS Code's own codicons use very nearly the
-  whole 24-unit box. Rays at 24 pixels are grey fuzz, so they stay on the marketplace icon.
-  **Judge this by rendering it into a mock activity bar against neighbouring icons**, at 24px, on
-  both themes - nothing else shows whether it holds its own, and that is the only question.
-
-Note the marketplace listing is the one place this is seen by people who have not installed it,
-so changing it changes how the extension looks in search results. That is a decision, not a
-detail.
-
 ## The walkthrough is generated, not written (2026-08-20)
 
 `contributes.walkthroughs` in `apps/vscode/package.json` is **produced**, and its diagrams come
