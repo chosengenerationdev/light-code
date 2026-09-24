@@ -1,5 +1,24 @@
 # @chosengeneration/light-code
 
+## 0.98.1
+
+### Patch Changes
+
+- "Upload all existing Python tools" said there was no folder to copy from.
+
+  Both that button and "bring them in from another folder" asked the Python runtime where the tools
+  folder was — and the runtime only works that out _after_ it has decided the feature is switched
+  on. With dynamic tools off, it had no answer, so the button reported there was nowhere to upload
+  from while the files sat in the folder.
+
+  Asking the runtime was the wrong question. Copying `.py` files in, or uploading them to a bucket,
+  does not need Python switched on at all: the folder is a setting, and the files are on disk either
+  way. Both now read it from configuration.
+
+  The message when there genuinely is nowhere says what to do about it, and "that folder does not
+  exist yet" is now distinguished from "that folder is empty" — only one of those means you are
+  looking in the wrong place.
+
 ## 0.98.0
 
 ### Minor Changes

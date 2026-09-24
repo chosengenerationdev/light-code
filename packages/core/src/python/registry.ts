@@ -79,6 +79,23 @@ export function isValidToolName(name: string): boolean {
   return /^[a-z][a-z0-9_]{0,63}$/.test(name)
 }
 
+/**
+ * Where Python tools live when nothing says otherwise.
+ *
+ * Inside the workspace deliberately: changes land in git and get code-reviewed, which is the
+ * main real mitigation available (section 13).
+ *
+ * **Owned here rather than computed where it is needed**, which is the fix for a real bug.
+ * `PythonManager.configure` set its `toolsDir` only *after* returning early when the feature is
+ * off - so with dynamic tools switched off, `toolDirectories()` was empty, and anything asking it
+ * where the files are got nothing. Uploading a folder of `.py` files to a bucket, or copying them
+ * in from an old folder, does not need the Python runtime at all: the folder is a fact about
+ * configuration, not about whether a worker is running.
+ */
+export function defaultPythonToolsDir(workspaceRoot: string): string {
+  return path.join(workspaceRoot, '.lightcode', 'tools')
+}
+
 export function toolFileName(name: string): string {
   return `${name}.py`
 }

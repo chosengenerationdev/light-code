@@ -1623,6 +1623,17 @@ invisible to the team for ever.
   counting it.
 - **The path stays typeable** (§19): a browser has no picker, so a Browse-only field would make
   the feature absent on the Node host - and an old folder is often on a share anyway.
+- **The folder is resolved from config, not from the runtime** (0.113.0, reported: "upload all
+  existing python tools gives no local folder to copy from"). Both handlers asked
+  `python.toolDirectories()`, and `PythonManager.configure` sets its `toolsDir` only *after*
+  returning early when dynamic tools are off - so with the feature switched off the list was empty
+  and the answer was "there is nowhere". **The deeper mistake was asking the wrong thing:** copying
+  `.py` files in, or uploading them to a bucket, does not need the Python runtime at all. The
+  folder is a fact about configuration and the files are on disk either way.
+  `defaultPythonToolsDir` in `python/registry.ts` owns that default now, so the manager and the
+  bridge cannot disagree, and `toolsFolder.test.ts` pins both halves - including that the manager
+  really does report nothing when the feature is off, so the reason the bridge stopped asking it
+  stays visible.
 
 ## 13. Python interop and skills (phase 9)
 

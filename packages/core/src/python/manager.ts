@@ -8,6 +8,7 @@ import { pythonEnvEntries, resolvePythonEnv, type PythonEnvEntry } from './env.j
 import type { Tool } from '../tools/types.js'
 import type { CodeGenerator } from './codeGenerator.js'
 import {
+  defaultPythonToolsDir,
   describeIssue,
   loadRegistries,
   type RegisteredTool,
@@ -304,7 +305,7 @@ export class PythonManager {
     this.timeoutMs = (config.timeoutSeconds ?? config.defaultTimeoutSeconds ?? 30) * 1000
     // Inside the workspace by default, deliberately: changes land in git and get reviewed,
     // which is the main real mitigation available (§13).
-    this.toolsDir = config.toolsDir ?? path.join(this.options.workspaceRoot, '.lightcode', 'tools')
+    this.toolsDir = config.toolsDir ?? defaultPythonToolsDir(this.options.workspaceRoot)
     this.extraToolDirs = [...(config.extraToolDirs ?? [])]
     this.declinedTools = { ...(config.declinedTools ?? {}) }
     this.indexUrl = config.indexUrl

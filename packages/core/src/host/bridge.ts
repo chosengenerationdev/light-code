@@ -18,6 +18,7 @@ import path from 'node:path'
 import { mentionSegment } from '../context/mentionGlob.js'
 import { buildAutoGuidance } from '../modes/autoGuidance.js'
 import { describeMigration, planMigration, runMigration } from '../migrate/folders.js'
+import { defaultPythonToolsDir } from '../python/registry.js'
 import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
 import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
@@ -971,6 +972,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /**
+   * The folder skills or Python tools are kept in, resolved from **config**.
+   *
+   * Reported: "Upload all existing Python tools" answered "no local folder to copy from".
+   * `python.toolDirectories()` was the source, and `PythonManager.configure` sets its `toolsDir`
+   * only *after* returning early when dynamic tools are off - so with the feature switched off
+   * the list was empty and anything asking where the files are got nothing.
+   *
+   * The deeper mistake was asking the wrong thing. Copying `.py` files in, or uploading them to a
+   * bucket, does not need the Python runtime: the folder is a fact about configuration, and the
+   * files are on disk whether or not a worker is running. `defaultPythonToolsDir` owns the
+   * default so this cannot drift from what the manager uses.
+   */
+  async function managedFolderFor(kind: 'skills' | 'tools'): Promise<string | undefined> {
+    if (kind === 'skills') return skillsDir
+    const { config } = await configManager.load()
+    const configured = config.python?.toolsDir?.trim()
+    if (configured !== undefined && configured.length > 0) return configured
+    return workspaceRoot === undefined ? undefined : defaultPythonToolsDir(workspaceRoot)
+  }
+
+  /** Why there is nowhere, said in terms of what to do about it. */
+  function noFolderMessage(kind: 'skills' | 'tools'): string {
+    if (kind === 'skills') return 'There is no skills folder configured.'
+    return workspaceRoot === undefined
+      ? 'Open a folder first - Python tools live in the workspace so they can be code-reviewed.'
+      : 'There is no Python tools folder configured.'
+  }
+
+  /**
    * Copies skills or Python tools in from a folder that used to hold them.
    *
    * Asked for: changing the folder left everything behind, and turning on a bucket published only
@@ -986,14 +1016,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const source = from.trim()
       if (source.length === 0) throw new Error('Name the folder to copy from.')
 
-      const to = kind === 'skills' ? skillsDir : python.toolDirectories()[0]
-      if (to === undefined || to.length === 0) {
-        throw new Error(
-          kind === 'skills'
-            ? 'There is no skills folder configured to copy into.'
-            : 'Python tools are not switched on, so there is no folder to copy into.',
-        )
-      }
+      const to = await managedFolderFor(kind)
+      if (to === undefined || to.length === 0) throw new Error(noFolderMessage(kind))
 
       const plan = await planMigration({ from: source, to, kind })
       if (plan.copy.length === 0) {
@@ -1057,8 +1081,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         throw new Error('That connection is unusable or read-only, so nothing can be uploaded.')
       }
 
-      const dir = kind === 'skills' ? skillsDir : python.toolDirectories()[0]
-      if (dir === undefined || dir.length === 0) throw new Error('There is no local folder to upload from.')
+      const dir = await managedFolderFor(kind)
+      if (dir === undefined || dir.length === 0) throw new Error(noFolderMessage(kind))
 
       const suffix = kind === 'skills' ? '.md' : '.py'
       let entries: string[] = []
@@ -1070,7 +1094,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         entries = []
       }
       if (entries.length === 0) {
-        ui.showInfo(`Nothing in ${dir} to upload.`)
+        /*
+         * "Nothing there" and "that folder does not exist" are different news, and only one
+         * of them means you are looking in the wrong place.
+         */
+        const exists = await fs
+          .stat(dir)
+          .then(() => true)
+          .catch(() => false)
+        ui.showInfo(
+          exists
+            ? `Nothing in ${dir} to upload.`
+            : `${dir} does not exist yet, so there is nothing to upload.`,
+        )
         return
       }
 
