@@ -34,6 +34,23 @@ describe('the team-skills index status check', () => {
     const scoped = body.slice(0, body.indexOf('\n  function skillsIndexName'))
 
     expect(scoped).toContain('mirrorForDir(skill.sourceDir) === undefined')
-    expect(scoped).toContain('teamSkillId(skill, owner)')
+  })
+
+  /**
+   * The actual bug this test would have caught: `listPaths` returns the `path` field, never
+   * `id`. `teamSkillId` is per-owner (it is what keeps two people's upserts from colliding), but
+   * checking a listed path against it compares a value nothing sends back — every skill reads as
+   * "not indexed" regardless of whether it was ever published. Reported from real use: publish
+   * ran, "Check status" still showed every skill red.
+   */
+  it('checks against the path listPaths actually returns, never the per-owner id', async () => {
+    const bridge = url.fileURLToPath(new URL('./bridge.ts', import.meta.url))
+    const source = await fs.readFile(bridge, 'utf8')
+
+    const body = source.slice(source.indexOf('async function handleTeamSkillsIndexStatus'))
+    const scoped = body.slice(0, body.indexOf('\n  function skillsIndexName'))
+
+    expect(scoped).toContain('teamSkillPath(skill)')
+    expect(scoped).not.toContain('teamSkillId(')
   })
 })

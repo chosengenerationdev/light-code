@@ -222,7 +222,7 @@ import {
   findTeamSkillsNamed,
   type TeamSkillsOptions,
   indexTeamSkills,
-  teamSkillId,
+  teamSkillPath,
   createSearchTeamSkillsTool,
   parseDocEntryId,
   type DocEntryKind,
@@ -7247,19 +7247,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     try {
-      const owner = indexOwner(config)
       const mine = skills.filter((skill) => mirrorForDir(skill.sourceDir) === undefined)
       const writer = createVectorIndexWriter(
         httpClient,
         search.store,
         await vectorStoreConnectionFor(search.store, search.id),
       )
+      // `listPaths` returns the `path` field, never `id` — `teamSkillId` is per-owner and is
+      // what makes an upsert land on your own document rather than a colleague's, but it is not
+      // what comes back here. Checking against it would always read as "not indexed".
       const existing = new Set(await writer.listPaths(collection))
       post({
         type: 'teamSkillsIndexStatus',
         entries: mine.map((skill) => ({
           name: skill.name,
-          indexed: existing.has(teamSkillId(skill, owner)),
+          indexed: existing.has(teamSkillPath(skill)),
         })),
       })
     } catch (error) {

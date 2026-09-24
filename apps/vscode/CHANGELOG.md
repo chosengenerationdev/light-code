@@ -1,5 +1,21 @@
 # light-code-vscode
 
+## 0.115.1
+
+### Patch Changes
+
+- The team-skills status dots (0.115.0) never showed green, even right after a successful
+  publish. Every backend's `listPaths` reads a document's `path` field, never its `id` — and a
+  team skill is written with two different values for those (`id` carries the publisher so two
+  people's copies never collide; `path` is the name alone, shared by everyone's copy of that
+  skill). The status check compared against `id`, a value nothing ever sends back, so it read as
+  "not indexed" regardless of whether it was. Fixed to check against `path`, with a shared
+  `teamSkillPath()` used on both the write and the read side so they cannot drift apart again.
+
+- Added a checkmark icon next to a skill in the main Skills list when the last "Check status"
+  run found it in the team index — so the status is visible where the skills themselves are
+  listed, not only in the separate Team skills panel.
+
 ## 0.115.0
 
 ### Minor Changes

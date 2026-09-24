@@ -7,6 +7,7 @@ import { FolderListEditor } from './FolderListEditor.js'
 import { MigrateFolder, type MigrateFolderProps } from './MigrateFolder.js'
 import { S3Section, type S3SectionProps } from './S3Section.js'
 import { DismissableProblems } from './DismissableProblems.js'
+import { CheckIcon } from '../icons.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -513,7 +514,15 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
               : 'None yet. Explain something about this codebase and the assistant will offer to record it.'}
           </p>
         ) : (
-          props.skills.map((skill) => (
+          props.skills.map((skill) => {
+            /*
+              From the last "Check status" run in Team skills, not a live call per row — this
+              list can be long, and a network round trip per skill on every render is not a cost
+              anyone asked to pay. So it reflects the most recent check rather than the instant,
+              the same way the dedicated status list does; re-run Check status to refresh it.
+            */
+            const teamIndexed = props.team.status?.find((entry) => entry.name === skill.name)?.indexed === true
+            return (
             <div key={skill.name} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <strong style={{ fontFamily: monospace, fontSize: 12 }}>{skill.name}</strong>
@@ -525,6 +534,19 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
                 {skill.sourceDir !== undefined && props.skillsDir !== undefined && skill.sourceDir !== props.skillsDir && (
                   <span style={{ ...badgeStyle(), fontSize: 9 }} title={`Read-only, from ${skill.sourceDir}`}>
                     shared
+                  </span>
+                )}
+                {/*
+                  Positive-only: absence means "not confirmed indexed", which covers both "never
+                  published" and "not checked yet" — and a row of red crosses on a list nobody has
+                  checked would read as a report rather than as what it is.
+                */}
+                {teamIndexed && (
+                  <span
+                    title="In the team index, as of the last status check"
+                    style={{ display: 'inline-flex', color: colors.accent }}
+                  >
+                    <CheckIcon size={12} />
                   </span>
                 )}
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -762,7 +784,8 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
                 </div>
               )}
             </div>
-          ))
+            )
+          })
         )}
       </div>
       <FolderListEditor

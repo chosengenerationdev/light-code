@@ -46,6 +46,20 @@ export function teamSkillText(skill: Skill, body: string): string {
   return [skill.name, skill.description, '', body].join('\n')
 }
 
+/**
+ * The corpus's own identifier for a skill, shared by every publisher's copy of that name —
+ * distinct from `teamSkillId`, which is unique per *owner* and is what makes each person's
+ * upsert land on their own document rather than overwriting a colleague's.
+ *
+ * **This is what `listPaths` returns.** Every backend's `listPaths` reads the `path` field
+ * specifically (see `rag/opensearch/writer.ts` and its Qdrant/Chroma counterparts) — `id` is
+ * never sent back by it. A caller checking "is this skill indexed" against `teamSkillId` instead
+ * of this would compare an id nothing ever returns, and always get no.
+ */
+export function teamSkillPath(skill: { name: string }): string {
+  return `skill:${skill.name}`
+}
+
 export function teamSkillDocument(
   skill: Skill,
   body: string,
@@ -58,7 +72,7 @@ export function teamSkillDocument(
     text,
     // `path` is the corpus's identifier, not a file path — matching how tool documentation
     // already stores `tool:`/`skill:` ids there.
-    path: `skill:${skill.name}`,
+    path: teamSkillPath(skill),
     startLine: 1,
     endLine: text.split('\n').length,
     ...(attribution.owner !== undefined ? { owner: attribution.owner } : {}),

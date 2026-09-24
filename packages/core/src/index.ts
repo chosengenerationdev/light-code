@@ -359,6 +359,7 @@ export {
   searchTeamSkills,
   teamSkillDocument,
   teamSkillId,
+  teamSkillPath,
   teamSkillText,
   type TeamSkillHit,
   type TeamSkillsOptions,
