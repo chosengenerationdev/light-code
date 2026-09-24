@@ -1,5 +1,33 @@
 # @chosengeneration/light-code
 
+## 0.96.0
+
+### Minor Changes
+
+- The tool approval panel goes away when you approve.
+
+  Reported: clicking Approve showed "1 tool approved" and the panel stayed, with some tools coming
+  back for approval again.
+
+  **The cause was the same tool sitting in two folders** — which is normal, because that is how a
+  bucket mirror sits beside the folder you write to. Each folder keeps its own record of what you
+  approved, which is what makes approvals per-machine. So the second copy had no record and was
+  listed as needing approval, while the Approve button records against the _first_ folder holding
+  the file — the one already approved. Nothing changed, and the panel came back identical.
+
+  It was a mistake about what to call it rather than about bookkeeping. "Needs approval" means _this
+  cannot run until you read it_, and that is not true once another folder has claimed the name: the
+  tool runs, from code you approved. The extra copy is shadowed, and is now reported that way — so
+  it still appears in Settings → Python, where you can see there are two of them, and no longer
+  blocks the chat.
+
+  Nothing about what may run has changed. The copy that runs still has to match a hash you approved,
+  a tool nothing else has claimed is still asked about, and a change to the file that actually runs
+  is still refused.
+
+  **Also fixed:** on Windows the same folder spelled two ways (`d:\proj` and `D:\proj`) was read
+  twice, so every tool in it was listed twice and approving one reported two.
+
 ## 0.95.0
 
 ### Minor Changes

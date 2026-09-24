@@ -1003,7 +1003,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     try {
       const problems: string[] = []
       let approved = 0
-      for (const name of names) {
+      /*
+       * Deduplicated, because the panel lists one row per *file* and the same tool can sit in
+       * two folders. Approving always records against the first folder holding it, so a repeated
+       * name is the same act twice - and counting it twice reported "2 tool(s) approved" for one
+       * tool, which is the sort of number somebody checks against the list and finds wrong.
+       */
+      for (const name of [...new Set(names)]) {
         const problem = await approveOnePythonTool(name)
         if (problem === undefined) approved += 1
         else problems.push(problem)

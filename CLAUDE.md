@@ -1519,6 +1519,45 @@ contains brackets, which `couldChain` refuses, so it prompts. The metacharacter 
 weakened for it - that rule is absolute on purpose and has no grammar to get wrong. The guidance
 tells the model to use bare names instead, which resolve through PATH.
 
+## 12o. The approval panel that would not go away (0.110.0)
+
+Reported: *"when I click approve, I see the notification that 1 tool approved, but that approval
+window is not leaving... sometimes it seems to be showing some tools for reapproval."*
+
+**Two folders holding the same tool name, which 0.99.0 deliberately supports** - that is how a
+bucket mirror sits beside the folder you write to. Each folder keeps its own `.registry.json`,
+which is exactly what makes approvals per-machine. So the second copy had no entry and was
+reported `unapproved`, while the Approve button records against the **first** folder holding the
+file - the one already approved. Measured with a real filesystem before the fix: two pending, then
+**one** pending after approving, and the button can never clear that one. The panel came back
+identical for ever, and the toast said a tool had been approved, which was true.
+
+**The fault was one of category, not of bookkeeping.** `unapproved` and `hash-mismatch` mean *this
+cannot run until you read it*, and that is false the moment another folder has claimed the name:
+the tool runs, from approved code. What is true of the extra copy is that it is **shadowed**, which
+`loadRegistries` already had a word for and was already emitting for the case where both copies
+load. It simply never applied it to the copy that failed to load.
+
+**The security property is untouched, and that is worth being explicit about.** Nothing here loads
+anything. A reclassified issue belongs to a file that was not loaded and will not be; the file that
+*is* loaded got there by matching an approved hash. What changed is only what the user is asked
+about. `registryShadowing.test.ts` pins both halves - including that a name nothing else claimed is
+still asked about, and that a change to the *winning* file is still refused.
+
+**A second, Windows-only fault in the same function.** `path.resolve` preserves case, so
+`d:\proj\.lightcode	ools` and `D:\proj\...` are one folder spelled two ways and both survived
+an exact-string filter: the folder was read twice and every tool in it listed twice. §16's rule
+about case-insensitive path comparison, in a function that had never applied it - the same trap
+`approvals` hit when it keyed a workspace path in JSON. And because the panel sends one name per
+row, a duplicate made `handleApprovePythonTools` report "2 tool(s) approved" for one tool.
+
+**`sharedWiring.test.ts` was reading a different function than it named.** It sliced from
+`'async function handleApprovePythonTool'`, which is a **prefix of** `handleApprovePythonTools`, so
+it matched the plural one first and passed only because a third function happened to fall inside
+its 1800-byte window. Adding a comment broke it - the right outcome from the wrong cause. It now
+anchors on full signatures and slices to the function's own closing brace, and checks **both**
+approval paths.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

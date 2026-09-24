@@ -53,12 +53,27 @@ describe('the bucket tools folders reach the Python manager', () => {
   })
 
   it('approves into the folder that actually holds the file', () => {
-    // Approving into `toolsDir` would write an entry in a folder with no file in it, leaving the
-    // tool unapproved and a registry claiming otherwise.
-    const handler = bridge.slice(
-      bridge.indexOf('async function handleApprovePythonTool'),
-      bridge.indexOf('async function handleApprovePythonTool') + 1800,
-    )
-    expect(handler).toContain('python.toolDirectories()')
+    /*
+     * Approving into `toolsDir` would write an entry in a folder with no file in it, leaving the
+     * tool unapproved and a registry claiming otherwise.
+     *
+     * **Both** approval paths are checked, and each is anchored on its full signature. This used
+     * to slice from `'async function handleApprovePythonTool'`, which is a prefix of
+     * `handleApprovePythonTools` and therefore matched the *plural* one first - so it was reading
+     * a different function than it named, and passed only because a third function happened to
+     * fall inside its byte window. Adding a comment broke it, which is the right outcome from
+     * the wrong cause.
+     */
+    for (const signature of [
+      'async function handleApprovePythonTool(name: string)',
+      'async function approveOnePythonTool(name: string)',
+    ]) {
+      const at = bridge.indexOf(signature)
+      expect(at, `${signature} not found`).toBeGreaterThan(-1)
+      // To the end of the function, found by its closing brace at the same indentation, rather
+      // than a byte count that any edit can invalidate.
+      const body = bridge.slice(at, bridge.indexOf('\n  }', at))
+      expect(body, signature).toContain('python.toolDirectories()')
+    }
   })
 })

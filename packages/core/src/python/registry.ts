@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+
+import { normalizeForComparison } from '../fs/confine.js'
 import type { Logger } from '../logging/logger.js'
 import type { PythonWorker, WorkerToolDescription } from './worker.js'
 
@@ -260,8 +262,23 @@ export async function loadRegistries(
   logger: Logger,
   declined?: Record<string, string> | undefined,
 ): Promise<LoadedRegistry> {
+  /*
+   * Deduplicated **case-insensitively on Windows** (§16).
+   *
+   * `path.resolve` preserves case, so `d:\proj\.lightcode\tools` and `D:\proj\...` are the
+   * same folder spelled two ways and both survived an exact-string filter. The folder was then
+   * read twice and every tool in it reported twice - listed twice in the approval panel, and
+   * counted twice by anything totalling them. The same trap `approvals` hit when it keyed a
+   * workspace path in JSON.
+   */
   const ordered = dirs.map((dir) => path.resolve(dir))
-  const unique = ordered.filter((dir, index) => ordered.indexOf(dir) === index)
+  const seen = new Set<string>()
+  const unique = ordered.filter((dir) => {
+    const key = normalizeForComparison(dir)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 
   const tools: RegisteredTool[] = []
   const issues: ToolLoadIssue[] = []
@@ -284,6 +301,35 @@ export async function loadRegistries(
       claimed.set(tool.name, tool)
       tools.push(tool)
     }
+  }
+
+  /*
+   * A copy that will never run must not be reported as *waiting to be approved*.
+   *
+   * Reported from real use: "I click approve, it says 1 tool approved, and the approval window
+   * will not go away." With the same tool in two folders - a bucket mirror beside the local one,
+   * which 0.99.0 deliberately supports - each folder has its own `.registry.json`, so the second
+   * copy has no entry and was reported `unapproved`. The Approve button records an approval in
+   * the **first** folder holding the file, which is the one already approved, so nothing changed
+   * and the panel came back identical. Measured: two pending before, one pending after, for ever.
+   *
+   * The error was of category, not of bookkeeping. `unapproved` and `hash-mismatch` mean *this
+   * tool cannot run until you read it*, and that is simply false once another folder has claimed
+   * the name: the tool runs, from approved code. What is true of the extra copy is that it is
+   * shadowed, which this file already has a word for.
+   *
+   * **The security property is untouched.** Nothing here loads anything: a reclassified issue
+   * belongs to a file that was not loaded and will not be, and the file that *is* loaded got
+   * there by matching an approved hash. What changes is only what the user is asked about.
+   */
+  const resolvedElsewhere = (issue: ToolLoadIssue): ToolLoadIssue => {
+    if (issue.kind !== 'unapproved' && issue.kind !== 'hash-mismatch') return issue
+    const winner = claimed.get(issue.name)
+    if (winner === undefined || winner.filePath === issue.filePath) return issue
+    return { kind: 'shadowed', name: issue.name, filePath: issue.filePath, winner: winner.filePath }
+  }
+  for (let index = 0; index < issues.length; index += 1) {
+    issues[index] = resolvedElsewhere(issues[index] as ToolLoadIssue)
   }
 
   // Sorted so the prompt's tool block has a stable order regardless of how the folders are
