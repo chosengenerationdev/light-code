@@ -318,6 +318,16 @@ export function App(props: AppProps): ReactElement {
   const [teamSkillsResult, setTeamSkillsResult] = useState<
     { count?: number; collection?: string; error?: string } | undefined
   >(undefined)
+  /**
+   * A live check of which locally-authored skills currently have a matching document in the
+   * team collection. Undefined until asked for, so a stale answer from a previous workspace or
+   * an earlier publish is never shown as current.
+   */
+  const [teamSkillsStatus, setTeamSkillsStatus] = useState<
+    { name: string; indexed: boolean }[] | undefined
+  >(undefined)
+  const [teamSkillsStatusError, setTeamSkillsStatusError] = useState<string | undefined>(undefined)
+  const [teamSkillsStatusLoading, setTeamSkillsStatusLoading] = useState(false)
   const [embedderModels, setEmbedderModels] = useState<string[]>([])
   const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
@@ -868,6 +878,10 @@ export function App(props: AppProps): ReactElement {
           ...(message.collection !== undefined ? { collection: message.collection } : {}),
           ...(message.error !== undefined ? { error: message.error } : {}),
         })
+      } else if (message.type === 'teamSkillsIndexStatus') {
+        setTeamSkillsStatusLoading(false)
+        setTeamSkillsStatus(message.entries)
+        setTeamSkillsStatusError(message.error)
       } else if (message.type === 'teamAliasAttached') {
         setAliasResult({
           ...(message.alias !== undefined ? { alias: message.alias } : {}),
@@ -1900,6 +1914,14 @@ export function App(props: AppProps): ReactElement {
                 publishing: indexingProgress?.kind === 'teamSkills' && indexingProgress.running,
                 progress: indexingProgress?.kind === 'teamSkills' ? indexingProgress : undefined,
                 result: teamSkillsResult,
+                status: teamSkillsStatus,
+                statusError: teamSkillsStatusError,
+                statusLoading: teamSkillsStatusLoading,
+                onRefreshStatus: () => {
+                  setTeamSkillsStatusLoading(true)
+                  setTeamSkillsStatusError(undefined)
+                  props.transport.post({ type: 'requestTeamSkillsIndexStatus' } satisfies UiToHostMessage)
+                },
               },
               skills,
               issues: skillIssues,

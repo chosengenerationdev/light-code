@@ -152,6 +152,15 @@ export function PythonTab(props: PythonTabProps): ReactElement {
       </p>
 
       {/*
+        Moved up here from underneath the whole tool list, where it was findable only by someone
+        who scrolled past every tool first to reach it. No connection editing here regardless: the
+        list is the Skills tab's, and a bucket and key that could be edited in two places is the
+        drift this project has paid for most.
+      */}
+      {props.s3 !== undefined && <S3Section {...props.s3} kind="tools" />}
+      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="tools" />}
+
+      {/*
         Stated plainly and before the switch. Every other approval in Light Code gates
         *calling* something; this one gates the creation of code that runs later, which is a
         different kind of decision and the user deserves to be told so.
@@ -717,12 +726,6 @@ export function PythonTab(props: PythonTabProps): ReactElement {
           </div>
         </div>
       )}
-    {/*
-        No connection editing here: the list is the Skills tab's, and a bucket and key that could
-        be edited in two places is the drift this project has paid for most.
-      */}
-      {props.s3 !== undefined && <S3Section {...props.s3} kind="tools" />}
-      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="tools" />}
     </div>
   )
 }

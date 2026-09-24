@@ -133,6 +133,14 @@ export interface SkillsTabProps {
     publishing?: boolean
     progress: IndexingProgressState | undefined
     result: { count?: number; collection?: string; cleared?: number; error?: string } | undefined
+    /**
+     * Which of *this machine's own* skills currently have a matching document in the
+     * collection — undefined until asked for, so a stale answer is never shown as current.
+     */
+    status?: { name: string; indexed: boolean }[] | undefined
+    statusError?: string | undefined
+    statusLoading?: boolean | undefined
+    onRefreshStatus: () => void
   }
 }
 
@@ -301,6 +309,69 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
             Sending again replaces your own copies and never touches anyone else&rsquo;s.
           </span>
         )}
+
+      {/*
+        A live check against the collection, not a memory of the last publish — a skill sent a
+        minute ago and edited since should not still read as "indexed". Same reasoning §12e gives
+        for checking locality against the filesystem rather than trusting a stored label.
+
+        Scoped to skills authored on this machine: one brought in from a bucket is a copy, and
+        "indexed" is a question about your own publishing of it, not about the copy itself.
+      */}
+      <div style={{ marginTop: 14, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: 12 }}>Your skills in the index</strong>
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            disabled={aliases.length === 0 || props.statusLoading === true}
+            onClick={props.onRefreshStatus}
+          >
+            {props.statusLoading === true ? 'Checking…' : 'Check status'}
+          </button>
+        </div>
+        {props.statusError !== undefined && (
+          <span style={{ display: 'block', color: colors.error, fontSize: 11 }}>{props.statusError}</span>
+        )}
+        {props.statusError === undefined &&
+          props.status !== undefined &&
+          (props.status.length === 0 ? (
+            <p style={{ color: colors.muted, fontSize: 11, margin: 0 }}>
+              Nothing authored on this machine yet — skills brought in from a bucket are not
+              counted here.
+            </p>
+          ) : (
+            <div>
+              {props.status.map((entry) => (
+                <div
+                  key={entry.name}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}
+                >
+                  {/*
+                    Colour is never the only signal — the word beside it carries the same fact,
+                    for anyone who cannot tell the dots apart.
+                  */}
+                  <span
+                    aria-hidden
+                    title={entry.indexed ? 'Indexed' : 'Not indexed'}
+                    style={{
+                      display: 'inline-block',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: entry.indexed ? colors.accent : colors.error,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontFamily: monospace, fontSize: 12 }}>{entry.name}</span>
+                  <span style={{ color: colors.muted, fontSize: 11 }}>
+                    {entry.indexed ? 'indexed' : 'not indexed'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+      </div>
     </section>
   )
 }
@@ -351,6 +422,14 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         onProbe={props.onProbe}
         onClear={props.onClearProbe}
       />
+
+      {/*
+        Moved up here from underneath the whole skill list, where it was findable only by
+        someone who scrolled past every skill first to reach it — the same reasoning that put
+        the Reindex row at the top of this file.
+      */}
+      {props.s3 !== undefined && <S3Section {...props.s3} kind="skills" manageConnections />}
+      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="skills" />}
 
       {/* First, because it is the part people come here looking for. */}
       <TeamSkillsSection {...props.team} />
@@ -696,13 +775,6 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         extrasHint="Shared or reference folders, searched in order after the one above. Never written to, so a folder shared with colleagues stays safe. A name defined twice is taken from the first folder that has it."
         onSave={props.onSaveDirs}
       />
-
-      {/*
-        Below the folder list, because it is one more place skills come from — and the section
-        itself says the mirrored folder joins that list rather than replacing it.
-      */}
-      {props.s3 !== undefined && <S3Section {...props.s3} kind="skills" manageConnections />}
-      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="skills" />}
     </div>
   )
 }

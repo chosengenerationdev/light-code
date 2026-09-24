@@ -222,6 +222,7 @@ import {
   findTeamSkillsNamed,
   type TeamSkillsOptions,
   indexTeamSkills,
+  teamSkillId,
   createSearchTeamSkillsTool,
   parseDocEntryId,
   type DocEntryKind,
@@ -7215,6 +7216,60 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Which of *this machine's own* skills currently have a matching document in the team
+   * collection — one row per skill authored here, green or red.
+   *
+   * A live check against the store, not a record kept locally from the last publish. Publishing
+   * writes here; a skill edited afterwards, or never published at all, has to show as such, and
+   * a locally-remembered "last published" flag would go stale the moment either happens with
+   * nothing to say so — the same reasoning §12e gives for checking locality against the
+   * filesystem rather than trusting a stored owner label.
+   *
+   * Skills mirrored in from a bucket are excluded entirely: "indexed" is a question about
+   * *your* publishing of *your own* skill, not about whether a copy you merely hold happens to
+   * be in the collection under someone else's name.
+   */
+  async function handleTeamSkillsIndexStatus(): Promise<void> {
+    const config = await loadSettings()
+    const collection = skillsIndexName(config)
+    const search = await resolveSearch(config)
+
+    if (collection === undefined || search === undefined) {
+      post({
+        type: 'teamSkillsIndexStatus',
+        error:
+          collection === undefined
+            ? 'Open a folder first, or name a skills index in Settings → Search.'
+            : await describeTeamSkillsSetupGap(config),
+      })
+      return
+    }
+
+    try {
+      const owner = indexOwner(config)
+      const mine = skills.filter((skill) => mirrorForDir(skill.sourceDir) === undefined)
+      const writer = createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await vectorStoreConnectionFor(search.store, search.id),
+      )
+      const existing = new Set(await writer.listPaths(collection))
+      post({
+        type: 'teamSkillsIndexStatus',
+        entries: mine.map((skill) => ({
+          name: skill.name,
+          indexed: existing.has(teamSkillId(skill, owner)),
+        })),
+      })
+    } catch (error) {
+      post({
+        type: 'teamSkillsIndexStatus',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   function skillsIndexName(config?: LightCodeConfig): string | undefined {
     const chosen = config?.retrieval?.skillsIndex?.trim()
     if (chosen !== undefined && chosen.length > 0) return chosen
@@ -10026,6 +10081,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }))
     } else if (message.type === 'clearTeamSkills') {
       reportFailure('handleClearTeamSkills', handleClearTeamSkills())
+    } else if (message.type === 'requestTeamSkillsIndexStatus') {
+      reportFailure('handleTeamSkillsIndexStatus', handleTeamSkillsIndexStatus())
     } else if (message.type === 'refreshMail') {
       reportFailure('handleRefreshMail', handleRefreshMail(message.days))
     } else if (message.type === 'requestDatasetStatus') {

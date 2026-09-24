@@ -636,6 +636,13 @@ export type UiToHostMessage =
    * cannot reach their copies even where two people named a skill the same thing.
    */
   | { type: 'clearTeamSkills' }
+  /**
+   * Whether each locally-authored skill currently has a matching document in the team
+   * collection — a live check against the store rather than a stored label, for the reason
+   * §12e checks locality against the filesystem rather than an owner field: a status that could
+   * go stale silently is worse than one nobody asked for.
+   */
+  | { type: 'requestTeamSkillsIndexStatus' }
   /** Collects new mail now, rather than waiting for the timer. */
   | { type: 'syncMail' }
   /** Drops indexed mail older than the configured retention, and its vectors. */
@@ -1580,6 +1587,15 @@ export type HostToUiMessage =
       collection?: string
       /** How many were removed, when this reports a clear rather than a publish. */
       cleared?: number
+      error?: string
+    }
+  /**
+   * One row per skill authored on this machine — skills mirrored in from a bucket are excluded,
+   * since "indexed" is a question about *your* publishing, not about a copy you merely hold.
+   */
+  | {
+      type: 'teamSkillsIndexStatus'
+      entries?: { name: string; indexed: boolean }[]
       error?: string
     }
   | {

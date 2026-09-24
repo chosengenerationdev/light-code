@@ -1,5 +1,22 @@
 # light-code-vscode
 
+## 0.115.0
+
+### Minor Changes
+
+- Settings → Skills and Settings → Python now put the bucket ("S3") section, and "bring them in
+  from another folder", right after the top of the tab instead of underneath the whole list — the
+  same reasoning that put the Reindex row at the top of the Skills tab a while ago: a setting is
+  findable only by someone who scrolls past everything above it first.
+
+- A live view of which of your own skills currently have a matching document in the team
+  collection, in Settings → Skills → Team skills. A "Check status" button lists every skill
+  authored on this machine with a green dot (indexed) or red dot (not indexed) next to it — never
+  color alone, the word is there too. Skills brought in from a bucket are left out on purpose:
+  this answers "did *my* publishing reach the collection", not "is a copy I merely hold present
+  somewhere in it". It is a live check against the store each time you ask, not a memory of the
+  last publish, so a skill edited since you last sent it will not still read as indexed.
+
 ## 0.114.0
 
 ### Minor Changes
