@@ -313,3 +313,78 @@ describe('environment variables for every tool', () => {
     expect(container.textContent).toContain('No value is stored for API_TOKEN')
   })
 })
+
+/**
+ * Reported as "when I click delete they are not being deleted". Delete on a not-loaded tool set a
+ * confirmation that was only ever drawn in the Registered tools list — which a tool that did not
+ * load is never in — so the click did nothing. And the host deleted `<tools folder>/<name>`
+ * whichever row was clicked, so the panel must now name the exact file.
+ */
+describe('a tool that did not load', () => {
+  const settings: PythonSettings = { dynamicTools: 'on' }
+  const withIssues = (issues: PythonStatus['issues']): PythonStatus => ({ ...status, issues })
+  const button = (text: string): HTMLButtonElement | undefined =>
+    [...container.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === text)
+
+  it('can be deleted from the folder this machine writes to, naming the exact file', () => {
+    const onDeleteTool = vi.fn()
+    render({
+      status: withIssues([
+        {
+          detail: 'broken_tool: does not import.',
+          name: 'broken_tool',
+          filePath: 'D:\\proj\\.lightcode\\tools\\broken_tool.py',
+          recoverable: false,
+          kind: 'invalid',
+        },
+      ]),
+      settings,
+      onDeleteTool,
+    })
+
+    const del = button('Delete')
+    expect(del, [...container.querySelectorAll('button')].map((b) => b.textContent).join('|')).toBeDefined()
+    act(() => del?.click())
+    // The confirmation has to appear where the click was, or the button does nothing at all.
+    expect(container.textContent).toContain('Delete this file?')
+    const confirm = [...container.querySelectorAll('button')].filter((b) => b.textContent === 'Delete').at(-1)
+    act(() => confirm?.click())
+    expect(onDeleteTool).toHaveBeenCalledWith('broken_tool', 'D:\\proj\\.lightcode\\tools\\broken_tool.py')
+  })
+
+  it('offers Decline, not Delete, for a copy from a bucket folder the next sync would restore', () => {
+    render({
+      status: withIssues([
+        {
+          detail: 'team_tool: new, not yet approved.',
+          name: 'team_tool',
+          filePath: 'C:\\Users\\me\\storage\\s3\\team\\tools-abc\\team_tool.py',
+          recoverable: true,
+          kind: 'unapproved',
+        },
+      ]),
+      settings,
+      onDeclineTool: () => {},
+    })
+
+    expect(button('Delete')).toBeUndefined()
+    expect(button('Decline')).toBeDefined()
+  })
+
+  it('does not paint a declined copy as an error', () => {
+    render({
+      status: withIssues([
+        {
+          detail: 'old_tool: declined.',
+          name: 'old_tool',
+          filePath: 'C:\\Users\\me\\storage\\s3\\team\\tools-abc\\old_tool.py',
+          recoverable: false,
+          kind: 'declined',
+        },
+      ]),
+      settings,
+    })
+    expect(container.textContent).toContain('ⓘ')
+    expect(container.textContent).not.toContain('⚠')
+  })
+})

@@ -261,7 +261,7 @@ described is one the assistant will never know to reach for.
 Settings -> Skills -> "Bring skills in from another folder" copies them in. Nothing is moved and
 nothing is overwritten: the old folder is untouched and a name already present is skipped and
 named back to you. The same section offers a one-off upload of everything you already have to a
-bucket folder marked "Save new here" - the automatic publish only fires on a *write*, so it never
+bucket folder marked "Publish new … here" - the automatic publish only fires on a *write*, so it never
 covered what was there before. Settings -> Python has the same for tools, where a copied tool
 arrives **unapproved** because approvals are recorded per folder.
 

@@ -55,7 +55,13 @@ export interface PythonTabProps {
     selectedId: string | undefined
     onSelect: (id: string) => void
   }
-  onDeleteTool: (name: string) => void
+  /** Names the exact file: two folders can hold one name, and only one row was clicked. */
+  onDeleteTool: (name: string, filePath: string) => void
+  /**
+   * Hides the version of a bucket tool on offer now, deleting nothing. The only honest "remove"
+   * for a copy the next sync would bring straight back. Absent: the button is not shown.
+   */
+  onDeclineTool?: ((name: string) => void) | undefined
   /** Undoes a decline. Absent on a host that does not offer it; the button is then not shown. */
   onRestoreTool?: ((name: string) => void) | undefined
   /** Re-pins a tool the user has edited by hand — see the hash pin in `registry.ts`. */
@@ -569,11 +575,34 @@ export function PythonTab(props: PythonTabProps): ReactElement {
           */}
           {status.issues.length > 0 && (
             <div style={{ marginTop: 10 }}>
-              <strong style={{ fontSize: 12, color: colors.error }}>Not loaded</strong>
-              {status.issues.map((issue) => (
+              <strong
+                style={{
+                  fontSize: 12,
+                  // Red only when something here actually needs attention.
+                  color: status.issues.some((issue) => !INFORMATIONAL.has(issue.kind)) ? colors.error : colors.muted,
+                }}
+              >
+                Not loaded
+              </strong>
+              {status.issues.map((issue) => {
+                /*
+                 * Where the file is decides what can be done about it, so it is worked out once.
+                 * Only the folder this machine writes to can be deleted from; a copy in a bucket
+                 * folder would be brought straight back by the next sync.
+                 */
+                const deletable = sameFolder(issue.filePath, status.toolsDir)
+                const informational = INFORMATIONAL.has(issue.kind)
+                return (
                 <div key={issue.filePath} style={{ marginTop: 4 }}>
-                  <div style={{ fontSize: 11, color: colors.error }}>⚠ {issue.detail}</div>
-                  <div style={{ display: 'flex', gap: 6, marginTop: 3 }}>
+                  {/*
+                    A shadowed or declined copy is not an error: the tool it shares a name with is
+                    running, or you chose to hide it. Painting those red is what turned a folder of
+                    published tools into "a lot of red lines" with nothing actually wrong.
+                  */}
+                  <div style={{ fontSize: 11, color: informational ? colors.muted : colors.error }}>
+                    {informational ? 'ⓘ' : '⚠'} {issue.detail}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
                       type="button"
                       style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
@@ -613,16 +642,62 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                         Restore
                       </button>
                     )}
-                    <button
-                      type="button"
-                      style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
-                      onClick={() => setConfirming(issue.name)}
-                    >
-                      Delete
-                    </button>
+                    {/*
+                      Delete where deleting works; Decline where it would only be undone.
+
+                      This button used to set a confirmation that was only ever drawn in the
+                      Registered tools list below — which a tool that did not load is never in —
+                      so it did nothing at all. And the host deleted `<tools folder>/<name>`
+                      whichever row was clicked, which for a shadowed copy is the working tool.
+                    */}
+                    {deletable && (
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                        onClick={() => setConfirming(issue.filePath)}
+                      >
+                        Delete
+                      </button>
+                    )}
+                    {!deletable &&
+                      (issue.kind === 'unapproved' || issue.kind === 'hash-mismatch') &&
+                      props.onDeclineTool !== undefined && (
+                        <button
+                          type="button"
+                          style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                          title="Hide this version. Nothing is deleted, and a newer version published later comes back for review."
+                          onClick={() => props.onDeclineTool?.(issue.name)}
+                        >
+                          Decline
+                        </button>
+                      )}
+                    {!deletable && issue.kind !== 'declined' && (
+                      <span style={{ color: colors.muted, fontSize: 10 }}>
+                        from a shared folder — the next sync would bring a deleted copy back
+                      </span>
+                    )}
                   </div>
+                  {confirming === issue.filePath && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12 }}>
+                      <span>Delete this file?</span>
+                      <button
+                        type="button"
+                        style={primaryButtonStyle(false)}
+                        onClick={() => {
+                          props.onDeleteTool(issue.name, issue.filePath)
+                          setConfirming(undefined)
+                        }}
+                      >
+                        Delete
+                      </button>
+                      <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(undefined)}>
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
@@ -665,7 +740,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                         <button
                           type="button"
                           style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
-                          onClick={() => setConfirming(tool.name)}
+                          onClick={() => setConfirming(tool.filePath)}
                         >
                           Delete
                         </button>
@@ -690,7 +765,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                     {tool.filePath}
                   </span>
 
-                  {confirming === tool.name && (
+                  {confirming === tool.filePath && (
                     <div
                       style={{
                         display: 'flex',
@@ -705,7 +780,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                         type="button"
                         style={primaryButtonStyle(false)}
                         onClick={() => {
-                          props.onDeleteTool(tool.name)
+                          props.onDeleteTool(tool.name, tool.filePath)
                           setConfirming(undefined)
                         }}
                       >
@@ -728,4 +803,23 @@ export function PythonTab(props: PythonTabProps): ReactElement {
       )}
     </div>
   )
+}
+
+/**
+ * Issues that are information rather than a problem: a copy of a tool that is running from
+ * another folder, or a version you chose to hide. Shown muted, never red.
+ */
+const INFORMATIONAL = new Set(['shadowed', 'declined'])
+
+/**
+ * Whether a file sits directly in a folder, however the two paths are spelled.
+ *
+ * Plain string work because this runs in a webview with no `node:path`: slashes unified, case
+ * folded (Windows hands one folder back spelled two ways, §16), trailing separators dropped.
+ */
+function sameFolder(filePath: string, folder: string): boolean {
+  const norm = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const file = norm(filePath)
+  const cut = file.lastIndexOf('/')
+  return cut >= 0 && folder.length > 0 && file.slice(0, cut) === norm(folder)
 }

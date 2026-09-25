@@ -86,9 +86,23 @@ describe('a tool that exists in two folders', () => {
     expect(loaded.tools.map((tool) => tool.name)).toEqual(['shared_tool'])
   })
 
-  it('still reports the copy that will not run, as shadowed rather than as unapproved', async () => {
-    // Silence would be wrong too: there are two files, and only one of them is what runs.
+  /*
+   * Revised in 0.117.1. This used to assert an identical copy was still reported, on the
+   * reasoning that there are two files and only one runs. Once bucket folders synced on their own,
+   * every tool anybody published came back beside its original and showed as a red line — "a lot
+   * of red lines" with nothing wrong. When the bytes are the same, which copy runs makes no
+   * difference, so silence is the accurate report. A copy that *differs* is still reported: that
+   * is two versions under one name.
+   */
+  it('says nothing about a copy identical to the one that runs', async () => {
     await approveTool(local, 'shared_tool', SOURCE, described)
+    const loaded = await loadRegistries([local, mirror], undefined, logger, {})
+    expect(loaded.issues.filter((issue) => issue.kind === 'shadowed')).toEqual([])
+  })
+
+  it('still reports a copy that differs, as shadowed rather than as unapproved', async () => {
+    await approveTool(local, 'shared_tool', SOURCE, described)
+    await fs.writeFile(path.join(mirror, 'shared_tool.py'), `${SOURCE}\n# a different version\n`, 'utf8')
     const loaded = await loadRegistries([local, mirror], undefined, logger, {})
     const shadowed = loaded.issues.filter((issue) => issue.kind === 'shadowed')
     expect(shadowed).toHaveLength(1)

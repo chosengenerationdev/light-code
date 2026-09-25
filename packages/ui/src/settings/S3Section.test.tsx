@@ -67,7 +67,7 @@ function render(props: S3SectionProps): void {
 /** The publish checkbox, found by its label rather than by position. */
 function publishBox(): HTMLInputElement | undefined {
   return [...container.querySelectorAll('label')]
-    .filter((label) => label.textContent?.includes('Save new here') === true)
+    .filter((label) => label.textContent?.includes('Publish new') === true)
     .map((label) => label.querySelector('input[type="checkbox"]'))
     .find((input): input is HTMLInputElement => input !== null)
 }

@@ -110,7 +110,7 @@ export function S3Section(props: S3SectionProps): ReactElement {
   /**
    * Whether the folder's connection refuses writes.
    *
-   * The host declines an upload to one silently, so this is what keeps "Save new here" from
+   * The host declines an upload to one silently, so this is what keeps "Publish new … here" from
    * being a tick that looks applied and does nothing.
    */
   const isReadOnly = (connectionId: string): boolean =>
@@ -472,7 +472,12 @@ export function S3Section(props: S3SectionProps): ReactElement {
                       )
                     }
                   />
-                  Save new here
+                  {/*
+                    Named for what it does. "Save new here" was looked for as "publish" and not
+                    found — reported as "I don't see any checkbox to enable publish". It uploads
+                    to the team; that is the word people reach for.
+                  */}
+                  Publish new {props.kind === 'skills' ? 'skills' : 'tools'} here
                 </label>
                 <button
                   type="button"

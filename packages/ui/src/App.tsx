@@ -2250,8 +2250,11 @@ export function App(props: AppProps): ReactElement {
               onBrowse: browseForPath,
               pickedPath,
               onOpenFile: openManagedFile,
-              onDeleteTool: (name: string) =>
-                props.transport.post({ type: 'deletePythonTool', name } satisfies UiToHostMessage),
+              // The exact copy: two folders can hold one name, and only one of them was clicked.
+              onDeleteTool: (name: string, filePath: string) =>
+                props.transport.post({ type: 'deletePythonTool', name, filePath } satisfies UiToHostMessage),
+              onDeclineTool: (name: string) =>
+                props.transport.post({ type: 'declinePythonTools', names: [name] } satisfies UiToHostMessage),
               onApproveTool: (name: string) =>
                 props.transport.post({ type: 'approvePythonTool', name } satisfies UiToHostMessage),
               onRestoreTool: (name: string) =>

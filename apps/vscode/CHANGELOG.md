@@ -1,5 +1,27 @@
 # light-code-vscode
 
+## 0.117.1
+
+### Patch Changes
+
+- Delete did nothing on a Python tool listed under "Not loaded". The button set a confirmation
+  that was only ever drawn in the Registered tools list, which a tool that did not load is never
+  in. It now asks right there — and deletes the exact file you clicked. It used to delete
+  `<tools folder>/<name>.py` whichever row was clicked, so for a second copy of a working tool it
+  would have removed the working one instead.
+
+- A copy that comes from a bucket folder is no longer offered Delete, because the next sync
+  would bring it straight back. It offers **Decline** instead, which hides that version without
+  deleting anything; a newer version published later comes back for review.
+
+- Far fewer red lines in the Python tab. Every tool you published was synced back from the bucket
+  beside the original and shown as a red "Not loaded" line — for a copy byte-for-byte identical to
+  the tool already running. Identical copies are no longer listed; a copy that *differs* still is,
+  in grey rather than red, as are tools you declined. Red is kept for things that need attention.
+
+- The bucket-folder checkbox that uploads new skills or tools for the team is now labelled
+  **Publish new skills here** / **Publish new tools here**, instead of "Save new here".
+
 ## 0.117.0
 
 ### Minor Changes

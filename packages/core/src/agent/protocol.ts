@@ -855,7 +855,12 @@ export type UiToHostMessage =
   | { type: 'deleteSkillFile'; name: string }
   /** Opens a skill or Python tool file in an editor tab, where it can actually be edited. */
   | { type: 'openManagedFile'; path: string }
-  | { type: 'deletePythonTool'; name: string }
+  /**
+   * `filePath` names the exact copy. Without it the host used to delete `<tools folder>/<name>.py`
+   * whichever row was clicked — so a Delete on a second, shadowed copy of a working tool would
+   * have removed the working one and its approval instead.
+   */
+  | { type: 'deletePythonTool'; name: string; filePath?: string }
   /**
    * Re-pins a hand-edited tool to its current contents.
    *

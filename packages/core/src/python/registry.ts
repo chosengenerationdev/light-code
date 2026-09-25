@@ -349,8 +349,33 @@ export async function loadRegistries(
     issues[index] = resolvedElsewhere(issues[index] as ToolLoadIssue)
   }
 
+  /*
+   * A shadowed copy identical to the tool that runs is not news, and is dropped.
+   *
+   * Reported from real use as "lots of red lines" in the Python tab. Publishing a tool uploads it
+   * to the bucket, and the next sync — automatic since 0.117.0 — brings that same file back into
+   * the mirror folder beside the original. Every tool you ever published then showed as a red
+   * "Not loaded" line, for a copy that is byte-for-byte the tool already running. A copy that
+   * *differs* is still reported: that is two versions under one name, which somebody should know.
+   */
+  const reported: ToolLoadIssue[] = []
+  for (const issue of issues) {
+    if (issue.kind === 'shadowed' && (await sameBytes(issue.filePath, issue.winner))) continue
+    reported.push(issue)
+  }
+
   // Sorted so the prompt's tool block has a stable order regardless of how the folders are
   // arranged — the same cache reasoning as everything else at the front of the prompt (§12).
   tools.sort((a, b) => a.name.localeCompare(b.name))
-  return { tools, issues }
+  return { tools, issues: reported }
+}
+
+/** True only when both files can be read and hold the same bytes; any doubt keeps the issue. */
+async function sameBytes(first: string, second: string): Promise<boolean> {
+  try {
+    const [a, b] = await Promise.all([fs.readFile(first), fs.readFile(second)])
+    return a.equals(b)
+  } catch {
+    return false
+  }
 }

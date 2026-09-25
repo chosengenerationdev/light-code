@@ -911,12 +911,39 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await handleOpenManagedFile(target)
   }
 
-  async function handleDeletePythonTool(name: string): Promise<void> {
+  async function handleDeletePythonTool(name: string, filePath?: string): Promise<void> {
     try {
       const dir = python.toolsDirectory()
       if (dir.length === 0) return
       if (!isValidToolName(name)) throw new Error(`"${name}" is not a valid tool name.`)
-      await fs.rm(path.join(dir, toolFileName(name)), { force: true })
+      /*
+       * The exact copy, when the panel names one.
+       *
+       * Without a path this deleted `<tools folder>/<name>.py` whichever row was clicked, so a
+       * Delete on a shadowed second copy of a working tool would have removed the working tool and
+       * its approval instead — the one outcome a delete button must never have.
+       *
+       * Only the writable folder is deleted from. A copy in a bucket mirror comes back with the
+       * next sync, so deleting it here would appear to work and quietly undo itself; and removing
+       * it from the bucket removes it for everyone, which is a different act with its own button.
+       */
+      const ownCopy = path.join(dir, toolFileName(name))
+      if (filePath !== undefined) {
+        const same = (a: string, b: string): boolean =>
+          normalizeForComparison(path.resolve(a)) === normalizeForComparison(path.resolve(b))
+        if (!same(filePath, ownCopy)) {
+          const fromBucket = mirroredToolsDirs.some((mirror) => same(path.dirname(filePath), mirror))
+          throw new Error(
+            fromBucket
+              ? `"${name}" at ${filePath} comes from a bucket folder, so deleting it here would be ` +
+                  'undone by the next sync. Decline it to hide this version, or remove it from the ' +
+                  'bucket to remove it for everyone.'
+              : `${filePath} is not in the tools folder this machine writes to (${dir}), so it ` +
+                  'was not deleted.',
+          )
+        }
+      }
+      await fs.rm(ownCopy, { force: true })
       // The registry entry goes too. Leaving it would re-approve the next file to appear under
       // that name without anyone looking at it.
       await forgetTool(dir, name)
@@ -1077,7 +1104,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const mirror = mirrors.find((each) => each.enabled === true && each.publish === true)
       if (mirror === undefined) {
         throw new Error(
-          `No bucket folder is marked "Save new here" for ${kind === 'skills' ? 'skills' : 'Python tools'}.`,
+          `No bucket folder is marked "Publish new … here" for ${kind === 'skills' ? 'skills' : 'Python tools'}.`,
         )
       }
       const target = targetById(cachedS3, mirror.connectionId)
@@ -10462,7 +10489,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'openManagedFile') {
       reportFailure('handleOpenManagedFile', handleOpenManagedFile(message.path))
     } else if (message.type === 'deletePythonTool') {
-      reportFailure('handleDeletePythonTool', handleDeletePythonTool(message.name))
+      reportFailure('handleDeletePythonTool', handleDeletePythonTool(message.name, message.filePath))
     } else if (message.type === 'approvePythonTool') {
       reportFailure('handleApprovePythonTool', handleApprovePythonTool(message.name))
     } else if (message.type === 'deleteSkillFile') {

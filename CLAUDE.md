@@ -1723,6 +1723,18 @@ each able to produce that symptom alone, and none visible from the chat.
   tool neither appeared for approval nor reached the docs index; it now does both. Approval is
   unchanged — a synced tool still refuses to load until approved on each machine (§13).
 
+**Follow-ups found the same week (0.117.1).** Automatic sync made two latent Python-tab faults
+visible at once. Every tool you publish comes back from the bucket beside its original; 0.110.0
+had deliberately reported such a shadowed copy even when identical ("two files, one runs"), which
+with sync on became a red line per published tool. **Identical copies are now silent**
+(`sameBytes` in `python/registry.ts`); a *differing* copy is still reported, muted rather than
+red. And Delete on a "Not loaded" row set a confirmation drawn only in the Registered list, so it
+did nothing — while the host deleted `<tools folder>/<name>.py` for *any* row, which for a
+shadowed copy is the working tool. Delete now names the exact file, is offered only for the
+writable folder, and a bucket copy gets Decline instead (the next sync would undo a delete).
+The publish checkbox was labelled "Save new here" and looked for as "publish"; it now says
+**Publish new … here**.
+
 **Tool documentation is deliberately not sent to the team pool**, and that is the answer to the
 question asked. A tool's documentation describes something callable on *this* machine; a
 colleague's model finding a doc for a tool their machine does not have would call it and fail.
