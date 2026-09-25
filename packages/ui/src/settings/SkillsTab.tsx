@@ -1,4 +1,4 @@
-import { formatAliases, parseAliases, type ProbeTarget } from '@light-code/core/browser'
+import { aliasProblem, formatAliases, parseAliases, type ProbeTarget } from '@light-code/core/browser'
 import { IndexProbe } from './IndexProbe.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { useEffect, useState, type ReactElement } from 'react'
@@ -138,10 +138,19 @@ export interface SkillsTabProps {
      * Which of *this machine's own* skills currently have a matching document in the
      * collection — undefined until asked for, so a stale answer is never shown as current.
      */
-    status?: { name: string; indexed: boolean }[] | undefined
+    status?: { name: string; state: 'indexed' | 'stale' | 'missing' }[] | undefined
     statusError?: string | undefined
     statusLoading?: boolean | undefined
     onRefreshStatus: () => void
+    /**
+     * "Can this machine see the team's skills, and whose?" — the real tool, run by hand.
+     *
+     * Optional because `SettingsNavigation.test.tsx` renders every tab with nothing configured,
+     * the state a fresh install is in; the section renders without it rather than throwing.
+     */
+    probe?: { running: boolean; result: { query: string; text: string; error?: string } | undefined }
+    onProbe?: (query: string, target: ProbeTarget) => void
+    onClearProbe?: () => void
   }
 }
 
@@ -178,6 +187,18 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
   useEffect(() => setAlias(saved), [saved])
   // Compared as parsed lists, so re-typing the same names in a different spacing is not an edit.
   const unsaved = formatAliases(parseAliases(alias)) !== saved
+  /*
+   * Checked as it is typed, with the same rule the host applies on save. A name with a space or
+   * a capital used to be saved as-is and then fail on every machine that used it, which is how
+   * team search came to look dead with nothing pointing at the name. Capitals are simply lowered
+   * (the host does the same), so only genuinely unusable names are refused here.
+   */
+  const aliasError = alias
+    .split(/[,\n]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .map(aliasProblem)
+    .find((problem) => problem !== undefined)
 
   return (
     <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
@@ -218,8 +239,16 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
       />
       <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
         Separate several with commas, most specific first &mdash; a squad, a department, everyone.
-        The first is the one a search uses when it is not told which. Up to 8.
+        The first is the one a search uses when it is not told which. Up to 8. Lowercase letters,
+        digits, <code style={{ fontFamily: monospace }}>. _ - +</code>, no spaces &mdash; and{' '}
+        <strong>exactly the same names on every colleague&rsquo;s machine</strong>, or they search
+        a pool nobody publishes to.
       </span>
+      {aliasError !== undefined && (
+        <span role="alert" style={{ display: 'block', color: colors.error, fontSize: 11, marginTop: 4 }}>
+          {aliasError}
+        </span>
+      )}
 
       {/*
         Two separate acts, and the labels say which is which.
@@ -232,7 +261,7 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={!unsaved}
+          disabled={!unsaved || aliasError !== undefined}
           onClick={() => props.onSaveAliases(parseAliases(alias))}
         >
           {unsaved ? '1. Save these names' : '1. Names saved'}
@@ -354,27 +383,53 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
                   */}
                   <span
                     aria-hidden
-                    title={entry.indexed ? 'Indexed' : 'Not indexed'}
+                    title={STATUS_WORDS[entry.state]}
                     style={{
                       display: 'inline-block',
                       width: 8,
                       height: 8,
                       borderRadius: '50%',
-                      background: entry.indexed ? colors.accent : colors.error,
+                      background: entry.state === 'indexed' ? colors.accent : colors.error,
                       flexShrink: 0,
                     }}
                   />
                   <span style={{ fontFamily: monospace, fontSize: 12 }}>{entry.name}</span>
-                  <span style={{ color: colors.muted, fontSize: 11 }}>
-                    {entry.indexed ? 'indexed' : 'not indexed'}
-                  </span>
+                  <span style={{ color: colors.muted, fontSize: 11 }}>{STATUS_WORDS[entry.state]}</span>
                 </div>
               ))}
             </div>
           ))}
       </div>
+
+      {/*
+        The other side of the question. Everything above is "did mine get there"; this is "can
+        this machine see the team's", which is the one a colleague has to answer on *their*
+        machine when they say they cannot see yours. It runs the assistant's own tool and says,
+        per name, whose skills came back — or exactly which setting is missing.
+      */}
+      {props.onProbe !== undefined && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>
+          <strong style={{ fontSize: 12 }}>Test team search</strong>
+          <IndexProbe
+            target="teamSkills"
+            label="Search the team's skills"
+            hint="Runs the same search the assistant uses, and says whose skills each name returns."
+            running={props.probe?.running === true}
+            result={props.probe?.result}
+            onProbe={props.onProbe}
+            onClear={() => props.onClearProbe?.()}
+          />
+        </div>
+      )}
     </section>
   )
+}
+
+/** One wording per state, shared by the dot's tooltip and the text beside it. */
+const STATUS_WORDS: Record<'indexed' | 'stale' | 'missing', string> = {
+  indexed: 'indexed',
+  stale: 'changed since sent — send again',
+  missing: 'not sent',
 }
 
 export function SkillsTab(props: SkillsTabProps): ReactElement {
@@ -521,7 +576,8 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
               anyone asked to pay. So it reflects the most recent check rather than the instant,
               the same way the dedicated status list does; re-run Check status to refresh it.
             */
-            const teamIndexed = props.team.status?.find((entry) => entry.name === skill.name)?.indexed === true
+            // Current only: a skill changed since it was sent is not what colleagues are reading.
+            const teamIndexed = props.team.status?.find((entry) => entry.name === skill.name)?.state === 'indexed'
             return (
             <div key={skill.name} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>

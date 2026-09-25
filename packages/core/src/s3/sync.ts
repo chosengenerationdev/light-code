@@ -87,6 +87,10 @@ export async function syncFromS3(options: SyncOptions): Promise<S3SyncResult> {
   // even looked at, which is as much a truncation as running past `limit` matches below.
   if (objects.length >= rawCeiling) result.truncated = true
 
+  const manifestPath = join(options.localDir, MANIFEST_NAME)
+  const manifest = await readManifest(options.fs, manifestPath)
+  let manifestChanged = false
+
   let matched = 0
   for (const object of objects) {
     const relative = object.key.slice(where.length)
@@ -115,8 +119,38 @@ export async function syncFromS3(options: SyncOptions): Promise<S3SyncResult> {
     }
 
     try {
-      const bytes = await options.target.client.get(object.key, options.signal)
       const localPath = join(options.localDir, relative)
+      /*
+       * Skipped without a download when the bucket reports exactly what it reported the last
+       * time this file was fetched, and the file is still here.
+       *
+       * Needed once this started running on a timer rather than only on a click. Without it
+       * every sync downloads every file to compare bytes, so a folder of two hundred skills
+       * costs two hundred GETs every few minutes on every machine, to learn nothing changed.
+       * With it, an unchanged folder costs the one listing.
+       *
+       * Compared against the bucket's *own* `lastModified` as recorded at download, never
+       * against this file's modification time: those are two clocks, and a machine running
+       * ahead would skip a colleague's same-size edit. Recorded values are one clock, and any
+       * difference at all — size or date — fetches.
+       */
+      const seen = manifest[object.key]
+      if (seen !== undefined && seen.size === object.size && seen.lastModified === object.lastModified) {
+        let present = false
+        try {
+          present = (await options.fs.stat(localPath)).isFile
+        } catch {
+          // Deleted by hand since: fetched again below, which is what somebody deleting it expects.
+        }
+        if (present) {
+          result.unchanged += 1
+          continue
+        }
+      }
+
+      const bytes = await options.target.client.get(object.key, options.signal)
+      manifest[object.key] = { size: object.size, lastModified: object.lastModified }
+      manifestChanged = true
 
       // Compared before writing, so an unchanged file does not churn the watcher that is
       // watching this very folder — which would reload every skill on every sync.
@@ -135,6 +169,11 @@ export async function syncFromS3(options: SyncOptions): Promise<S3SyncResult> {
       await options.fs.writeBytes(localPath, bytes)
       result.written.push(relative)
     } catch (error) {
+      // Forgotten, so a file that failed is fetched in full next time rather than skipped.
+      if (manifest[object.key] !== undefined) {
+        delete manifest[object.key]
+        manifestChanged = true
+      }
       result.failed.push({
         key: object.key,
         problem: error instanceof Error ? error.message : String(error),
@@ -142,7 +181,39 @@ export async function syncFromS3(options: SyncOptions): Promise<S3SyncResult> {
     }
   }
 
+  // Best effort: a manifest that could not be written costs a full comparison next time,
+  // never a missed update — nothing is skipped without an entry recorded by a real fetch.
+  // Written only when something changed, so an idle tick of the timer touches nothing on disk.
+  if (manifestChanged) {
+    try {
+      await options.fs.mkdir(options.localDir)
+      await options.fs.writeBytes(manifestPath, Buffer.from(JSON.stringify(manifest)))
+    } catch {
+      // See above.
+    }
+  }
+
   return result
+}
+
+/**
+ * What the bucket reported for each key when it was last fetched. A dotfile, so neither the
+ * skill loader (`.md`) nor the tool loader (`.py`) reads it, and folder migration skips it.
+ */
+const MANIFEST_NAME = '.lightcode-sync.json'
+
+type SyncManifest = Record<string, { size: number; lastModified: string }>
+
+async function readManifest(fs: FileSystem, manifestPath: string): Promise<SyncManifest> {
+  try {
+    const parsed: unknown = JSON.parse((await fs.readBytes(manifestPath)).toString('utf8'))
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as SyncManifest)
+      : {}
+  } catch {
+    // Absent on a first sync, or damaged: either way every file is compared in full.
+    return {}
+  }
 }
 
 /**

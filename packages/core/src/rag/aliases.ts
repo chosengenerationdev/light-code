@@ -51,14 +51,49 @@ export function aliasForScope(scope: string, aliases: readonly string[]): string
   return aliases.find((alias) => alias.toLowerCase() === wanted)
 }
 
+/**
+ * Lowercased on the way in and on the way out, because OpenSearch only accepts lowercase index
+ * and alias names.
+ *
+ * Reported from real use as "search team skills is dead, other people couldn't see the team
+ * skills". Names were stored exactly as typed, so `Team-Skills` on one machine could not be
+ * attached (the cluster rejects it) or searched (the client refuses it), and `team-skills` on a
+ * colleague's machine was a different name from the one a first machine was trying to use — two
+ * spellings of one agreement, each failing differently. Normalising here, in the one function
+ * every reader and writer goes through, fixes configs already saved with capitals without
+ * anybody retyping them.
+ */
 function merge(single: string | undefined, many: readonly string[] | undefined): string[] {
   const out: string[] = []
   for (const value of [single, ...(many ?? [])]) {
-    const trimmed = value?.trim()
+    const trimmed = value?.trim().toLowerCase()
     if (trimmed === undefined || trimmed.length === 0) continue
-    if (!out.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) out.push(trimmed)
+    if (!out.includes(trimmed)) out.push(trimmed)
   }
   return out
+}
+
+/**
+ * Why a name cannot be used as an alias, or undefined when it can.
+ *
+ * The same rule `isSafeIndexName` enforces at request time, stated here too so it can be checked
+ * when the name is *saved* — in the panel, and again host-side — rather than discovered later as a
+ * publish that fails on one machine and a search that fails on another. Kept free of any
+ * OpenSearch import so the panel can run it.
+ */
+export function aliasProblem(name: string): string | undefined {
+  const value = name.trim().toLowerCase()
+  if (value.length === 0) return 'A name cannot be empty.'
+  if (value.length > 255) return `"${value}" is longer than 255 characters.`
+  if (value.includes('*')) return `"${value}" contains "*", and an alias cannot be a wildcard.`
+  if (value.includes('..')) return `"${value}" contains "..".`
+  if (!/^[a-z0-9][a-z0-9._\-+]*$/.test(value)) {
+    return (
+      `"${value}" can only use letters, digits, ".", "_", "-" and "+", and must start with a ` +
+      'letter or digit — no spaces.'
+    )
+  }
+  return undefined
 }
 
 /**

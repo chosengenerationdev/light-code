@@ -886,6 +886,15 @@ const s3MirrorSchema = z.object({
 export const s3ConfigSchema = z.object({
   connections: z.array(s3ConnectionSchema).max(20).optional(),
   /**
+   * How often enabled bucket folders are brought down on their own. Default 15.
+   *
+   * Only folders marked `enabled` are ever read, so a fresh install still contacts nothing.
+   * Before this existed an enabled folder was read only when somebody clicked Sync, so a
+   * colleague's new skill or tool reached nobody until each of them thought to click — which
+   * reads, from the outside, as sharing not working.
+   */
+  syncMinutes: z.number().int().min(5).max(1440).optional(),
+  /**
    * Where skills are kept, when they live in a bucket rather than on this disk.
    *
    * Only the *files* move. They are still loaded, watched and indexed exactly as local ones are —

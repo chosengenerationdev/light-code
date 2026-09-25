@@ -38,7 +38,7 @@ describe('the team-skills index status check', () => {
     const body = source.slice(source.indexOf('async function handleTeamSkillsIndexStatus'))
     const scoped = body.slice(0, body.indexOf('\n  function skillsIndexName'))
 
-    expect(scoped).toContain('skills.map((skill)')
+    expect(scoped).toContain('skills.map(async (skill)')
     expect(scoped).not.toContain('mirrorForDir')
   })
 
@@ -58,5 +58,43 @@ describe('the team-skills index status check', () => {
 
     expect(scoped).toContain('teamSkillPath(skill)')
     expect(scoped).not.toContain('teamSkillId(')
+  })
+
+  /**
+   * Presence alone said green for a skill edited after it was sent, so colleagues read the old
+   * version while the panel said everything was fine. It must compare what was sent — the stored
+   * text — against what `teamSkillText` produces from the file now.
+   */
+  it('compares the stored text, so an edited skill reads as out of date', async () => {
+    const bridge = url.fileURLToPath(new URL('./bridge.ts', import.meta.url))
+    const source = await fs.readFile(bridge, 'utf8')
+
+    const body = source.slice(source.indexOf('async function handleTeamSkillsIndexStatus'))
+    const scoped = body.slice(0, body.indexOf('\n  function skillsIndexName'))
+
+    expect(scoped).toContain('writer.scan(collection')
+    expect(scoped).toContain('teamSkillText(skill, body)')
+    expect(scoped).toContain("'stale'")
+  })
+})
+
+/**
+ * One owner for "can team search work here, and if not, why". The tool's registration, the
+ * prompt's mention of it and the probe must all read it, or a colleague can be told the tool
+ * exists while it does not — or be shown no reason at all, which is how it came to look dead.
+ */
+describe('team search availability has one owner', () => {
+  it('is decided by resolveTeamSkills everywhere', async () => {
+    const bridge = url.fileURLToPath(new URL('./bridge.ts', import.meta.url))
+    const source = await fs.readFile(bridge, 'utf8')
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+
+    expect(code).toContain("teamSkillsAvailable: 'options' in teamSkillsResolved")
+    expect(code).toContain("'options' in teamSkillsResolved ? teamSkillsResolved.options : undefined")
+    // The probe goes through it too, never a copy of its conditions.
+    const probe = code.slice(code.indexOf("if (target === 'teamSkills')"))
+    expect(probe.slice(0, 400)).toContain('resolveTeamSkills(config, search, embedder)')
+    // And the old inline decision is gone.
+    expect(code).not.toContain('skillAliases(config).length > 0 && search !== undefined')
   })
 })

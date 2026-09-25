@@ -1690,6 +1690,55 @@ and the tool's own logic are covered by `tools/debugSession.test.ts`; the DAP wi
 `variables` sequence — has only been read, not run against a real paused program. That is the
 first thing to check.
 
+## 12r. Team sharing that actually reaches people (0.117.0)
+
+Reported as "search team skills is dead, other people couldn't see the team skills", with "will
+newly created tool docs be sent to the team?" and "make sure sharing stays solid". Four defects,
+each able to produce that symptom alone, and none visible from the chat.
+
+- **Alias names were stored exactly as typed, and OpenSearch only accepts lowercase.** A capital or
+  a space made the name unusable on the machine that typed it (the attach and the search both
+  refuse it), and a colleague who typed the same name in lowercase was using a *different* name.
+  `merge` in `rag/aliases.ts` now lowercases on the way in and out — so configs already saved with
+  capitals work unedited — and `aliasProblem` refuses unusable names at save, in the panel and
+  host-side. Same fix covers `embedder.indexAlias` (team codebase search).
+- **Nothing said *why* team search was absent.** The tool was registered inline on four
+  conditions and nothing could report which was missing. `resolveTeamSkills` is now the one
+  owner, read by the registration, the prompt's `teamSkillsAvailable` and the new **Test team
+  search** probe (Settings → Skills → Team skills). The probe runs the real tool and reports, per
+  alias, whose skills came back — a list containing only "you" is "colleagues can't see mine"
+  read from the other side. It also enforces §12e's OpenSearch-only rule, which nothing did.
+- **The status check was presence-only**, so a skill edited after sending stayed green while
+  colleagues read the old text — and 0.115.0's changelog claimed the opposite. It now scans the
+  collection and compares the stored text with `teamSkillText(skill, body)` from the file:
+  indexed / changed since sent / not sent.
+- **An enabled bucket folder was never read on its own.** New skills and tools were uploaded the
+  moment they were written and then reached nobody until each colleague pressed Sync — while the
+  schema's own comment on `enabled` said a folder is read "on every panel open". `startMirrorSync`
+  now runs 5s after the bridge is built and every `s3.syncMinutes` (default 15). Cheap by
+  construction: `s3/sync.ts` keeps a `.lightcode-sync.json` manifest of the bucket's *own*
+  `lastModified` and size per key, so an unchanged folder costs one listing. **Never compare
+  against the local file's mtime** — two clocks, and a machine running ahead would skip a
+  colleague's same-size edit. And a tools sync never reloaded the Python registry, so a synced
+  tool neither appeared for approval nor reached the docs index; it now does both. Approval is
+  unchanged — a synced tool still refuses to load until approved on each machine (§13).
+
+**Tool documentation is deliberately not sent to the team pool**, and that is the answer to the
+question asked. A tool's documentation describes something callable on *this* machine; a
+colleague's model finding a doc for a tool their machine does not have would call it and fail.
+Tools travel as *tools* — through a bucket mirror marked `publish` — and each machine documents
+what it can actually run, automatically, once approved. §12g's reasoning for keeping tool docs out
+of the alias still holds.
+
+**Still open, deliberately:** "Send my skills to the team" publishes every loaded skill, including
+ones synced in from a shared bucket, each stamped with the publisher's name. With several people
+publishing from one bucket that is duplicate hits with wrong attribution. Raised with the user and
+not yet decided; if it is scoped to locally-authored skills, the status check must be narrowed in
+the same change (see §the comment on `handleTeamSkillsIndexStatus`).
+
+**Not verified against a live cluster or bucket.** The alias rules match OpenSearch's documented
+naming rules; the sync manifest is covered by `s3/sync.test.ts` against a fake bucket.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

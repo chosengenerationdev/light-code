@@ -40,7 +40,7 @@ import type { DatasetConfig } from '../dataset/types.js'
 import type { ChartSpec } from '../charts/types.js'
 import type { DiagramSpec } from '../diagrams/types.js'
 
-export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data'
+export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data' | 'teamSkills'
 
 export type IndexingKind =
   'codebase' | 'docs' | 'skills' | 'tools' | 'mail' | 'teamSkills' | 'dataset'
@@ -1595,7 +1595,11 @@ export type HostToUiMessage =
    */
   | {
       type: 'teamSkillsIndexStatus'
-      entries?: { name: string; indexed: boolean }[]
+      /**
+       * `indexed` — the team copy matches the file now. `stale` — sent, but the file has changed
+       * since, so colleagues are reading an older version. `missing` — never sent.
+       */
+      entries?: { name: string; state: 'indexed' | 'stale' | 'missing' }[]
       error?: string
     }
   | {

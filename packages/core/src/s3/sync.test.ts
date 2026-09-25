@@ -36,6 +36,11 @@ function disk(seed: Record<string, string> = {}): FakeDisk {
     mkdir: async (path: string) => {
       made.push(path)
     },
+    stat: async (path: string) => {
+      const found = files.get(path)
+      if (found === undefined) throw new Error('ENOENT')
+      return { size: found.length, mtimeMs: 0, isFile: true, isDirectory: false, isSymbolicLink: false }
+    },
   } as unknown as FileSystem
   return { fs, files, made }
 }
@@ -94,7 +99,8 @@ describe('bringing a folder down', () => {
       extensions: ['.md'],
     })
 
-    expect([...local.files.keys()]).toEqual(['/cache/skills/team/a.md'])
+    // The sync's own manifest is a dotfile beside them; see `s3/sync.ts`.
+    expect([...local.files.keys()].filter((key) => !key.includes('/.'))).toEqual(['/cache/skills/team/a.md'])
   })
 
   it('ignores files of other kinds', async () => {
@@ -281,6 +287,78 @@ describe('reference files must not crowd matching files out of the limit', () =>
     })
 
     expect(result.truncated).toBe(false)
+  })
+})
+
+/**
+ * Syncing now runs on a timer, so an unchanged folder must cost the listing and nothing else —
+ * and a colleague's edit must still arrive, whatever the two machines' clocks say.
+ */
+describe('a sync with nothing new', () => {
+  function counting(contents: Record<string, string>, lastModified: () => string) {
+    let gets = 0
+    const target: S3Target = {
+      id: 'c1',
+      label: 'team',
+      bucket: 'team-bucket',
+      prefix: 'shared/',
+      readOnly: false,
+      client: {
+        list: async (prefix: string): Promise<S3Object[]> =>
+          Object.keys(contents)
+            .filter((key) => key.startsWith(prefix))
+            .map((key) => ({ key, size: contents[key]?.length ?? 0, lastModified: lastModified() })),
+        get: async (key: string) => {
+          gets += 1
+          return Buffer.from(contents[key] ?? '')
+        },
+        put: async () => undefined,
+      } as unknown as S3Target['client'],
+    }
+    return { target, gets: () => gets }
+  }
+  const options = (target: S3Target, fs: FileSystem) => ({
+    target,
+    prefix: 'skills',
+    localDir: '/cache/skills',
+    fs,
+    extensions: ['.md'],
+  })
+
+  it('downloads nothing the second time', async () => {
+    const bucketed = counting({ 'shared/skills/a.md': 'x', 'shared/skills/b.md': 'y' }, () => '2026-01-01T00:00:00Z')
+    const local = disk()
+    await syncFromS3(options(bucketed.target, local.fs))
+    expect(bucketed.gets()).toBe(2)
+
+    const again = await syncFromS3(options(bucketed.target, local.fs))
+    expect(bucketed.gets()).toBe(2)
+    expect(again).toMatchObject({ written: [], unchanged: 2 })
+  })
+
+  /** Same size, new content: only the bucket's own date says it changed, and that is enough. */
+  it('fetches a colleague’s same-size edit', async () => {
+    const contents = { 'shared/skills/a.md': 'old' }
+    let stamp = '2026-01-01T00:00:00Z'
+    const bucketed = counting(contents, () => stamp)
+    const local = disk()
+    await syncFromS3(options(bucketed.target, local.fs))
+
+    contents['shared/skills/a.md'] = 'new'
+    stamp = '2026-01-02T00:00:00Z'
+    const again = await syncFromS3(options(bucketed.target, local.fs))
+    expect(again.written).toEqual(['a.md'])
+    expect(local.files.get('/cache/skills/a.md')?.toString()).toBe('new')
+  })
+
+  it('fetches again a file deleted by hand', async () => {
+    const bucketed = counting({ 'shared/skills/a.md': 'x' }, () => '2026-01-01T00:00:00Z')
+    const local = disk()
+    await syncFromS3(options(bucketed.target, local.fs))
+    local.files.delete('/cache/skills/a.md')
+
+    const again = await syncFromS3(options(bucketed.target, local.fs))
+    expect(again.written).toEqual(['a.md'])
   })
 })
 

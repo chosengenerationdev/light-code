@@ -63,7 +63,7 @@ import {
   type CustomRoleDefinition,
 } from '../agents/roles.js'
 import { budgetMatters, resolveTeam, type ResolvedAgent } from '../agents/team.js'
-import { aliasFields, codebaseAliases, skillAliases } from '../rag/aliases.js'
+import { aliasFields, aliasProblem, codebaseAliases, skillAliases } from '../rag/aliases.js'
 import {
   deriveIndexName,
   DEFAULT_INDEX_PREFIX as DERIVED_INDEX_PREFIX,
@@ -223,7 +223,9 @@ import {
   findTeamSkillsNamed,
   type TeamSkillsOptions,
   indexTeamSkills,
+  searchTeamSkills,
   teamSkillPath,
+  teamSkillText,
   createSearchTeamSkillsTool,
   parseDocEntryId,
   type DocEntryKind,
@@ -3629,6 +3631,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const embedder = await resolveEmbedder(config)
       const codebaseIndex = codebaseIndexName(config)
       const docsIndex = docsIndexName(config)
+      // Resolved once, so the tool and the prompt's mention of it cannot disagree.
+      const teamSkillsResolved = resolveTeamSkills(config, search, embedder)
       /*
        * Mail may live somewhere else entirely — that is the point of `retrieval.stores.mail`.
        * Resolved only when mail indexing is on, so an install without it pays nothing.
@@ -3742,7 +3746,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
         // Only when a pool actually exists: telling the model about a tool it has not been given
         // is how it comes to report that it looked somewhere it could not reach.
-        teamSkillsAvailable: skillAliases(config).length > 0,
+        teamSkillsAvailable: 'options' in teamSkillsResolved,
         /*
          * Read from config rather than from the registry, because the prompt is built before the
          * registry is. Only the *off* case is claimed: "on but uv is missing" leaves the model
@@ -4014,19 +4018,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * The team's shared skills. Needs an alias, a connection and an embedder — without
          * all three there is nothing to search, and the tool is simply not offered.
          */
-        skillAliases(config).length > 0 && search !== undefined && embedder !== undefined
-          ? {
-              searcher: search.searcher,
-              embedder,
-              /*
-               * All of them, in order — the first is the ordinary circle and the rest are what a
-               * search widens into when it holds nothing. Handing over only the first is what
-               * made the extra names typed in the panel do nothing at all for skills.
-               */
-              collections: skillAliases(config),
-              ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) as string } : {}),
-            }
-          : undefined,
+        'options' in teamSkillsResolved ? teamSkillsResolved.options : undefined,
         /*
          * Mail ranking. Resolved against whichever store `retrieval.stores.mail` names, which
          * is frequently a local Qdrant while the code goes to a shared cluster — mail is the
@@ -6891,6 +6883,55 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * ordinary case on a large folder, and "three updated, one failed" is more use than a failure.
    */
   async function handleSyncS3(kind: 'skills' | 'tools'): Promise<void> {
+    // A click landing while the timer's run is still going waits for nothing and duplicates
+    // nothing: the run in progress posts its own result.
+    if (mirrorSyncInFlight.has(kind)) return
+    mirrorSyncInFlight.add(kind)
+    try {
+      await syncMirrorsOf(kind)
+    } finally {
+      mirrorSyncInFlight.delete(kind)
+    }
+  }
+
+  const mirrorSyncInFlight = new Set<'skills' | 'tools'>()
+  let mirrorSyncTimer: ReturnType<typeof setInterval> | undefined
+  let lastAutoMirrorSync = 0
+
+  /**
+   * Brings enabled bucket folders down on their own, when the panel opens and then every
+   * `s3.syncMinutes` (default 15).
+   *
+   * Reported as "search team skills is dead" and "will newly created tool docs be sent to the
+   * team": a colleague's new skill or tool was uploaded to the bucket the moment it was written,
+   * and then reached nobody until each of them thought to press Sync. The schema's own comment on
+   * `enabled` already said a folder is read "on every panel open"; nothing did it.
+   *
+   * Only folders marked `enabled` are ever read, so a fresh install still contacts nothing (§3).
+   * A tick is one config read; a sync with nothing new is one listing per folder (see the
+   * manifest in `s3/sync.ts`).
+   */
+  function startMirrorSync(): void {
+    const tick = async (): Promise<void> => {
+      const { config } = await configManager.load()
+      const minutes = config.s3?.syncMinutes ?? 15
+      if (Date.now() - lastAutoMirrorSync < minutes * 60_000) return
+      lastAutoMirrorSync = Date.now()
+      for (const kind of ['skills', 'tools'] as const) {
+        if (!(config.s3?.[kind] ?? []).some((mirror) => mirror.enabled === true)) continue
+        await handleSyncS3(kind)
+      }
+    }
+    const run = (): void => {
+      tick().catch((error: unknown) => logger.warn('automatic bucket sync failed', String(error)))
+    }
+    // Fire-and-forget after a moment, so a slow bucket never delays the panel rendering (§11).
+    mirrorSyncStartup = setTimeout(run, 5_000)
+    mirrorSyncTimer = setInterval(run, 60_000)
+  }
+  let mirrorSyncStartup: ReturnType<typeof setTimeout> | undefined
+
+  async function syncMirrorsOf(kind: 'skills' | 'tools'): Promise<void> {
     const { config } = await configManager.load()
     const mirrors = (config.s3?.[kind] ?? []).filter((mirror) => mirror.enabled === true)
     if (mirrors.length === 0) {
@@ -6955,6 +6996,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await refreshSkills()
       postSkills()
     }
+    /*
+     * And the same for tools, which it never did: a synced `.py` sat on disk unnoticed until
+     * something else happened to reload the registry, so a colleague's new tool neither appeared
+     * for approval nor reached this machine's documentation index. `postPython` schedules that
+     * reindex. Approval is untouched — a synced tool is still refused until approved here (§13).
+     */
+    if (kind === 'tools') {
+      await python.refresh()
+      await postPython()
+    }
     await postS3()
   }
 
@@ -7006,6 +7057,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   async function handleSaveSkillsAlias(aliases: string[]): Promise<void> {
     try {
+      /*
+       * Checked before anything is written. A name OpenSearch will not accept used to be saved
+       * anyway, and then failed as a publish error on this machine and a search error on every
+       * colleague's — reported as "search team skills is dead".
+       */
+      const problem = aliases.map(aliasProblem).find((entry) => entry !== undefined)
+      if (problem !== undefined) {
+        post({ type: 'error', message: `Team skills name not saved: ${problem}` })
+        return
+      }
       const { config } = await configManager.load()
       const embedder = { ...(config.embedder ?? {}) }
       /*
@@ -7230,7 +7291,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /**
    * Which currently loaded skills have a matching document in the team collection — one row per
-   * skill, green or red.
+   * skill: current, sent-but-out-of-date, or never sent.
    *
    * A live check against the store, not a record kept locally from the last publish. Publishing
    * writes here; a skill edited afterwards, or never published at all, has to show as such, and
@@ -7269,22 +7330,102 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         search.store,
         await vectorStoreConnectionFor(search.store, search.id),
       )
-      // `listPaths` returns the `path` field, never `id` — `teamSkillId` is per-owner and is
-      // what makes an upsert land on your own document rather than a colleague's, but it is not
-      // what comes back here. Checking against it would always read as "not indexed".
-      const existing = new Set(await writer.listPaths(collection))
-      post({
-        type: 'teamSkillsIndexStatus',
-        entries: skills.map((skill) => ({
-          name: skill.name,
-          indexed: existing.has(teamSkillPath(skill)),
-        })),
-      })
+      /*
+       * The stored *text*, not just which paths exist.
+       *
+       * Presence alone said green for a skill edited after it was sent, so colleagues read the
+       * old version while this panel said everything was fine — and 0.115.0's changelog claimed
+       * the opposite. What was sent is `teamSkillText(skill, body)`; recomputing it from the file
+       * now and comparing is the only honest answer to "is the team reading what I have".
+       *
+       * Keyed by `path` (via `teamSkillPath`), never by `id`: `id` carries the owner and is not
+       * what identifies a skill across a scan. Own collection only, so every document is ours.
+       */
+      const stored = new Map<string, string>()
+      let cursor: unknown
+      do {
+        const page = await writer.scan(collection, cursor === undefined ? {} : { cursor })
+        for (const document of page.documents) stored.set(document.path, document.text)
+        cursor = page.next
+      } while (cursor !== undefined)
+
+      const entries = await Promise.all(
+        skills.map(async (skill) => {
+          const sent = stored.get(teamSkillPath(skill))
+          if (sent === undefined) return { name: skill.name, state: 'missing' as const }
+          let body: string
+          try {
+            body = await fs.readFile(skill.filePath, 'utf8')
+          } catch {
+            // Sent once, file gone since: what colleagues read no longer matches anything here.
+            return { name: skill.name, state: 'stale' as const }
+          }
+          return {
+            name: skill.name,
+            state: sent === teamSkillText(skill, body) ? ('indexed' as const) : ('stale' as const),
+          }
+        }),
+      )
+      post({ type: 'teamSkillsIndexStatus', entries })
     } catch (error) {
       post({
         type: 'teamSkillsIndexStatus',
         error: error instanceof Error ? error.message : String(error),
       })
+    }
+  }
+
+  /**
+   * What `search_team_skills` searches with on this machine, or why it cannot.
+   *
+   * One owner for the conditions, read by the tool's registration, the prompt's mention of it and
+   * the Test team search probe. Before this, the tool decided inline and nothing could say *why*
+   * it was absent — so a colleague missing one of four settings saw team search as simply dead,
+   * with nothing on screen pointing at which one.
+   *
+   * OpenSearch only, as §12e has always said and nothing enforced: a pool is an alias, and Qdrant
+   * and Chroma have no aliases. Absent there rather than present and failing on every call.
+   */
+  function resolveTeamSkills(
+    config: LightCodeConfig,
+    search: Awaited<ReturnType<typeof resolveSearch>>,
+    embedder: Embedder | undefined,
+  ): { options: TeamSkillsOptions } | { reason: string } {
+    const aliases = skillAliases(config)
+    if (aliases.length === 0) {
+      return {
+        reason:
+          'No team skills name is set on this machine. Settings → Skills → Team skills: enter the ' +
+          'same name everyone on the team uses and save it.',
+      }
+    }
+    if (search === undefined) {
+      return { reason: 'No search connection is active. Settings → Search: add one and use it.' }
+    }
+    if (search.store.kind !== 'opensearch') {
+      return {
+        reason:
+          `Team skills need an OpenSearch connection; "${search.store.label}" is ` +
+          `${search.store.kind}, which has no aliases to share through.`,
+      }
+    }
+    if (embedder === undefined) {
+      return {
+        reason:
+          'No embedding model is saved. Settings → Search: choose the same model and dimensions ' +
+          'as the rest of the team.',
+      }
+    }
+    const owner = indexOwner(config)
+    return {
+      options: {
+        searcher: search.searcher,
+        embedder,
+        // All of them, in order: the first is the ordinary circle and the rest are what a search
+        // widens into when it holds nothing.
+        collections: aliases,
+        ...(owner !== undefined ? { owner } : {}),
+      },
     }
   }
 
@@ -7700,6 +7841,56 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           target,
           query,
           text: result.content,
+          ...(result.isError === true ? { error: 'The search failed.' } : {}),
+        })
+        return
+      }
+
+      if (target === 'teamSkills') {
+        /*
+         * "Can this machine see the team's skills, and whose?" — answered in one click.
+         *
+         * Reported as "search team skills is dead, other people couldn't see the team skills",
+         * with nothing on screen able to say which of several independent things was wrong:
+         * this machine's alias, its connection, its embedder, the cluster refusing the name, or
+         * simply nobody having published under it. So this says each of them.
+         *
+         * The bottom half is the real tool's own output — never a re-implementation, for the
+         * reason the mail probe gives. The top half asks each alias separately, which is exactly
+         * what the tool does internally on the way to its first answer, and reports whose skills
+         * came back from it: a list with only your own name in it is the answer to "colleagues
+         * cannot see mine" read from the other side.
+         */
+        const resolved = resolveTeamSkills(config, search, embedder)
+        if (!('options' in resolved)) {
+          post({ type: 'searchProbe', target, query, text: '', error: resolved.reason })
+          return
+        }
+        const { options } = resolved
+        const lines = [
+          `This machine searches ${options.collections.join(' → ')}` +
+            (options.owner !== undefined ? `, as ${options.owner}.` : '.'),
+        ]
+        for (const alias of options.collections) {
+          try {
+            const found = await searchTeamSkills({ ...options, collections: [alias] }, query, 10)
+            if (found.hits.length === 0) {
+              lines.push(`- ${alias}: answers, but nobody has published under this name yet.`)
+              continue
+            }
+            const owners = [...new Set(found.hits.map((hit) => (hit.isMine ? 'you' : (hit.owner ?? 'unknown owner'))))]
+            lines.push(`- ${alias}: ${String(found.hits.length)} nearest skill(s), from ${owners.join(', ')}.`)
+          } catch (error) {
+            lines.push(`- ${alias}: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+        const tool = createSearchTeamSkillsTool({ ...options, observer: searchLog })
+        const result = await tool.execute({ query }, {} as ToolExecutionContext)
+        post({
+          type: 'searchProbe',
+          target,
+          query,
+          text: [...lines, '', 'What the assistant gets:', '', result.content].join('\n'),
           ...(result.isError === true ? { error: 'The search failed.' } : {}),
         })
         return
@@ -8457,6 +8648,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // Cleared means absent, which is what turns team scope back off. Split by the one
       // function that also merges them back — see `rag/aliases.ts`.
       if (indexAliases !== undefined) {
+        // Refused at save, not discovered later as an attach that fails here and a search that
+        // fails on a colleague's machine. See `aliasProblem`.
+        const problem = indexAliases.map(aliasProblem).find((entry) => entry !== undefined)
+        if (problem !== undefined) {
+          post({ type: 'error', message: `Team alias not saved: ${problem}` })
+          return
+        }
         const { primary, rest } = aliasFields(indexAliases)
         if (primary !== undefined) embedder['indexAlias'] = primary
         else delete embedder['indexAlias']
@@ -11344,6 +11542,8 @@ ${contents}
    * nightly job runs on a closed laptop.
    */
   startScheduleTimer()
+  // Same lifetime, same reason: bucket folders are brought down while this bridge is alive.
+  startMirrorSync()
 
   return {
     /**
@@ -11412,6 +11612,9 @@ ${contents}
       if (scheduleTimer !== undefined) clearInterval(scheduleTimer)
       // A mail sync reads the user's mailbox. Nothing that does that may outlive the bridge.
       if (mailTimer !== undefined) clearInterval(mailTimer)
+      // Nor a bucket sync, which would post to a dead webview and hold a connection open.
+      if (mirrorSyncTimer !== undefined) clearInterval(mirrorSyncTimer)
+      if (mirrorSyncStartup !== undefined) clearTimeout(mirrorSyncStartup)
       // Nothing may outlive the bridge, least of all something that spends money.
       stopKeepAlive()
       unsubscribe()

@@ -167,7 +167,14 @@ export type { DatasetConfig, DatasetRecord } from './dataset/types.js'
  * They live beside the parser that reads them back, so the panel and the search cannot disagree
  * about what "a, b" means.
  */
-export { formatAliases, parseAliases, codebaseAliases, skillAliases, MAX_ALIASES } from './rag/aliases.js'
+export {
+  formatAliases,
+  parseAliases,
+  codebaseAliases,
+  skillAliases,
+  aliasProblem,
+  MAX_ALIASES,
+} from './rag/aliases.js'
 
 /*
  * How large a picture is drawn. One vocabulary for charts, diagrams and whatever comes next —

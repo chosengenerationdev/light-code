@@ -1,5 +1,37 @@
 # light-code-vscode
 
+## 0.117.0
+
+### Minor Changes
+
+- Team skills and shared tools now actually reach colleagues. Reported as "search team skills is
+  dead, other people couldn't see the team skills". Four separate causes, each enough on its own:
+
+  **Alias names with capitals or spaces silently failed.** OpenSearch only accepts lowercase, and
+  names were stored exactly as typed — so `Team-Skills` could not be used at all, and a colleague
+  who typed `team-skills` was using a different name. Names are now lowercased everywhere (configs
+  already saved with capitals work without retyping), and an unusable name is refused when you
+  save it, with the reason. Every machine still needs the same name.
+
+  **Nothing said why team search was missing.** Settings → Skills → Team skills now has **Test
+  team search**: it runs the assistant's own search and reports, for each name, whose skills this
+  machine can see — or exactly which setting is missing (name, connection, embedding model, or a
+  non-OpenSearch connection). Run it on a colleague's machine to see whether your skills reach it.
+
+  **Check status showed green for a skill edited after it was sent.** It now compares the text in
+  the team collection with the file: *indexed*, *changed since sent — send again*, or *not sent*.
+
+  **Bucket folders were only read when someone pressed Sync.** A colleague's new skill or Python
+  tool was uploaded instantly and then reached nobody until each person clicked Sync. Enabled
+  bucket folders are now brought down automatically when the panel opens and every 15 minutes
+  (`s3.syncMinutes` to change it). An unchanged folder costs one listing, nothing more. A synced
+  Python tool now appears for approval straight away — it still will not run until approved.
+
+- Tool documentation is intentionally *not* sent to the team pool: a doc for a tool a colleague
+  does not have would have their assistant calling something that does not exist. Tools are
+  shared as tools, through a bucket folder marked "publish", and each machine documents what it
+  can actually run once the tool is approved there.
+
 ## 0.116.0
 
 ### Minor Changes

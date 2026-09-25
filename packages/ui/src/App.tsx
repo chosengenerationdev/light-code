@@ -324,7 +324,7 @@ export function App(props: AppProps): ReactElement {
    * an earlier publish is never shown as current.
    */
   const [teamSkillsStatus, setTeamSkillsStatus] = useState<
-    { name: string; indexed: boolean }[] | undefined
+    { name: string; state: 'indexed' | 'stale' | 'missing' }[] | undefined
   >(undefined)
   const [teamSkillsStatusError, setTeamSkillsStatusError] = useState<string | undefined>(undefined)
   const [teamSkillsStatusLoading, setTeamSkillsStatusLoading] = useState(false)
@@ -1922,6 +1922,17 @@ export function App(props: AppProps): ReactElement {
                   setTeamSkillsStatusError(undefined)
                   props.transport.post({ type: 'requestTeamSkillsIndexStatus' } satisfies UiToHostMessage)
                 },
+                // Keyed by its own target, so it never shows the docs probe's result or vice versa.
+                probe: { running: probeRunning.teamSkills === true, result: searchProbes.teamSkills },
+                onProbe: (query: string, target: ProbeTarget) => {
+                  setProbeRunning((current) => ({ ...current, [target]: true }))
+                  props.transport.post({
+                    type: 'runSearchProbe',
+                    query,
+                    target,
+                  } satisfies UiToHostMessage)
+                },
+                onClearProbe: () => clearProbe('teamSkills'),
               },
               skills,
               issues: skillIssues,
