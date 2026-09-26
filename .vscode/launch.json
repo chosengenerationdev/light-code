@@ -6,7 +6,12 @@
       "type": "extensionHost",
       "request": "launch",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}/apps/vscode"],
-      "outFiles": ["${workspaceFolder}/apps/vscode/dist/**/*.js"],
+      // Only the extension-host bundle: webview.js runs in the webview, not here, and scanning
+      // its 3.6 MB source map slows the debugger's startup for nothing.
+      "outFiles": ["${workspaceFolder}/apps/vscode/dist/extension.js"],
+      // The default 10s is tight on Windows, where antivirus scans a freshly rebuilt bundle
+      // before the host may load it ("Extension host did not start in 10 seconds").
+      "timeout": 30000,
       "preLaunchTask": "build-vscode-extension"
     }
   ]
