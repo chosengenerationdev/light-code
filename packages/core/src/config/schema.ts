@@ -919,6 +919,15 @@ export const s3ConfigSchema = z.object({
 export type S3ConnectionConfig = z.infer<typeof s3ConnectionSchema>
 export type S3Config = z.infer<typeof s3ConfigSchema>
 
+/** The connection half of the Jira and Bitbucket blocks; Confluence's predates it and matches it. */
+const atlassianConnectionShape = {
+  enabled: z.boolean(),
+  baseUrl: z.string().url(),
+  tokenRef: z.string().min(1),
+  caFile: z.string().min(1),
+  rejectUnauthorized: z.boolean(),
+}
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
@@ -996,6 +1005,26 @@ export const configSchema = z
         caFile: z.string().min(1),
         /** The escape hatch, never the fix — see the provider profile's own `tls` (§10). */
         rejectUnauthorized: z.boolean(),
+      })
+      .partial(),
+    /**
+     * Jira Data Center / Server. Same connection shape as `confluence`, same reasons for being
+     * user-scope only: an endpoint plus a credential that writes under the user's name.
+     */
+    jira: z
+      .object({
+        ...atlassianConnectionShape,
+        /** Project key new issues go into when the request does not name one. */
+        defaultProject: z.string().min(1),
+      })
+      .partial(),
+    /** Bitbucket Data Center / Server. As `jira`. */
+    bitbucket: z
+      .object({
+        ...atlassianConnectionShape,
+        /** Project key and repository slug used when a request does not name a repository. */
+        defaultProject: z.string().min(1),
+        defaultRepo: z.string().min(1),
       })
       .partial(),
     filesystem: z

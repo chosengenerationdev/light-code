@@ -71,6 +71,9 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * owns. The preview is the live page diffed against the new body, and a person reads it once.
    */
   'confluence_write_page',
+  // Jira and Bitbucket writes, for the same reason: under the user's name, read by a team.
+  'jira_write_issue',
+  'bitbucket_write_pull_request',
   // Changes a workbook somebody has open and has not saved, with no undo this product owns.
   'excel_write_range',
   /*

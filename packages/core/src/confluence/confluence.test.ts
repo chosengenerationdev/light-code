@@ -84,7 +84,7 @@ describe('the Confluence client', () => {
   })
 
   it('says what to do about the failures people actually hit', () => {
-    expect(describeFailure('reading', 401, '')).toMatch(/Settings → Tools → Confluence/)
+    expect(describeFailure('reading', 401, '')).toMatch(/Settings → Atlassian → Confluence/)
     expect(describeFailure('updating', 409, '')).toMatch(/Read it again/)
     expect(describeFailure('creating', 400, JSON.stringify({ message: 'Error parsing xhtml' }))).toMatch(
       /Error parsing xhtml[\s\S]*storage format/,

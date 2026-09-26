@@ -53,7 +53,7 @@ export type ShareSectionId =
   | 'office'
   | 'mail'
   | 's3'
-  | 'confluence'
+  | 'atlassian'
   | 'datasets'
   | 'schedules'
   | 'tools'
@@ -179,10 +179,10 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     keys: ['s3'],
   },
   {
-    id: 'confluence',
-    label: 'Confluence',
-    description: 'The Confluence site and default space the assistant writes pages to.',
-    keys: ['confluence'],
+    id: 'atlassian',
+    label: 'Atlassian',
+    description: 'The Confluence, Jira and Bitbucket sites, and their default space, project and repository.',
+    keys: ['confluence', 'jira', 'bitbucket'],
   },
   {
     id: 'datasets',
@@ -323,8 +323,12 @@ function detailFor(section: ShareSection, config: LightCodeConfig): string {
       return count(Object.keys(config.agents?.roles ?? {}).length, 'role')
     case 's3':
       return count((config.s3?.connections ?? []).length, 'connection')
-    case 'confluence':
-      return config.confluence?.baseUrl ?? 'not set up'
+    case 'atlassian': {
+      const sites = [config.confluence?.baseUrl, config.jira?.baseUrl, config.bitbucket?.baseUrl].filter(
+        (site): site is string => site !== undefined,
+      )
+      return sites.length > 0 ? sites.join(', ') : 'not set up'
+    }
     case 'datasets':
       return count((config.datasets ?? []).length, 'dataset')
     case 'commands':
@@ -376,9 +380,11 @@ function secretRefsFor(section: ShareSection, config: LightCodeConfig): string[]
         refs.push(`${connection.label}: secret access key`)
       }
       break
-    case 'confluence':
-      // Everyone brings their own: a token publishes under the name of whoever it belongs to.
+    case 'atlassian':
+      // Everyone brings their own: a token writes under the name of whoever it belongs to.
       if (config.confluence?.tokenRef !== undefined) refs.push('Confluence: personal access token')
+      if (config.jira?.tokenRef !== undefined) refs.push('Jira: personal access token')
+      if (config.bitbucket?.tokenRef !== undefined) refs.push('Bitbucket: personal access token')
       break
     case 'network':
       if (config.tls?.passphraseRef !== undefined) refs.push('Global client key: passphrase')

@@ -193,14 +193,14 @@ const PERSONAL_SETTINGS = new Set([
   // A form the assistant put in front of this user, answered by this user.
   'formResponse',
   /*
-   * A user's own Confluence token and site, for the reason their own provider profiles are theirs:
-   * a page is published under the name of whoever the token belongs to, so on a shared server each
-   * person must bring their own. An admin setting one would make every user publish as the admin.
-   * Stored per user (`Principal.id`), so one user's token is never another's.
+   * A user's own Confluence, Jira and Bitbucket tokens and sites, for the reason their own provider
+   * profiles are theirs: a page, an issue or a comment is written under the name of whoever the
+   * token belongs to, so on a shared server each person must bring their own. An admin setting one
+   * would make every user write as the admin. Stored per user (`Principal.id`).
    */
-  'saveConfluence',
-  'clearConfluenceToken',
-  'testConfluence',
+  'saveAtlassian',
+  'clearAtlassianToken',
+  'testAtlassian',
 ])
 
 export function isAdminOnly(messageType: string): boolean {

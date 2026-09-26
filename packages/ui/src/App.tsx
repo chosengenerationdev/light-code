@@ -1,7 +1,13 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
 import { CUSTOM_ROLE_LIMIT, skillAliases } from '@light-code/core/browser'
 import type { S3Mirror } from './settings/S3Section.js'
-import type { CheckpointView, CommandRules, ConfluenceSettingsView, ProbeTarget } from '@light-code/core/browser'
+import type {
+  AtlassianProductId,
+  AtlassianProductStatus,
+  CheckpointView,
+  CommandRules,
+  ProbeTarget,
+} from '@light-code/core/browser'
 
 /** The settings message, named once so the shell block does not have to be written out again. */
 type SettingsMessage = Extract<HostToUiMessage, { type: 'settings' }>
@@ -328,13 +334,13 @@ export function App(props: AppProps): ReactElement {
   >(undefined)
   const [teamSkillsStatusError, setTeamSkillsStatusError] = useState<string | undefined>(undefined)
   const [teamSkillsStatusLoading, setTeamSkillsStatusLoading] = useState(false)
-  /** Confluence as the host reports it. The token never arrives — only whether one is stored. */
-  const [confluence, setConfluence] = useState<
-    { settings: ConfluenceSettingsView; hasToken: boolean } | undefined
-  >(undefined)
-  const [confluenceSavedTick, setConfluenceSavedTick] = useState(0)
-  const [confluenceTest, setConfluenceTest] = useState<{ ok: boolean; detail: string } | undefined>(undefined)
-  const [confluenceTesting, setConfluenceTesting] = useState(false)
+  /** Confluence, Jira and Bitbucket as the host reports them. Tokens never arrive — only whether one is stored. */
+  const [atlassian, setAtlassian] = useState<Record<AtlassianProductId, AtlassianProductStatus> | undefined>(undefined)
+  const [atlassianSavedTicks, setAtlassianSavedTicks] = useState<Partial<Record<AtlassianProductId, number>>>({})
+  const [atlassianTests, setAtlassianTests] = useState<
+    Partial<Record<AtlassianProductId, { ok: boolean; detail: string }>>
+  >({})
+  const [atlassianTesting, setAtlassianTesting] = useState<Partial<Record<AtlassianProductId, boolean>>>({})
   const [embedderModels, setEmbedderModels] = useState<string[]>([])
   const [embedderModelsWarning, setEmbedderModelsWarning] = useState<string | undefined>(undefined)
   const [embedderModelsLoading, setEmbedderModelsLoading] = useState(false)
@@ -885,13 +891,13 @@ export function App(props: AppProps): ReactElement {
           ...(message.collection !== undefined ? { collection: message.collection } : {}),
           ...(message.error !== undefined ? { error: message.error } : {}),
         })
-      } else if (message.type === 'confluence') {
-        setConfluence({ settings: message.settings, hasToken: message.hasToken })
-      } else if (message.type === 'confluenceSaved') {
-        setConfluenceSavedTick((tick) => tick + 1)
-      } else if (message.type === 'confluenceTest') {
-        setConfluenceTesting(false)
-        setConfluenceTest({ ok: message.ok, detail: message.detail })
+      } else if (message.type === 'atlassian') {
+        setAtlassian(message.products)
+      } else if (message.type === 'atlassianSaved') {
+        setAtlassianSavedTicks((ticks) => ({ ...ticks, [message.product]: (ticks[message.product] ?? 0) + 1 }))
+      } else if (message.type === 'atlassianTest') {
+        setAtlassianTesting((testing) => ({ ...testing, [message.product]: false }))
+        setAtlassianTests((tests) => ({ ...tests, [message.product]: { ok: message.ok, detail: message.detail } }))
       } else if (message.type === 'teamSkillsIndexStatus') {
         setTeamSkillsStatusLoading(false)
         setTeamSkillsStatus(message.entries)
@@ -999,7 +1005,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestPython' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestS3' } satisfies UiToHostMessage)
-    props.transport.post({ type: 'requestConfluence' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestAtlassian' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestVariables' } satisfies UiToHostMessage)
@@ -2139,6 +2145,28 @@ export function App(props: AppProps): ReactElement {
                   kind: 'mail',
                 } satisfies UiToHostMessage),
             }}
+            atlassian={{
+              products: atlassian,
+              savedTicks: atlassianSavedTicks,
+              tests: atlassianTests,
+              testing: atlassianTesting,
+              onSave: (product, settings, token) => {
+                setAtlassianTests((tests) => ({ ...tests, [product]: undefined }))
+                props.transport.post({
+                  type: 'saveAtlassian',
+                  product,
+                  settings,
+                  ...(token !== undefined ? { token } : {}),
+                } satisfies UiToHostMessage)
+              },
+              onClearToken: (product) =>
+                props.transport.post({ type: 'clearAtlassianToken', product } satisfies UiToHostMessage),
+              onTest: (product) => {
+                setAtlassianTesting((testing) => ({ ...testing, [product]: true }))
+                setAtlassianTests((tests) => ({ ...tests, [product]: undefined }))
+                props.transport.post({ type: 'testAtlassian', product } satisfies UiToHostMessage)
+              },
+            }}
             tools={{
               ...toolCatalogue,
               docsIndex: {
@@ -2187,32 +2215,6 @@ export function App(props: AppProps): ReactElement {
                   type: 'setToolTimeout',
                   ...(seconds === undefined ? {} : { seconds }),
                 } satisfies UiToHostMessage),
-              ...(confluence !== undefined
-                ? {
-                    confluence: {
-                      settings: confluence.settings,
-                      hasToken: confluence.hasToken,
-                      savedTick: confluenceSavedTick,
-                      test: confluenceTest,
-                      testing: confluenceTesting,
-                      onSave: (settings: ConfluenceSettingsView, token: string | undefined) => {
-                        setConfluenceTest(undefined)
-                        props.transport.post({
-                          type: 'saveConfluence',
-                          settings,
-                          ...(token !== undefined ? { token } : {}),
-                        } satisfies UiToHostMessage)
-                      },
-                      onClearToken: () =>
-                        props.transport.post({ type: 'clearConfluenceToken' } satisfies UiToHostMessage),
-                      onTest: () => {
-                        setConfluenceTesting(true)
-                        setConfluenceTest(undefined)
-                        props.transport.post({ type: 'testConfluence' } satisfies UiToHostMessage)
-                      },
-                    },
-                  }
-                : {}),
               onSetOffice: (excel, outlook) => {
                 setToolCatalogue((current) => ({
                   ...current,

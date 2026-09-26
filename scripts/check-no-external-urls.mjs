@@ -85,6 +85,8 @@ const ALLOWED_HOSTS = new Map([
   ['gateway.example.com', 'placeholder in the Apigee token URL field'],
   ['gw.example.com', 'placeholder'],
   ['wiki.example.com', 'placeholder in the Confluence site address field'],
+  ['jira.example.com', 'placeholder in the Jira site address field'],
+  ['git.example.com', 'placeholder in the Bitbucket site address field'],
   ['example.com', 'generic documentation example'],
   ['opensearch.internal', 'placeholder in the OpenSearch cluster URL field'],
   ['mcp.internal', 'placeholder in the MCP server URL field'],

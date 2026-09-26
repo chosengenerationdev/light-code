@@ -449,6 +449,18 @@ export function PauseIcon({ size = 14 }: IconProps): ReactElement {
   )
 }
 
+/** Atlassian — three linked sites. A plain glyph, not anybody's logo. */
+export function LinkedSitesIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="5" height="5" rx="1" />
+      <rect x="9.5" y="1.5" width="5" height="5" rx="1" />
+      <rect x="5.5" y="9.5" width="5" height="5" rx="1" />
+      <path d="M6.5 4h3M4 6.5v1.5l3.5 1.5M12 6.5v1.5l-3.5 1.5" />
+    </svg>
+  )
+}
+
 /** Stacked discs. The conventional glyph for a store of records. */
 export function DatabaseIcon({ size = 16 }: IconProps): ReactElement {
   return (

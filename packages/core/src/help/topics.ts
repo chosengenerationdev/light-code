@@ -443,6 +443,55 @@ filters already produced.
 `,
   },
   {
+    id: 'jira',
+    title: 'Jira issues',
+    keywords: [
+      'jira', 'issue', 'ticket', 'bug', 'story', 'jql', 'backlog', 'transition', 'status',
+      'log a bug', 'raise a ticket', 'move to done', 'comment on issue',
+    ],
+    body: `
+**Settings → Atlassian → Jira**: the site address, a personal access token, and optionally a default
+project key, a CA file and the skip-verify escape hatch. Off until switched on; **user-scope only**
+(config:jira). The token is kept in secure storage and never shown again. **Test connection** says who
+the token belongs to.
+
+Jira **Data Center / Server** only; Cloud is not supported.
+
+**Three tools.** \`jira_search\` (plain words, or JQL passed through as written), \`jira_read_issue\`
+(fields, description, every comment, and the status moves available right now), and
+\`jira_write_issue\`, which creates an issue or updates one by key — summary, description, labels,
+priority — and can add a comment and move the status in the same call.
+
+**Every write asks first.** An update shows the description diffed against the issue as it is now,
+every other field from what to what, the literal comment, and where the status would move — or that
+no such move exists from the current status. If a comment or move fails after the fields were saved,
+the result says exactly which part did not happen.
+`,
+  },
+  {
+    id: 'bitbucket',
+    title: 'Bitbucket pull requests',
+    keywords: [
+      'bitbucket', 'pull request', 'pr', 'review', 'diff', 'branch', 'repository', 'repo',
+      'open a pull request', 'comment on pr', 'file on branch', 'stash',
+    ],
+    body: `
+**Settings → Atlassian → Bitbucket**: the site address, a personal access token, and optionally a
+default project key and repository slug, used when a request names no repository. Off until switched
+on; **user-scope only** (config:bitbucket).
+
+Bitbucket **Data Center / Server** only; Cloud is not supported.
+
+**Four tools.** \`bitbucket_pull_requests\` lists them, \`bitbucket_read_pull_request\` reads one with
+reviewers, every comment (with its file and line) and the diff, \`bitbucket_read_file\` reads a file
+at any branch, tag or commit, and \`bitbucket_write_pull_request\` opens a pull request or comments on
+one. Every write asks first, showing the literal text.
+
+**It cannot approve, merge or decline — deliberately.** Those are a reviewer's decisions about
+somebody's work, made under your name; commenting is what the assistant contributes to a review.
+`,
+  },
+  {
     id: 'confluence',
     title: 'Confluence pages',
     keywords: [
@@ -450,7 +499,7 @@ filters already produced.
       'documentation page', 'diagram on a page', 'image on a page', 'replace image',
     ],
     body: `
-**Settings → Tools → Confluence**: the site address (including any path before \`/display\`), a
+**Settings → Atlassian → Confluence**: the site address (including any path before \`/display\`), a
 personal access token, and optionally a default space key and a CA file. Off until switched on;
 **user-scope only** (config:confluence), so a repository can never repoint it. The token is kept in
 secure storage, never in the settings file, and never shown again — the field says whether one is

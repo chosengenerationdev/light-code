@@ -98,7 +98,7 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 > Light Code makes no network connection the user has not configured. It ships with zero
 > default endpoints, no telemetry, no update checks, and no remote assets. The only hosts
 > it contacts are the model gateway, MCP servers, and — each only when the user configures and
-> switches it on — the vector store and embedding endpoint, S3 buckets, and a Confluence site
+> switches it on — the vector store and embedding endpoint, S3 buckets, and Confluence, Jira and Bitbucket sites
 > named in config. Code that Light Code executes on the user's
 > instruction — shell commands, Python tools, MCP servers — is outside this boundary and
 > governed by the user's environment.
@@ -1792,6 +1792,38 @@ settings tab turned into collapsible, theme-matched panels.
   `confluence` and `team-onboarding` topics so a guide the assistant writes is accurate.
 - **On the shared Node host a Confluence token is personal** (`apps/host/src/roles.ts`): a page is
   published as the token's owner, so an admin-set token would make everyone publish as the admin.
+
+### Jira and Bitbucket, and the Atlassian tab
+
+Asked for as a tab where Jira and Bitbucket are configured beside Confluence, **each in its own
+panel**. Settings → Atlassian replaces Settings → Tools → Confluence.
+
+- **One REST core, `atlassian/rest.ts`.** All three are DC/Server with a PAT as Bearer over the one
+  `HttpClient`, so "send, check the status, turn the error body into a sentence" exists once. It
+  reads all three error shapes — Confluence `{message}`, Jira `{errorMessages, errors{field}}`,
+  Bitbucket `{errors:[{message}]}` — because the message inside is usually the whole explanation.
+- **`atlassian/products.ts` is the one table of what differs**: label, token ref, placeholder, and
+  the product's own default fields (`defaultSpace`; `defaultProject`; `defaultProject` +
+  `defaultRepo`). The host saves only the fields it declares and the panel renders exactly those,
+  so the panel can never offer a default the host drops — the two-constructors bug this project
+  keeps paying for.
+- **One set of messages keyed by product** (`saveAtlassian{product}` …) rather than three copies.
+  Each product saves separately, so a Jira save cannot touch Confluence.
+- **Jira: three tools.** `jira_write_issue` creates or updates, and can comment and transition in
+  the same call. The preview diffs the description against the live issue, lists every other
+  field change, and says in advance when a requested status move does not exist from the current
+  status. A comment or move that fails *after* the fields were saved is reported part by part, not
+  as a failure of the whole — the edit happened.
+- **Bitbucket: four tools, and no approve, merge or decline.** Those are a reviewer's decision
+  about somebody's work, under the user's name; an assistant able to approve would make the review
+  a formality. Commenting is its contribution. `atlassian.test.ts` asserts the schema has no such
+  field. Project and repo are checked as path segments and file paths refuse `..`, because both
+  arrive from the model and are interpolated into a URL carrying the token.
+- `jira` and `bitbucket` are **user-scope only** (invariant 5) and both writers are in
+  `ALWAYS_ASK_TOOLS`. The share section became **Atlassian**, covering all three blocks and naming
+  each token as a credential the importer must enter.
+
+**Not verified against live Jira or Bitbucket** — against fakes only, like Confluence.
 
 ### Settings panels (`settings/Panel.tsx`)
 

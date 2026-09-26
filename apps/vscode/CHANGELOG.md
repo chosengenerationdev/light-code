@@ -4,7 +4,16 @@
 
 ### Minor Changes
 
-- **Confluence.** Settings → Tools → Confluence: your site address, a personal access token and an
+- **Atlassian tab: Confluence, Jira and Bitbucket**, each in its own panel with its own site,
+  personal access token, defaults and Test connection. Data Center / Server only.
+
+  **Jira**: search by words or JQL, read an issue with its comments and available status moves,
+  and create or update issues — including adding a comment and moving the status in one step.
+  **Bitbucket**: list and read pull requests with reviewers, comments and the diff, read any file
+  at any branch or commit, open a pull request, and comment. It cannot approve, merge or decline;
+  those stay yours. Every write is shown to you first.
+
+- **Confluence.** Settings → Atlassian → Confluence: your site address, a personal access token and an
   optional default space (plus a CA file if your site needs one). Test connection says who the
   token belongs to. Data Center / Server only. The token is kept in secure storage and never shown
   again.

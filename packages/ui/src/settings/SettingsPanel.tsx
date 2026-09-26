@@ -21,6 +21,7 @@ import { NetworkTab, type NetworkTabProps } from './NetworkTab.js'
 import { PythonTab, type PythonTabProps } from './PythonTab.js'
 import { OutlookTab, type OutlookTabProps } from './OutlookTab.js'
 import { ToolsTab, type ToolsTabProps } from './ToolsTab.js'
+import { AtlassianTab, type AtlassianTabProps } from './AtlassianTab.js'
 import { ReviewsTab, type ReviewsTabProps } from './ReviewsTab.js'
 import { VariablesTab, type VariablesTabProps } from './VariablesTab.js'
 import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
@@ -43,6 +44,7 @@ import {
   ShieldIcon,
   PythonIcon,
   ToolboxIcon,
+  LinkedSitesIcon,
 } from '../icons.js'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -115,6 +117,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   customData: Omit<CustomDataTabProps, 'onOpenPython'>
   python: PythonTabProps
   tools: ToolsTabProps
+  /** Confluence, Jira and Bitbucket. */
+  atlassian: AtlassianTabProps
   outlook: Omit<OutlookTabProps, 'onOpenTools'>
   /** Changes which tab is shown. Bumped by the host so the same tab can be asked for twice. */
   requestedTab?: { tab: string; nonce: number } | undefined
@@ -147,6 +151,7 @@ type TabId =
   | 'network'
   | 'python'
   | 'tools'
+  | 'atlassian'
   | 'outlook'
   | 'customData'
   | 'skills'
@@ -188,6 +193,7 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'python', label: 'Python', Icon: PythonIcon },
   // After the sources it lists, because it is where you go to *read* rather than change.
   { id: 'tools', label: 'Tools', Icon: ToolboxIcon },
+  { id: 'atlassian', label: 'Atlassian', Icon: LinkedSitesIcon },
   // Beside Skills rather than beside Tools: both are corpora the assistant reads from, where
   // Tools is a list of what can act.
   { id: 'outlook', label: 'Outlook', Icon: MailIcon },
@@ -371,6 +377,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <SkillsTab {...props.skills} />
         ) : shown === 'tools' ? (
           <ToolsTab {...props.tools} />
+        ) : shown === 'atlassian' ? (
+          <AtlassianTab {...props.atlassian} />
         ) : shown === 'outlook' ? (
           <OutlookTab {...props.outlook} onOpenTools={() => setActive('tools')} />
         ) : shown === 'customData' ? (

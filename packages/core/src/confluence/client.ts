@@ -1,5 +1,5 @@
-import type { HttpClient, HttpRequestOptions, HttpResponse, TlsOptions } from '../platform/http.js'
-import { readBody } from '../platform/readBody.js'
+import type { HttpClient, TlsOptions } from '../platform/http.js'
+import { AtlassianError, AtlassianRest, describeAtlassianFailure } from '../atlassian/rest.js'
 
 /**
  * A thin Confluence Data Center / Server client over the one `HttpClient` (invariant 2).
@@ -46,15 +46,9 @@ export interface ConfluencePage extends ConfluencePageSummary {
   ancestors: string[]
 }
 
-export class ConfluenceError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message)
-    this.name = 'ConfluenceError'
-  }
-}
+/** Kept as a name for callers; the one error type is `AtlassianError`, shared by all three products. */
+export const ConfluenceError = AtlassianError
+export type ConfluenceError = AtlassianError
 
 /** Filenames an attachment may have: what a person would type, and nothing that reaches a header. */
 export function isSafeAttachmentName(name: string): boolean {
@@ -84,18 +78,16 @@ export function contentTypeFor(filename: string): string {
 }
 
 export class ConfluenceClient {
-  private readonly base: string
+  /** The shared transport: Bearer token, TLS and error wording, one owner for all three products. */
+  private readonly rest: AtlassianRest
 
-  constructor(
-    private readonly http: HttpClient,
-    private readonly connection: ConfluenceConnection,
-  ) {
-    this.base = connection.baseUrl.replace(/\/+$/, '')
+  constructor(http: HttpClient, connection: ConfluenceConnection) {
+    this.rest = new AtlassianRest(http, 'confluence', connection)
   }
 
   /** Who the token belongs to — what Test connection reports. */
   async currentUser(signal?: AbortSignal): Promise<string> {
-    const user = await this.json<{ displayName?: string; username?: string }>(
+    const user = await this.rest.json<{ displayName?: string; username?: string }>(
       'reading the current user',
       '/rest/api/user/current',
       { method: 'GET' },
@@ -107,7 +99,7 @@ export class ConfluenceClient {
   /** Pages matching a CQL query. */
   async search(cql: string, limit: number, signal?: AbortSignal): Promise<ConfluencePageSummary[]> {
     const query = new URLSearchParams({ cql, limit: String(limit), expand: 'space' })
-    const result = await this.json<{ results?: RawContent[] }>(
+    const result = await this.rest.json<{ results?: RawContent[] }>(
       'searching',
       `/rest/api/content/search?${query.toString()}`,
       { method: 'GET' },
@@ -118,7 +110,7 @@ export class ConfluenceClient {
 
   async getPage(id: string, signal?: AbortSignal): Promise<ConfluencePage> {
     if (!/^\d+$/.test(id)) throw new ConfluenceError(`"${id}" is not a Confluence page id — those are numbers.`)
-    const raw = await this.json<RawContent>(
+    const raw = await this.rest.json<RawContent>(
       `reading page ${id}`,
       `/rest/api/content/${id}?expand=body.storage,version,space,ancestors`,
       { method: 'GET' },
@@ -134,7 +126,7 @@ export class ConfluenceClient {
       title,
       expand: 'body.storage,version,space,ancestors',
     })
-    const result = await this.json<{ results?: RawContent[] }>(
+    const result = await this.rest.json<{ results?: RawContent[] }>(
       `looking for "${title}" in ${spaceKey}`,
       `/rest/api/content?${query.toString()}`,
       { method: 'GET' },
@@ -148,7 +140,7 @@ export class ConfluenceClient {
     page: { spaceKey: string; title: string; body: string; parentId?: string | undefined },
     signal?: AbortSignal,
   ): Promise<ConfluencePageSummary> {
-    const raw = await this.json<RawContent>(
+    const raw = await this.rest.json<RawContent>(
       `creating "${page.title}"`,
       '/rest/api/content',
       {
@@ -174,7 +166,7 @@ export class ConfluenceClient {
     page: { id: string; title: string; body: string; version: number },
     signal?: AbortSignal,
   ): Promise<ConfluencePageSummary> {
-    const raw = await this.json<RawContent>(
+    const raw = await this.rest.json<RawContent>(
       `updating "${page.title}"`,
       `/rest/api/content/${page.id}`,
       {
@@ -228,7 +220,7 @@ export class ConfluenceClient {
     bytes.set(file.bytes, headBytes.length)
     bytes.set(tailBytes, headBytes.length + file.bytes.length)
 
-    await this.send(
+    await this.rest.send(
       `attaching ${file.name}`,
       `/rest/api/content/${pageId}/child/attachment`,
       {
@@ -246,7 +238,7 @@ export class ConfluenceClient {
 
   /** A page's attachments — what an image on it is called, which is what replacing one needs. */
   async listAttachments(pageId: string, signal?: AbortSignal): Promise<ConfluenceAttachment[]> {
-    const result = await this.json<{ results?: RawAttachment[] }>(
+    const result = await this.rest.json<{ results?: RawAttachment[] }>(
       `listing the attachments of page ${pageId}`,
       `/rest/api/content/${pageId}/child/attachment?limit=100&expand=version`,
       { method: 'GET' },
@@ -267,16 +259,12 @@ export class ConfluenceClient {
    * download link that was a full URL somewhere else would otherwise send the token there.
    */
   async download(link: string, signal?: AbortSignal): Promise<Buffer> {
-    if (!link.startsWith('/')) {
-      throw new ConfluenceError(`Refused to download "${link}": it is not a link on ${this.base}.`)
-    }
-    const response = await this.send(`downloading ${link}`, link, { method: 'GET' }, signal)
-    return readBody(response)
+    return this.rest.bytes(`downloading ${link}`, link, signal)
   }
 
   /** Where a relative `webui` link actually is. */
   url(webui: string | undefined): string {
-    return webui === undefined ? this.base : `${this.base}${webui}`
+    return this.rest.url(webui)
   }
 
   private summary(raw: RawContent): ConfluencePageSummary {
@@ -297,49 +285,6 @@ export class ConfluenceClient {
     }
   }
 
-  private async json<T>(
-    doing: string,
-    pathAndQuery: string,
-    options: HttpRequestOptions,
-    signal?: AbortSignal,
-  ): Promise<T> {
-    const response = await this.send(
-      doing,
-      pathAndQuery,
-      { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) } },
-      signal,
-    )
-    return (await response.json()) as T
-  }
-
-  private async send(
-    doing: string,
-    pathAndQuery: string,
-    options: HttpRequestOptions,
-    signal?: AbortSignal,
-  ): Promise<HttpResponse> {
-    let response: HttpResponse
-    try {
-      response = await this.http.request(`${this.base}${pathAndQuery}`, {
-        ...options,
-        headers: {
-          Accept: 'application/json',
-          ...(options.headers ?? {}),
-          Authorization: `Bearer ${this.connection.token}`,
-        },
-        ...(signal !== undefined ? { signal } : {}),
-        ...(this.connection.tls !== undefined ? { tls: this.connection.tls } : {}),
-      })
-    } catch (error) {
-      throw new ConfluenceError(
-        `Could not reach Confluence at ${this.base} while ${doing}: ` +
-          `${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-    if (response.status >= 200 && response.status < 300) return response
-    const detail = await response.text().catch(() => '')
-    throw new ConfluenceError(describeFailure(doing, response.status, detail), response.status)
-  }
 }
 
 /**
@@ -349,37 +294,7 @@ export class ConfluenceClient {
  * the user, and two phrasings of one failure is how a wrong diagnosis gets repeated.
  */
 export function describeFailure(doing: string, status: number, body: string): string {
-  let message = ''
-  try {
-    const parsed = JSON.parse(body) as { message?: unknown }
-    if (typeof parsed.message === 'string') message = parsed.message
-  } catch {
-    message = body.slice(0, 300)
-  }
-  const said = message.length > 0 ? ` Confluence said: ${message}` : ''
-  switch (status) {
-    case 400:
-      return (
-        `Confluence refused ${doing}.${said} If it mentions xhtml, the page body is not valid ` +
-        'storage format — every tag must be closed and every macro well formed.'
-      )
-    case 401:
-      return (
-        `Confluence did not accept the personal access token while ${doing}. It may have expired ` +
-        'or been revoked: create a new one and save it in Settings → Tools → Confluence.'
-      )
-    case 403:
-      return `The token's owner is not allowed to do this (${doing}).${said} Ask a space admin for permission.`
-    case 404:
-      return `Confluence found nothing while ${doing}.${said} Check the page id or space key.`
-    case 409:
-      return (
-        `Someone changed the page while ${doing}, so it was not overwritten.${said} Read it again ` +
-        'and redo the edit against the current version.'
-      )
-    default:
-      return `Confluence answered HTTP ${String(status)} while ${doing}.${said}`
-  }
+  return describeAtlassianFailure('confluence', doing, status, body)
 }
 
 export interface ConfluenceAttachment {

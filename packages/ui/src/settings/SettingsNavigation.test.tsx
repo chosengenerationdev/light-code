@@ -106,6 +106,15 @@ const base = {
   },
   network: { warnings: [], issues: [] },
   python: { status: undefined, settings: {}, tools: [], issues: [] },
+  atlassian: {
+    products: undefined,
+    savedTicks: {},
+    tests: {},
+    testing: {},
+    onSave: () => undefined,
+    onClearToken: () => undefined,
+    onTest: () => undefined,
+  },
   tools: {
     tools: [],
     dispatcher: false,
@@ -224,6 +233,7 @@ describe('opening settings on a named tab', () => {
     'schedules',
     'python',
     'tools',
+    'atlassian',
     'skills',
     'network',
     'appearance',

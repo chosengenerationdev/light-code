@@ -1,36 +1,94 @@
-import type { ConfluenceSettingsView } from '@light-code/core/browser'
+import {
+  ATLASSIAN_PRODUCTS,
+  type AtlassianProductId,
+  type AtlassianProductInfo,
+  type AtlassianProductStatus,
+  type AtlassianSettingsView,
+} from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
 
 /**
- * Setting up Confluence: the site, the default space, and a personal access token.
+ * Confluence, Jira and Bitbucket: one panel each, from one component and the product table in
+ * core, so the panel can never offer a default the host does not save.
  *
- * The token is **write-only** (invariant 7). The field is always empty; the host only ever says
+ * Each token is **write-only** (invariant 7). The field is always empty; the host only ever says
  * whether one is stored, and a blank field on save means "keep it". Removing it is its own button,
- * so saving a new space key can never wipe the token on the way past.
+ * so saving a new default can never wipe the token on the way past.
  */
 
-export interface ConfluenceSectionProps {
-  settings: ConfluenceSettingsView
+export interface AtlassianTabProps {
+  /** Undefined until the host has answered; the panels then say they are loading. */
+  products: Record<AtlassianProductId, AtlassianProductStatus> | undefined
+  /** Bumped per product by the host after a successful save, so its button can say "Saved". */
+  savedTicks: Partial<Record<AtlassianProductId, number>>
+  tests: Partial<Record<AtlassianProductId, { ok: boolean; detail: string }>>
+  testing: Partial<Record<AtlassianProductId, boolean>>
+  onSave: (product: AtlassianProductId, settings: AtlassianSettingsView, token: string | undefined) => void
+  onClearToken: (product: AtlassianProductId) => void
+  onTest: (product: AtlassianProductId) => void
+}
+
+export function AtlassianTab(props: AtlassianTabProps): ReactElement {
+  return (
+    <div>
+      <p style={{ color: colors.muted, fontSize: 12, margin: '0 0 12px' }}>
+        Data Center and Server sites, each with your own personal access token. Everything the
+        assistant writes is shown to you first and is written as you. A product stays off, and its
+        site is never contacted, until you switch it on.
+      </p>
+      {ATLASSIAN_PRODUCTS.map((info) => {
+        const status = props.products?.[info.id]
+        if (status === undefined) {
+          return (
+            <Panel key={info.id} id={`atlassian.${info.id}`} title={info.label} summary="Loading…">
+              <span style={{ color: colors.muted, fontSize: 12 }}>Loading…</span>
+            </Panel>
+          )
+        }
+        return (
+          <AtlassianSection
+            key={info.id}
+            info={info}
+            settings={status.settings}
+            hasToken={status.hasToken}
+            savedTick={props.savedTicks[info.id] ?? 0}
+            test={props.tests[info.id]}
+            testing={props.testing[info.id] === true}
+            onSave={(settings, token) => props.onSave(info.id, settings, token)}
+            onClearToken={() => props.onClearToken(info.id)}
+            onTest={() => props.onTest(info.id)}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+export interface AtlassianSectionProps {
+  info: AtlassianProductInfo
+  settings: AtlassianSettingsView
   hasToken: boolean
-  /** Bumped by the host after a successful save, so the button can say "Saved". */
   savedTick: number
   test: { ok: boolean; detail: string } | undefined
   testing: boolean
-  onSave: (settings: ConfluenceSettingsView, token: string | undefined) => void
+  onSave: (settings: AtlassianSettingsView, token: string | undefined) => void
   onClearToken: () => void
   onTest: () => void
 }
 
-export function ConfluenceSection(props: ConfluenceSectionProps): ReactElement {
-  const [draft, setDraft] = useState<ConfluenceSettingsView>(props.settings)
+const hintStyle = { display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' } as const
+
+export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
+  const { info } = props
+  const [draft, setDraft] = useState<AtlassianSettingsView>(props.settings)
   const [token, setToken] = useState('')
   const [saved, setSaved] = useState(false)
   const savedKey = JSON.stringify(props.settings)
   // Resynced by value, so an unrelated message from the host does not discard a half-typed field.
-  useEffect(() => setDraft(JSON.parse(savedKey) as ConfluenceSettingsView), [savedKey])
+  useEffect(() => setDraft(JSON.parse(savedKey) as AtlassianSettingsView), [savedKey])
   useEffect(() => {
     if (props.savedTick > 0) {
       setSaved(true)
@@ -39,10 +97,11 @@ export function ConfluenceSection(props: ConfluenceSectionProps): ReactElement {
   }, [props.savedTick])
 
   const dirty = JSON.stringify(draft) !== savedKey || token.trim().length > 0
-  const set = (change: Partial<ConfluenceSettingsView>): void => {
+  const set = (change: Partial<AtlassianSettingsView>): void => {
     setSaved(false)
     setDraft({ ...draft, ...change })
   }
+  const id = (field: string): string => `lc-${info.id}-${field}`
 
   const summary = !props.settings.enabled
     ? 'Off'
@@ -53,40 +112,35 @@ export function ConfluenceSection(props: ConfluenceSectionProps): ReactElement {
         : 'No token stored'
 
   return (
-    <Panel id="tools.confluence" title="Confluence" summary={summary}>
+    <Panel id={`atlassian.${info.id}`} title={info.label} summary={summary}>
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 10px' }}>
-        Lets the assistant search, read and write pages on your Confluence Data Center or Server
-        site with your personal access token — including the images on a page, attached diagrams,
-        and files. Every write is shown to you before anything is published. Off until you switch
-        it on; nothing is contacted until then.
+        Lets the assistant {info.does}.
       </p>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer' }}>
         <input type="checkbox" checked={draft.enabled} onChange={(event) => set({ enabled: event.target.checked })} />
-        <span>Let the assistant use Confluence</span>
+        <span>Let the assistant use {info.label}</span>
       </label>
 
-      <label htmlFor="lc-confluence-url" style={labelStyle()}>
+      <label htmlFor={id('url')} style={labelStyle()}>
         Site address
       </label>
       <input
-        id="lc-confluence-url"
+        id={id('url')}
         type="text"
         value={draft.baseUrl}
         spellCheck={false}
-        placeholder="https://wiki.example.com/confluence"
+        placeholder={info.sitePlaceholder}
         onChange={(event) => set({ baseUrl: event.target.value })}
         style={textFieldStyle()}
       />
-      <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' }}>
-        The address you open Confluence at, including any path before <code>/display</code>.
-      </span>
+      <span style={hintStyle}>The address you open {info.label} at, including any path after the host name.</span>
 
-      <label htmlFor="lc-confluence-token" style={labelStyle()}>
+      <label htmlFor={id('token')} style={labelStyle()}>
         Personal access token
       </label>
       <input
-        id="lc-confluence-token"
+        id={id('token')}
         type="password"
         value={token}
         autoComplete="off"
@@ -97,34 +151,34 @@ export function ConfluenceSection(props: ConfluenceSectionProps): ReactElement {
         }}
         style={textFieldStyle()}
       />
-      <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' }}>
-        Create one in Confluence under your profile → Personal Access Tokens. Kept in secure
-        storage, never in the settings file, and never sent back to this panel. Pages are written
-        as you.
+      <span style={hintStyle}>
+        Create one in {info.label} under your profile → Personal Access Tokens. Kept in secure
+        storage, never in the settings file, and never sent back to this panel.
       </span>
 
-      <label htmlFor="lc-confluence-space" style={labelStyle()}>
-        Default space for new pages <span style={{ color: colors.muted, fontWeight: 400 }}>(space key)</span>
-      </label>
-      <input
-        id="lc-confluence-space"
-        type="text"
-        value={draft.defaultSpace}
-        spellCheck={false}
-        placeholder="e.g. TEAM"
-        onChange={(event) => set({ defaultSpace: event.target.value })}
-        style={textFieldStyle()}
-      />
-      <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' }}>
-        The key shown in the space&rsquo;s address, e.g. <code>TEAM</code> in <code>/display/TEAM/…</code>.
-        The assistant creates new pages here unless you ask for another space, and is told so.
-      </span>
+      {info.defaults.map((field) => (
+        <div key={field.key}>
+          <label htmlFor={id(field.key)} style={labelStyle()}>
+            {field.label} <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
+          </label>
+          <input
+            id={id(field.key)}
+            type="text"
+            value={draft.defaults[field.key] ?? ''}
+            spellCheck={false}
+            placeholder={field.placeholder}
+            onChange={(event) => set({ defaults: { ...draft.defaults, [field.key]: event.target.value } })}
+            style={textFieldStyle()}
+          />
+          <span style={hintStyle}>{field.hint}</span>
+        </div>
+      ))}
 
-      <label htmlFor="lc-confluence-ca" style={labelStyle()}>
+      <label htmlFor={id('ca')} style={labelStyle()}>
         CA certificate file <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
       </label>
       <input
-        id="lc-confluence-ca"
+        id={id('ca')}
         type="text"
         value={draft.caFile}
         spellCheck={false}

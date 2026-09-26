@@ -73,7 +73,18 @@ import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
 import { createReadDebugSessionTool } from '../tools/debugSession.js'
 import { createExportConfigTool } from '../tools/exportConfig.js'
-import { ConfluenceClient, ConfluenceError } from '../confluence/client.js'
+import { ConfluenceClient } from '../confluence/client.js'
+import {
+  BitbucketClient,
+  createBitbucketPullRequestsTool,
+  createBitbucketReadFileTool,
+  createBitbucketReadPullRequestTool,
+  createBitbucketWritePullRequestTool,
+} from '../atlassian/bitbucket.js'
+import { createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
+import { ATLASSIAN_PRODUCTS, atlassianProduct } from '../atlassian/products.js'
+import { AtlassianError, type AtlassianConnection } from '../atlassian/rest.js'
+import type { AtlassianProductId, AtlassianProductStatus, AtlassianSettingsView } from '../agent/protocol.js'
 import {
   createConfluenceReadPageTool,
   createConfluenceSearchTool,
@@ -2334,8 +2345,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedProgrammingProfileId: string | undefined
   /** Mirrors config, because the registry is built synchronously and cannot await a load. */
   let cachedOffice: { excel?: boolean | undefined; outlook?: boolean | undefined } = {}
-  /** The Confluence block as last loaded, so the tool registry can decide without a file read. */
+  /** The Atlassian blocks as last loaded, so the tool registry can decide without a file read. */
   let cachedConfluence: LightCodeConfig['confluence'] = undefined
+  let cachedJira: LightCodeConfig['jira'] = undefined
+  let cachedBitbucket: LightCodeConfig['bitbucket'] = undefined
   /** Mirrors `mail`, for the same reason. */
   let cachedMail: MailIndexConfig = {}
   let cachedDatasets: DatasetConfig[] = []
@@ -2440,6 +2453,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedProgrammingProfileId = config.programmingProfileId
     cachedOffice = config.office ?? {}
     cachedConfluence = config.confluence
+    cachedJira = config.jira
+    cachedBitbucket = config.bitbucket
     cachedMail = config.mail ?? {}
     cachedDatasets = config.datasets ?? []
     /*
@@ -3280,6 +3295,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       combined.register(createConfluenceSearchTool(confluenceOptions))
       combined.register(createConfluenceReadPageTool(confluenceOptions))
       combined.register(createConfluenceWritePageTool(confluenceOptions))
+    }
+    if (cachedJira?.enabled === true && cachedJira.baseUrl !== undefined) {
+      const jiraOptions = {
+        client: jiraClient,
+        ...(cachedJira.defaultProject !== undefined ? { defaultProject: cachedJira.defaultProject } : {}),
+      }
+      combined.register(createJiraSearchTool(jiraOptions))
+      combined.register(createJiraReadIssueTool(jiraOptions))
+      combined.register(createJiraWriteIssueTool(jiraOptions))
+    }
+    if (cachedBitbucket?.enabled === true && cachedBitbucket.baseUrl !== undefined) {
+      const bitbucketOptions = {
+        client: bitbucketClient,
+        ...(cachedBitbucket.defaultProject !== undefined ? { defaultProject: cachedBitbucket.defaultProject } : {}),
+        ...(cachedBitbucket.defaultRepo !== undefined ? { defaultRepo: cachedBitbucket.defaultRepo } : {}),
+      }
+      combined.register(createBitbucketPullRequestsTool(bitbucketOptions))
+      combined.register(createBitbucketReadPullRequestTool(bitbucketOptions))
+      combined.register(createBitbucketReadFileTool(bitbucketOptions))
+      combined.register(createBitbucketWritePullRequestTool(bitbucketOptions))
     }
 
     /*
@@ -6768,27 +6803,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * while the model and width are set from Search, and writing the whole block from either
    * would have one tab silently erasing the other's fields.
    */
-  /** Where the Confluence personal access token lives in secret storage. Never in config (§15). */
-  const CONFLUENCE_TOKEN_REF = 'confluence:token'
-
   /**
-   * A client for the configured Confluence site, built per call.
+   * The connection for one Atlassian product, built per call.
    *
    * Per call rather than cached, so a token replaced in Settings or a certificate rotated on disk
    * applies to the very next request — the same reason the S3 and search connections are built on
    * demand. TLS goes through the one resolver every connection uses (§10, "do not add a fifth
-   * place to configure a CA"), so the corporate root set once in Network covers the wiki too.
+   * place to configure a CA"), so the corporate root set once in Network covers all three sites.
    */
-  async function confluenceClient(): Promise<ConfluenceClient> {
+  async function atlassianConnection(product: AtlassianProductId): Promise<AtlassianConnection> {
+    const info = atlassianProduct(product)
     const { config } = await configManager.load()
-    const settings = config.confluence
+    const settings = config[product]
     if (settings?.baseUrl === undefined) {
-      throw new ConfluenceError('Confluence is not set up. Settings → Tools → Confluence: enter the site address.')
+      throw new AtlassianError(`${info.label} is not set up. Settings → Atlassian → ${info.label}: enter the site address.`)
     }
     const token = settings.tokenRef !== undefined ? await secrets.get(settings.tokenRef) : undefined
     if (token === undefined || token.length === 0) {
-      throw new ConfluenceError(
-        'No Confluence personal access token is stored. Settings → Tools → Confluence: paste one and save.',
+      throw new AtlassianError(
+        `No ${info.label} personal access token is stored. Settings → Atlassian → ${info.label}: paste one and save.`,
       )
     }
     const passphraseRef = config.tls?.passphraseRef
@@ -6806,93 +6839,125 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
       },
     })
-    return new ConfluenceClient(httpClient, {
-      baseUrl: settings.baseUrl,
-      token,
-      ...(tls !== undefined ? { tls } : {}),
-    })
+    return { baseUrl: settings.baseUrl, token, ...(tls !== undefined ? { tls } : {}) }
   }
 
-  /** The panel's view of Confluence. The token never crosses — only whether one is stored (invariant 7). */
-  async function postConfluence(): Promise<void> {
+  async function confluenceClient(): Promise<ConfluenceClient> {
+    return new ConfluenceClient(httpClient, await atlassianConnection('confluence'))
+  }
+  async function jiraClient(): Promise<JiraClient> {
+    return new JiraClient(httpClient, await atlassianConnection('jira'))
+  }
+  async function bitbucketClient(): Promise<BitbucketClient> {
+    return new BitbucketClient(httpClient, await atlassianConnection('bitbucket'))
+  }
+
+  /** The Atlassian tab's view of all three products. Tokens never cross — only whether one is stored (invariant 7). */
+  async function postAtlassian(): Promise<void> {
     const { config } = await configManager.load()
-    const settings = config.confluence ?? {}
-    const hasToken =
-      settings.tokenRef !== undefined && ((await secrets.get(settings.tokenRef)) ?? '').length > 0
-    post({
-      type: 'confluence',
-      settings: {
-        enabled: settings.enabled === true,
-        baseUrl: settings.baseUrl ?? '',
-        defaultSpace: settings.defaultSpace ?? '',
-        caFile: settings.caFile ?? '',
-        rejectUnauthorized: settings.rejectUnauthorized !== false,
-      },
-      hasToken,
-    })
+    const products = {} as Record<AtlassianProductId, AtlassianProductStatus>
+    for (const info of ATLASSIAN_PRODUCTS) {
+      const settings = (config[info.id] ?? {}) as {
+        enabled?: boolean
+        baseUrl?: string
+        tokenRef?: string
+        caFile?: string
+        rejectUnauthorized?: boolean
+      } & Record<string, unknown>
+      const hasToken = settings.tokenRef !== undefined && ((await secrets.get(settings.tokenRef)) ?? '').length > 0
+      const defaults: Record<string, string> = {}
+      for (const field of info.defaults) {
+        const value = settings[field.key]
+        defaults[field.key] = typeof value === 'string' ? value : ''
+      }
+      products[info.id] = {
+        settings: {
+          enabled: settings.enabled === true,
+          baseUrl: settings.baseUrl ?? '',
+          caFile: settings.caFile ?? '',
+          rejectUnauthorized: settings.rejectUnauthorized !== false,
+          defaults,
+        },
+        hasToken,
+      }
+    }
+    post({ type: 'atlassian', products })
   }
 
   /**
-   * Saves the Confluence block. An empty `token` means "keep the stored one" — the field is
+   * Saves one product's block. An empty `token` means "keep the stored one" — the field is
    * write-only (invariant 7), so blank cannot mean "clear"; clearing has its own message.
    */
-  async function handleSaveConfluence(
-    input: { enabled: boolean; baseUrl: string; defaultSpace: string; caFile: string; rejectUnauthorized: boolean },
+  async function handleSaveAtlassian(
+    product: AtlassianProductId,
+    input: AtlassianSettingsView,
     token: string | undefined,
   ): Promise<void> {
     try {
+      const info = atlassianProduct(product)
       const baseUrl = input.baseUrl.trim().replace(/\/+$/, '')
       if (baseUrl.length > 0 && !/^https?:\/\/[^\s]+$/i.test(baseUrl)) {
         post({ type: 'error', message: `"${baseUrl}" is not a web address — it should begin with https followed by the site name.` })
         return
       }
       if (input.enabled && baseUrl.length === 0) {
-        post({ type: 'error', message: 'Enter the Confluence site address before switching it on.' })
+        post({ type: 'error', message: `Enter the ${info.label} site address before switching it on.` })
         return
       }
       if (token !== undefined && token.trim().length > 0) {
-        await secrets.set(CONFLUENCE_TOKEN_REF, token.trim())
+        await secrets.set(info.tokenRef, token.trim())
       }
-      const stored = ((await secrets.get(CONFLUENCE_TOKEN_REF)) ?? '').length > 0
+      const stored = ((await secrets.get(info.tokenRef)) ?? '').length > 0
+      // Only the fields this product declares, so a crafted message cannot write arbitrary keys.
+      const defaults: Record<string, string> = {}
+      for (const field of info.defaults) {
+        const value = (input.defaults[field.key] ?? '').trim()
+        if (value.length > 0) defaults[field.key] = value
+      }
       await configManager.save('user', {
-        confluence: {
+        [product]: {
           enabled: input.enabled,
           ...(baseUrl.length > 0 ? { baseUrl } : {}),
-          ...(stored ? { tokenRef: CONFLUENCE_TOKEN_REF } : {}),
-          ...(input.defaultSpace.trim().length > 0 ? { defaultSpace: input.defaultSpace.trim() } : {}),
+          ...(stored ? { tokenRef: info.tokenRef } : {}),
+          ...defaults,
           ...(input.caFile.trim().length > 0 ? { caFile: input.caFile.trim() } : {}),
           // Stored only when switched off, so the default stays the safe one.
           ...(input.rejectUnauthorized ? {} : { rejectUnauthorized: false }),
         },
       } as never)
       await loadSettings()
-      await postConfluence()
-      post({ type: 'confluenceSaved' })
+      await postAtlassian()
+      post({ type: 'atlassianSaved', product })
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }
 
-  async function handleClearConfluenceToken(): Promise<void> {
-    await secrets.delete(CONFLUENCE_TOKEN_REF)
+  async function handleClearAtlassianToken(product: AtlassianProductId): Promise<void> {
+    await secrets.delete(atlassianProduct(product).tokenRef)
     const { config } = await configManager.load()
-    if (config.confluence !== undefined) {
-      const { tokenRef: _dropped, ...rest } = config.confluence
+    const block = config[product]
+    if (block !== undefined) {
+      const { tokenRef: _dropped, ...rest } = block
       void _dropped
-      await configManager.save('user', { confluence: rest } as never)
+      await configManager.save('user', { [product]: rest } as never)
     }
     await loadSettings()
-    await postConfluence()
+    await postAtlassian()
   }
 
   /** Test connection: who the token belongs to, or the step and reason it failed. */
-  async function handleTestConfluence(): Promise<void> {
+  async function handleTestAtlassian(product: AtlassianProductId): Promise<void> {
     try {
-      const client = await confluenceClient()
-      const who = await client.currentUser()
-      post({ type: 'confluenceTest', ok: true, detail: `Connected as ${who}.` })
+      const who =
+        product === 'confluence'
+          ? await (await confluenceClient()).currentUser()
+          : product === 'jira'
+            ? await (await jiraClient()).currentUser()
+            : await (await bitbucketClient()).currentUser()
+      post({ type: 'atlassianTest', product, ok: true, detail: `Connected as ${who}.` })
     } catch (error) {
-      post({ type: 'confluenceTest', ok: false, detail: error instanceof Error ? error.message : String(error) })
+      post({ type: 'atlassianTest', product, ok: false, detail: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -10403,14 +10468,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleClearCodebaseIndex', handleClearCodebaseIndex())
     } else if (message.type === 'openStandingSkill') {
       reportFailure('handleOpenStandingSkill', handleOpenStandingSkill())
-    } else if (message.type === 'requestConfluence') {
-      reportFailure('postConfluence', postConfluence())
-    } else if (message.type === 'saveConfluence') {
-      reportFailure('handleSaveConfluence', handleSaveConfluence(message.settings, message.token))
-    } else if (message.type === 'clearConfluenceToken') {
-      reportFailure('handleClearConfluenceToken', handleClearConfluenceToken())
-    } else if (message.type === 'testConfluence') {
-      reportFailure('handleTestConfluence', handleTestConfluence())
+    } else if (message.type === 'requestAtlassian') {
+      reportFailure('postAtlassian', postAtlassian())
+    } else if (message.type === 'saveAtlassian') {
+      reportFailure('handleSaveAtlassian', handleSaveAtlassian(message.product, message.settings, message.token))
+    } else if (message.type === 'clearAtlassianToken') {
+      reportFailure('handleClearAtlassianToken', handleClearAtlassianToken(message.product))
+    } else if (message.type === 'testAtlassian') {
+      reportFailure('handleTestAtlassian', handleTestAtlassian(message.product))
     } else if (message.type === 'setOffice') {
       void configManager
         .load()

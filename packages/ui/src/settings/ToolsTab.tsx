@@ -4,7 +4,6 @@ import { IndexingProgress, type IndexingProgressState } from './IndexingProgress
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
-import { ConfluenceSection, type ConfluenceSectionProps } from './ConfluenceSection.js'
 import { Panel } from './Panel.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -56,8 +55,6 @@ export interface ToolsTabProps {
    * with a pasted config — but that is the host's problem, not the reader's: one box per row.
    */
   onSetToolTimeoutFor: (name: string, seconds?: number) => void
-  /** Confluence setup. Absent on a host that does not offer it; the section is then not shown. */
-  confluence?: ConfluenceSectionProps | undefined
 }
 
 const SOURCE_LABELS: Record<ToolCatalogueEntry['source'], string> = {
@@ -209,7 +206,6 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
 
       <OfficeSection office={props.office} onSet={props.onSetOffice} />
 
-      {props.confluence !== undefined && <ConfluenceSection {...props.confluence} />}
 
       <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />
 
