@@ -11,6 +11,7 @@ import {
   textFieldStyle,
 } from '../theme.js'
 import { ScopeBadge } from './ScopeBadge.js'
+import { Panel } from './Panel.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -150,6 +151,12 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
         available; leave one as Nobody and it is simply not offered.
       </p>
 
+      <Panel
+        id="agents.roles"
+        title="Roles"
+        summary={`${String(assignedCount)} of ${String(props.roles.length)} assigned`}
+        defaultOpen
+      >
       {props.cliAvailable ? (
         <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 12px' }}>
           Claude was found on this machine and is the default expert. You can put any model in that
@@ -614,7 +621,13 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
         </button>
       )}
 
-      {props.fitPanel}
+      </Panel>
+
+      {props.fitPanel !== undefined && (
+        <Panel id="agents.fit" title="Which model fits which seat">
+          {props.fitPanel}
+        </Panel>
+      )}
 
       {/*
         The whole budget section, present only where there is something to budget.
@@ -625,7 +638,7 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
         deliberately, so turning it on is never a one-way door.
       */}
       {(props.claudeSeated || props.budgetMatters) && (
-        <>
+        <Panel id="agents.budget" title="Consultation budget" summary={props.budgetMatters ? 'Managed' : 'Off'}>
           <label
             style={{
               display: 'flex',
@@ -652,10 +665,15 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
           </p>
 
           {props.budgetMatters && props.budgetPanel}
-        </>
+        </Panel>
       )}
 
-      <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+      <Panel
+        id="agents.guidance"
+        title="When to consult"
+        summary={props.teamGuidanceIsDefault ? 'Default' : 'Edited'}
+      >
+      <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <strong style={{ fontSize: 12 }}>When to consult</strong>
           <span style={{ color: colors.muted, fontSize: 11, flex: 1 }}>
@@ -714,6 +732,7 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
           </div>
         )}
       </div>
+      </Panel>
 
       {assignedCount === 0 && (
         <p style={{ color: colors.muted, fontSize: 11, marginTop: 12, lineHeight: 1.5 }}>

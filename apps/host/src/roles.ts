@@ -192,6 +192,15 @@ const PERSONAL_SETTINGS = new Set([
   'requestProjectSettings',
   // A form the assistant put in front of this user, answered by this user.
   'formResponse',
+  /*
+   * A user's own Confluence token and site, for the reason their own provider profiles are theirs:
+   * a page is published under the name of whoever the token belongs to, so on a shared server each
+   * person must bring their own. An admin setting one would make every user publish as the admin.
+   * Stored per user (`Principal.id`), so one user's token is never another's.
+   */
+  'saveConfluence',
+  'clearConfluenceToken',
+  'testConfluence',
 ])
 
 export function isAdminOnly(messageType: string): boolean {

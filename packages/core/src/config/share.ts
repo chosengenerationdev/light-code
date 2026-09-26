@@ -53,6 +53,7 @@ export type ShareSectionId =
   | 'office'
   | 'mail'
   | 's3'
+  | 'confluence'
   | 'datasets'
   | 'schedules'
   | 'tools'
@@ -176,6 +177,12 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     label: 'Buckets',
     description: 'S3 connections and the folders skills and tools are mirrored to.',
     keys: ['s3'],
+  },
+  {
+    id: 'confluence',
+    label: 'Confluence',
+    description: 'The Confluence site and default space the assistant writes pages to.',
+    keys: ['confluence'],
   },
   {
     id: 'datasets',
@@ -316,6 +323,8 @@ function detailFor(section: ShareSection, config: LightCodeConfig): string {
       return count(Object.keys(config.agents?.roles ?? {}).length, 'role')
     case 's3':
       return count((config.s3?.connections ?? []).length, 'connection')
+    case 'confluence':
+      return config.confluence?.baseUrl ?? 'not set up'
     case 'datasets':
       return count((config.datasets ?? []).length, 'dataset')
     case 'commands':
@@ -366,6 +375,10 @@ function secretRefsFor(section: ShareSection, config: LightCodeConfig): string[]
       for (const connection of config.s3?.connections ?? []) {
         refs.push(`${connection.label}: secret access key`)
       }
+      break
+    case 'confluence':
+      // Everyone brings their own: a token publishes under the name of whoever it belongs to.
+      if (config.confluence?.tokenRef !== undefined) refs.push('Confluence: personal access token')
       break
     case 'network':
       if (config.tls?.passphraseRef !== undefined) refs.push('Global client key: passphrase')

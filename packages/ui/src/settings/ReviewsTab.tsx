@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import { DiffView } from '../approval/DiffView.js'
-import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { badgeStyle, colors, fontFamily, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { Panel } from './Panel.js'
 
 export interface ReviewItem {
   id: string
@@ -47,17 +48,18 @@ export function ReviewsTab(props: ReviewsTabProps): ReactElement {
           : 'What you have submitted. An administrator has to approve it before it can run.'}
       </p>
 
+      <Panel id="reviews.pending" title="Waiting" summary={`${String(pending.length)} waiting`} defaultOpen>
       {pending.length === 0 && (
-        <p style={{ color: colors.muted, fontSize: 12, marginTop: 14 }}>Nothing waiting.</p>
+        <p style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>Nothing waiting.</p>
       )}
 
       {pending.map((item) => (
         <PendingItem key={item.id} item={item} canDecide={props.canDecide} onDecide={props.onDecide} />
       ))}
+      </Panel>
 
       {decided.length > 0 && (
-        <section style={{ marginTop: 22, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
-          <span style={labelStyle()}>Decided</span>
+        <Panel id="reviews.decided" title="Decided" summary={`${String(decided.length)} decided`}>
           {/*
             Kept for a while rather than cleared on decision: "who approved this, and when" is the
             question a review queue exists to answer afterwards.
@@ -75,7 +77,7 @@ export function ReviewsTab(props: ReviewsTabProps): ReactElement {
               )}
             </div>
           ))}
-        </section>
+        </Panel>
       )}
     </div>
   )

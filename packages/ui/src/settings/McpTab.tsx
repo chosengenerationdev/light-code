@@ -13,6 +13,7 @@ import {
 } from '../theme.js'
 import { McpServerForm } from './McpServerForm.js'
 import type { BrowseRequest } from './PathField.js'
+import { Panel } from './Panel.js'
 
 export interface McpTabProps {
   servers: McpServerState[]
@@ -369,7 +370,17 @@ export function McpTab(props: McpTabProps): ReactElement {
         exactly that reason: this is where the change is made. One button, one message, shown in
         both places.
       */}
+      <Panel
+        id="mcp.servers"
+        title="Servers"
+        summary={`${String(props.servers.length)} server${props.servers.length === 1 ? '' : 's'}`}
+        defaultOpen
+      >
+      {serversBody()}
+      </Panel>
+
       {props.docsIndex !== undefined && (
+        <Panel id="mcp.docs" title="Tool documentation" summary={props.docsIndex.indexing ? 'Indexing…' : props.docsIndex.result}>
         <div
           style={{
             display: 'flex',
@@ -399,9 +410,22 @@ export function McpTab(props: McpTabProps): ReactElement {
               'Runs on its own a few seconds after a server connects. This does it now.'}
           </span>
         </div>
+        <IndexingProgress progress={props.indexProgress} onStop={props.onStopIndexing} />
+        </Panel>
       )}
-      <IndexingProgress progress={props.indexProgress} onStop={props.onStopIndexing} />
+    </div>
+  )
 
+  /**
+   * The server list and the JSON editor, inside the Servers panel.
+   *
+   * Called as a function, never rendered as `<ServersBody />`: a component defined inside a render
+   * is a new type on every render, so React would remount it on each keystroke and the JSON box
+   * would lose focus after every character.
+   */
+  function serversBody(): ReactElement {
+    return (
+      <>
       {props.servers.length === 0 ? (
         <p style={{ color: colors.muted, fontSize: 12 }}>No servers configured yet.</p>
       ) : (
@@ -497,9 +521,9 @@ export function McpTab(props: McpTabProps): ReactElement {
           </p>
         </div>
       )}
-
-    </div>
-  )
+      </>
+    )
+  }
 }
 
 /**

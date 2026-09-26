@@ -1,5 +1,31 @@
 # light-code-vscode
 
+## 0.118.0
+
+### Minor Changes
+
+- **Confluence.** Settings → Tools → Confluence: your site address, a personal access token and an
+  optional default space (plus a CA file if your site needs one). Test connection says who the
+  token belongs to. Data Center / Server only. The token is kept in secure storage and never shown
+  again.
+
+  The assistant can then search pages, read them — including **the images on a page**, which it
+  looks at directly when your model supports images, and attached diagrams, which it reads as
+  their source — and create or update pages with attached files and **diagrams it draws**.
+  **Replacing an image** is supported: attach one with the same name, and the page text can be left
+  alone. Every write is shown to you first: an update as a diff against the page as it is now, a
+  new page in full, and every attachment listed, with any that replaces an existing one marked.
+
+- **Onboarding material.** A new `light_code_export_config` tool writes the same shareable JSON as
+  Settings → Export — no secrets, approvals or identity in it, and every credential an importer
+  must enter listed — so the assistant can attach it to an onboarding page. The built-in handbook
+  now covers Confluence and setting a team up, so a guide it writes matches the product.
+
+- **Collapsible settings.** Every settings tab is now a set of collapsible panels in your theme's
+  colours, with your accent marking the open one. The part of each tab you usually come for starts
+  open, and each panel remembers whether you left it open. Export and Import moved into Providers →
+  "Share settings with your team".
+
 ## 0.117.1
 
 ### Patch Changes

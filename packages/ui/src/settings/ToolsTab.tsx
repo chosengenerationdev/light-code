@@ -3,7 +3,9 @@ import { IndexProbe } from './IndexProbe.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle, sectionHeadingStyle} from '../theme.js'
+import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { ConfluenceSection, type ConfluenceSectionProps } from './ConfluenceSection.js'
+import { Panel } from './Panel.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -54,6 +56,8 @@ export interface ToolsTabProps {
    * with a pasted config — but that is the host's problem, not the reader's: one box per row.
    */
   onSetToolTimeoutFor: (name: string, seconds?: number) => void
+  /** Confluence setup. Absent on a host that does not offer it; the section is then not shown. */
+  confluence?: ConfluenceSectionProps | undefined
 }
 
 const SOURCE_LABELS: Record<ToolCatalogueEntry['source'], string> = {
@@ -132,13 +136,20 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
         </p>
       )}
 
-      <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />
-
       {props.docsIndex !== undefined && (
-        <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
-          <h3 style={sectionHeadingStyle()}>
-            Tool documentation index
-          </h3>
+        <Panel
+          id="tools.docsIndex"
+          title="Tool documentation index"
+          summary={
+            props.docsIndex.indexing
+              ? 'Indexing…'
+              : !props.docsIndex.enabled
+                ? 'Not used'
+                : props.docsIndex.retrievalReady
+                  ? (props.docsIndex.result ?? 'Automatic')
+                  : 'Matching by name'
+          }
+        >
           <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
             Tool schemas are kept out of every request and looked up on demand, so a tool has to be
             indexed before it can be found by meaning. That happens on its own a few seconds after
@@ -193,12 +204,17 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
             onProbe={props.onProbe}
           onClear={props.onClearProbe}
           />
-        </section>
+        </Panel>
       )}
 
       <OfficeSection office={props.office} onSet={props.onSetOffice} />
 
-      <div style={{ margin: '10px 0' }}>
+      {props.confluence !== undefined && <ConfluenceSection {...props.confluence} />}
+
+      <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />
+
+      <Panel id="tools.catalogue" title="All tools" summary={`${String(props.tools.length)} tools`} defaultOpen>
+      <div style={{ margin: '0 0 10px' }}>
         <label htmlFor="lc-tools-search" style={labelStyle()}>
           Search
         </label>
@@ -322,6 +338,7 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
           Nothing matches “{query.trim()}”.
         </p>
       )}
+      </Panel>
     </div>
   )
 }
@@ -346,17 +363,14 @@ function OfficeSection(props: {
   onSet: (excel: boolean, outlook: boolean) => void
 }): ReactElement {
   const { office } = props
+  const summary = !office.supported
+    ? 'Windows only'
+    : [office.excel ? 'Excel' : undefined, office.outlook ? 'Outlook' : undefined]
+        .filter((part) => part !== undefined)
+        .join(' + ') || 'Off'
   return (
-    <div
-      style={{
-        margin: '12px 0',
-        padding: 10,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 6,
-        opacity: office.supported ? 1 : 0.6,
-      }}
-    >
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Excel and Outlook</div>
+    <Panel id="tools.office" title="Excel and Outlook" summary={summary}>
+      <div style={{ opacity: office.supported ? 1 : 0.6 }}>
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
         {office.supported
           ? 'Lets the assistant attach to the Office applications already running here. Off by ' +
@@ -400,7 +414,8 @@ function OfficeSection(props: {
           </span>
         </span>
       </label>
-    </div>
+      </div>
+    </Panel>
   )
 }
 
@@ -436,8 +451,11 @@ function TimeoutSection(props: { value: number | undefined; onSet: (seconds?: nu
   }
 
   return (
-    <div style={{ margin: '12px 0', padding: 10, border: `1px solid ${colors.border}`, borderRadius: 6 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Tool timeout</div>
+    <Panel
+      id="tools.timeout"
+      title="Tool timeout"
+      summary={props.value === undefined ? 'each tool decides' : `${String(props.value)}s`}
+    >
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
         How long any one tool call may take. Applies to MCP servers, Python tools and the Excel and
         Outlook tools alike, and to anything added later. Blank leaves each kind at its own default.
@@ -460,6 +478,6 @@ function TimeoutSection(props: { value: number | undefined; onSet: (seconds?: nu
           {props.value === undefined ? 'each tool decides' : `${String(props.value)}s for everything`}
         </span>
       </div>
-    </div>
+    </Panel>
   )
 }

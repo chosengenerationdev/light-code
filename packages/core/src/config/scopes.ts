@@ -45,6 +45,9 @@ export const USER_SCOPE_ONLY_KEYS = [
    * uploads as the payload.
    */
   's3',
+  // A wiki site and the token that publishes under the user's name. A repository able to set it
+  // would choose where every page the assistant writes goes, and what it reads back as fact.
+  'confluence',
   // `expert.path` names an executable. A workspace able to set it would run a program of
   // its choosing as soon as the panel opened — the same threat as `python.uvPath`.
   // `expert.enabled` is here too, so a repo cannot switch on paid API calls by itself.

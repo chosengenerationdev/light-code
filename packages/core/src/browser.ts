@@ -108,6 +108,7 @@ export type {
   TaskListEntry,
   ContextUsage,
   ImageAttachmentInput,
+  ConfluenceSettingsView,
 } from './agent/protocol.js'
 
 /** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */

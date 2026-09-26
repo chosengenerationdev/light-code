@@ -66,6 +66,11 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * human sees the source once, and no category toggle can stand in for that.
    */
   'excel_write_macro',
+  /*
+   * Publishes under the user's name to everyone who can read the space, with no undo this product
+   * owns. The preview is the live page diffed against the new body, and a person reads it once.
+   */
+  'confluence_write_page',
   // Changes a workbook somebody has open and has not saved, with no undo this product owns.
   'excel_write_range',
   /*

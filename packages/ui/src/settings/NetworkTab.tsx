@@ -1,8 +1,9 @@
 import type { NetworkSettingsInput, NetworkSettingsSummary } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { colors, fontFamily, primaryButtonStyle, sectionHeadingStyle} from '../theme.js'
+import { colors, fontFamily, primaryButtonStyle } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { SecretField } from './SecretField.js'
+import { Panel } from './Panel.js'
 
 export interface NetworkTabProps {
   settings: NetworkSettingsSummary | undefined
@@ -121,6 +122,7 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
         this one for that connection only.
       </p>
 
+      <Panel id="network.trust" title="Trust" summary={verify ? (caFile.length > 0 ? caFile : 'Built-in roots') : 'Verification off'} defaultOpen>
       <Field
         id="net-certdir"
         browse={{ purpose: 'net.certDir', kind: 'folder' }}
@@ -131,10 +133,6 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
         hint="Filenames below resolve against this. Absolute paths ignore it. Must be outside the workspace, and everything it holds is hidden from file-reading tools."
         onChange={setCertDir}
       />
-
-      <h3 style={{ ...sectionHeadingStyle(), margin: '24px 0 12px' }}>
-        Trust
-      </h3>
 
       <Field
         id="net-ca"
@@ -163,9 +161,13 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
         </div>
       )}
 
-      <h3 style={{ ...sectionHeadingStyle(), margin: '24px 0 12px' }}>
-        Client certificate
-      </h3>
+      </Panel>
+
+      <Panel
+        id="network.clientCertificate"
+        title="Client certificate"
+        summary={usingPfx ? pfxFile : certFile.length > 0 ? certFile : 'None'}
+      >
       <p style={{ ...hint, marginTop: 0 }}>
         Presented to every connection that does not supply its own. A certificate identifies you, so
         it goes to each host you have configured — set it on the individual profile instead if that
@@ -208,7 +210,9 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
         onChange={setPassphrase}
         placeholder="Leave blank if the key is not encrypted"
       />
+      </Panel>
 
+      {/* One Save for both panels: they are one block of settings, written together. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <button type="button" style={primaryButtonStyle(false)} onClick={save}>
           Save

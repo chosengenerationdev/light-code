@@ -12,6 +12,7 @@ import { Select } from '../Select.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { MigrateFolder, type MigrateFolderProps } from './MigrateFolder.js'
 import { S3Section, type S3SectionProps } from './S3Section.js'
+import { Panel } from './Panel.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -158,14 +159,37 @@ export function PythonTab(props: PythonTabProps): ReactElement {
       </p>
 
       {/*
-        Moved up here from underneath the whole tool list, where it was findable only by someone
-        who scrolled past every tool first to reach it. No connection editing here regardless: the
-        list is the Skills tab's, and a bucket and key that could be edited in two places is the
-        drift this project has paid for most.
+        Tools first and open: the list of what exists, what did not load and what waits for
+        approval is what people come here for. Setup and the bucket are panels beside it.
       */}
-      {props.s3 !== undefined && <S3Section {...props.s3} kind="tools" />}
-      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="tools" />}
+      {status !== undefined && (
+        <Panel
+          id="python.tools"
+          title="Tools"
+          summary={`${String(status.tools.length)} registered${
+            status.issues.some((issue) => !INFORMATIONAL.has(issue.kind))
+              ? `, ${String(status.issues.filter((issue) => !INFORMATIONAL.has(issue.kind)).length)} need attention`
+              : ''
+          }`}
+          defaultOpen
+        >
+          <ToolsStatus {...props} status={status} confirming={confirming} setConfirming={setConfirming} />
+        </Panel>
+      )}
 
+      {props.s3 !== undefined && (
+        <Panel
+          id="python.bucket"
+          title="S3 bucket"
+          summary={props.s3.mirrors.some((mirror) => mirror.enabled === true) ? 'In use' : 'Not used'}
+        >
+          {/* No connection editing here: the list is the Skills tab's, one bucket edited in one place. */}
+          <S3Section {...props.s3} kind="tools" />
+          {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="tools" />}
+        </Panel>
+      )}
+
+      <Panel id="python.setup" title="Setup" summary={enabled ? 'On' : 'Off'} defaultOpen={!enabled}>
       {/*
         Stated plainly and before the switch. Every other approval in Light Code gates
         *calling* something; this one gates the creation of code that runs later, which is a
@@ -538,9 +562,25 @@ export function PythonTab(props: PythonTabProps): ReactElement {
         </button>
         {saved && <span style={{ fontSize: 11, color: colors.muted }}>Saved.</span>}
       </div>
+      </Panel>
+    </div>
+  )
+}
 
-      {status !== undefined && (
-        <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+/**
+ * Status, refused tools and registered tools — split out of `PythonTab` so it sits inside its
+ * panel without the tab's body growing into one function hundreds of lines long.
+ */
+function ToolsStatus(
+  props: PythonTabProps & {
+    status: PythonStatus
+    confirming: string | undefined
+    setConfirming: (value: string | undefined) => void
+  },
+): ReactElement {
+  const { status, confirming, setConfirming } = props
+  return (
+        <div>
           <strong style={{ fontSize: 12 }}>Status</strong>
           <div
             style={{
@@ -800,8 +840,6 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             )}
           </div>
         </div>
-      )}
-    </div>
   )
 }
 

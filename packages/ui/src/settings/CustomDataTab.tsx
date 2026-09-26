@@ -11,9 +11,9 @@ import {
   monospaceFamily,
   primaryButtonStyle,
   secondaryButtonStyle,
-  sectionHeadingStyle,
   textFieldStyle,
 } from '../theme.js'
+import { Panel } from './Panel.js'
 
 export type DatasetStatus = DatasetConfig & {
   records: number
@@ -84,16 +84,27 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/** A titled block, so a long page reads as parts rather than a wall. Matches the Outlook tab. */
-function Section(props: { title: string; hint?: string; children: React.ReactNode }): ReactElement {
+/**
+ * A titled block, as a collapsible panel — the same `Panel` every settings tab uses, so this tab
+ * reads as parts and follows the theme like the rest. The first section of the tab is open.
+ */
+function Section(props: {
+  title: string
+  hint?: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}): ReactElement {
   return (
-    <section style={{ marginBottom: 18 }}>
-      <h3 style={sectionHeadingStyle()}>{props.title}</h3>
+    <Panel
+      id={`customData.${props.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+      title={props.title}
+      defaultOpen={props.defaultOpen === true}
+    >
       {props.hint !== undefined && (
         <p style={{ margin: '0 0 8px', color: colors.muted, fontSize: 11 }}>{props.hint}</p>
       )}
       {props.children}
-    </section>
+    </Panel>
   )
 }
 
@@ -350,7 +361,7 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
         <code style={{ fontFamily: monospaceFamily }}>search_data</code>.
       </p>
 
-      <Section title="Datasets">
+      <Section defaultOpen title="Datasets">
         {props.datasets.length === 0 ? (
           <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
             None yet. The assistant can write a collector for you if you ask it &mdash; describe

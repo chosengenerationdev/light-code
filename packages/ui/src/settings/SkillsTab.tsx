@@ -8,6 +8,7 @@ import { MigrateFolder, type MigrateFolderProps } from './MigrateFolder.js'
 import { S3Section, type S3SectionProps } from './S3Section.js'
 import { DismissableProblems } from './DismissableProblems.js'
 import { CheckIcon } from '../icons.js'
+import { Panel } from './Panel.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -201,8 +202,11 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
     .find((problem) => problem !== undefined)
 
   return (
-    <section style={{ marginTop: 18, borderTop: `1px solid ${colors.border}`, paddingTop: 14 }}>
-      <h3 style={{ margin: '0 0 6px', fontSize: 13 }}>Team skills</h3>
+    <Panel
+      id="skills.team"
+      title="Team skills"
+      summary={aliases.length > 0 ? aliases.join(', ') : 'No team name set'}
+    >
       <p style={{ margin: '0 0 8px', color: colors.muted, fontSize: 11 }}>
         One name covering every teammate&rsquo;s skills, so the assistant can search what other
         people have taught theirs. Everyone publishes to their own collection; set the same alias
@@ -421,7 +425,7 @@ function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
           />
         </div>
       )}
-    </section>
+    </Panel>
   )
 }
 
@@ -435,15 +439,89 @@ const STATUS_WORDS: Record<'indexed' | 'stale' | 'missing', string> = {
 export function SkillsTab(props: SkillsTabProps): ReactElement {
   const [confirming, setConfirming] = useState<string | undefined>(undefined)
 
+  const standing = props.skills.find((skill) => skill.always === true)
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily, fontSize: 13, color: colors.foreground }}>
-      {/*
-        At the top, because it is an action rather than a setting.
+      <h3 style={{ margin: '0 0 4px' }}>Skills</h3>
+      <p style={{ color: colors.muted, fontSize: 11, marginTop: 0 }}>
+        Notes the assistant keeps about this workspace — internal libraries, conventions, anything
+        you would otherwise explain again each time. Tell it something durable and it will offer to
+        record one; you approve the text before it is written.
+      </p>
 
-        It sat under the folder editors, below every skill in the list, so on a workspace with a
-        dozen skills it was off the bottom of the panel entirely - present, and findable only by
-        someone who already knew it was there.
+      {/*
+        Each part of the tab is a panel, and the list — the part people come here for — is open.
+        Asked for directly: the tab had grown into one long column of unrelated sections.
       */}
+      <Panel
+        id="skills.list"
+        title="Your skills"
+        summary={`${String(props.skills.length)} skill${props.skills.length === 1 ? '' : 's'}${
+          props.issues.length > 0 ? `, ${String(props.issues.length)} not loaded` : ''
+        }`}
+        defaultOpen
+      >
+      <p style={{ color: colors.muted, fontSize: 11, marginTop: 0 }}>
+        Only each <strong>description</strong> below is loaded into every conversation. The bodies are
+        read on demand, so a long skill costs nothing until it is relevant.
+        {props.skillsDir !== undefined && (
+          <>
+            {' '}
+            They are plain markdown in <code style={{ fontFamily: monospace }}>{props.skillsDir}</code>, so
+            they land in git and can be reviewed like any other file.
+          </>
+        )}
+      </p>
+
+      {/*
+        Shown rather than only logged. A skill that is silently not offered is impossible to
+        diagnose from the chat — the same reasoning as refused Python tools.
+      */}
+      <DismissableProblems
+        title="Not loaded"
+        problems={props.issues.map((issue) => `${issue.filePath} — ${issue.detail}`)}
+      />
+
+      <SkillList {...props} confirming={confirming} setConfirming={setConfirming} />
+      </Panel>
+
+      {/*
+        The standing instructions, given their own panel.
+
+        A skill with `always: true` behaves differently from every other one — its whole body is in
+        every request rather than its description — and the flag is a line of frontmatter that
+        silently does nothing when mistyped. Neither of those should be discoverable only by
+        reading the source, so the tab states which skill it is, or offers to create it.
+      */}
+      <Panel id="skills.standing" title="Standing instructions" summary={standing?.name ?? 'None'}>
+        {standing === undefined ? (
+          <>
+            <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+              One skill can be included in <strong>every</strong> session, in full, rather than
+              offered by name — for the things you would otherwise repeat at the start of each
+              conversation. It is paid for on every request, so keep it short.
+            </p>
+            <button type="button" style={secondaryButtonStyle()} onClick={props.onOpenStandingSkill}>
+              Create standing instructions
+            </button>
+          </>
+        ) : (
+          <>
+            <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+              <strong>{standing.name}</strong> is included in every session, in full. Remove{' '}
+              <code style={{ fontFamily: monospace }}>always: true</code> from its frontmatter to make
+              it an ordinary skill again.
+            </p>
+            <button type="button" style={secondaryButtonStyle()} onClick={props.onOpenStandingSkill}>
+              Edit standing instructions
+            </button>
+          </>
+        )}
+      </Panel>
+
+      <TeamSkillsSection {...props.team} />
+
+      <Panel id="skills.index" title="Index and search" summary={props.indexing ? 'Reindexing…' : props.indexResult}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <button type="button" style={secondaryButtonStyle()} disabled={props.indexing} onClick={props.onReindex}>
           {props.indexing ? 'Reindexing…' : 'Reindex skills'}
@@ -478,89 +556,44 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         onProbe={props.onProbe}
         onClear={props.onClearProbe}
       />
+      </Panel>
 
-      {/*
-        Moved up here from underneath the whole skill list, where it was findable only by
-        someone who scrolled past every skill first to reach it — the same reasoning that put
-        the Reindex row at the top of this file.
-      */}
-      {props.s3 !== undefined && <S3Section {...props.s3} kind="skills" manageConnections />}
-      {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="skills" />}
+      {props.s3 !== undefined && (
+        <Panel
+          id="skills.bucket"
+          title="S3 bucket"
+          summary={props.s3.mirrors.some((mirror) => mirror.enabled === true) ? 'In use' : 'Not used'}
+        >
+          <S3Section {...props.s3} kind="skills" manageConnections />
+          {props.migrate !== undefined && <MigrateFolder {...props.migrate} kind="skills" />}
+        </Panel>
+      )}
 
-      {/* First, because it is the part people come here looking for. */}
-      <TeamSkillsSection {...props.team} />
-      <h3 style={{ margin: '0 0 4px' }}>Skills</h3>
-      <p style={{ color: colors.muted, fontSize: 11, marginTop: 0 }}>
-        Notes the assistant keeps about this workspace — internal libraries, conventions, anything
-        you would otherwise explain again each time. Tell it something durable and it will offer to
-        record one; you approve the text before it is written.
-      </p>
-      <p style={{ color: colors.muted, fontSize: 11 }}>
-        Only each <strong>description</strong> below is loaded into every conversation. The bodies are
-        read on demand, so a long skill costs nothing until it is relevant.
-        {props.skillsDir !== undefined && (
-          <>
-            {' '}
-            They are plain markdown in <code style={{ fontFamily: monospace }}>{props.skillsDir}</code>, so
-            they land in git and can be reviewed like any other file.
-          </>
-        )}
-      </p>
+      <Panel id="skills.folders" title="Folders" summary={props.skillsDir}>
+        <FolderListEditor
+          primary={props.configuredDir}
+          primaryPlaceholder={props.skillsDir ?? '.lightcode/skills'}
+          primaryLabel="Where new skills are saved"
+          primaryHint="Leave blank for .lightcode/skills in the workspace. Creating, editing and deleting all happen here."
+          extras={props.extraDirs}
+          extrasLabel="Also read skills from"
+          extrasHint="Shared or reference folders, searched in order after the one above. Never written to, so a folder shared with colleagues stays safe. A name defined twice is taken from the first folder that has it."
+          onSave={props.onSaveDirs}
+        />
+      </Panel>
+    </div>
+  )
+}
 
-      {/*
-        The standing instructions, given their own line.
-
-        A skill with `always: true` behaves differently from every other one — its whole body is in
-        every request rather than its description — and the flag is a line of frontmatter that
-        silently does nothing when mistyped. Neither of those should be discoverable only by
-        reading the source, so the tab states which skill it is, or offers to create it.
-      */}
-      <div
-        style={{
-          margin: '10px 0',
-          padding: 10,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 6,
-        }}
-      >
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Standing instructions</div>
-        {(() => {
-          const standing = props.skills.find((skill) => skill.always === true)
-          return standing === undefined ? (
-            <>
-              <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
-                One skill can be included in <strong>every</strong> session, in full, rather than
-                offered by name — for the things you would otherwise repeat at the start of each
-                conversation. It is paid for on every request, so keep it short.
-              </p>
-              <button type="button" style={secondaryButtonStyle()} onClick={props.onOpenStandingSkill}>
-                Create standing instructions
-              </button>
-            </>
-          ) : (
-            <>
-              <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
-                <strong>{standing.name}</strong> is included in every session, in full. Remove{' '}
-                <code style={{ fontFamily: monospace }}>always: true</code> from its frontmatter to make
-                it an ordinary skill again.
-              </p>
-              <button type="button" style={secondaryButtonStyle()} onClick={props.onOpenStandingSkill}>
-                Edit standing instructions
-              </button>
-            </>
-          )
-        })()}
-      </div>
-
-      {/*
-        Shown rather than only logged. A skill that is silently not offered is impossible to
-        diagnose from the chat — the same reasoning as refused Python tools.
-      */}
-      <DismissableProblems
-        title="Not loaded"
-        problems={props.issues.map((issue) => `${issue.filePath} — ${issue.detail}`)}
-      />
-
+/**
+ * The skill list itself, split out of `SkillsTab` so it can sit inside a panel without the tab's
+ * body becoming one function several hundred lines long.
+ */
+function SkillList(
+  props: SkillsTabProps & { confirming: string | undefined; setConfirming: (name: string | undefined) => void },
+): ReactElement {
+  const { confirming, setConfirming } = props
+  return (
       <div style={{ marginTop: 14 }}>
         {props.skills.length === 0 ? (
           <p style={{ color: colors.muted, fontSize: 12 }}>
@@ -844,16 +877,5 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
           })
         )}
       </div>
-      <FolderListEditor
-        primary={props.configuredDir}
-        primaryPlaceholder={props.skillsDir ?? '.lightcode/skills'}
-        primaryLabel="Where new skills are saved"
-        primaryHint="Leave blank for .lightcode/skills in the workspace. Creating, editing and deleting all happen here."
-        extras={props.extraDirs}
-        extrasLabel="Also read skills from"
-        extrasHint="Shared or reference folders, searched in order after the one above. Never written to, so a folder shared with colleagues stays safe. A name defined twice is taken from the first folder that has it."
-        onSave={props.onSaveDirs}
-      />
-    </div>
   )
 }

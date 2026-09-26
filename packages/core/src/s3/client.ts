@@ -1,4 +1,5 @@
 import type { HttpClient, HttpResponse } from '../platform/http.js'
+import { readBody } from '../platform/readBody.js'
 import { describeTlsError } from '../providers/auth/apigeeMtls.js'
 import { signRequest } from './sigv4.js'
 
@@ -129,7 +130,7 @@ export class S3Client {
       throw new Error(`Could not reach ${new URL(url).host}: ${describeTlsError(error)}`, { cause: error })
     }
 
-    const bytes = await readAll(response)
+    const bytes = await readBody(response)
     return { status: response.status, text: bytes.toString('utf8'), bytes }
   }
 
@@ -217,19 +218,6 @@ export class S3Client {
       throw new Error(describeFailure(result.status, result.text, key))
     }
   }
-}
-
-/** Reads a response body whole, whether it arrived as a stream or not. */
-async function readAll(response: HttpResponse): Promise<Buffer> {
-  if (response.body === null) return Buffer.from(await response.text(), 'utf8')
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value !== undefined) chunks.push(value)
-  }
-  return Buffer.concat(chunks)
 }
 
 /**

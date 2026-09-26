@@ -2,10 +2,11 @@ import type { BrowseRequest } from './PathField.js'
 import type { ProfileInput, ProfileSummary, TestConnectionStep } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { CheckIcon, CopyIcon, EditIcon, TrashIcon } from '../icons.js'
-import { badgeStyle, colors, fontFamily, iconButtonStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { badgeStyle, colors, fontFamily, iconButtonStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
 import { ProviderForm, type ProviderFormValues } from './ProviderForm.js'
 import { ConfigShare, type ShareSectionView } from './ConfigShare.js'
 import { ScopeBadge } from './ScopeBadge.js'
+import { Panel } from './Panel.js'
 
 export interface ProvidersTabProps {
   /** The shared browse dialog, for the token-script field. Absent where there is no picker. */
@@ -136,6 +137,12 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
         <ScopeBadge scope="user" />
       </div>
 
+      <Panel
+        id="providers.list"
+        title="Providers"
+        summary={`${String(props.profiles.length)} configured`}
+        defaultOpen
+      >
       {props.profiles.length === 0 && (
         <p style={{ color: colors.muted, fontFamily }}>No providers configured yet. Add one to start chatting.</p>
       )}
@@ -227,9 +234,19 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
       <button type="button" style={primaryButtonStyle(false)} onClick={() => open({ mode: 'create' })}>
         Add Provider
       </button>
+      </Panel>
 
-      <div style={{ marginTop: 20, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
-        <label style={labelStyle()}>Config file</label>
+      {/*
+        Open whenever an import or export is in progress, whatever it was left as: the chooser
+        appearing inside a closed panel would be a button that seemed to do nothing.
+      */}
+      <Panel
+        id="providers.share"
+        title="Share settings with your team"
+        summary="Export / Import"
+        forceOpen={props.share !== undefined}
+      >
+      <div>
         <div style={{ color: colors.muted, fontSize: 11, marginBottom: 6 }}>
           Share a working setup with the team. Choose what travels; credentials never do.
         </div>
@@ -254,6 +271,7 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
           />
         )}
       </div>
+      </Panel>
     </div>
   )
 }

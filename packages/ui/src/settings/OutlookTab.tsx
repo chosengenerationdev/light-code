@@ -5,7 +5,8 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { FolderTree, type MailFolderNode } from './FolderTree.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { Select } from '../Select.js'
-import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle, sectionHeadingStyle} from '../theme.js'
+import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { Panel } from './Panel.js'
 
 export interface MailStatusState {
   enabled: boolean
@@ -55,18 +56,27 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/** A titled block, so a long settings page reads as parts rather than a wall. */
-function Section(props: { title: string; hint?: string; children: React.ReactNode }): ReactElement {
+/**
+ * A titled block, as a collapsible panel — the same `Panel` every settings tab uses, so this tab
+ * reads as parts and follows the theme like the rest. The first section of the tab is open.
+ */
+function Section(props: {
+  title: string
+  hint?: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}): ReactElement {
   return (
-    <section style={{ marginBottom: 18 }}>
-      <h3 style={sectionHeadingStyle()}>
-        {props.title}
-      </h3>
+    <Panel
+      id={`outlook.${props.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+      title={props.title}
+      defaultOpen={props.defaultOpen === true}
+    >
       {props.hint !== undefined && (
         <p style={{ margin: '0 0 8px', color: colors.muted, fontSize: 11 }}>{props.hint}</p>
       )}
       {props.children}
-    </section>
+    </Panel>
   )
 }
 
@@ -170,7 +180,7 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
     <div>
       {header}
 
-      <Section title="Indexing">
+      <Section defaultOpen title="Indexing">
         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} style={{ marginTop: 2 }} />
           <span>

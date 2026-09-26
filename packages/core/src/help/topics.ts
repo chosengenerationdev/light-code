@@ -443,6 +443,72 @@ filters already produced.
 `,
   },
   {
+    id: 'confluence',
+    title: 'Confluence pages',
+    keywords: [
+      'confluence', 'wiki', 'page', 'pat', 'personal access token', 'space', 'publish', 'document',
+      'documentation page', 'diagram on a page', 'image on a page', 'replace image',
+    ],
+    body: `
+**Settings → Tools → Confluence**: the site address (including any path before \`/display\`), a
+personal access token, and optionally a default space key and a CA file. Off until switched on;
+**user-scope only** (config:confluence), so a repository can never repoint it. The token is kept in
+secure storage, never in the settings file, and never shown again — the field says whether one is
+stored. **Test connection** reports who the token belongs to, or which step failed.
+
+Confluence **Data Center / Server** with a personal access token. Confluence Cloud (email and API
+token) is not supported.
+
+**Three tools.** \`confluence_search\` (words or CQL), \`confluence_read_page\` (body, attachments,
+and with \`images\` the pictures on the page — shown to the model when it can see images, SVG
+diagrams read as their source), and \`confluence_write_page\`, which creates a page or updates one
+given its id, with attached files and drawn diagrams.
+
+**Every write asks first.** An update shows a diff against the page as it is now; a new page shows
+its whole body; every attachment is listed, and one that **replaces** an existing attachment of the
+same name is marked so. Pages are published as you.
+
+**Replacing an image**: write to the page with its id and attach a file — or a diagram — with exactly
+the same name as the existing attachment. The page text can be left out; only the attachment
+changes.
+
+**Diagrams** are drawn with the same shapes \`show_diagram\` uses and attached as SVG. A page shows
+one with an \`ac:image\` element naming the attachment.
+`,
+  },
+  {
+    id: 'team-onboarding',
+    title: 'Setting a team up with Light Code',
+    keywords: [
+      'onboard', 'onboarding', 'team', 'colleague', 'new joiner', 'share settings', 'export',
+      'import', 'config json', 'setup guide', 'rollout',
+    ],
+    body: `
+**Export once, import on each machine.** Settings → Providers → Share settings with your team →
+**Export** writes a JSON file of the sections you tick — providers, MCP servers, search, skills,
+Python, buckets, Confluence and more. The assistant can write the same file with
+\`light_code_export_config\` for a guide or a page.
+
+**Never in the file**: any secret (API keys, passwords, tokens), approvals, per-project settings and
+identity. Index names that identify one person are stripped from the search section, because
+everyone must publish to their own collection.
+
+**Each colleague then:**
+1. Settings → Providers → Share settings with your team → **Import**, choose the file, pick the
+   sections, confirm.
+2. Enter their own credentials — the import names each one: provider API keys, the search
+   connection's username and password, S3 secret access keys, the Confluence personal access token.
+3. Settings → Providers: **Test connection** on each profile.
+4. Settings → Skills → Team skills: the team skills name must be exactly the same everywhere
+   (config:embedder). **Test team search** shows whose skills this machine can see.
+5. Settings → Python: switch Python tools on if the team shares tools through a bucket; new ones
+   arrive on their own and wait above the chat input for approval.
+
+**Everything is per machine.** Nothing syncs between two installs by itself, including two virtual
+desktops of the same person; importing the file is how a second machine is set up.
+`,
+  },
+  {
     id: 'schedules',
     title: 'Scheduled prompts and unattended runs',
     keywords: [

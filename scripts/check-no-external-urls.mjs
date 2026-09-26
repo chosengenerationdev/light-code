@@ -84,6 +84,7 @@ const ALLOWED_HOSTS = new Map([
   // --- Placeholders shown as grey text in form fields.
   ['gateway.example.com', 'placeholder in the Apigee token URL field'],
   ['gw.example.com', 'placeholder'],
+  ['wiki.example.com', 'placeholder in the Confluence site address field'],
   ['example.com', 'generic documentation example'],
   ['opensearch.internal', 'placeholder in the OpenSearch cluster URL field'],
   ['mcp.internal', 'placeholder in the MCP server URL field'],

@@ -2,6 +2,7 @@ import { isValidVariableName, type ResolvedVariable, type SessionVariable } from
 import { useEffect, useState, type ReactElement } from 'react'
 import { TrashIcon } from '../icons.js'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { Panel } from './Panel.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -55,6 +56,7 @@ export function VariablesTab(props: VariablesTabProps): ReactElement {
         <strong>Providers</strong>, which stores it separately and never sends it back to a page.
       </p>
 
+      <Panel id="variables.user" title="Yours" summary={`${String(props.user.length)} set`} defaultOpen>
       <VariableList
         title="Yours"
         hint="Only your sessions see these."
@@ -64,7 +66,9 @@ export function VariablesTab(props: VariablesTabProps): ReactElement {
         onSave={props.onSaveUser}
         editable
       />
+      </Panel>
 
+      <Panel id="variables.admin" title="Everyone's" summary={`${String(props.admin.length)} set`}>
       <VariableList
         title="Everyone's"
         hint={
@@ -78,8 +82,13 @@ export function VariablesTab(props: VariablesTabProps): ReactElement {
         onSave={props.onSaveAdmin}
         editable={props.canEditAdmin}
       />
+      </Panel>
 
-      {props.canEditAdmin && <AdminIds ids={props.adminIds} onSave={props.onSaveAdminIds} />}
+      {props.canEditAdmin && (
+        <Panel id="variables.administrators" title="Administrators">
+          <AdminIds ids={props.adminIds} onSave={props.onSaveAdminIds} />
+        </Panel>
+      )}
     </div>
   )
 }

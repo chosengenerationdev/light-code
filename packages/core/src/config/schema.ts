@@ -974,6 +974,30 @@ export const configSchema = z
         outlook: z.boolean(),
       })
       .partial(),
+    /**
+     * A Confluence Data Center / Server site the assistant may search, read and write pages in.
+     *
+     * **User-scope only** (invariant 5): it names an endpoint and a credential that can publish
+     * under the user's name. A repository able to set it would repoint every page the assistant
+     * writes — and everything it reads — at a site of its choosing. Off until switched on.
+     *
+     * The personal access token is never here: `tokenRef` names where it sits in secret storage,
+     * the same arrangement every other credential in this file has (§15).
+     */
+    confluence: z
+      .object({
+        enabled: z.boolean(),
+        /** The site's base, including any context path — `https://wiki.example.com/confluence`. */
+        baseUrl: z.string().url(),
+        tokenRef: z.string().min(1),
+        /** Space key new pages go into when the request does not name one. */
+        defaultSpace: z.string().min(1),
+        /** Extra CA for this site. Adds to the global roots rather than replacing them (§19). */
+        caFile: z.string().min(1),
+        /** The escape hatch, never the fix — see the provider profile's own `tls` (§10). */
+        rejectUnauthorized: z.boolean(),
+      })
+      .partial(),
     filesystem: z
       .object({
         readRoots: z.array(z.string()),

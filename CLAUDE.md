@@ -97,8 +97,9 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 
 > Light Code makes no network connection the user has not configured. It ships with zero
 > default endpoints, no telemetry, no update checks, and no remote assets. The only hosts
-> it contacts are the model gateway, MCP servers, and — if indexing is enabled — the vector
-> store and embedding endpoint named in config. Code that Light Code executes on the user's
+> it contacts are the model gateway, MCP servers, and — each only when the user configures and
+> switches it on — the vector store and embedding endpoint, S3 buckets, and a Confluence site
+> named in config. Code that Light Code executes on the user's
 > instruction — shell commands, Python tools, MCP servers — is outside this boundary and
 > governed by the user's environment.
 
@@ -175,8 +176,9 @@ rather than being re-baselined.
 
 Since then, and worth knowing they exist: `use_skill_file` (§13, a skill's own template
 copied into the workspace), `excel_create_workbook` / `excel_save_workbook` / `excel_sheets`
-(§12c), and `read_debug_session` (§12q, the call stack and variables of a paused debug session —
-any language VS Code can debug, via the Debug Adapter Protocol).
+(§12c), `read_debug_session` (§12q, the call stack and variables of a paused debug session —
+any language VS Code can debug, via the Debug Adapter Protocol), `confluence_search` /
+`confluence_read_page` / `confluence_write_page` and `light_code_export_config` (§12s).
 
 **Explicitly not in v1:** browser automation, semantic/embedding codebase search,
 `insert_content`, `list_code_definition_names`, mode-switching and subtask tools, a fetch
@@ -1750,6 +1752,65 @@ the same change (see §the comment on `handleTeamSkillsIndexStatus`).
 
 **Not verified against a live cluster or bucket.** The alias rules match OpenSearch's documented
 naming rules; the sync manifest is covered by `s3/sync.test.ts` against a fake bucket.
+
+## 12s. Confluence, tool-returned images, and collapsible settings (0.118.0)
+
+Asked for as: tools to maintain Confluence pages with a PAT, "creative" pages with images and
+technical diagrams, reading pages *including their images*, replacing an image, and an onboarding
+page that exports reusable JSON and explains how to import it. Plus, from the same session: every
+settings tab turned into collapsible, theme-matched panels.
+
+- **Data Center / Server, PAT as `Authorization: Bearer`.** `confluence/client.ts` is hand-written
+  over `HttpClient` (invariant 2), like the S3 and vector-store clients. Cloud's email + API token
+  is not attempted rather than half-supported. **`confluence` is user-scope only** (invariant 5): it
+  names a site and a credential that publishes under the user's name, so a repository able to set
+  it would choose where every page goes and what is read back as fact. The token lives in secret
+  storage (`confluence:token`); the panel only ever learns whether one is stored (invariant 7), and
+  clearing is its own message so a save about the space key can never wipe it. TLS goes through
+  `resolveConnectionTls` — no fifth place to configure a CA (§10).
+- **Three tools, not seven** (§17). `confluence_write_page` creates *or* updates and carries its
+  attachments and diagrams, because create/update/attach are one act to a person. It is in
+  `ALWAYS_ASK_TOOLS`. **The preview is computed** (invariant 8): an update is diffed against the
+  page's *live* body, a new page is shown whole, every attachment is listed with its source and
+  size, and one that **replaces** an existing attachment is marked — replacing an image changes no
+  text, which is exactly why it is the easy thing to approve without noticing. The body is optional
+  on an update, so an image can be swapped alone. `version` is the one *read*, so a page edited in
+  between is refused (409) rather than overwritten.
+- **Diagrams** reuse `layoutDiagram` + `diagramSvg`, with the fixed light palette (a page is read in a
+  browser, not in this editor). Every label is escaped there, so a diagram cannot carry markup.
+- **The download link is refused unless it is relative to the site.** It comes from the server, and
+  an absolute link elsewhere would carry the Bearer token to it.
+- **Tool results can now carry images** (`ToolResult.images`). A tool message is text on every wire
+  format, so the loop sends them as a user message straight after the result — the path a pasted
+  mid-turn screenshot already takes, so no adapter changed — labelled as coming from the tool, and
+  **only when `supportsVision`**; otherwise the result says they were fetched and not shown, so the
+  model never describes a picture it did not see. SVG attachments are returned as their source text
+  instead: a model reads a diagram's structure better from that, and no provider accepts SVG.
+- **`light_code_export_config`** writes the same file Settings → Export does, through the same
+  `buildExport`, so the two cannot disagree about what is shared; its preview is the literal JSON
+  and names every credential an importer must enter. Dispatch-only — a rare need. The handbook got
+  `confluence` and `team-onboarding` topics so a guide the assistant writes is accurate.
+- **On the shared Node host a Confluence token is personal** (`apps/host/src/roles.ts`): a page is
+  published as the token's owner, so an admin-set token would make everyone publish as the admin.
+
+### Settings panels (`settings/Panel.tsx`)
+
+- **Only theme tokens**, and the user's accent marks the open panel — so panels follow light, dark,
+  high contrast and a chosen accent with nothing of their own to keep in step.
+- **Collapsed means hidden, not unmounted.** Unmounting would discard a half-typed form the moment
+  somebody tidied the tab. It also means every existing render test kept passing: collapsed content
+  is still in the DOM.
+- **Open/closed is remembered per panel id** in webview storage, with a default per panel (the part
+  of a tab people come for is open). `forceOpen` holds one open while something inside it is in
+  progress — an import chooser appearing inside a closed panel would be a click that did nothing.
+- **Never define a component inside a render and render it as `<Inner />`.** It is a new type every
+  render, so React remounts it on each keystroke and an input loses focus after every character.
+  The MCP tab's server list is called as `serversBody()` for exactly that reason; the Skills and
+  Python lists were lifted to module level instead.
+
+**Not verified against a live Confluence.** The client and tools are covered by
+`confluence/confluence.test.ts` against a fake site; storage-format quirks of a particular Confluence
+version (SVG rendering in `ac:image` especially) are the first thing to check.
 
 ## 13. Python interop and skills (phase 9)
 

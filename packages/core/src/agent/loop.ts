@@ -79,6 +79,11 @@ export interface RunAgentTurnOptions {
   /** Images attached to this user message. */
   images?: ImageAttachment[]
   /**
+   * Whether the model accepts images, from the capability table (§9). Decides whether images a
+   * tool returns are shown to it or reported as not shown. Omitted means no.
+   */
+  supportsVision?: boolean
+  /**
    * Pulls anything the user typed while this turn was running.
    *
    * Called at a **turn boundary inside the loop** — after a tool result has been recorded
@@ -604,11 +609,31 @@ export async function runAgentTurn(
     }
     // The conversation gets the capped text; the UI event carries the full result so the
     // user still sees everything that actually happened.
-    const forModel =
+    const pictures = result.images ?? []
+    const capped =
       options.truncationStore !== undefined
         ? (await truncateToolResult(result.content, options.truncationStore)).content
         : result.content
+    /*
+     * Said in the result when the pictures cannot be shown, so the model does not describe an
+     * image it never saw — the failure the queued-attachment gate exists for, from the other side.
+     */
+    const forModel =
+      pictures.length > 0 && options.supportsVision !== true
+        ? `${capped}\n\n(${String(pictures.length)} image(s) were fetched but not shown: the current model does not accept images.)`
+        : capped
     conversation.addToolResultMessage(toolCall.id, forModel)
+    /*
+     * Straight after the result, so the call/result pair is intact — the same place queued user
+     * messages join, and for the same reason. Labelled as coming from the tool: nobody typed it,
+     * and a picture on a wiki page is as much untrusted input as the page's text.
+     */
+    if (pictures.length > 0 && options.supportsVision === true) {
+      conversation.addUserMessage(
+        `[Images returned by ${toolCall.name}, not typed by the user: ${pictures.map((picture) => picture.label).join(', ')}]`,
+        pictures.map((picture) => ({ mediaType: picture.mediaType, data: picture.data })),
+      )
+    }
     events.onToolResult(toolCall, result)
 
     // Anything the user typed while this was running joins the conversation now, so the

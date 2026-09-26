@@ -17,6 +17,15 @@ export interface ToolResult {
   isError?: boolean
   /** Present for tools that touch a specific file, so the loop can track consecutive mistakes per file. */
   path?: string
+  /**
+   * Pictures the tool fetched for the model to look at — the images on a Confluence page.
+   *
+   * A side channel rather than part of `content`, because a tool message is text on every wire
+   * format this product speaks. The loop sends them as a user message straight after the result,
+   * which is the path a screenshot pasted mid-turn already takes, and only when the model accepts
+   * images; otherwise the result says they were not shown.
+   */
+  images?: { label: string; mediaType: string; data: string }[]
 }
 
 export interface ToolExecutionContext {

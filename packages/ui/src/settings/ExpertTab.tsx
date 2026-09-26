@@ -17,6 +17,7 @@ import {
 } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { ScopeBadge } from './ScopeBadge.js'
+import { Panel } from './Panel.js'
 
 /** Sentinel for the free-text escape hatch, kept out of the value space. */
 const CUSTOM = '__custom__'
@@ -190,6 +191,7 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         )}
       </div>
 
+      <Panel id="expert.setup" title="Setup" summary={enabled ? 'On' : 'Off'} defaultOpen>
       <label
         style={{
           display: 'flex',
@@ -269,6 +271,9 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
         The cap is per task, matching the expert session's own scope. A total that never resets
         becomes something the user clears rather than something that protects them.
       */}
+      </Panel>
+
+      <Panel id="expert.budget" title="Budget per task">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
         <label style={labelStyle()}>Budget per task</label>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -425,6 +430,7 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           an unpriced consultation still costs money.
         </span>
       </div>
+      </Panel>
 
       <div
         style={{

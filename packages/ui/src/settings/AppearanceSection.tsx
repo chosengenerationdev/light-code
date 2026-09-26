@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { ACCENT_PRESETS, DEFAULT_ACCENT, DEFAULT_EXPERT, EXPERT_PRESETS, contrastFor, defaultAgentColor, isValidAccent, type AccentPreset } from '../styles.js'
 import { CheckIcon, ExpertIcon } from '../icons.js'
 import { colors, fontFamily, labelStyle, textFieldStyle } from '../theme.js'
+import { Panel } from './Panel.js'
 
 export interface AppearanceSectionProps {
   accentColor: string
@@ -143,41 +144,14 @@ function ColourPicker(props: ColourPickerProps): ReactElement {
   )
 }
 
-/**
- * A group heading.
- *
- * Reported as "all of them look like the same text": every control carried a `labelStyle()` label
- * and nothing above them did, so a field label and the name of a whole section were typographically
- * identical — eight settings in one undifferentiated column. A heading has to look unlike the
- * things it heads or it is not a heading, so this is smaller, spaced, and separated by a rule.
- */
-function GroupHeading(props: { children: string; first?: boolean }): ReactElement {
-  return (
-    <h4
-      style={{
-        margin: props.first === true ? '0 0 8px' : '20px 0 8px',
-        paddingTop: props.first === true ? 0 : 14,
-        borderTop: props.first === true ? 'none' : `1px solid ${colors.border}`,
-        fontSize: 11,
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: colors.muted,
-      }}
-    >
-      {props.children}
-    </h4>
-  )
-}
-
 export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
   const clash = props.accentColor.toLowerCase() === props.expertColor.toLowerCase()
 
   return (
     <section>
-      {props.onChangeTheme !== undefined && <GroupHeading first>Theme</GroupHeading>}
       {props.onChangeTheme !== undefined && (
-        <div style={{ marginBottom: 16 }}>
+        <Panel id="appearance.theme" title="Theme" summary={props.theme ?? 'system'} defaultOpen>
+        <div style={{ marginBottom: 4 }}>
           <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
             {(['system', 'light', 'dark'] as const).map((option) => {
               const selected = (props.theme ?? 'system') === option
@@ -207,8 +181,9 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
             choose Dark here instead.
           </span>
         </div>
+        </Panel>
       )}
-      <GroupHeading first={props.onChangeTheme === undefined}>Colours</GroupHeading>
+      <Panel id="appearance.colours" title="Colours" defaultOpen>
 
       <ColourPicker
         label="Accent colour"
@@ -256,6 +231,19 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
       />
 
       {/*
+       * Warned rather than prevented. Two identical colours defeat the point of having two,
+       * but it is a legitimate thing to want — and the expert mark icon still distinguishes
+       * them — so this states the consequence and leaves the choice alone.
+       */}
+      {clash && (
+        <p style={{ color: colors.error, fontSize: 11, margin: '0 0 14px' }}>
+          These are the same colour, so expert answers will not stand out. Only the expert mark will
+          tell them apart.
+        </p>
+      )}
+      </Panel>
+
+      {/*
         One per specialist, for the same reason the expert has one.
 
         The expert's colour marks *authorship* — these words came from somewhere other than the
@@ -264,9 +252,7 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
         specialist said it is exactly what the reader needs to know.
       */}
       {props.agentRoles.filter((role) => role.role !== 'expert').length > 0 && (
-        <GroupHeading>Specialists</GroupHeading>
-      )}
-      {props.agentRoles.length > 0 && (
+        <Panel id="appearance.specialists" title="Specialists">
         <div style={{ marginTop: 4 }}>
           {/*
             The expert is deliberately not among these.
@@ -293,23 +279,12 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
               />
             ))}
         </div>
-      )}
-
-      {/*
-       * Warned rather than prevented. Two identical colours defeat the point of having two,
-       * but it is a legitimate thing to want — and the expert mark icon still distinguishes
-       * them — so this states the consequence and leaves the choice alone.
-       */}
-      {clash && (
-        <p style={{ color: colors.error, fontSize: 11, margin: '0 0 14px' }}>
-          These are the same colour, so expert answers will not stand out. Only the expert mark will
-          tell them apart.
-        </p>
+        </Panel>
       )}
 
       {/* Its own group, so it reads as the result of the settings above rather than another one. */}
+      <Panel id="appearance.preview" title="Preview" defaultOpen>
       <div>
-        <GroupHeading>Preview</GroupHeading>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <span
@@ -359,6 +334,7 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
           </div>
         </div>
       </div>
+      </Panel>
     </section>
   )
 }

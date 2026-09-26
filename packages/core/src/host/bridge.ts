@@ -72,6 +72,13 @@ import { EXPERT_GUIDANCE, SEAT_FITS } from '../agents/seats.js'
 import { ASK_CLAUDE_TOOL } from '../tools/askExpert.js'
 import type { Tool } from '../tools/types.js'
 import { createReadDebugSessionTool } from '../tools/debugSession.js'
+import { createExportConfigTool } from '../tools/exportConfig.js'
+import { ConfluenceClient, ConfluenceError } from '../confluence/client.js'
+import {
+  createConfluenceReadPageTool,
+  createConfluenceSearchTool,
+  createConfluenceWritePageTool,
+} from '../confluence/tools.js'
 import {
   createExcelOpenTool,
   createExcelDiagnoseTool,
@@ -2327,6 +2334,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedProgrammingProfileId: string | undefined
   /** Mirrors config, because the registry is built synchronously and cannot await a load. */
   let cachedOffice: { excel?: boolean | undefined; outlook?: boolean | undefined } = {}
+  /** The Confluence block as last loaded, so the tool registry can decide without a file read. */
+  let cachedConfluence: LightCodeConfig['confluence'] = undefined
   /** Mirrors `mail`, for the same reason. */
   let cachedMail: MailIndexConfig = {}
   let cachedDatasets: DatasetConfig[] = []
@@ -2430,6 +2439,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedBudgetMatters = budgetMatters(teamContext)
     cachedProgrammingProfileId = config.programmingProfileId
     cachedOffice = config.office ?? {}
+    cachedConfluence = config.confluence
     cachedMail = config.mail ?? {}
     cachedDatasets = config.datasets ?? []
     /*
@@ -3257,6 +3267,30 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       combined.register(createReadDebugSessionTool({ read: services.readDebugSession }))
     }
 
+    /*
+     * Confluence, once switched on and pointed at a site. Absent otherwise rather than present and
+     * failing on every call. The client is built per call inside each tool, so a token replaced
+     * in Settings applies to the next request without rebuilding the registry.
+     */
+    if (cachedConfluence?.enabled === true && cachedConfluence.baseUrl !== undefined) {
+      const confluenceOptions = {
+        client: confluenceClient,
+        ...(cachedConfluence.defaultSpace !== undefined ? { defaultSpace: cachedConfluence.defaultSpace } : {}),
+      }
+      combined.register(createConfluenceSearchTool(confluenceOptions))
+      combined.register(createConfluenceReadPageTool(confluenceOptions))
+      combined.register(createConfluenceWritePageTool(confluenceOptions))
+    }
+
+    /*
+     * The team export, for onboarding material. Hidden behind the dispatcher like the role tools:
+     * wanted in the rare conversation that prepares a guide, and `search_docs` finds it then.
+     */
+    combined.register(
+      createExportConfigTool({ loadConfig: async () => (await configManager.load()).config }),
+      { dispatchOnly: dispatcher },
+    )
+
     const hasHiddenTools = dispatcher && combined.dispatchOnlyList().length > 0
     const hasHiddenSkills = hideSkills && skills.length > 0
     if (hasHiddenTools) {
@@ -3929,6 +3963,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // loop — swapping them mid-turn would break the prompt cache prefix (§12).
         mode: activeMode,
         contextWindow: capabilities.contextWindow,
+        // So images a tool returns (a Confluence page's pictures) reach a model that can see them.
+        supportsVision: capabilities.supportsVision,
         // CLAUDE.md §5 has called this configurable since Phase 0; until now it was not.
         maxIterations: cachedMaxIterations,
         drainQueuedMessages: () => {
@@ -6732,6 +6768,134 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * while the model and width are set from Search, and writing the whole block from either
    * would have one tab silently erasing the other's fields.
    */
+  /** Where the Confluence personal access token lives in secret storage. Never in config (§15). */
+  const CONFLUENCE_TOKEN_REF = 'confluence:token'
+
+  /**
+   * A client for the configured Confluence site, built per call.
+   *
+   * Per call rather than cached, so a token replaced in Settings or a certificate rotated on disk
+   * applies to the very next request — the same reason the S3 and search connections are built on
+   * demand. TLS goes through the one resolver every connection uses (§10, "do not add a fifth
+   * place to configure a CA"), so the corporate root set once in Network covers the wiki too.
+   */
+  async function confluenceClient(): Promise<ConfluenceClient> {
+    const { config } = await configManager.load()
+    const settings = config.confluence
+    if (settings?.baseUrl === undefined) {
+      throw new ConfluenceError('Confluence is not set up. Settings → Tools → Confluence: enter the site address.')
+    }
+    const token = settings.tokenRef !== undefined ? await secrets.get(settings.tokenRef) : undefined
+    if (token === undefined || token.length === 0) {
+      throw new ConfluenceError(
+        'No Confluence personal access token is stored. Settings → Tools → Confluence: paste one and save.',
+      )
+    }
+    const passphraseRef = config.tls?.passphraseRef
+    const tls = await resolveConnectionTls({
+      ...(config.tls !== undefined ? { global: config.tls } : {}),
+      connection: {
+        ...(settings.caFile !== undefined ? { caFile: settings.caFile } : {}),
+        ...(settings.rejectUnauthorized !== undefined ? { rejectUnauthorized: settings.rejectUnauthorized } : {}),
+      },
+      ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+      ...(passphraseRef !== undefined ? { passphrase: await secrets.get(passphraseRef) } : {}),
+      onPaths: (paths) => {
+        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch((error: unknown) => {
+          logger.warn('could not add cert path to the deny list', String(error))
+        })
+      },
+    })
+    return new ConfluenceClient(httpClient, {
+      baseUrl: settings.baseUrl,
+      token,
+      ...(tls !== undefined ? { tls } : {}),
+    })
+  }
+
+  /** The panel's view of Confluence. The token never crosses — only whether one is stored (invariant 7). */
+  async function postConfluence(): Promise<void> {
+    const { config } = await configManager.load()
+    const settings = config.confluence ?? {}
+    const hasToken =
+      settings.tokenRef !== undefined && ((await secrets.get(settings.tokenRef)) ?? '').length > 0
+    post({
+      type: 'confluence',
+      settings: {
+        enabled: settings.enabled === true,
+        baseUrl: settings.baseUrl ?? '',
+        defaultSpace: settings.defaultSpace ?? '',
+        caFile: settings.caFile ?? '',
+        rejectUnauthorized: settings.rejectUnauthorized !== false,
+      },
+      hasToken,
+    })
+  }
+
+  /**
+   * Saves the Confluence block. An empty `token` means "keep the stored one" — the field is
+   * write-only (invariant 7), so blank cannot mean "clear"; clearing has its own message.
+   */
+  async function handleSaveConfluence(
+    input: { enabled: boolean; baseUrl: string; defaultSpace: string; caFile: string; rejectUnauthorized: boolean },
+    token: string | undefined,
+  ): Promise<void> {
+    try {
+      const baseUrl = input.baseUrl.trim().replace(/\/+$/, '')
+      if (baseUrl.length > 0 && !/^https?:\/\/[^\s]+$/i.test(baseUrl)) {
+        post({ type: 'error', message: `"${baseUrl}" is not a web address — it should begin with https followed by the site name.` })
+        return
+      }
+      if (input.enabled && baseUrl.length === 0) {
+        post({ type: 'error', message: 'Enter the Confluence site address before switching it on.' })
+        return
+      }
+      if (token !== undefined && token.trim().length > 0) {
+        await secrets.set(CONFLUENCE_TOKEN_REF, token.trim())
+      }
+      const stored = ((await secrets.get(CONFLUENCE_TOKEN_REF)) ?? '').length > 0
+      await configManager.save('user', {
+        confluence: {
+          enabled: input.enabled,
+          ...(baseUrl.length > 0 ? { baseUrl } : {}),
+          ...(stored ? { tokenRef: CONFLUENCE_TOKEN_REF } : {}),
+          ...(input.defaultSpace.trim().length > 0 ? { defaultSpace: input.defaultSpace.trim() } : {}),
+          ...(input.caFile.trim().length > 0 ? { caFile: input.caFile.trim() } : {}),
+          // Stored only when switched off, so the default stays the safe one.
+          ...(input.rejectUnauthorized ? {} : { rejectUnauthorized: false }),
+        },
+      } as never)
+      await loadSettings()
+      await postConfluence()
+      post({ type: 'confluenceSaved' })
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleClearConfluenceToken(): Promise<void> {
+    await secrets.delete(CONFLUENCE_TOKEN_REF)
+    const { config } = await configManager.load()
+    if (config.confluence !== undefined) {
+      const { tokenRef: _dropped, ...rest } = config.confluence
+      void _dropped
+      await configManager.save('user', { confluence: rest } as never)
+    }
+    await loadSettings()
+    await postConfluence()
+  }
+
+  /** Test connection: who the token belongs to, or the step and reason it failed. */
+  async function handleTestConfluence(): Promise<void> {
+    try {
+      const client = await confluenceClient()
+      const who = await client.currentUser()
+      post({ type: 'confluenceTest', ok: true, detail: `Connected as ${who}.` })
+    } catch (error) {
+      post({ type: 'confluenceTest', ok: false, detail: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   /** The panel's whole view of S3. Secrets never appear - only whether one is stored. */
   async function postS3(): Promise<void> {
     const { config } = await configManager.load()
@@ -10239,6 +10403,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleClearCodebaseIndex', handleClearCodebaseIndex())
     } else if (message.type === 'openStandingSkill') {
       reportFailure('handleOpenStandingSkill', handleOpenStandingSkill())
+    } else if (message.type === 'requestConfluence') {
+      reportFailure('postConfluence', postConfluence())
+    } else if (message.type === 'saveConfluence') {
+      reportFailure('handleSaveConfluence', handleSaveConfluence(message.settings, message.token))
+    } else if (message.type === 'clearConfluenceToken') {
+      reportFailure('handleClearConfluenceToken', handleClearConfluenceToken())
+    } else if (message.type === 'testConfluence') {
+      reportFailure('handleTestConfluence', handleTestConfluence())
     } else if (message.type === 'setOffice') {
       void configManager
         .load()

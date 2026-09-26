@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { ChevronIcon, CopyIcon, PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
 import { activeMentionQuery, insertMention } from '../mentions.js'
 import { Select } from '../Select.js'
+import { Panel } from './Panel.js'
 import {
   badgeStyle,
   colors,
@@ -171,6 +172,12 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
         </button>
       </div>
 
+      <Panel
+        id="schedules.list"
+        title="Your schedules"
+        summary={`${String(props.schedules.length)} schedule${props.schedules.length === 1 ? '' : 's'}`}
+        defaultOpen
+      >
       {props.schedules.length === 0 ? (
         <p style={{ color: colors.muted, fontSize: 12, marginTop: 14 }}>None yet.</p>
       ) : (
@@ -409,6 +416,7 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
           </button>
         )}
       </div>
+      </Panel>
     </div>
   )
 }

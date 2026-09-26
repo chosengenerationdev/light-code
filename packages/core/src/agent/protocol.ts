@@ -40,6 +40,15 @@ import type { DatasetConfig } from '../dataset/types.js'
 import type { ChartSpec } from '../charts/types.js'
 import type { DiagramSpec } from '../diagrams/types.js'
 
+/** The Confluence block as the settings panel edits it: every field present, empty meaning unset. */
+export interface ConfluenceSettingsView {
+  enabled: boolean
+  baseUrl: string
+  defaultSpace: string
+  caFile: string
+  rejectUnauthorized: boolean
+}
+
 export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data' | 'teamSkills'
 
 export type IndexingKind =
@@ -752,6 +761,14 @@ export type UiToHostMessage =
   | { type: 'requestProjectSettings' }
   /** Excel and Outlook, off by default. Windows only. */
   | { type: 'setOffice'; excel: boolean; outlook: boolean }
+  | { type: 'requestConfluence' }
+  /**
+   * `token` is write-only (invariant 7): absent or blank keeps what is stored, and clearing it is
+   * its own message so a save about the space key can never wipe the token on the way past.
+   */
+  | { type: 'saveConfluence'; settings: ConfluenceSettingsView; token?: string }
+  | { type: 'clearConfluenceToken' }
+  | { type: 'testConfluence' }
   /**
    * Creates the standing-instructions skill and opens it, or just opens it if it exists.
    *
@@ -1598,6 +1615,10 @@ export type HostToUiMessage =
    * One row per currently loaded skill — the same set `publishTeamSkills` sends, so a skill this
    * machine actually published is never structurally invisible to its own status check.
    */
+  /** Never carries the token — only whether one is stored (invariant 7). */
+  | { type: 'confluence'; settings: ConfluenceSettingsView; hasToken: boolean }
+  | { type: 'confluenceSaved' }
+  | { type: 'confluenceTest'; ok: boolean; detail: string }
   | {
       type: 'teamSkillsIndexStatus'
       /**

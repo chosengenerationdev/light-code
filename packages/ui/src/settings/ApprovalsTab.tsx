@@ -4,6 +4,7 @@ import { CommandRulesSection, type CommandRulesSectionProps } from './CommandRul
 import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
 import { colors, fontFamily, iconButtonStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { Panel } from './Panel.js'
 
 export interface ApprovalsTabProps {
   approvals: WorkspaceApprovals
@@ -107,7 +108,61 @@ export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
         These apply to this workspace only, and are stored outside it — a repository cannot grant itself permissions.
       </p>
 
-      <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${colors.border}` }}>
+      <Panel
+        id="approvals.auto"
+        title="Skipping the prompt"
+        summary={CATEGORIES.filter((category) => auto[category.group] === true).map((category) => category.label).join(', ') || 'Always ask'}
+        defaultOpen
+      >
+      <label style={labelStyle()}>Skip the prompt for…</label>
+      {CATEGORIES.map((category) => (
+        <Toggle
+          key={category.group}
+          checked={auto[category.group] === true}
+          label={category.label}
+          description={category.description}
+          onChange={(enabled) => props.onSetAutoApprove(category.group, enabled)}
+        />
+      ))}
+
+      <RevocableList
+        title="Always-allowed tools"
+        empty="None. Use “Always allow” on an approval prompt to add one."
+        entries={props.approvals.allowedTools ?? []}
+        onRevoke={props.onRevokeTool}
+      />
+
+      <RevocableList
+        title="Always-allowed commands (exact match)"
+        empty="None. Use “Always allow this command” on a command prompt to add one."
+        entries={props.approvals.allowedCommands ?? []}
+        onRevoke={props.onRevokeCommand}
+      />
+      <p style={{ color: colors.muted, fontSize: 11 }}>
+        A command is matched byte-for-byte. Allowing <code style={{ fontFamily: monospace }}>npm test</code> does not
+        allow <code style={{ fontFamily: monospace }}>npm test &amp;&amp; something-else</code>.
+      </p>
+      </Panel>
+
+      <Panel id="approvals.commands" title="Commands and the shell">
+      <CommandRulesSection
+        rules={props.commandRules}
+        onSave={props.onSetCommandRules}
+        {...(props.modeId !== undefined ? { modeId: props.modeId } : {})}
+        {...(props.shell !== undefined ? { shell: props.shell } : {})}
+      />
+      </Panel>
+
+      <Panel
+        id="approvals.readRoots"
+        title="Folders it may read"
+        summary={`${String(props.readRoots.length)} outside the workspace`}
+      >
+      <ReadRootsSection roots={props.readRoots} onSave={props.onSetReadRoots} />
+      </Panel>
+
+      <Panel id="approvals.steps" title="Maximum steps per message" summary={String(props.maxIterations)}>
+      <div>
         <label htmlFor="lc-max-steps" style={labelStyle()}>
           Maximum steps per message
         </label>
@@ -139,41 +194,7 @@ export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
         </span>
       </div>
 
-      <label style={labelStyle()}>Skip the prompt for…</label>
-      {CATEGORIES.map((category) => (
-        <Toggle
-          key={category.group}
-          checked={auto[category.group] === true}
-          label={category.label}
-          description={category.description}
-          onChange={(enabled) => props.onSetAutoApprove(category.group, enabled)}
-        />
-      ))}
-
-      <RevocableList
-        title="Always-allowed tools"
-        empty="None. Use “Always allow” on an approval prompt to add one."
-        entries={props.approvals.allowedTools ?? []}
-        onRevoke={props.onRevokeTool}
-      />
-
-      <RevocableList
-        title="Always-allowed commands (exact match)"
-        empty="None. Use “Always allow this command” on a command prompt to add one."
-        entries={props.approvals.allowedCommands ?? []}
-        onRevoke={props.onRevokeCommand}
-      />
-      <p style={{ color: colors.muted, fontSize: 11 }}>
-        A command is matched byte-for-byte. Allowing <code style={{ fontFamily: monospace }}>npm test</code> does not
-        allow <code style={{ fontFamily: monospace }}>npm test &amp;&amp; something-else</code>.
-      </p>
-      <ReadRootsSection roots={props.readRoots} onSave={props.onSetReadRoots} />
-      <CommandRulesSection
-        rules={props.commandRules}
-        onSave={props.onSetCommandRules}
-        {...(props.modeId !== undefined ? { modeId: props.modeId } : {})}
-        {...(props.shell !== undefined ? { shell: props.shell } : {})}
-      />
+      </Panel>
 
     </div>
   )

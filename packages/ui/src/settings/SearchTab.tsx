@@ -21,6 +21,7 @@ import { DispatcherSection, type DispatcherSectionProps } from './DispatcherSect
 import { SearchActivity, type SearchActivityProps } from './SearchActivity.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { SecretField } from './SecretField.js'
+import { Panel } from './Panel.js'
 
 export interface SearchIndex {
   name: string
@@ -594,6 +595,15 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
         anything in a cluster.
       </p>
 
+      <Panel
+        id="search.connections"
+        title="Connections"
+        summary={
+          props.connections.find((connection) => connection.id === props.activeConnectionId)?.label ??
+          `${String(props.connections.length)} connection${props.connections.length === 1 ? '' : 's'}`
+        }
+        defaultOpen
+      >
       {props.connections.length === 0 && (
         <p style={{ color: colors.muted, fontFamily }}>No connections yet.</p>
       )}
@@ -757,10 +767,17 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
         Search tools are offered only while a connection is active. Switching starts a fresh
         prompt, so change it between messages rather than mid-reply.
       </p>
+      </Panel>
 
-      <IndexingSection {...props.indexing} />
-      <DispatcherSection {...props.dispatcher} />
-      <SearchActivity {...props.activity} />
+      <Panel id="search.indexing" title="Embedding model and codebase index">
+        <IndexingSection {...props.indexing} />
+      </Panel>
+      <Panel id="search.dispatcher" title="Tool and skill lookup">
+        <DispatcherSection {...props.dispatcher} />
+      </Panel>
+      <Panel id="search.activity" title="Search activity">
+        <SearchActivity {...props.activity} />
+      </Panel>
     </div>
   )
 }
