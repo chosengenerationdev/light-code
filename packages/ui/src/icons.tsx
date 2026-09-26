@@ -229,14 +229,11 @@ export function SettingsIcon({ size = 16 }: IconProps): ReactElement {
       stroke="currentColor"
       strokeWidth="1.5"
       strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <line x1="2" y1="4" x2="14" y2="4" />
-      <line x1="2" y1="8" x2="14" y2="8" />
-      <line x1="2" y1="12" x2="14" y2="12" />
-      <circle cx="6" cy="4" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="10" cy="8" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M6.51 2.81 L7.03 1.07 L8.97 1.07 L9.49 2.81 L10.62 3.28 L12.21 2.41 L13.59 3.79 L12.72 5.38 L13.19 6.51 L14.93 7.03 L14.93 8.97 L13.19 9.49 L12.72 10.62 L13.59 12.21 L12.21 13.59 L10.62 12.72 L9.49 13.19 L8.97 14.93 L7.03 14.93 L6.51 13.19 L5.38 12.72 L3.79 13.59 L2.41 12.21 L3.28 10.62 L2.81 9.49 L1.07 8.97 L1.07 7.03 L2.81 6.51 L3.28 5.38 L2.41 3.79 L3.79 2.41 L5.38 3.28 Z" />
+      <circle cx="8" cy="8" r="2" />
     </svg>
   )
 }

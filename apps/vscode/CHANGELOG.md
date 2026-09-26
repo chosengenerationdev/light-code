@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.118.1
+
+### Patch Changes
+
+- The settings button in the chat header is now a cog wheel rather than three sliders.
+
 ## 0.118.0
 
 ### Minor Changes
@@ -51,7 +57,7 @@
 
 - Far fewer red lines in the Python tab. Every tool you published was synced back from the bucket
   beside the original and shown as a red "Not loaded" line — for a copy byte-for-byte identical to
-  the tool already running. Identical copies are no longer listed; a copy that *differs* still is,
+  the tool already running. Identical copies are no longer listed; a copy that _differs_ still is,
   in grey rather than red, as are tools you declined. Red is kept for things that need attention.
 
 - The bucket-folder checkbox that uploads new skills or tools for the team is now labelled
@@ -76,7 +82,7 @@
   non-OpenSearch connection). Run it on a colleague's machine to see whether your skills reach it.
 
   **Check status showed green for a skill edited after it was sent.** It now compares the text in
-  the team collection with the file: *indexed*, *changed since sent — send again*, or *not sent*.
+  the team collection with the file: _indexed_, _changed since sent — send again_, or _not sent_.
 
   **Bucket folders were only read when someone pressed Sync.** A colleague's new skill or Python
   tool was uploaded instantly and then reached nobody until each person clicked Sync. Enabled
@@ -84,7 +90,7 @@
   (`s3.syncMinutes` to change it). An unchanged folder costs one listing, nothing more. A synced
   Python tool now appears for approval straight away — it still will not run until approved.
 
-- Tool documentation is intentionally *not* sent to the team pool: a doc for a tool a colleague
+- Tool documentation is intentionally _not_ sent to the team pool: a doc for a tool a colleague
   does not have would have their assistant calling something that does not exist. Tools are
   shared as tools, through a bucket folder marked "publish", and each machine documents what it
   can actually run once the tool is approved there.
@@ -153,7 +159,7 @@
   collection, in Settings → Skills → Team skills. A "Check status" button lists every skill
   authored on this machine with a green dot (indexed) or red dot (not indexed) next to it — never
   color alone, the word is there too. Skills brought in from a bucket are left out on purpose:
-  this answers "did *my* publishing reach the collection", not "is a copy I merely hold present
+  this answers "did _my_ publishing reach the collection", not "is a copy I merely hold present
   somewhere in it". It is a live check against the store each time you ask, not a memory of the
   last publish, so a skill edited since you last sent it will not still read as indexed.
 
