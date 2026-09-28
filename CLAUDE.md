@@ -1876,8 +1876,11 @@ Three reports from real use, fixed together.
   ambiguous person is refused with candidates rather than assigned to the first match.
   **Not verified against a live Jira** — against fakes only, like the rest of §12s.
 - **Approve all looked broken.** Approving loads each tool into the worker, seconds apiece, and the
-  panel changed only when the last finished. `pythonApprovalProgress` is posted per tool; the UI marks
-  rows "Approving…" on click and hides each as it succeeds. The busy state clears on the closing
+  panel changed only when the last finished. `pythonApprovalProgress` is posted per tool; on click the
+  UI shows a spinner on the tool being checked (the first busy row — the host works through them in
+  list order), "Queued" on the rest, and "Checking N of M" with a determinate bar, hiding each row as
+  it succeeds. **Motion was asked for explicitly**: a still label over several seconds per tool still
+  reads as hung, which was the original complaint. The busy state clears on the closing
   `pythonApprovalProblems` (sent *after* the refreshed status, so nothing flickers back) and on any
   `error`, so a thrown approval cannot leave rows stuck. The review source is now highlighted with
   the same tokenizer as chat code blocks.

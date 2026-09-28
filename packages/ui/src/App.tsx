@@ -2399,6 +2399,10 @@ export function App(props: AppProps): ReactElement {
               sources: pythonSources,
               problems: pythonApprovalProblems,
               approving: Object.keys(pythonApproving).filter((name) => pythonApproving[name] === 'working'),
+              approvalProgress: {
+                done: Object.values(pythonApproving).filter((state) => state === 'done').length,
+                total: Object.keys(pythonApproving).length,
+              },
               onRequestSource: (name: string) =>
                 props.transport.post({
                   type: 'requestPythonToolSource',

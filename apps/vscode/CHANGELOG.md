@@ -20,9 +20,10 @@
   own search, and if none will run, searches and lists files itself — honouring `.gitignore` the same
   way.
 
-- **Python tool review shows highlighted source**, and pressing Approve or Approve all now says
-  "Approving…" straight away, with each tool leaving the list as soon as it is done, instead of the
-  panel sitting unchanged while every tool loads.
+- **Python tool review shows highlighted source**, and approving now shows its progress: a spinner
+  on the tool being checked, the others marked queued, and "Checking 2 of 5" with a progress bar.
+  Each tool is loaded to make sure it runs, which takes a few seconds apiece; the panel used to sit
+  unchanged until all of them were done.
 
 ## 0.118.1
 

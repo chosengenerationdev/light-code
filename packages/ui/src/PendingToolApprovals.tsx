@@ -61,6 +61,54 @@ export interface PendingToolApprovalsProps {
    * had not worked. The rows say so instead, and leave one by one as each tool is done.
    */
   approving?: readonly string[] | undefined
+  /** How far through the current approval the host is, counting tools already done. */
+  approvalProgress?: { done: number; total: number } | undefined
+}
+
+/**
+ * A small turning arc, for the tool being checked right now. Motion is the point: a still
+ * "Approving…" for ten seconds reads as hung, and the whole reason this exists is that it did.
+ * `lc-spin` is switched off under reduced motion by the shared stylesheet; the words remain.
+ */
+function Spinner(): ReactElement {
+  return (
+    <svg className="lc-spin" width={12} height={12} viewBox="0 0 16 16" aria-hidden="true" style={{ flex: 'none' }}>
+      <circle cx="8" cy="8" r="6" fill="none" stroke={colors.border} strokeWidth="2" />
+      <path d="M8 2 A6 6 0 0 1 14 8" fill="none" stroke={colors.accent} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** Checking N of M, with a bar. Determinate, because the host reports each tool as it finishes. */
+function ApprovalProgress(props: { done: number; total: number; current: string | undefined }): ReactElement {
+  const fraction = props.total === 0 ? 0 : props.done / props.total
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }} role="status">
+        <Spinner />
+        <span>
+          Checking {Math.min(props.done + 1, props.total)} of {props.total}
+          {props.current !== undefined ? <> &mdash; loading py__{props.current} to make sure it runs</> : null}
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={props.total}
+        aria-valuenow={props.done}
+        style={{ height: 3, marginTop: 4, borderRadius: 2, background: colors.border, overflow: 'hidden' }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${String(Math.round(fraction * 100))}%`,
+            background: colors.accent,
+            transition: 'width 200ms linear',
+          }}
+        />
+      </div>
+    </div>
+  )
 }
 
 /** Python source in the editor's own colours, the same highlighter chat code blocks use. */
@@ -100,6 +148,8 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
   const names = props.tools.map((tool) => tool.name)
   const approving = new Set(props.approving ?? [])
   const busy = props.tools.filter((tool) => approving.has(tool.name)).length
+  // The host checks tools one at a time, in the order they were sent, which is list order.
+  const current = props.tools.find((tool) => approving.has(tool.name))?.name
   const changed = props.tools.filter((tool) => tool.kind === 'hash-mismatch').length
 
   return (
@@ -125,6 +175,13 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
           ? 'Read the source before approving. Nothing here can run until you do.'
           : `${String(changed)} changed after you approved ${changed === 1 ? 'it' : 'them'} — read what changed.`}
       </div>
+      {busy > 0 && (
+        <ApprovalProgress
+          done={props.approvalProgress?.done ?? 0}
+          total={Math.max(props.approvalProgress?.total ?? busy, busy)}
+          current={current}
+        />
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
         {props.tools.map((tool) => {
@@ -147,10 +204,23 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
                 )}
                 {approving.has(tool.name) ? (
                   <span
-                    style={{ marginLeft: 'auto', color: colors.muted, fontSize: 11 }}
-                    role="status"
+                    style={{
+                      marginLeft: 'auto',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      color: colors.muted,
+                      fontSize: 11,
+                    }}
                   >
-                    Approving…
+                    {tool.name === current ? (
+                      <>
+                        <Spinner />
+                        Checking…
+                      </>
+                    ) : (
+                      'Queued'
+                    )}
                   </span>
                 ) : (
                   <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -221,13 +291,9 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
         })}
       </div>
 
-      {props.tools.length > 1 && (
+      {props.tools.length > 1 && busy === 0 && (
         <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center' }}>
-          {busy > 0 ? (
-            <span style={{ fontSize: 12 }} role="status">
-              Approving {busy} tool{busy === 1 ? '' : 's'}… each one is loaded to check it works.
-            </span>
-          ) : reviewingAll ? (
+          {reviewingAll ? (
             <button
               type="button"
               style={primaryButtonStyle(false)}
@@ -240,22 +306,16 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
               Review all {props.tools.length}
             </button>
           )}
-          {busy === 0 && (
-            <>
-              <button
-                type="button"
-                style={secondaryButtonStyle()}
-                onClick={() => props.onDecline(names)}
-              >
-                Decline all
-              </button>
-              <span style={{ color: colors.muted, fontSize: 10 }}>
-                {reviewingAll
-                  ? 'Sources are shown above.'
-                  : 'Shows every source, then offers to approve.'}
-              </span>
-            </>
-          )}
+          <button
+            type="button"
+            style={secondaryButtonStyle()}
+            onClick={() => props.onDecline(names)}
+          >
+            Decline all
+          </button>
+          <span style={{ color: colors.muted, fontSize: 10 }}>
+            {reviewingAll ? 'Sources are shown above.' : 'Shows every source, then offers to approve.'}
+          </span>
         </div>
       )}
     </div>

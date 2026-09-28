@@ -219,14 +219,26 @@ describe('the same tool in two folders', () => {
    * Each approval loads the tool, seconds apiece, so the rows must say they are being dealt with.
    */
   it('says a tool is being approved, and offers no second click while it is', () => {
-    render({ approving: ['ledger_fetch'] })
-    const rows = [...container.querySelectorAll('[role="status"]')].map((node) => node.textContent)
-    expect(rows).toContain('Approving…')
-    expect(rows.some((text) => text?.includes('Approving 1 tool'))).toBe(true)
+    render({ approving: ['ledger_fetch'], approvalProgress: { done: 0, total: 1 } })
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('Checking 1 of 1')
+    expect(container.textContent).toContain('Checking…')
     // The other row is untouched and still answerable.
     expect(button('Approve')).toBeDefined()
     expect(button('Approve all')).toBeUndefined()
     expect(button('Decline all')).toBeUndefined()
+  })
+
+  /* Motion and a count, because a still "Approving…" over several seconds per tool read as hung. */
+  it('spins on the tool being checked, queues the rest, and fills a bar as each finishes', () => {
+    render({ approving: ['ledger_fetch', 'risk_export'], approvalProgress: { done: 1, total: 3 } })
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('Checking 2 of 3')
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('py__ledger_fetch')
+    // One spinner in the heading, one on the row being checked; the queued row has none.
+    expect(container.querySelectorAll('svg.lc-spin')).toHaveLength(2)
+    expect(container.textContent).toContain('Queued')
+    const bar = container.querySelector('[role="progressbar"]')
+    expect(bar?.getAttribute('aria-valuenow')).toBe('1')
+    expect((bar?.firstElementChild as HTMLElement | null)?.style.width).toBe('33%')
   })
 
   it('shows the source highlighted as Python', () => {
