@@ -1879,7 +1879,7 @@ Three reports from real use, fixed together.
   panel changed only when the last finished. `pythonApprovalProgress` is posted per tool; on click the
   UI shows a spinner on the tool being checked (the first busy row — the host works through them in
   list order), "Queued" on the rest, and "Checking N of M" with a determinate bar, hiding each row as
-  it succeeds. **Motion was asked for explicitly**: a still label over several seconds per tool still
+  it succeeds (spinner and bar: 0.119.1). **Motion was asked for explicitly**: a still label over several seconds per tool still
   reads as hung, which was the original complaint. The busy state clears on the closing
   `pythonApprovalProblems` (sent *after* the refreshed status, so nothing flickers back) and on any
   `error`, so a thrown approval cannot leave rows stuck. The review source is now highlighted with
@@ -2744,8 +2744,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.119.0**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.119.0.vsix`, unpublished.
+until then, stale again. The local manifest is **0.119.1**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.119.1.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same
