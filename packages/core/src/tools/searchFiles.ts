@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
 import { z } from 'zod'
 import { resolveToolPath } from './paths.js'
-import { describeRipgrepFailure } from './ripgrepError.js'
+import { searchFiles } from './nativeSearch.js'
+import { describeRipgrepFailure, ripgrepDidNotStart } from './ripgrepError.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -55,28 +56,41 @@ export const searchFilesTool: Tool<SearchFilesParams> = {
     const resolved = await resolveToolPath(context, params.path)
     if (!resolved.ok) return { content: resolved.message, isError: true }
 
-    if (context.ripgrepPath === undefined) {
-      return { content: 'Search is unavailable: ripgrep was not found on this installation.', isError: true }
+    const noMatches: ToolResult = {
+      content:
+        params.includeIgnored === true
+          ? '(no matches)'
+          : '(no matches — .gitignore-excluded files were not searched; retry with includeIgnored: true)',
+    }
+
+    if (context.ripgrepPath !== undefined) {
+      try {
+        const output = await runRipgrepSearch(
+          context.ripgrepPath,
+          resolved.realPath,
+          params.pattern,
+          params.filePattern,
+          context.signal,
+          params.includeIgnored === true,
+        )
+        return output.trim().length > 0 ? { content: output } : noMatches
+      } catch (error) {
+        // Refused or missing binary: the built-in search below answers instead of failing.
+        if (!ripgrepDidNotStart(error)) return { content: describeRipgrepFailure(error, 'Search'), isError: true }
+      }
     }
 
     try {
-      const output = await runRipgrepSearch(
-        context.ripgrepPath,
-        resolved.realPath,
-        params.pattern,
-        params.filePattern,
-        context.signal,
-        params.includeIgnored === true,
-      )
-      if (output.trim().length > 0) return { content: output }
-      return {
-        content:
-          params.includeIgnored === true
-            ? '(no matches)'
-            : '(no matches — .gitignore-excluded files were not searched; retry with includeIgnored: true)',
-      }
+      const { output, truncated } = await searchFiles(context.fs, resolved.realPath, {
+        pattern: params.pattern,
+        filePattern: params.filePattern,
+        includeIgnored: params.includeIgnored === true,
+        signal: context.signal,
+      })
+      if (output.length === 0) return noMatches
+      return { content: truncated ? `${output}\n(results cut short — narrow the path or pattern)` : output }
     } catch (error) {
-      return { content: describeRipgrepFailure(error, 'Search'), isError: true }
+      return { content: error instanceof Error ? error.message : String(error), isError: true }
     }
   },
 }

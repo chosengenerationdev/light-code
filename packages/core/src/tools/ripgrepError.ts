@@ -12,6 +12,17 @@
  * neighbouring install still has a copy, so reaching this message means it could not — and a window
  * reload genuinely does fix it, which is the one thing the raw errno never said.
  */
+/**
+ * Whether ripgrep failed to *start*, as opposed to running and reporting an error.
+ *
+ * A spawn failure carries a string code (`ENOENT`, `EACCES`, `EPERM`, `UNKNOWN` when policy blocks
+ * the program); ripgrep's own failures carry its numeric exit status. Only the first means "use the
+ * built-in search instead" — an invalid pattern must still be reported as one.
+ */
+export function ripgrepDidNotStart(error: unknown): boolean {
+  return typeof (error as { code?: unknown } | null)?.code === 'string'
+}
+
 export function describeRipgrepFailure(error: unknown, what: string): string {
   const code = (error as { code?: unknown } | null)?.code
   if (code === 'ENOENT') {

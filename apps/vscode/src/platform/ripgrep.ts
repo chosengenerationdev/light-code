@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Logger } from '@light-code/core'
@@ -54,12 +55,25 @@ import type { Logger } from '@light-code/core'
  * search only when that fails. A missing binary is reported once rather than on every turn,
  * which is what the single resolution at activation was protecting and is worth keeping.
  */
+export interface RipgrepResolverOptions {
+  /**
+   * VS Code's own install folder (`vscode.env.appRoot`). VS Code ships a ripgrep for its own
+   * search, so it is a second binary to fall back on — and one the machine's policy already lets
+   * run, because Ctrl+Shift+F would not work otherwise.
+   */
+  appRoot?: string
+  /** Whether a binary actually starts. Replaced in tests, whose binaries are placeholder files. */
+  canRun?: (candidate: string) => boolean
+}
+
 export function createRipgrepResolver(
   extensionPath: string,
   logger?: Logger,
+  options: RipgrepResolverOptions = {},
 ): () => string | undefined {
   let cached: string | undefined
   let reportedMissing = false
+  const canRun = memoiseRunnable(options.canRun ?? ripgrepRuns, logger)
 
   return (): string | undefined => {
     // Still where it was: the overwhelmingly common case, and one stat.
@@ -74,9 +88,39 @@ export function createRipgrepResolver(
       reportedMissing = false
     }
 
-    cached = resolveRipgrepPath(extensionPath, logger, !reportedMissing)
+    cached = resolveRipgrepPath(extensionPath, logger, !reportedMissing, { ...options, canRun })
     if (cached === undefined) reportedMissing = true
     return cached
+  }
+}
+
+/**
+ * Runs `rg --version` and says whether it worked.
+ *
+ * Existing is not the same as running. On a managed Windows machine, application control
+ * (AppLocker, WDAC) or antivirus commonly refuses to start programs under the user profile —
+ * which is exactly where VS Code installs extensions — so our `rg.exe` is present and every
+ * spawn of it fails. Checking by running it lets the resolver move on to a copy that is allowed.
+ */
+function ripgrepRuns(candidate: string): boolean {
+  try {
+    const result = spawnSync(candidate, ['--version'], { timeout: 10_000, windowsHide: true })
+    return result.error === undefined && result.status === 0
+  } catch {
+    return false
+  }
+}
+
+/** One check per path for the life of the session; a refused binary is named once in the log. */
+function memoiseRunnable(check: (candidate: string) => boolean, logger?: Logger): (candidate: string) => boolean {
+  const known = new Map<string, boolean>()
+  return (candidate) => {
+    const previous = known.get(candidate)
+    if (previous !== undefined) return previous
+    const runs = check(candidate)
+    known.set(candidate, runs)
+    if (!runs) logger?.warn('a ripgrep binary exists but would not start — trying the next one', candidate)
+    return runs
   }
 }
 
@@ -84,7 +128,9 @@ export function resolveRipgrepPath(
   extensionPath: string,
   logger?: Logger,
   report = true,
+  options: RipgrepResolverOptions = {},
 ): string | undefined {
+  const canRun = options.canRun ?? ripgrepRuns
   const executable = process.platform === 'win32' ? 'rg.exe' : 'rg'
   const binDir = path.join(extensionPath, 'dist', 'bin')
 
@@ -104,7 +150,7 @@ export function resolveRipgrepPath(
           // Read-only install location — if it was already executable this is harmless.
         }
       }
-      return candidate
+      if (canRun(candidate)) return candidate
     }
   }
 
@@ -121,10 +167,16 @@ export function resolveRipgrepPath(
    * neighbouring version's copy is as good as our own, and the alternative is a dead search
    * tool until the window is reloaded.
    */
-  const sibling = siblingRipgrep(extensionPath, executable)
-  if (sibling !== undefined) {
-    logger?.warn('using ripgrep from a newer install of this extension', sibling)
+  for (const sibling of siblingRipgrepCandidates(extensionPath, executable)) {
+    if (!canRun(sibling)) continue
+    logger?.warn('using ripgrep from another install of this extension', sibling)
     return sibling
+  }
+
+  for (const bundled of vscodeRipgrepCandidates(options.appRoot, executable)) {
+    if (!fs.existsSync(bundled) || !canRun(bundled)) continue
+    logger?.warn('using the ripgrep that ships with VS Code', bundled)
+    return bundled
   }
 
   try {
@@ -132,14 +184,14 @@ export function resolveRipgrepPath(
     // top-level require in the bundle, which is what broke activation for every install.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { rgPath } = require('@vscode/ripgrep') as { rgPath: string }
-    if (typeof rgPath === 'string' && fs.existsSync(rgPath)) return rgPath
+    if (typeof rgPath === 'string' && fs.existsSync(rgPath) && canRun(rgPath)) return rgPath
     if (report) logger?.warn('@vscode/ripgrep resolved a path that does not exist', String(rgPath))
   } catch (error) {
     // `report` is false once this has already been said: the resolver runs every turn now, and
     // a line per turn about the same missing binary buries everything else in the channel.
     if (report) {
       logger?.warn(
-        'ripgrep was not found — list_files (recursive) and search_files are unavailable',
+        'no runnable ripgrep was found — list_files and search_files will use the built-in search',
         error instanceof Error ? error.message : String(error),
       )
     }
@@ -158,20 +210,26 @@ export function resolveRipgrepPath(
  * disappears, which no test of the happy path can see.
  */
 export function siblingRipgrep(extensionPath: string, executable: string): string | undefined {
+  return siblingRipgrepCandidates(extensionPath, executable)[0]
+}
+
+/** Every neighbouring install's binary that exists, newest first. */
+export function siblingRipgrepCandidates(extensionPath: string, executable: string): string[] {
   const parent = path.dirname(extensionPath)
   const self = path.basename(extensionPath)
   // Everything up to the trailing version, e.g. `chosengeneration.light-code-vscode`.
   const family = self.replace(/-\d+\.\d+\.\d+.*$/, '')
-  if (family === self || family.length === 0) return undefined
+  if (family === self || family.length === 0) return []
 
   let entries: string[]
   try {
     entries = fs.readdirSync(parent)
   } catch {
     // No readable extensions directory — nothing to recover from, and not an error worth raising.
-    return undefined
+    return []
   }
 
+  const found: string[] = []
   const candidates = entries
     .filter((entry) => entry !== self && entry.startsWith(`${family}-`))
     .map((entry) => ({ entry, version: versionKey(entry.slice(family.length + 1)) }))
@@ -182,10 +240,26 @@ export function siblingRipgrep(extensionPath: string, executable: string): strin
       path.join(parent, entry, 'dist', 'bin', `${process.platform}-${process.arch}`, executable),
       path.join(parent, entry, 'dist', 'bin', executable),
     ]) {
-      if (fs.existsSync(candidate)) return candidate
+      if (fs.existsSync(candidate)) found.push(candidate)
     }
   }
-  return undefined
+  return found
+}
+
+/**
+ * Where VS Code keeps the ripgrep its own search runs, across the layouts it has shipped.
+ *
+ * The folder is stamped with VS Code's commit, so a VS Code update moves it the same way an update
+ * of ours moves our copy; the resolver's existence check notices either.
+ */
+export function vscodeRipgrepCandidates(appRoot: string | undefined, executable: string): string[] {
+  if (appRoot === undefined || appRoot.length === 0) return []
+  const unpacked = path.join(appRoot, 'node_modules.asar.unpacked', '@vscode')
+  return [
+    path.join(unpacked, 'ripgrep-universal', 'bin', `${process.platform}-${process.arch}`, executable),
+    path.join(unpacked, 'ripgrep', 'bin', executable),
+    path.join(appRoot, 'node_modules', '@vscode', 'ripgrep', 'bin', executable),
+  ]
 }
 
 /** The leading numeric parts of a version, so `0.86.0-win32-x64` orders by `[0, 86, 0]`. */

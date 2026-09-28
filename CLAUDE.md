@@ -1844,6 +1844,44 @@ panel**. Settings → Atlassian replaces Settings → Tools → Confluence.
 `confluence/confluence.test.ts` against a fake site; storage-format quirks of a particular Confluence
 version (SVG rendering in `ac:image` especially) are the first thing to check.
 
+## 12t. Search without ripgrep, Jira without limits, approvals that answer (0.119.0)
+
+Three reports from real use, fixed together.
+
+- **"Search breaks very often, complaining ripgrep is missing."** Nothing on the development machine
+  had ever logged it, and every install carried its `rg.exe` — so the cause was not the update race
+  0.86-era `createRipgrepResolver` already handled. The likely one is a managed machine refusing
+  programs under the user profile (AppLocker, WDAC, antivirus), which is exactly where VS Code puts
+  extensions: the file **exists and never starts**. Existence checks cannot see that, so:
+  - the resolver **runs** each candidate once (`rg --version`, memoised per path) before using it,
+    and tries VS Code's own ripgrep (`vscode.env.appRoot`, three historical layouts) after ours —
+    policy already lets that one run, or VS Code's search would not work;
+  - and when nothing runs, `search_files` and recursive `list_files` use `tools/nativeSearch.ts`, a
+    plain-Node walk and search. A **spawn** failure (string errno) falls through to it; ripgrep's own
+    failure (numeric exit, e.g. a bad pattern) is still reported, so a real error is never masked.
+  The fallback matches ripgrep's output shape and `.gitignore` handling, including `.git/info/exclude`
+  and the global excludes file — a real-repository comparison found that gap, and the file lists now
+  agree exactly. `nativeSearch.test.ts` compares against a real ripgrep where one is installed.
+  Why it mattered beyond search: told "search is unavailable", the model ran `rg` through
+  `execute_command`, which is not on PATH and prompts every time. **The fix for "it keeps asking" was
+  making the tool not fail, not widening the safe list** — `rg --pre` runs a program, so `rg` does
+  not belong on it.
+- **Jira could not attach, show an image, or set a component** — the write tool knew five fields.
+  It now has named parameters for the common ones, `fields` for **anything else by id** (applied
+  last, so it wins), links through `update.issuelinks` (whose direction semantics are unambiguous,
+  unlike the top-level `issueLink` endpoint), and the attachment and diagram upload Confluence had —
+  moved to `atlassian/uploads.ts` so both products share one gate (invariant 6, through
+  `resolveToolPath`). `jira_project` exists so custom field ids and allowed values are *looked up*
+  rather than guessed. The preview names a component, version or person Jira would refuse; an
+  ambiguous person is refused with candidates rather than assigned to the first match.
+  **Not verified against a live Jira** — against fakes only, like the rest of §12s.
+- **Approve all looked broken.** Approving loads each tool into the worker, seconds apiece, and the
+  panel changed only when the last finished. `pythonApprovalProgress` is posted per tool; the UI marks
+  rows "Approving…" on click and hides each as it succeeds. The busy state clears on the closing
+  `pythonApprovalProblems` (sent *after* the refreshed status, so nothing flickers back) and on any
+  `error`, so a thrown approval cannot leave rows stuck. The review source is now highlighted with
+  the same tokenizer as chat code blocks.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2702,9 +2740,9 @@ the first run reported a failure that the source had already fixed.
 
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
-workflow has never run. **0.104.0 is live as of 2026-09-22**, queried from the gallery — this paragraph said 0.103.0
-until then, stale again. The local manifest is **0.105.0**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.105.0.vsix`, unpublished.
+workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
+until then, stale again. The local manifest is **0.119.0**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.119.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

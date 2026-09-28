@@ -213,4 +213,30 @@ describe('the same tool in two folders', () => {
     expect(container.textContent).toContain('/mirror/shared_tool.py')
     expect(container.textContent).toContain('2 Python tools waiting')
   })
+
+  /*
+   * Reported: after Approve all, the card stayed exactly as it was for long enough to look broken.
+   * Each approval loads the tool, seconds apiece, so the rows must say they are being dealt with.
+   */
+  it('says a tool is being approved, and offers no second click while it is', () => {
+    render({ approving: ['ledger_fetch'] })
+    const rows = [...container.querySelectorAll('[role="status"]')].map((node) => node.textContent)
+    expect(rows).toContain('Approving…')
+    expect(rows.some((text) => text?.includes('Approving 1 tool'))).toBe(true)
+    // The other row is untouched and still answerable.
+    expect(button('Approve')).toBeDefined()
+    expect(button('Approve all')).toBeUndefined()
+    expect(button('Decline all')).toBeUndefined()
+  })
+
+  it('shows the source highlighted as Python', () => {
+    render({ sources: { ledger_fetch: { source: 'def run(x: int) -> str:\n    # doc\n    return "a"\n' } } })
+    act(() => button('View source')?.click())
+    const pre = container.querySelector('pre')
+    expect(pre?.textContent).toContain('def run(x: int)')
+    const coloured = [...(pre?.querySelectorAll('span[style]') ?? [])].map((span) => span.textContent)
+    expect(coloured).toContain('def')
+    expect(coloured).toContain('return')
+    expect(coloured).toContain('"a"')
+  })
 })

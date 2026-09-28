@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from 'react'
 
+import { tokenize, TOKEN_COLORS } from './highlight.js'
 import { colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from './theme.js'
 
 /**
@@ -54,6 +55,30 @@ export interface PendingToolApprovalsProps {
    * that says so.
    */
   problems?: Record<string, string> | undefined
+  /**
+   * Tools whose approval has been sent and not yet answered. Approving loads each tool into the
+   * worker, seconds apiece, and a panel that did not change in that time read as a button that
+   * had not worked. The rows say so instead, and leave one by one as each tool is done.
+   */
+  approving?: readonly string[] | undefined
+}
+
+/** Python source in the editor's own colours, the same highlighter chat code blocks use. */
+function HighlightedSource(props: { source: string }): ReactElement {
+  return (
+    <>
+      {tokenize(props.source, 'python').map((token, index) => {
+        const color = TOKEN_COLORS[token.kind]
+        return color === undefined ? (
+          <span key={index}>{token.text}</span>
+        ) : (
+          <span key={index} style={{ color }}>
+            {token.text}
+          </span>
+        )
+      })}
+    </>
+  )
 }
 
 export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactElement | null {
@@ -73,6 +98,8 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
   }
 
   const names = props.tools.map((tool) => tool.name)
+  const approving = new Set(props.approving ?? [])
+  const busy = props.tools.filter((tool) => approving.has(tool.name)).length
   const changed = props.tools.filter((tool) => tool.kind === 'hash-mismatch').length
 
   return (
@@ -109,40 +136,52 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
              * bucket mirror beside the local one - and two rows sharing a React key is a list
              * React cannot update predictably as it shrinks.
              */
-            <div key={tool.filePath} style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 6 }}>
+            <div
+              key={tool.filePath}
+              style={{ borderTop: `1px solid ${colors.border}`, paddingTop: 6 }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontFamily: monospace, fontSize: 12 }}>py__{tool.name}</span>
                 {tool.kind === 'hash-mismatch' && (
                   <span style={{ color: colors.error, fontSize: 10 }}>changed</span>
                 )}
-                <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                  <button
-                    type="button"
-                    style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
-                    onClick={() =>
-                      expanded
-                        ? setOpen((current) => current.filter((entry) => entry !== tool.name))
-                        : show(tool.name)
-                    }
+                {approving.has(tool.name) ? (
+                  <span
+                    style={{ marginLeft: 'auto', color: colors.muted, fontSize: 11 }}
+                    role="status"
                   >
-                    {expanded ? 'Hide source' : 'View source'}
-                  </button>
-                  <button
-                    type="button"
-                    style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
-                    onClick={() => props.onApprove([tool.name])}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
-                    title="Hide it. The file stays, and Settings → Python can restore it."
-                    onClick={() => props.onDecline([tool.name])}
-                  >
-                    Decline
-                  </button>
-                </span>
+                    Approving…
+                  </span>
+                ) : (
+                  <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                    <button
+                      type="button"
+                      style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                      onClick={() =>
+                        expanded
+                          ? setOpen((current) => current.filter((entry) => entry !== tool.name))
+                          : show(tool.name)
+                      }
+                    >
+                      {expanded ? 'Hide source' : 'View source'}
+                    </button>
+                    <button
+                      type="button"
+                      style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                      onClick={() => props.onApprove([tool.name])}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                      title="Hide it. The file stays, and Settings → Python can restore it."
+                      onClick={() => props.onDecline([tool.name])}
+                    >
+                      Decline
+                    </button>
+                  </span>
+                )}
               </div>
               <div
                 style={{ color: colors.muted, fontSize: 10, fontFamily: monospace, marginTop: 2 }}
@@ -151,8 +190,8 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
               </div>
               {props.problems?.[tool.name] !== undefined && (
                 <div style={{ color: colors.error, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
-                  Could not be approved: {props.problems[tool.name]}. Approving again will not
-                  help &mdash; fix the file, or Decline to hide it.
+                  Could not be approved: {props.problems[tool.name]}. Approving again will not help
+                  &mdash; fix the file, or Decline to hide it.
                 </div>
               )}
               {expanded && (
@@ -170,7 +209,11 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
                     whiteSpace: 'pre',
                   }}
                 >
-                  {fetched?.source ?? fetched?.problem ?? 'Loading…'}
+                  {fetched?.source !== undefined ? (
+                    <HighlightedSource source={fetched.source} />
+                  ) : (
+                    (fetched?.problem ?? 'Loading…')
+                  )}
                 </pre>
               )}
             </div>
@@ -180,7 +223,11 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
 
       {props.tools.length > 1 && (
         <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center' }}>
-          {reviewingAll ? (
+          {busy > 0 ? (
+            <span style={{ fontSize: 12 }} role="status">
+              Approving {busy} tool{busy === 1 ? '' : 's'}… each one is loaded to check it works.
+            </span>
+          ) : reviewingAll ? (
             <button
               type="button"
               style={primaryButtonStyle(false)}
@@ -193,16 +240,22 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
               Review all {props.tools.length}
             </button>
           )}
-          <button
-            type="button"
-            style={secondaryButtonStyle()}
-            onClick={() => props.onDecline(names)}
-          >
-            Decline all
-          </button>
-          <span style={{ color: colors.muted, fontSize: 10 }}>
-            {reviewingAll ? 'Sources are shown above.' : 'Shows every source, then offers to approve.'}
-          </span>
+          {busy === 0 && (
+            <>
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                onClick={() => props.onDecline(names)}
+              >
+                Decline all
+              </button>
+              <span style={{ color: colors.muted, fontSize: 10 }}>
+                {reviewingAll
+                  ? 'Sources are shown above.'
+                  : 'Shows every source, then offers to approve.'}
+              </span>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -447,7 +447,8 @@ filters already produced.
     title: 'Jira issues',
     keywords: [
       'jira', 'issue', 'ticket', 'bug', 'story', 'jql', 'backlog', 'transition', 'status',
-      'log a bug', 'raise a ticket', 'move to done', 'comment on issue',
+      'log a bug', 'raise a ticket', 'move to done', 'comment on issue', 'component', 'attach to ticket',
+      'assign ticket', 'custom field',
     ],
     body: `
 **Settings → Atlassian → Jira**: the site address, a personal access token, and optionally a default
@@ -457,15 +458,21 @@ the token belongs to.
 
 Jira **Data Center / Server** only; Cloud is not supported.
 
-**Three tools.** \`jira_search\` (plain words, or JQL passed through as written), \`jira_read_issue\`
-(fields, description, every comment, and the status moves available right now), and
-\`jira_write_issue\`, which creates an issue or updates one by key — summary, description, labels,
-priority — and can add a comment and move the status in the same call.
+**Four tools.** \`jira_search\` (plain words, or JQL passed through as written), \`jira_read_issue\`
+(every field with a value — custom fields included — the description, comments, attachments, links,
+sub-tasks and the status moves available right now; it can also look at attached images),
+\`jira_project\` (a project's issue types, components and versions, and every field a new issue of a
+type takes, with custom field ids and allowed values), and \`jira_write_issue\`, which creates an
+issue or updates one by key. In one call it can set summary, description, priority, labels,
+assignee (\`me\`, a username, a name or an email), components, fix and affects versions, due date,
+parent, and **any other field by id** through \`fields\`; attach workspace files and drawn diagrams,
+shown inline in the description with \`!name.png!\`; link other issues; comment; and move the status.
 
 **Every write asks first.** An update shows the description diffed against the issue as it is now,
-every other field from what to what, the literal comment, and where the status would move — or that
-no such move exists from the current status. If a comment or move fails after the fields were saved,
-the result says exactly which part did not happen.
+every other field from what to what, each file with its size, each link, the literal comment, and
+where the status would move. A component or version the project does not have, a person who cannot
+be identified, or a move that does not exist is named as refused before you approve. If an upload,
+comment or move fails after the fields were saved, the result says exactly which part did not happen.
 `,
   },
   {

@@ -1,5 +1,29 @@
 # light-code-vscode
 
+## 0.119.0
+
+### Minor Changes
+
+- **Jira writes can do what you ask.** Creating or updating an issue can now set the assignee
+  ("me", a username, a name or an email), components, fix and affects versions, due date and parent,
+  link other issues, and set **any other field by id** — custom fields included. It can attach files
+  from the workspace and diagrams it draws, and show an image inline in the description with
+  `!screenshot.png!`. A new `jira_project` tool lists a project's components, versions and the fields
+  a new issue takes, with custom field ids and allowed values, so nothing has to be guessed. Reading
+  an issue shows every field with a value and can look at attached images. Every write is still
+  shown to you first, and a component, version or person Jira would refuse is named before you
+  approve.
+
+- **Search no longer depends on ripgrep being allowed to run.** On managed machines the ripgrep
+  bundled with Light Code is often blocked, and the assistant would then ask to run `rg` itself.
+  Light Code now checks that a ripgrep actually starts, falls back to the one VS Code ships for its
+  own search, and if none will run, searches and lists files itself — honouring `.gitignore` the same
+  way.
+
+- **Python tool review shows highlighted source**, and pressing Approve or Approve all now says
+  "Approving…" straight away, with each tool leaving the list as soon as it is done, instead of the
+  panel sitting unchanged while every tool loads.
+
 ## 0.118.1
 
 ### Patch Changes

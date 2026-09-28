@@ -136,7 +136,7 @@ export function createVSCodeHostServices(
       * re-resolves when its answer stops existing, and still reports a genuinely missing binary
       * only once.
       */
-     ripgrepPath: createRipgrepResolver(context.extensionPath, logger),
+     ripgrepPath: createRipgrepResolver(context.extensionPath, logger, { appRoot: vscode.env.appRoot }),
     logSink,
     readDebugSession,
   }

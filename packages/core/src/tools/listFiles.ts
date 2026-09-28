@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process'
+import path from 'node:path'
 import { z } from 'zod'
 import { resolveToolPath } from './paths.js'
-import { describeRipgrepFailure } from './ripgrepError.js'
+import { walkFiles } from './nativeSearch.js'
+import { describeRipgrepFailure, ripgrepDidNotStart } from './ripgrepError.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -74,31 +76,37 @@ export const listFilesTool: Tool<ListFilesParams> = {
     if (!resolved.ok) return { content: resolved.message, isError: true }
 
     if (params.recursive === true) {
-      if (context.ripgrepPath === undefined) {
-        return {
-          content: 'Recursive listing is unavailable: ripgrep was not found. List one directory at a time instead.',
-          isError: true,
+      // Says which rule may have hidden them, rather than leaving "nothing here" to be read
+      // as fact — an empty ignored folder and an ignored one look identical otherwise.
+      const noFiles: ToolResult = {
+        content:
+          params.includeIgnored === true
+            ? '(no files found)'
+            : '(no files found — .gitignore-excluded files are skipped; retry with includeIgnored: true)',
+      }
+      if (context.ripgrepPath !== undefined) {
+        try {
+          const files = await runRipgrepFiles(
+            context.ripgrepPath,
+            resolved.realPath,
+            context.signal,
+            params.includeIgnored === true,
+          )
+          return files.length > 0 ? { content: files.join('\n') } : noFiles
+        } catch (error) {
+          // Refused or missing binary: the built-in walk below answers instead of failing.
+          if (!ripgrepDidNotStart(error)) {
+            return { content: describeRipgrepFailure(error, 'Listing files recursively'), isError: true }
+          }
         }
       }
-      try {
-        const files = await runRipgrepFiles(
-          context.ripgrepPath,
-          resolved.realPath,
-          context.signal,
-          params.includeIgnored === true,
-        )
-        if (files.length > 0) return { content: files.join('\n') }
-        // Says which rule may have hidden them, rather than leaving "nothing here" to be read
-        // as fact — an empty ignored folder and an ignored one look identical otherwise.
-        return {
-          content:
-            params.includeIgnored === true
-              ? '(no files found)'
-              : '(no files found — .gitignore-excluded files are skipped; retry with includeIgnored: true)',
-        }
-      } catch (error) {
-        return { content: describeRipgrepFailure(error, 'Listing files recursively'), isError: true }
-      }
+      const { files, truncated } = await walkFiles(context.fs, resolved.realPath, {
+        includeIgnored: params.includeIgnored === true,
+        signal: context.signal,
+      })
+      if (files.length === 0) return noFiles
+      const listed = files.map((file) => file.split('/').join(path.sep)).join('\n')
+      return { content: truncated ? `${listed}\n(listing cut short — list a narrower folder)` : listed }
     }
 
     const entries = await context.fs.readdir(resolved.realPath)

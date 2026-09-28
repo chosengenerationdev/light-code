@@ -1,5 +1,8 @@
 import type { HttpClient, TlsOptions } from '../platform/http.js'
 import { AtlassianError, AtlassianRest, describeAtlassianFailure } from '../atlassian/rest.js'
+import { contentTypeFor, isSafeAttachmentName, multipartBody } from '../atlassian/uploads.js'
+
+export { contentTypeFor, isSafeAttachmentName }
 
 /**
  * A thin Confluence Data Center / Server client over the one `HttpClient` (invariant 2).
@@ -49,33 +52,6 @@ export interface ConfluencePage extends ConfluencePageSummary {
 /** Kept as a name for callers; the one error type is `AtlassianError`, shared by all three products. */
 export const ConfluenceError = AtlassianError
 export type ConfluenceError = AtlassianError
-
-/** Filenames an attachment may have: what a person would type, and nothing that reaches a header. */
-export function isSafeAttachmentName(name: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,199}$/.test(name) && !name.includes('..')
-}
-
-const CONTENT_TYPES: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  json: 'application/json',
-  pdf: 'application/pdf',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  csv: 'text/csv',
-  zip: 'application/zip',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-}
-
-export function contentTypeFor(filename: string): string {
-  const extension = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase()
-  return CONTENT_TYPES[extension] ?? 'application/octet-stream'
-}
 
 export class ConfluenceClient {
   /** The shared transport: Bearer token, TLS and error wording, one owner for all three products. */
@@ -203,22 +179,7 @@ export class ConfluenceClient {
           '"-" and brackets only.',
       )
     }
-    const boundary = `lightcode${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
-    const head =
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="file"; filename="${file.name}"\r\n` +
-      `Content-Type: ${file.contentType ?? contentTypeFor(file.name)}\r\n\r\n`
-    const tail =
-      `\r\n--${boundary}\r\n` +
-      'Content-Disposition: form-data; name="minorEdit"\r\n\r\ntrue\r\n' +
-      `--${boundary}--\r\n`
-    const encoder = new TextEncoder()
-    const headBytes = encoder.encode(head)
-    const tailBytes = encoder.encode(tail)
-    const bytes = new Uint8Array(headBytes.length + file.bytes.length + tailBytes.length)
-    bytes.set(headBytes, 0)
-    bytes.set(file.bytes, headBytes.length)
-    bytes.set(tailBytes, headBytes.length + file.bytes.length)
+    const body = multipartBody(file, { minorEdit: 'true' })
 
     await this.rest.send(
       `attaching ${file.name}`,
@@ -226,11 +187,11 @@ export class ConfluenceClient {
       {
         method: 'PUT',
         headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Type': body.contentType,
           // Required by Confluence for any multipart write, or it refuses it as a possible CSRF.
           'X-Atlassian-Token': 'no-check',
         },
-        bodyBytes: bytes,
+        bodyBytes: body.bytes,
       },
       signal,
     )

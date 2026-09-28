@@ -161,6 +161,12 @@ export function App(props: AppProps): ReactElement {
   const [commandShell, setCommandShell] = useState<SettingsMessage['shell'] | undefined>(undefined)
   /** Why an approval did not take, per tool, so the row can say so rather than a toast. */
   const [pythonApprovalProblems, setPythonApprovalProblems] = useState<Record<string, string>>({})
+  /**
+   * Tools whose approval is under way (`working`) or has succeeded but not yet reached the status
+   * (`done`, hidden). Cleared when the host's closing `pythonApprovalProblems` arrives, which is
+   * posted after the refreshed status, so nothing reappears in between.
+   */
+  const [pythonApproving, setPythonApproving] = useState<Record<string, 'working' | 'done'>>({})
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   /**
    * The team, as the host resolved it.
@@ -609,6 +615,8 @@ export function App(props: AppProps): ReactElement {
         setPendingApproval(undefined)
         setIsStreaming(false)
       } else if (message.type === 'error') {
+        // An approval that threw never sends its closing message; the rows must not stay busy.
+        setPythonApproving({})
         // A late error must not erase text that already streamed in successfully —
         // finalize whatever arrived, and show the error alongside it, not instead of it.
         setMessages(finalizePendingMessage)
@@ -829,6 +837,14 @@ export function App(props: AppProps): ReactElement {
         // Replaced wholesale, never merged: an empty map is how a row that has since been fixed
         // stops showing the reason it failed last time.
         setPythonApprovalProblems(message.problems)
+        setPythonApproving({})
+      } else if (message.type === 'pythonApprovalProgress') {
+        setPythonApproving((current) => {
+          const next = { ...current }
+          if (message.approved) next[message.name] = 'done'
+          else delete next[message.name]
+          return next
+        })
       } else if (message.type === 'bucketSkillDeletePlan') {
         setBucketDeletePlan(message)
       } else if (message.type === 'shareSections') {
@@ -2371,7 +2387,9 @@ export function App(props: AppProps): ReactElement {
                */
               tools: (pythonStatus?.issues ?? [])
                 .filter(
-                  (issue) => issue.kind === 'unapproved' || issue.kind === 'hash-mismatch',
+                  (issue) =>
+                    (issue.kind === 'unapproved' || issue.kind === 'hash-mismatch') &&
+                    pythonApproving[issue.name] !== 'done',
                 )
                 .map((issue) => ({
                   name: issue.name,
@@ -2380,16 +2398,23 @@ export function App(props: AppProps): ReactElement {
                 })),
               sources: pythonSources,
               problems: pythonApprovalProblems,
+              approving: Object.keys(pythonApproving).filter((name) => pythonApproving[name] === 'working'),
               onRequestSource: (name: string) =>
                 props.transport.post({
                   type: 'requestPythonToolSource',
                   name,
                 } satisfies UiToHostMessage),
-              onApprove: (names: string[]) =>
+              onApprove: (names: string[]) => {
+                // Said at once: each approval loads the tool, which takes seconds apiece.
+                setPythonApproving((current) => ({
+                  ...current,
+                  ...Object.fromEntries(names.map((name) => [name, 'working' as const])),
+                }))
                 props.transport.post({
                   type: 'approvePythonTools',
                   names,
-                } satisfies UiToHostMessage),
+                } satisfies UiToHostMessage)
+              },
               onDecline: (names: string[]) =>
                 props.transport.post({
                   type: 'declinePythonTools',

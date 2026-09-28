@@ -81,7 +81,7 @@ import {
   createBitbucketReadPullRequestTool,
   createBitbucketWritePullRequestTool,
 } from '../atlassian/bitbucket.js'
-import { createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
+import { createJiraProjectTool, createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
 import { ATLASSIAN_PRODUCTS, atlassianProduct } from '../atlassian/products.js'
 import { AtlassianError, type AtlassianConnection } from '../atlassian/rest.js'
 import type { AtlassianProductId, AtlassianProductStatus, AtlassianSettingsView } from '../agent/protocol.js'
@@ -334,6 +334,7 @@ import {
 import { WebviewApprovalGate } from './approvalGate.js'
 import type { HostServices } from './services.js'
 import { NodeFileSystem } from '../platform/node/filesystem.js'
+import { walkFiles } from '../tools/nativeSearch.js'
 import { NodeTerminal } from '../platform/node/terminal.js'
 import { JsonTaskStore } from '../platform/node/taskStore.js'
 
@@ -1242,6 +1243,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           problems.push(problem)
           perTool[name] = problem
         }
+        post({ type: 'pythonApprovalProgress', name, approved: problem === undefined })
       }
 
       await python.refresh()
@@ -3303,6 +3305,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
       combined.register(createJiraSearchTool(jiraOptions))
       combined.register(createJiraReadIssueTool(jiraOptions))
+      combined.register(createJiraProjectTool(jiraOptions))
       combined.register(createJiraWriteIssueTool(jiraOptions))
     }
     if (cachedBitbucket?.enabled === true && cachedBitbucket.baseUrl !== undefined) {
@@ -7739,7 +7742,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Asked now rather than at startup: an extension update moves the binary out from
     // under a session that is still running. See `HostServices.ripgrepPath`.
     const ripgrepPath = services.ripgrepPath()
-    if (workspaceRoot === undefined || ripgrepPath === undefined) return undefined
+    if (workspaceRoot === undefined) return undefined
+    const root = workspaceRoot
+    // No runnable ripgrep: the built-in walk applies the same .gitignore rules, so indexing does
+    // not quietly start embedding a virtualenv on a machine that blocks the binary.
+    const withoutRipgrep = async (): Promise<((relative: string) => boolean) | undefined> => {
+      const { files } = await walkFiles(new NodeFileSystem(), root, { includeIgnored: false })
+      if (files.length === 0) return undefined
+      const allowed = new Set(files)
+      return (relative) => !relative.endsWith('/') && !allowed.has(relative)
+    }
+    if (ripgrepPath === undefined) return withoutRipgrep()
     try {
       const listed = await new Promise<string>((resolve, reject) => {
         const child = spawn(ripgrepPath, ['--files', '--hidden', '--glob', '!.git'], {
@@ -7762,11 +7775,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // gitignore semantics this delegation exists to avoid. The per-file check is enough.
       return (relative) => !relative.endsWith('/') && !allowed.has(relative)
     } catch (error) {
-      logger.warn(
-        'could not list files with ripgrep; indexing will use its own skip list only',
-        String(error),
-      )
-      return undefined
+      logger.warn('could not list files with ripgrep; using the built-in walk instead', String(error))
+      return withoutRipgrep()
     }
   }
 

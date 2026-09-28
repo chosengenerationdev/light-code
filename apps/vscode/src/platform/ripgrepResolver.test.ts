@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createRipgrepResolver, siblingRipgrep } from './ripgrep.js'
+import { createRipgrepResolver, siblingRipgrep, vscodeRipgrepCandidates } from './ripgrep.js'
 
 /**
  * Ripgrep going missing mid-session.
@@ -19,6 +19,8 @@ import { createRipgrepResolver, siblingRipgrep } from './ripgrep.js'
 
 const roots: string[] = []
 const EXE = process.platform === 'win32' ? 'rg.exe' : 'rg'
+/** The binaries here are placeholder files, so starting one is stubbed rather than attempted. */
+const RUNS = { canRun: (): boolean => true }
 
 const makeExtensions = (): string => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-ext-'))
@@ -40,7 +42,7 @@ afterEach(() => {
 describe('the ripgrep resolver', () => {
   it('finds the binary in its own install', () => {
     const root = makeExtensions()
-    const resolve = createRipgrepResolver(install(root, '0.86.0'))
+    const resolve = createRipgrepResolver(install(root, '0.86.0'), undefined, RUNS)
     expect(resolve()).toBe(path.join(root, 'chosengeneration.light-code-vscode-0.86.0', 'dist', 'bin', EXE))
   })
 
@@ -51,7 +53,7 @@ describe('the ripgrep resolver', () => {
   it('recovers when an update deletes the folder it was using', () => {
     const root = makeExtensions()
     const old = install(root, '0.83.0')
-    const resolve = createRipgrepResolver(old)
+    const resolve = createRipgrepResolver(old, undefined, RUNS)
     expect(resolve()).toContain('0.83.0')
 
     install(root, '0.86.0')
@@ -65,7 +67,7 @@ describe('the ripgrep resolver', () => {
   it('does not go looking while its own binary is still there', () => {
     const root = makeExtensions()
     install(root, '0.90.0')
-    const resolve = createRipgrepResolver(install(root, '0.86.0'))
+    const resolve = createRipgrepResolver(install(root, '0.86.0'), undefined, RUNS)
     expect(resolve()).toContain('0.86.0')
   })
 
@@ -99,9 +101,42 @@ describe('the ripgrep resolver', () => {
   /* The happy path must not pay for the recovery: one stat per call, no directory scan. */
   it('keeps answering after the first resolution without re-reading the directory', () => {
     const root = makeExtensions()
-    const resolve = createRipgrepResolver(install(root, '0.86.0'))
+    const resolve = createRipgrepResolver(install(root, '0.86.0'), undefined, RUNS)
     const first = resolve()
     expect(resolve()).toBe(first)
     expect(resolve()).toBe(first)
+  })
+
+  /*
+   * Present but refused. Managed Windows machines commonly block programs under the user
+   * profile, which is where extensions live, so our rg.exe exists and never starts. VS Code's
+   * own copy is under its install folder and is allowed, or VS Code's search would not work.
+   */
+  it('skips a binary that exists but will not start, and uses the one VS Code ships', () => {
+    const root = makeExtensions()
+    const ours = install(root, '0.86.0')
+    const appRoot = path.join(root, 'vscode', 'resources', 'app')
+    const bundled = vscodeRipgrepCandidates(appRoot, EXE)[0]!
+    fs.mkdirSync(path.dirname(bundled), { recursive: true })
+    fs.writeFileSync(bundled, 'VS Code ripgrep')
+
+    const tried: string[] = []
+    const resolve = createRipgrepResolver(ours, undefined, {
+      appRoot,
+      canRun: (candidate) => {
+        tried.push(candidate)
+        return !candidate.startsWith(ours)
+      },
+    })
+    expect(resolve()).toBe(bundled)
+    // Asked once per path: a refused binary is not re-tried on every turn.
+    resolve()
+    expect(tried.filter((candidate) => candidate.startsWith(ours))).toHaveLength(1)
+  })
+
+  it('reports nothing when every binary is refused, so the built-in search takes over', () => {
+    const root = makeExtensions()
+    const resolve = createRipgrepResolver(install(root, '0.86.0'), undefined, { canRun: () => false })
+    expect(resolve()).toBeUndefined()
   })
 })

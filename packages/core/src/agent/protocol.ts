@@ -1604,6 +1604,12 @@ export type HostToUiMessage =
    * and the only thing left to do was press Approve again. Reported here so the row can say it.
    */
   | { type: 'pythonApprovalProblems'; problems: Record<string, string> }
+  /**
+   * One tool of an approval has been dealt with. Approving loads each tool into the worker, which
+   * takes seconds apiece, and the panel used to say nothing until the last one finished — reported
+   * as "I thought it was not working". So each row answers as its own tool is done.
+   */
+  | { type: 'pythonApprovalProgress'; name: string; approved: boolean }
   | { type: 'embedderSaved' }
   | { type: 'indexProgress'; progress: IndexProgress }
   /** Exactly one of `result` or `error`. Both absent would leave the UI spinning. */

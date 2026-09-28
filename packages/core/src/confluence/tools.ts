@@ -1,13 +1,15 @@
-import path from 'node:path'
-
 import { z } from 'zod'
 
-import { layoutDiagram } from '../diagrams/layout.js'
-import { DEFAULT_PALETTE, diagramSvg } from '../diagrams/svg.js'
-import { diagramSpecSchema } from '../diagrams/types.js'
-import { resolveToolPath } from '../tools/paths.js'
-import type { Tool, ToolExecutionContext, ToolPreview, ToolResult } from '../tools/types.js'
-import { contentTypeFor, isSafeAttachmentName, type ConfluenceClient } from './client.js'
+import {
+  attachmentsSchema,
+  describeUploads,
+  diagramsSchema,
+  formatSize,
+  prepareUploads,
+  type PreparedFile,
+} from '../atlassian/uploads.js'
+import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
+import type { ConfluenceClient } from './client.js'
 
 /**
  * Searching, reading and writing Confluence pages.
@@ -246,107 +248,16 @@ const writeSchema = z.object({
       'The complete page body — required for a new page. Omit when updating to change only ' +
         `attachments, e.g. to replace an image by attaching one with the same name. ${STORAGE_GUIDE}`,
     ),
-  attachments: z
-    .array(
-      z.object({
-        path: z.string().min(1).describe('A file in the workspace — an image, a JSON export, a PDF.'),
-        name: z.string().optional().describe('Name on the page. Defaults to the file name.'),
-      }),
-    )
-    .max(20)
-    .optional()
-    .describe('Files to attach. Refer to them in the body by name.'),
-  diagrams: z
-    .array(
-      z.object({
-        name: z.string().min(1).describe('Attachment name, ending .svg, e.g. "architecture.svg".'),
-        diagram: diagramSpecSchema,
-      }),
-    )
-    .max(10)
-    .optional()
-    .describe('Diagrams to draw and attach as SVG images — the same shape show_diagram takes.'),
+  attachments: attachmentsSchema('page', 'Refer to them in the body by name.'),
+  diagrams: diagramsSchema,
 })
 
 type WriteParams = z.infer<typeof writeSchema>
 
-/** Everything the write will upload, resolved once so the preview and the write agree. */
-interface PreparedFile {
-  name: string
-  bytes: Uint8Array
-  contentType: string
-  /** Where it came from, for the preview: a workspace path, or "diagram, 12 nodes". */
-  source: string
-}
+const REPLACES_ON_PAGE = 'REPLACES the attachment of this name on the page'
 
-async function prepareFiles(
-  params: WriteParams,
-  context: ToolExecutionContext,
-): Promise<{ ok: true; files: PreparedFile[] } | { ok: false; message: string }> {
-  const files: PreparedFile[] = []
-  const taken = new Set<string>()
-  const claim = (name: string): string | undefined => {
-    if (!isSafeAttachmentName(name)) {
-      return `"${name}" cannot be an attachment name: letters, digits, spaces, ".", "_", "-" and brackets only.`
-    }
-    if (taken.has(name.toLowerCase())) return `Two attachments are both called "${name}".`
-    taken.add(name.toLowerCase())
-    return undefined
-  }
-
-  for (const attachment of params.attachments ?? []) {
-    // Through the same gate `read_file` uses: confinement, the deny list, and the prompt for a
-    // file outside the workspace. A key file must never become a page attachment (invariant 6).
-    const resolved = await resolveToolPath(context, attachment.path)
-    if (!resolved.ok) return { ok: false, message: resolved.message }
-    const name = attachment.name ?? path.basename(resolved.realPath)
-    const problem = claim(name)
-    if (problem !== undefined) return { ok: false, message: problem }
-    let bytes: Buffer
-    try {
-      bytes = await context.fs.readBytes(resolved.realPath)
-    } catch (error) {
-      return { ok: false, message: `Could not read ${attachment.path}: ${error instanceof Error ? error.message : String(error)}` }
-    }
-    files.push({ name, bytes, contentType: contentTypeFor(name), source: resolved.realPath })
-  }
-
-  for (const drawn of params.diagrams ?? []) {
-    const name = drawn.name.toLowerCase().endsWith('.svg') ? drawn.name : `${drawn.name}.svg`
-    const problem = claim(name)
-    if (problem !== undefined) return { ok: false, message: problem }
-    const svg = diagramSvg(layoutDiagram(drawn.diagram), DEFAULT_PALETTE)
-    files.push({
-      name,
-      bytes: new TextEncoder().encode(svg),
-      contentType: 'image/svg+xml',
-      source: `diagram "${drawn.diagram.title ?? name}", ${String(drawn.diagram.nodes.length)} node(s)`,
-    })
-  }
-  return { ok: true, files }
-}
-
-/**
- * What will be uploaded, with every file that *replaces* one already on the page said so.
- *
- * Replacing an image is the easy thing to approve without noticing — the page text does not
- * change, and a same-named upload silently becomes the new picture — so it is named outright.
- */
 function describeFiles(files: readonly PreparedFile[], existingNames: readonly string[]): string {
-  if (files.length === 0) return 'No attachments.'
-  const existing = new Set(existingNames.map((name) => name.toLowerCase()))
-  return [
-    `${String(files.length)} attachment(s):`,
-    ...files.map(
-      (file) =>
-        `- ${file.name}  (${formatSize(file.bytes.length)}, from ${file.source})` +
-        (existing.has(file.name.toLowerCase()) ? '  — REPLACES the attachment of this name on the page' : ''),
-    ),
-  ].join('\n')
-}
-
-function formatSize(bytes: number): string {
-  return bytes < 1024 ? `${String(bytes)} B` : `${(bytes / 1024).toFixed(1)} KB`
+  return describeUploads(files, existingNames, REPLACES_ON_PAGE)
 }
 
 export function createConfluenceWritePageTool(options: ConfluenceToolOptions): Tool<WriteParams> {
@@ -373,7 +284,7 @@ export function createConfluenceWritePageTool(options: ConfluenceToolOptions): T
     parametersSchema: writeSchema,
 
     async preview(params, context): Promise<ToolPreview> {
-      const prepared = await prepareFiles(params, context)
+      const prepared = await prepareUploads(params, context)
       if (params.pageId !== undefined) {
         // The real current page, so the user approves a change to what is actually there.
         const client = await options.client()
@@ -416,7 +327,7 @@ export function createConfluenceWritePageTool(options: ConfluenceToolOptions): T
 
     async execute(params, context): Promise<ToolResult> {
       try {
-        const prepared = await prepareFiles(params, context)
+        const prepared = await prepareUploads(params, context)
         if (!prepared.ok) return { content: prepared.message, isError: true }
         const client = await options.client()
 
