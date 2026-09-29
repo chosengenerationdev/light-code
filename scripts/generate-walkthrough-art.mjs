@@ -394,7 +394,7 @@ const STEPS = {
       { label: 'Additional CA certificate', control: 'list', value: 'inherits the Network tab' },
       { section: 'embedding' },
       { label: 'Embedding profile', control: 'select', value: 'corporate gateway', hint: 'A provider profile — the same credentials, not a second place to configure one.' },
-      { label: 'Index prefix', value: 'lc-' },
+      { label: 'Index names and team aliases', value: 'in the Project tab', hint: 'With the project name and author they are built from.' },
       { label: 'Index the workspace', control: 'button', value: 'Index now', hint: 'Says what it will send, and where, before the first upload.' },
       { section: 'how it is used' },
       { label: 'Keep tool schemas out of the prompt', control: 'toggle', value: 'on', hint: 'On by default. Nothing is registered when there is nothing to hide, so a small setup pays nothing.' },

@@ -1,5 +1,15 @@
 # light-code-vscode
 
+## 0.120.1
+
+### Patch Changes
+
+- Settings → Project now holds every name that decides how your work appears to the team: the author
+  (which can now be changed here), the index name prefix, an optional fixed codebase index name, the
+  team codebase aliases with "Attach alias to my existing index", and the Team skills panel. Each box
+  saves on its own. The Search tab keeps the embedding model and indexing, and shows where the index is
+  written.
+
 ## 0.120.0
 
 ### Minor Changes

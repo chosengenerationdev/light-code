@@ -177,7 +177,7 @@ export interface SkillsTabProps {
  * Publishing is a button rather than something that happens on save. Sending what you have
  * taught your assistant to colleagues is a decision, and one worth making deliberately.
  */
-function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
+export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
   /*
    * Read once, with an absent list meaning none.
    *
@@ -523,7 +523,15 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         )}
       </Panel>
 
-      <TeamSkillsSection {...props.team} />
+      {/*
+        Moved to Settings → Project with the other shared names: an alias, an index prefix and a
+        project name are one decision about how this machine appears to the team, and were spread
+        across three tabs. The per-skill "sent / changed" marks below still read its status.
+      */}
+      <p style={{ color: colors.muted, fontSize: 11, margin: '8px 0' }}>
+        Sharing skills with the team — the shared names, sending, and checking what colleagues can
+        see — is in <strong>Settings → Project → Team skills</strong>.
+      </p>
 
       <Panel id="skills.index" title="Index and search" summary={props.indexing ? 'Reindexing…' : props.indexResult}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
@@ -608,7 +616,7 @@ function SkillList(
         ) : (
           props.skills.map((skill) => {
             /*
-              From the last "Check status" run in Team skills, not a live call per row — this
+              From the last "Check status" run in Project → Team skills, not a live call per row — this
               list can be long, and a network round trip per skill on every render is not a cost
               anyone asked to pay. So it reflects the most recent check rather than the instant,
               the same way the dedicated status list does; re-run Check status to refresh it.

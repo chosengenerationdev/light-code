@@ -1939,6 +1939,16 @@ skill, tool or index belonged to whom.
 - On the shared Node host, `runIndexRenames`, `runProjectStamp` and `installPythonPackages` are
   admin-only — none matches a mutating prefix, and all three write to what every user shares.
 
+- **Every shared name lives in Settings → Project** (0.120.1, asked for directly). The author
+  (`identity.owner`, hand-edit only until now), the index prefix, an optional fixed codebase index
+  name, the team codebase aliases with "Attach alias", and the whole Team skills panel moved there
+  from Search and Skills. They are one decision — how this machine appears in a shared cluster — and
+  had been spread across three tabs, with the prefix and alias saveable only *with the embedding
+  model*. `saveProjectNaming` saves one box at a time (absent = unchanged, empty = cleared) and
+  carries both blocks forward; Search's `saveEmbedder` now sends the model only, which the host
+  already read as "names unchanged". The Search tab still shows the resolved names read-only, beside
+  the button that sends the code there.
+
 **Not verified against a live cluster or bucket** — the copy is covered against an in-memory store,
 the bucket save path by reading `bridge.ts`. The package check *is* verified against a real
 interpreter.
@@ -2802,8 +2812,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.120.0**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.120.0.vsix`, unpublished.
+until then, stale again. The local manifest is **0.120.1**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.120.1.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

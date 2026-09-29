@@ -806,6 +806,17 @@ export type UiToHostMessage =
   | { type: 'requestProject' }
   /** Empty clears it, and the folder name is used again. Saved for this project only. */
   | { type: 'saveProjectName'; name: string }
+  /**
+   * Settings → Project's shared names. Each field is three-valued: absent leaves it alone, empty
+   * clears it, anything else sets it — so saving one box never disturbs another.
+   */
+  | {
+      type: 'saveProjectNaming'
+      owner?: string
+      indexPrefix?: string
+      indexName?: string
+      indexAliases?: string[]
+    }
   /** Lists the indexes a project name renames; `apply` copies them. */
   | { type: 'runIndexRenames'; apply: boolean }
   /** Lists skills and tools missing an author or project; `apply` writes them in. */
@@ -1940,6 +1951,20 @@ export interface ProjectMessage {
   author?: string
   /** The codebase index as named now, when a search connection is set up. */
   indexName?: string
+  /** `identity.owner` as typed; absent means the login name is used. */
+  ownerConfigured?: string
+  /** The operating system's user name, which is the author when nothing is typed. */
+  loginName?: string
+  indexPrefix?: string
+  defaultIndexPrefix?: string
+  /** Whether `indexName` was typed rather than derived. */
+  indexNameIsCustom?: boolean
+  skillsIndexName?: string
+  docsIndexName?: string
+  /** Team names for codebase indexes, most specific first. */
+  codeAliases?: string[]
+  /** The active store's kind: team names are OpenSearch-only. */
+  storeKind?: string
 }
 
 export interface IndexRenamesMessage {

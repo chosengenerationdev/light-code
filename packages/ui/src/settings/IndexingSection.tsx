@@ -1,5 +1,4 @@
 import type { IndexProgress, IndexResult, ProfileSummary } from '@light-code/core/browser'
-import { codebaseAliases, formatAliases, parseAliases } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
@@ -52,21 +51,12 @@ export interface IndexingSectionProps {
   /** Increments when the host confirms the save reached disk. */
   savedTick: number
   onRequestModels: (profileId: string) => void
-  onSaveEmbedder: (
-    profileId: string,
-    model: string,
-    dimensions: number,
-    indexName: string,
-    indexPrefix: string,
-    indexAliases: string[],
-  ) => void
+  /** The model only; names and aliases are saved from Settings → Project. */
+  onSaveEmbedder: (profileId: string, model: string, dimensions: number) => void
   onStartIndexing: () => void
   /** Empties the index and forgets the manifest, so the next run rebuilds from nothing. */
   onClearIndex: () => void
   onCancelIndexing: () => void
-  /** Joins an already-indexed workspace to the alias without re-embedding it. */
-  onAttachTeamAlias: () => void
-  aliasResult: { alias?: string; index?: string; attributed?: number; error?: string } | undefined
 }
 
 /** Common widths, offered because getting this wrong is a full reindex to discover. */
@@ -84,12 +74,6 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
   const [profileId, setProfileId] = useState('')
   const [model, setModel] = useState('')
   const [dimensions, setDimensions] = useState('')
-  const [indexName, setIndexName] = useState('')
-  const [indexPrefix, setIndexPrefix] = useState('')
-  const [indexAlias, setIndexAlias] = useState('')
-  // Both spellings, through the one function that owns them, so a config written before the
-  // list existed shows up as a one-name list rather than as nothing.
-  const savedAliases = formatAliases(codebaseAliases({ embedder: props.embedder } as never))
   const [confirming, setConfirming] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -99,20 +83,8 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
     setProfileId(props.embedder?.profileId ?? '')
     setModel(props.embedder?.model ?? '')
     setDimensions(props.embedder?.dimensions !== undefined ? String(props.embedder.dimensions) : '')
-    // Only a *chosen* name populates the field; a derived one stays as the placeholder.
-    setIndexName(props.embedder?.indexNameIsCustom === true ? (props.embedder.indexName ?? '') : '')
-    setIndexPrefix(props.embedder?.indexPrefix ?? '')
-    setIndexAlias(savedAliases)
   }, [props.embedder])
 
-  /**
-   * Typed but not yet saved.
-   *
-   * The distinction matters because attaching reads config, not this form. Anything that acts on
-   * the *saved* value has to say so, or it reads as the button being broken.
-   */
-  // Compared as parsed lists, so re-spacing the same names is not an unsaved edit.
-  const aliasUnsaved = formatAliases(parseAliases(indexAlias)) !== savedAliases
 
   /*
    * Fetched on selection rather than behind a button. The user has already told us which
@@ -236,152 +208,20 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
         </span>
       </div>
 
-      <div style={{ marginBottom: 10 }}>
-        <label htmlFor="lc-emb-alias" style={labelStyle()}>
-          Team index alias <span style={{ color: colors.muted, fontWeight: 'normal' }}>(optional)</span>
-        </label>
-        {/*
-          Its own Save, beside the field.
-
-          The section's button is labelled "Save embedder" and sits several fields below, which is
-          why "it says to click the save button, but i don't know where it is" was a fair report:
-          nothing connected an alias to a button about embedders. A control that needs saving
-          should have the save next to it.
-        */}
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input
-            id="lc-emb-alias"
-            type="text"
-            value={indexAlias}
-            spellCheck={false}
-            placeholder="e.g. my-team-code, platform-code"
-            onChange={(event) => setIndexAlias(event.target.value)}
-            style={{ ...textFieldStyle(), flex: 1 }}
-          />
-          <button
-            type="button"
-            style={secondaryButtonStyle()}
-            disabled={!aliasUnsaved}
-            title={aliasUnsaved ? 'Save the alias' : 'Already saved'}
-            onClick={() =>
-              props.onSaveEmbedder(
-                profileId,
-                model.trim(),
-                parsedDimensions,
-                indexName.trim(),
-                indexPrefix.trim(),
-                parseAliases(indexAlias),
-              )
-            }
-          >
-            {aliasUnsaved ? 'Save alias' : 'Saved'}
-          </button>
-        </div>
-        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-          Names pointing at every teammate&rsquo;s index, so <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>search_codebase</code>{' '}
-          can be asked to look across the team. Everyone still writes to their own index; set the
-          same alias on each machine. Results from someone else are marked as not being in your
-          workspace, so the assistant does not try to open them. <strong>OpenSearch only</strong> &mdash;
-          Qdrant and Chroma have no equivalent, and team scope is simply unavailable there.
-        </span>
-        {indexAlias.trim().length > 0 && (
-          <div style={{ marginTop: 6 }}>
-            {/*
-              For an index that already exists. Re-embedding a whole repository to gain a label
-              would be an absurd price for a string, so this attaches the alias in place and
-              fills in the attribution that older chunks were written without.
-
-              Gated on the *saved* alias rather than the typed one. The host attaches whatever is
-              in config, so offering this against an unsaved box meant clicking it and being told
-              to set an alias you had visibly just set.
-            */}
-            <button
-              type="button"
-              style={secondaryButtonStyle()}
-              disabled={aliasUnsaved}
-              title={aliasUnsaved ? 'Press Save first — this attaches the saved alias' : undefined}
-              onClick={props.onAttachTeamAlias}
-            >
-              Attach alias to my existing index
-            </button>
-            <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
-              {aliasUnsaved
-                ? 'Press Save below first. This attaches whatever alias is saved, not what is typed above.'
-                : 'Use this if you indexed before setting an alias. It adds the alias and labels the existing chunks as yours \u2014 no re-indexing, and nothing is re-embedded. Chunks already labelled with someone else are never touched.'}
-            </span>
-            {props.aliasResult?.error !== undefined && (
-              <span style={{ display: 'block', color: colors.error, fontSize: 11, marginTop: 4 }}>
-                {props.aliasResult.error}
-              </span>
-            )}
-            {props.aliasResult?.error === undefined && props.aliasResult?.alias !== undefined && (
-              <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
-                {`"${props.aliasResult.index ?? ''}" now answers to "${props.aliasResult.alias}". `}
-                {props.aliasResult.attributed === 0
-                  ? 'Every chunk already had an owner.'
-                  : `${String(props.aliasResult.attributed ?? 0)} existing chunk(s) labelled as yours.`}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <label htmlFor="lc-emb-prefix" style={labelStyle()}>
-          Index name prefix
-        </label>
-        <input
-          id="lc-emb-prefix"
-          type="text"
-          value={indexPrefix}
-          spellCheck={false}
-          placeholder={props.embedder?.defaultIndexPrefix ?? 'light-code'}
-          onChange={(event) => setIndexPrefix(event.target.value)}
-          style={textFieldStyle()}
-        />
-        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-          Front of both derived names — the codebase index and the <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>-docs</code>{' '}
-          one — so a shared cluster shows at a glance whose collections are whose. Lowercase letters,
-          digits, dot, dash and underscore. Changing it points at <em>new</em>, empty collections;
-          the old ones keep their data until you delete them in OpenSearch.
-        </span>
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <label htmlFor="lc-emb-index" style={labelStyle()}>
-          Index name
-        </label>
-        <input
-          id="lc-emb-index"
-          type="text"
-          value={indexName}
-          spellCheck={false}
-          placeholder={props.embedder?.indexName ?? 'derived from the workspace path'}
-          onChange={(event) => setIndexName(event.target.value)}
-          style={textFieldStyle()}
-        />
-        {/*
-          The two that follow from it, named.
-
-          Both are derived from this one and neither had anywhere to be seen, so "where did my
-          skills go" had no answer short of listing the cluster and guessing. Shown together
-          because changing the field above moves all three at once, which is the thing worth
-          knowing before changing it.
-        */}
-        {(props.embedder?.skillsIndexName !== undefined ||
-          props.embedder?.docsIndexName !== undefined) && (
-          <span
-            style={{
-              display: 'block',
-              color: colors.muted,
-              fontSize: 11,
-              marginTop: 4,
-              fontFamily: 'var(--vscode-editor-font-family, monospace)',
-              wordBreak: 'break-all',
-            }}
-          >
+      {/*
+        Index names and team aliases live in Settings → Project now, with the project name and the
+        author they are built from. Shown here read-only because this is where the indexing button
+        is, and pressing it should not mean guessing where the source code goes.
+      */}
+      <div style={{ marginBottom: 12, fontSize: 11, color: colors.muted, lineHeight: 1.6 }}>
+        {props.embedder?.indexName !== undefined && (
+          <div style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)', wordBreak: 'break-all' }}>
+            codebase → {props.embedder.indexName}
             {props.embedder.skillsIndexName !== undefined && (
-              <>skills → {props.embedder.skillsIndexName}</>
+              <>
+                <br />
+                skills → {props.embedder.skillsIndexName}
+              </>
             )}
             {props.embedder.docsIndexName !== undefined && (
               <>
@@ -389,14 +229,9 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
                 tool docs → {props.embedder.docsIndexName}
               </>
             )}
-          </span>
+          </div>
         )}
-        <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
-          Leave blank and one is derived from this folder&apos;s path — collision-free, but nobody
-          looking at the cluster can tell whose it is. Name it if you share a cluster. Also how you
-          move to a new index after changing the embedding model: a vector field&apos;s width is fixed
-          when the index is created, so a different width needs a different index.
-        </span>
+        Index names, the prefix and team aliases are set in <strong>Settings → Project</strong>.
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -404,7 +239,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           type="button"
           style={secondaryButtonStyle()}
           disabled={!configured}
-          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions, indexName.trim(), indexPrefix.trim(), parseAliases(indexAlias))}
+          onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions)}
         >
           Save embedder
         </button>

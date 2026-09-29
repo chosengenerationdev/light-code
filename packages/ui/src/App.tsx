@@ -60,6 +60,7 @@ import { ModeSelector } from './ModeSelector.js'
 import { Guide } from './guide/Guide.js'
 import type { ReviewItem } from './settings/ReviewsTab.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
+import type { SkillsTabProps } from './settings/SkillsTab.js'
 import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
 import type { EmbedderState } from './settings/IndexingSection.js'
@@ -1235,6 +1236,58 @@ export function App(props: AppProps): ReactElement {
           onSync: () => props.transport.post({ type: 'syncS3', kind: 'tools' } satisfies UiToHostMessage),
         }
 
+  /** The team skills panel's state and actions: shown in Settings → Project, read by the Skills tab. */
+  const skillsTeam: SkillsTabProps['team'] = {
+    // Both spellings, merged by the one function that owns them — a config written
+    // before the list existed still reads back as a one-name list.
+    aliases: skillAliases({ embedder } as never),
+    // Resolved host-side; the panel only reports it, because it is derived rather
+    // than chosen and `embedder.indexName` is where it is changed.
+    ...(embedder?.skillsIndexName !== undefined
+      ? { collection: embedder.skillsIndexName }
+      : {}),
+    onSaveAliases: (aliases: string[]) =>
+      props.transport.post({
+        type: 'saveSkillsAlias',
+        aliases,
+      } satisfies UiToHostMessage),
+    onPublish: () => {
+      setTeamSkillsResult(undefined)
+      props.transport.post({ type: 'publishTeamSkills' } satisfies UiToHostMessage)
+    },
+    onClear: () => {
+      setTeamSkillsResult(undefined)
+      props.transport.post({ type: 'clearTeamSkills' } satisfies UiToHostMessage)
+    },
+    onStop: () =>
+      props.transport.post({
+        type: 'cancelIndexing',
+        kind: 'teamSkills',
+      } satisfies UiToHostMessage),
+    publishing: indexingProgress?.kind === 'teamSkills' && indexingProgress.running,
+    progress: indexingProgress?.kind === 'teamSkills' ? indexingProgress : undefined,
+    result: teamSkillsResult,
+    status: teamSkillsStatus,
+    statusError: teamSkillsStatusError,
+    statusLoading: teamSkillsStatusLoading,
+    onRefreshStatus: () => {
+      setTeamSkillsStatusLoading(true)
+      setTeamSkillsStatusError(undefined)
+      props.transport.post({ type: 'requestTeamSkillsIndexStatus' } satisfies UiToHostMessage)
+    },
+    // Keyed by its own target, so it never shows the docs probe's result or vice versa.
+    probe: { running: probeRunning.teamSkills === true, result: searchProbes.teamSkills },
+    onProbe: (query: string, target: ProbeTarget) => {
+      setProbeRunning((current) => ({ ...current, [target]: true }))
+      props.transport.post({
+        type: 'runSearchProbe',
+        query,
+        target,
+      } satisfies UiToHostMessage)
+    },
+    onClearProbe: () => clearProbe('teamSkills'),
+  }
+
   const searchProps = {
     connections: searchConnections,
     activeConnectionId: activeSearchId,
@@ -1287,38 +1340,12 @@ export function App(props: AppProps): ReactElement {
         setEmbedderModelsLoading(true)
         props.transport.post({ type: 'requestEmbedderModels', profileId } satisfies UiToHostMessage)
       },
-      onSaveEmbedder: (
-        profileId: string,
-        model: string,
-        dimensions: number,
-        indexName: string,
-        indexPrefix: string,
-        indexAliases: string[],
-      ) => {
+      onSaveEmbedder: (profileId: string, model: string, dimensions: number) => {
         setError(undefined)
-        props.transport.post({
-          type: 'saveEmbedder',
-          profileId,
-          model,
-          dimensions,
-          /*
-           * Sent whatever their value, including empty.
-           *
-           * They were conditional spreads, which slip past excess-property checking — so a field
-           * renamed in the protocol kept compiling while going nowhere. And an empty string here
-           * is a real answer: somebody cleared the box, and the host deletes the key. Omitting it
-           * would mean "unchanged" and the box would spring back on the next load.
-           */
-          indexName,
-          indexPrefix,
-          indexAliases,
-        } satisfies UiToHostMessage)
+        // The model only. Names and aliases are omitted — which the host reads as "unchanged" —
+        // because they are edited in Settings → Project now.
+        props.transport.post({ type: 'saveEmbedder', profileId, model, dimensions } satisfies UiToHostMessage)
       },
-      onAttachTeamAlias: () => {
-        setAliasResult(undefined)
-        props.transport.post({ type: 'attachTeamAlias' } satisfies UiToHostMessage)
-      },
-      aliasResult,
       onStartIndexing: () => {
         setIndexResult(undefined)
         props.transport.post({ type: 'startIndexing' } satisfies UiToHostMessage)
@@ -1941,56 +1968,7 @@ export function App(props: AppProps): ReactElement {
                   skill,
                   image,
                 } satisfies UiToHostMessage),
-              team: {
-                // Both spellings, merged by the one function that owns them — a config written
-                // before the list existed still reads back as a one-name list.
-                aliases: skillAliases({ embedder } as never),
-                // Resolved host-side; the panel only reports it, because it is derived rather
-                // than chosen and `embedder.indexName` is where it is changed.
-                ...(embedder?.skillsIndexName !== undefined
-                  ? { collection: embedder.skillsIndexName }
-                  : {}),
-                onSaveAliases: (aliases: string[]) =>
-                  props.transport.post({
-                    type: 'saveSkillsAlias',
-                    aliases,
-                  } satisfies UiToHostMessage),
-                onPublish: () => {
-                  setTeamSkillsResult(undefined)
-                  props.transport.post({ type: 'publishTeamSkills' } satisfies UiToHostMessage)
-                },
-                onClear: () => {
-                  setTeamSkillsResult(undefined)
-                  props.transport.post({ type: 'clearTeamSkills' } satisfies UiToHostMessage)
-                },
-                onStop: () =>
-                  props.transport.post({
-                    type: 'cancelIndexing',
-                    kind: 'teamSkills',
-                  } satisfies UiToHostMessage),
-                publishing: indexingProgress?.kind === 'teamSkills' && indexingProgress.running,
-                progress: indexingProgress?.kind === 'teamSkills' ? indexingProgress : undefined,
-                result: teamSkillsResult,
-                status: teamSkillsStatus,
-                statusError: teamSkillsStatusError,
-                statusLoading: teamSkillsStatusLoading,
-                onRefreshStatus: () => {
-                  setTeamSkillsStatusLoading(true)
-                  setTeamSkillsStatusError(undefined)
-                  props.transport.post({ type: 'requestTeamSkillsIndexStatus' } satisfies UiToHostMessage)
-                },
-                // Keyed by its own target, so it never shows the docs probe's result or vice versa.
-                probe: { running: probeRunning.teamSkills === true, result: searchProbes.teamSkills },
-                onProbe: (query: string, target: ProbeTarget) => {
-                  setProbeRunning((current) => ({ ...current, [target]: true }))
-                  props.transport.post({
-                    type: 'runSearchProbe',
-                    query,
-                    target,
-                  } satisfies UiToHostMessage)
-                },
-                onClearProbe: () => clearProbe('teamSkills'),
-              },
+              team: skillsTeam,
               skills,
               issues: skillIssues,
               skillsDir,
@@ -2185,6 +2163,13 @@ export function App(props: AppProps): ReactElement {
               project,
               stamp: projectStamp,
               renames: indexRenames,
+              team: skillsTeam,
+              aliasResult,
+              onAttachTeamAlias: () => {
+                setAliasResult(undefined)
+                props.transport.post({ type: 'attachTeamAlias' } satisfies UiToHostMessage)
+              },
+              onSaveNaming: (naming) => props.transport.post({ type: 'saveProjectNaming', ...naming } satisfies UiToHostMessage),
               onSaveName: (name) => props.transport.post({ type: 'saveProjectName', name } satisfies UiToHostMessage),
               onStamp: (apply) => {
                 setProjectStamp((current) => (apply && current !== undefined ? { ...current, running: true } : current))

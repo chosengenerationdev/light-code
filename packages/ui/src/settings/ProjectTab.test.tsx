@@ -18,10 +18,16 @@ afterEach(() => {
   container.remove()
 })
 
-function render(overrides: Partial<ProjectTabProps> = {}): { saved: string[]; stamps: boolean[]; renames: boolean[] } {
+function render(overrides: Partial<ProjectTabProps> = {}): {
+  saved: string[]
+  stamps: boolean[]
+  renames: boolean[]
+  naming: Parameters<ProjectTabProps['onSaveNaming']>[0][]
+} {
   const saved: string[] = []
   const stamps: boolean[] = []
   const renames: boolean[] = []
+  const naming: Parameters<ProjectTabProps['onSaveNaming']>[0][] = []
   act(() => {
     root.render(
       <ProjectTab
@@ -31,12 +37,66 @@ function render(overrides: Partial<ProjectTabProps> = {}): { saved: string[]; st
         onSaveName={(name) => saved.push(name)}
         onStamp={(apply) => stamps.push(apply)}
         onRenames={(apply) => renames.push(apply)}
+        onSaveNaming={(value) => naming.push(value)}
+        onAttachTeamAlias={() => {}}
+        aliasResult={undefined}
         {...overrides}
       />,
     )
   })
-  return { saved, stamps, renames }
+  return { saved, stamps, renames, naming }
 }
+
+function type(selector: string, value: string): void {
+  const input = container.querySelector<HTMLInputElement>(selector)!
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+/** The Save beside a field: the next button after it in the same row. */
+function saveBeside(selector: string): HTMLButtonElement {
+  return container.querySelector(selector)!.parentElement!.querySelector('button')!
+}
+
+describe('shared names, moved here from Search and Skills', () => {
+  it('saves each box on its own, so saving one never touches another', () => {
+    const calls = render({
+      project: {
+        type: 'project',
+        hasWorkspace: true,
+        folder: 'pay-api',
+        loginName: 'ana',
+        indexName: 'pay-light-code-ana-1',
+        codeAliases: ['payments-code'],
+        defaultIndexPrefix: 'light-code',
+      },
+    })
+    expect(container.querySelector<HTMLInputElement>('#project-code-alias')?.value).toBe('payments-code')
+    expect(container.querySelector<HTMLInputElement>('#project-owner')?.placeholder).toContain('ana')
+
+    type('#project-owner', 'Ana Silva')
+    act(() => saveBeside('#project-owner').click())
+    type('#project-prefix', 'fin')
+    act(() => saveBeside('#project-prefix').click())
+    type('#project-code-alias', 'payments-code, platform-code')
+    act(() => saveBeside('#project-code-alias').click())
+
+    expect(calls.naming).toEqual([
+      { owner: 'Ana Silva' },
+      { indexPrefix: 'fin' },
+      { indexAliases: ['payments-code', 'platform-code'] },
+    ])
+  })
+
+  it('refuses an alias OpenSearch would refuse, before it is saved', () => {
+    render()
+    type('#project-code-alias', 'Has Spaces')
+    expect(saveBeside('#project-code-alias').disabled).toBe(true)
+    expect(container.querySelector('[role="alert"]')).not.toBeNull()
+  })
+})
 
 const button = (text: string): HTMLButtonElement | undefined =>
   [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes(text))

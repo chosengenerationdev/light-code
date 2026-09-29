@@ -144,7 +144,7 @@ import {
   missingAttribution,
   type Attribution,
 } from '../sharing/attribution.js'
-import { projectConfigSchema } from '../config/schema.js'
+import { identityConfigSchema, projectConfigSchema } from '../config/schema.js'
 import { isTranscriptMessage } from './backgroundMessages.js'
 import {
   ConfigManager,
@@ -8461,14 +8461,111 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const configured = configuredProjectName(config)
     const author = indexOwner(config)
     const index = codebaseIndexName(config)
+    const skillsIndex = skillsIndexName(config)
+    const docsIndex = docsIndexName(config)
+    const ownerConfigured = config.identity?.owner?.trim()
+    let loginName: string | undefined
+    try {
+      loginName = os.userInfo().username
+    } catch {
+      loginName = undefined
+    }
+    const storeKind = config.activeVectorStoreId !== undefined ? config.vectorStores?.[config.activeVectorStoreId]?.kind : undefined
+    const prefix = config.embedder?.indexPrefix?.trim()
     post({
       type: 'project',
       hasWorkspace: workspaceRoot !== undefined,
       ...(configured !== undefined ? { configured } : {}),
       ...(workspaceRoot !== undefined ? { folder: path.basename(workspaceRoot) } : {}),
       ...(author !== undefined ? { author } : {}),
-      ...(config.activeVectorStoreId !== undefined && index !== undefined ? { indexName: index } : {}),
+      ...(index !== undefined ? { indexName: index } : {}),
+      ...(ownerConfigured !== undefined && ownerConfigured.length > 0 ? { ownerConfigured } : {}),
+      ...(loginName !== undefined ? { loginName } : {}),
+      ...(prefix !== undefined && prefix.length > 0 ? { indexPrefix: prefix } : {}),
+      defaultIndexPrefix: DEFAULT_INDEX_PREFIX,
+      indexNameIsCustom: (config.embedder?.indexName?.trim().length ?? 0) > 0,
+      ...(skillsIndex !== undefined ? { skillsIndexName: skillsIndex } : {}),
+      ...(docsIndex !== undefined ? { docsIndexName: docsIndex } : {}),
+      codeAliases: codebaseAliases(config),
+      ...(storeKind !== undefined ? { storeKind } : {}),
     })
+  }
+
+  /**
+   * Settings → Project's shared names: the author and the index names and team aliases.
+   *
+   * Each field is three-valued (absent: leave it; empty: clear it; otherwise: set it), so the
+   * author box can be saved without touching the aliases and the other way round. The embedder
+   * block is carried forward rather than rebuilt, for the reason `handleSaveEmbedder` records.
+   */
+  async function handleSaveProjectNaming(input: {
+    owner?: string | undefined
+    indexPrefix?: string | undefined
+    indexName?: string | undefined
+    indexAliases?: string[] | undefined
+  }): Promise<void> {
+    try {
+      const { config: current } = await configManager.load()
+      const patch: Record<string, unknown> = {}
+
+      if (input.owner !== undefined) {
+        const owner = input.owner.trim()
+        const identity: Record<string, unknown> = { ...(current.identity ?? {}) }
+        if (owner.length > 0) {
+          const parsed = identityConfigSchema.safeParse({ owner })
+          if (!parsed.success) {
+            post({ type: 'error', message: `Author not saved: ${parsed.error.issues[0]?.message ?? 'invalid'}.` })
+            return
+          }
+          identity['owner'] = owner
+        } else {
+          delete identity['owner']
+        }
+        patch['identity'] = identity
+      }
+
+      if (input.indexPrefix !== undefined || input.indexName !== undefined || input.indexAliases !== undefined) {
+        const embedder: Record<string, unknown> = { ...(current.embedder ?? {}) }
+        const put = (key: string, value: string | undefined): void => {
+          if (value === undefined) return
+          if (value.trim().length > 0) embedder[key] = value.trim()
+          else delete embedder[key]
+        }
+        if (input.indexPrefix !== undefined && input.indexPrefix.trim().length > 0) {
+          const problem = aliasProblem(input.indexPrefix.trim())
+          if (problem !== undefined) {
+            post({ type: 'error', message: `Index prefix not saved: ${problem}` })
+            return
+          }
+        }
+        put('indexPrefix', input.indexPrefix)
+        put('indexName', input.indexName)
+        if (input.indexAliases !== undefined) {
+          const problem = input.indexAliases.map(aliasProblem).find((entry) => entry !== undefined)
+          if (problem !== undefined) {
+            post({ type: 'error', message: `Team alias not saved: ${problem}` })
+            return
+          }
+          const { primary, rest } = aliasFields(input.indexAliases)
+          if (primary !== undefined) embedder['indexAlias'] = primary
+          else delete embedder['indexAlias']
+          if (rest !== undefined) embedder['indexAliases'] = rest
+          else delete embedder['indexAliases']
+        }
+        patch['embedder'] = embedder
+      }
+
+      if (Object.keys(patch).length === 0) return
+      await configManager.save('user', patch as never)
+      await loadSettings()
+      const { config } = await configManager.load()
+      await postEmbedder(config)
+      await postProject()
+      if (patch['embedder'] !== undefined) scheduleDocsReindex('index names changed')
+      post({ type: 'embedderSaved' })
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
   }
 
   async function handleSaveProjectName(name: string): Promise<void> {
@@ -9333,6 +9430,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       await configManager.save('user', { embedder } as never)
       const { config } = await configManager.load()
       await postEmbedder(config)
+      // The Project tab shows the names this decides.
+      await postProject()
       /*
        * A changed prefix means different collection names, so whatever is in the new ones is
        * unrelated to what was in the old. The documentation corpus is small enough to just
@@ -10874,6 +10973,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleTestSearchConnection', handleTestSearchConnection(message.connection))
     } else if (message.type === 'requestProject') {
       reportFailure('postProject', postProject())
+    } else if (message.type === 'saveProjectNaming') {
+      reportFailure(
+        'handleSaveProjectNaming',
+        handleSaveProjectNaming({
+          owner: message.owner,
+          indexPrefix: message.indexPrefix,
+          indexName: message.indexName,
+          indexAliases: message.indexAliases,
+        }),
+      )
     } else if (message.type === 'saveProjectName') {
       reportFailure('handleSaveProjectName', handleSaveProjectName(message.name))
     } else if (message.type === 'runIndexRenames') {

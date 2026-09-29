@@ -106,3 +106,38 @@ describe('the embedder handler', () => {
     expect(handler.slice(0, handler.indexOf('put('))).toContain('...(current.embedder ?? {})')
   })
 })
+
+/**
+ * Settings → Project saves the author, the prefix, the index name and the team aliases one box at a
+ * time, into the same two blocks other panels write. The same two rules apply: carry the stored
+ * block forward, and tell an unsent field from a cleared one.
+ */
+describe('the project naming handler', () => {
+  const handlerSource = async (): Promise<string> => {
+    const source = await fs.readFile(path.join(import.meta.dirname, 'bridge.ts'), 'utf8')
+    const start = source.indexOf('async function handleSaveProjectNaming(')
+    expect(start).toBeGreaterThan(-1)
+    return source.slice(start, source.indexOf('\n  }\n', start))
+  }
+
+  it('carries both stored blocks forward rather than rebuilding them', async () => {
+    const handler = await handlerSource()
+    expect(handler).toContain('...(current.embedder ?? {})')
+    expect(handler).toContain('...(current.identity ?? {})')
+  })
+
+  it('leaves unsent fields alone, clears emptied ones, and writes nothing when nothing was sent', async () => {
+    const handler = await handlerSource()
+    expect(handler).toContain('if (value === undefined) return')
+    expect(handler).toContain('else delete embedder[key]')
+    expect(handler).toContain("if (input.owner !== undefined)")
+    expect(handler).toContain("delete identity['owner']")
+    expect(handler).toContain('if (Object.keys(patch).length === 0) return')
+  })
+
+  it('refuses an alias or prefix OpenSearch would refuse, before saving', async () => {
+    const handler = await handlerSource()
+    expect(handler).toContain('aliasProblem(input.indexPrefix.trim())')
+    expect(handler).toContain('input.indexAliases.map(aliasProblem)')
+  })
+})

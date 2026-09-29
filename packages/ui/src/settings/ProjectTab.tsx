@@ -10,7 +10,10 @@ import {
   secondaryButtonStyle,
   textFieldStyle,
 } from '../theme.js'
+import { aliasProblem, formatAliases, parseAliases } from '@light-code/core/browser'
+
 import { Panel } from './Panel.js'
+import { TeamSkillsSection, type SkillsTabProps } from './SkillsTab.js'
 
 /**
  * Settings → Project: what this project is called, and the two one-off jobs that name changes.
@@ -28,6 +31,13 @@ export interface ProjectTabProps {
   onSaveName: (name: string) => void
   onStamp: (apply: boolean) => void
   onRenames: (apply: boolean) => void
+  /** Author, index prefix and name, and team code aliases. Absent fields are left alone. */
+  onSaveNaming: (naming: { owner?: string; indexPrefix?: string; indexName?: string; indexAliases?: string[] }) => void
+  /** Joins an index made before the alias existed to it, without re-embedding. */
+  onAttachTeamAlias: () => void
+  aliasResult: { alias?: string; index?: string; attributed?: number; error?: string } | undefined
+  /** The team skills panel, moved here from the Skills tab. Optional so an empty render works. */
+  team?: SkillsTabProps['team'] | undefined
 }
 
 const hintStyle = { display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' } as const
@@ -92,9 +102,201 @@ export function ProjectTab(props: ProjectTabProps): ReactElement {
         </div>
       </Panel>
 
+      <NamingPanel
+        project={project}
+        onSaveNaming={props.onSaveNaming}
+        onAttachTeamAlias={props.onAttachTeamAlias}
+        aliasResult={props.aliasResult}
+      />
+      {props.team !== undefined && <TeamSkillsSection {...props.team} />}
       <StampPanel stamp={props.stamp} onStamp={props.onStamp} />
       <RenamesPanel renames={props.renames} configured={project?.configured} onRenames={props.onRenames} />
     </div>
+  )
+}
+
+/**
+ * Everything that decides how this machine's work is named where other people see it.
+ *
+ * Moved here from Search and Skills, where the prefix, the index name and the team code alias sat
+ * inside the embedder form and could only be saved together with the model. They are one decision
+ * — how this project shows up in a shared cluster — and that decision belongs beside its name.
+ * Each box saves on its own: the host treats an absent field as unchanged.
+ */
+function NamingPanel(props: {
+  project: ProjectMessage | undefined
+  onSaveNaming: ProjectTabProps['onSaveNaming']
+  onAttachTeamAlias: () => void
+  aliasResult: ProjectTabProps['aliasResult']
+}): ReactElement {
+  const project = props.project
+  const savedAliases = formatAliases(project?.codeAliases ?? [])
+  const savedName = project?.indexNameIsCustom === true ? (project.indexName ?? '') : ''
+  const [owner, setOwner] = useState(project?.ownerConfigured ?? '')
+  const [prefix, setPrefix] = useState(project?.indexPrefix ?? '')
+  const [indexName, setIndexName] = useState(savedName)
+  const [aliases, setAliases] = useState(savedAliases)
+  useEffect(() => {
+    setOwner(project?.ownerConfigured ?? '')
+    setPrefix(project?.indexPrefix ?? '')
+    setIndexName(savedName)
+    setAliases(savedAliases)
+  }, [project])
+
+  const ownerDirty = owner.trim() !== (project?.ownerConfigured ?? '')
+  const prefixDirty = prefix.trim() !== (project?.indexPrefix ?? '')
+  const nameDirty = indexName.trim() !== savedName
+  const aliasesDirty = formatAliases(parseAliases(aliases)) !== savedAliases
+  const aliasError = parseAliases(aliases)
+    .map(aliasProblem)
+    .find((problem) => problem !== undefined)
+  const prefixError = prefix.trim().length > 0 ? aliasProblem(prefix.trim()) : undefined
+  const teamUnavailable = project?.storeKind !== undefined && project.storeKind !== 'opensearch'
+
+  const saveButton = (dirty: boolean, blocked: boolean, save: () => void): ReactElement => (
+    <button type="button" style={secondaryButtonStyle()} disabled={!dirty || blocked} onClick={save}>
+      {dirty ? 'Save' : 'Saved'}
+    </button>
+  )
+
+  return (
+    <Panel id="project.naming" title="Author and shared names" summary={project?.author ?? ''}>
+      <label htmlFor="project-owner" style={labelStyle()}>
+        Author
+      </label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          id="project-owner"
+          type="text"
+          value={owner}
+          spellCheck={false}
+          placeholder={project?.loginName !== undefined ? `${project.loginName} (your login name)` : 'your name'}
+          onChange={(event) => setOwner(event.target.value)}
+          style={{ ...textFieldStyle(), flex: 1 }}
+        />
+        {saveButton(ownerDirty, false, () => props.onSaveNaming({ owner }))}
+      </div>
+      <span style={hintStyle}>
+        Written on every skill and tool you save, and on everything you index, so colleagues can see
+        whose it is. Blank uses your login name. Changing it later gives your indexes new names.
+      </span>
+
+      <label htmlFor="project-prefix" style={labelStyle()}>
+        Index name prefix
+      </label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          id="project-prefix"
+          type="text"
+          value={prefix}
+          spellCheck={false}
+          placeholder={project?.defaultIndexPrefix ?? 'light-code'}
+          onChange={(event) => setPrefix(event.target.value)}
+          style={{ ...textFieldStyle(), flex: 1 }}
+        />
+        {saveButton(prefixDirty, prefixError !== undefined, () => props.onSaveNaming({ indexPrefix: prefix }))}
+      </div>
+      {prefixError !== undefined && (
+        <span role="alert" style={{ ...hintStyle, color: colors.error }}>
+          {prefixError}
+        </span>
+      )}
+      <span style={hintStyle}>
+        Comes after the project name in every derived index name — a team namespace, the same for
+        everyone in it. Changing it points at new, empty indexes; the old ones keep their data.
+      </span>
+
+      <label htmlFor="project-index" style={labelStyle()}>
+        Codebase index name <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
+      </label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          id="project-index"
+          type="text"
+          value={indexName}
+          spellCheck={false}
+          placeholder={savedName.length > 0 ? '' : (project?.indexName ?? 'derived from the project, prefix and author')}
+          onChange={(event) => setIndexName(event.target.value)}
+          style={{ ...textFieldStyle(), flex: 1 }}
+        />
+        {saveButton(nameDirty, false, () => props.onSaveNaming({ indexName }))}
+      </div>
+      <span style={hintStyle}>
+        Leave blank to derive it — that gives each person their own index and puts the project name
+        in front. Name it only to reuse an existing index, or to start a new one after changing the
+        embedding model.
+      </span>
+      {project?.indexName !== undefined && (
+        <div style={{ ...hintStyle, fontFamily: monospaceFamily, wordBreak: 'break-all' }}>
+          codebase → {project.indexName}
+          {project.skillsIndexName !== undefined && (
+            <>
+              <br />
+              skills → {project.skillsIndexName}
+            </>
+          )}
+          {project.docsIndexName !== undefined && (
+            <>
+              <br />
+              tool docs → {project.docsIndexName}
+            </>
+          )}
+        </div>
+      )}
+
+      <label htmlFor="project-code-alias" style={labelStyle()}>
+        Team codebase aliases <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
+      </label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          id="project-code-alias"
+          type="text"
+          value={aliases}
+          spellCheck={false}
+          placeholder="e.g. payments-code, platform-code"
+          onChange={(event) => setAliases(event.target.value)}
+          style={{ ...textFieldStyle(), flex: 1 }}
+        />
+        {saveButton(aliasesDirty, aliasError !== undefined, () => props.onSaveNaming({ indexAliases: parseAliases(aliases) }))}
+      </div>
+      {aliasError !== undefined && (
+        <span role="alert" style={{ ...hintStyle, color: colors.error }}>
+          {aliasError}
+        </span>
+      )}
+      <span style={hintStyle}>
+        Names covering every teammate&apos;s codebase index, so a search can look across the team.
+        Everyone still writes to their own index; use exactly the same names on every machine.
+        Separate several with commas, most specific first. <strong>OpenSearch only</strong>
+        {teamUnavailable ? ' — the search connection in use is not OpenSearch, so these do nothing there.' : '.'}
+      </span>
+      {savedAliases.length > 0 && (
+        <div style={{ marginBottom: 6 }}>
+          <button type="button" style={secondaryButtonStyle()} disabled={aliasesDirty} onClick={props.onAttachTeamAlias}>
+            Attach alias to my existing index
+          </button>
+          <span style={hintStyle}>
+            {aliasesDirty
+              ? 'Save the aliases first — this attaches what is saved.'
+              : 'For an index made before the alias: adds the alias and labels the existing chunks as yours, without re-embedding. Chunks labelled with someone else are never touched.'}
+          </span>
+          {props.aliasResult?.error !== undefined && (
+            <span role="alert" style={{ ...hintStyle, color: colors.error }}>
+              {props.aliasResult.error}
+            </span>
+          )}
+          {props.aliasResult?.error === undefined && props.aliasResult?.alias !== undefined && (
+            <span role="status" style={hintStyle}>
+              {`"${props.aliasResult.index ?? ''}" now answers to "${props.aliasResult.alias}". `}
+              {props.aliasResult.attributed === 0
+                ? 'Every chunk already had an owner.'
+                : `${String(props.aliasResult.attributed ?? 0)} existing chunk(s) labelled as yours.`}
+            </span>
+          )}
+        </div>
+      )}
+      <span style={hintStyle}>Team skills aliases are in the Team skills panel below.</span>
+    </Panel>
   )
 }
 

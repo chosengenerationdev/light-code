@@ -509,6 +509,12 @@ somebody's work, made under your name; commenting is what the assistant contribu
 **Settings → Project**: the name of this project (config:project). Saved for this project only,
 on this machine — a repository cannot set it. Blank means the folder name.
 
+The same tab holds everything else about how this machine appears to the team: the **author**
+(config:identity), the **index name prefix**, an optional fixed codebase index name, the **team
+codebase aliases** (with "Attach alias to my existing index"), and **Team skills** — its aliases,
+sending your skills, and testing what colleagues can see. Each box saves on its own. Team names
+work on OpenSearch only.
+
 **What it labels.** Every skill and Python tool Light Code saves carries its author, project,
 version and the time of the save: \`author:\`, \`project:\`, \`version:\`, \`updated:\` in a skill's
 frontmatter, and \`__author__\`, \`__project__\`, \`__version__\`, \`__updated__\` in a tool. Author and
@@ -583,7 +589,7 @@ everyone must publish to their own collection.
 2. Enter their own credentials — the import names each one: provider API keys, the search
    connection's username and password, S3 secret access keys, the Confluence personal access token.
 3. Settings → Providers: **Test connection** on each profile.
-4. Settings → Skills → Team skills: the team skills name must be exactly the same everywhere
+4. Settings → Project → Team skills: the team skills name must be exactly the same everywhere
    (config:embedder). **Test team search** shows whose skills this machine can see.
 5. Settings → Python: switch Python tools on if the team shares tools through a bucket; new ones
    arrive on their own and wait above the chat input for approval.
