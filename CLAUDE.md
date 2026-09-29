@@ -1949,6 +1949,24 @@ skill, tool or index belonged to whom.
   already read as "names unchanged". The Search tab still shows the resolved names read-only, beside
   the button that sends the code there.
 
+- **Skill and tool searches are scoped to the project** (0.121.0). `sharing/scope.ts` owns the rule
+  both `search_docs` and `search_team_skills` use: by default this project — under its configured
+  *and* folder name, since skills labelled before a name was set are still its — plus anything
+  unlabelled, because built-in and MCP tools belong to no project and older skills carry no label.
+  The model passes `project` ("all" or a name) and `author` when the user asks; a named project or
+  author means exact matches. `project.searchScope` (Settings -> Project, per project) changes the
+  default to *Only mine* or *Everything*; an explicit request always wins.
+  `search_docs` judges scope against the **live** tool or skill, not the index, so a relabelled skill
+  is scoped correctly without a reindex, and over-fetches to make up for what it drops; the result
+  says how many were left out, so a narrow search never reads as an empty one. `search_team_skills`
+  searches colleagues' collections, so there the filter goes into the engine
+  (`VectorSearchOptions.project`, like `owner`): OpenSearch `terms` or missing-field, Qdrant
+  `should` with `is_empty`, Chroma `$in` — except "or unlabelled", which Chroma cannot express and is
+  filtered after an over-fetch. The author filter is the existing owner filter, since a published
+  skill's owner is its author.
+  The handbook got the recent work (bucket save folder, labels, missing packages, approval progress,
+  ripgrep fallback, search scope), and `topics.test.ts` pins the questions people ask about it.
+
 **Not verified against a live cluster or bucket** — the copy is covered against an in-memory store,
 the bucket save path by reading `bridge.ts`. The package check *is* verified against a real
 interpreter.
@@ -2812,8 +2830,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.120.1**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.120.1.vsix`, unpublished.
+until then, stale again. The local manifest is **0.121.0**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.121.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

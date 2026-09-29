@@ -132,6 +132,13 @@ export interface Tool<TParams = Record<string, unknown>> {
    * (CLAUDE.md §11 calls schema translation a silent-failure source).
    */
   rawJsonSchema?: unknown
+  /**
+   * Which project and author the tool says it belongs to — a Python tool's `__project__` and
+   * `__author__`. Absent for built-in and MCP tools, which belong to no project. Read by searches
+   * scoped to a project (`sharing/scope.ts`); never sent to a provider.
+   */
+  project?: string
+  author?: string
   execute(params: TParams, context: ToolExecutionContext): Promise<ToolResult>
   /**
    * Computes ground truth for the approval prompt without performing the action. Tools

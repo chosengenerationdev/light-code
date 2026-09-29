@@ -804,6 +804,13 @@ export const projectConfigSchema = z
       .min(1)
       .max(64)
       .regex(/^[\w .()-]+$/, 'Letters, digits, spaces, dot, dash, underscore and brackets'),
+    /**
+     * What `search_docs` and `search_team_skills` return when the request does not say:
+     * `project` (this project, plus anything unlabelled — the default), `author` (only what this
+     * machine's author wrote, in any project) or `all`. A request naming a project or an author
+     * always wins. See `sharing/scope.ts`.
+     */
+    searchScope: z.enum(['project', 'author', 'all']),
   })
   .partial()
 export type ProjectConfig = z.infer<typeof projectConfigSchema>

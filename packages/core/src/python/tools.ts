@@ -671,6 +671,9 @@ export function adaptPythonTool(
     missingPackages?: string[] | undefined
     /** Whether `install_python_packages` can act here. */
     canInstall?: boolean
+    /** From the tool's own header, for searches scoped to a project or author. */
+    project?: string | undefined
+    author?: string | undefined
   },
 ): Tool<Record<string, unknown>> {
   const missing = context.missingPackages ?? []
@@ -687,6 +690,8 @@ export function adaptPythonTool(
   return {
     name: `py__${registered.name}`,
     group: 'command',
+    ...(context.project !== undefined ? { project: context.project } : {}),
+    ...(context.author !== undefined ? { author: context.author } : {}),
     description:
       needs +
       (registered.description.length > 0 ? registered.description : `Python tool "${registered.name}".`),

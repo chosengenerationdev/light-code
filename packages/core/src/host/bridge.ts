@@ -344,6 +344,7 @@ import { WebviewApprovalGate } from './approvalGate.js'
 import type { HostServices } from './services.js'
 import { NodeFileSystem } from '../platform/node/filesystem.js'
 import { configuredProjectName, projectName, projectSlug } from '../config/project.js'
+import type { DefaultSearchScope } from '../sharing/scope.js'
 import { copyBookkeeping, copyIndex, hasDocuments, planIndexRenames, type IndexRename } from '../rag/renameIndexes.js'
 import { walkFiles } from '../tools/nativeSearch.js'
 import { NodeTerminal } from '../platform/node/terminal.js'
@@ -721,6 +722,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * config each turn, so every writer reads the same answer — see `sharing/attribution.ts`.
    */
   let cachedAttribution: { author?: string | undefined; project?: string | undefined } = {}
+  /** The default search scope from Settings -> Project; see `sharing/scope.ts`. */
+  let cachedSearchScope: 'project' | 'author' | 'all' = 'project'
   /** The same for Python tools, reported so the tab can say where each landed. */
   let mirroredToolsDirs: string[] = []
   /** The skills mirrors as configured, so `write_skill` knows where to publish. */
@@ -2607,6 +2610,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
     cachedAttribution = { author: indexOwner(config), project: projectName(config, workspaceRoot) }
+    cachedSearchScope = config.project?.searchScope ?? 'project'
     localSkillsDir =
       (config.skills?.dir !== undefined ? resolveSkillDir(config.skills.dir) : undefined) ??
       defaultSkillsDir
@@ -3228,7 +3232,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * for it instead of reading the local skills it does have.
      */
     if (teamSkills !== undefined) {
-      combined.register(createSearchTeamSkillsTool({ ...teamSkills, observer: searchLog }))
+      combined.register(createSearchTeamSkillsTool({ ...teamSkills, observer: searchLog, currentProject: currentProjectNames, defaultScope: defaultSearchScope }))
     }
     if (search !== undefined) {
       combined.register(
@@ -3438,6 +3442,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // found, and so a schema is never served from a snapshot.
           listTools: () => combined.list(),
           listSkills: () => skills,
+          currentProject: currentProjectNames,
+          defaultScope: defaultSearchScope,
           // A hit for a tool this run cannot call is still worth returning — annotated, so the
           // run can say what it needed instead of being refused and reporting a failure.
           accessibleTo: (name) => scheduleToolAccess?.(name) ?? true,
@@ -5845,6 +5851,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /** The project's folder name, which is what distinguishes two checkouts in a hit list. */
+  /**
+   * The names that mean "this project" to a scoped search: the configured name and the folder's,
+   * since skills labelled with the folder name before a name was set are still this project's.
+   */
+  function defaultSearchScope(): DefaultSearchScope {
+    return { mode: cachedSearchScope, author: cachedAttribution.author }
+  }
+
+  function currentProjectNames(): string[] {
+    const names = [cachedAttribution.project, workspaceRoot !== undefined ? path.basename(workspaceRoot) : undefined]
+    return names.filter((name): name is string => name !== undefined && name.length > 0)
+  }
+
   /** The project a chunk or skill is attributed to. `config/project.ts` owns the answer. */
   function indexProject(config?: LightCodeConfig): string | undefined {
     return projectName(config, workspaceRoot)
@@ -8306,6 +8325,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const tool = createSearchDocsTool({
         listTools: () => registry.list(),
         listSkills: () => skills,
+        currentProject: currentProjectNames,
+          defaultScope: defaultSearchScope,
         ...(search !== undefined && embedder !== undefined && docsIndex !== undefined
           ? { retrieval: { searcher: search.searcher, embedder, index: docsIndex } }
           : {}),
@@ -8488,6 +8509,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       ...(docsIndex !== undefined ? { docsIndexName: docsIndex } : {}),
       codeAliases: codebaseAliases(config),
       ...(storeKind !== undefined ? { storeKind } : {}),
+      searchScope: config.project?.searchScope ?? 'project',
     })
   }
 
@@ -8568,6 +8590,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  async function handleSaveProjectSearchScope(scope: 'project' | 'author' | 'all'): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      // 'project' is the default, so it is stored as absence: the config stays sparse.
+      const { searchScope: _previous, ...rest } = config.project ?? {}
+      void _previous
+      const next = { ...rest, ...(scope !== 'project' ? { searchScope: scope } : {}) }
+      await configManager.saveForWorkspace({ project: Object.keys(next).length > 0 ? next : undefined })
+      await loadSettings()
+      await postProject()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   async function handleSaveProjectName(name: string): Promise<void> {
     try {
       const trimmed = name.trim()
@@ -8578,8 +8615,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           return
         }
       }
-      // Saved for this project only; a blank box goes back to the folder name.
-      await configManager.saveForWorkspace({ project: trimmed.length > 0 ? { name: trimmed } : undefined })
+      // Saved for this project only; a blank box goes back to the folder name. The rest of the
+      // project block — the search scope — is carried, since a per-project key saves as a whole.
+      const { config } = await configManager.load()
+      const { name: _previous, ...rest } = config.project ?? {}
+      void _previous
+      const next = { ...rest, ...(trimmed.length > 0 ? { name: trimmed } : {}) }
+      await configManager.saveForWorkspace({ project: Object.keys(next).length > 0 ? next : undefined })
       await loadSettings()
       await postProject()
     } catch (error) {
@@ -10983,6 +11025,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           indexAliases: message.indexAliases,
         }),
       )
+    } else if (message.type === 'saveProjectSearchScope') {
+      reportFailure('handleSaveProjectSearchScope', handleSaveProjectSearchScope(message.scope))
     } else if (message.type === 'saveProjectName') {
       reportFailure('handleSaveProjectName', handleSaveProjectName(message.name))
     } else if (message.type === 'runIndexRenames') {

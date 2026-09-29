@@ -2171,6 +2171,7 @@ export function App(props: AppProps): ReactElement {
               },
               onSaveNaming: (naming) => props.transport.post({ type: 'saveProjectNaming', ...naming } satisfies UiToHostMessage),
               onSaveName: (name) => props.transport.post({ type: 'saveProjectName', name } satisfies UiToHostMessage),
+              onSaveSearchScope: (scope) => props.transport.post({ type: 'saveProjectSearchScope', scope } satisfies UiToHostMessage),
               onStamp: (apply) => {
                 setProjectStamp((current) => (apply && current !== undefined ? { ...current, running: true } : current))
                 props.transport.post({ type: 'runProjectStamp', apply } satisfies UiToHostMessage)

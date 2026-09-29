@@ -267,6 +267,14 @@ export class OpenSearchClient implements VectorSearcher {
     const clauses: Record<string, unknown>[] = []
     if (prefix !== undefined && prefix.length > 0) clauses.push({ prefix: { path: prefix } })
     if (options.owner !== undefined) clauses.push({ term: { owner: options.owner } })
+    if (options.project !== undefined) {
+      const named = { terms: { project: [...options.project.names] } }
+      clauses.push(
+        options.project.includeUnlabelled
+          ? { bool: { should: [named, { bool: { must_not: [{ exists: { field: 'project' } }] } }], minimum_should_match: 1 } }
+          : named,
+      )
+    }
 
     const body: Record<string, unknown> = {
       /*

@@ -1,3 +1,4 @@
+import { describeSearchScope, type SearchScope } from '../sharing/scope.js'
 import type { Skill } from '../skills/index.js'
 import type { Embedder } from './embedder.js'
 import type { VectorDocument, VectorIndexWriter, VectorMatch, VectorSearcher } from './vectorStore.js'
@@ -134,6 +135,8 @@ export async function searchTeamSkills(
   query: string,
   size = 5,
   signal?: AbortSignal,
+  /** Which project's and whose skills. Absent searches everything, as before. See `sharing/scope.ts`. */
+  scope?: SearchScope,
 ): Promise<TeamSkillSearchResult> {
   const vector = await options.embedder.embed(query)
   const tried: string[] = []
@@ -146,6 +149,12 @@ export async function searchTeamSkills(
       matches = await options.searcher.searchByVector(collection, vector, {
         size,
         ...(signal !== undefined ? { signal } : {}),
+        // In the engine, like the owner filter, so ten of this project's skills means ten.
+        ...(scope?.projects !== undefined
+          ? { project: { names: scope.projects, includeUnlabelled: scope.includeUnlabelled } }
+          : {}),
+        // A published skill's owner is its author (`indexTeamSkills`), so this is the author filter.
+        ...(scope?.author !== undefined ? { owner: scope.author } : {}),
       })
     } catch (error) {
       /*
@@ -275,12 +284,17 @@ export function describeTeamSkillCollision(
  * The difference is that the whole body *is* present, so instead of "do not open it" the
  * instruction is "this is all of it, and there is nothing to open".
  */
-export function renderTeamSkillHits(found: TeamSkillSearchResult, query: string): string {
+export function renderTeamSkillHits(found: TeamSkillSearchResult, query: string, scope?: SearchScope): string {
   const { hits, collection, tried } = found
+  const within = scope === undefined ? '' : ` in ${describeSearchScope(scope)}`
+  const narrowed = scope !== undefined && (scope.projects !== undefined || scope.author !== undefined)
 
   if (hits.length === 0) {
     return (
-      `No team skills match: ${query}\n` +
+      `No team skills${within} match: ${query}\n` +
+      (narrowed
+        ? `To look beyond that, search again with project: "all"${scope?.author !== undefined ? ' and no author' : ''}.\n`
+        : '') +
       (tried.length > 0 ? 'Looked in ' + tried.join(', ') + '. ' : '') +
       'Either nobody has written one, or the shared skills index has not been built yet ' +
       '(Settings → Skills). This does not mean the subject is undocumented.'
@@ -308,7 +322,7 @@ export function renderTeamSkillHits(found: TeamSkillSearchResult, query: string)
     .join('\n\n---\n\n')
 
   return [
-    `${hits.length} team skill(s) matching: ${query}`,
+    `${hits.length} team skill(s)${within} matching: ${query}`,
     ...(widened !== undefined ? [widened] : []),
     'Anything not marked "yours" is a colleague’s and has no file on this machine — the text',
     'above is the whole of it, so do not try to read_file it. To keep one, write your own copy',

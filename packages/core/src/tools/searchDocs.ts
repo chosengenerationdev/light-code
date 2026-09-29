@@ -1,4 +1,13 @@
 import { z } from 'zod'
+
+import {
+  describeHidden,
+  describeSearchScope,
+  inSearchScope,
+  resolveSearchScope,
+  type DefaultSearchScope,
+  type SearchScope,
+} from '../sharing/scope.js'
 import type { Embedder } from '../rag/embedder.js'
 import { parseDocEntryId, schemaForTool, type DocEntryKind } from '../rag/toolDocs.js'
 import type { SearchObserver } from '../rag/searchLog.js'
@@ -38,6 +47,14 @@ const paramsSchema = z.object({
     .describe('What you need, in plain words — e.g. "upload a file to object storage" or "our deployment process".'),
   limit: z.number().int().min(1).max(15).optional().describe('How many to return. Default 5.'),
   kind: z.enum(['tool', 'skill']).optional().describe('Restrict to tools or to skills. Omit for both.'),
+  project: z
+    .string()
+    .optional()
+    .describe(
+      'Which project to search. Omit for this project (plus anything with no project). Give a ' +
+        'project name to search that one instead, or "all" when the user asks to look beyond this project.',
+    ),
+  author: z.string().optional().describe('Only skills and tools by this author. Omit unless the user names somebody.'),
 })
 export type SearchDocsParams = z.infer<typeof paramsSchema>
 
@@ -72,6 +89,13 @@ export interface SearchDocsOptions {
    * explain what it would have needed.
    */
   accessibleTo?: (toolName: string) => boolean
+  /**
+   * This project's names — the configured one and the folder's — which the default search is
+   * limited to. Absent or empty means every project, as before. See `sharing/scope.ts`.
+   */
+  currentProject?: () => readonly string[]
+  /** The default chosen in Settings -> Project, for a request that names no project or author. */
+  defaultScope?: () => DefaultSearchScope
 }
 
 const DEFAULT_LIMIT = 5
@@ -149,7 +173,8 @@ export function createSearchDocsTool(options: SearchDocsOptions): Tool<SearchDoc
     async execute(params): Promise<ToolResult> {
       const startedAt = Date.now()
       try {
-        const { matches, via, note } = await runDocsSearch(options, params)
+        const { matches, via, note, hidden, scope } = await runDocsSearch(options, params)
+        const leftOut = describeHidden(hidden, scope)
 
         options.observer?.record({
           at: startedAt,
@@ -165,8 +190,9 @@ export function createSearchDocsTool(options: SearchDocsOptions): Tool<SearchDoc
         if (matches.length === 0) {
           return {
             content: [
-              `Nothing matched: ${params.query}`,
+              `Nothing matched in ${describeSearchScope(scope)}: ${params.query}`,
               note ?? '',
+              leftOut,
               'Try different words, or drop the `kind` filter. The tools listed in your prompt are ' +
                 'always available directly and are not returned here.',
             ]
@@ -177,8 +203,9 @@ export function createSearchDocsTool(options: SearchDocsOptions): Tool<SearchDoc
 
         return {
           content: [
-            `${matches.length} match(es) for: ${params.query}`,
+            `${matches.length} match(es) in ${describeSearchScope(scope)} for: ${params.query}`,
             note ?? '',
+            leftOut,
             // Stated because the two paths rank very differently, and a lexical result that
             // looks like a semantic one hides the fact that the index is not being used.
             via === 'lexical' ? '(Matched on names and descriptions, not by meaning.)' : '',
@@ -214,20 +241,35 @@ export async function runDocsSearch(
   options: SearchDocsOptions,
   params: SearchDocsParams,
   signal?: AbortSignal,
-): Promise<{ matches: Candidate[]; via: 'index' | 'lexical'; note?: string }> {
+): Promise<{ matches: Candidate[]; via: 'index' | 'lexical'; note?: string; hidden: number; scope: SearchScope }> {
   const limit = params.limit ?? DEFAULT_LIMIT
   const tools = options.listTools()
   const skills = options.listSkills?.() ?? []
+  const scope = resolveSearchScope(params, options.currentProject?.() ?? [], options.defaultScope?.())
+  let hidden = 0
 
   const wanted = (kind: DocEntryKind): boolean => params.kind === undefined || params.kind === kind
+  /*
+   * Judged against the live tool or skill, not the index: the labels are in the files, so a
+   * skill relabelled a minute ago is scoped correctly without waiting for a reindex.
+   */
+  const inScope = (candidate: Candidate): boolean => {
+    if (candidate.kind === 'skill') {
+      const skill = skills.find((entry) => entry.name === candidate.name)
+      return skill === undefined || inSearchScope(skill, scope)
+    }
+    const tool = tools.find((entry) => entry.name === candidate.name)
+    return tool === undefined || inSearchScope(tool, scope, tool.name.startsWith('py__'))
+  }
+  const filtering = scope.projects !== undefined || scope.author !== undefined
 
   if (options.retrieval !== undefined) {
     try {
       const vector = await options.retrieval.embedder.embed(params.query, signal)
       const hits = await options.retrieval.searcher.searchByVector(options.retrieval.index, vector, {
-        // Over-fetch: hits for tools that have since disappeared are dropped below, and
-        // asking for exactly `limit` would then quietly return fewer than requested.
-        size: Math.max(limit * 3, 10),
+        // Over-fetch: hits for tools that have since disappeared, or from another project, are
+        // dropped below, and asking for exactly `limit` would quietly return fewer than requested.
+        size: Math.max(limit * (filtering ? 8 : 3), 10),
         ...(signal !== undefined ? { signal } : {}),
       })
 
@@ -244,22 +286,29 @@ export async function runDocsSearch(
             : skills.some((skill) => skill.name === parsed.name)
         if (!exists) continue
         seen.add(hit.path)
+        if (!inScope(parsed)) {
+          hidden += 1
+          continue
+        }
         matches.push(parsed)
         if (matches.length >= limit) break
       }
 
-      if (matches.length > 0) return { matches, via: 'index' }
+      if (matches.length > 0) return { matches, via: 'index', hidden, scope }
       // An empty index is indistinguishable from a genuinely unmatched query, and the
       // lexical pass is cheap, so fall through rather than reporting nothing.
     } catch (error) {
       return {
         ...lexicalResult(),
+        hidden,
+        scope,
         note: `The documentation index could not be searched (${error instanceof Error ? error.message : String(error)}), so this is a name and description match instead.`,
       }
     }
   }
 
-  return lexicalResult()
+  hidden = 0
+  return { ...lexicalResult(), hidden, scope }
 
   function lexicalResult(): { matches: Candidate[]; via: 'lexical' } {
     const haystacks: { candidate: Candidate; haystack: string }[] = []
@@ -273,7 +322,10 @@ export async function runDocsSearch(
         haystacks.push({ candidate: { kind: 'skill', name: skill.name }, haystack: `${skill.name} ${skill.description}` })
       }
     }
-    return { matches: lexicalRank(params.query, haystacks, limit), via: 'lexical' }
+    const ranked = lexicalRank(params.query, haystacks, haystacks.length)
+    const kept = ranked.filter((candidate) => inScope(candidate))
+    hidden = ranked.length - kept.length
+    return { matches: kept.slice(0, limit), via: 'lexical' }
   }
 }
 

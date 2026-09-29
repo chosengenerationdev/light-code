@@ -261,13 +261,24 @@ described is one the assistant will never know to reach for.
 Settings -> Skills -> "Bring skills in from another folder" copies them in. Nothing is moved and
 nothing is overwritten: the old folder is untouched and a name already present is skipped and
 named back to you. The same section offers a one-off upload of everything you already have to a
-bucket folder marked "Publish new … here" - the automatic publish only fires on a *write*, so it never
-covered what was there before. Settings -> Python has the same for tools, where a copied tool
-arrives **unapproved** because approvals are recorded per folder.
+bucket folder marked "Publish new … here". Settings -> Python has the same for tools, where a copied
+tool arrives **unapproved** because approvals are recorded per folder.
+
+**A bucket folder marked "Publish new … here" is where new skills are saved** — not the project's
+\`.lightcode/skills\` with a copy uploaded. The file lands in the bucket's local mirror and goes up
+straight away. An explicitly set config:skills (dir) still wins. Skills already in the project folder
+keep loading until you upload them.
+
+**Every skill says who wrote it and where it belongs**: \`author\`, \`project\`, \`version\` and
+\`updated\` in its frontmatter, written automatically on each save — author and project once, the
+version up by one each time. The Skills tab shows them. Settings -> Project -> "Label existing skills
+and tools" fills them in for older files (as version 1).
 
 **Sharing.** Skills can be published to a team collection and found with \`search_team_skills\`,
 or mirrored from an S3 bucket. Everyone publishes to their own collection and an alias spans them,
-so one person re-indexing never disturbs anybody else.
+so one person re-indexing never disturbs anybody else. The team skills aliases, sending, and the
+team search test are in **Settings -> Project -> Team skills**. Searches return this project's
+skills by default; say "all projects", another project's name, or a person to widen or change that.
 
 A skill is **prose nobody code-reviews that steers every conversation that finds it**. That is why
 writing one always asks for approval, whatever else is auto-approved, and why plain markdown in
@@ -283,7 +294,10 @@ git is the main defence.
      * verb somebody types.
      */
     title: 'Python tools written by the assistant',
-    keywords: ['python', 'tool', 'uv', 'venv', 'dependencies', 'pip', 'dynamic', 'registry'],
+    keywords: [
+      'python', 'tool', 'uv', 'venv', 'dependencies', 'pip', 'dynamic', 'registry', 'missing package',
+      'install package', 'module not found', 'library', 'approve tool',
+    ],
     body: `
 **Settings → Python.** Off by default — set config:python.dynamicTools to \`on\`. This is the
 sharpest surface in the product: it makes the *body* of a tool model-authored, not just the call.
@@ -305,6 +319,23 @@ installed or removed: that environment belongs to whatever built it.
 **Dependencies** install before validation, so a failure names the package rather than surfacing
 as an ImportError from inside the worker. config:python.indexUrl points at an internal mirror and
 config:python.offline refuses the network.
+
+**Missing packages are spotted before they fail.** Tools arriving from a bucket often need packages
+this machine's environment lacks. Light Code checks every tool's declared dependencies and imports
+against the environment; a tool that needs something missing says so in its description, the
+Python tab lists it, and a failed call naming the missing module says what to do. The assistant can
+install them with \`install_python_packages\` — it asks first and shows the exact \`uv pip install\`
+command, using config:python (indexUrl). A tool waiting for approval that cannot load until a package
+exists shows an **Install** button beside it. Nothing is installed into an interpreter Light Code did
+not create.
+
+**Reviewing a tool** shows its source syntax-highlighted. Approving loads each tool to make sure it
+runs, a few seconds apiece, so the panel shows a spinner on the one being checked, "Checking 2 of 5"
+and a progress bar.
+
+**Labels.** Each saved tool carries \`__author__\`, \`__project__\`, \`__version__\` and \`__updated__\`
+lines, part of the source you approve. A bucket folder marked "Publish new tools here" is where new
+tools are saved, not \`.lightcode/tools\`.
 
 **Environment variables for tools** (config:python.env) are declared once and applied to every
 Python child, so a host and a token do not have to be written into each tool's source — where they
@@ -381,6 +412,16 @@ from somebody else's checkout is checked against your filesystem and marked
 \`NOT IN THIS WORKSPACE\`** — attribution is a label and can be wrong, but whether a file exists
 here is a fact, and it is settled rather than assumed. Team scope is OpenSearch only, and absent
 elsewhere rather than emulated.
+
+**Names live in Settings -> Project**: the index name prefix, an optional fixed index name, the
+team codebase aliases (with "Attach alias to my existing index") and the team skills aliases. Once a
+project name is set, derived index names start with it; "Move indexes to the project's names" copies
+existing ones across without re-embedding. Settings -> Search keeps the store, the embedding model and
+the Index button, and shows where the index is written.
+
+**\`search_docs\` and \`search_team_skills\` stay in this project** by default — its skills and tools,
+plus anything with no project label. They take \`project\` ("all", or another project's name) and
+\`author\`, used when you ask to look wider, elsewhere, or at one person's work.
 
 **The dispatcher** is on by default. Tools are registered but not advertised, and the model finds
 them with \`search_docs\` — so the prompt does not grow with the size of your tool catalogue. It
@@ -514,6 +555,14 @@ The same tab holds everything else about how this machine appears to the team: t
 codebase aliases** (with "Attach alias to my existing index"), and **Team skills** — its aliases,
 sending your skills, and testing what colleagues can see. Each box saves on its own. Team names
 work on OpenSearch only.
+
+**Searches stay in this project** — or whatever **Search scope** is set to on the Project tab:
+*This project*, *Only mine* (what you wrote, in any project) or *Everything*, saved per project in
+config:project (searchScope). \`search_docs\` and \`search_team_skills\` return this project's
+skills and tools, plus anything with no project label (built-in and MCP tools, older skills). Ask
+the assistant to "look in all projects" and it passes \`project: "all"\`; name another project and it
+searches that one; name a person and it limits to their work with \`author\`. The result says how
+many matches were left out, so a narrow search never looks like an empty one.
 
 **What it labels.** Every skill and Python tool Light Code saves carries its author, project,
 version and the time of the save: \`author:\`, \`project:\`, \`version:\`, \`updated:\` in a skill's
@@ -830,7 +879,7 @@ walkthrough, whose steps link straight into the tab each one is about. On the No
       // "nothing happened" is how people report a turn that ended silently, and it matched no
       // topic at all - so the best score was body noise from somewhere unrelated.
       'nothing happens', 'nothing happened', 'no response', 'stuck', 'hangs', 'hung', 'frozen',
-      'silent', 'crashed', 'stopped',
+      'silent', 'crashed', 'stopped', 'ripgrep', 'rg', 'lightcode folder',
     ],
     body: `
 **Several settings appear to have been forgotten at once** — suspect the config *file*, not the
@@ -863,7 +912,23 @@ network when the panel opens.
 
 **A Python tool will not run** — it is probably unapproved. One that arrived from a bucket or a
 repository has no registry entry on this machine and stays inert until you read its source and say
-yes. The list of those sits above the message box.
+yes. The list of those sits above the message box. If it names packages it "needs", they are
+missing from the tools' Python environment: press **Install**, or ask the assistant to install them.
+
+**Approving tools seems to take a while** — each one is loaded to make sure it runs. The panel shows
+which one is being checked and how many are left.
+
+**File search or listing mentions ripgrep** — it no longer depends on it. Light Code tries its own
+ripgrep, then the one VS Code ships, and if a managed machine blocks both it searches and lists files
+itself, honouring \`.gitignore\`. The assistant should not need to run \`rg\` as a command.
+
+**New skills or tools appear in \`.lightcode\` although a bucket is chosen** — only a bucket folder
+marked "Publish new … here", enabled, on a connection that is not read-only, becomes the save folder,
+and an explicitly set folder in config:skills or config:python wins over it.
+
+**Skills from other projects show up, or yours do not** — searches are limited to the project named
+in Settings -> Project, plus anything unlabelled. Ask for "all projects" to look wider. A skill
+labelled with the folder name still counts as this project's.
 
 **Excel says there is no open session** — if Excel really is running, a privilege mismatch is the
 usual cause: an editor started as administrator cannot reach an Excel that was not, or the reverse.

@@ -633,6 +633,8 @@ export class PythonManager {
         timeoutMs: this.timeoutMs,
         ...(this.missingPackages.has(tool.name) ? { missingPackages: this.missingPackages.get(tool.name) } : {}),
         canInstall: this.toolContext()?.installDeps !== undefined,
+        project: this.labels.get(tool.name)?.project,
+        author: this.labels.get(tool.name)?.author,
       }),
     ) as unknown as Tool<never>[]
   }

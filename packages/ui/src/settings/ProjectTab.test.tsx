@@ -35,6 +35,7 @@ function render(overrides: Partial<ProjectTabProps> = {}): {
         stamp={undefined}
         renames={undefined}
         onSaveName={(name) => saved.push(name)}
+        onSaveSearchScope={() => {}}
         onStamp={(apply) => stamps.push(apply)}
         onRenames={(apply) => renames.push(apply)}
         onSaveNaming={(value) => naming.push(value)}
@@ -142,5 +143,25 @@ describe('Settings → Project', () => {
     })
     expect(container.textContent).toContain('codebase: lc-ana-1 → payments-lc-ana-1')
     expect(button('Copy 1 index')).toBeDefined()
+  })
+})
+
+describe('the default search scope', () => {
+  // jsdom has no layout, so the listbox's scrollIntoView does not exist there.
+  Element.prototype.scrollIntoView ??= () => {}
+
+  it('shows the saved choice and saves a new one', () => {
+    const chosen: string[] = []
+    render({
+      project: { type: 'project', hasWorkspace: true, folder: 'pay-api', searchScope: 'author' },
+      onSaveSearchScope: (scope) => chosen.push(scope),
+    })
+    const trigger = container.querySelector<HTMLElement>('#project-scope')!
+    expect(trigger.textContent).toContain('Only mine')
+    act(() => trigger.click())
+    const everything = [...document.querySelectorAll('[role="option"]')].find((option) => option.textContent?.includes('Everything'))
+    // The listbox picks on pointerdown, before the focus change a click would cause.
+    act(() => everything?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+    expect(chosen).toEqual(['all'])
   })
 })

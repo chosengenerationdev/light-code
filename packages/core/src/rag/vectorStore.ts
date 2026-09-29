@@ -93,6 +93,11 @@ export interface VectorSearchOptions {
    * many of ten happen to be yours — which on a team index is frequently none.
    */
   owner?: string
+  /**
+   * Restrict to these projects, optionally also keeping chunks that name no project. Filtered in
+   * the engine for the same reason as `owner`. Exact values: `project` is a keyword field.
+   */
+  project?: { names: readonly string[]; includeUnlabelled: boolean }
   signal?: AbortSignal
 }
 

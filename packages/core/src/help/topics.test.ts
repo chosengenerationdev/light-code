@@ -164,6 +164,14 @@ describe('finding the right topic', () => {
      */
     const cases: [string, string][] = [
       ['how do I run something every morning', 'schedules'],
+      // The project, bucket, package and search-scope work, asked the way people ask.
+      ['how do I set the project name', 'project'],
+      ['my python tool needs a package that is not installed', 'python-tools'],
+      ['new skills are still created in the lightcode folder even though I chose a bucket', 'troubleshooting'],
+      ['search only shows skills from my project, how do I search all projects', 'project'],
+      ['where do I set the team alias and index prefix', 'project'],
+      ['search_files complains ripgrep is missing', 'troubleshooting'],
+      ['can I attach a screenshot to a jira ticket and set its component', 'jira'],
       ['how do I teach it about our internal library', 'skills'],
       ['how do I change the colour', 'appearance'],
       ['how do I make it use dark mode', 'appearance'],

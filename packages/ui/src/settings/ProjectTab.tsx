@@ -12,6 +12,7 @@ import {
 } from '../theme.js'
 import { aliasProblem, formatAliases, parseAliases } from '@light-code/core/browser'
 
+import { Select } from '../Select.js'
 import { Panel } from './Panel.js'
 import { TeamSkillsSection, type SkillsTabProps } from './SkillsTab.js'
 
@@ -29,6 +30,8 @@ export interface ProjectTabProps {
   stamp: ProjectStampMessage | undefined
   renames: IndexRenamesMessage | undefined
   onSaveName: (name: string) => void
+  /** The default scope of skill and tool searches, for this project. */
+  onSaveSearchScope: (scope: 'project' | 'author' | 'all') => void
   onStamp: (apply: boolean) => void
   onRenames: (apply: boolean) => void
   /** Author, index prefix and name, and team code aliases. Absent fields are left alone. */
@@ -39,6 +42,12 @@ export interface ProjectTabProps {
   /** The team skills panel, moved here from the Skills tab. Optional so an empty render works. */
   team?: SkillsTabProps['team'] | undefined
 }
+
+const SCOPE_OPTIONS = [
+  { value: 'project', label: 'This project', detail: "This project's skills and tools, and anything with no project" },
+  { value: 'author', label: 'Only mine', detail: 'What you wrote, in any project' },
+  { value: 'all', label: 'Everything', detail: 'Every project and every author' },
+] as const
 
 const hintStyle = { display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' } as const
 const listStyle = {
@@ -100,6 +109,21 @@ export function ProjectTab(props: ProjectTabProps): ReactElement {
             </div>
           )}
         </div>
+
+        <label htmlFor="project-scope" style={{ ...labelStyle(), marginTop: 10 }}>
+          Search scope
+        </label>
+        <Select
+          id="project-scope"
+          value={project?.searchScope ?? 'project'}
+          options={SCOPE_OPTIONS}
+          onChange={(value) => props.onSaveSearchScope(value as 'project' | 'author' | 'all')}
+        />
+        <span style={hintStyle}>
+          What the assistant finds when it searches skills and tool documentation, unless you tell it
+          otherwise — &quot;search all projects&quot;, &quot;look in Lending&quot;, &quot;only Ana&apos;s&quot;
+          always win. Built-in and MCP tools are found whichever you choose.
+        </span>
       </Panel>
 
       <NamingPanel

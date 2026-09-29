@@ -133,7 +133,18 @@ export class ChromaSearcher extends ChromaBase implements VectorSearcher {
   ): Promise<VectorMatch[]> {
     const id = await this.idFor(collection, options.signal)
     const prefix = options.pathPrefix?.trim()
-    const filtering = prefix !== undefined && prefix.length > 0
+    /*
+     * "This project, or no project" has no `where` form — Chroma cannot ask for a missing key — so
+     * that case is filtered here, over-fetching like the prefix. An exact project list is pushed
+     * down as `$in`.
+     */
+    const projectHere = options.project !== undefined && options.project.includeUnlabelled
+    const filtering = (prefix !== undefined && prefix.length > 0) || projectHere
+    const where: Record<string, unknown>[] = []
+    if (options.owner !== undefined) where.push({ owner: options.owner })
+    if (options.project !== undefined && !options.project.includeUnlabelled) {
+      where.push({ project: { $in: [...options.project.names] } })
+    }
 
     const result = await this.rest.expectOk<{
       ids?: string[][]
@@ -157,7 +168,7 @@ export class ChromaSearcher extends ChromaBase implements VectorSearcher {
          * filter — discarding afterwards would turn a request for ten of your own chunks into
          * however many of the global ten happened to be yours.
          */
-        ...(options.owner !== undefined ? { where: { owner: options.owner } } : {}),
+        ...(where.length === 1 ? { where: where[0] } : where.length > 1 ? { where: { $and: where } } : {}),
         include: ['documents', 'metadatas', 'distances'],
       },
       options.signal,
@@ -174,7 +185,8 @@ export class ChromaSearcher extends ChromaBase implements VectorSearcher {
       const metadata = metadatas[index] ?? {}
       const path = typeof metadata.path === 'string' ? metadata.path : undefined
       if (path === undefined) continue
-      if (filtering && !path.startsWith(prefix)) continue
+      if (prefix !== undefined && prefix.length > 0 && !path.startsWith(prefix)) continue
+      if (projectHere && typeof metadata.project === 'string' && !options.project?.names.includes(metadata.project)) continue
 
       const distance = distances[index]
       const match: VectorMatch = {

@@ -150,9 +150,7 @@ export class QdrantSearcher extends QdrantBase implements VectorSearcher {
        * for ten of your own chunks returning however many of the global ten happened to be
        * yours. The prefix stays client-side because it would need a full-text payload index.
        */
-      ...(options.owner !== undefined
-        ? { filter: { must: [{ key: 'owner', match: { value: options.owner } }] } }
-        : {}),
+      ...(qdrantFilter(options) !== undefined ? { filter: qdrantFilter(options) } : {}),
       with_payload: true,
       with_vector: false,
     }
@@ -174,6 +172,23 @@ export class QdrantSearcher extends QdrantBase implements VectorSearcher {
     }
     return matches
   }
+}
+
+/**
+ * Owner and project as one Qdrant filter. `must` for what is required; `should` for "this project,
+ * or no project at all" — Qdrant requires at least one `should` to hold when any is given.
+ */
+function qdrantFilter(options: VectorSearchOptions): Record<string, unknown> | undefined {
+  const must: Record<string, unknown>[] = []
+  const should: Record<string, unknown>[] = []
+  if (options.owner !== undefined) must.push({ key: 'owner', match: { value: options.owner } })
+  if (options.project !== undefined) {
+    const named = { key: 'project', match: { any: [...options.project.names] } }
+    if (options.project.includeUnlabelled) should.push(named, { is_empty: { key: 'project' } })
+    else must.push(named)
+  }
+  if (must.length === 0 && should.length === 0) return undefined
+  return { ...(must.length > 0 ? { must } : {}), ...(should.length > 0 ? { should } : {}) }
 }
 
 export class QdrantIndexWriter extends QdrantBase implements VectorIndexWriter {

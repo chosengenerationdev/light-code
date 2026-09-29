@@ -806,6 +806,8 @@ export type UiToHostMessage =
   | { type: 'requestProject' }
   /** Empty clears it, and the folder name is used again. Saved for this project only. */
   | { type: 'saveProjectName'; name: string }
+  /** The default scope of skill and tool searches, for this project. */
+  | { type: 'saveProjectSearchScope'; scope: 'project' | 'author' | 'all' }
   /**
    * Settings → Project's shared names. Each field is three-valued: absent leaves it alone, empty
    * clears it, anything else sets it — so saving one box never disturbs another.
@@ -1965,6 +1967,8 @@ export interface ProjectMessage {
   codeAliases?: string[]
   /** The active store's kind: team names are OpenSearch-only. */
   storeKind?: string
+  /** What skill and tool searches return by default here. */
+  searchScope?: 'project' | 'author' | 'all'
 }
 
 export interface IndexRenamesMessage {

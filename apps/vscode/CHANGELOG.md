@@ -1,5 +1,19 @@
 # light-code-vscode
 
+## 0.121.0
+
+### Minor Changes
+
+- **Searches stay in your project.** When the assistant looks up skills and tool documentation —
+  its own and the team's — it finds this project's, plus anything that belongs to no project, such
+  as built-in tools and older skills. Ask it to "search all projects", name another project, or
+  name a person, and it widens or changes the search for that request. The result says how many
+  matches were left out.
+- **Choose the default** in Settings → Project → Search scope: _This project_, _Only mine_ (what you
+  wrote, in any project) or _Everything_. Saved per project.
+- **The built-in help knows about the latest changes**: projects, labels, bucket saving, missing
+  Python packages, approval progress, search without ripgrep, and search scope.
+
 ## 0.120.1
 
 ### Patch Changes
