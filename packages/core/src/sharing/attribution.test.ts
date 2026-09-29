@@ -29,6 +29,15 @@ describe('skills', () => {
     expect(readAttribution('skill', stampRevision('skill', SKILL, SKILL, {}, NOW)).version).toBe(2)
   })
 
+  /*
+   * An unlabelled existing skill may be a colleague's, copied in or synced from a shared bucket.
+   * Whoever saves it next is not evidence of who wrote it.
+   */
+  it('never guesses the author or project of an existing unlabelled skill on save', () => {
+    const saved = readAttribution('skill', stampRevision('skill', SKILL, SKILL, { author: 'ana', project: 'Payments' }, NOW))
+    expect(saved).toEqual({ author: undefined, project: undefined, version: 2, updated: '2026-09-29T08:15:02Z' })
+  })
+
   it('fills only what is missing when labelling an existing file', () => {
     const colleague = '---\nname: deploy\ndescription: d\nauthor: chen\n---\nbody'
     const filled = fillAttribution('skill', colleague, { author: 'ana', project: 'Payments', version: 1, updated: '2026-01-01T00:00:00Z' })

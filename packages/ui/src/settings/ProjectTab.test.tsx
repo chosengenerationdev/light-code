@@ -3,6 +3,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import type { ProjectStampMessage } from '@light-code/core/browser'
+
 import { ProjectTab, type ProjectTabProps } from './ProjectTab.js'
 
 let container: HTMLDivElement
@@ -47,6 +49,10 @@ function render(overrides: Partial<ProjectTabProps> = {}): {
   })
   return { saved, stamps, renames, naming }
 }
+
+/** A button whose whole text is this — the panel header also contains the word "Label". */
+const exactButton = (text: string): HTMLButtonElement | undefined =>
+  [...container.querySelectorAll('button')].find((entry) => entry.textContent?.trim() === text)
 
 function type(selector: string, value: string): void {
   const input = container.querySelector<HTMLInputElement>(selector)!
@@ -121,19 +127,95 @@ describe('Settings → Project', () => {
     expect(button('Find indexes to move')?.disabled).toBe(true)
   })
 
-  it('lists exactly what labelling will add before offering to do it', () => {
-    const calls = render({
-      stamp: {
-        type: 'projectStamp',
-        running: false,
-        entries: [{ kind: 'tool', name: 'ledger', filePath: '/t/ledger.py', adds: { author: 'ana', version: 1 }, approved: true }],
+  /*
+   * Files are mixed — colleagues', another team's from the bucket — so author and project are never
+   * guessed: only facts are automatic, and labels go where somebody ticked.
+   */
+  describe('labelling existing files without guessing', () => {
+    const entries: ProjectStampMessage['entries'] = [
+      {
+        kind: 'tool',
+        name: 'ledger',
+        filePath: '/p/.lightcode/tools/ledger.py',
+        location: 'project',
+        current: {},
+        automatic: { version: 1, updated: '2026-01-02T03:04:05Z' },
+        needsLabels: true,
+        suggestion: { author: 'Ana Silva', source: 'git: the commit that added this file' },
+        approved: true,
       },
+      {
+        kind: 'skill',
+        name: 'deploy',
+        filePath: '/p/.lightcode/skills/deploy.md',
+        location: 'project',
+        current: { project: 'Payments' },
+        automatic: { version: 1 },
+        needsLabels: true,
+      },
+      {
+        kind: 'skill',
+        name: 'lending-rules',
+        filePath: '/mirror/lending-rules.md',
+        location: 'bucket',
+        current: {},
+        automatic: { version: 1 },
+        needsLabels: true,
+      },
+    ]
+    const withLabels = (): { stamps: boolean[]; sent: unknown[] } => {
+      const sent: unknown[] = []
+      const calls = render({
+        stamp: { type: 'projectStamp', running: false, entries },
+        onStamp: (apply, labels) => {
+          if (apply) sent.push(labels)
+        },
+      })
+      return { stamps: calls.stamps, sent }
+    }
+    const tick = (name: string): void => {
+      const row = [...container.querySelectorAll('label')].find((label) => label.textContent?.includes(name))!
+      act(() => row.querySelector('input')!.click())
+    }
+
+    it('sends no author or project unless a row is ticked', () => {
+      const { sent } = withLabels()
+      expect(container.textContent).toContain('Suggested: author Ana Silva')
+      expect(container.textContent).toContain('bucket — untouched unless ticked')
+      act(() => exactButton('Label')?.click())
+      expect(sent).toEqual([[]])
     })
-    expect(container.textContent).toContain('ledger')
-    expect(container.textContent).toContain('author: ana, version: 1')
-    expect(container.textContent).toContain('stay approved here')
-    act(() => button('Label 1 file')?.click())
-    expect(calls.stamps).toEqual([true])
+
+    it('prefills a ticked row from its evidence, and never overwrites a label already there', () => {
+      const { sent } = withLabels()
+      tick('ledger')
+      tick('deploy')
+      type('[aria-label="Author of deploy"]', 'bo')
+      act(() => exactButton('Label')?.click())
+      expect(sent).toEqual([
+        [
+          { filePath: '/p/.lightcode/tools/ledger.py', author: 'Ana Silva' },
+          { filePath: '/p/.lightcode/skills/deploy.md', author: 'bo' },
+        ],
+      ])
+      // deploy already says Payments, so its project box is shown and locked.
+      expect(container.querySelector<HTMLInputElement>('[aria-label="Project of deploy"]')?.disabled).toBe(true)
+    })
+
+    it('fills every ticked row at once, and ticks the ones with a suggestion in one go', () => {
+      const { sent } = withLabels()
+      act(() => button('Tick the 1 with a suggestion')?.click())
+      tick('lending-rules')
+      type('[aria-label="Project for ticked rows"]', 'Lending')
+      act(() => button('Fill ticked rows')?.click())
+      act(() => exactButton('Label')?.click())
+      expect(sent).toEqual([
+        [
+          { filePath: '/p/.lightcode/tools/ledger.py', author: 'Ana Silva', project: 'Lending' },
+          { filePath: '/mirror/lending-rules.md', project: 'Lending' },
+        ],
+      ])
+    })
   })
 
   it('names every index it will copy, old to new', () => {

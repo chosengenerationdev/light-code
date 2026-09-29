@@ -206,8 +206,8 @@ export function fillAttribution(kind: AttributedKind, source: string, values: At
  * The labels for a save Light Code is making.
  *
  * `previous` is the file being replaced, if any. Author and project come from the new text, then
- * the old file, then `defaults`; the version is one more than the highest either file names (a
- * file that existed without a version counts as 1); `updated` is `now`.
+ * the old file, then — **only for a new file** — `defaults`; the version is one more than the
+ * highest either file names (a file that existed without a version counts as 1); `updated` is `now`.
  */
 export function stampRevision(
   kind: AttributedKind,
@@ -220,9 +220,15 @@ export function stampRevision(
   const before = previous === undefined ? {} : readAttribution(kind, previous)
   const priorVersion = Math.max(before.version ?? (previous === undefined ? 0 : 1), 0)
   const version = Math.max(priorVersion + 1, incoming.version ?? 0)
+  /*
+   * The defaults label only a file that is new. An existing file without a label may be anybody's —
+   * copied from a colleague, synced from a shared bucket — and whoever happens to save it next is
+   * not evidence of who wrote it. It keeps whatever it says, and stays unlabelled otherwise.
+   */
+  const isNew = previous === undefined
   const values: Attribution = {
-    author: incoming.author ?? before.author ?? defaults.author,
-    project: incoming.project ?? before.project ?? defaults.project,
+    author: incoming.author ?? before.author ?? (isNew ? defaults.author : undefined),
+    project: incoming.project ?? before.project ?? (isNew ? defaults.project : undefined),
     version,
     updated: attributionTimestamp(now),
   }

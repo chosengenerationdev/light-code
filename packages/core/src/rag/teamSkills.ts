@@ -297,7 +297,7 @@ export function renderTeamSkillHits(found: TeamSkillSearchResult, query: string,
         : '') +
       (tried.length > 0 ? 'Looked in ' + tried.join(', ') + '. ' : '') +
       'Either nobody has written one, or the shared skills index has not been built yet ' +
-      '(Settings → Skills). This does not mean the subject is undocumented.'
+      '(Settings → Project → Team skills). This does not mean the subject is undocumented.'
     )
   }
 

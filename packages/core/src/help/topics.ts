@@ -272,7 +272,7 @@ keep loading until you upload them.
 **Every skill says who wrote it and where it belongs**: \`author\`, \`project\`, \`version\` and
 \`updated\` in its frontmatter, written automatically on each save — author and project once, the
 version up by one each time. The Skills tab shows them. Settings -> Project -> "Label existing skills
-and tools" fills them in for older files (as version 1).
+and tools" adds version and time to older files, and author and project only where you tick them.
 
 **Sharing.** Skills can be published to a team collection and found with \`search_team_skills\`,
 or mirrored from an S3 bucket. Everyone publishes to their own collection and an alias spans them,
@@ -570,9 +570,18 @@ frontmatter, and \`__author__\`, \`__project__\`, \`__version__\`, \`__updated__
 project are filled in once and never replaced; the version goes up by one on each save. The author
 is config:identity (owner), or the login name. The Skills and Python tabs show them.
 
-**Existing files.** "Label existing skills and tools" lists every file here missing any of these
-and adds only what is missing — existing files become version 1, dated when they last changed.
-An approved tool stays approved on this machine; other machines ask once for the labelled version.
+**Existing files.** "Label existing skills and tools" lists every file here missing a label. It
+**never guesses author or project** — files are mixed, colleagues' and other teams', and a wrong
+label is worse than none. Version (1) and the time the file last changed are filled on their own;
+author and project only on rows you tick, with the values you choose. Evidence is offered where it
+exists — the git author who added the file, or the team skills index holding the same text — and
+"Fill ticked rows" sets several at once. Files in the bucket folder are left alone unless ticked.
+An unlabelled file still works and is still found by project searches. An approved tool stays
+approved on this machine; other machines ask once for the labelled version.
+
+Saving a skill or tool labels it only if it is **new**; saving an existing unlabelled file adds the
+version and time and leaves author and project blank, since whoever edits it next is not evidence of
+who wrote it.
 
 **Index names.** Once a name is set, derived index names start with it (names typed into
 config:embedder or config:retrieval are left alone). "Move indexes to the project's names" copies

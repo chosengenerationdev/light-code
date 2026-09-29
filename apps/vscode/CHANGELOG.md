@@ -1,5 +1,16 @@
 # light-code-vscode
 
+## 0.121.1
+
+### Patch Changes
+
+- Labelling existing skills and tools no longer guesses who wrote them or which project they belong
+  to. Version and last-changed time are still filled in automatically; author and project are added
+  only to the files you tick, with the values you choose. Where there is evidence — the git author who
+  added the file, or the same text in the team skills index — it is suggested for you to confirm, and
+  "Fill ticked rows" labels several at once. Files in the shared bucket folder are left alone unless
+  you tick them. Saving an existing unlabelled skill or tool also no longer labels it with your name.
+
 ## 0.121.0
 
 ### Minor Changes

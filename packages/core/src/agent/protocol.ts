@@ -822,7 +822,11 @@ export type UiToHostMessage =
   /** Lists the indexes a project name renames; `apply` copies them. */
   | { type: 'runIndexRenames'; apply: boolean }
   /** Lists skills and tools missing an author or project; `apply` writes them in. */
-  | { type: 'runProjectStamp'; apply: boolean }
+  /**
+   * `apply` writes version and time to project files, and author/project only to the files named
+   * in `labels` — the rows the user ticked, with the values they chose. Nothing else is guessed.
+   */
+  | { type: 'runProjectStamp'; apply: boolean; labels?: { filePath: string; author?: string; project?: string }[] }
   /** Installs packages into the tools' Python environment, from a button the user pressed. */
   | { type: 'installPythonPackages'; packages: string[] }
   /** Run a query by hand, exactly as the model would, to judge what the index returns. */
@@ -1987,13 +1991,32 @@ export interface IndexRenamesMessage {
   error?: string
 }
 
+/**
+ * One file the labelling job found missing a label.
+ *
+ * Author and project are **never guessed**: files are mixed — a colleague's copied in, another
+ * team's synced from the bucket — and whoever runs the job is not evidence of who wrote any of
+ * them. Version and time are facts and are filled on their own; author and project only as the
+ * user decides, row by row, with evidence offered where there is some.
+ */
 export interface ProjectStampEntry {
   kind: 'skill' | 'tool'
   name: string
   filePath: string
-  /** The fields that will be added and their values; an existing value is never replaced. */
-  adds: { author?: string; project?: string; version?: number; updated?: string }
-  /** For a tool: its approval is carried over, because only these two lines change. */
+  /**
+   * `bucket`: the local copy of a shared bucket folder, holding other people's files. Nothing there
+   * is touched — not even the version — unless the row is ticked, because every change is uploaded.
+   */
+  location: 'project' | 'bucket'
+  /** What the file already says. Never replaced. */
+  current: { author?: string; project?: string }
+  /** Filled without asking, outside the bucket: the next version number is 1, the time is the file's own. */
+  automatic: { version?: number; updated?: string }
+  /** Whether author and project can be added at all — false when the file already has both. */
+  needsLabels: boolean
+  /** Evidence for author and project, to confirm with a tick. Absent when there is none. */
+  suggestion?: { author?: string; project?: string; source: string }
+  /** For a tool: its approval is carried over, because only label lines change. */
   approved?: boolean
 }
 

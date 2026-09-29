@@ -142,6 +142,7 @@ import {
   attributionTimestamp,
   fillAttribution,
   missingAttribution,
+  readAttribution,
   type Attribution,
 } from '../sharing/attribution.js'
 import { identityConfigSchema, projectConfigSchema } from '../config/schema.js'
@@ -7776,7 +7777,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (aliases.length === 0) {
       return {
         reason:
-          'No team skills name is set on this machine. Settings → Skills → Team skills: enter the ' +
+          'No team skills name is set on this machine. Settings → Project → Team skills: enter the ' +
           'same name everyone on the team uses and save it.',
       }
     }
@@ -8646,84 +8647,165 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /**
-   * Labels the skills and tools already here with author, project, version and time.
+   * Who first added each file under a folder, from git — evidence for a label, never a label.
    *
-   * Only folders this machine writes to — the project's own and, when a bucket is the save folder,
-   * that one. A colleague's skill in a read-only folder is theirs to label. Every missing field is
-   * filled and nothing is replaced (`sharing/attribution.ts`); a file's `updated` is its own last
-   * modification, since that is when it last actually changed.
-   *
-   * An approved tool keeps its approval — see `repinApproval` for why that is safe. Other machines
-   * will see the change and ask for approval again, because their pins are theirs.
+   * One `git log` for the folder: newest first, so the last author seen for a path is the one who
+   * added it. Absent when the folder is outside the repository, git is missing, or the file was
+   * never committed. The name is git's, which may not match `identity.owner`; it is offered for the
+   * user to confirm, which is exactly why it is only offered.
    */
-  async function handleProjectStamp(apply: boolean): Promise<void> {
+  async function gitFirstAuthors(folder: string): Promise<Map<string, string>> {
+    const found = new Map<string, string>()
+    if (workspaceRoot === undefined) return found
+    const root = workspaceRoot
+    const relative = path.relative(root, folder)
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return found
+    const output = await new Promise<string>((resolve) => {
+      const child = spawn('git', ['-c', 'core.quotePath=false', 'log', '--diff-filter=A', '--relative', '--format=@@%an', '--name-only', '--', relative.length > 0 ? relative : '.'], {
+        cwd: root,
+        windowsHide: true,
+      })
+      let text = ''
+      child.stdout.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')))
+      child.on('error', () => resolve(''))
+      child.on('close', () => resolve(text))
+    })
+    let author: string | undefined
+    for (const line of output.split(/\r?\n/)) {
+      if (line.startsWith('@@')) author = line.slice(2).trim()
+      else if (line.trim().length > 0 && author !== undefined && author.length > 0) {
+        found.set(normalizeForComparison(path.resolve(root, line.trim())), author)
+      }
+    }
+    return found
+  }
+
+  /**
+   * Labels skills and tools that are missing a label — without guessing.
+   *
+   * ## Why it asks
+   *
+   * The files are mixed: a colleague's copied in, another team's synced from the shared bucket,
+   * older ones from before labels existed. Whoever runs this is not evidence of who wrote any of
+   * them, and a wrong label is worse than none — it would sort another team's skill into this
+   * project, credit the wrong person, and in the bucket spread to everyone on the next sync. An
+   * unlabelled file still loads, works and is found by project-scoped searches.
+   *
+   * So only facts are automatic: the version (1) and the time the file last changed. Author and
+   * project are written only to the rows the user ticked, with the values they chose, and evidence
+   * is offered where there is some — the git author who added the file, or the team skills index
+   * holding the same text under a colleague's name.
+   *
+   * The bucket folder is untouched unless a row is ticked: every change there is uploaded, and a
+   * file other people depend on should not change because somebody tidied their own.
+   *
+   * An approved tool keeps its approval — see `repinApproval`. Other machines ask once for the
+   * labelled version, because their pins are theirs.
+   */
+  async function handleProjectStamp(
+    apply: boolean,
+    labels: readonly { filePath: string; author?: string | undefined; project?: string | undefined }[] = [],
+  ): Promise<void> {
     try {
       const { config } = await configManager.load()
-      const author = indexOwner(config)
-      const project = projectName(config, workspaceRoot)
       const ours = (dirs: (string | undefined)[]): string[] =>
         dirs.filter((dir, index): dir is string => dir !== undefined && dirs.findIndex((other) => samePath(other, dir)) === index)
       const skillFolders = ours([skillsDir, localSkillsDir])
       const folders = pythonFolders(config)
-      const toolFolders = ours([folders.toolsDir ?? localToolsDir(config), localToolsDir(config)])
+      const localTools = localToolsDir(config)
+      const toolFolders = ours([folders.toolsDir ?? localTools, localTools])
 
       interface Candidate {
         entry: ProjectStampEntry
         source: string
         folder: string
         relative: string
-        adds: Attribution
       }
       const candidates: Candidate[] = []
-      const consider = async (kind: 'skill' | 'tool', name: string, filePath: string, folder: string): Promise<void> => {
+      const consider = async (kind: 'skill' | 'tool', name: string, filePath: string, folder: string, location: 'project' | 'bucket'): Promise<void> => {
         const source = await fs.readFile(filePath, 'utf8')
         const missing = missingAttribution(kind, source)
         if (missing.length === 0) return
         if (kind === 'skill' && !/^---\r?\n/.test(source)) return
+        const current = readAttribution(kind, source)
         const modified = (await fs.stat(filePath)).mtime
-        const adds: Attribution = {}
-        if (missing.includes('author') && author !== undefined) adds.author = author
-        if (missing.includes('project') && project !== undefined) adds.project = project
-        if (missing.includes('version')) adds.version = 1
-        if (missing.includes('updated')) adds.updated = attributionTimestamp(modified)
-        if (Object.keys(adds).length === 0) return
+        const automatic = {
+          ...(missing.includes('version') ? { version: 1 } : {}),
+          ...(missing.includes('updated') ? { updated: attributionTimestamp(modified) } : {}),
+        }
         const approved = kind === 'tool' ? await isApprovedSource(folder, name, source) : undefined
         candidates.push({
           entry: {
             kind,
             name,
             filePath,
-            adds: {
-              ...(adds.author !== undefined ? { author: adds.author } : {}),
-              ...(adds.project !== undefined ? { project: adds.project } : {}),
-              ...(adds.version !== undefined ? { version: adds.version } : {}),
-              ...(adds.updated !== undefined ? { updated: adds.updated } : {}),
+            location,
+            current: {
+              ...(current.author !== undefined ? { author: current.author } : {}),
+              ...(current.project !== undefined ? { project: current.project } : {}),
             },
+            automatic,
+            needsLabels: missing.includes('author') || missing.includes('project'),
             ...(approved !== undefined ? { approved } : {}),
           },
           source,
           folder,
           relative: path.relative(folder, filePath).split(path.sep).join('/'),
-          adds,
         })
       }
 
       for (const folder of skillFolders) {
+        const location = samePath(folder, localSkillsDir) ? 'project' : 'bucket'
         const loaded = await loadSkills([folder]).catch(() => ({ skills: [] as Skill[] }))
-        for (const skill of loaded.skills) await consider('skill', skill.name, skill.filePath, folder)
+        for (const skill of loaded.skills) await consider('skill', skill.name, skill.filePath, folder, location)
       }
       for (const folder of toolFolders) {
+        const location = samePath(folder, localTools) ? 'project' : 'bucket'
         const entries = await fs.readdir(folder).catch(() => [] as string[])
         for (const entry of entries) {
           if (entry.startsWith('.') || !entry.endsWith('.py')) continue
           const name = entry.slice(0, -3)
           if (!isValidToolName(name)) continue
-          await consider('tool', name, path.join(folder, entry), folder)
+          await consider('tool', name, path.join(folder, entry), folder, location)
         }
       }
       const readOnly = skills.filter((skill) => skill.sourceDir !== undefined && !skillFolders.some((folder) => samePath(folder, skill.sourceDir))).length
 
       if (!apply) {
+        // Evidence, gathered only for the preview: it is offered, never applied by itself.
+        const gitAuthors = new Map<string, string>()
+        for (const folder of [...skillFolders, ...toolFolders]) {
+          for (const [file, author] of await gitFirstAuthors(folder)) gitAuthors.set(file, author)
+        }
+        const search = await resolveSearch(config).catch(() => undefined)
+        const embedder = await resolveEmbedder(config).catch(() => undefined)
+        const team = resolveTeamSkills(config, search, embedder)
+        for (const candidate of candidates) {
+          if (!candidate.entry.needsLabels) continue
+          if (candidate.entry.kind === 'skill' && 'options' in team) {
+            try {
+              const skill = (await loadSkills([candidate.folder])).skills.find((each) => each.name === candidate.entry.name)
+              const text = skill === undefined ? undefined : teamSkillText(skill, candidate.source)
+              const same = (await findTeamSkillsNamed(team.options, candidate.entry.name)).find(
+                (hit) => text !== undefined && hit.text === text && (hit.owner !== undefined || hit.project !== undefined),
+              )
+              if (same !== undefined) {
+                candidate.entry.suggestion = {
+                  ...(same.owner !== undefined ? { author: same.owner } : {}),
+                  ...(same.project !== undefined ? { project: same.project } : {}),
+                  source: 'the team skills index holds this exact text under that name',
+                }
+                continue
+              }
+            } catch {
+              // No team index to ask: no suggestion from it.
+            }
+          }
+          const gitAuthor = gitAuthors.get(normalizeForComparison(path.resolve(candidate.entry.filePath)))
+          if (gitAuthor !== undefined) {
+            candidate.entry.suggestion = { author: gitAuthor, source: 'git: the commit that added this file' }
+          }
+        }
         post({
           type: 'projectStamp',
           running: false,
@@ -8739,18 +8821,28 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       let uploaded = 0
       const failed: string[] = []
       for (const candidate of candidates) {
+        const chosen = labels.find((label) => samePath(label.filePath, candidate.entry.filePath))
+        // Other people's files in the bucket change only when somebody chose to change them.
+        if (candidate.entry.location === 'bucket' && chosen === undefined) continue
+        const values: Attribution = { ...candidate.entry.automatic }
+        if (chosen !== undefined) {
+          const author = chosen.author?.trim()
+          const project = chosen.project?.trim()
+          if (candidate.entry.current.author === undefined && author !== undefined && author.length > 0) values.author = author
+          if (candidate.entry.current.project === undefined && project !== undefined && project.length > 0) values.project = project
+        }
+        if (Object.keys(values).length === 0) continue
         try {
-          const next = fillAttribution(candidate.entry.kind, candidate.source, candidate.adds)
+          const next = fillAttribution(candidate.entry.kind, candidate.source, values)
+          if (next === candidate.source) continue
           await fs.writeFile(candidate.entry.filePath, next, 'utf8')
           written += 1
           if (candidate.entry.kind === 'tool' && candidate.entry.approved === true) {
             await repinApproval(candidate.folder, candidate.entry.name, candidate.source, next)
           }
-          const isSaveFolder =
-            candidate.entry.kind === 'skill' ? samePath(candidate.folder, skillsDir) : samePath(candidate.folder, folders.toolsDir)
-          // Only the bucket's own folder goes up: the project folder's copy is uploaded by the
-          // separate, deliberate "Upload all existing" button, never as a side effect of labelling.
-          if (isSaveFolder && (candidate.entry.kind === 'skill' ? skillsDir !== localSkillsDir : folders.toolsDir !== undefined)) {
+          // Only a file in the bucket's own folder goes up; a project file is uploaded by the
+          // separate, deliberate "Upload all existing" button.
+          if (candidate.entry.location === 'bucket') {
             if (await uploadToPublishFolder(candidate.entry.kind === 'skill' ? 'skills' : 'tools', candidate.relative, next)) uploaded += 1
           }
         } catch (error) {
@@ -11032,7 +11124,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'runIndexRenames') {
       reportFailure('handleIndexRenames', handleIndexRenames(message.apply))
     } else if (message.type === 'runProjectStamp') {
-      reportFailure('handleProjectStamp', handleProjectStamp(message.apply))
+      reportFailure('handleProjectStamp', handleProjectStamp(message.apply, message.labels ?? []))
     } else if (message.type === 'installPythonPackages') {
       reportFailure('handleInstallPythonPackages', handleInstallPythonPackages(message.packages))
     } else if (message.type === 'syncVectorStore') {

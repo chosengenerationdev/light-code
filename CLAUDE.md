@@ -1939,6 +1939,20 @@ skill, tool or index belonged to whom.
 - On the shared Node host, `runIndexRenames`, `runProjectStamp` and `installPythonPackages` are
   admin-only — none matches a mutating prefix, and all three write to what every user shares.
 
+- **Labelling never guesses author or project** (0.121.1, raised by the user: the existing files
+  are mixed). The first version filled missing labels with *this machine's* author and project on
+  every file in the folders we save to — which, once a publishing bucket became the save folder,
+  included every other team's synced files, and the job then **uploaded** them. A wrong label is
+  worse than none: it sorts another team's skill into this project and spreads on the next sync,
+  while an unlabelled file loses nothing (project searches include unlabelled items).
+  Now only facts are automatic (version 1, the file's mtime), and only outside the bucket. Author
+  and project are written to rows the user ticked, with values they chose; `handleProjectStamp`
+  never reads `indexOwner`/`projectName`. Evidence is *offered* in the preview and applied nowhere:
+  the git author of the adding commit (`git log --diff-filter=A --relative`), or a team-index hit
+  with the same name and identical text. Bucket rows change only when ticked. The same reasoning
+  reached `stampRevision`: saving an **existing** unlabelled file no longer labels it with whoever
+  saved it — the defaults apply to new files only. `labelledWrites.test.ts` pins the handler's
+  rules by reading `bridge.ts`.
 - **Every shared name lives in Settings → Project** (0.120.1, asked for directly). The author
   (`identity.owner`, hand-edit only until now), the index prefix, an optional fixed codebase index
   name, the team codebase aliases with "Attach alias", and the whole Team skills panel moved there
@@ -2830,8 +2844,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.121.0**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.121.0.vsix`, unpublished.
+until then, stale again. The local manifest is **0.121.1**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.121.1.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

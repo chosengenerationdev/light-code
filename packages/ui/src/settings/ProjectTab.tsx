@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react'
 
-import type { IndexRenamesMessage, ProjectMessage, ProjectStampMessage } from '@light-code/core/browser'
+import type { IndexRenamesMessage, ProjectMessage, ProjectStampEntry, ProjectStampMessage } from '@light-code/core/browser'
 
 import {
   colors,
@@ -32,7 +32,7 @@ export interface ProjectTabProps {
   onSaveName: (name: string) => void
   /** The default scope of skill and tool searches, for this project. */
   onSaveSearchScope: (scope: 'project' | 'author' | 'all') => void
-  onStamp: (apply: boolean) => void
+  onStamp: (apply: boolean, labels?: StampLabels) => void
   onRenames: (apply: boolean) => void
   /** Author, index prefix and name, and team code aliases. Absent fields are left alone. */
   onSaveNaming: (naming: { owner?: string; indexPrefix?: string; indexName?: string; indexAliases?: string[] }) => void
@@ -324,49 +324,219 @@ function NamingPanel(props: {
   )
 }
 
-function StampPanel(props: { stamp: ProjectStampMessage | undefined; onStamp: (apply: boolean) => void }): ReactElement {
+/** What the user decided for one row: nothing is labelled with an author or project unless ticked. */
+interface RowChoice {
+  ticked: boolean
+  author: string
+  project: string
+}
+
+export type StampLabels = { filePath: string; author?: string; project?: string }[]
+
+/**
+ * Labelling files that predate labels — without guessing who wrote them.
+ *
+ * The files are mixed: copied from colleagues, synced from a bucket several teams share, written
+ * before labels existed. So version and time, which are facts, are filled on their own; author and
+ * project only on the rows somebody ticks, with the values they chose. Evidence is offered — the git
+ * author who added a file, the team index holding the same text — and prefilled only when ticked.
+ */
+function StampPanel(props: {
+  stamp: ProjectStampMessage | undefined
+  onStamp: (apply: boolean, labels?: StampLabels) => void
+}): ReactElement {
   const stamp = props.stamp
   const entries = stamp?.entries ?? []
-  const approved = entries.filter((entry) => entry.kind === 'tool' && entry.approved === true).length
+  const [choices, setChoices] = useState<Record<string, RowChoice>>({})
+  const [bulkAuthor, setBulkAuthor] = useState('')
+  const [bulkProject, setBulkProject] = useState('')
+  // A new list is a new set of decisions; old ticks against different files would mislead.
+  const listKey = entries.map((entry) => entry.filePath).join('\n')
+  useEffect(() => setChoices({}), [listKey])
+
+  const choiceFor = (entry: ProjectStampEntry): RowChoice =>
+    choices[entry.filePath] ?? { ticked: false, author: entry.suggestion?.author ?? '', project: entry.suggestion?.project ?? '' }
+  const update = (entry: ProjectStampEntry, change: Partial<RowChoice>): void =>
+    setChoices((current) => ({ ...current, [entry.filePath]: { ...choiceFor(entry), ...change } }))
+
+  const ticked = entries.filter((entry) => choiceFor(entry).ticked)
+  const labels: StampLabels = ticked.map((entry) => {
+    const choice = choiceFor(entry)
+    return {
+      filePath: entry.filePath,
+      ...(entry.current.author === undefined && choice.author.trim().length > 0 ? { author: choice.author.trim() } : {}),
+      ...(entry.current.project === undefined && choice.project.trim().length > 0 ? { project: choice.project.trim() } : {}),
+    }
+  })
+  const automaticCount = entries.filter(
+    (entry) => entry.location === 'project' && (entry.automatic.version !== undefined || entry.automatic.updated !== undefined),
+  ).length
+  const withSuggestion = entries.filter((entry) => entry.suggestion !== undefined)
+  const bucketCount = entries.filter((entry) => entry.location === 'bucket').length
+
+  const rowStyle = { borderTop: `1px solid ${colors.border}`, padding: '6px 0', fontSize: 12 } as const
+  const smallInput = { ...textFieldStyle(), padding: '2px 6px', fontSize: 11, width: 140 } as const
+
   return (
     <Panel id="project.stamp" title="Label existing skills and tools" forceOpen={stamp?.running === true || entries.length > 0}>
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
-        Adds author, project, version and last-updated time to skills and Python tools that do not
-        have them yet. Only what is missing is added — a skill that already names its author keeps
-        it. Existing files start at version 1, dated when they were last changed. Only folders this
-        machine saves to are touched; a colleague&apos;s shared files are theirs to label.
+        Adds version and last-changed time on its own — those are facts. <strong>Author and project
+        are only added where you tick a row</strong>, because files here may be colleagues&apos;,
+        copied in or synced from the team bucket, and a wrong label is worse than none. An unlabelled
+        file still works and is still found by project searches. Existing labels are never replaced.
       </p>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <button type="button" style={secondaryButtonStyle()} disabled={stamp?.running === true} onClick={() => props.onStamp(false)}>
           Find unlabelled files
         </button>
-        {entries.length > 0 && stamp?.running !== true && (
-          <button type="button" style={primaryButtonStyle(false)} onClick={() => props.onStamp(true)}>
-            Label {entries.length} file{entries.length === 1 ? '' : 's'}
-          </button>
-        )}
         {stamp?.running === true && <span role="status">Labelling…</span>}
       </div>
-      {entries.length > 0 && (
-        <div style={listStyle}>
-          {entries.map((entry) => (
-            <div key={entry.filePath}>
-              {entry.kind === 'skill' ? 'skill' : 'tool '} {entry.name}{' '}
-              <span style={{ color: colors.muted }}>
-                + {Object.entries(entry.adds).map(([key, value]) => `${key}: ${String(value)}`).join(', ')}
-              </span>
-            </div>
-          ))}
-        </div>
+
+      {entries.length > 0 && stamp?.running !== true && (
+        <>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', margin: '10px 0 4px' }}>
+            <input
+              aria-label="Author for ticked rows"
+              type="text"
+              value={bulkAuthor}
+              placeholder="author"
+              onChange={(event) => setBulkAuthor(event.target.value)}
+              style={smallInput}
+            />
+            <input
+              aria-label="Project for ticked rows"
+              type="text"
+              value={bulkProject}
+              placeholder="project"
+              onChange={(event) => setBulkProject(event.target.value)}
+              style={smallInput}
+            />
+            <button
+              type="button"
+              style={secondaryButtonStyle()}
+              disabled={ticked.length === 0 || (bulkAuthor.trim().length === 0 && bulkProject.trim().length === 0)}
+              onClick={() =>
+                setChoices((current) => {
+                  const next = { ...current }
+                  for (const entry of ticked) {
+                    next[entry.filePath] = {
+                      ...choiceFor(entry),
+                      ...(bulkAuthor.trim().length > 0 ? { author: bulkAuthor.trim() } : {}),
+                      ...(bulkProject.trim().length > 0 ? { project: bulkProject.trim() } : {}),
+                    }
+                  }
+                  return next
+                })
+              }
+            >
+              Fill ticked rows
+            </button>
+            {withSuggestion.length > 0 && (
+              <button
+                type="button"
+                style={secondaryButtonStyle()}
+                onClick={() =>
+                  setChoices((current) => {
+                    const next = { ...current }
+                    for (const entry of withSuggestion) next[entry.filePath] = { ...choiceFor(entry), ticked: true }
+                    return next
+                  })
+                }
+              >
+                Tick the {withSuggestion.length} with a suggestion
+              </button>
+            )}
+          </div>
+
+          <div style={{ maxHeight: 360, overflow: 'auto', margin: '6px 0' }}>
+            {entries.map((entry) => {
+              const choice = choiceFor(entry)
+              const id = `stamp-${entry.filePath}`
+              return (
+                <div key={entry.filePath} style={rowStyle}>
+                  <label htmlFor={id} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: entry.needsLabels ? 'pointer' : 'default' }}>
+                    <input
+                      id={id}
+                      type="checkbox"
+                      checked={choice.ticked}
+                      disabled={!entry.needsLabels && entry.location === 'project'}
+                      onChange={(event) => update(entry, { ticked: event.target.checked })}
+                    />
+                    <span style={{ fontFamily: monospaceFamily }}>
+                      {entry.kind === 'skill' ? 'skill' : 'tool'} {entry.name}
+                    </span>
+                    {entry.location === 'bucket' && (
+                      <span style={{ fontSize: 10, color: colors.muted, border: `1px solid ${colors.border}`, borderRadius: 3, padding: '0 4px' }}>
+                        bucket — untouched unless ticked
+                      </span>
+                    )}
+                  </label>
+                  <div style={{ color: colors.muted, fontSize: 11, marginLeft: 22 }}>
+                    {[
+                      entry.current.author !== undefined ? `author ${entry.current.author}` : undefined,
+                      entry.current.project !== undefined ? `project ${entry.current.project}` : undefined,
+                      entry.automatic.version !== undefined ? 'adds version 1' : undefined,
+                      entry.automatic.updated !== undefined ? `dated ${entry.automatic.updated.replace('T', ' ').replace('Z', ' UTC')}` : undefined,
+                    ]
+                      .filter((part): part is string => part !== undefined)
+                      .join(' · ')}
+                    {entry.suggestion !== undefined && (
+                      <div>
+                        Suggested:{' '}
+                        {[
+                          entry.suggestion.author !== undefined ? `author ${entry.suggestion.author}` : undefined,
+                          entry.suggestion.project !== undefined ? `project ${entry.suggestion.project}` : undefined,
+                        ]
+                          .filter((part): part is string => part !== undefined)
+                          .join(', ')}{' '}
+                        <span style={{ fontStyle: 'italic' }}>({entry.suggestion.source})</span>
+                      </div>
+                    )}
+                  </div>
+                  {choice.ticked && entry.needsLabels && (
+                    <div style={{ display: 'flex', gap: 6, marginLeft: 22, marginTop: 4 }}>
+                      <input
+                        aria-label={`Author of ${entry.name}`}
+                        type="text"
+                        value={entry.current.author ?? choice.author}
+                        disabled={entry.current.author !== undefined}
+                        placeholder="author"
+                        onChange={(event) => update(entry, { author: event.target.value })}
+                        style={smallInput}
+                      />
+                      <input
+                        aria-label={`Project of ${entry.name}`}
+                        type="text"
+                        value={entry.current.project ?? choice.project}
+                        disabled={entry.current.project !== undefined}
+                        placeholder="project"
+                        onChange={(event) => update(entry, { project: event.target.value })}
+                        style={smallInput}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <span style={hintStyle}>
+            {automaticCount} project file{automaticCount === 1 ? '' : 's'} get version and time.{' '}
+            {labels.filter((label) => label.author !== undefined || label.project !== undefined).length} ticked file(s) get the
+            author and project shown.
+            {bucketCount > 0 ? ` Bucket files are changed only if ticked, and are then uploaded.` : ''}
+            {entries.some((entry) => entry.kind === 'tool' && entry.approved === true)
+              ? ' Approved tools stay approved here; other machines ask once for the labelled version.'
+              : ''}
+          </span>
+          <button type="button" style={primaryButtonStyle(false)} onClick={() => props.onStamp(true, labels)}>
+            Label
+          </button>
+        </>
       )}
-      {approved > 0 && stamp?.running !== true && (
-        <span style={hintStyle}>
-          {approved} approved tool{approved === 1 ? '' : 's'} stay approved here, since only the label
-          lines change. Other machines will ask to approve the labelled version once.
-        </span>
-      )}
+
       {stamp?.readOnly !== undefined && stamp.readOnly > 0 && entries.length > 0 && (
-        <span style={hintStyle}>{stamp.readOnly} skill(s) from shared folders are left alone.</span>
+        <span style={hintStyle}>{stamp.readOnly} skill(s) in read-only shared folders are left alone.</span>
       )}
       {stamp?.note !== undefined && <span style={hintStyle}>{stamp.note}</span>}
       {stamp?.done !== undefined && (
