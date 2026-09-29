@@ -45,6 +45,9 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   'create_python_tool',
   'update_python_tool',
   'delete_python_tool',
+  // Fetches and installs other people's code into the environment every tool runs in. Nobody
+  // unattended would see which packages, from where.
+  'install_python_packages',
   'write_skill',
   'delete_skill',
   /*

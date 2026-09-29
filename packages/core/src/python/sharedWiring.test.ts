@@ -32,8 +32,24 @@ describe('the bucket tools folders reach the Python manager', () => {
     }
     expect(calls.length).toBeGreaterThan(0)
     for (const call of calls) {
-      expect(call, call).toContain('extraToolDirs')
+      // Either spelled out or through `pythonFolders`, which owns the folders for every call.
+      expect(call.includes('extraToolDirs') || call.includes('pythonFolders('), call).toBe(true)
     }
+  })
+
+  /*
+   * A bucket folder marked for publishing is the *save* folder (reported: new tools still
+   * appeared under .lightcode with a bucket chosen), and the project folder stays readable.
+   */
+  it('saves to a publishing bucket folder, and keeps the mirrors and the project folder readable', () => {
+    const at = bridge.indexOf('function pythonFolders(')
+    expect(at, 'pythonFolders not found').toBeGreaterThan(-1)
+    const body = bridge.slice(at, bridge.indexOf('\n  }\n', at))
+    expect(body).toContain('mirroredToolsDirs')
+    expect(body).toContain("publishFolder('tools'")
+    expect(body).toContain('localToolsDir(config)')
+    // An explicitly chosen folder still wins over the bucket.
+    expect(body).toContain('config.python?.toolsDir')
   })
 
   it('never configures Python from the raw config alone', () => {

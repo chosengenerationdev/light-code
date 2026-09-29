@@ -786,6 +786,29 @@ export const identityConfigSchema = z
 export type IdentityConfig = z.infer<typeof identityConfigSchema>
 
 /**
+ * What this project is called, for everything Light Code writes somewhere other people read.
+ *
+ * Several teams share one cluster and one bucket, so a skill, a tool or an index has to say which
+ * project it came from — `config/project.ts` owns the name and every derivation from it. Absent
+ * means the folder name, which is right for a single user and ambiguous across teams; setting it
+ * is what makes index names start with the project and labels new skills and tools.
+ *
+ * User-scope only, and stored per project through `workspaces` like the other per-project values:
+ * a repository able to name itself could claim another team's index prefix and write into it.
+ */
+export const projectConfigSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(64)
+      .regex(/^[\w .()-]+$/, 'Letters, digits, spaces, dot, dash, underscore and brackets'),
+  })
+  .partial()
+export type ProjectConfig = z.infer<typeof projectConfigSchema>
+
+/**
  * Indexing Outlook mail so it can be investigated.
  *
  * Off by default and **user-scope only**, like the rest of `office`: this reads the contents of
@@ -941,6 +964,8 @@ export const configSchema = z
      * repository able to set it could attribute its own indexed content to someone else.
      */
     identity: identityConfigSchema,
+    /** User-scope only, set per project. See `projectConfigSchema`. */
+    project: projectConfigSchema,
     /** User-scope only: a workspace able to add a trusted root could enable interception. */
     tls: globalTlsSchema,
     expert: expertConfigSchema,

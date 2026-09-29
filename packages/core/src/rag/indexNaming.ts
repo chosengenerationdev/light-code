@@ -80,10 +80,17 @@ export interface IndexNameInput {
   owner?: string | undefined
   /** Absolute path to the workspace. */
   workspaceRoot: string
+  /**
+   * The project's name, already reduced by `projectSlug`. Leads the name when present, so a
+   * cluster several teams share sorts each team's indexes together. Only a *configured* name is
+   * passed — see `config/project.ts` for why the folder name never is.
+   */
+  project?: string | undefined
 }
 
 /**
- * `<prefix>-<owner>-<digest>`, or `<prefix>-<digest>` when there is no owner to name.
+ * `<prefix>-<owner>-<digest>`, or `<prefix>-<digest>` when there is no owner to name, with
+ * `<project>-` in front when a project name is set.
  *
  * The path is resolved and case-folded before hashing, per §16: Windows hands the same folder back
  * spelled more than one way, and a name that changed with the spelling would re-embed for nothing.
@@ -111,5 +118,8 @@ export function deriveIndexName(input: IndexNameInput): string {
     .digest('hex')
     .slice(0, 16)
 
-  return slug === undefined ? `${prefix}-${digest}` : `${prefix}-${slug}-${digest}`
+  const base = slug === undefined ? `${prefix}-${digest}` : `${prefix}-${slug}-${digest}`
+  // The digest is deliberately unchanged by the project, so the name before and after a project
+  // is set differ only by the prefix — which is what lets `rag/renameIndexes.ts` pair them up.
+  return input.project === undefined ? base : `${input.project}-${base}`
 }

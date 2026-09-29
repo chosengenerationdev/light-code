@@ -225,6 +225,32 @@ export async function approveTool(
   await writeRegistryFile(toolsDir, registry)
 }
 
+/**
+ * Moves an approval onto a file Light Code has just labelled.
+ *
+ * Only when the file *before* labelling is exactly what was approved: then the one difference is
+ * the attribution lines the host wrote itself, and asking the user to re-read an unchanged tool
+ * for them would teach people to approve without reading. A file that had already changed stays
+ * unapproved, as it was. Returns whether the approval moved.
+ *
+ * Deliberately not a general "ignore these lines when hashing": an approved tool can read its own
+ * `__version__`, so letting that line change freely would let behaviour change unreviewed.
+ */
+export async function repinApproval(toolsDir: string, name: string, previousSource: string, nextSource: string): Promise<boolean> {
+  const registry = await readRegistryFile(toolsDir)
+  const entry = registry.tools[name]
+  if (entry === undefined || entry.hash !== hashSource(previousSource)) return false
+  registry.tools[name] = { ...entry, hash: hashSource(nextSource) }
+  await writeRegistryFile(toolsDir, registry)
+  return true
+}
+
+/** Whether this exact source is the approved one in this folder. */
+export async function isApprovedSource(toolsDir: string, name: string, source: string): Promise<boolean> {
+  const entry = (await readRegistryFile(toolsDir)).tools[name]
+  return entry !== undefined && entry.hash === hashSource(source)
+}
+
 export async function forgetTool(toolsDir: string, name: string): Promise<void> {
   const registry = await readRegistryFile(toolsDir)
   delete registry.tools[name]

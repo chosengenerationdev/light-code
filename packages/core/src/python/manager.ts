@@ -19,10 +19,24 @@ import {
   createCollectorTool,
   createCreatePythonTool,
   createDeletePythonTool,
+  createInstallPackagesTool,
   createUpdatePythonTool,
   type PythonToolContext,
 } from './tools.js'
-import { installDependencies } from './deps.js'
+import { installArguments, installDependencies } from './deps.js'
+import { readToolAttribution, type Attribution } from '../sharing/attribution.js'
+
+/** Only the labels a tool actually has, so an unlabelled tool carries no empty fields. */
+function labelFields(labels: Attribution | undefined): { author?: string; project?: string; version?: number; updated?: string } {
+  if (labels === undefined) return {}
+  return {
+    ...(labels.author !== undefined ? { author: labels.author } : {}),
+    ...(labels.project !== undefined ? { project: labels.project } : {}),
+    ...(labels.version !== undefined ? { version: labels.version } : {}),
+    ...(labels.updated !== undefined ? { updated: labels.updated } : {}),
+  }
+}
+import { findMissingPackages, interpreterCheck, isInstallableRequirement, type ToolSource } from './missingPackages.js'
 import type { WorkerToolDescription } from './worker.js'
 import {
   detectUv,
@@ -76,10 +90,27 @@ export interface PythonStatus {
    */
   missingEnv?: string[]
   /**
+   * Packages each tool needs that the environment lacks, by tool name — for tools that are loaded
+   * and for tools still waiting for approval, which cannot be approved until these exist.
+   */
+  missingPackages?: Record<string, string[]>
+  /** Whether Light Code can install into this environment; see `installPackages`. */
+  canInstallPackages?: boolean
+  /**
    * `sourceDir` says which configured folder it came from — only the first is writable, so the tab
    * can mark a shared tool read-only rather than offering a Remove that would be refused.
    */
-  tools: { name: string; description: string; filePath: string; sourceDir: string }[]
+  tools: {
+    name: string
+    description: string
+    filePath: string
+    sourceDir: string
+    /** From the tool's own `__author__`/`__project__`/`__version__`/`__updated__`. */
+    author?: string
+    project?: string
+    version?: number
+    updated?: string
+  }[]
   /** Read-only folders searched after `toolsDir`, in order. */
   extraToolDirs?: string[]
   /**
@@ -156,6 +187,8 @@ export interface PythonManagerOptions {
    * will. That has to be settled at build time, and the answer can change between turns.
    */
   generateSource?: () => CodeGenerator | undefined
+  /** Labels every tool saved; see `PythonToolContext.attribution`. */
+  attribution?: (() => { author?: string | undefined; project?: string | undefined }) | undefined
 }
 
 export class PythonManager {
@@ -163,6 +196,10 @@ export class PythonManager {
   private uv: UvInfo | undefined
   private registered: RegisteredTool[] = []
   private issues: ToolLoadIssue[] = []
+  /** Packages each tool needs and the environment lacks, by tool name. See `missingPackages.ts`. */
+  private missingPackages = new Map<string, string[]>()
+  /** Author, project, version and time from each tool's own header. See `sharing/attribution.ts`. */
+  private labels = new Map<string, Attribution>()
   private ready = false
   private detail = 'Dynamic Python tools are off.'
   private enabled = false
@@ -455,7 +492,75 @@ export class PythonManager {
     )
     this.registered = loaded.tools
     this.issues = loaded.issues
+    this.missingPackages = await this.checkPackages()
     this.options.onToolsChanged?.()
+  }
+
+  /**
+   * What every tool here needs and this environment does not have — loaded tools and the ones
+   * waiting for approval alike, since a tool whose import fails cannot be approved until its
+   * packages are present. One interpreter start for all of them.
+   */
+  private async checkPackages(): Promise<Map<string, string[]>> {
+    if (!this.ready || this.interpreter.length === 0) return new Map()
+    this.labels = new Map()
+    const files = new Map<string, string>()
+    for (const tool of this.registered) files.set(tool.name, tool.filePath)
+    for (const issue of this.issues) {
+      if (issue.kind === 'shadowed' || issue.kind === 'declined') continue
+      if (!files.has(issue.name)) files.set(issue.name, issue.filePath)
+    }
+    const sources: ToolSource[] = []
+    for (const [name, filePath] of files) {
+      try {
+        const source = await fs.readFile(filePath, 'utf8')
+        sources.push({ name, source })
+        this.labels.set(name, readToolAttribution(source))
+      } catch {
+        // Unreadable: reported elsewhere, and there is nothing to check.
+      }
+    }
+    try {
+      return await findMissingPackages(sources, interpreterCheck(this.interpreter, await this.childEnv()))
+    } catch (error) {
+      this.options.logger.debug('could not check which packages Python tools need', String(error))
+      return new Map()
+    }
+  }
+
+  /** The literal install command, for the approval prompt. Built by the function that runs it. */
+  installCommand(packages: readonly string[]): string {
+    const quote = (value: string): string => (/[\s"]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value)
+    const args = installArguments({
+      pythonPath: this.interpreter,
+      packages,
+      ...(this.indexUrl !== undefined ? { indexUrl: this.indexUrl } : {}),
+      extraIndexUrls: this.extraIndexUrls,
+      offline: this.offline,
+    })
+    return [this.uv?.path ?? 'uv', ...args].map(quote).join(' ')
+  }
+
+  /**
+   * Installs packages into the tools' environment and reloads, for a button the user pressed.
+   * Refused, with the reason, where Light Code does not own the environment.
+   */
+  async installPackages(packages: readonly string[]): Promise<{ installed: string[]; error?: string }> {
+    const bad = packages.filter((entry) => !isInstallableRequirement(entry))
+    if (bad.length > 0) return { installed: [], error: `Not a package name: ${bad.join(', ')}` }
+    const install = this.toolContext()?.installDeps
+    if (install === undefined) {
+      return {
+        installed: [],
+        error:
+          this.venvSource === 'interpreter'
+            ? 'Light Code is using a Python it did not create, so it does not install packages there. Install them into that environment yourself.'
+            : 'Installing needs uv and a virtualenv Light Code manages. See Settings → Python.',
+      }
+    }
+    const result = await install(packages)
+    await this.refresh()
+    return result
   }
 
   /**
@@ -497,6 +602,9 @@ export class PythonManager {
       createCreatePythonTool(context),
       createUpdatePythonTool(context),
       createDeletePythonTool(context),
+      ...(context.installDeps !== undefined && this.uv !== undefined
+        ? [createInstallPackagesTool({ ...context, installCommand: (packages) => this.installCommand(packages) })]
+        : []),
       /*
        * Offered only when a worker exists to run the check.
        *
@@ -520,7 +628,12 @@ export class PythonManager {
     const worker = this.worker
     if (this.toolContext() === undefined || worker === undefined) return []
     return this.registered.map((tool) =>
-      adaptPythonTool(tool, { worker, timeoutMs: this.timeoutMs }),
+      adaptPythonTool(tool, {
+        worker,
+        timeoutMs: this.timeoutMs,
+        ...(this.missingPackages.has(tool.name) ? { missingPackages: this.missingPackages.get(tool.name) } : {}),
+        canInstall: this.toolContext()?.installDeps !== undefined,
+      }),
     ) as unknown as Tool<never>[]
   }
 
@@ -541,6 +654,7 @@ export class PythonManager {
       ...(this.options.onToolSaved !== undefined
         ? { onSaved: this.options.onToolSaved }
         : {}),
+      ...(this.options.attribution !== undefined ? { attribution: this.options.attribution } : {}),
       /*
        * No installing against an interpreter we do not own.
        *
@@ -651,11 +765,14 @@ export class PythonManager {
       detail: this.detail,
       ...(this.missingEnv.length > 0 ? { missingEnv: [...this.missingEnv] } : {}),
       ...(this.extraToolDirs.length > 0 ? { extraToolDirs: [...this.extraToolDirs] } : {}),
+      ...(this.missingPackages.size > 0 ? { missingPackages: Object.fromEntries(this.missingPackages) } : {}),
+      canInstallPackages: this.toolContext()?.installDeps !== undefined,
       tools: this.registered.map((tool) => ({
         name: tool.name,
         description: tool.description,
         filePath: tool.filePath,
         sourceDir: tool.sourceDir,
+        ...labelFields(this.labels.get(tool.name)),
       })),
       issues: this.issues.map((issue) => ({
         detail: describeIssue(issue),

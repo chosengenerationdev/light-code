@@ -1,5 +1,27 @@
 # light-code-vscode
 
+## 0.120.0
+
+### Minor Changes
+
+- **Project name.** Settings → Project names this project; it is saved for this project only, on
+  your machine. Blank uses the folder name.
+- **Skills and tools say who wrote them and where they belong.** Every skill and Python tool saved
+  now carries its author, project, version and the date and time of the save. Version goes up by one
+  on each save. The Skills and Python tabs show them, and skills sent to the team keep their own
+  author and project. "Label existing skills and tools" adds these to files that do not have them —
+  existing files become version 1 — without replacing anything already there; approved tools stay
+  approved.
+- **Index names start with the project name** once one is set. "Move indexes to the project's
+  names" copies your existing indexes to the new names inside the cluster — nothing is embedded
+  again — and leaves the old ones in place. Indexing the codebase does this by itself too.
+- **Choosing a bucket to publish skills or tools to now saves new ones there**, instead of in
+  `.lightcode/skills` or `.lightcode/tools` with a copy uploaded. Ones already in the project keep
+  working until you upload them.
+- **Python tools that need packages you do not have are flagged.** The assistant is told before it
+  uses such a tool, can offer to install them (always asking first, with the exact command shown),
+  and the approval card offers an Install button.
+
 ## 0.119.1
 
 ### Patch Changes

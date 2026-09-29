@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { confine } from '../fs/confine.js'
 import { describeTeamSkillCollision, type TeamSkillHit } from '../rag/teamSkills.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
+import { stampRevision } from '../sharing/attribution.js'
 import { isValidSkillName, parseFrontmatter, renderSkill, skillFileName } from './index.js'
 import {
   appendSkillImages,
@@ -83,7 +84,13 @@ export interface SkillToolContext {
    * and losing it because a bucket was unreachable would be the worse outcome. The tool result
    * says the copy did not go up, so nothing is silently half-done.
    */
-  onSaved?: ((name: string, content: string) => Promise<void>) | undefined
+  onSaved?: ((name: string, content: string, relativePath: string) => Promise<void>) | undefined
+  /**
+   * Who a new skill is attributed to and which project it belongs to. Present, every write is
+   * labelled with those, a version one higher than the file it replaces, and the time — see
+   * `sharing/attribution.ts`. Absent writes the skill as it is, which is what tests get.
+   */
+  attribution?: (() => { author?: string | undefined; project?: string | undefined }) | undefined
 }
 
 /** A skill is an illustrated page, not a gallery. */
@@ -340,6 +347,25 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
     }
   }
 
+  /*
+   * The labelled text computed for a preview, reused by the write it approves.
+   *
+   * The label carries the time of the save, and preview and write run at different moments: a
+   * second stamp would put bytes on disk that nobody approved (invariant 8). Keyed by everything
+   * the label depends on, so a different body or a file changed in between gets a fresh one.
+   */
+  const stampedByInput = new Map<string, string>()
+  const label = (name: string, rendered: string, before: string): string => {
+    if (context.attribution === undefined) return rendered
+    const key = `${name}\u0000${rendered}\u0000${before}`
+    const cached = stampedByInput.get(key)
+    if (cached !== undefined) return cached
+    const stamped = stampRevision('skill', rendered, before.length > 0 ? before : undefined, context.attribution(), new Date())
+    stampedByInput.clear()
+    stampedByInput.set(key, stamped)
+    return stamped
+  }
+
   return {
     name: 'write_skill',
     group: 'edit',
@@ -354,10 +380,11 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
 
     async preview(params): Promise<ToolPreview> {
       const filePath = await resolveSkillPath(context.skillsDir, params.name)
+      const before = await readIfPresent(filePath)
       return {
         kind: 'diff',
         path: filePath,
-        before: await readIfPresent(filePath),
+        before,
         // Rendered here, so the diff is exactly the bytes that get written rather than an
         // approximation of them.
         /*
@@ -365,14 +392,18 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
          * A preview showing the body without them would be approving different bytes - which
          * invariant 8 exists to prevent, and the pictures are the part somebody would look for.
          */
-        after: renderSkill(
+        after: label(
           params.name,
-          params.description,
-          appendSkillFiles(
-            appendSkillImages(params.body, plannedImages(params)),
+          renderSkill(
             params.name,
-            plannedFiles(params),
+            params.description,
+            appendSkillFiles(
+              appendSkillImages(params.body, plannedImages(params)),
+              params.name,
+              plannedFiles(params),
+            ),
           ),
+          before,
         ),
       }
     },
@@ -406,10 +437,14 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
           wantsFolder && context.submitForReview === undefined
             ? await copySkillFiles(path.dirname(filePath), params.files ?? [], toolContext)
             : plannedFiles(params)
-        const rendered = renderSkill(
+        const rendered = label(
           params.name,
-          params.description,
-          appendSkillFiles(appendSkillImages(params.body, stored), params.name, storedFiles),
+          renderSkill(
+            params.name,
+            params.description,
+            appendSkillFiles(appendSkillImages(params.body, stored), params.name, storedFiles),
+          ),
+          before,
         )
 
         // Before the write, not after: a skill that existed even briefly is one that could be
@@ -444,7 +479,9 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
         let publishProblem: string | undefined
         if (context.onSaved !== undefined) {
           try {
-            await context.onSaved(params.name, rendered)
+            // Where it actually is: a skill kept as a folder is `name/SKILL.md`, and uploading it
+            // as `name.md` would bring a second copy back down on the next sync.
+            await context.onSaved(params.name, rendered, path.relative(context.skillsDir, filePath).split(path.sep).join('/'))
           } catch (error) {
             publishProblem = error instanceof Error ? error.message : String(error)
           }

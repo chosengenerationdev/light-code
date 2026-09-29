@@ -63,6 +63,16 @@ export interface PendingToolApprovalsProps {
   approving?: readonly string[] | undefined
   /** How far through the current approval the host is, counting tools already done. */
   approvalProgress?: { done: number; total: number } | undefined
+  /**
+   * Packages each tool needs that the tools' Python environment lacks. A tool whose import fails
+   * cannot be approved at all, so this is said beside it with a way to fix it, rather than left
+   * to surface as "could not be loaded".
+   */
+  missingPackages?: Record<string, string[]> | undefined
+  /** Whether Light Code may install into that environment. */
+  canInstallPackages?: boolean
+  install?: { running: boolean; packages: string[]; error?: string; installed?: string[] } | undefined
+  onInstall?: (packages: string[]) => void
 }
 
 /**
@@ -175,6 +185,13 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
           ? 'Read the source before approving. Nothing here can run until you do.'
           : `${String(changed)} changed after you approved ${changed === 1 ? 'it' : 'them'} — read what changed.`}
       </div>
+      {props.install !== undefined && props.install.running !== true && (
+        <div role="status" style={{ fontSize: 11, marginTop: 6, color: props.install.error !== undefined ? colors.error : colors.muted }}>
+          {props.install.error !== undefined
+            ? `Could not install ${props.install.packages.join(', ')}: ${props.install.error}`
+            : `Installed ${(props.install.installed ?? props.install.packages).join(', ')}.`}
+        </div>
+      )}
       {busy > 0 && (
         <ApprovalProgress
           done={props.approvalProgress?.done ?? 0}
@@ -258,6 +275,32 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
               >
                 {tool.filePath}
               </div>
+              {(props.missingPackages?.[tool.name]?.length ?? 0) > 0 && (
+                <div style={{ fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span>
+                    Needs <code style={{ fontFamily: monospace }}>{props.missingPackages?.[tool.name]?.join(', ')}</code>,
+                    not installed in the tools&apos; Python environment.
+                  </span>
+                  {props.canInstallPackages === true && props.onInstall !== undefined ? (
+                    props.install?.running === true ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: colors.muted }} role="status">
+                        <Spinner /> Installing…
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
+                        title="Installs into the environment Python tools run in, from the configured package index"
+                        onClick={() => props.onInstall?.([...(props.missingPackages?.[tool.name] ?? [])])}
+                      >
+                        Install
+                      </button>
+                    )
+                  ) : (
+                    <span style={{ color: colors.muted }}>Install them into that environment, then approve.</span>
+                  )}
+                </div>
+              )}
               {props.problems?.[tool.name] !== undefined && (
                 <div style={{ color: colors.error, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
                   Could not be approved: {props.problems[tool.name]}. Approving again will not help

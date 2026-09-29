@@ -71,8 +71,12 @@ describe('the bridge resolves the folder from config', () => {
     expect(at, 'managedFolderFor not found').toBeGreaterThan(-1)
     const body = bridge.slice(at, bridge.indexOf('\n  }', at))
     expect(body).toContain('configManager.load()')
-    expect(body).toContain('defaultPythonToolsDir')
+    expect(body).toContain('localToolsDir(config)')
     expect(body).not.toContain('python.toolDirectories()')
+    // The project folder, not the bucket: this is where the files that already exist live.
+    const local = bridge.slice(bridge.indexOf('function localToolsDir('), bridge.indexOf('function samePath('))
+    expect(local).toContain('defaultPythonToolsDir')
+    expect(local).not.toContain('publishFolder')
   })
 
   it('uses it for both the copy-in and the upload-all paths', () => {

@@ -73,6 +73,8 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   'confluence_write_page',
   // Jira and Bitbucket writes, for the same reason: under the user's name, read by a team.
   'jira_write_issue',
+  // Installs packages from an index into the tools' environment: the command is the thing to read.
+  'install_python_packages',
   'bitbucket_write_pull_request',
   // Changes a workbook somebody has open and has not saved, with no undo this product owns.
   'excel_write_range',

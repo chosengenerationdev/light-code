@@ -5,6 +5,9 @@ import type {
   AtlassianProductId,
   AtlassianProductStatus,
   CheckpointView,
+  IndexRenamesMessage,
+  ProjectMessage,
+  ProjectStampMessage,
   CommandRules,
   ProbeTarget,
 } from '@light-code/core/browser'
@@ -166,6 +169,14 @@ export function App(props: AppProps): ReactElement {
    * (`done`, hidden). Cleared when the host's closing `pythonApprovalProblems` arrives, which is
    * posted after the refreshed status, so nothing reappears in between.
    */
+  /** Settings → Project. */
+  const [project, setProject] = useState<ProjectMessage | undefined>(undefined)
+  const [projectStamp, setProjectStamp] = useState<ProjectStampMessage | undefined>(undefined)
+  const [indexRenames, setIndexRenames] = useState<IndexRenamesMessage | undefined>(undefined)
+  /** An install started from the approval card, and how it went. */
+  const [pythonInstall, setPythonInstall] = useState<
+    { running: boolean; packages: string[]; error?: string; installed?: string[] } | undefined
+  >(undefined)
   const [pythonApproving, setPythonApproving] = useState<Record<string, 'working' | 'done'>>({})
   const [expertColor, setExpertColor] = useState(DEFAULT_EXPERT)
   /**
@@ -907,6 +918,14 @@ export function App(props: AppProps): ReactElement {
           ...(message.collection !== undefined ? { collection: message.collection } : {}),
           ...(message.error !== undefined ? { error: message.error } : {}),
         })
+      } else if (message.type === 'project') {
+        setProject(message)
+      } else if (message.type === 'projectStamp') {
+        setProjectStamp(message)
+      } else if (message.type === 'indexRenames') {
+        setIndexRenames(message)
+      } else if (message.type === 'pythonInstall') {
+        setPythonInstall(message)
       } else if (message.type === 'atlassian') {
         setAtlassian(message.products)
       } else if (message.type === 'atlassianSaved') {
@@ -1022,6 +1041,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestSkills' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestS3' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestAtlassian' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestProject' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestVariables' } satisfies UiToHostMessage)
@@ -2161,6 +2181,20 @@ export function App(props: AppProps): ReactElement {
                   kind: 'mail',
                 } satisfies UiToHostMessage),
             }}
+            project={{
+              project,
+              stamp: projectStamp,
+              renames: indexRenames,
+              onSaveName: (name) => props.transport.post({ type: 'saveProjectName', name } satisfies UiToHostMessage),
+              onStamp: (apply) => {
+                setProjectStamp((current) => (apply && current !== undefined ? { ...current, running: true } : current))
+                props.transport.post({ type: 'runProjectStamp', apply } satisfies UiToHostMessage)
+              },
+              onRenames: (apply) => {
+                setIndexRenames((current) => (apply && current !== undefined ? { ...current, running: true } : current))
+                props.transport.post({ type: 'runIndexRenames', apply } satisfies UiToHostMessage)
+              },
+            }}
             atlassian={{
               products: atlassian,
               savedTicks: atlassianSavedTicks,
@@ -2399,6 +2433,13 @@ export function App(props: AppProps): ReactElement {
               sources: pythonSources,
               problems: pythonApprovalProblems,
               approving: Object.keys(pythonApproving).filter((name) => pythonApproving[name] === 'working'),
+              missingPackages: pythonStatus?.missingPackages,
+              canInstallPackages: pythonStatus?.canInstallPackages === true,
+              install: pythonInstall,
+              onInstall: (packages: string[]) => {
+                setPythonInstall({ running: true, packages })
+                props.transport.post({ type: 'installPythonPackages', packages } satisfies UiToHostMessage)
+              },
               approvalProgress: {
                 done: Object.values(pythonApproving).filter((state) => state === 'done').length,
                 total: Object.keys(pythonApproving).length,

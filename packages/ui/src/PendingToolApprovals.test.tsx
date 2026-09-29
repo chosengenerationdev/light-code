@@ -252,3 +252,45 @@ describe('the same tool in two folders', () => {
     expect(coloured).toContain('"a"')
   })
 })
+
+describe('packages a waiting tool needs', () => {
+  it('says which are missing and installs them from the row', () => {
+    const installed: string[][] = []
+    act(() => {
+      root.render(
+        <PendingToolApprovals
+          tools={TOOLS}
+          sources={{}}
+          onRequestSource={() => {}}
+          onApprove={() => {}}
+          onDecline={() => {}}
+          missingPackages={{ ledger_fetch: ['pandas', 'PyYAML'] }}
+          canInstallPackages
+          onInstall={(packages) => installed.push(packages)}
+        />,
+      )
+    })
+    expect(container.textContent).toContain('Needs pandas, PyYAML')
+    act(() => button('Install')?.click())
+    expect(installed).toEqual([['pandas', 'PyYAML']])
+  })
+
+  it('says to install them by hand where Light Code does not own the environment', () => {
+    act(() => {
+      root.render(
+        <PendingToolApprovals
+          tools={TOOLS}
+          sources={{}}
+          onRequestSource={() => {}}
+          onApprove={() => {}}
+          onDecline={() => {}}
+          missingPackages={{ ledger_fetch: ['pandas'] }}
+          canInstallPackages={false}
+          onInstall={() => {}}
+        />,
+      )
+    })
+    expect(button('Install')).toBeUndefined()
+    expect(container.textContent).toContain('Install them into that environment')
+  })
+})

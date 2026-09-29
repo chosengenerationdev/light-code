@@ -47,6 +47,8 @@ export const OVERRIDABLE_KEYS = [
   'skills',
   /** One repository on a slow share needs longer than another on local disk. */
   'tools',
+  /** What this project is called. A project name that did not vary by project would be no name. */
+  'project',
 ] as const
 
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number]

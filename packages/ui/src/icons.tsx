@@ -468,3 +468,18 @@ export function DatabaseIcon({ size = 16 }: IconProps): ReactElement {
     </svg>
   )
 }
+
+/** A folder with a name tag: Settings → Project. */
+export function ProjectIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M1.5 4.5v8a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6.5a1 1 0 0 0-1-1H8L6.5 3h-4a1 1 0 0 0-1 1.5z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+      <path d="M5 9.5h6M5 11.5h3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}

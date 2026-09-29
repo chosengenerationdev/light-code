@@ -454,9 +454,12 @@ export function S3Section(props: S3SectionProps): ReactElement {
                     isReadOnly(row.connectionId)
                       ? 'This connection is marked read-only, so nothing can be uploaded to it.'
                       : props.kind === 'skills'
-                        ? 'New skills are uploaded to this folder as well as saved here.'
-                        : 'New Python tools are uploaded to this folder as well as saved here. ' +
-                          'Colleagues still approve each one on their own machine before it runs.'
+                        ? 'New skills are saved in this bucket folder instead of the project folder, and uploaded ' +
+                          'straight away — unless a skills folder is set explicitly. Skills already in the project ' +
+                          'keep loading; "Upload all existing" moves them up.'
+                        : 'New Python tools are saved in this bucket folder instead of the project folder, and ' +
+                          'uploaded straight away — unless a tools folder is set explicitly. Colleagues still ' +
+                          'approve each one on their own machine before it runs.'
                   }
                 >
                   <input
@@ -478,6 +481,7 @@ export function S3Section(props: S3SectionProps): ReactElement {
                     to the team; that is the word people reach for.
                   */}
                   Publish new {props.kind === 'skills' ? 'skills' : 'tools'} here
+                  <span style={{ color: colors.muted }}>&nbsp;(saved here, not in the project)</span>
                 </label>
                 <button
                   type="button"

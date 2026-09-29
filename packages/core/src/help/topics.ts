@@ -499,6 +499,34 @@ somebody's work, made under your name; commenting is what the assistant contribu
 `,
   },
   {
+    id: 'project',
+    title: 'Project name, and labelling skills and tools',
+    keywords: [
+      'project name', 'project', 'author', 'owner', 'label', 'metadata', 'version', 'which team',
+      'index prefix', 'rename index', 'who wrote this skill', 'belongs to',
+    ],
+    body: `
+**Settings → Project**: the name of this project (config:project). Saved for this project only,
+on this machine — a repository cannot set it. Blank means the folder name.
+
+**What it labels.** Every skill and Python tool Light Code saves carries its author, project,
+version and the time of the save: \`author:\`, \`project:\`, \`version:\`, \`updated:\` in a skill's
+frontmatter, and \`__author__\`, \`__project__\`, \`__version__\`, \`__updated__\` in a tool. Author and
+project are filled in once and never replaced; the version goes up by one on each save. The author
+is config:identity (owner), or the login name. The Skills and Python tabs show them.
+
+**Existing files.** "Label existing skills and tools" lists every file here missing any of these
+and adds only what is missing — existing files become version 1, dated when they last changed.
+An approved tool stays approved on this machine; other machines ask once for the labelled version.
+
+**Index names.** Once a name is set, derived index names start with it (names typed into
+config:embedder or config:retrieval are left alone). "Move indexes to the project's names" copies
+existing indexes to the new names inside the cluster — nothing is embedded again — and labels each
+document with the project. The old indexes are left in place to remove when convenient. Indexing
+the codebase also copies the old index across by itself if it finds one.
+`,
+  },
+  {
     id: 'confluence',
     title: 'Confluence pages',
     keywords: [

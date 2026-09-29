@@ -802,6 +802,16 @@ export type UiToHostMessage =
   | { type: 'clearCodebaseIndex' }
   /** Copies this workspace's index from another store into the active one, vectors and all. */
   | { type: 'syncVectorStore'; fromId: string }
+  /** Settings → Project. See `config/project.ts`. */
+  | { type: 'requestProject' }
+  /** Empty clears it, and the folder name is used again. Saved for this project only. */
+  | { type: 'saveProjectName'; name: string }
+  /** Lists the indexes a project name renames; `apply` copies them. */
+  | { type: 'runIndexRenames'; apply: boolean }
+  /** Lists skills and tools missing an author or project; `apply` writes them in. */
+  | { type: 'runProjectStamp'; apply: boolean }
+  /** Installs packages into the tools' Python environment, from a button the user pressed. */
+  | { type: 'installPythonPackages'; packages: string[] }
   /** Run a query by hand, exactly as the model would, to judge what the index returns. */
   | { type: 'runSearchProbe'; query: string; target: ProbeTarget }
   | { type: 'clearSearchLog' }
@@ -1361,6 +1371,10 @@ export type HostToUiMessage =
   | { type: 'projectSettings'; workspaceOpen: boolean; overridden: string[] }
   /** Progress and outcome of copying one store into another. */
   | { type: 'storeSync'; running: boolean; copied?: number; error?: string; fromLabel?: string }
+  | ProjectMessage
+  | IndexRenamesMessage
+  | ProjectStampMessage
+  | { type: 'pythonInstall'; running: boolean; packages: string[]; error?: string; installed?: string[] }
   /** Whether tool schemas are being kept out of the prompt, and how many are hidden. */
   | {
       type: 'dispatcher'
@@ -1523,6 +1537,11 @@ export type HostToUiMessage =
         files?: string[]
         sourceDir?: string
         always?: boolean
+        /** From the frontmatter: who wrote it, which project, which revision, and when. */
+        author?: string
+        project?: string
+        version?: number
+        updated?: string
         /**
          * Set when this skill came from a bucket mirror.
          *
@@ -1907,3 +1926,55 @@ export type HostToUiMessage =
    * restore the task that was in progress. `entries` is empty for a new task.
    */
   | { type: 'taskRestored'; taskId: string | undefined; entries: TranscriptEntry[] }
+
+/** What this project is called, and what that name currently decides. */
+export interface ProjectMessage {
+  type: 'project'
+  /** False when no folder is open: a project name has nothing to belong to. */
+  hasWorkspace: boolean
+  /** What the user typed, if anything. */
+  configured?: string
+  /** The folder's name, used when nothing is configured. */
+  folder?: string
+  /** Who new skills and tools are attributed to. */
+  author?: string
+  /** The codebase index as named now, when a search connection is set up. */
+  indexName?: string
+}
+
+export interface IndexRenamesMessage {
+  type: 'indexRenames'
+  running: boolean
+  /** What would be (or is being) copied: old name → new name. */
+  plans: { kind: 'codebase' | 'docs' | 'skills'; from: string; to: string }[]
+  /** The search connection's label. */
+  store?: string
+  /** The index being written now, and how many documents so far. */
+  current?: string
+  copied?: number
+  /** Finished copies, with the old names left in the cluster. */
+  done?: { kind: string; from: string; to: string; copied: number }[]
+  note?: string
+  error?: string
+}
+
+export interface ProjectStampEntry {
+  kind: 'skill' | 'tool'
+  name: string
+  filePath: string
+  /** The fields that will be added and their values; an existing value is never replaced. */
+  adds: { author?: string; project?: string; version?: number; updated?: string }
+  /** For a tool: its approval is carried over, because only these two lines change. */
+  approved?: boolean
+}
+
+export interface ProjectStampMessage {
+  type: 'projectStamp'
+  running: boolean
+  entries: ProjectStampEntry[]
+  /** Files that could not be labelled because they live in a folder that is not ours to edit. */
+  readOnly?: number
+  done?: { written: number; uploaded: number; failed: string[] }
+  note?: string
+  error?: string
+}

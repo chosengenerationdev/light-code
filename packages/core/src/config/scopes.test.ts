@@ -78,6 +78,11 @@ describe('mergeScopes', () => {
        */
       identity: { owner: 'someone.else' },
       /*
+       * Leads every derived index name and labels every shared skill and tool. A repository able
+       * to name itself could take another team's index prefix and write into their indexes.
+       */
+      project: { name: 'Another Team' },
+      /*
        * Names folders of the user's mail to read and embed. A repository able to set this would
        * have their correspondence on its chosen endpoint the moment the folder was opened.
        */

@@ -78,9 +78,11 @@ export interface InstallResult {
  * response is usually for it to pick a different library or drop the dependency — not for
  * the turn to blow up.
  */
-export async function installDependencies(options: InstallOptions): Promise<InstallResult> {
-  if (options.packages.length === 0) return { installed: [] }
-
+/**
+ * The arguments to uv for an install. One function, used by the install and by the approval
+ * preview of `install_python_packages`, so the command shown is the command run (invariant 8).
+ */
+export function installArguments(options: Omit<InstallOptions, 'uv' | 'env' | 'timeoutMs'>): string[] {
   const args = ['pip', 'install', '--python', options.pythonPath]
   if (options.indexUrl !== undefined && options.indexUrl.trim().length > 0) {
     args.push('--index-url', options.indexUrl.trim())
@@ -89,7 +91,15 @@ export async function installDependencies(options: InstallOptions): Promise<Inst
     if (extra.trim().length > 0) args.push('--extra-index-url', extra.trim())
   }
   if (options.offline === true) args.push('--offline')
-  args.push(...options.packages)
+  // `--` so a package name can never be read as an option, whatever reached here.
+  args.push('--', ...options.packages)
+  return args
+}
+
+export async function installDependencies(options: InstallOptions): Promise<InstallResult> {
+  if (options.packages.length === 0) return { installed: [] }
+
+  const args = installArguments(options)
 
   return new Promise<InstallResult>((resolve) => {
     execFile(

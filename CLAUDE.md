@@ -65,6 +65,8 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 5. **These config keys are user-scope only and are ignored if found in workspace config:**
    the entire `profiles` list, `activeProfileId`, `certDir`, `tls`, `python.uvPath`,
    `approvals`, and — from Phase 8b — `vectorStores`, `activeVectorStoreId`, and `embedder`.
+   (Not exhaustive any more: `config/scopes.ts` is the list. `project` joined it in 0.120.0 — a
+   repository able to name itself could take another team's index prefix.)
    `tls` is the global trust block: a workspace able to add a trusted root, or to switch
    verification off, could intercept the gateway connection leaving nothing the user would
    ever see.
@@ -1885,6 +1887,62 @@ Three reports from real use, fixed together.
   `error`, so a thrown approval cannot leave rows stuck. The review source is now highlighted with
   the same tokenizer as chat code blocks.
 
+## 12u. Projects on a shared cluster and bucket (0.120.0)
+
+Asked for because many teams share one OpenSearch cluster and one S3 bucket, and nothing said which
+skill, tool or index belonged to whom.
+
+- **`project.name`, Settings → Project.** `config/project.ts` owns it and everything derived from it.
+  User-scope only *and* per project: stored under `workspaces` through `saveForWorkspace`, the split
+  `approvals` established (§12d). Blank means the folder name.
+  **Configured and derived are different questions on purpose.** Labels take the folder name when
+  nothing is set; **index names change only for a configured name** — deriving a prefix from the
+  folder would have renamed every existing index on upgrade and quietly re-embedded it.
+- **Derived index names lead with the project** (`<project>-<prefix>-<owner>-<digest>`); the digest is
+  unchanged, so old and new differ only by the prefix. Typed names (`embedder.indexName`,
+  `retrieval.docsIndex`/`skillsIndex`) are never touched. `rag/renameIndexes.ts` copies existing
+  indexes to the new names with `scan`+`upsert` (every backend has both), stamping `project` on each
+  document, and copies the `<index>@<store>` bookkeeping so the next run is incremental. **The old
+  index stays**: nothing in Light Code deletes a collection, and on a shared cluster that is the
+  owner's call. A codebase index run does the copy itself when it finds the old manifest.
+- **Skills and tools carry `author`, `project`, `version`, `updated` in the file** —
+  `sharing/attribution.ts`. Frontmatter for skills, `__author__`-style string assignments for tools,
+  placed after the module docstring and `__future__` imports or both would break. Author and project
+  are **filled, never replaced**; version and time are set on every save Light Code makes (version =
+  one more than the file replaced; an unversioned existing file counts as 1, as the user specified).
+  **The stamped text is computed once and reused by the write** (`label()` in both writers): preview
+  and execute run at different moments, and a second timestamp would write — and for a tool, pin —
+  bytes nobody approved.
+  Labelling existing files fills gaps only, dates each by its own mtime, and **re-pins an approved
+  tool only when the file before labelling was exactly the approved bytes** (`repinApproval`). The
+  tempting alternative — hashing with the label lines stripped — was rejected: an approved tool can
+  read its own `__version__`, so a line excluded from the hash is behaviour that can change unreviewed.
+  Other machines re-approve the labelled version once; their pins are theirs.
+  Team skill publishing now uses a skill's own author/project before the publisher's — the §12r open
+  question about synced skills being attributed to whoever pressed the button.
+- **A bucket folder marked "Publish" is where new skills and tools are *saved***, not just copied to
+  (reported: with a bucket chosen, new ones still appeared under `.lightcode`). Unless `skills.dir` /
+  `python.toolsDir` is set, which still wins. The project folder stays in the search path, read-only,
+  so what is already there keeps loading; "Upload all existing" and "copy from an old folder" keep
+  reading the project folder (`managedFolderFor`), which is where existing files are.
+  `pythonFolders(config)` is the one answer for all four `python.configure` calls.
+  A skill kept as `name/SKILL.md` was uploaded as `name.md`; with the bucket as the save folder that
+  would sync back a duplicate, so `onSaved` now receives the real relative path.
+- **Python tools say which packages they lack.** `python/missingPackages.ts` reads PEP 723
+  declarations and imports (docstrings stripped first — prose saying "import data from…" must not
+  suggest installing a package called `data`), then asks the environment in one interpreter start via
+  `importlib.metadata` / `find_spec`, neither of which imports anything. A loaded tool's description
+  leads with what it needs; a `No module named` failure carries advice; the approval card lists them
+  with an Install button. `install_python_packages` is `command`, **always asks, never scheduled**, and
+  its preview is built by `installArguments`, the function that runs it; names are validated as
+  requirements and follow `--`, so nothing a model writes can become a uv option.
+- On the shared Node host, `runIndexRenames`, `runProjectStamp` and `installPythonPackages` are
+  admin-only — none matches a mutating prefix, and all three write to what every user shares.
+
+**Not verified against a live cluster or bucket** — the copy is covered against an in-memory store,
+the bucket save path by reading `bridge.ts`. The package check *is* verified against a real
+interpreter.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2744,8 +2802,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.119.1**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.119.1.vsix`, unpublished.
+until then, stale again. The local manifest is **0.120.0**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.120.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

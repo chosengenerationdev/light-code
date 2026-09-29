@@ -1,3 +1,4 @@
+import { readSkillAttribution } from '../sharing/attribution.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -43,6 +44,11 @@ export interface Skill {
    * a skill lives and to refuse deleting one it does not own.
    */
   sourceDir?: string
+  /** From the frontmatter, when present. See `sharing/attribution.ts`. */
+  author?: string
+  project?: string
+  version?: number
+  updated?: string
 }
 
 export interface SkillLoadIssue {
@@ -155,7 +161,9 @@ async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
 
   for (const [filePath, fallbackName] of candidates.sort((a, b) => a[0].localeCompare(b[0]))) {
     try {
-      const parsed = parseFrontmatter(await fs.readFile(filePath, 'utf8'))
+      const text = await fs.readFile(filePath, 'utf8')
+      const parsed = parseFrontmatter(text)
+      const labels = readSkillAttribution(text)
       const name = parsed.name ?? fallbackName
       if (parsed.description === undefined || parsed.description.length === 0) {
         // Without a description the model has nothing to decide on, so the skill would sit
@@ -168,6 +176,10 @@ async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
         description: parsed.description,
         filePath,
         sourceDir: skillsDir,
+        ...(labels.author !== undefined ? { author: labels.author } : {}),
+        ...(labels.project !== undefined ? { project: labels.project } : {}),
+        ...(labels.version !== undefined ? { version: labels.version } : {}),
+        ...(labels.updated !== undefined ? { updated: labels.updated } : {}),
         ...(parsed.always === true ? { always: true, body: parsed.body.trim() } : {}),
       })
     } catch (error) {

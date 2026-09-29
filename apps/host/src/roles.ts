@@ -65,6 +65,14 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
    * two the wrong way round: clearing a number is harmless and spending is not.
    */
   'measureExpertCost',
+  /*
+   * `run*` and `install*` are not mutating prefixes, and all three write to things everyone shares:
+   * copying indexes in the team's cluster, rewriting the skill and tool files every user loads, and
+   * installing packages into the one environment every user's tools run in.
+   */
+  'runIndexRenames',
+  'runProjectStamp',
+  'installPythonPackages',
   'saveSharedProfile',
   'deleteSharedProfile',
   'setDefaultProfile',

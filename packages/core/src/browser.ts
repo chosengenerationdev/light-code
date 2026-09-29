@@ -149,6 +149,7 @@ export type { Schedule, ScheduleTrigger, Schedules, ScheduleRun } from './schedu
 export { riskyGroupsIn } from './schedule/types.js'
 export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedule/timing.js'
 export type { ScheduleToolInfo } from './agent/protocol.js'
+export type { IndexRenamesMessage, ProjectMessage, ProjectStampEntry, ProjectStampMessage } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'
 
 export {

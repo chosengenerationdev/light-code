@@ -84,7 +84,7 @@ import {
 import { createJiraProjectTool, createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
 import { ATLASSIAN_PRODUCTS, atlassianProduct } from '../atlassian/products.js'
 import { AtlassianError, type AtlassianConnection } from '../atlassian/rest.js'
-import type { AtlassianProductId, AtlassianProductStatus, AtlassianSettingsView } from '../agent/protocol.js'
+import type { AtlassianProductId, AtlassianProductStatus, AtlassianSettingsView, ProjectStampEntry } from '../agent/protocol.js'
 import {
   createConfluenceReadPageTool,
   createConfluenceSearchTool,
@@ -133,9 +133,18 @@ import {
   approveTool,
   forgetTool,
   hashSource,
+  isApprovedSource,
   isValidToolName,
+  repinApproval,
   toolFileName,
 } from '../python/registry.js'
+import {
+  attributionTimestamp,
+  fillAttribution,
+  missingAttribution,
+  type Attribution,
+} from '../sharing/attribution.js'
+import { projectConfigSchema } from '../config/schema.js'
 import { isTranscriptMessage } from './backgroundMessages.js'
 import {
   ConfigManager,
@@ -334,6 +343,8 @@ import {
 import { WebviewApprovalGate } from './approvalGate.js'
 import type { HostServices } from './services.js'
 import { NodeFileSystem } from '../platform/node/filesystem.js'
+import { configuredProjectName, projectName, projectSlug } from '../config/project.js'
+import { copyBookkeeping, copyIndex, hasDocuments, planIndexRenames, type IndexRename } from '../rag/renameIndexes.js'
 import { walkFiles } from '../tools/nativeSearch.js'
 import { NodeTerminal } from '../platform/node/terminal.js'
 import { JsonTaskStore } from '../platform/node/taskStore.js'
@@ -547,6 +558,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * The same split the skills folders have: any number of folders read from, exactly one written
      * to. Without that, "where did that tool go" has several answers.
      */
+    attribution: () => cachedAttribution,
     onToolSaved: async (name: string, source: string) => {
       const publishTo = cachedToolMirrors.find(
         (mirror) => mirror.enabled === true && mirror.publish === true,
@@ -699,9 +711,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * without reloading the window.
    */
   let skillsDir = defaultSkillsDir
+  /** The project's own skills folder, whether or not it is the one new skills are saved to. */
+  let localSkillsDir = defaultSkillsDir
   let extraSkillDirs: string[] = []
   /** The mirrored bucket folders in the skill search path, one per configured source. */
   let mirroredSkillsDirs: string[] = []
+  /**
+   * Who new skills and tools are labelled with, and which project. Refreshed with the rest of
+   * config each turn, so every writer reads the same answer — see `sharing/attribution.ts`.
+   */
+  let cachedAttribution: { author?: string | undefined; project?: string | undefined } = {}
   /** The same for Python tools, reported so the tab can say where each landed. */
   let mirroredToolsDirs: string[] = []
   /** The skills mirrors as configured, so `write_skill` knows where to publish. */
@@ -844,6 +863,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             ...(files.length > 0 ? { files } : {}),
             ...(skill.sourceDir !== undefined ? { sourceDir: skill.sourceDir } : {}),
             ...(skill.always === true ? { always: true } : {}),
+            ...(skill.author !== undefined ? { author: skill.author } : {}),
+            ...(skill.project !== undefined ? { project: skill.project } : {}),
+            ...(skill.version !== undefined ? { version: skill.version } : {}),
+            ...(skill.updated !== undefined ? { updated: skill.updated } : {}),
             // Present only for a skill that came from a bucket; see `bucketFor`.
             ...(() => {
               const bucket = bucketFor(skill.sourceDir)
@@ -1035,11 +1058,63 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * default so this cannot drift from what the manager uses.
    */
   async function managedFolderFor(kind: 'skills' | 'tools'): Promise<string | undefined> {
-    if (kind === 'skills') return skillsDir
+    if (kind === 'skills') return localSkillsDir
     const { config } = await configManager.load()
+    return localToolsDir(config)
+  }
+
+  /** The project's own tools folder: the configured one, or `.lightcode/tools`. */
+  function localToolsDir(config: LightCodeConfig): string | undefined {
     const configured = config.python?.toolsDir?.trim()
     if (configured !== undefined && configured.length > 0) return configured
     return workspaceRoot === undefined ? undefined : defaultPythonToolsDir(workspaceRoot)
+  }
+
+  function samePath(a: string | undefined, b: string | undefined): boolean {
+    if (a === undefined || b === undefined) return false
+    const norm = (value: string): string =>
+      process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
+    return norm(a) === norm(b)
+  }
+
+  /**
+   * The bucket folder new skills or tools are saved in, when one is marked for it and can be
+   * written. Its local mirror is the folder; the save is uploaded straight after.
+   */
+  function publishFolder(
+    kind: 'skills' | 'tools',
+    mirrors: readonly { connectionId: string; prefix?: string | undefined; enabled?: boolean | undefined; publish?: boolean | undefined }[],
+  ): string | undefined {
+    const marked = mirrors.find((mirror) => mirror.enabled === true && mirror.publish === true)
+    if (marked === undefined) return undefined
+    const target = targetById(cachedS3, marked.connectionId)
+    if (target === undefined || target.readOnly === true) return undefined
+    return mirrorFolder({
+      storageDir,
+      connectionId: marked.connectionId,
+      kind,
+      ...(marked.prefix !== undefined ? { prefix: marked.prefix } : {}),
+    })
+  }
+
+  /**
+   * Where Python tools are saved and read from, for every call to `python.configure`.
+   *
+   * One function because there are four such calls, and a fourth that forgot the bucket would put
+   * the next tool back in the project folder — the report this answers. Same rule as skills: a
+   * folder marked for publishing is the save folder unless `python.toolsDir` names one, and the
+   * project folder stays readable so tools already there, and their approvals, keep working.
+   */
+  function pythonFolders(config: LightCodeConfig): { toolsDir?: string; extraToolDirs: string[] } {
+    const configured = config.python?.toolsDir?.trim()
+    const publish =
+      configured !== undefined && configured.length > 0 ? undefined : publishFolder('tools', config.s3?.tools ?? [])
+    if (publish === undefined) return { extraToolDirs: mirroredToolsDirs }
+    const local = localToolsDir(config)
+    return {
+      toolsDir: publish,
+      extraToolDirs: [...(local !== undefined ? [local] : []), ...mirroredToolsDirs.filter((dir) => !samePath(dir, publish))],
+    }
   }
 
   /** Why there is nowhere, said in terms of what to do about it. */
@@ -1296,10 +1371,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...config,
         python: { ...(config.python ?? {}), declinedTools: declined },
       })
-      await python.configure({
-        ...((await configManager.load()).config.python ?? {}),
-        extraToolDirs: mirroredToolsDirs,
-      })
+      {
+        const latest = (await configManager.load()).config
+        await python.configure({ ...(latest.python ?? {}), ...pythonFolders(latest) })
+      }
       await python.refresh()
       await postPython()
       ui.showInfo(
@@ -1321,10 +1396,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...config,
         python: { ...(config.python ?? {}), declinedTools: declined },
       })
-      await python.configure({
-        ...((await configManager.load()).config.python ?? {}),
-        extraToolDirs: mirroredToolsDirs,
-      })
+      {
+        const latest = (await configManager.load()).config
+        await python.configure({ ...(latest.python ?? {}), ...pythonFolders(latest) })
+      }
       await python.refresh()
       await postPython()
       ui.showInfo(`"${name}" is back, waiting to be approved.`)
@@ -2531,9 +2606,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedReadRoots = (config.filesystem?.readRoots ?? [])
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
-    skillsDir =
+    cachedAttribution = { author: indexOwner(config), project: projectName(config, workspaceRoot) }
+    localSkillsDir =
       (config.skills?.dir !== undefined ? resolveSkillDir(config.skills.dir) : undefined) ??
       defaultSkillsDir
+    skillsDir = localSkillsDir
     extraSkillDirs = (config.skills?.paths ?? [])
       .map(resolveSkillDir)
       .filter((dir): dir is string => dir !== undefined)
@@ -2560,7 +2637,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
         }),
       )
-    extraSkillDirs.push(...mirroredSkillsDirs)
+    /*
+     * A bucket folder marked for publishing is where new skills are *saved*, not just copied to.
+     *
+     * Reported: with a bucket chosen, new skills still appeared under `.lightcode/skills`. They
+     * were written there and a copy uploaded, which is what "publish" meant — and not what
+     * choosing a bucket to store skills in means to anybody. So the marked folder becomes the
+     * writable one, unless a folder was chosen explicitly in `skills.dir`, which still wins.
+     *
+     * The project folder stays in the search path, read-only, so skills already there keep
+     * loading until they are uploaded; the bucket copy wins a name they share.
+     */
+    const publishSkills = config.skills?.dir === undefined ? publishFolder('skills', cachedSkillMirrors) : undefined
+    if (publishSkills !== undefined) {
+      skillsDir = publishSkills
+      extraSkillDirs.unshift(...(localSkillsDir !== undefined ? [localSkillsDir] : []))
+    }
+    extraSkillDirs.push(...mirroredSkillsDirs.filter((dir) => !samePath(dir, publishSkills)))
 
     cachedToolMirrors = config.s3?.tools ?? []
     mirroredToolsDirs = (config.s3?.tools ?? [])
@@ -3031,6 +3124,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const context = {
         skillsDir,
         onChanged: refreshSkills,
+        attribution: () => cachedAttribution,
         /*
          * Every loaded skill, so `use_skill_file` can reach a template in a read-only shared
          * folder. A closure over the live array rather than a copy: the folders are watched, and
@@ -3084,11 +3178,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...context,
           ...(skillTarget !== undefined && skillTarget.readOnly !== true
             ? {
-                onSaved: async (name: string, content: string) => {
+                onSaved: async (name: string, content: string, relativePath: string) => {
                   await uploadToS3({
                     target: skillTarget,
                     ...(mirrorPrefix !== undefined ? { prefix: mirrorPrefix } : {}),
-                    relative: `${name}.md`,
+                    relative: relativePath.length > 0 ? relativePath : `${name}.md`,
                     contents: Buffer.from(content, 'utf8'),
                   })
                 },
@@ -3921,7 +4015,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // actually needs its tools. Failures are per-server and surface in the MCP tab.
       await syncMcpFromConfig(config)
       await mcp.ensureConnected()
-      await python.configure({ ...(config.python ?? {}), extraToolDirs: mirroredToolsDirs })
+      await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
 
       const toolContext: ToolExecutionContext = {
         fs: new NodeFileSystem(),
@@ -5751,8 +5845,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /** The project's folder name, which is what distinguishes two checkouts in a hit list. */
-  function indexProject(): string | undefined {
-    return workspaceRoot === undefined ? undefined : path.basename(workspaceRoot)
+  /** The project a chunk or skill is attributed to. `config/project.ts` owns the answer. */
+  function indexProject(config?: LightCodeConfig): string | undefined {
+    return projectName(config, workspaceRoot)
   }
 
   /**
@@ -5813,7 +5908,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       let attributed = 0
       const owner = indexOwner(config)
       if (owner !== undefined && writer.attributeUnowned !== undefined) {
-        const project = indexProject()
+        const project = indexProject(config)
         attributed = await writer.attributeUnowned(index, {
           owner,
           ...(project !== undefined ? { project } : {}),
@@ -6754,7 +6849,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  function codebaseIndexName(config?: LightCodeConfig): string | undefined {
+  /**
+   * @param withProject False gives the name from before a project was set — what
+   *   `rag/renameIndexes.ts` copies from. Never used to decide where anything is written.
+   */
+  function codebaseIndexName(config?: LightCodeConfig, withProject = true): string | undefined {
     const chosen = config?.embedder?.indexName?.trim()
     if (chosen !== undefined && chosen.length > 0) return chosen
     if (workspaceRoot === undefined) return undefined
@@ -6770,6 +6869,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         : {}),
       ...(indexOwner(config) !== undefined ? { owner: indexOwner(config) } : {}),
       workspaceRoot,
+      // Only a name the user set. The folder name would rename every existing index on upgrade.
+      ...(withProject && projectSlug(configuredProjectName(config)) !== undefined
+        ? { project: projectSlug(configuredProjectName(config)) }
+        : {}),
     })
   }
 
@@ -7448,7 +7551,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
 
       const owner = indexOwner(config)
-      const project = indexProject()
+      const project = indexProject(config)
       const count = await indexTeamSkills({
         writer: createVectorIndexWriter(
           httpClient,
@@ -7688,17 +7791,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  function skillsIndexName(config?: LightCodeConfig): string | undefined {
+  function skillsIndexName(config?: LightCodeConfig, withProject = true): string | undefined {
     const chosen = config?.retrieval?.skillsIndex?.trim()
     if (chosen !== undefined && chosen.length > 0) return chosen
-    const base = codebaseIndexName(config)
+    const base = codebaseIndexName(config, withProject)
     return base === undefined ? undefined : `${base}-skills`
   }
 
-  function docsIndexName(config?: LightCodeConfig): string | undefined {
+  function docsIndexName(config?: LightCodeConfig, withProject = true): string | undefined {
     const chosen = config?.retrieval?.docsIndex?.trim()
     if (chosen !== undefined && chosen.length > 0) return chosen
-    const base = codebaseIndexName(config)
+    const base = codebaseIndexName(config, withProject)
     return base === undefined ? undefined : `${base}-docs`
   }
 
@@ -8331,6 +8434,299 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /**
+   * Installs what a Python tool needs, from the button beside it. The button is the approval: the
+   * user pressed it next to the package names, and the result says what happened.
+   */
+  async function handleInstallPythonPackages(packages: readonly string[]): Promise<void> {
+    const list = [...new Set(packages.map((entry) => entry.trim()).filter((entry) => entry.length > 0))]
+    post({ type: 'pythonInstall', running: true, packages: list })
+    try {
+      const result = await python.installPackages(list)
+      await postPython()
+      post({
+        type: 'pythonInstall',
+        running: false,
+        packages: list,
+        installed: result.installed,
+        ...(result.error !== undefined ? { error: result.error } : {}),
+      })
+    } catch (error) {
+      post({ type: 'pythonInstall', running: false, packages: list, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /** What Settings → Project shows: the name, where it came from, and what it decides. */
+  async function postProject(): Promise<void> {
+    const { config } = await configManager.load()
+    const configured = configuredProjectName(config)
+    const author = indexOwner(config)
+    const index = codebaseIndexName(config)
+    post({
+      type: 'project',
+      hasWorkspace: workspaceRoot !== undefined,
+      ...(configured !== undefined ? { configured } : {}),
+      ...(workspaceRoot !== undefined ? { folder: path.basename(workspaceRoot) } : {}),
+      ...(author !== undefined ? { author } : {}),
+      ...(config.activeVectorStoreId !== undefined && index !== undefined ? { indexName: index } : {}),
+    })
+  }
+
+  async function handleSaveProjectName(name: string): Promise<void> {
+    try {
+      const trimmed = name.trim()
+      if (trimmed.length > 0) {
+        const parsed = projectConfigSchema.safeParse({ name: trimmed })
+        if (!parsed.success) {
+          post({ type: 'error', message: `"${trimmed}" cannot be a project name: ${parsed.error.issues[0]?.message ?? 'invalid'}.` })
+          return
+        }
+      }
+      // Saved for this project only; a blank box goes back to the folder name.
+      await configManager.saveForWorkspace({ project: trimmed.length > 0 ? { name: trimmed } : undefined })
+      await loadSettings()
+      await postProject()
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /** Uploads one file to the bucket folder marked for publishing, if there is one. */
+  async function uploadToPublishFolder(kind: 'skills' | 'tools', relative: string, contents: string): Promise<boolean> {
+    const mirrors = kind === 'skills' ? cachedSkillMirrors : cachedToolMirrors
+    const marked = mirrors.find((mirror) => mirror.enabled === true && mirror.publish === true)
+    if (marked === undefined) return false
+    const target = targetById(cachedS3, marked.connectionId)
+    if (target === undefined || target.readOnly === true) return false
+    await uploadToS3({
+      target,
+      ...(marked.prefix !== undefined ? { prefix: marked.prefix } : {}),
+      relative,
+      contents: Buffer.from(contents, 'utf8'),
+    })
+    return true
+  }
+
+  /**
+   * Labels the skills and tools already here with author, project, version and time.
+   *
+   * Only folders this machine writes to — the project's own and, when a bucket is the save folder,
+   * that one. A colleague's skill in a read-only folder is theirs to label. Every missing field is
+   * filled and nothing is replaced (`sharing/attribution.ts`); a file's `updated` is its own last
+   * modification, since that is when it last actually changed.
+   *
+   * An approved tool keeps its approval — see `repinApproval` for why that is safe. Other machines
+   * will see the change and ask for approval again, because their pins are theirs.
+   */
+  async function handleProjectStamp(apply: boolean): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const author = indexOwner(config)
+      const project = projectName(config, workspaceRoot)
+      const ours = (dirs: (string | undefined)[]): string[] =>
+        dirs.filter((dir, index): dir is string => dir !== undefined && dirs.findIndex((other) => samePath(other, dir)) === index)
+      const skillFolders = ours([skillsDir, localSkillsDir])
+      const folders = pythonFolders(config)
+      const toolFolders = ours([folders.toolsDir ?? localToolsDir(config), localToolsDir(config)])
+
+      interface Candidate {
+        entry: ProjectStampEntry
+        source: string
+        folder: string
+        relative: string
+        adds: Attribution
+      }
+      const candidates: Candidate[] = []
+      const consider = async (kind: 'skill' | 'tool', name: string, filePath: string, folder: string): Promise<void> => {
+        const source = await fs.readFile(filePath, 'utf8')
+        const missing = missingAttribution(kind, source)
+        if (missing.length === 0) return
+        if (kind === 'skill' && !/^---\r?\n/.test(source)) return
+        const modified = (await fs.stat(filePath)).mtime
+        const adds: Attribution = {}
+        if (missing.includes('author') && author !== undefined) adds.author = author
+        if (missing.includes('project') && project !== undefined) adds.project = project
+        if (missing.includes('version')) adds.version = 1
+        if (missing.includes('updated')) adds.updated = attributionTimestamp(modified)
+        if (Object.keys(adds).length === 0) return
+        const approved = kind === 'tool' ? await isApprovedSource(folder, name, source) : undefined
+        candidates.push({
+          entry: {
+            kind,
+            name,
+            filePath,
+            adds: {
+              ...(adds.author !== undefined ? { author: adds.author } : {}),
+              ...(adds.project !== undefined ? { project: adds.project } : {}),
+              ...(adds.version !== undefined ? { version: adds.version } : {}),
+              ...(adds.updated !== undefined ? { updated: adds.updated } : {}),
+            },
+            ...(approved !== undefined ? { approved } : {}),
+          },
+          source,
+          folder,
+          relative: path.relative(folder, filePath).split(path.sep).join('/'),
+          adds,
+        })
+      }
+
+      for (const folder of skillFolders) {
+        const loaded = await loadSkills([folder]).catch(() => ({ skills: [] as Skill[] }))
+        for (const skill of loaded.skills) await consider('skill', skill.name, skill.filePath, folder)
+      }
+      for (const folder of toolFolders) {
+        const entries = await fs.readdir(folder).catch(() => [] as string[])
+        for (const entry of entries) {
+          if (entry.startsWith('.') || !entry.endsWith('.py')) continue
+          const name = entry.slice(0, -3)
+          if (!isValidToolName(name)) continue
+          await consider('tool', name, path.join(folder, entry), folder)
+        }
+      }
+      const readOnly = skills.filter((skill) => skill.sourceDir !== undefined && !skillFolders.some((folder) => samePath(folder, skill.sourceDir))).length
+
+      if (!apply) {
+        post({
+          type: 'projectStamp',
+          running: false,
+          entries: candidates.map((candidate) => candidate.entry),
+          readOnly,
+          ...(candidates.length === 0 ? { note: 'Every skill and tool here is already labelled.' } : {}),
+        })
+        return
+      }
+
+      post({ type: 'projectStamp', running: true, entries: candidates.map((candidate) => candidate.entry) })
+      let written = 0
+      let uploaded = 0
+      const failed: string[] = []
+      for (const candidate of candidates) {
+        try {
+          const next = fillAttribution(candidate.entry.kind, candidate.source, candidate.adds)
+          await fs.writeFile(candidate.entry.filePath, next, 'utf8')
+          written += 1
+          if (candidate.entry.kind === 'tool' && candidate.entry.approved === true) {
+            await repinApproval(candidate.folder, candidate.entry.name, candidate.source, next)
+          }
+          const isSaveFolder =
+            candidate.entry.kind === 'skill' ? samePath(candidate.folder, skillsDir) : samePath(candidate.folder, folders.toolsDir)
+          // Only the bucket's own folder goes up: the project folder's copy is uploaded by the
+          // separate, deliberate "Upload all existing" button, never as a side effect of labelling.
+          if (isSaveFolder && (candidate.entry.kind === 'skill' ? skillsDir !== localSkillsDir : folders.toolsDir !== undefined)) {
+            if (await uploadToPublishFolder(candidate.entry.kind === 'skill' ? 'skills' : 'tools', candidate.relative, next)) uploaded += 1
+          }
+        } catch (error) {
+          failed.push(`${candidate.entry.name}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+      await refreshSkills()
+      await python.refresh()
+      await postPython()
+      post({ type: 'projectStamp', running: false, entries: [], done: { written, uploaded, failed } })
+    } catch (error) {
+      post({ type: 'projectStamp', running: false, entries: [], error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Previews or carries out the move of this project's indexes to their project-prefixed names.
+   *
+   * `rag/renameIndexes.ts` has the reasoning. Here: only derived names move (a typed one is the
+   * user's), only indexes that actually hold something are offered, and the preview is computed
+   * against the cluster rather than assumed, so it names exactly what the button will copy.
+   */
+  async function handleIndexRenames(apply: boolean): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      if (configuredProjectName(config) === undefined) {
+        post({ type: 'indexRenames', running: false, plans: [], note: 'Set a project name first — until then index names do not change.' })
+        return
+      }
+      const search = await resolveSearch(config)
+      if (search === undefined) {
+        post({ type: 'indexRenames', running: false, plans: [], note: 'No search connection is configured, so there are no indexes to rename.' })
+        return
+      }
+      const writer = createVectorIndexWriter(httpClient, search.store, await vectorStoreConnectionFor(search.store, search.id))
+      const candidates = planIndexRenames({
+        codebase: { legacy: codebaseIndexName(config, false), current: codebaseIndexName(config) },
+        docs: { legacy: docsIndexName(config, false), current: docsIndexName(config) },
+        skills: { legacy: skillsIndexName(config, false), current: skillsIndexName(config) },
+      })
+      const plans: IndexRename[] = []
+      for (const plan of candidates) {
+        if (await hasDocuments(writer, plan.from)) plans.push(plan)
+      }
+      const store = search.store.label ?? search.id
+      if (!apply || plans.length === 0) {
+        post({
+          type: 'indexRenames',
+          running: false,
+          plans,
+          store,
+          ...(plans.length === 0 ? { note: 'Nothing to rename: no index exists under the old names.' } : {}),
+        })
+        return
+      }
+      const embedder = await resolveEmbedder(config)
+      if (embedder === undefined) {
+        post({ type: 'indexRenames', running: false, plans, store, error: 'Configure an embedding model in Settings → Search first.' })
+        return
+      }
+
+      const project = projectName(config, workspaceRoot)
+      const done: { kind: string; from: string; to: string; copied: number }[] = []
+      for (const plan of plans) {
+        const copied = await copyIndex({
+          writer,
+          from: plan.from,
+          to: plan.to,
+          dimensions: embedder.dimensions,
+          project,
+          aliases: plan.kind === 'codebase' ? codebaseAliases(config) : plan.kind === 'skills' ? skillAliases(config) : [],
+          onProgress: (count) => post({ type: 'indexRenames', running: true, plans, store, current: plan.to, copied: count }),
+        })
+        await copyBookkeeping(path.join(storageDir, 'index-manifests'), plan.from, plan.to, search.id)
+        done.push({ ...plan, copied })
+      }
+      post({ type: 'indexRenames', running: false, plans: [], store, done })
+    } catch (error) {
+      post({ type: 'indexRenames', running: false, plans: [], error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * Before a codebase index run: if a project name has just renamed this index, copy the old one
+   * across instead of letting the run embed the whole repository again. Nothing to do when the new
+   * index already has a manifest, or the old one never existed.
+   */
+  async function carryOverRenamedCodebaseIndex(
+    config: LightCodeConfig,
+    search: { store: VectorStoreConfig; id: string },
+    dimensions: number,
+  ): Promise<void> {
+    const current = codebaseIndexName(config)
+    const legacy = codebaseIndexName(config, false)
+    if (current === undefined || legacy === undefined || current === legacy) return
+    const exists = async (file: string): Promise<boolean> => fs.stat(file).then(() => true, () => false)
+    if (await exists(manifestPath(current, search.id))) return
+    if (!(await exists(manifestPath(legacy, search.id)))) return
+    const writer = createVectorIndexWriter(httpClient, search.store, await vectorStoreConnectionFor(search.store, search.id))
+    if (!(await hasDocuments(writer, legacy))) return
+    post({ type: 'indexRenames', running: true, plans: [{ kind: 'codebase', from: legacy, to: current }], current, copied: 0 })
+    const copied = await copyIndex({
+      writer,
+      from: legacy,
+      to: current,
+      dimensions,
+      project: projectName(config, workspaceRoot),
+      aliases: codebaseAliases(config),
+    })
+    await copyBookkeeping(path.join(storageDir, 'index-manifests'), legacy, current, search.id)
+    post({ type: 'indexRenames', running: false, plans: [], done: [{ kind: 'codebase', from: legacy, to: current, copied }] })
+    logger.info(`copied ${String(copied)} chunks from ${legacy} to ${current} rather than re-embedding them`)
+  }
+
+  /**
    * Empties the codebase index and forgets what was written.
    *
    * **The manifest goes with the vectors, and that ordering is the whole point.** The indexer
@@ -8558,9 +8954,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     indexingAbort = new AbortController()
+    try {
+      await carryOverRenamedCodebaseIndex(config, search, embedder.dimensions)
+    } catch (error) {
+      // A failed copy costs an ordinary full index, not the run.
+      logger.warn('could not copy the index to its new name; indexing from scratch', String(error))
+    }
     const manifestFile = manifestPath(index, search.id)
     const owner = indexOwner(config)
-    const project = indexProject()
+    const project = indexProject(config)
     const aliases = codebaseAliases(config)
     try {
       const manifest = await loadIndexManifest(manifestFile, embedder)
@@ -8787,7 +9189,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       // Applied immediately rather than at the next turn: switching it on should show the
       // environment coming up, not sit silent until the user happens to send a message.
-      await python.configure({ ...(config.python ?? {}), extraToolDirs: mirroredToolsDirs })
+      await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
       await postPython()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -10470,6 +10872,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleRequestSearchIndexes', handleRequestSearchIndexes(message.connection))
     } else if (message.type === 'testSearchConnection') {
       reportFailure('handleTestSearchConnection', handleTestSearchConnection(message.connection))
+    } else if (message.type === 'requestProject') {
+      reportFailure('postProject', postProject())
+    } else if (message.type === 'saveProjectName') {
+      reportFailure('handleSaveProjectName', handleSaveProjectName(message.name))
+    } else if (message.type === 'runIndexRenames') {
+      reportFailure('handleIndexRenames', handleIndexRenames(message.apply))
+    } else if (message.type === 'runProjectStamp') {
+      reportFailure('handleProjectStamp', handleProjectStamp(message.apply))
+    } else if (message.type === 'installPythonPackages') {
+      reportFailure('handleInstallPythonPackages', handleInstallPythonPackages(message.packages))
     } else if (message.type === 'syncVectorStore') {
       reportFailure('handleSyncVectorStore', handleSyncVectorStore(message.fromId))
     } else if (message.type === 'clearDocsIndex') {

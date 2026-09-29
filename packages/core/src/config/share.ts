@@ -265,6 +265,9 @@ export const NEVER_SHARED: readonly (keyof LightCodeConfig)[] = [
   // Labels everything this machine writes to a shared index. Importing one attributes your work
   // to somebody else, and nothing downstream would ever question it (§12e).
   'identity',
+  // Set per project and stored under `workspaces`; a top-level value would name every project the
+  // same, and an imported one would label this machine's work with somebody else's project.
+  'project',
 ]
 
 export interface SectionSummary {

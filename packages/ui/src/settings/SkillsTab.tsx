@@ -44,6 +44,10 @@ export interface SkillsTabProps {
     files?: string[]
     sourceDir?: string
     always?: boolean
+    author?: string
+    project?: string
+    version?: number
+    updated?: string
     /**
      * Set when the skill came from a bucket mirror.
      *
@@ -686,6 +690,18 @@ function SkillList(
                 </span>
               </div>
               <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{skill.description}</div>
+              {(skill.author !== undefined || skill.project !== undefined || skill.version !== undefined) && (
+                <div style={{ color: colors.muted, fontSize: 10, marginTop: 2 }}>
+                  {[
+                    skill.project !== undefined ? `project ${skill.project}` : undefined,
+                    skill.author !== undefined ? `by ${skill.author}` : undefined,
+                    skill.version !== undefined ? `v${String(skill.version)}` : undefined,
+                    skill.updated !== undefined ? `updated ${skill.updated.replace('T', ' ').replace('Z', ' UTC')}` : undefined,
+                  ]
+                    .filter((part): part is string => part !== undefined)
+                    .join(' · ')}
+                </div>
+              )}
               <div style={{ color: colors.muted, fontSize: 10, fontFamily: monospace, marginTop: 2 }}>
                 {skill.filePath}
               </div>

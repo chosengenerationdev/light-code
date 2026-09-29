@@ -794,6 +794,24 @@ function ToolsStatus(
                       {tool.description}
                     </span>
                   )}
+                  {(tool.author !== undefined || tool.project !== undefined || tool.version !== undefined) && (
+                    <span style={{ display: 'block', color: colors.muted, fontSize: 10 }}>
+                      {[
+                        tool.project !== undefined ? `project ${tool.project}` : undefined,
+                        tool.author !== undefined ? `by ${tool.author}` : undefined,
+                        tool.version !== undefined ? `v${String(tool.version)}` : undefined,
+                        tool.updated !== undefined ? `updated ${tool.updated.replace('T', ' ').replace('Z', ' UTC')}` : undefined,
+                      ]
+                        .filter((part): part is string => part !== undefined)
+                        .join(' · ')}
+                    </span>
+                  )}
+                  {(status.missingPackages?.[tool.name]?.length ?? 0) > 0 && (
+                    <span style={{ display: 'block', color: colors.error, fontSize: 11 }}>
+                      Needs {status.missingPackages?.[tool.name]?.join(', ')}, not installed in this environment.
+                      The assistant will offer to install them when the tool is wanted.
+                    </span>
+                  )}
                   <span
                     style={{
                       display: 'block',

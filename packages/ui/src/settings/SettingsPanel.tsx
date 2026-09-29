@@ -22,6 +22,7 @@ import { PythonTab, type PythonTabProps } from './PythonTab.js'
 import { OutlookTab, type OutlookTabProps } from './OutlookTab.js'
 import { ToolsTab, type ToolsTabProps } from './ToolsTab.js'
 import { AtlassianTab, type AtlassianTabProps } from './AtlassianTab.js'
+import { ProjectTab, type ProjectTabProps } from './ProjectTab.js'
 import { ReviewsTab, type ReviewsTabProps } from './ReviewsTab.js'
 import { VariablesTab, type VariablesTabProps } from './VariablesTab.js'
 import { SkillsTab, type SkillsTabProps } from './SkillsTab.js'
@@ -38,6 +39,7 @@ import {
   GlobeIcon,
   PaletteIcon,
   VariablesIcon,
+  ProjectIcon,
   ProviderIcon,
   SearchIcon,
   ServerIcon,
@@ -119,6 +121,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   tools: ToolsTabProps
   /** Confluence, Jira and Bitbucket. */
   atlassian: AtlassianTabProps
+  /** What this project is called; see `config/project.ts`. */
+  project: ProjectTabProps
   outlook: Omit<OutlookTabProps, 'onOpenTools'>
   /** Changes which tab is shown. Bumped by the host so the same tab can be asked for twice. */
   requestedTab?: { tab: string; nonce: number } | undefined
@@ -152,6 +156,7 @@ type TabId =
   | 'python'
   | 'tools'
   | 'atlassian'
+  | 'project'
   | 'outlook'
   | 'customData'
   | 'skills'
@@ -185,6 +190,8 @@ const RENAMED_TABS: Record<string, string> = { expert: 'agents' }
 
 const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => ReactElement }[] = [
   { id: 'providers', label: 'Providers', Icon: ProviderIcon },
+  // Second: the name decides how skills, tools and indexes are labelled, so it is set early.
+  { id: 'project', label: 'Project', Icon: ProjectIcon },
   { id: 'approvals', label: 'Approvals', Icon: ShieldIcon },
   { id: 'mcp', label: 'MCP', Icon: ServerIcon },
   { id: 'search', label: 'Search', Icon: SearchIcon },
@@ -385,6 +392,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <CustomDataTab {...props.customData} onOpenPython={() => setActive('python')} />
         ) : shown === 'python' ? (
           <PythonTab {...props.python} />
+        ) : shown === 'project' ? (
+          <ProjectTab {...props.project} />
         ) : shown === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
         ) : shown === 'agents' ? (

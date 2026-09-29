@@ -346,7 +346,19 @@ export async function indexTeamSkills(options: {
     // Checked per skill rather than only around the loop: the whole cost is inside it.
     if (options.signal?.aborted === true) throw new Error('Stopped.')
     const vector = await options.embedder.embed(teamSkillText(entry.skill, entry.body))
-    documents.push(teamSkillDocument(entry.skill, entry.body, vector, options.attribution))
+    /*
+     * The skill's own labels first. A skill synced in from a colleague names its author and
+     * project, and publishing it under whoever pressed the button is the wrong attribution
+     * search_team_skills exists to avoid.
+     */
+    const owner = entry.skill.author ?? options.attribution.owner
+    const project = entry.skill.project ?? options.attribution.project
+    documents.push(
+      teamSkillDocument(entry.skill, entry.body, vector, {
+        ...(owner !== undefined ? { owner } : {}),
+        ...(project !== undefined ? { project } : {}),
+      }),
+    )
     options.onProgress?.(documents.length, options.skills.length)
   }
   await options.writer.upsert(options.collection, documents, options.signal)

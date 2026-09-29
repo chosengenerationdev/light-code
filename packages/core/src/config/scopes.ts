@@ -48,6 +48,9 @@ export const USER_SCOPE_ONLY_KEYS = [
   // A wiki site and the token that publishes under the user's name. A repository able to set it
   // would choose where every page the assistant writes goes, and what it reads back as fact.
   'confluence',
+  // Names this project in index names and on every skill and tool it shares. A repository able to
+  // set it could take another team's index prefix and write into that team's indexes.
+  'project',
   // Jira and Bitbucket, for the same reason: an endpoint and a token that writes as the user.
   'jira',
   'bitbucket',
