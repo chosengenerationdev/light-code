@@ -21,3 +21,6 @@ coverage/
 # close, so they are never content — two were committed by a sweeping `git add -A`.
 ~$*
 apps/host/light-code-pkg-*.cjs
+apps/intellij/.gradle/
+apps/intellij/.intellijPlatform/
+apps/intellij/build/
