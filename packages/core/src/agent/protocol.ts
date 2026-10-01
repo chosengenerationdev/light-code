@@ -40,7 +40,7 @@ import type { DatasetConfig } from '../dataset/types.js'
 import type { ChartSpec } from '../charts/types.js'
 import type { DiagramSpec } from '../diagrams/types.js'
 
-export type AtlassianProductId = 'confluence' | 'jira' | 'bitbucket'
+export type AtlassianProductId = 'confluence' | 'jira' | 'bitbucket' | 'jenkins'
 
 /**
  * One Atlassian product's block as the settings panel edits it: every field present, empty meaning

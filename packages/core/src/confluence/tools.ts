@@ -352,7 +352,7 @@ export function createConfluenceWritePageTool(options: ConfluenceToolOptions): T
           const space = params.space ?? options.defaultSpace
           if (space === undefined) {
             return {
-              content: 'No space was given and no default space is configured (Settings → Atlassian → Confluence).',
+              content: 'No space was given and no default space is configured (Settings → DevOps → Confluence).',
               isError: true,
             }
           }

@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.121.2",
+  "version": "0.122.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -354,7 +354,7 @@
   "scripts": {
     "build": "node ./esbuild.mjs",
     "typecheck": "tsc -b tsconfig.json",
-    "package": "vsce package --no-dependencies"
+    "package": "node ../../scripts/remove-old-vsix.mjs && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

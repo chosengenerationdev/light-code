@@ -233,7 +233,7 @@ describe('opening settings on a named tab', () => {
     'schedules',
     'python',
     'tools',
-    'atlassian',
+    'devops',
     'skills',
     'network',
     'appearance',

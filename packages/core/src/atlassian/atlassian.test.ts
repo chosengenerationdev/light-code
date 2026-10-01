@@ -193,16 +193,20 @@ describe('the rules around them', () => {
   })
 
   /** Shared together as one section, and every token named as something the colleague must enter. */
-  it('exports all three as one section, naming each token but never including one', () => {
+  it('exports all four DevOps sites as one section, naming each token but never including one', () => {
     const section = SHARE_SECTIONS.find((entry) => entry.id === 'atlassian')
-    expect(section?.keys).toEqual(['confluence', 'jira', 'bitbucket'])
+    expect(section?.keys).toEqual(['confluence', 'jira', 'bitbucket', 'jenkins'])
     const config = {
       confluence: { enabled: true, baseUrl: 'https://wiki.example.com', tokenRef: 'confluence:token' },
       jira: { enabled: true, baseUrl: 'https://jira.example.com', tokenRef: 'jira:token', defaultProject: 'ABC' },
+      jenkins: { enabled: true, baseUrl: 'https://ci.example.com', tokenRef: 'jenkins:token', username: 'jsmith', defaultJob: 'platform/api' },
     } as never
-    const exported = buildExport(config, ['atlassian'])
-    expect(JSON.stringify(exported)).toContain('"defaultProject":"ABC"')
+    const exported = JSON.stringify(buildExport(config, ['atlassian']))
+    expect(exported).toContain('"defaultProject":"ABC"')
+    expect(exported).toContain('"defaultJob":"platform/api"')
+    // A Jenkins user id names one person, so it stays behind.
+    expect(exported).not.toContain('jsmith')
     const summary = describeSections(config).find((entry) => entry.id === 'atlassian')
-    expect(summary?.secretRefs).toEqual(['Confluence: personal access token', 'Jira: personal access token'])
+    expect(summary?.secretRefs).toEqual(['Confluence: personal access token', 'Jira: personal access token', 'Jenkins: API token and user id'])
   })
 })

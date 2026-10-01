@@ -75,6 +75,11 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   'jira_write_issue',
   // Installs packages from an index into the tools' environment: the command is the thing to read.
   'install_python_packages',
+  // Shared CI under the user's name: starting or stopping a build, and replaying one with a local
+  // Jenkinsfile, which runs whatever that file says with the job's credentials.
+  'jenkins_start_build',
+  'jenkins_stop_build',
+  'jenkins_try_jenkinsfile',
   'bitbucket_write_pull_request',
   // Changes a workbook somebody has open and has not saved, with no undo this product owns.
   'excel_write_range',

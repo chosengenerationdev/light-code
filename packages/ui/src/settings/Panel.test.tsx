@@ -122,7 +122,7 @@ describe('the Atlassian settings', () => {
   })
 
   /** Separate panels, and each saves as its own product — a Jira save must never land on Confluence. */
-  it('shows Confluence, Jira and Bitbucket as separate panels, each with its own defaults', () => {
+  it('shows Confluence, Jira, Bitbucket and Jenkins as separate panels, each with its own fields', () => {
     const blank = { enabled: false, baseUrl: '', caFile: '', rejectUnauthorized: true, defaults: {} }
     const saves: string[] = []
     act(() =>
@@ -132,6 +132,7 @@ describe('the Atlassian settings', () => {
             confluence: { settings: blank, hasToken: false },
             jira: { settings: blank, hasToken: false },
             bitbucket: { settings: blank, hasToken: false },
+            jenkins: { settings: blank, hasToken: false },
           }}
           savedTicks={{}}
           tests={{}}
@@ -148,6 +149,10 @@ describe('the Atlassian settings', () => {
     expect(titles.some((title) => title.includes('Bitbucket'))).toBe(true)
     expect(container.querySelector('#lc-jira-defaultProject')).not.toBeNull()
     expect(container.querySelector('#lc-bitbucket-defaultRepo')).not.toBeNull()
+    expect(titles.some((title) => title.includes('Jenkins'))).toBe(true)
+    // Jenkins tokens are sent with the user id, so the panel asks for it.
+    expect(container.querySelector('#lc-jenkins-username')).not.toBeNull()
+    expect(container.querySelector('#lc-jenkins-defaultJob')).not.toBeNull()
 
     type(container.querySelector<HTMLInputElement>('#lc-jira-defaultProject'), 'ABC')
     const jiraSave = [...container.querySelectorAll('button')].find(

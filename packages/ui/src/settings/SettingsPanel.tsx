@@ -155,7 +155,7 @@ type TabId =
   | 'network'
   | 'python'
   | 'tools'
-  | 'atlassian'
+  | 'devops'
   | 'project'
   | 'outlook'
   | 'customData'
@@ -186,7 +186,7 @@ export function describeDocsResult(
 }
 
 /** Tabs that have been renamed, so an old link still lands where it meant to. */
-const RENAMED_TABS: Record<string, string> = { expert: 'agents' }
+const RENAMED_TABS: Record<string, string> = { expert: 'agents', atlassian: 'devops' }
 
 const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => ReactElement }[] = [
   { id: 'providers', label: 'Providers', Icon: ProviderIcon },
@@ -200,7 +200,8 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'python', label: 'Python', Icon: PythonIcon },
   // After the sources it lists, because it is where you go to *read* rather than change.
   { id: 'tools', label: 'Tools', Icon: ToolboxIcon },
-  { id: 'atlassian', label: 'Atlassian', Icon: LinkedSitesIcon },
+  // Confluence, Jira, Bitbucket and Jenkins. Was "Atlassian" until Jenkins joined; the old id still opens it.
+  { id: 'devops', label: 'DevOps', Icon: LinkedSitesIcon },
   // Beside Skills rather than beside Tools: both are corpora the assistant reads from, where
   // Tools is a list of what can act.
   { id: 'outlook', label: 'Outlook', Icon: MailIcon },
@@ -384,7 +385,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <SkillsTab {...props.skills} />
         ) : shown === 'tools' ? (
           <ToolsTab {...props.tools} />
-        ) : shown === 'atlassian' ? (
+        ) : shown === 'devops' ? (
           <AtlassianTab {...props.atlassian} />
         ) : shown === 'outlook' ? (
           <OutlookTab {...props.outlook} onOpenTools={() => setActive('tools')} />

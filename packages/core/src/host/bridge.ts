@@ -81,6 +81,7 @@ import {
   createBitbucketReadPullRequestTool,
   createBitbucketWritePullRequestTool,
 } from '../atlassian/bitbucket.js'
+import { createJenkinsTools, JenkinsClient } from '../atlassian/jenkins.js'
 import { createJiraProjectTool, createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
 import { ATLASSIAN_PRODUCTS, atlassianProduct } from '../atlassian/products.js'
 import { AtlassianError, type AtlassianConnection } from '../atlassian/rest.js'
@@ -2437,6 +2438,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedConfluence: LightCodeConfig['confluence'] = undefined
   let cachedJira: LightCodeConfig['jira'] = undefined
   let cachedBitbucket: LightCodeConfig['bitbucket'] = undefined
+  let cachedJenkins: LightCodeConfig['jenkins'] = undefined
   /** Mirrors `mail`, for the same reason. */
   let cachedMail: MailIndexConfig = {}
   let cachedDatasets: DatasetConfig[] = []
@@ -2543,6 +2545,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedConfluence = config.confluence
     cachedJira = config.jira
     cachedBitbucket = config.bitbucket
+    cachedJenkins = config.jenkins
     cachedMail = config.mail ?? {}
     cachedDatasets = config.datasets ?? []
     /*
@@ -3413,6 +3416,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       combined.register(createJiraReadIssueTool(jiraOptions))
       combined.register(createJiraProjectTool(jiraOptions))
       combined.register(createJiraWriteIssueTool(jiraOptions))
+    }
+    if (cachedJenkins?.enabled === true && cachedJenkins.baseUrl !== undefined) {
+      for (const tool of createJenkinsTools({
+        client: jenkinsClient,
+        ...(cachedJenkins.defaultJob !== undefined ? { defaultJob: cachedJenkins.defaultJob } : {}),
+      })) {
+        combined.register(tool)
+      }
     }
     if (cachedBitbucket?.enabled === true && cachedBitbucket.baseUrl !== undefined) {
       const bitbucketOptions = {
@@ -6949,12 +6960,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const { config } = await configManager.load()
     const settings = config[product]
     if (settings?.baseUrl === undefined) {
-      throw new AtlassianError(`${info.label} is not set up. Settings → Atlassian → ${info.label}: enter the site address.`)
+      throw new AtlassianError(`${info.label} is not set up. Settings → DevOps → ${info.label}: enter the site address.`)
     }
     const token = settings.tokenRef !== undefined ? await secrets.get(settings.tokenRef) : undefined
     if (token === undefined || token.length === 0) {
       throw new AtlassianError(
-        `No ${info.label} personal access token is stored. Settings → Atlassian → ${info.label}: paste one and save.`,
+        `No ${info.label} personal access token is stored. Settings → DevOps → ${info.label}: paste one and save.`,
       )
     }
     const passphraseRef = config.tls?.passphraseRef
@@ -6972,7 +6983,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         })
       },
     })
-    return { baseUrl: settings.baseUrl, token, ...(tls !== undefined ? { tls } : {}) }
+    // Jenkins sends its token with the user id; the Atlassian products and an SSO bearer token do not.
+    const username = product === 'jenkins' ? config.jenkins?.username?.trim() : undefined
+    return {
+      baseUrl: settings.baseUrl,
+      token,
+      ...(username !== undefined && username.length > 0 ? { username } : {}),
+      ...(tls !== undefined ? { tls } : {}),
+    }
   }
 
   async function confluenceClient(): Promise<ConfluenceClient> {
@@ -6983,6 +7001,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
   async function bitbucketClient(): Promise<BitbucketClient> {
     return new BitbucketClient(httpClient, await atlassianConnection('bitbucket'))
+  }
+  async function jenkinsClient(): Promise<JenkinsClient> {
+    return new JenkinsClient(httpClient, await atlassianConnection('jenkins'))
   }
 
   /** The Atlassian tab's view of all three products. Tokens never cross — only whether one is stored (invariant 7). */
@@ -7087,7 +7108,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ? await (await confluenceClient()).currentUser()
           : product === 'jira'
             ? await (await jiraClient()).currentUser()
-            : await (await bitbucketClient()).currentUser()
+            : product === 'jenkins'
+              ? await (await jenkinsClient()).currentUser()
+              : await (await bitbucketClient()).currentUser()
       post({ type: 'atlassianTest', product, ok: true, detail: `Connected as ${who}.` })
     } catch (error) {
       post({ type: 'atlassianTest', product, ok: false, detail: error instanceof Error ? error.message : String(error) })
@@ -10022,11 +10045,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * holds the open project's values, and saving those globally would leak them too — and an
        * imported one is written to this project's own settings.
        */
-      const { project: importedProject, ...globalPart } = merged
-      await configManager.save('user', {
-        ...globalPart,
-        ...(merged.profiles === undefined ? {} : { profiles: reconciled }),
-      } as LightCodeConfig)
+      const { project: importedProject } = merged
+      /*
+       * Only the chosen sections are written. `existing` is the *merged* view — global settings with
+       * this project's own values and the repository's settings file laid over them — so saving all
+       * of it, as this once did, copied those into the global settings of every project. A key the
+       * imported file lacks is written as absent, which removes it: a section is replaced whole.
+       */
+      const patch: Record<string, unknown> = {}
+      for (const section of SHARE_SECTIONS) {
+        if (!chosen.includes(section.id) || section.id === 'project') continue
+        for (const key of section.keys) patch[key] = key === 'profiles' && merged.profiles !== undefined ? reconciled : merged[key]
+      }
+      await configManager.save('user', patch as LightCodeConfig)
       if (chosen.includes('project')) {
         if (workspaceRoot === undefined) {
           ui.showWarning('The project name and search scope were not imported: no folder is open to apply them to.')

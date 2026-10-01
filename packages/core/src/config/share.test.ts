@@ -301,7 +301,22 @@ describe('the project section', () => {
     const path = await import('node:path')
     const bridge = fs.readFileSync(path.join(import.meta.dirname, '..', 'host', 'bridge.ts'), 'utf8')
     const handler = bridge.slice(bridge.indexOf('async function handleImportConfig('))
-    expect(handler).toContain('const { project: importedProject, ...globalPart } = merged')
+    expect(handler).toContain('const { project: importedProject } = merged')
     expect(handler).toContain('await configManager.saveForWorkspace({ project: importedProject ?? undefined })')
+  })
+
+  /*
+   * Asked: does an import leave the settings you did not choose alone? It did not quite: the whole
+   * merged view was saved — this project's own values and the repository's settings file included —
+   * which copied them into global settings. Only the chosen sections' keys are written now.
+   */
+  it('writes only the sections that were chosen', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const bridge = fs.readFileSync(path.join(import.meta.dirname, '..', 'host', 'bridge.ts'), 'utf8')
+    const handler = bridge.slice(bridge.indexOf('async function handleImportConfig('))
+    expect(handler).toContain("if (!chosen.includes(section.id) || section.id === 'project') continue")
+    expect(handler).toContain("await configManager.save('user', patch as LightCodeConfig)")
+    expect(handler).not.toContain('...merged,')
   })
 })

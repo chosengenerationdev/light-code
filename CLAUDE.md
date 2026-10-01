@@ -1939,6 +1939,23 @@ skill, tool or index belonged to whom.
 - On the shared Node host, `runIndexRenames`, `runProjectStamp` and `installPythonPackages` are
   admin-only — none matches a mutating prefix, and all three write to what every user shares.
 
+- **Jenkins, and the Atlassian tab became DevOps (0.122.0).** Jenkins rides the same table
+  (`atlassian/products.ts`), REST core and messages as Confluence, Jira and Bitbucket — a fourth
+  copy of "site + token + TLS + error wording" was the alternative. One difference: Jenkins API
+  tokens go as HTTP Basic with the user id (`AtlassianConnection.username`); with no user id the
+  token goes as Bearer, which some SSO plugins accept. Single sign-on users still have API tokens
+  (`/me/security`), and those bypass SSO for REST. Nine tools in `atlassian/jenkins.ts`: six read
+  (find jobs, job, build with stages/tests/changes, log streamed — tail, search or one stage's failed
+  steps — queue and offline agents, the declarative linter) and three that act on shared CI
+  (start, stop, **try a local Jenkinsfile via Replay** and wait for the result), all `command`, in
+  `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES`. **Logs are streamed** — only a bounded tail or
+  the matching lines are ever held, because a console log can be hundreds of megabytes. No tool
+  edits job configuration. A CSRF crumb is fetched only when Jenkins asks (API-token requests are
+  exempt on current Jenkins). The tab id is `devops`; `atlassian` still opens it via `RENAMED_TABS`.
+  The share section stays `atlassian` internally, gains `jenkins`, and strips `jenkins.username`.
+  **Import writes only the chosen sections** (asked: does it leave the rest alone? — not quite): it
+  used to save the whole merged view, copying per-project and repository values into global settings.
+  Old VSIX files are now removed by `scripts/remove-old-vsix.mjs` before each package.
 - **Five reported faults (0.121.2).** (1) *Run did nothing in a demo.* A manual run hitting a busy
   bridge — a reply still finishing, very likely the one that created the schedule — was skipped with
   a log line; it now waits (up to 15 minutes) and says so, and announces start and finish. Worse:
@@ -2867,8 +2884,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.121.2**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.121.2.vsix`, unpublished.
+until then, stale again. The local manifest is **0.122.0**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.122.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

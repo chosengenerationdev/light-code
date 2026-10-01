@@ -1,8 +1,10 @@
 import type { AtlassianProductId } from '../agent/protocol.js'
 
 /**
- * What differs between the three Atlassian products, in one table the host and the settings panel
- * both read, so the panel can never offer a default the host does not save. Browser-safe.
+ * What differs between the DevOps sites — Confluence, Jira, Bitbucket and Jenkins — in one table the
+ * host and the settings panel both read, so the panel can never offer a field the host does not
+ * save. Browser-safe. (Named for where it started; Jenkins joined because it has the same shape: a
+ * site, a personal token in secret storage, and a few fields of its own.)
  */
 
 export interface AtlassianDefaultField {
@@ -75,6 +77,29 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
         label: 'Default repository',
         placeholder: 'e.g. service-api',
         hint: 'The repository slug, the part after /repos/. Used when you do not name one.',
+      },
+    ],
+  },
+  {
+    id: 'jenkins',
+    label: 'Jenkins',
+    tokenRef: 'jenkins:token',
+    sitePlaceholder: 'https://jenkins.example.com',
+    does:
+      'find jobs, read builds, failed tests and logs, see the queue, start and stop builds, and validate or try a local Jenkinsfile — every start, stop and try is shown to you first',
+    defaults: [
+      {
+        key: 'username',
+        label: 'Jenkins user id',
+        placeholder: 'e.g. jsmith',
+        hint:
+          'Sent with the token. Single sign-on users have one too: sign in to Jenkins and click your name — it is the last part of the address, /user/<id>. Create the token at <your Jenkins>/me/security → API Token → Add new Token, and copy it straight away: Jenkins shows it only once. Leave this empty only if your Jenkins takes an SSO access token as a Bearer token instead.',
+      },
+      {
+        key: 'defaultJob',
+        label: 'Default job',
+        placeholder: 'e.g. platform/service-api',
+        hint: 'Folder and job name. Used when you ask about "the build" without naming a job.',
       },
     ],
   },

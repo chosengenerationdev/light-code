@@ -54,6 +54,8 @@ export const USER_SCOPE_ONLY_KEYS = [
   // Jira and Bitbucket, for the same reason: an endpoint and a token that writes as the user.
   'jira',
   'bitbucket',
+  // A CI server and a token that starts, stops and replays builds as the user.
+  'jenkins',
   // `expert.path` names an executable. A workspace able to set it would run a program of
   // its choosing as soon as the panel opened — the same threat as `python.uvPath`.
   // `expert.enabled` is here too, so a repo cannot switch on paid API calls by itself.

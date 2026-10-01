@@ -21,12 +21,13 @@ import { readBody } from '../platform/readBody.js'
  * Cloud (email + API token) is not attempted by any of the three, rather than half-supported.
  */
 
-export type AtlassianProduct = 'confluence' | 'jira' | 'bitbucket'
+export type AtlassianProduct = 'confluence' | 'jira' | 'bitbucket' | 'jenkins'
 
 export const PRODUCT_LABELS: Record<AtlassianProduct, string> = {
   confluence: 'Confluence',
   jira: 'Jira',
   bitbucket: 'Bitbucket',
+  jenkins: 'Jenkins',
 }
 
 export interface AtlassianConnection {
@@ -34,6 +35,12 @@ export interface AtlassianConnection {
   baseUrl: string
   /** The personal access token. Held only for the life of a request, never logged. */
   token: string
+  /**
+   * Set for Jenkins, whose API tokens are sent as HTTP Basic with the user's id. Absent sends the
+   * token as a Bearer token — the Atlassian products, and a Jenkins whose single sign-on plugin
+   * accepts an access token that way.
+   */
+  username?: string | undefined
   tls?: TlsOptions | undefined
 }
 
@@ -101,7 +108,10 @@ export class AtlassianRest {
         headers: {
           Accept: 'application/json',
           ...(options.headers ?? {}),
-          Authorization: `Bearer ${this.connection.token}`,
+          Authorization:
+            this.connection.username !== undefined && this.connection.username.length > 0
+              ? `Basic ${Buffer.from(`${this.connection.username}:${this.connection.token}`, 'utf8').toString('base64')}`
+              : `Bearer ${this.connection.token}`,
         },
         ...(signal !== undefined ? { signal } : {}),
         ...(this.connection.tls !== undefined ? { tls: this.connection.tls } : {}),
@@ -142,7 +152,13 @@ function messageFrom(body: string): string {
     }
     return parts.join(' ')
   } catch {
-    return body.slice(0, 300)
+    // Jenkins answers errors as an HTML page; the words are what matter.
+    return body
+      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 300)
   }
 }
 
@@ -162,7 +178,7 @@ export function describeAtlassianFailure(product: AtlassianProduct, doing: strin
     case 401:
       return (
         `${label} did not accept the personal access token while ${doing}. It may have expired or ` +
-        `been revoked: create a new one and save it in Settings → Atlassian → ${label}.`
+        `been revoked: create a new one and save it in Settings → DevOps → ${label}.`
       )
     case 403:
       return `The token's owner is not allowed to do this (${doing}).${said} Ask an administrator for permission.`

@@ -48,6 +48,10 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   // Fetches and installs other people's code into the environment every tool runs in. Nobody
   // unattended would see which packages, from where.
   'install_python_packages',
+  // CI actions nobody would see happen: a build started, aborted, or replayed with a changed script.
+  'jenkins_start_build',
+  'jenkins_stop_build',
+  'jenkins_try_jenkinsfile',
   'write_skill',
   'delete_skill',
   /*

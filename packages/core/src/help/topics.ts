@@ -501,7 +501,7 @@ filters already produced.
       'assign ticket', 'custom field',
     ],
     body: `
-**Settings → Atlassian → Jira**: the site address, a personal access token, and optionally a default
+**Settings → DevOps → Jira**: the site address, a personal access token, and optionally a default
 project key, a CA file and the skip-verify escape hatch. Off until switched on; **user-scope only**
 (config:jira). The token is kept in secure storage and never shown again. **Test connection** says who
 the token belongs to.
@@ -526,6 +526,52 @@ comment or move fails after the fields were saved, the result says exactly which
 `,
   },
   {
+    id: 'jenkins',
+    title: 'Jenkins builds, logs and Jenkinsfiles',
+    keywords: [
+      'jenkins', 'ci', 'build', 'pipeline', 'jenkinsfile', 'job', 'console log', 'build log',
+      'why did the build fail', 'failed build', 'start a build', 'trigger', 'rerun', 'replay',
+      'stop build', 'abort', 'queue', 'agent offline', 'api token', 'sso',
+    ],
+    body: `
+**Settings → DevOps → Jenkins**: the site address, an **API token**, your **Jenkins user id**, and
+optionally a default job (\`folder/name\`), a CA file and the skip-verify escape hatch. Off until
+switched on; **user-scope only** (config:jenkins). The token is kept in secure storage. **Test
+connection** says who the token belongs to.
+
+**Getting a token, single sign-on included.** Sign in to Jenkins in the browser as usual, open
+\`<your Jenkins>/me/security\` (or click your name → Security), API Token → **Add new Token**,
+and copy it at once — Jenkins shows it only once. Your user id is the last part of your profile
+address, \`/user/<id>\`. Token plus user id is sent as HTTP Basic, which works behind SAML or
+OpenID Connect sign-on. If your administrators have turned API tokens off and your SSO plugin accepts
+an access token as a Bearer token, leave the user id empty and paste that token instead.
+
+**Reading** — never asks beyond the ordinary gate:
+- \`jenkins_find_jobs\` — jobs by name, through folders, with their last status.
+- \`jenkins_job\` — health, the last ten builds, the last good and failed build, and the parameters
+  the job takes with defaults and choices.
+- \`jenkins_build\` — one build: result, who or what started it, parameters, commits, pipeline
+  stages and their status, failed tests with their errors, artifacts. Start here for "why did it fail".
+- \`jenkins_build_log\` — the console log without loading all of it: the end, only lines matching a
+  pattern (with context), or the failed steps of one pipeline stage.
+- \`jenkins_queue\` — what is waiting and why, and which agents are offline.
+- \`jenkins_check_jenkinsfile\` — validates a local declarative Jenkinsfile with your Jenkins's own
+  linter. Changes nothing.
+
+**Acting** — always shown to you first, never available to a schedule:
+- \`jenkins_start_build\` — starts a build, with parameters; the preview lists every value, defaults
+  included, and names any parameter the job does not have.
+- \`jenkins_stop_build\` — aborts a running build.
+- \`jenkins_try_jenkinsfile\` — **does my local Jenkinsfile run?** Replays a recent build of a pipeline
+  job with the local file as its script — the job's real agents, credentials and parameters, nothing
+  committed — and waits (10 minutes by default) for the answer: success, or the failing stage and the
+  end of its log. Needs a pipeline job that has run at least once and the Replay permission. Run
+  \`jenkins_check_jenkinsfile\` first; it is instant and catches syntax and unknown steps.
+
+There is no tool that changes a job's configuration.
+`,
+  },
+  {
     id: 'bitbucket',
     title: 'Bitbucket pull requests',
     keywords: [
@@ -533,7 +579,7 @@ comment or move fails after the fields were saved, the result says exactly which
       'open a pull request', 'comment on pr', 'file on branch', 'stash',
     ],
     body: `
-**Settings → Atlassian → Bitbucket**: the site address, a personal access token, and optionally a
+**Settings → DevOps → Bitbucket**: the site address, a personal access token, and optionally a
 default project key and repository slug, used when a request names no repository. Off until switched
 on; **user-scope only** (config:bitbucket).
 
@@ -612,7 +658,7 @@ the codebase also copies the old index across by itself if it finds one.
       'documentation page', 'diagram on a page', 'image on a page', 'replace image',
     ],
     body: `
-**Settings → Atlassian → Confluence**: the site address (including any path before \`/display\`), a
+**Settings → DevOps → Confluence**: the site address (including any path before \`/display\`), a
 personal access token, and optionally a default space key and a CA file. Off until switched on;
 **user-scope only** (config:confluence), so a repository can never repoint it. The token is kept in
 secure storage, never in the settings file, and never shown again — the field says whether one is
@@ -654,6 +700,12 @@ Python, buckets, Confluence and more. The assistant can write the same file with
 **Never in the file**: any secret (API keys, passwords, tokens), approvals, other per-project settings,
 and identity (the author). Index names that identify one person are stripped from the search section,
 because everyone must publish to their own collection.
+
+**Import only changes what you choose.** The file's sections are listed with checkboxes; only the
+ticked ones are written, and every other setting is left exactly as it was. A ticked section
+*replaces* yours — importing MCP servers swaps your server list for theirs rather than merging two
+lists that cannot be matched up. The DevOps section covers Confluence, Jira, Bitbucket and Jenkins;
+tokens are never in the file and a Jenkins user id is left out.
 
 **Project name and search scope** are a section of their own. They are exported from the project you
 have open, and an import applies them **to the project open on the importing machine** — never as a

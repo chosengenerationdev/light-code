@@ -207,7 +207,7 @@ function resolveRepo(options: BitbucketToolOptions, params: { project?: string |
   const repo = params.repo ?? options.defaultRepo
   if (project === undefined || repo === undefined) {
     throw new AtlassianError(
-      'Which repository? Give project and repo — no default is configured in Settings → Atlassian → Bitbucket.',
+      'Which repository? Give project and repo — no default is configured in Settings → DevOps → Bitbucket.',
     )
   }
   return { project, repo }

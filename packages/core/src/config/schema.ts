@@ -1050,6 +1050,20 @@ export const configSchema = z
         defaultProject: z.string().min(1),
       })
       .partial(),
+    /**
+     * Jenkins. The same connection shape as the Atlassian products, and user-scope only for the same
+     * reason — a site and a token that start builds under the user's name. `username` makes the
+     * token HTTP Basic, which is how Jenkins API tokens work, single sign-on included; without it the
+     * token is sent as a Bearer token.
+     */
+    jenkins: z
+      .object({
+        ...atlassianConnectionShape,
+        username: z.string().min(1),
+        /** `folder/job` used when a request names no job. */
+        defaultJob: z.string().min(1),
+      })
+      .partial(),
     /** Bitbucket Data Center / Server. As `jira`. */
     bitbucket: z
       .object({

@@ -11,7 +11,7 @@ import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textField
 import { Panel } from './Panel.js'
 
 /**
- * Confluence, Jira and Bitbucket: one panel each, from one component and the product table in
+ * Confluence, Jira, Bitbucket and Jenkins: one panel each, from one component and the product table in
  * core, so the panel can never offer a default the host does not save.
  *
  * Each token is **write-only** (invariant 7). The field is always empty; the host only ever says
@@ -35,9 +35,9 @@ export function AtlassianTab(props: AtlassianTabProps): ReactElement {
   return (
     <div>
       <p style={{ color: colors.muted, fontSize: 12, margin: '0 0 12px' }}>
-        Data Center and Server sites, each with your own personal access token. Everything the
-        assistant writes is shown to you first and is written as you. A product stays off, and its
-        site is never contacted, until you switch it on.
+        Confluence, Jira and Bitbucket (Data Center and Server) and Jenkins, each with your own
+        token. Everything the assistant writes, and every build it starts, is shown to you first and
+        happens as you. A site stays off, and is never contacted, until you switch it on.
       </p>
       {ATLASSIAN_PRODUCTS.map((info) => {
         const status = props.products?.[info.id]
@@ -137,7 +137,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       <span style={hintStyle}>The address you open {info.label} at, including any path after the host name.</span>
 
       <label htmlFor={id('token')} style={labelStyle()}>
-        Personal access token
+        {info.id === 'jenkins' ? 'API token' : 'Personal access token'}
       </label>
       <input
         id={id('token')}

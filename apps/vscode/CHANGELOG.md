@@ -1,5 +1,21 @@
 # light-code-vscode
 
+## 0.122.0
+
+### Minor Changes
+
+- **Jenkins.** Settings → DevOps (renamed from Atlassian) → Jenkins: your Jenkins address, an API
+  token and your user id — single sign-on users create the token at `<your Jenkins>/me/security`.
+  The assistant can find jobs; read a job's recent builds and parameters; read a build's result,
+  causes, commits, pipeline stages and failed tests; read its log without loading all of it (the
+  end, matching lines, or one stage's failed steps); see the queue and offline agents; and validate a
+  local Jenkinsfile with your Jenkins's linter. It can also start and stop builds and **try a local
+  Jenkinsfile for real** with Jenkins Replay, waiting for the result — always shown to you first,
+  and never from a schedule.
+- **Importing settings changes only the sections you tick.** It used to also copy some of the open
+  project's settings into your global ones.
+- Old packaged extension files are removed when a new one is built.
+
 ## 0.121.2
 
 ### Patch Changes
