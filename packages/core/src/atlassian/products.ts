@@ -23,6 +23,9 @@ export interface AtlassianProductInfo {
   sitePlaceholder: string
   /** What the product lets the assistant do, in one sentence for the panel. */
   does: string
+  /** What the secret is called in the panel, and where to get one. */
+  tokenLabel: string
+  tokenHint: string
   defaults: readonly AtlassianDefaultField[]
 }
 
@@ -30,6 +33,8 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
   {
     id: 'confluence',
     label: 'Confluence',
+    tokenLabel: 'Personal access token',
+    tokenHint: 'Create one in Confluence under your profile → Personal Access Tokens. Kept in secure storage, never in the settings file, and never sent back to this panel.',
     tokenRef: 'confluence:token',
     sitePlaceholder: 'https://wiki.example.com/confluence',
     does:
@@ -46,6 +51,8 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
   {
     id: 'jira',
     label: 'Jira',
+    tokenLabel: 'Personal access token',
+    tokenHint: 'Create one in Jira under your profile → Personal Access Tokens. Kept in secure storage, never in the settings file, and never sent back to this panel.',
     tokenRef: 'jira:token',
     sitePlaceholder: 'https://jira.example.com',
     does: 'search and read issues, create them, edit them, comment, and move their status',
@@ -61,6 +68,8 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
   {
     id: 'bitbucket',
     label: 'Bitbucket',
+    tokenLabel: 'Personal access token',
+    tokenHint: 'Create one in Bitbucket under your profile → Personal Access Tokens. Kept in secure storage, never in the settings file, and never sent back to this panel.',
     tokenRef: 'bitbucket:token',
     sitePlaceholder: 'https://git.example.com',
     does:
@@ -83,6 +92,9 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
   {
     id: 'jenkins',
     label: 'Jenkins',
+    tokenLabel: 'API token',
+    tokenHint:
+      'Create one at <your Jenkins>/me/security → API Token → Add new Token — single sign-on users too. Copy it straight away; Jenkins shows it only once. Kept in secure storage, never in the settings file.',
     tokenRef: 'jenkins:token',
     sitePlaceholder: 'https://jenkins.example.com',
     does:
@@ -100,6 +112,31 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
         label: 'Default job',
         placeholder: 'e.g. platform/service-api',
         hint: 'Folder and job name. Used when you ask about "the build" without naming a job.',
+      },
+    ],
+  },
+  {
+    id: 'autosys',
+    label: 'AutoSys',
+    tokenLabel: 'Password',
+    tokenHint:
+      'The password for the user below, as you sign in to AutoSys web services. Kept in secure storage, never in the settings file, and never sent back to this panel.',
+    tokenRef: 'autosys:password',
+    sitePlaceholder: 'https://autosys.example.com:9443',
+    does:
+      'find jobs, read job definitions, status and run logs, and — always shown to you first — send events such as force-start, kill, hold and ice, or apply JIL',
+    defaults: [
+      {
+        key: 'username',
+        label: 'Username',
+        placeholder: 'e.g. jsmith',
+        hint: 'The AutoSys web services user. Sent with the password as HTTP Basic.',
+      },
+      {
+        key: 'defaultPattern',
+        label: 'Default job pattern',
+        placeholder: 'e.g. PAY_*',
+        hint: 'Used when you ask about "the jobs" without naming any. * matches anything.',
       },
     ],
   },

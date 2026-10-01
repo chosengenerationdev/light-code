@@ -1,5 +1,7 @@
 import type { ApprovalDecision, ApprovalGate, ApprovalRequest, HostToUiMessage } from '@light-code/core'
 
+import { ALWAYS_ASK_TOOLS } from '../approval/policy.js'
+
 /**
  * Bridges core's synchronous-looking `requestApproval` to the asynchronous webview
  * round-trip: post the request, park a promise keyed by id, resolve it when the UI
@@ -30,6 +32,9 @@ export class WebviewApprovalGate implements ApprovalGate {
         group: request.group,
         preview: request.preview,
         ...(request.alwaysScope === undefined ? {} : { alwaysScope: request.alwaysScope }),
+        // Said so the prompt offers no "Always allow": for these it would record a rule that the
+        // policy never consults, which is a button that lies.
+        ...(ALWAYS_ASK_TOOLS.has(request.toolName) ? { alwaysAsk: true } : {}),
       })
     })
   }

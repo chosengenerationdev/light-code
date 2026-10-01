@@ -547,13 +547,11 @@ export function App(props: AppProps): ReactElement {
         setPendingForm(message)
       } else if (message.type === 'approvalRequest') {
         setMessages(finalizePendingMessage)
-        setPendingApproval({
-          id: message.id,
-          toolName: message.toolName,
-          group: message.group,
-          preview: message.preview,
-          ...(message.alwaysScope === undefined ? {} : { alwaysScope: message.alwaysScope }),
-        })
+        // Assigned whole, for the reason given for the form just above: a field copied by hand is a
+        // field the next addition forgets.
+        const { type: _type, ...approval } = message
+        void _type
+        setPendingApproval(approval)
       } else if (message.type === 'openSettings') {
         /*
          * The walkthrough asking to be shown a tab. It arrives as a normal host message so

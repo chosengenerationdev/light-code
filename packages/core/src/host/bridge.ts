@@ -82,6 +82,7 @@ import {
   createBitbucketWritePullRequestTool,
 } from '../atlassian/bitbucket.js'
 import { createJenkinsTools, JenkinsClient } from '../atlassian/jenkins.js'
+import { AutosysClient, createAutosysTools, type AutosysPaths } from '../atlassian/autosys.js'
 import { createJiraProjectTool, createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
 import { ATLASSIAN_PRODUCTS, atlassianProduct } from '../atlassian/products.js'
 import { AtlassianError, type AtlassianConnection } from '../atlassian/rest.js'
@@ -2439,6 +2440,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedJira: LightCodeConfig['jira'] = undefined
   let cachedBitbucket: LightCodeConfig['bitbucket'] = undefined
   let cachedJenkins: LightCodeConfig['jenkins'] = undefined
+  let cachedAutosys: LightCodeConfig['autosys'] = undefined
   /** Mirrors `mail`, for the same reason. */
   let cachedMail: MailIndexConfig = {}
   let cachedDatasets: DatasetConfig[] = []
@@ -2546,6 +2548,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     cachedJira = config.jira
     cachedBitbucket = config.bitbucket
     cachedJenkins = config.jenkins
+    cachedAutosys = config.autosys
     cachedMail = config.mail ?? {}
     cachedDatasets = config.datasets ?? []
     /*
@@ -3421,6 +3424,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       for (const tool of createJenkinsTools({
         client: jenkinsClient,
         ...(cachedJenkins.defaultJob !== undefined ? { defaultJob: cachedJenkins.defaultJob } : {}),
+      })) {
+        combined.register(tool)
+      }
+    }
+    if (cachedAutosys?.enabled === true && cachedAutosys.baseUrl !== undefined) {
+      for (const tool of createAutosysTools({
+        client: autosysClient,
+        ...(cachedAutosys.defaultPattern !== undefined ? { defaultPattern: cachedAutosys.defaultPattern } : {}),
       })) {
         combined.register(tool)
       }
@@ -6984,7 +6995,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       },
     })
     // Jenkins sends its token with the user id; the Atlassian products and an SSO bearer token do not.
-    const username = product === 'jenkins' ? config.jenkins?.username?.trim() : undefined
+    const username =
+      product === 'jenkins' ? config.jenkins?.username?.trim() : product === 'autosys' ? config.autosys?.username?.trim() : undefined
+    if (product === 'autosys' && (username === undefined || username.length === 0)) {
+      throw new AtlassianError('AutoSys needs a username. Settings → DevOps → AutoSys: enter it and save.')
+    }
     return {
       baseUrl: settings.baseUrl,
       token,
@@ -7004,6 +7019,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
   async function jenkinsClient(): Promise<JenkinsClient> {
     return new JenkinsClient(httpClient, await atlassianConnection('jenkins'))
+  }
+  async function autosysClient(): Promise<AutosysClient> {
+    const { config } = await configManager.load()
+    const paths = Object.fromEntries(Object.entries(config.autosys?.paths ?? {}).filter(([, value]) => value !== undefined)) as Partial<AutosysPaths>
+    return new AutosysClient(httpClient, await atlassianConnection('autosys'), paths)
   }
 
   /** The Atlassian tab's view of all three products. Tokens never cross — only whether one is stored (invariant 7). */
@@ -7110,7 +7130,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             ? await (await jiraClient()).currentUser()
             : product === 'jenkins'
               ? await (await jenkinsClient()).currentUser()
-              : await (await bitbucketClient()).currentUser()
+              : product === 'autosys'
+                ? await (await autosysClient()).probe((await configManager.load()).config.autosys?.username ?? '')
+                : await (await bitbucketClient()).currentUser()
       post({ type: 'atlassianTest', product, ok: true, detail: `Connected as ${who}.` })
     } catch (error) {
       post({ type: 'atlassianTest', product, ok: false, detail: error instanceof Error ? error.message : String(error) })

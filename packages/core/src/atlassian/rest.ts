@@ -21,13 +21,14 @@ import { readBody } from '../platform/readBody.js'
  * Cloud (email + API token) is not attempted by any of the three, rather than half-supported.
  */
 
-export type AtlassianProduct = 'confluence' | 'jira' | 'bitbucket' | 'jenkins'
+export type AtlassianProduct = 'confluence' | 'jira' | 'bitbucket' | 'jenkins' | 'autosys'
 
 export const PRODUCT_LABELS: Record<AtlassianProduct, string> = {
   confluence: 'Confluence',
   jira: 'Jira',
   bitbucket: 'Bitbucket',
   jenkins: 'Jenkins',
+  autosys: 'AutoSys',
 }
 
 export interface AtlassianConnection {

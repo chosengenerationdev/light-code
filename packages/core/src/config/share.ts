@@ -197,11 +197,11 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     id: 'atlassian',
     label: 'DevOps',
     description:
-      'The Confluence, Jira, Bitbucket and Jenkins sites, and their defaults. Tokens are not included.',
-    keys: ['confluence', 'jira', 'bitbucket', 'jenkins'],
-    // A Jenkins user id names one person: kept out of the file, and the importer's own is kept.
-    strip: ['jenkins.username'],
-    stripNote: 'Your Jenkins user id is left out; each person uses their own.',
+      'The Confluence, Jira, Bitbucket, Jenkins and AutoSys sites, and their defaults. Tokens and passwords are not included.',
+    keys: ['confluence', 'jira', 'bitbucket', 'jenkins', 'autosys'],
+    // A user id names one person: kept out of the file, and the importer's own is kept.
+    strip: ['jenkins.username', 'autosys.username'],
+    stripNote: 'Your Jenkins and AutoSys user names are left out; each person uses their own.',
   },
   {
     id: 'datasets',
@@ -405,6 +405,7 @@ function secretRefsFor(section: ShareSection, config: LightCodeConfig): string[]
       if (config.jira?.tokenRef !== undefined) refs.push('Jira: personal access token')
       if (config.bitbucket?.tokenRef !== undefined) refs.push('Bitbucket: personal access token')
       if (config.jenkins?.tokenRef !== undefined) refs.push('Jenkins: API token and user id')
+      if (config.autosys?.tokenRef !== undefined) refs.push('AutoSys: username and password')
       break
     case 'network':
       if (config.tls?.passphraseRef !== undefined) refs.push('Global client key: passphrase')

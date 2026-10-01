@@ -40,7 +40,7 @@ import type { DatasetConfig } from '../dataset/types.js'
 import type { ChartSpec } from '../charts/types.js'
 import type { DiagramSpec } from '../diagrams/types.js'
 
-export type AtlassianProductId = 'confluence' | 'jira' | 'bitbucket' | 'jenkins'
+export type AtlassianProductId = 'confluence' | 'jira' | 'bitbucket' | 'jenkins' | 'autosys'
 
 /**
  * One Atlassian product's block as the settings panel edits it: every field present, empty meaning
@@ -1137,6 +1137,11 @@ export type HostToUiMessage =
       group: ToolGroup
       preview: ToolPreview
       alwaysScope?: 'folder'
+      /**
+       * This tool asks every time, whatever is allowed — it changes something shared or runs code
+       * (`ALWAYS_ASK_TOOLS`). The prompt offers no "Always allow" for it.
+       */
+      alwaysAsk?: boolean
     }
   /** A rollback point now exists; the UI can offer to undo back to it. */
   /**

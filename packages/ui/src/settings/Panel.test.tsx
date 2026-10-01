@@ -133,6 +133,7 @@ describe('the Atlassian settings', () => {
             jira: { settings: blank, hasToken: false },
             bitbucket: { settings: blank, hasToken: false },
             jenkins: { settings: blank, hasToken: false },
+            autosys: { settings: blank, hasToken: false },
           }}
           savedTicks={{}}
           tests={{}}

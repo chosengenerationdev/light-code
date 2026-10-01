@@ -11,6 +11,8 @@ export interface PendingApproval {
   preview: ToolPreview
   /** `folder` means "always" grants a directory, not the tool. See `ApprovalRequest`. */
   alwaysScope?: 'folder'
+  /** Asked every time; no "Always allow" is offered. */
+  alwaysAsk?: boolean
 }
 
 export interface ApprovalPromptProps {
@@ -152,7 +154,11 @@ export function ApprovalPrompt(props: ApprovalPromptProps): ReactElement {
           * that command for the rest of the workspace's life. Invariant 8 exists so this
           * surface tells the truth; a wordless button would undo that for tidiness.
           */}
-        {approval.alwaysScope === 'folder' ? (
+        {approval.alwaysAsk === true ? (
+          <span style={{ color: colors.muted, fontSize: 11, alignSelf: 'center' }}>
+            Asked every time — this cannot be set to always allow.
+          </span>
+        ) : approval.alwaysScope === 'folder' ? (
           <button
             type="button"
             style={secondaryButtonStyle()}

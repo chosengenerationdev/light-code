@@ -1939,6 +1939,20 @@ skill, tool or index belonged to whom.
 - On the shared Node host, `runIndexRenames`, `runProjectStamp` and `installPythonPackages` are
   admin-only — none matches a mutating prefix, and all three write to what every user shares.
 
+- **AutoSys in the DevOps tab, and no "Always allow" where it would lie (0.123.0).** AutoSys rides the
+  same product table and REST core: username and password (secret ref `autosys:password`) as HTTP
+  Basic against the REST web services (AEWS). **The paths are templates** (`DEFAULT_AUTOSYS_PATHS`,
+  overridable per key in `autosys.paths`) because AEWS has been reshaped across releases and the
+  job-log endpoint varies most; when a server has none, `autosys_job_log` names the job's output
+  file and machine rather than failing bare. Seven tools: five read (find, definition, status,
+  log, **dependencies** — upstream conditions parsed from `condition` with each named job's status
+  and whether it is met, following unmet ones; downstream by scanning conditions, capped at 300
+  definitions) and two that change production schedules (`autosys_send_event`, `autosys_apply_jil`),
+  in `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES`. **Not verified against a live AutoSys.**
+  The approval prompt showed "Always allow" for `ALWAYS_ASK_TOOLS` too — pressing it recorded a rule
+  the policy never reads. `approvalRequest.alwaysAsk` now hides it, and `App.tsx` assigns the
+  approval message whole instead of copying fields (the defect shape §19 keeps recording).
+  Product table entries now carry their own `tokenLabel`/`tokenHint`.
 - **A newer window's settings survived only until an older window saved (0.122.1).** Reported as
   Jenkins not appearing in a second VS Code window while Jira did. Windows share `config.json`, but
   each runs the extension version it started with, and `parseConfig` drops keys the schema does not
@@ -2892,8 +2906,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.122.1**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.122.1.vsix`, unpublished.
+until then, stale again. The local manifest is **0.123.0**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

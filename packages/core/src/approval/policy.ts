@@ -80,6 +80,9 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   'jenkins_start_build',
   'jenkins_stop_build',
   'jenkins_try_jenkinsfile',
+  // Production schedules: an event (force-start, kill, hold, ice, status) or a changed definition.
+  'autosys_send_event',
+  'autosys_apply_jil',
   'bitbucket_write_pull_request',
   // Changes a workbook somebody has open and has not saved, with no undo this product owns.
   'excel_write_range',

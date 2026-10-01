@@ -1064,6 +1064,31 @@ export const configSchema = z
         defaultJob: z.string().min(1),
       })
       .partial(),
+    /**
+     * AutoSys Workload Automation, through its REST web services. Username and password (the
+     * password in secret storage, under `tokenRef`), sent as HTTP Basic. `paths` overrides the
+     * request templates for a server that answers somewhere else — see `atlassian/autosys.ts`.
+     * User-scope only: it can force-start, kill and redefine production jobs as the user.
+     */
+    autosys: z
+      .object({
+        ...atlassianConnectionShape,
+        username: z.string().min(1),
+        defaultPattern: z.string().min(1),
+        paths: z
+          .object({
+            jobs: z.string().min(1),
+            job: z.string().min(1),
+            runInfo: z.string().min(1),
+            jobRunInfo: z.string().min(1),
+            boxMembers: z.string().min(1),
+            event: z.string().min(1),
+            jil: z.string().min(1),
+            log: z.string().min(1),
+          })
+          .partial(),
+      })
+      .partial(),
     /** Bitbucket Data Center / Server. As `jira`. */
     bitbucket: z
       .object({

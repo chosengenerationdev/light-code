@@ -52,6 +52,9 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   'jenkins_start_build',
   'jenkins_stop_build',
   'jenkins_try_jenkinsfile',
+  // A production scheduler changed with nobody watching.
+  'autosys_send_event',
+  'autosys_apply_jil',
   'write_skill',
   'delete_skill',
   /*

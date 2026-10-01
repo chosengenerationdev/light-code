@@ -142,6 +142,12 @@ free where the same three joined together stop and ask.
       'prompt', 'confirm', 'allowlist', 'safe commands', 'risky',
     ],
     body: `
+**Some tools ask every time and offer no "Always allow"** — whatever the auto-approve switches say:
+writing Python tools and skills, installing Python packages, writing to Jira, Confluence and
+Bitbucket, starting, stopping or replaying Jenkins builds, and sending AutoSys events or applying
+JIL. They change something shared or run code, so each one is read before it happens. Reading tools
+can always be allowed.
+
 **Settings → Approvals.** Everything here ships off: nothing is auto-approved until you say so.
 
 **Category toggles** — read / edit / command / MCP. Blunt instruments, and "commands" is the
@@ -569,6 +575,48 @@ an access token as a Bearer token, leave the user id empty and paste that token 
   \`jenkins_check_jenkinsfile\` first; it is instant and catches syntax and unknown steps.
 
 There is no tool that changes a job's configuration.
+`,
+  },
+  {
+    id: 'autosys',
+    title: 'AutoSys jobs, status, logs and dependencies',
+    keywords: [
+      'autosys', 'workload automation', 'wcc', 'jil', 'sendevent', 'autorep', 'force start',
+      'force_startjob', 'on hold', 'on ice', 'kill job', 'change status', 'job definition',
+      'job dependencies', 'condition', 'box', 'why has my job not started', 'job failed', 'job log',
+    ],
+    body: `
+**Settings → DevOps → AutoSys**: the web services address (for example
+\`https://autosys.example.com:9443\`), your **username** and **password**, and optionally a default
+job pattern such as \`PAY_*\`, a CA file and the skip-verify escape hatch. Off until switched on;
+**user-scope only** (config:autosys). The password is kept in secure storage. **Test connection**
+signs in without listing any jobs.
+
+It talks to AutoSys's REST web services (AEWS) with HTTP Basic. Paths follow the documented layout
+(\`/AEWS/job\`, \`/AEWS/job-run-info\`, \`/AEWS/event\`, \`/AEWS/jil\`); a server that answers
+elsewhere can be pointed at with config:autosys (paths) — one template each for jobs, job,
+runInfo, jobRunInfo, boxMembers, event, jil and log.
+
+**Reading** — ordinary read tools, which you may set to always allow:
+- \`autosys_find_jobs\` — jobs matching a name pattern, with type, box and machine.
+- \`autosys_job\` — a job's whole definition in JIL terms, its status, and a box's members.
+- \`autosys_status\` — like autorep: status, last start and end, exit code, run number; \`only:
+  FAILURE\` lists what failed.
+- \`autosys_job_log\` — a job's stderr or stdout, the end of it or matching lines. If the server
+  offers no log endpoint, it says which file on which machine the job writes to instead.
+- \`autosys_dependencies\` — **why has it not started?** Upstream: each job its condition names
+  (success, failure, done, notrunning, terminated, exit code) with its status and whether the
+  condition is met, following unmet ones further up, and the box it runs in. Downstream: the jobs
+  whose conditions name it, and a box's members.
+
+**Changing** — asked **every time**, and cannot be set to always allow; never available to a
+schedule:
+- \`autosys_send_event\` — force-start, start, kill, hold, ice, no-exec, change status or priority,
+  comment. The prompt shows the equivalent \`sendevent\` and what the event will do.
+- \`autosys_apply_jil\` — insert, update or delete job definitions. The prompt shows the whole JIL
+  and says plainly when it deletes.
+
+Whether any of it succeeds is still decided by your AutoSys permissions.
 `,
   },
   {

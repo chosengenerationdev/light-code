@@ -193,9 +193,9 @@ describe('the rules around them', () => {
   })
 
   /** Shared together as one section, and every token named as something the colleague must enter. */
-  it('exports all four DevOps sites as one section, naming each token but never including one', () => {
+  it('exports every DevOps site as one section, naming each credential but never including one', () => {
     const section = SHARE_SECTIONS.find((entry) => entry.id === 'atlassian')
-    expect(section?.keys).toEqual(['confluence', 'jira', 'bitbucket', 'jenkins'])
+    expect(section?.keys).toEqual(['confluence', 'jira', 'bitbucket', 'jenkins', 'autosys'])
     const config = {
       confluence: { enabled: true, baseUrl: 'https://wiki.example.com', tokenRef: 'confluence:token' },
       jira: { enabled: true, baseUrl: 'https://jira.example.com', tokenRef: 'jira:token', defaultProject: 'ABC' },

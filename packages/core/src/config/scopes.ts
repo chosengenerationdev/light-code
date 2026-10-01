@@ -56,6 +56,8 @@ export const USER_SCOPE_ONLY_KEYS = [
   'bitbucket',
   // A CI server and a token that starts, stops and replays builds as the user.
   'jenkins',
+  // A scheduler the assistant can force-start, kill and redefine production jobs on as the user.
+  'autosys',
   // `expert.path` names an executable. A workspace able to set it would run a program of
   // its choosing as soon as the panel opened — the same threat as `python.uvPath`.
   // `expert.enabled` is here too, so a repo cannot switch on paid API calls by itself.

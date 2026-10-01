@@ -35,8 +35,8 @@ export function AtlassianTab(props: AtlassianTabProps): ReactElement {
   return (
     <div>
       <p style={{ color: colors.muted, fontSize: 12, margin: '0 0 12px' }}>
-        Confluence, Jira and Bitbucket (Data Center and Server) and Jenkins, each with your own
-        token. Everything the assistant writes, and every build it starts, is shown to you first and
+        Confluence, Jira and Bitbucket (Data Center and Server), Jenkins and AutoSys, each with your own
+        credential. Everything the assistant writes, and every build it starts, is shown to you first and
         happens as you. A site stays off, and is never contacted, until you switch it on.
       </p>
       {ATLASSIAN_PRODUCTS.map((info) => {
@@ -137,7 +137,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       <span style={hintStyle}>The address you open {info.label} at, including any path after the host name.</span>
 
       <label htmlFor={id('token')} style={labelStyle()}>
-        {info.id === 'jenkins' ? 'API token' : 'Personal access token'}
+        {info.tokenLabel}
       </label>
       <input
         id={id('token')}
@@ -152,8 +152,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         style={textFieldStyle()}
       />
       <span style={hintStyle}>
-        Create one in {info.label} under your profile → Personal Access Tokens. Kept in secure
-        storage, never in the settings file, and never sent back to this panel.
+        {info.tokenHint}
       </span>
 
       {info.defaults.map((field) => (

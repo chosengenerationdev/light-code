@@ -1,5 +1,18 @@
 # light-code-vscode
 
+## 0.123.0
+
+### Minor Changes
+
+- **AutoSys.** Settings → DevOps → AutoSys: the web services address, your username and password,
+  and optionally a default job pattern. The assistant can find jobs, read a job's definition and
+  status, read its logs, and work out its **dependencies** — what it is waiting for and whether each
+  condition is met, and which jobs wait on it. With your permission every time, it can send events
+  (force-start, kill, hold, ice, change status and more) and apply JIL to change job definitions.
+- **"Always allow" is no longer offered for actions that always ask** — starting builds, AutoSys
+  events and JIL, writing to Jira, Confluence and Bitbucket, and others. It used to appear and do
+  nothing. Read-only actions can still be always allowed.
+
 ## 0.122.1
 
 ### Patch Changes
