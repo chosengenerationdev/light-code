@@ -1939,6 +1939,14 @@ skill, tool or index belonged to whom.
 - On the shared Node host, `runIndexRenames`, `runProjectStamp` and `installPythonPackages` are
   admin-only — none matches a mutating prefix, and all three write to what every user shares.
 
+- **A newer window's settings survived only until an older window saved (0.122.1).** Reported as
+  Jenkins not appearing in a second VS Code window while Jira did. Windows share `config.json`, but
+  each runs the extension version it started with, and `parseConfig` drops keys the schema does not
+  list — so an un-reloaded 0.121 window saving *anything* rewrote the file without `jenkins`.
+  `ConfigManager.saveNow` now carries unknown **top-level** keys through unchanged. Only top-level:
+  inside a known block, a missing key may be a deliberate removal (clearing a `tokenRef`), so nested
+  unknown fields still drop — add new settings as new top-level keys where a mixed-version window
+  matters. Versions before 0.122.1 still strip; every window must be reloaded after an update.
 - **Jenkins, and the Atlassian tab became DevOps (0.122.0).** Jenkins rides the same table
   (`atlassian/products.ts`), REST core and messages as Confluence, Jira and Bitbucket — a fourth
   copy of "site + token + TLS + error wording" was the alternative. One difference: Jenkins API
@@ -2884,8 +2892,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.122.0**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.122.0.vsix`, unpublished.
+until then, stale again. The local manifest is **0.122.1**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.122.1.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

@@ -1,5 +1,5 @@
 import type { ConfigScope, ConfigStore } from '../platform/config.js'
-import { ConfigValidationError, parseConfig, type LightCodeConfig } from './schema.js'
+import { ConfigValidationError, configSchema, parseConfig, type LightCodeConfig } from './schema.js'
 import {
   applyWorkspaceOverrides,
   overridesFor,
@@ -174,7 +174,30 @@ export class ConfigManager {
     const next = { ...existing, ...patch }
     // Round-trip through the schema so a bad save fails the same way a bad hand-edit does.
     const validated = parseConfig(JSON.stringify(next))
-    await this.store.write(scope, JSON.stringify(validated, null, 2))
+    await this.store.write(scope, JSON.stringify({ ...validated, ...(await this.keysFromNewerVersions(scope)) }, null, 2))
+  }
+
+  /**
+   * Top-level keys in the file that this version does not know, kept as they are.
+   *
+   * Reported: Jenkins saved in one window did not appear in another. Both windows share this file,
+   * but a window keeps running the extension version it started with, and parsing drops keys the
+   * schema does not list — so an older window saving *anything* rewrote the file without the newer
+   * window's settings, erasing them for every window. Carrying unknown keys through means a setting
+   * added by a newer version survives an older one; a key this version does know is never taken
+   * from here, so a bad value still fails validation as before.
+   */
+  private async keysFromNewerVersions(scope: ConfigScope): Promise<Record<string, unknown>> {
+    let raw: unknown
+    try {
+      const text = await this.store.read(scope)
+      raw = text === undefined ? undefined : JSON.parse(text)
+    } catch {
+      return {}
+    }
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    const known = new Set(Object.keys(configSchema.shape))
+    return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter(([key]) => !known.has(key)))
   }
 
   /** Fires with the freshly reloaded, merged config whenever either scope changes on disk. */

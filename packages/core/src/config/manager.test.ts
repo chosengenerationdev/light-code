@@ -134,3 +134,33 @@ describe('a config file that will not parse', () => {
     expect(store.quarantined).toEqual([])
   })
 })
+
+/**
+ * Reported: Jenkins saved in one window did not appear in another, while Jira and Confluence did.
+ * Windows share one file but each runs the extension version it started with, and an older version
+ * dropped the keys it did not know on its next save — erasing a newer window's settings for every
+ * window.
+ */
+describe('settings from a newer version', () => {
+  it('survive a save by a version that does not know them', async () => {
+    const store = new FakeStore()
+    store.files.user = JSON.stringify({
+      modeId: 'code',
+      someFutureFeature: { enabled: true, baseUrl: 'https://future.example.com' },
+    })
+    const manager = new ConfigManager(store)
+    await manager.save('user', { maxIterations: 40 })
+
+    const written = JSON.parse(store.files.user ?? '{}') as Record<string, unknown>
+    expect(written['maxIterations']).toBe(40)
+    expect(written['modeId']).toBe('code')
+    expect(written['someFutureFeature']).toEqual({ enabled: true, baseUrl: 'https://future.example.com' })
+  })
+
+  it('never lets a known key bypass validation by that route', async () => {
+    const store = new FakeStore()
+    store.files.user = JSON.stringify({ maxIterations: 'lots' })
+    const manager = new ConfigManager(store)
+    await expect(manager.save('user', { modeId: 'code' })).rejects.toThrow()
+  })
+})

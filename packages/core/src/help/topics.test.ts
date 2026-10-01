@@ -174,6 +174,7 @@ describe('finding the right topic', () => {
       ['can I attach a screenshot to a jira ticket and set its component', 'jira'],
       ['I pressed the play button on a schedule and it did not run', 'schedules'],
       ['why did my jenkins build fail', 'jenkins'],
+      ['a setting I saved in one vs code window is not showing in another window', 'troubleshooting'],
       ['will my local jenkinsfile run on jenkins', 'jenkins'],
       ['how do I connect jenkins with sso', 'jenkins'],
       ['start a jenkins job with parameters', 'jenkins'],

@@ -1,5 +1,13 @@
 # light-code-vscode
 
+## 0.122.1
+
+### Patch Changes
+
+- Settings added by a newer version of Light Code — such as Jenkins — are no longer erased when a
+  VS Code window still running an older version saves its settings. After updating, reload every open
+  window (Developer: Reload Window) so they all run the same version.
+
 ## 0.122.0
 
 ### Minor Changes

@@ -965,8 +965,18 @@ walkthrough, whose steps link straight into the tab each one is about. On the No
       // topic at all - so the best score was body noise from somewhere unrelated.
       'nothing happens', 'nothing happened', 'no response', 'stuck', 'hangs', 'hung', 'frozen',
       'silent', 'crashed', 'stopped', 'ripgrep', 'rg', 'lightcode folder',
+      // Settings saved in one window and missing in another: a window runs the version it started with.
+      'another window', 'other window', 'second window', 'not reflecting', 'not showing',
     ],
     body: `
+**A setting saved in one VS Code window does not show in another** — every window of the same VS Code
+shares one settings file and one token store, but a window keeps running the Light Code version it
+started with until it is reloaded. After an update, run **Developer: Reload Window** in each open
+window. A window on an older version does not know settings added since (Jenkins arrived in 0.122.0);
+from 0.122.1 on, saving in an older window keeps them rather than erasing them, but a window older
+than that can still drop them — re-enter them once every window is reloaded. A different VS Code
+*profile*, or a remote (SSH, WSL, container) window, has settings of its own.
+
 **Several settings appear to have been forgotten at once** — suspect the config *file*, not the
 features. One damaged file reads as the expert vanishing, approvals being asked again and skills
 disappearing, all at the same time. Writes are atomic and serialised now, and a file that will not
