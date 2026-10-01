@@ -609,8 +609,10 @@ job pattern such as \`PAY_*\`, a CA file and the skip-verify escape hatch. Off u
 **user-scope only** (config:autosys). The password is kept in secure storage. **Test connection**
 signs in without listing any jobs.
 
-**Behind an API gateway (Apigee)?** Open **API gateway (Apigee)** in the same panel and tick
-"Sign in through the gateway". Enter the **token URL** (where the token is issued — usually a
+**Behind an API gateway (Apigee)?** Fill in **API gateway (Apigee)** in the same panel — typing a
+token URL ticks "Sign in through the gateway" — and press the panel's one **Save**, which stores the
+site address and the gateway together. Test connection runs against what is saved and says on the
+page what it is still waiting for; a refused save is explained there too. Enter the **token URL** (where the token is issued — usually a
 different address from the AutoSys API), the **client id** and **client secret** (kept in secure
 storage), and a scope if the gateway asks for one. A token is fetched with those, kept in memory
 only, renewed before it expires, and sent with every call to the site address — the username and

@@ -2085,6 +2085,16 @@ secret and certificates, used against another URL). `autosys.auth`, `atlassian/a
 - The strategy is cached per auth block and certificate hash so the token is reused; saving the
   gateway drops it. Secrets: `autosys:clientSecret`, `autosys:certPassphrase`; export names them.
 
+**The gateway had its own Save button, and that was wrong** (0.126.1, reported: everything filled in,
+and Test connection still said "save the site address and token first"). People press the Save at
+the bottom of the panel; it stored the address and dropped the gateway, so Test fell back to wanting
+a password. Worse, save refusals were posted as `error`, which renders in the chat transcript —
+invisible from Settings — so a refused save looked like nothing happening. Now: one Save carries the
+gateway in `saveAtlassian`, applied **after** the site settings in the same handler (two messages
+would each overwrite the block the other had not seen); typing a token URL ticks the gateway;
+refusals come back as the panel's own status line; and Test names exactly what it is waiting for, on
+the page. `AutosysGateway.test.tsx` replays the report.
+
 **Not verified against a live gateway or AutoSys** — the flow is covered end to end against a fake
 that issues tokens at one host and serves the API at another.
 
@@ -2999,7 +3009,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.126.0**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.126.1**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

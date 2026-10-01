@@ -180,6 +180,7 @@ describe('finding the right topic', () => {
       ['I get EPERM when saving', 'troubleshooting'],
       ['error eperm operation not permitted on config.json', 'troubleshooting'],
       ['connect autosys through apigee with a client id and secret', 'autosys'],
+      ['autosys test connection says save the site address and token first', 'autosys'],
       ['how do I reply to a specific message', 'feedback'],
       ['can I give a thumbs down to its thinking', 'feedback'],
       ['react to the thought process to steer it', 'feedback'],

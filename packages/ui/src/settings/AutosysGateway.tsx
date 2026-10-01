@@ -1,7 +1,7 @@
 import type { AutosysGatewaySettings, AutosysGatewayView } from '@light-code/core/browser'
-import { useEffect, useState, type ReactElement } from 'react'
+import type { ReactElement } from 'react'
 
-import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { colors, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 /**
  * AutoSys through an API gateway such as Apigee: a token from one URL, using a client id and
@@ -14,31 +14,40 @@ import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textField
 
 const hintStyle = { display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' } as const
 
-function strip(view: AutosysGatewayView): AutosysGatewaySettings {
+export function gatewayDraftFrom(view: AutosysGatewayView): AutosysGatewaySettings {
   const { hasClientSecret: _secret, hasPassphrase: _passphrase, ...settings } = view
   void _secret
   void _passphrase
   return settings
 }
 
+/**
+ * The gateway fields, with no Save of their own: the AutoSys panel's one Save sends them with the
+ * site address. Two Save buttons in one panel was the first design, and it was used as one would
+ * expect — fill everything in, press the Save at the bottom — which stored the address and quietly
+ * dropped the gateway, leaving Test connection asking for a password nobody had.
+ */
 export function AutosysGatewaySection(props: {
-  gateway: AutosysGatewayView
-  savedTick: number
-  onSave: (settings: AutosysGatewaySettings, clientSecret: string | undefined, passphrase: string | undefined) => void
+  draft: AutosysGatewaySettings
+  onChange: (change: Partial<AutosysGatewaySettings>) => void
+  secret: string
+  onSecret: (value: string) => void
+  passphrase: string
+  onPassphrase: (value: string) => void
+  hasClientSecret: boolean
+  hasPassphrase: boolean
   onClearSecret: (which: 'clientSecret' | 'passphrase') => void
 }): ReactElement {
-  const savedKey = JSON.stringify(strip(props.gateway))
-  const [draft, setDraft] = useState<AutosysGatewaySettings>(strip(props.gateway))
-  const [secret, setSecret] = useState('')
-  const [passphrase, setPassphrase] = useState('')
-  useEffect(() => setDraft(JSON.parse(savedKey) as AutosysGatewaySettings), [savedKey])
-  useEffect(() => {
-    setSecret('')
-    setPassphrase('')
-  }, [props.savedTick])
-
-  const dirty = JSON.stringify(draft) !== savedKey || secret.length > 0 || passphrase.length > 0
-  const set = (change: Partial<AutosysGatewaySettings>): void => setDraft({ ...draft, ...change })
+  const draft = props.draft
+  const set = (change: Partial<AutosysGatewaySettings>): void => {
+    // Typing a token URL is the decision to use the gateway; leaving the box unticked would save
+    // everything and use none of it. Ticked visibly, so it can still be unticked.
+    if (change.tokenUrl !== undefined && change.tokenUrl.trim().length > 0 && draft.tokenUrl.trim().length === 0 && !draft.enabled) {
+      props.onChange({ ...change, enabled: true })
+      return
+    }
+    props.onChange(change)
+  }
 
   const field = (
     key: keyof AutosysGatewaySettings,
@@ -87,9 +96,9 @@ export function AutosysGatewaySection(props: {
         id="lc-autosys-gw-secret"
         type="password"
         autoComplete="off"
-        value={secret}
-        placeholder={props.gateway.hasClientSecret ? 'Stored — leave blank to keep it' : 'Paste the client secret'}
-        onChange={(event) => setSecret(event.target.value)}
+        value={props.secret}
+        placeholder={props.hasClientSecret ? 'Stored — leave blank to keep it' : 'Paste the client secret'}
+        onChange={(event) => props.onSecret(event.target.value)}
         style={textFieldStyle()}
       />
       <span style={hintStyle}>Kept in secure storage, never in the settings file.</span>
@@ -136,9 +145,9 @@ export function AutosysGatewaySection(props: {
           id="lc-autosys-gw-pass"
           type="password"
           autoComplete="off"
-          value={passphrase}
-          placeholder={props.gateway.hasPassphrase ? 'Stored — leave blank to keep it' : 'Only if the key is protected'}
-          onChange={(event) => setPassphrase(event.target.value)}
+          value={props.passphrase}
+          placeholder={props.hasPassphrase ? 'Stored — leave blank to keep it' : 'Only if the key is protected'}
+          onChange={(event) => props.onPassphrase(event.target.value)}
           style={textFieldStyle()}
         />
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0 4px', cursor: 'pointer' }}>
@@ -185,28 +194,20 @@ export function AutosysGatewaySection(props: {
         />
       </details>
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          style={primaryButtonStyle(!dirty)}
-          disabled={!dirty}
-          onClick={() =>
-            props.onSave(draft, secret.trim().length > 0 ? secret.trim() : undefined, passphrase.length > 0 ? passphrase : undefined)
-          }
-        >
-          Save gateway
-        </button>
-        {props.gateway.hasClientSecret && (
-          <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('clientSecret')}>
-            Remove client secret
-          </button>
-        )}
-        {props.gateway.hasPassphrase && (
-          <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('passphrase')}>
-            Remove passphrase
-          </button>
-        )}
-      </div>
+      {(props.hasClientSecret || props.hasPassphrase) && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {props.hasClientSecret && (
+            <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('clientSecret')}>
+              Remove client secret
+            </button>
+          )}
+          {props.hasPassphrase && (
+            <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('passphrase')}>
+              Remove passphrase
+            </button>
+          )}
+        </div>
+      )}
     </fieldset>
   )
 }

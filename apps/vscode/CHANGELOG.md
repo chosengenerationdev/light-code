@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.126.1
+
+### Patch Changes
+
+- AutoSys: the API gateway settings are saved by the panel's one Save, together with the site address — they had a separate button, so filling everything in and pressing Save left the gateway unsaved and Test connection asking for a password. Typing a token URL switches the gateway on, a refused save is explained in the panel instead of the chat, and Test connection says exactly what it is waiting for.
+
 ## 0.126.0
 
 ### Minor Changes

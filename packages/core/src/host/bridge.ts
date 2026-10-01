@@ -7220,16 +7220,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     product: AtlassianProductId,
     input: AtlassianSettingsView,
     token: string | undefined,
+    gateway?: { settings: AutosysGatewaySettings; clientSecret?: string; passphrase?: string },
   ): Promise<void> {
+    /*
+     * Refusals go to the panel the user is looking at. Posted as an 'error' they landed in the chat
+     * transcript, which is not on screen in Settings — so a refused save looked like a save that
+     * silently did nothing.
+     */
+    const refuse = (message: string): void => {
+      post({ type: 'atlassianTest', product, ok: false, detail: `Not saved: ${message}` })
+    }
     try {
       const info = atlassianProduct(product)
       const baseUrl = input.baseUrl.trim().replace(/\/+$/, '')
       if (baseUrl.length > 0 && !/^https?:\/\/[^\s]+$/i.test(baseUrl)) {
-        post({ type: 'error', message: `"${baseUrl}" is not a web address — it should begin with https followed by the site name.` })
+        refuse(`"${baseUrl}" is not a web address — it should begin with https followed by the site name.`)
         return
       }
       if (input.enabled && baseUrl.length === 0) {
-        post({ type: 'error', message: `Enter the ${info.label} site address before switching it on.` })
+        refuse(`Enter the ${info.label} site address before switching it on.`)
         return
       }
       if (token !== undefined && token.trim().length > 0) {
@@ -7261,39 +7270,59 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...(input.rejectUnauthorized ? {} : { rejectUnauthorized: false }),
         },
       } as never)
+      // After the site settings, in the same handler: two messages saving one block concurrently
+      // would each write what the other had not seen yet.
+      if (product === 'autosys' && gateway !== undefined) {
+        const problem = await saveAutosysGateway(gateway.settings, gateway.clientSecret, gateway.passphrase)
+        if (problem !== undefined) {
+          await loadSettings()
+          await postAtlassian()
+          refuse(`the API gateway settings — ${problem} The site settings were saved.`)
+          return
+        }
+      }
       await loadSettings()
       await postAtlassian()
       post({ type: 'atlassianSaved', product })
     } catch (error) {
-      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+      refuse(error instanceof Error ? error.message : String(error))
     }
   }
 
+  /** Stores the AutoSys gateway sign-in. Returns why it was refused, or undefined when saved. */
+  async function saveAutosysGateway(
+    input: AutosysGatewaySettings,
+    clientSecret: string | undefined,
+    passphrase: string | undefined,
+  ): Promise<string | undefined> {
+    if (clientSecret !== undefined && clientSecret.trim().length > 0) await secrets.set(AUTOSYS_CLIENT_SECRET_REF, clientSecret.trim())
+    if (passphrase !== undefined && passphrase.length > 0) await secrets.set(AUTOSYS_PASSPHRASE_REF, passphrase)
+    const result = gatewayFromSettings(input, {
+      clientSecret: ((await secrets.get(AUTOSYS_CLIENT_SECRET_REF)) ?? '').length > 0,
+      passphrase: ((await secrets.get(AUTOSYS_PASSPHRASE_REF)) ?? '').length > 0,
+    })
+    if ('error' in result) return result.error
+    const { config } = await configManager.load()
+    await configManager.save('user', { autosys: { ...(config.autosys ?? {}), auth: result.auth } })
+    // A new client, URL or certificate means the cached token was issued for something else.
+    autosysGateway = undefined
+    return undefined
+  }
+
+  /** The standalone message, kept for a panel from before the gateway moved into the one Save. */
   async function handleSaveAutosysGateway(
     input: AutosysGatewaySettings,
     clientSecret: string | undefined,
     passphrase: string | undefined,
   ): Promise<void> {
     try {
-      if (clientSecret !== undefined && clientSecret.trim().length > 0) await secrets.set(AUTOSYS_CLIENT_SECRET_REF, clientSecret.trim())
-      if (passphrase !== undefined && passphrase.length > 0) await secrets.set(AUTOSYS_PASSPHRASE_REF, passphrase)
-      const result = gatewayFromSettings(input, {
-        clientSecret: ((await secrets.get(AUTOSYS_CLIENT_SECRET_REF)) ?? '').length > 0,
-        passphrase: ((await secrets.get(AUTOSYS_PASSPHRASE_REF)) ?? '').length > 0,
-      })
-      if ('error' in result) {
-        post({ type: 'error', message: `AutoSys gateway: ${result.error}` })
-        return
-      }
-      const { config } = await configManager.load()
-      await configManager.save('user', { autosys: { ...(config.autosys ?? {}), auth: result.auth } })
-      // A new client, URL or certificate means the cached token was issued for something else.
-      autosysGateway = undefined
+      const problem = await saveAutosysGateway(input, clientSecret, passphrase)
       await loadSettings()
       await postAtlassian()
-      post({ type: 'atlassianSaved', product: 'autosys' })
+      if (problem !== undefined) post({ type: 'atlassianTest', product: 'autosys', ok: false, detail: `Not saved: ${problem}` })
+      else post({ type: 'atlassianSaved', product: 'autosys' })
     } catch (error) {
-      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+      post({ type: 'atlassianTest', product: 'autosys', ok: false, detail: `Not saved: ${error instanceof Error ? error.message : String(error)}` })
     }
   }
 
@@ -11478,7 +11507,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'requestAtlassian') {
       reportFailure('postAtlassian', postAtlassian())
     } else if (message.type === 'saveAtlassian') {
-      reportFailure('handleSaveAtlassian', handleSaveAtlassian(message.product, message.settings, message.token))
+      reportFailure('handleSaveAtlassian', handleSaveAtlassian(message.product, message.settings, message.token, message.gateway))
     } else if (message.type === 'saveAutosysGateway') {
       reportFailure('handleSaveAutosysGateway', handleSaveAutosysGateway(message.gateway, message.clientSecret, message.passphrase))
     } else if (message.type === 'clearAutosysGatewaySecret') {

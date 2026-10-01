@@ -117,4 +117,14 @@ describe('the gateway form', () => {
     expect(bridge).toContain("...(product === 'autosys' && before.autosys?.auth !== undefined ? { auth: before.autosys.auth } : {}),")
     expect(bridge).toContain("...(product === 'autosys' && before.autosys?.paths !== undefined ? { paths: before.autosys.paths } : {}),")
   })
+
+  /* One Save for the panel: the gateway goes with the site settings, after them, never concurrently. */
+  it('is saved by the same handler as the site, after it, and refusals go to the panel', () => {
+    const bridge = readFileSync(new URL('../host/bridge.ts', import.meta.url), 'utf8')
+    const start = bridge.indexOf('  async function handleSaveAtlassian(')
+    const handler = bridge.slice(start, bridge.indexOf('\n  }\n', start))
+    expect(handler.indexOf('saveAutosysGateway(')).toBeGreaterThan(handler.indexOf("await configManager.save('user'"))
+    expect(handler).not.toContain("type: 'error'")
+    expect(handler).toContain("type: 'atlassianTest', product, ok: false")
+  })
 })

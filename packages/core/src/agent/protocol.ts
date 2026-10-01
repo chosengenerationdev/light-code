@@ -819,7 +819,17 @@ export type UiToHostMessage =
    * `token` is write-only (invariant 7): absent or blank keeps what is stored, and clearing it is
    * its own message so a save about a default can never wipe the token on the way past.
    */
-  | { type: 'saveAtlassian'; product: AtlassianProductId; settings: AtlassianSettingsView; token?: string }
+  /**
+   * `gateway` is AutoSys's API-gateway sign-in, saved in the same act as the site address so one
+   * Save covers the panel; the host applies it after the site settings, never concurrently.
+   */
+  | {
+      type: 'saveAtlassian'
+      product: AtlassianProductId
+      settings: AtlassianSettingsView
+      token?: string
+      gateway?: { settings: AutosysGatewaySettings; clientSecret?: string; passphrase?: string }
+    }
   | { type: 'clearAtlassianToken'; product: AtlassianProductId }
   /** Blank secrets mean "keep the stored one" (invariant 7); removing is its own message. */
   | { type: 'saveAutosysGateway'; gateway: AutosysGatewaySettings; clientSecret?: string; passphrase?: string }

@@ -7,7 +7,7 @@ import {
   type AutosysGatewaySettings,
   type AutosysGatewayView,
 } from '@light-code/core/browser'
-import { AutosysGatewaySection } from './AutosysGateway.js'
+import { AutosysGatewaySection, gatewayDraftFrom } from './AutosysGateway.js'
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
@@ -29,11 +29,22 @@ export interface AtlassianTabProps {
   savedTicks: Partial<Record<AtlassianProductId, number>>
   tests: Partial<Record<AtlassianProductId, { ok: boolean; detail: string }>>
   testing: Partial<Record<AtlassianProductId, boolean>>
-  onSave: (product: AtlassianProductId, settings: AtlassianSettingsView, token: string | undefined) => void
+  onSave: (
+    product: AtlassianProductId,
+    settings: AtlassianSettingsView,
+    token: string | undefined,
+    gateway?: GatewaySave | undefined,
+  ) => void
   onClearToken: (product: AtlassianProductId) => void
   onTest: (product: AtlassianProductId) => void
-  onSaveGateway?: (settings: AutosysGatewaySettings, clientSecret: string | undefined, passphrase: string | undefined) => void
   onClearGatewaySecret?: (which: 'clientSecret' | 'passphrase') => void
+}
+
+/** The AutoSys gateway fields, sent with the panel's one Save. Secrets blank mean "keep". */
+export interface GatewaySave {
+  settings: AutosysGatewaySettings
+  clientSecret?: string | undefined
+  passphrase?: string | undefined
 }
 
 export function AtlassianTab(props: AtlassianTabProps): ReactElement {
@@ -60,12 +71,11 @@ export function AtlassianTab(props: AtlassianTabProps): ReactElement {
             settings={status.settings}
             hasToken={status.hasToken}
             gateway={status.gateway}
-            onSaveGateway={props.onSaveGateway}
             onClearGatewaySecret={props.onClearGatewaySecret}
             savedTick={props.savedTicks[info.id] ?? 0}
             test={props.tests[info.id]}
             testing={props.testing[info.id] === true}
-            onSave={(settings, token) => props.onSave(info.id, settings, token)}
+            onSave={(settings, token, gateway) => props.onSave(info.id, settings, token, gateway)}
             onClearToken={() => props.onClearToken(info.id)}
             onTest={() => props.onTest(info.id)}
           />
@@ -82,12 +92,11 @@ export interface AtlassianSectionProps {
   savedTick: number
   test: { ok: boolean; detail: string } | undefined
   testing: boolean
-  onSave: (settings: AtlassianSettingsView, token: string | undefined) => void
+  onSave: (settings: AtlassianSettingsView, token: string | undefined, gateway?: GatewaySave | undefined) => void
   onClearToken: () => void
   onTest: () => void
   /** AutoSys only. */
   gateway?: AutosysGatewayView | undefined
-  onSaveGateway?: ((settings: AutosysGatewaySettings, clientSecret: string | undefined, passphrase: string | undefined) => void) | undefined
   onClearGatewaySecret?: ((which: 'clientSecret' | 'passphrase') => void) | undefined
 }
 
@@ -101,14 +110,30 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
   const savedKey = JSON.stringify(props.settings)
   // Resynced by value, so an unrelated message from the host does not discard a half-typed field.
   useEffect(() => setDraft(JSON.parse(savedKey) as AtlassianSettingsView), [savedKey])
+  /*
+   * The gateway's fields live here, not in their own section, so the panel's one Save carries
+   * them. Resynced by value like the rest.
+   */
+  const gatewayKey = props.gateway === undefined ? '' : JSON.stringify(gatewayDraftFrom(props.gateway))
+  const [gatewayDraft, setGatewayDraft] = useState<AutosysGatewaySettings | undefined>(
+    props.gateway === undefined ? undefined : gatewayDraftFrom(props.gateway),
+  )
+  const [clientSecret, setClientSecret] = useState('')
+  const [passphrase, setPassphrase] = useState('')
+  useEffect(() => setGatewayDraft(gatewayKey === '' ? undefined : (JSON.parse(gatewayKey) as AutosysGatewaySettings)), [gatewayKey])
+
   useEffect(() => {
     if (props.savedTick > 0) {
       setSaved(true)
       setToken('')
+      setClientSecret('')
+      setPassphrase('')
     }
   }, [props.savedTick])
 
-  const dirty = JSON.stringify(draft) !== savedKey || token.trim().length > 0
+  const gatewayDirty =
+    gatewayDraft !== undefined && (JSON.stringify(gatewayDraft) !== gatewayKey || clientSecret.length > 0 || passphrase.length > 0)
+  const dirty = JSON.stringify(draft) !== savedKey || token.trim().length > 0 || gatewayDirty
   const set = (change: Partial<AtlassianSettingsView>): void => {
     setSaved(false)
     setDraft({ ...draft, ...change })
@@ -127,6 +152,21 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         : viaGateway
           ? 'No client secret stored'
           : 'No token stored'
+
+  // Test runs against what is saved, so it says precisely what is missing from that.
+  const testBlocked: string | undefined = dirty
+    ? 'Save your changes first — Test connection uses the saved settings.'
+    : props.settings.baseUrl.length === 0
+      ? 'Save the site address first.'
+      : viaGateway
+        ? props.gateway?.hasClientSecret === true
+          ? undefined
+          : 'Enter the gateway client secret and save.'
+        : props.hasToken
+          ? undefined
+          : props.gateway !== undefined
+            ? 'Enter the password and save — or, for the API gateway, tick "Sign in through the gateway" below and save.'
+            : `Enter the ${info.tokenLabel.toLowerCase()} and save.`
 
   return (
     <Panel id={`atlassian.${info.id}`} title={info.label} summary={summary}>
@@ -221,11 +261,25 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         </span>
       )}
 
-      {props.gateway !== undefined && props.onSaveGateway !== undefined && props.onClearGatewaySecret !== undefined && (
+      {props.gateway !== undefined && gatewayDraft !== undefined && props.onClearGatewaySecret !== undefined && (
         <AutosysGatewaySection
-          gateway={props.gateway}
-          savedTick={props.savedTick}
-          onSave={props.onSaveGateway}
+          draft={gatewayDraft}
+          onChange={(change) => {
+            setSaved(false)
+            setGatewayDraft({ ...gatewayDraft, ...change })
+          }}
+          secret={clientSecret}
+          onSecret={(value) => {
+            setSaved(false)
+            setClientSecret(value)
+          }}
+          passphrase={passphrase}
+          onPassphrase={(value) => {
+            setSaved(false)
+            setPassphrase(value)
+          }}
+          hasClientSecret={props.gateway.hasClientSecret}
+          hasPassphrase={props.gateway.hasPassphrase}
           onClearSecret={props.onClearGatewaySecret}
         />
       )}
@@ -235,19 +289,27 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
           type="button"
           style={primaryButtonStyle(!dirty)}
           disabled={!dirty}
-          onClick={() => props.onSave(draft, token.trim().length > 0 ? token.trim() : undefined)}
+          onClick={() =>
+            props.onSave(
+              draft,
+              token.trim().length > 0 ? token.trim() : undefined,
+              gatewayDirty && gatewayDraft !== undefined
+                ? {
+                    settings: gatewayDraft,
+                    ...(clientSecret.trim().length > 0 ? { clientSecret: clientSecret.trim() } : {}),
+                    ...(passphrase.length > 0 ? { passphrase } : {}),
+                  }
+                : undefined,
+            )
+          }
         >
           {saved && !dirty ? 'Saved' : 'Save'}
         </button>
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={props.testing || props.settings.baseUrl.length === 0 || !credentialStored}
-          title={
-            props.settings.baseUrl.length === 0 || !credentialStored
-              ? 'Save the site address and a token first'
-              : 'Checks the address, the certificate and the token, and says who it connects as'
-          }
+          disabled={props.testing || testBlocked !== undefined}
+          title={testBlocked ?? 'Checks the address, the certificate and the credential, and says who it connects as'}
           onClick={props.onTest}
         >
           {props.testing ? 'Testing…' : 'Test connection'}
@@ -258,6 +320,13 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
           </button>
         )}
       </div>
+      {/*
+        Said on the page, not only in the tooltip: "save the token first" when the problem is an
+        unticked gateway or an unsaved form sent somebody round in circles.
+      */}
+      {testBlocked !== undefined && !props.testing && (
+        <span style={{ display: 'block', marginTop: 6, fontSize: 11, color: colors.muted }}>{testBlocked}</span>
+      )}
       {props.test !== undefined && (
         <span
           role="status"
