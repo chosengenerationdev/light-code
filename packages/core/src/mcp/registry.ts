@@ -115,6 +115,12 @@ export class McpRegistry {
      * restart: this registry outlives any one settings load.
      */
     private readonly defaultTimeout: (() => number | undefined) | undefined = undefined,
+    /**
+     * Whether a server was defined by the repository rather than the user. Asked afresh on every
+     * connect, so it can never be stale, and such a server resolves no secret or environment
+     * reference (see `InterpolationOptions.repositoryDefined`). Absent means none are.
+     */
+    private readonly isRepositoryServer: (name: string) => Promise<boolean> = async () => false,
   ) {}
 
   /** Replaces the configured server set, closing any that disappeared or changed. */
@@ -228,6 +234,9 @@ export class McpRegistry {
         this.logger?.debug(`[mcp:${name}] ${line}`)
         this.appendLog(name, line)
       },
+      // Forwarded: without it a global timeout above the SDK's 60s default never applied to MCP.
+      this.defaultTimeout,
+      { repositoryDefined: await this.isRepositoryServer(name) },
     )
 
     try {

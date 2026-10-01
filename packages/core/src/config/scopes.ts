@@ -103,6 +103,14 @@ export interface ScopeMergeResult {
   config: LightCodeConfig
   /** User-scope-only keys that were present in workspace config and ignored. */
   ignoredWorkspaceKeys: string[]
+  /**
+   * MCP servers the workspace file names at all — whole entries or a single field of one.
+   *
+   * The merge is deep, so once merged nothing says where an entry came from, and a workspace
+   * that overrode only `url` on *your* server would keep your token header and send it to its
+   * own host. So touching a name in any way marks it, and such a server resolves no references.
+   */
+  workspaceMcpServers: string[]
 }
 
 function getPath(obj: Record<string, unknown>, dottedPath: string): unknown {
@@ -160,5 +168,7 @@ export function mergeScopes(
   const merged = structuredClone(userConfig as Record<string, unknown>)
   deepMerge(merged, sanitizedWorkspace)
 
-  return { config: merged as LightCodeConfig, ignoredWorkspaceKeys }
+  const workspaceServers = sanitizedWorkspace['mcpServers']
+  const workspaceMcpServers = isPlainObject(workspaceServers) ? Object.keys(workspaceServers) : []
+  return { config: merged as LightCodeConfig, ignoredWorkspaceKeys, workspaceMcpServers }
 }

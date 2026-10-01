@@ -559,6 +559,15 @@ was already stale once):
   the panel opens; that is why the §3 package-runner warning is shown in the MCP tab.
   Startup is fire-and-forget so a slow server never delays the panel rendering.)*
 - Secrets interpolated from `SecretStorage`/env, never written into the config file.
+  `${env:NAME}` was not actually resolved until 0.124.0 — it went out literally, which a server
+  answers with a 401 that reads as a bad token. Unknown `${kind:…}` forms (VS Code's `${input:}`)
+  are refused rather than sent. **A plain token in a header was verified reaching the server on a
+  real socket** (`mcp/httpHeaders.test.ts`), both transports — check that test before suspecting
+  the header path again. When Automatic falls back to SSE and both fail, **both** errors are
+  reported: the second used to replace the first, so a Streamable failure followed by a 401 on the
+  SSE GET looked like a rejected token. The form now offers Transport for that reason. And the
+  global tool timeout was handed to the registry and never forwarded to a connection, so MCP calls
+  were still cut at the SDK's 60s.
 - **Schema translation per provider** is a common source of silent tool-call failures.
   MCP gives JSON Schema; Anthropic wants `input_schema`, OpenAI nests under
   `function.parameters`, and providers differ on tolerated keywords.
@@ -2906,7 +2915,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.123.0**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.124.0**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
@@ -4101,6 +4110,14 @@ path therefore works outside tests; the restore paths are still unproven.
 - **`mcpServers` is deliberately NOT on invariant 5's user-scope-only list**, unlike
   `approvals`. A workspace-supplied server cannot bypass approval, because every MCP tool
   call is gated like any other. Reconsider only if that ever stops being true.
+  **It stopped being entirely true, and the fix is narrower than moving the key** (0.124.0).
+  *Calls* are gated; *connecting* is not — it happens on panel open. A repository-defined HTTP
+  server with a header of `${secret:profile:…:apiKey}` would post your gateway key to its own
+  host before you had looked at anything, and because `mergeScopes` is deep, a workspace that
+  overrode only `url` on *your* server kept your token header. So a server the workspace file
+  names at all (`ScopeMergeResult.workspaceMcpServers`) resolves **no** `${secret:}` or
+  `${env:}` reference; literal values are the repository's own business. The registry asks
+  afresh on every connect and treats a config read failure as "repository-defined".
 - **Not yet manually verified** — needs a real MCP server to exercise.
 
 **Phase 4 done — modes, tool groups, Approvals tab:**

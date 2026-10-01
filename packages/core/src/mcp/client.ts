@@ -8,23 +8,64 @@ import { isStdioServer, type McpServerConfig } from './types.js'
 
 const CLIENT_INFO = { name: 'light-code', version: '0.0.0' }
 
-/** `${secret:NAME}` in an env value or header, resolved at spawn time — never stored. */
-const SECRET_REFERENCE = /\$\{secret:([^}]+)\}/g
+/**
+ * References in an env value or header, resolved at connect time — never stored.
+ *
+ * `${secret:NAME}` reads secret storage; `${env:NAME}` reads this process's environment. The
+ * second is the form Roo Code and Cline use, so a config pasted from either works unchanged —
+ * unread, it would be sent **literally**, and a server receiving `Bearer ${env:TOKEN}` answers
+ * 401, which reads as a bad token rather than an unread reference.
+ */
+const REFERENCE = /\$\{([A-Za-z]+):([^}]+)\}/g
+
+export interface InterpolationOptions {
+  /**
+   * The server was defined by the repository (`.lightcode/config.json`), not by the user.
+   *
+   * Such a server may not resolve any reference. `mcpServers` is deliberately allowed in
+   * workspace config (§11: every *call* is approval-gated), but **connecting is not gated** — it
+   * happens when the panel opens. So a cloned repository naming its own URL and a header of
+   * `${secret:profile:gateway:apiKey}` would post your gateway key to a host of its choosing
+   * before you had looked at anything. Literal values in a repository's config are the
+   * repository's own business; references reach into yours.
+   */
+  repositoryDefined?: boolean
+  /** The environment `${env:NAME}` reads. Defaults to this process's. */
+  env?: Record<string, string | undefined>
+}
 
 export async function interpolateSecrets(
   values: Record<string, string> | undefined,
   secrets: SecretStore,
+  options: InterpolationOptions = {},
 ): Promise<Record<string, string>> {
   if (values === undefined) return {}
+  const env = options.env ?? process.env
   const out: Record<string, string> = {}
   for (const [key, raw] of Object.entries(values)) {
-    const matches = [...raw.matchAll(SECRET_REFERENCE)]
     let resolved = raw
-    for (const match of matches) {
-      const secretName = match[1] as string
-      const value = await secrets.get(secretName)
+    for (const match of raw.matchAll(REFERENCE)) {
+      const written = match[1] as string
+      const kind = written.toLowerCase()
+      const name = (match[2] as string).trim()
+      if (kind !== 'secret' && kind !== 'env') {
+        // `${input:...}` is VS Code's own mcp.json prompt syntax. Sent literally, it is a 401.
+        throw new Error(
+          `"${key}" uses \${${written}:${name}}, which Light Code does not resolve — only \${secret:NAME} (secret storage) and \${env:NAME} (an environment variable) are understood.`,
+        )
+      }
+      if (options.repositoryDefined === true) {
+        throw new Error(
+          `"${key}" references \${${kind}:${name}}, but this server is defined in the project's .lightcode/config.json. A repository may not read your secrets or environment, because a server connects as soon as the panel opens. Add the server in Settings → MCP instead.`,
+        )
+      }
+      const value = kind === 'secret' ? await secrets.get(name) : env[name]
       if (value === undefined) {
-        throw new Error(`Secret "${secretName}" is referenced by this MCP server but is not stored. Add it in Settings.`)
+        throw new Error(
+          kind === 'secret'
+            ? `Secret "${name}" is referenced by this MCP server but is not stored. Add it in Settings.`
+            : `Environment variable "${name}" is referenced by this MCP server but is not set in the environment VS Code was started from. Set it and restart VS Code, or store the value as a secret and use \${secret:NAME}.`,
+        )
       }
       resolved = resolved.replace(match[0], value)
     }
@@ -33,9 +74,13 @@ export async function interpolateSecrets(
   return out
 }
 
-async function buildTransport(config: McpServerConfig, secrets: SecretStore): Promise<Transport> {
+async function buildTransport(
+  config: McpServerConfig,
+  secrets: SecretStore,
+  options: InterpolationOptions,
+): Promise<Transport> {
   if (isStdioServer(config)) {
-    const configuredEnv = await interpolateSecrets(config.env, secrets)
+    const configuredEnv = await interpolateSecrets(config.env, secrets, options)
     return new StdioClientTransport({
       command: config.command,
       ...(config.args !== undefined ? { args: config.args } : {}),
@@ -50,7 +95,7 @@ async function buildTransport(config: McpServerConfig, secrets: SecretStore): Pr
     })
   }
 
-  const headers = await interpolateSecrets(config.headers, secrets)
+  const headers = await interpolateSecrets(config.headers, secrets, options)
   return httpTransport(config.url, headers, httpKindOf(config))
 }
 
@@ -124,6 +169,8 @@ export class McpConnection {
      * restart, and this object outlives any one settings load.
      */
     private readonly defaultTimeout: (() => number | undefined) | undefined = undefined,
+    /** See `InterpolationOptions` — whether this server came from the repository. */
+    private readonly interpolation: InterpolationOptions = {},
   ) {}
 
   async connect(): Promise<void> {
@@ -131,7 +178,7 @@ export class McpConnection {
       capabilities: {},
       listChanged: { tools: { onChanged: () => this.onToolsChanged() } },
     })
-    const transport = await buildTransport(this.config, this.secrets)
+    const transport = await buildTransport(this.config, this.secrets, this.interpolation)
 
     // Attached *before* connect, so startup diagnostics aren't missed — and, more
     // importantly, so the pipe is drained. `stderr: 'pipe'` with no reader fills the OS
@@ -141,7 +188,7 @@ export class McpConnection {
       this.attachStderr(transport)
     }
 
-    this.onLog(await describeMcpRequest(this.config, this.secrets))
+    this.onLog(await describeMcpRequest(this.config, this.secrets, this.interpolation))
 
     try {
       await client.connect(transport)
@@ -158,8 +205,25 @@ export class McpConnection {
        * their server is not answering, not to have a different protocol tried behind their back.
        */
       const fallback = await this.fallbackTransport(error)
-      if (fallback === undefined) throw error
-      await client.connect(fallback)
+      if (fallback === undefined) {
+        if (isUnauthorized(error)) this.onLog(unauthorizedHint(this.config))
+        throw error
+      }
+      try {
+        await client.connect(fallback)
+      } catch (sseError) {
+        /*
+         * Both errors, never only the second. The fallback's failure used to replace the first,
+         * so a Streamable HTTP server that failed for some ordinary reason — and then refused the
+         * SSE retry with a 401, as an endpoint not expecting a GET often does — was reported as a
+         * rejected token. Somebody checks the token, finds it right, and has nowhere to go.
+         */
+        if (isUnauthorized(error) || isUnauthorized(sseError)) this.onLog(unauthorizedHint(this.config))
+        throw new Error(
+          `Streamable HTTP failed: ${describeError(error)}. Retried as SSE, which also failed: ${describeError(sseError)}. If you know which one the server speaks, choose it under Transport in the server's settings so only that one is tried.`,
+          { cause: sseError },
+        )
+      }
       this.client = client
       this.transport = fallback
       this.onLog(`Connected over SSE; Streamable HTTP was refused (${describeError(error)})`)
@@ -174,7 +238,7 @@ export class McpConnection {
     const config = this.config
     if (isStdioServer(config) || config.type !== undefined) return undefined
     this.onLog(`Streamable HTTP failed (${describeError(error)}) — retrying as SSE`)
-    const headers = await interpolateSecrets(config.headers, this.secrets)
+    const headers = await interpolateSecrets(config.headers, this.secrets, this.interpolation)
     return httpTransport(config.url, headers, 'sse')
   }
 
@@ -274,6 +338,7 @@ function describeError(error: unknown): string {
 export async function describeMcpRequest(
   config: McpServerConfig,
   secrets: SecretStore,
+  options: InterpolationOptions = {},
 ): Promise<string> {
   if (isStdioServer(config)) return `Starting ${config.command}`
 
@@ -281,7 +346,7 @@ export async function describeMcpRequest(
   let names: string[]
   try {
     // Resolved, so a `${secret:NAME}` that is stored but empty is visible as such.
-    const resolved = await interpolateSecrets(config.headers, secrets)
+    const resolved = await interpolateSecrets(config.headers, secrets, options)
     names = Object.entries(resolved).map(([name, value]) =>
       value.trim().length === 0 ? `${name} (EMPTY)` : name,
     )
@@ -291,4 +356,37 @@ export async function describeMcpRequest(
 
   const headers = names.length === 0 ? 'no headers configured' : `headers: ${names.join(', ')}`
   return `Connecting to ${config.url} as ${kind}; ${headers}`
+}
+
+/** The SDK reports a refused request as an error whose message carries the status. */
+function isUnauthorized(error: unknown): boolean {
+  return /\b401\b|unauthori[sz]ed/i.test(describeError(error))
+}
+
+/**
+ * What a 401 usually means, written to the server's log. Names headers, never values.
+ *
+ * The causes that cover nearly every report, roughly in order: the scheme is missing or doubled,
+ * the server reads a different header than the one sent, the server signs in through a browser
+ * (OAuth), which other clients do and Light Code does not, and an expired token.
+ */
+export function unauthorizedHint(config: McpServerConfig): string {
+  if (isStdioServer(config)) return 'The server refused the request (401).'
+  const headers = Object.entries(config.headers ?? {})
+  const lines = ['The server answered 401 (not authorised). Worth checking, in order:']
+  if (headers.length === 0) {
+    lines.push('- No headers are configured, so nothing identified you. Add the one the server expects, usually Authorization: Bearer <token>.')
+  } else {
+    const auth = headers.find(([name]) => name.trim().toLowerCase() === 'authorization')
+    const value = auth?.[1].trim()
+    if (value !== undefined && /^bearer\s+bearer\s/i.test(value)) {
+      lines.push('- Authorization reads "Bearer Bearer …" — the token itself probably already starts with Bearer.')
+    } else if (value !== undefined && !/^\S+\s+\S/.test(value) && !value.startsWith('${')) {
+      lines.push('- Authorization holds a bare token with no scheme. Most servers want "Bearer <token>"; compare with the value the other client sends.')
+    }
+    lines.push(`- Sending ${headers.map(([name]) => name).join(', ')}. Is that the header name the server reads (Authorization, X-API-Key, …)?`)
+  }
+  lines.push('- Does the server sign in through a browser (OAuth) in the other client? Light Code sends configured headers only, so it needs a token supplied as a header.')
+  lines.push('- Is it the same, unexpired token the other client uses?')
+  return lines.join('\n')
 }

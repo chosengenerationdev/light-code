@@ -184,6 +184,8 @@ describe('finding the right topic', () => {
       ['start a jenkins job with parameters', 'jenkins'],
       ['can I import only some settings without changing the others', 'team-onboarding'],
       ['how do I clone an mcp server', 'mcp'],
+      ['my http mcp server gives 401 but works in roo code', 'mcp'],
+      ['mcp server unauthorized with a bearer token', 'mcp'],
       ['the python tab says python tools are off but they are on', 'python-tools'],
       ['does export include the project name', 'project'],
       ['how do I label existing skills without guessing the author', 'skills'],

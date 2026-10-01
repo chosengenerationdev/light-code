@@ -262,3 +262,13 @@ describe('per-tool timeouts', () => {
     expect(resolve({ command: 'srv' }, 'anything')).toBeUndefined()
   })
 })
+
+describe('the HTTP transport choice', () => {
+  /* Choosing it is what stops the SSE fallback from masking the first failure. */
+  it('round-trips, treats "http" as Streamable HTTP, and leaves Automatic unset', () => {
+    const declared = toMcpServerForm({ url: 'https://mcp.test/mcp', type: 'http' } as never)
+    expect(declared.transport).toBe('streamable-http')
+    expect(fromMcpServerForm({ ...declared, transport: 'sse' }, 'posix')).toMatchObject({ type: 'sse' })
+    expect(fromMcpServerForm({ ...declared, transport: '' }, 'posix')).not.toHaveProperty('type')
+  })
+})

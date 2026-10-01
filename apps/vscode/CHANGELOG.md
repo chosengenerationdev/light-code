@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.124.0
+
+### Minor Changes
+
+- HTTP MCP servers: `${env:NAME}` references are resolved instead of sent literally, an unknown `${…}` is refused, and a server defined by the repository's `.lightcode/config.json` can no longer read your secrets or environment. When Automatic falls back to SSE and both fail, both errors are shown; the form gains a Transport choice; a 401 writes a checklist to the server's log. The global tool timeout now applies to MCP calls.
+
 ## 0.123.0
 
 ### Minor Changes

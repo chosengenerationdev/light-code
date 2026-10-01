@@ -22,6 +22,14 @@ import {
   textFieldStyle,
 } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
+import { Select } from '../Select.js'
+
+/** The HTTP protocols, as other clients name them in `"type"`. */
+const TRANSPORTS = [
+  { value: '', label: 'Automatic — Streamable HTTP, then SSE' },
+  { value: 'streamable-http', label: 'Streamable HTTP' },
+  { value: 'sse', label: 'SSE (older servers)' },
+] as const
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -416,10 +424,22 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
             {...(show('url') !== undefined ? { error: show('url') as string } : {})}
             onChange={(url) => patch({ url })}
           />
+          <div style={{ marginBottom: 10 }}>
+            <label htmlFor="lc-mcp-transport" style={labelStyle()}>
+              Transport
+            </label>
+            <Select
+              id="lc-mcp-transport"
+              ariaLabel="Transport"
+              value={form.transport}
+              options={TRANSPORTS}
+              onChange={(transport) => patch({ transport: transport as McpForm['transport'] })}
+            />
+          </div>
           <PairEditor
             idPrefix="lc-mcp-header"
             label="Headers"
-            hint="Use ${secret:NAME} for a token — it is read from secret storage at connect time and never written to the config file."
+            hint="The whole value is sent as typed — for a token that is usually Bearer <token>. Use ${secret:NAME} to keep it in secret storage, or ${env:NAME} for an environment variable."
             pairs={form.headers}
             onChange={(headers) => patch({ headers })}
           />

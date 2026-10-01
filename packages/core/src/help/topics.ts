@@ -363,11 +363,16 @@ definitions have to stay stable for a whole turn or the prompt cache is thrown a
   {
     id: 'mcp',
     title: 'MCP servers',
-    keywords: ['mcp', 'server', 'stdio', 'http', 'tools', 'npx', 'timeout', 'disable', 'clone', 'copy server', 'duplicate'],
+    keywords: [
+      'mcp', 'server', 'stdio', 'http', 'tools', 'npx', 'timeout', 'disable', 'clone', 'copy server', 'duplicate',
+      '401', 'unauthorized', 'unauthorised', 'mcp header', 'bearer', 'transport', 'sse', 'streamable http', 'env:',
+    ],
     body: `
 **Settings → MCP.** The config shape is the standard \`mcpServers\` one, so a config copied from
 another client can be pasted unchanged. Transport is inferred: \`command\` means stdio, \`url\`
-means Streamable HTTP.
+means HTTP. For an HTTP server, **Transport** chooses the protocol: *Automatic* tries Streamable HTTP
+and falls back to SSE; name one when you know it (another client's \`"type"\`), so only that one
+is tried.
 
 Servers connect **when the Light Code panel opens**, not at editor startup, and their health is
 shown in the tab with a restart button. A mistyped command tells you so immediately rather than
@@ -391,7 +396,18 @@ raising the server's limit to suit the slow one would make a genuinely hung quic
 four minutes too.
 
 **Secrets** are written as \`${'$'}{secret:NAME}\` and resolved from secret storage when the server is
-spawned. They are never written into the config file.
+spawned. They are never written into the config file. \`${'$'}{env:NAME}\` reads an environment
+variable, as Roo Code and Cline configs write it. Any other \`${'$'}{…}\` is refused rather than sent
+literally. **A server defined in the project's \`.lightcode/config.json\` resolves neither** — it
+connects when the panel opens, so a repository could otherwise send your tokens to a host of its
+choosing. Define such a server in Settings → MCP instead.
+
+**An HTTP server answering 401.** A header value is sent exactly as typed, so a token usually needs
+its scheme: \`Authorization: Bearer <token>\`, not the bare token, and not "Bearer" twice. The
+server's log in the MCP tab lists the header *names* sent and, after a 401, a checklist. If both
+protocols failed under Automatic, the error shows both reasons — the first is usually the real one,
+so set Transport to match. A server that signs in through a browser (OAuth) in another client needs
+a token supplied as a header here; Light Code does not run that sign-in.
 
 **A package-runner command** (\`npx -y ...\`) fetches from the internet when the panel opens. The
 tab warns about it, because that is machinery Light Code chose rather than a host you configured.

@@ -2925,6 +2925,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     logger,
     () => cachedApprovals.allowedTools ?? [],
     () => cachedToolTimeoutSeconds,
+    // Read on every connect rather than cached: a stale answer here is a credential sent to a
+    // repository's server, and failing to read the config at all is treated as "yes".
+    async (name) => {
+      try {
+        return (await configManager.load()).workspaceMcpServers.includes(name)
+      } catch {
+        return true
+      }
+    },
   )
 
   function postMcp(): void {

@@ -38,6 +38,14 @@ export interface McpServerForm {
   args: string[]
   /** `http`: the endpoint. */
   url: string
+  /**
+   * `http`: which protocol to speak. Empty means try Streamable HTTP and fall back to SSE.
+   *
+   * Offered because the fallback can hide the real failure: a server that fails Streamable HTTP
+   * for an ordinary reason and then refuses the SSE retry with a 401 looks like a rejected token.
+   * Somebody whose other client says `"type": "streamable-http"` should be able to say so here.
+   */
+  transport: '' | 'streamable-http' | 'sse'
   headers: Record<string, string>
   env: Record<string, string>
   cwd: string
@@ -59,6 +67,7 @@ export const BLANK_MCP_FORM: McpServerForm = {
   command: '',
   args: [],
   url: '',
+  transport: '',
   headers: {},
   env: {},
   cwd: '',
@@ -143,6 +152,8 @@ export function toMcpServerForm(config: McpServerConfig): McpServerForm {
       ...BLANK_MCP_FORM,
       kind: 'http',
       url: config.url,
+      // `http` is the same protocol as `streamable-http` under another name, as in other clients.
+      transport: config.type === 'sse' ? 'sse' : config.type === undefined ? '' : 'streamable-http',
       headers: config.headers ?? {},
       timeout: config.timeout === undefined ? '' : String(config.timeout),
     }
@@ -215,9 +226,7 @@ export function fromMcpServerForm(
        * save that dropped it would turn a server declared as SSE back into a guess — silently,
        * from an edit about something else entirely.
        */
-      ...(existing !== undefined && !isStdioServer(existing) && existing.type !== undefined
-        ? { type: existing.type }
-        : {}),
+      ...(form.transport !== '' ? { type: form.transport } : {}),
       ...timeout,
       ...preserved,
     }

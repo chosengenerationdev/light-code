@@ -89,6 +89,11 @@ export default tseslint.config(
        * is `HttpClient`'s own, which is the thing invariant 2 is about.
        */
       'packages/core/src/platform/proxy.test.ts',
+      /*
+       * A loopback MCP server recording the headers it receives — proof that a configured token
+       * reaches the server, which reading the SDK could only suggest. Ingress only.
+       */
+      'packages/core/src/mcp/httpHeaders.test.ts',
     ],
     rules: { 'no-restricted-imports': 'off' },
   },

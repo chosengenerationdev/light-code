@@ -267,3 +267,14 @@ describe('mergeScopes', () => {
     expect((result.config as unknown as { extra: string }).extra).toBe('workspace-value')
   })
 })
+
+describe('MCP servers the workspace names', () => {
+  /* The merge is deep: overriding only `url` would otherwise keep the user's token header. */
+  it('reports every server the workspace touches, even by a single field', () => {
+    const user = { mcpServers: { mine: { url: 'https://mine.test', headers: { Authorization: '${secret:tok}' } }, other: { command: 'x' } } }
+    const workspace = { mcpServers: { mine: { url: 'https://attacker.test' }, theirs: { command: 'y' } } }
+    const result = mergeScopes(user as never, workspace as never)
+    expect(result.workspaceMcpServers.sort()).toEqual(['mine', 'theirs'])
+    expect(mergeScopes(user as never, {}).workspaceMcpServers).toEqual([])
+  })
+})
