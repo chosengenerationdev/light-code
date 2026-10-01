@@ -128,6 +128,28 @@ export function AutosysGatewaySection(props: {
       </div>
       <span style={hintStyle}>If the token request is refused with 401 and the secret is right, try the other one.</span>
 
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 4px', cursor: 'pointer' }}>
+        <input type="checkbox" checked={draft.sendBasic} onChange={(event) => set({ sendBasic: event.target.checked })} />
+        <span>Also send the AutoSys username and password (HTTP Basic)</span>
+      </label>
+      <span style={hintStyle}>
+        For a gateway that checks its own token and passes AutoSys&apos;s sign-in through. Uses the username and
+        password entered above. The two go in different headers — one header cannot hold both.
+      </span>
+      {draft.sendBasic && (
+        <>
+          {field('basicHeaderName', 'Header for the username and password', 'Authorization')}
+          {/* Said before saving, where it can still be fixed, rather than as a refusal afterwards. */}
+          {(draft.basicHeaderName.trim() || 'Authorization').toLowerCase() === (draft.tokenHeaderName.trim() || 'Authorization').toLowerCase() && (
+            <span role="alert" style={{ display: 'block', color: colors.error, fontSize: 11, margin: '-4px 0 10px' }}>
+              The token and the username and password would both go in the {draft.basicHeaderName.trim() || 'Authorization'} header.
+              Set the token&apos;s header under Advanced (for example x-apigee-token), or a different header here — your
+              gateway team knows which the gateway expects.
+            </span>
+          )}
+        </>
+      )}
+
       <details style={{ margin: '4px 0 10px' }}>
         <summary style={{ cursor: 'pointer', fontSize: 12 }}>Client certificate</summary>
         <span style={hintStyle}>

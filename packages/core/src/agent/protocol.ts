@@ -84,6 +84,9 @@ export interface AutosysGatewaySettings {
   tokenHeaderPrefix: string
   extraHeaders: string
   extraTokenParams: string
+  /** Also send the AutoSys username and password as Basic, in `basicHeaderName` (blank = Authorization). */
+  sendBasic: boolean
+  basicHeaderName: string
   certFile: string
   keyFile: string
   pfxFile: string

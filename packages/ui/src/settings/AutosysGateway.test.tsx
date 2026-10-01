@@ -28,7 +28,7 @@ const autosys = ATLASSIAN_PRODUCTS.find((info) => info.id === 'autosys')!
 const settings: AtlassianSettingsView = { enabled: false, baseUrl: '', caFile: '', rejectUnauthorized: true, defaults: {} }
 const gateway: AutosysGatewayView = {
   enabled: false, tokenUrl: '', clientId: '', scope: '', grantType: '', clientAuthentication: 'body', tokenPath: '', expiresInPath: '',
-  tokenHeaderName: '', tokenHeaderPrefix: '', extraHeaders: '', extraTokenParams: '', certFile: '', keyFile: '', pfxFile: '',
+  tokenHeaderName: '', tokenHeaderPrefix: '', extraHeaders: '', extraTokenParams: '', sendBasic: false, basicHeaderName: '', certFile: '', keyFile: '', pfxFile: '',
   useGlobalClientCertificate: true, hasClientSecret: false, hasPassphrase: false,
 }
 
@@ -95,5 +95,17 @@ describe('the AutoSys panel with an API gateway', () => {
 
     render({ settings: { ...settings, baseUrl: 'https://autosys.test' }, gateway: { ...gateway, enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', hasClientSecret: true } })
     expect(buttonByText('Test connection').disabled).toBe(false)
+  })
+
+  /* Reported next: the gateway wants its token and AutoSys's Basic sign-in on the same request. */
+  it('offers Basic alongside the token, and warns before saving when both would share a header', () => {
+    const saves = render({ settings: { ...settings, baseUrl: 'https://autosys.test' }, gateway: { ...gateway, enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', hasClientSecret: true } })
+    const box = [...container.querySelectorAll('label')].find((label) => label.textContent?.includes('Also send the AutoSys username'))!.querySelector('input')!
+    act(() => box.click())
+    expect(container.textContent).toContain('would both go in the Authorization header')
+    type('#lc-autosys-gw-tokenHeaderName', 'x-apigee-token')
+    expect(container.textContent).not.toContain('would both go in')
+    act(() => buttonByText('Save').click())
+    expect(saves[0]?.[2]?.settings).toMatchObject({ sendBasic: true, tokenHeaderName: 'x-apigee-token' })
   })
 })

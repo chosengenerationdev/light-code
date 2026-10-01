@@ -5,7 +5,7 @@ import type { AutosysGatewaySettings } from '../agent/protocol.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
 import { AutosysClient } from './autosys.js'
-import { AUTOSYS_CLIENT_SECRET_REF, gatewayFromSettings, gatewayView } from './autosysGateway.js'
+import { AUTOSYS_CLIENT_SECRET_REF, gatewayFromSettings, gatewayView, withBasicCredentials } from './autosysGateway.js'
 
 const blank = (): AutosysGatewaySettings => ({ ...gatewayView(undefined, false, false) })
 
@@ -126,5 +126,34 @@ describe('the gateway form', () => {
     expect(handler.indexOf('saveAutosysGateway(')).toBeGreaterThan(handler.indexOf("await configManager.save('user'"))
     expect(handler).not.toContain("type: 'error'")
     expect(handler).toContain("type: 'atlassianTest', product, ok: false")
+  })
+
+  it('sends the gateway token and the AutoSys Basic sign-in together, in their own headers', async () => {
+    const { http, calls } = fakeGateway()
+    const gateway = new ApigeeMtlsAuthStrategy(
+      http,
+      { tokenUrl: 'https://gw.test/oauth/token', clientId: 'lc-app', resolveClientSecret: async () => 's3cret', tokenHeaderName: 'x-apigee-token' },
+      'https://autosys.test',
+      async () => undefined,
+    )
+    const auth = withBasicCredentials(gateway, 'Authorization', 'jsmith', 'pw')
+    await new AutosysClient(http, { baseUrl: 'https://autosys.test', token: '', auth }).probe('x')
+    const api = calls.find((call) => call.url.startsWith('https://autosys.test/'))!
+    expect(api.options.headers?.['x-apigee-token']).toBe('Bearer tok-1')
+    expect(api.options.headers?.['Authorization']).toBe(`Basic ${Buffer.from('jsmith:pw').toString('base64')}`)
+  })
+
+  it('refuses the token and the Basic sign-in in one header, naming the way out', () => {
+    const both = gatewayFromSettings(
+      { ...blank(), enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', sendBasic: true },
+      { clientSecret: true, passphrase: false },
+    )
+    expect(both).toHaveProperty('error')
+    expect((both as { error: string }).error).toContain('x-apigee-token')
+    const apart = gatewayFromSettings(
+      { ...blank(), enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', sendBasic: true, basicHeaderName: 'X-AutoSys-Authorization' },
+      { clientSecret: true, passphrase: false },
+    )
+    expect(apart).toMatchObject({ auth: { sendBasic: true, basicHeaderName: 'X-AutoSys-Authorization' } })
   })
 })

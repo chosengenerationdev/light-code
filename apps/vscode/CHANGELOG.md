@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.127.0
+
+### Minor Changes
+
+- AutoSys through an API gateway can also send the AutoSys username and password as HTTP Basic alongside the gateway token, for gateways that check their own token and pass AutoSys's sign-in through. The two go in separate headers, which you name; the panel warns if both would share one.
+
 ## 0.126.1
 
 ### Patch Changes

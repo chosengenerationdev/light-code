@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
-import { AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView } from '../atlassian/autosysGateway.js'
+import { AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView, withBasicCredentials } from '../atlassian/autosysGateway.js'
 import type { AutosysGatewaySettings } from '../agent/protocol.js'
 import type { TlsOptions } from '../platform/http.js'
 import { watch as watchPath, type FSWatcher } from 'node:fs'
@@ -7114,7 +7114,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       return {
         baseUrl: settings.baseUrl,
         token: '',
-        auth: await autosysGatewayAuth(config, tls),
+        auth: await (async () => {
+          const gatewayAuth = await autosysGatewayAuth(config, tls)
+          if (auth.sendBasic !== true) return gatewayAuth
+          // The gateway's token and AutoSys's own username and password, in separate headers.
+          const username = config.autosys?.username?.trim() ?? ''
+          const password = config.autosys?.tokenRef !== undefined ? await secrets.get(config.autosys.tokenRef) : undefined
+          if (username.length === 0 || password === undefined || password.length === 0) {
+            throw new AtlassianError(
+              'AutoSys is set to send its username and password through the gateway, but one of them is not saved. Settings → DevOps → AutoSys: enter both and save.',
+            )
+          }
+          return withBasicCredentials(gatewayAuth, auth.basicHeaderName ?? 'Authorization', username, password)
+        })(),
         ...(tls !== undefined ? { tls } : {}),
       }
     }

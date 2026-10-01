@@ -979,6 +979,13 @@ export const autosysAuthSchema = z
     tokenHeaderPrefix: z.string(),
     /** Sent with every API call, e.g. an API key the gateway also wants. Plain values only. */
     extraHeaders: z.record(z.string(), z.string()),
+    /**
+     * Also send the AutoSys username and password as HTTP Basic, for a gateway that checks its own
+     * token and passes AutoSys's sign-in through. In `basicHeaderName` (default `Authorization`),
+     * which must differ from the token's header — one header cannot carry both.
+     */
+    sendBasic: z.boolean(),
+    basicHeaderName: z.string().min(1),
     /** Client certificate for the gateway. Absent uses Settings → Network's, as every connection does. */
     certFile: z.string().min(1),
     keyFile: z.string().min(1),

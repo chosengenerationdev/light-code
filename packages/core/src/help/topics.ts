@@ -620,7 +620,12 @@ password are then not used. The **client certificate** comes from Settings → N
 name one under *Client certificate* (certificate and key, or a PFX, plus a passphrase); the same
 certificate is presented to the token URL and to the API. If the token request is refused with 401
 and the secret is right, switch *How the client id and secret are sent* between the request body
-and a Basic header — gateways differ. *Advanced* covers the grant type, where the token and its
+and a Basic header — gateways differ. **Gateway token and AutoSys username and password together:** tick *Also send the AutoSys
+username and password (HTTP Basic)* — it sends the username and password entered above as Basic,
+alongside the gateway's token. One header holds one value, so the two must go in different headers:
+usually the token in a gateway header (Advanced → *Header the token is sent in*, such as
+x-apigee-token) and the Basic sign-in in Authorization, or the other way round with *Header for the
+username and password*. The panel warns before saving if both would land in the same one. *Advanced* covers the grant type, where the token and its
 expiry sit in the response, the header and prefix it is sent with, extra headers (an API key, say)
 and extra token parameters (config:autosys).
 

@@ -159,9 +159,11 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
     : props.settings.baseUrl.length === 0
       ? 'Save the site address first.'
       : viaGateway
-        ? props.gateway?.hasClientSecret === true
-          ? undefined
-          : 'Enter the gateway client secret and save.'
+        ? props.gateway?.hasClientSecret !== true
+          ? 'Enter the gateway client secret and save.'
+          : props.gateway.sendBasic && (!props.hasToken || (props.settings.defaults['username'] ?? '').trim().length === 0)
+            ? 'Enter the AutoSys username and password and save — the gateway is set to pass them on.'
+            : undefined
         : props.hasToken
           ? undefined
           : props.gateway !== undefined
@@ -194,7 +196,11 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       <span style={hintStyle}>The address you open {info.label} at, including any path after the host name.</span>
 
       {viaGateway && (
-        <span style={hintStyle}>Signing in through the API gateway below — the password is not used.</span>
+        <span style={hintStyle}>
+          {props.gateway?.sendBasic === true
+            ? 'Signing in through the API gateway below, which also passes on this username and password.'
+            : 'Signing in through the API gateway below — the username and password are not used.'}
+        </span>
       )}
       <label htmlFor={id('token')} style={labelStyle()}>
         {info.tokenLabel}

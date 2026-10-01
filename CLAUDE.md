@@ -2095,6 +2095,13 @@ would each overwrite the block the other had not seen); typing a token URL ticks
 refusals come back as the panel's own status line; and Test names exactly what it is waiting for, on
 the page. `AutosysGateway.test.tsx` replays the report.
 
+**Token and Basic together** (`auth.sendBasic`, reported: the gateway needs its token *and* AutoSys's
+username and password). `withBasicCredentials` adds `Basic user:password` from the panel's existing
+username and password (no new secret) after the gateway's headers, in `basicHeaderName` (default
+`Authorization`). One header holds one value, so the save refuses the two sharing a header and says
+to move the token to a gateway header such as `x-apigee-token` — sending both would silently keep
+whichever was written last, a 401 with nothing to say which check lost. The panel warns before Save.
+
 **Not verified against a live gateway or AutoSys** — the flow is covered end to end against a fake
 that issues tokens at one host and serves the API at another.
 
@@ -3009,7 +3016,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.126.1**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.127.0**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

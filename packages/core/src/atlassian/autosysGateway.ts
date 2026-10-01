@@ -1,6 +1,7 @@
 import type { AutosysGatewaySettings, AutosysGatewayView } from '../agent/protocol.js'
 import type { autosysAuthSchema } from '../config/schema.js'
 import type { z } from 'zod'
+import type { ConnectionAuth } from './rest.js'
 
 /**
  * AutoSys behind an API gateway: the form's view of `autosys.auth`, and back.
@@ -11,6 +12,24 @@ import type { z } from 'zod'
  */
 
 export type AutosysAuth = z.infer<typeof autosysAuthSchema>
+
+/**
+ * The gateway's token plus AutoSys's own Basic sign-in, for a gateway that checks its token and
+ * passes the username and password through to AutoSys. Basic is added after the token headers;
+ * `gatewayFromSettings` has already refused the two sharing a header.
+ */
+export function withBasicCredentials(
+  auth: ConnectionAuth,
+  headerName: string,
+  username: string,
+  password: string,
+): ConnectionAuth {
+  const basic = `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`
+  return {
+    resolveHeaders: async () => ({ ...(await auth.resolveHeaders()), [headerName]: basic }),
+    onUnauthorized: () => auth.onUnauthorized(),
+  }
+}
 
 /** Secret storage keys. Namespaced, so clearing AutoSys clears these too. */
 export const AUTOSYS_CLIENT_SECRET_REF = 'autosys:clientSecret'
@@ -36,6 +55,8 @@ export function gatewayView(auth: AutosysAuth | undefined, hasClientSecret: bool
     tokenHeaderPrefix: auth?.tokenHeaderPrefix ?? '',
     extraHeaders: linesFrom(auth?.extraHeaders, ': '),
     extraTokenParams: linesFrom(auth?.extraTokenParams, '='),
+    sendBasic: auth?.sendBasic === true,
+    basicHeaderName: auth?.basicHeaderName ?? '',
     certFile: auth?.certFile ?? '',
     keyFile: auth?.keyFile ?? '',
     pfxFile: auth?.pfxFile ?? '',
@@ -81,6 +102,19 @@ export function gatewayFromSettings(
   if (typeof headers === 'string') return { error: headers }
   const params = parseLines(input.extraTokenParams, '=', 'Extra token parameters')
   if (typeof params === 'string') return { error: params }
+  /*
+   * One header cannot carry both, and sending the second would silently replace the first — a 401
+   * from whichever check lost, with nothing to say which. Refused with the way out instead.
+   */
+  const tokenHeader = (text(input.tokenHeaderName) ?? 'Authorization').toLowerCase()
+  const basicHeader = (text(input.basicHeaderName) ?? 'Authorization').toLowerCase()
+  if (input.sendBasic && tokenHeader === basicHeader) {
+    return {
+      error:
+        `The gateway token and the AutoSys username and password would both go in the ${text(input.basicHeaderName) ?? 'Authorization'} header, and one header holds one value. ` +
+        'Set the header the gateway reads its token from (Advanced → "Header the token is sent in", for example x-apigee-token), or the header AutoSys reads the username and password from — your gateway team knows which.',
+    }
+  }
   if (text(input.pfxFile) !== undefined && text(input.certFile) !== undefined) {
     return { error: 'Use either a PFX bundle or a certificate and key, not both.' }
   }
@@ -112,6 +146,8 @@ export function gatewayFromSettings(
         : {}),
       ...(Object.keys(headers).length > 0 ? { extraHeaders: headers } : {}),
       ...(Object.keys(params).length > 0 ? { extraTokenParams: params } : {}),
+      ...(input.sendBasic ? { sendBasic: true } : {}),
+      ...optional('basicHeaderName', text(input.basicHeaderName)),
       ...optional('certFile', text(input.certFile)),
       ...optional('keyFile', text(input.keyFile)),
       ...optional('pfxFile', text(input.pfxFile)),
