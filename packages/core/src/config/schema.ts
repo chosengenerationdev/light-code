@@ -950,6 +950,44 @@ export type S3ConnectionConfig = z.infer<typeof s3ConnectionSchema>
 export type S3Config = z.infer<typeof s3ConfigSchema>
 
 /** The connection half of the Jira and Bitbucket blocks; Confluence's predates it and matches it. */
+/**
+ * AutoSys through an API gateway: a token fetched from one URL with a client id and secret (over
+ * mutual TLS where the gateway asks for it), then sent to the AutoSys API at `baseUrl`. The same
+ * client-credentials flow the provider `apigeeMtls` auth uses, and the same strategy class, so
+ * refresh, single-flight and the one 401 retry behave identically. Absent or `basic` keeps
+ * username and password as HTTP Basic.
+ */
+export const autosysAuthSchema = z
+  .object({
+    type: z.enum(['basic', 'apigee']),
+    tokenUrl: z.string().url(),
+    clientId: z.string().min(1),
+    /** Secret storage key for the client secret — never the secret itself (§15). */
+    clientSecretRef: z.string().min(1),
+    grantType: z.string().min(1),
+    scope: z.string().min(1),
+    /** Client id and secret as form fields (default) or an HTTP Basic header. */
+    clientAuthentication: z.enum(['body', 'header']),
+    extraTokenParams: z.record(z.string(), z.string()),
+    /** Where the token and its lifetime sit in the token response, as dotted paths. */
+    tokenPath: z.string().min(1),
+    expiresInPath: z.string().min(1),
+    fallbackExpirySeconds: z.number().int().positive(),
+    refreshSkewSeconds: z.number().int().nonnegative(),
+    /** How the token is sent to the API; defaults `Authorization` and `Bearer `. */
+    tokenHeaderName: z.string().min(1),
+    tokenHeaderPrefix: z.string(),
+    /** Sent with every API call, e.g. an API key the gateway also wants. Plain values only. */
+    extraHeaders: z.record(z.string(), z.string()),
+    /** Client certificate for the gateway. Absent uses Settings → Network's, as every connection does. */
+    certFile: z.string().min(1),
+    keyFile: z.string().min(1),
+    pfxFile: z.string().min(1),
+    passphraseRef: z.string().min(1),
+    useGlobalClientCertificate: z.boolean(),
+  })
+  .partial()
+
 const atlassianConnectionShape = {
   enabled: z.boolean(),
   baseUrl: z.string().url(),
@@ -1075,6 +1113,7 @@ export const configSchema = z
         ...atlassianConnectionShape,
         username: z.string().min(1),
         defaultPattern: z.string().min(1),
+        auth: autosysAuthSchema,
         paths: z
           .object({
             jobs: z.string().min(1),

@@ -2048,6 +2048,46 @@ skill, tool or index belonged to whom.
 the bucket save path by reading `bridge.ts`. The package check *is* verified against a real
 interpreter.
 
+## 12v. Replies, reactions, and AutoSys behind a gateway (0.125.0)
+
+**Reply and react** (asked for: reply to a specific message; react so the agent focuses on the right
+solution; would reacting to the thought process help?). `agent/feedback.ts`.
+- **Both become words in the user's next turn**, written by `composeUserText` — the host for the
+  model, the panel for the live bubble, so the two cannot disagree. A model has no channel for "a
+  thumbs-down on paragraph three" except text; anything subtler would be a control that reaches
+  nothing. It also means the saved transcript shows what was pointed at.
+- **Select part of a message first and only that part is quoted.** "This is wrong" about a whole
+  answer leaves the model guessing which part. `clipQuote` is idempotent (the ellipsis counts against
+  the limit) because the panel clips and the host clips again.
+- **Reactions never start a turn.** Held host-side (the webview can be rebuilt any moment), delivered
+  with the next message or at the next step of a running turn via `drainQueuedMessages` — the
+  earliest any input can reach a model mid-turn. A pending one can be withdrawn; a delivered one is
+  locked, because taking it back would change the button and not what the model was told.
+- **On a thought process it steers, it does not edit.** Reasoning already done cannot change, and
+  most providers do not show a model its earlier reasoning at all, so the quote is how it learns
+  which line of thought was meant. 👎 mid-turn is the useful case. The controls appear only once the
+  thinking is expanded: reacting to reasoning you have not read is a guess.
+
+**AutoSys through an API gateway** (asked for: Apigee — a token from one URL with a client id and
+secret and certificates, used against another URL). `autosys.auth`, `atlassian/autosysGateway.ts`.
+- **The provider `ApigeeMtlsAuthStrategy`, reused**, not a second implementation: refresh,
+  single-flight and the one 401 retry are the ones already confirmed against a real Apigee.
+  `AtlassianRest` takes it as `connection.auth` and retries once on 401 **only** with a gateway
+  token — a rejected password would be rejected again and can lock an account.
+- **`clientAuthentication`** (`body` default, or `header`) was added to the shared strategy: many
+  gateways want the client id and secret as RFC 6749 Basic, and the wrong one is a 401 that reads as
+  a bad secret. The form says to try the other when the secret is known to be right.
+- Certificates go through `resolveConnectionTls` (no fifth place for a CA, §10): the machine
+  certificate applies unless the block names its own, and the same one is presented to the token URL
+  and the API. A word-ending header prefix gets its space (`Bearer` would send `Bearerabc…`).
+- **The DevOps save replaced the whole `autosys` block**, so every save of the form erased hand-set
+  `paths` — and would have erased the gateway. Both are carried through now.
+- The strategy is cached per auth block and certificate hash so the token is reused; saving the
+  gateway drops it. Secrets: `autosys:clientSecret`, `autosys:certPassphrase`; export names them.
+
+**Not verified against a live gateway or AutoSys** — the flow is covered end to end against a fake
+that issues tokens at one host and serves the API at another.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2741,6 +2781,14 @@ exists from the first save rather than the second. **A hand-edit that merely fai
 still throws** — that is a mistake the user just made in a file they are looking at, and
 silently reverting it would be worse help than naming the field.
 
+**The rename is retried on Windows** (0.125.0, reported: "sometimes saving gives EPERM with the
+config name"). Windows refuses a rename over a file another program has open — another window, a
+watcher, antivirus, OneDrive — with `EPERM`/`EACCES`/`EBUSY` for that moment. `replaceFile` in
+`platform/node/replaceFile.ts` retries those codes for about three seconds (graceful-fs's answer),
+removes its temporary on final failure, and says which file and why. **Every temp-and-rename save
+goes through it**; the quarantine rename of a damaged config deliberately does not, because the
+helper deletes its source on failure and that source is the user's broken-but-kept file.
+
 The same reasoning applies to any other file this product owns. `taskStore`, `fileSecretStore`
 and `reviewQueue` already wrote temp-and-rename; config was the one that did not.
 
@@ -2915,7 +2963,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.124.0**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.125.0**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

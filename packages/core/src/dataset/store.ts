@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { replaceFile } from '../platform/node/replaceFile.js'
 import path from 'node:path'
 
 import type { DatasetRecord } from './types.js'
@@ -81,7 +82,7 @@ export class DatasetStore {
     const temporary = `${this.filePath}.tmp`
     const body = records.map((record) => JSON.stringify(record)).join('\n')
     await fs.writeFile(temporary, records.length === 0 ? '' : `${body}\n`, 'utf8')
-    await fs.rename(temporary, this.filePath)
+    await replaceFile(temporary, this.filePath)
   }
 
   /**
@@ -137,7 +138,7 @@ export class DatasetStore {
     await fs.mkdir(path.dirname(this.statePath), { recursive: true })
     const temporary = `${this.statePath}.tmp`
     await fs.writeFile(temporary, JSON.stringify({ lastSyncedAt: at }), 'utf8')
-    await fs.rename(temporary, this.statePath)
+    await replaceFile(temporary, this.statePath)
   }
 }
 

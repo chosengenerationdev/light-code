@@ -1,5 +1,12 @@
 # @chosengeneration/light-code
 
+## 0.99.0
+
+### Minor Changes
+
+- Saving settings on Windows no longer fails with EPERM when another window, antivirus or a sync tool briefly holds the file: the save is retried for a few seconds, and a lasting failure says which file and why. Applies to every file Light Code saves.
+- Reply to a specific message (select part of it to quote just that part) and react to replies or to a thought process with 👍, 👎 or 🎯; reactions go with your next message, or at the assistant's next step while it works. AutoSys can sign in through an API gateway such as Apigee: a token from a token URL with a client id and secret and client certificate, sent to the AutoSys API. Saving the AutoSys form no longer erases hand-set request paths.
+
 ## 0.98.1
 
 ### Patch Changes

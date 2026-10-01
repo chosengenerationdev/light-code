@@ -1,4 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
+import { replaceFile } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import * as vscode from 'vscode'
@@ -51,7 +52,7 @@ export class VSCodeConfigStore implements ConfigStore {
     // Same directory, so the rename stays on one volume and is therefore atomic.
     const temporary = `${filePath}.${process.pid.toString(36)}.tmp`
     await fs.writeFile(temporary, contents, 'utf8')
-    await fs.rename(temporary, filePath)
+    await replaceFile(temporary, filePath)
 
     /*
      * The backup is written *after* the live file, from the same contents.
@@ -64,7 +65,7 @@ export class VSCodeConfigStore implements ConfigStore {
     try {
       const backupTemp = `${backupPathFor(filePath)}.tmp`
       await fs.writeFile(backupTemp, contents, 'utf8')
-      await fs.rename(backupTemp, backupPathFor(filePath))
+      await replaceFile(backupTemp, backupPathFor(filePath))
     } catch {
       // A backup that could not be written is worth no interruption — the live file is safe,
       // which is the part that decides whether the product still works.

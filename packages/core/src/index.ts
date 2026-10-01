@@ -795,3 +795,4 @@ export {
   type RemoveSkillResult,
 } from './s3/remove.js'
 export { composeUserText, clipQuote, type MessageQuote, type MessageReaction, type Reaction } from './agent/feedback.js'
+export { replaceFile, FileReplaceError } from './platform/node/replaceFile.js'

@@ -43,6 +43,19 @@ export interface AtlassianConnection {
    */
   username?: string | undefined
   tls?: TlsOptions | undefined
+  /**
+   * Replaces `token`/`username` as how a request is authorised — AutoSys behind an API gateway,
+   * where a token is fetched from one URL and sent to another. The provider auth strategies fit
+   * this shape, so the gateway client is the very one the chat gateway uses.
+   */
+  auth?: ConnectionAuth | undefined
+}
+
+/** What `AtlassianRest` needs from a token-issuing strategy. `ApigeeMtlsAuthStrategy` is one. */
+export interface ConnectionAuth {
+  resolveHeaders(): Promise<Record<string, string>>
+  /** Drop the cached token and get a new one; true means retrying is worth it. */
+  onUnauthorized(): Promise<boolean>
 }
 
 export class AtlassianError extends Error {
@@ -101,27 +114,57 @@ export class AtlassianRest {
     return readBody(response)
   }
 
-  async send(doing: string, pathAndQuery: string, options: HttpRequestOptions, signal?: AbortSignal): Promise<HttpResponse> {
-    let response: HttpResponse
+  private async authHeaders(doing: string): Promise<Record<string, string>> {
+    if (this.connection.auth !== undefined) {
+      try {
+        return await this.connection.auth.resolveHeaders()
+      } catch (error) {
+        // The token request is a step of its own; naming it is what separates "the gateway would
+        // not issue a token" from "AutoSys refused the call".
+        throw new AtlassianError(
+          `Could not get a token from the gateway for ${PRODUCT_LABELS[this.product]} while ${doing}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    return {
+      Authorization:
+        this.connection.username !== undefined && this.connection.username.length > 0
+          ? `Basic ${Buffer.from(`${this.connection.username}:${this.connection.token}`, 'utf8').toString('base64')}`
+          : `Bearer ${this.connection.token}`,
+    }
+  }
+
+  private async attempt(doing: string, pathAndQuery: string, options: HttpRequestOptions, signal?: AbortSignal): Promise<HttpResponse> {
     try {
-      response = await this.http.request(`${this.base}${pathAndQuery}`, {
+      return await this.http.request(`${this.base}${pathAndQuery}`, {
         ...options,
         headers: {
           Accept: 'application/json',
           ...(options.headers ?? {}),
-          Authorization:
-            this.connection.username !== undefined && this.connection.username.length > 0
-              ? `Basic ${Buffer.from(`${this.connection.username}:${this.connection.token}`, 'utf8').toString('base64')}`
-              : `Bearer ${this.connection.token}`,
+          ...(await this.authHeaders(doing)),
         },
         ...(signal !== undefined ? { signal } : {}),
         ...(this.connection.tls !== undefined ? { tls: this.connection.tls } : {}),
       })
     } catch (error) {
+      if (error instanceof AtlassianError) throw error
       throw new AtlassianError(
         `Could not reach ${PRODUCT_LABELS[this.product]} at ${this.base} while ${doing}: ` +
           `${error instanceof Error ? error.message : String(error)}`,
       )
+    }
+  }
+
+  async send(doing: string, pathAndQuery: string, options: HttpRequestOptions, signal?: AbortSignal): Promise<HttpResponse> {
+    let response = await this.attempt(doing, pathAndQuery, options, signal)
+    /*
+     * One retry with a fresh token, never a loop (§10). Only with a gateway token: a rejected
+     * password would be rejected again, and a second attempt can lock an account.
+     */
+    if (response.status === 401 && this.connection.auth !== undefined && (await this.connection.auth.onUnauthorized())) {
+      await response.text().catch(() => '')
+      response = await this.attempt(doing, pathAndQuery, options, signal)
     }
     if (response.status >= 200 && response.status < 300) return response
     const detail = await response.text().catch(() => '')

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { replaceFile } from '../platform/node/replaceFile.js'
 import path from 'node:path'
 
 import type { MailRecord } from './mailIndex.js'
@@ -75,7 +76,7 @@ export class MailStore {
     const temporary = `${this.filePath}.tmp`
     const body = records.map((record) => JSON.stringify(record)).join('\n')
     await fs.writeFile(temporary, records.length === 0 ? '' : `${body}\n`, 'utf8')
-    await fs.rename(temporary, this.filePath)
+    await replaceFile(temporary, this.filePath)
   }
 
   /**
@@ -98,7 +99,7 @@ export class MailStore {
     await fs.mkdir(path.dirname(this.progressPath), { recursive: true })
     const temporary = `${this.progressPath}.tmp`
     await fs.writeFile(temporary, JSON.stringify(state), 'utf8')
-    await fs.rename(temporary, this.progressPath)
+    await replaceFile(temporary, this.progressPath)
   }
 
   async clear(): Promise<void> {

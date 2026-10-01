@@ -19,6 +19,12 @@ export interface ApigeeMtlsSettings {
    */
   resolveClientSecret?: (() => Promise<string | undefined>) | undefined
   scope?: string | undefined
+  /**
+   * Where the client id and secret go on the token request: form fields (`body`, the default and
+   * what this always did) or an HTTP Basic header (`header`, RFC 6749's preferred form, which many
+   * gateways require). Getting it wrong is a 401 that reads as a bad secret.
+   */
+  clientAuthentication?: 'body' | 'header' | undefined
   extraTokenParams?: Record<string, string> | undefined
   /** Defaults to `Authorization` / `Bearer `. */
   tokenHeaderName?: string | undefined
@@ -167,10 +173,11 @@ export class ApigeeMtlsAuthStrategy implements AuthStrategy {
     }
 
     const clientSecret = await this.settings.resolveClientSecret?.()
+    const inHeader = this.settings.clientAuthentication === 'header' && this.settings.clientId !== undefined
     const params = new URLSearchParams({
       grant_type: this.settings.grantType ?? DEFAULTS.grantType,
-      ...(this.settings.clientId !== undefined ? { client_id: this.settings.clientId } : {}),
-      ...(clientSecret !== undefined ? { client_secret: clientSecret } : {}),
+      ...(!inHeader && this.settings.clientId !== undefined ? { client_id: this.settings.clientId } : {}),
+      ...(!inHeader && clientSecret !== undefined ? { client_secret: clientSecret } : {}),
       ...(this.settings.scope !== undefined ? { scope: this.settings.scope } : {}),
       ...this.settings.extraTokenParams,
     })
@@ -180,7 +187,18 @@ export class ApigeeMtlsAuthStrategy implements AuthStrategy {
     try {
       response = await this.http.request(tokenUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          ...(inHeader
+            ? {
+                // RFC 6749 §2.3.1: each part form-encoded before joining.
+                Authorization: `Basic ${Buffer.from(
+                  `${encodeURIComponent(this.settings.clientId ?? '')}:${encodeURIComponent(clientSecret ?? '')}`,
+                  'utf8',
+                ).toString('base64')}`,
+              }
+            : {}),
+        },
         body: params.toString(),
         ...(tls !== undefined ? { tls } : {}),
       })

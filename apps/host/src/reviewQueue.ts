@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { replaceFile } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { ReviewKind, ReviewRequest } from '@light-code/core'
@@ -45,7 +46,7 @@ export class ReviewQueue {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })
     const temporary = `${this.filePath}.tmp`
     await fs.writeFile(temporary, JSON.stringify(items, null, 2), { encoding: 'utf8', mode: 0o600 })
-    await fs.rename(temporary, this.filePath)
+    await replaceFile(temporary, this.filePath)
   }
 
   async list(): Promise<QueuedReview[]> {

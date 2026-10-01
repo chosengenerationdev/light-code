@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { replaceFile } from '@light-code/core'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { sessionVariablesSchema, type SessionVariable } from '@light-code/core'
@@ -39,7 +40,7 @@ export class UserVariableStore {
       encoding: 'utf8',
       mode: 0o600,
     })
-    await fs.rename(temporary, this.filePath)
+    await replaceFile(temporary, this.filePath)
     return parsed
   }
 }

@@ -4,7 +4,10 @@ import {
   type AtlassianProductInfo,
   type AtlassianProductStatus,
   type AtlassianSettingsView,
+  type AutosysGatewaySettings,
+  type AutosysGatewayView,
 } from '@light-code/core/browser'
+import { AutosysGatewaySection } from './AutosysGateway.js'
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
@@ -29,6 +32,8 @@ export interface AtlassianTabProps {
   onSave: (product: AtlassianProductId, settings: AtlassianSettingsView, token: string | undefined) => void
   onClearToken: (product: AtlassianProductId) => void
   onTest: (product: AtlassianProductId) => void
+  onSaveGateway?: (settings: AutosysGatewaySettings, clientSecret: string | undefined, passphrase: string | undefined) => void
+  onClearGatewaySecret?: (which: 'clientSecret' | 'passphrase') => void
 }
 
 export function AtlassianTab(props: AtlassianTabProps): ReactElement {
@@ -54,6 +59,9 @@ export function AtlassianTab(props: AtlassianTabProps): ReactElement {
             info={info}
             settings={status.settings}
             hasToken={status.hasToken}
+            gateway={status.gateway}
+            onSaveGateway={props.onSaveGateway}
+            onClearGatewaySecret={props.onClearGatewaySecret}
             savedTick={props.savedTicks[info.id] ?? 0}
             test={props.tests[info.id]}
             testing={props.testing[info.id] === true}
@@ -77,6 +85,10 @@ export interface AtlassianSectionProps {
   onSave: (settings: AtlassianSettingsView, token: string | undefined) => void
   onClearToken: () => void
   onTest: () => void
+  /** AutoSys only. */
+  gateway?: AutosysGatewayView | undefined
+  onSaveGateway?: ((settings: AutosysGatewaySettings, clientSecret: string | undefined, passphrase: string | undefined) => void) | undefined
+  onClearGatewaySecret?: ((which: 'clientSecret' | 'passphrase') => void) | undefined
 }
 
 const hintStyle = { display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' } as const
@@ -103,13 +115,18 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
   }
   const id = (field: string): string => `lc-${info.id}-${field}`
 
+  // Through a gateway the password is not used; what has to be stored is the client secret.
+  const viaGateway = props.gateway?.enabled === true
+  const credentialStored = viaGateway ? props.gateway?.hasClientSecret === true : props.hasToken
   const summary = !props.settings.enabled
     ? 'Off'
     : props.settings.baseUrl.length === 0
       ? 'No site set'
-      : props.hasToken
-        ? props.settings.baseUrl
-        : 'No token stored'
+      : credentialStored
+        ? `${props.settings.baseUrl}${viaGateway ? ' (via gateway)' : ''}`
+        : viaGateway
+          ? 'No client secret stored'
+          : 'No token stored'
 
   return (
     <Panel id={`atlassian.${info.id}`} title={info.label} summary={summary}>
@@ -136,6 +153,9 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       />
       <span style={hintStyle}>The address you open {info.label} at, including any path after the host name.</span>
 
+      {viaGateway && (
+        <span style={hintStyle}>Signing in through the API gateway below — the password is not used.</span>
+      )}
       <label htmlFor={id('token')} style={labelStyle()}>
         {info.tokenLabel}
       </label>
@@ -201,6 +221,15 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         </span>
       )}
 
+      {props.gateway !== undefined && props.onSaveGateway !== undefined && props.onClearGatewaySecret !== undefined && (
+        <AutosysGatewaySection
+          gateway={props.gateway}
+          savedTick={props.savedTick}
+          onSave={props.onSaveGateway}
+          onClearSecret={props.onClearGatewaySecret}
+        />
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
           type="button"
@@ -213,9 +242,9 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={props.testing || props.settings.baseUrl.length === 0 || !props.hasToken}
+          disabled={props.testing || props.settings.baseUrl.length === 0 || !credentialStored}
           title={
-            props.settings.baseUrl.length === 0 || !props.hasToken
+            props.settings.baseUrl.length === 0 || !credentialStored
               ? 'Save the site address and a token first'
               : 'Checks the address, the certificate and the token, and says who it connects as'
           }

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { replaceFile } from '@light-code/core'
 import path from 'node:path'
 import type { SecretStore } from '@light-code/core'
 
@@ -51,7 +52,7 @@ export class FileSecretStore implements SecretStore {
       // which would leave a window where the file exists and is world-readable.
       const temp = `${this.filePath}.${process.pid}.tmp`
       await fs.writeFile(temp, JSON.stringify(secrets, null, 2), { encoding: 'utf8', mode: 0o600 })
-      await fs.rename(temp, this.filePath)
+      await replaceFile(temp, this.filePath)
     })
     return this.queue
   }

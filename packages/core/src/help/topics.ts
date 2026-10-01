@@ -600,6 +600,7 @@ There is no tool that changes a job's configuration.
       'autosys', 'workload automation', 'wcc', 'jil', 'sendevent', 'autorep', 'force start',
       'force_startjob', 'on hold', 'on ice', 'kill job', 'change status', 'job definition',
       'job dependencies', 'condition', 'box', 'why has my job not started', 'job failed', 'job log',
+      'apigee', 'gateway', 'token url', 'client id', 'client secret', 'oauth',
     ],
     body: `
 **Settings → DevOps → AutoSys**: the web services address (for example
@@ -608,7 +609,20 @@ job pattern such as \`PAY_*\`, a CA file and the skip-verify escape hatch. Off u
 **user-scope only** (config:autosys). The password is kept in secure storage. **Test connection**
 signs in without listing any jobs.
 
-It talks to AutoSys's REST web services (AEWS) with HTTP Basic. Paths follow the documented layout
+**Behind an API gateway (Apigee)?** Open **API gateway (Apigee)** in the same panel and tick
+"Sign in through the gateway". Enter the **token URL** (where the token is issued — usually a
+different address from the AutoSys API), the **client id** and **client secret** (kept in secure
+storage), and a scope if the gateway asks for one. A token is fetched with those, kept in memory
+only, renewed before it expires, and sent with every call to the site address — the username and
+password are then not used. The **client certificate** comes from Settings → Network unless you
+name one under *Client certificate* (certificate and key, or a PFX, plus a passphrase); the same
+certificate is presented to the token URL and to the API. If the token request is refused with 401
+and the secret is right, switch *How the client id and secret are sent* between the request body
+and a Basic header — gateways differ. *Advanced* covers the grant type, where the token and its
+expiry sit in the response, the header and prefix it is sent with, extra headers (an API key, say)
+and extra token parameters (config:autosys).
+
+Without a gateway, it talks to AutoSys's REST web services (AEWS) with HTTP Basic. Paths follow the documented layout
 (\`/AEWS/job\`, \`/AEWS/job-run-info\`, \`/AEWS/event\`, \`/AEWS/jil\`); a server that answers
 elsewhere can be pointed at with config:autosys (paths) — one template each for jobs, job,
 runInfo, jobRunInfo, boxMembers, event, jil and log.
@@ -1063,10 +1077,18 @@ walkthrough, whose steps link straight into the tab each one is about. On the No
       // topic at all - so the best score was body noise from somewhere unrelated.
       'nothing happens', 'nothing happened', 'no response', 'stuck', 'hangs', 'hung', 'frozen',
       'silent', 'crashed', 'stopped', 'ripgrep', 'rg', 'lightcode folder',
+      'eperm', 'ebusy', 'could not save', 'permission denied saving', 'operation not permitted',
       // Settings saved in one window and missing in another: a window runs the version it started with.
       'another window', 'other window', 'second window', 'not reflecting', 'not showing',
     ],
     body: `
+**"EPERM" (or EBUSY) naming config.json when saving.** On Windows a file cannot be replaced while
+another program has it open — another VS Code window loading the same settings, antivirus checking
+the write that just happened, or OneDrive syncing the folder. Saves retry for a few seconds, which
+covers nearly all of it; if one still fails the message says so, the previous settings are intact,
+and saving again works. If it keeps happening, exclude the settings folder from the sync tool or
+the antivirus scan.
+
 **A setting saved in one VS Code window does not show in another** — every window of the same VS Code
 shares one settings file and one token store, but a window keeps running the Light Code version it
 started with until it is reloaded. After an update, run **Developer: Reload Window** in each open

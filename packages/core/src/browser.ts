@@ -121,6 +121,8 @@ export type {
   AtlassianProductId,
   AtlassianProductStatus,
   AtlassianSettingsView,
+  AutosysGatewaySettings,
+  AutosysGatewayView,
 } from './agent/protocol.js'
 
 /** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */

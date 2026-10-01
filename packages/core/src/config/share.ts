@@ -405,7 +405,10 @@ function secretRefsFor(section: ShareSection, config: LightCodeConfig): string[]
       if (config.jira?.tokenRef !== undefined) refs.push('Jira: personal access token')
       if (config.bitbucket?.tokenRef !== undefined) refs.push('Bitbucket: personal access token')
       if (config.jenkins?.tokenRef !== undefined) refs.push('Jenkins: API token and user id')
-      if (config.autosys?.tokenRef !== undefined) refs.push('AutoSys: username and password')
+      if (config.autosys?.auth?.type === 'apigee') {
+        refs.push('AutoSys: gateway client secret')
+        if (config.autosys.auth.passphraseRef !== undefined) refs.push('AutoSys: client certificate passphrase')
+      } else if (config.autosys?.tokenRef !== undefined) refs.push('AutoSys: username and password')
       break
     case 'network':
       if (config.tls?.passphraseRef !== undefined) refs.push('Global client key: passphrase')

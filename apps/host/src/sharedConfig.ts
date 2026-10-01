@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { replaceFile } from '@light-code/core'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -145,7 +146,7 @@ export class SharedConfigStore {
       encoding: 'utf8',
       mode: 0o600,
     })
-    await fs.rename(temporary, this.filePath)
+    await replaceFile(temporary, this.filePath)
     this.cache = merged
     return merged
   }

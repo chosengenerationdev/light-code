@@ -2239,6 +2239,21 @@ export function App(props: AppProps): ReactElement {
               },
               onClearToken: (product) =>
                 props.transport.post({ type: 'clearAtlassianToken', product } satisfies UiToHostMessage),
+              onSaveGateway: (gateway, clientSecret, passphrase) => {
+                setAtlassianTests((tests) => {
+                  const { autosys: _cleared, ...rest } = tests
+                  void _cleared
+                  return rest
+                })
+                props.transport.post({
+                  type: 'saveAutosysGateway',
+                  gateway,
+                  ...(clientSecret !== undefined ? { clientSecret } : {}),
+                  ...(passphrase !== undefined ? { passphrase } : {}),
+                } satisfies UiToHostMessage)
+              },
+              onClearGatewaySecret: (which) =>
+                props.transport.post({ type: 'clearAutosysGatewaySecret', which } satisfies UiToHostMessage),
               onTest: (product) => {
                 setAtlassianTesting((testing) => ({ ...testing, [product]: true }))
                 setAtlassianTests((tests) => ({ ...tests, [product]: undefined }))

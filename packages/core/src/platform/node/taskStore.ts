@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { replaceFile } from './replaceFile.js'
 import path from 'node:path'
 import type { TruncationStore } from '../../agent/truncate.js'
 import { taskSummary, type Task, type TaskStore, type TaskSummary } from '../../history/types.js'
@@ -68,7 +69,7 @@ export class JsonTaskStore implements TaskStore {
     const target = this.fileFor(task.id)
     const temporary = `${target}.tmp`
     await fs.writeFile(temporary, JSON.stringify(task, null, 2), 'utf8')
-    await fs.rename(temporary, target)
+    await replaceFile(temporary, target)
 
     const index = await this.readIndex()
     const entry: IndexEntry = { ...taskSummary(task), workspaceRoot: task.workspaceRoot }
@@ -136,7 +137,7 @@ export class JsonTaskStore implements TaskStore {
     const target = path.join(this.directory, INDEX_FILE)
     const temporary = `${target}.tmp`
     await fs.writeFile(temporary, JSON.stringify(entries, null, 2), 'utf8')
-    await fs.rename(temporary, target)
+    await replaceFile(temporary, target)
   }
 }
 

@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
+import { AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView } from '../atlassian/autosysGateway.js'
+import type { AutosysGatewaySettings } from '../agent/protocol.js'
+import type { TlsOptions } from '../platform/http.js'
 import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
@@ -7024,12 +7028,93 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * demand. TLS goes through the one resolver every connection uses (§10, "do not add a fifth
    * place to configure a CA"), so the corporate root set once in Network covers all three sites.
    */
+  /**
+   * The gateway token strategy for AutoSys, kept across calls so its token is reused and refreshed
+   * proactively rather than fetched per request. Keyed on everything that would change what is
+   * fetched; a rotated secret keeps the key (the ref is unchanged), so a save drops it explicitly.
+   */
+  let autosysGateway: { key: string; strategy: ApigeeMtlsAuthStrategy } | undefined
+
+  async function autosysGatewayAuth(
+    config: LightCodeConfig,
+    tls: TlsOptions | undefined,
+  ): Promise<ApigeeMtlsAuthStrategy> {
+    const auth = config.autosys?.auth ?? {}
+    if (auth.tokenUrl === undefined) {
+      throw new AtlassianError('AutoSys uses the API gateway but no token URL is set. Settings → DevOps → AutoSys → API gateway: enter it and save.')
+    }
+    if (auth.clientId === undefined || auth.clientSecretRef === undefined) {
+      throw new AtlassianError('AutoSys uses the API gateway but the client id or secret is missing. Settings → DevOps → AutoSys → API gateway: enter both and save.')
+    }
+    const key = JSON.stringify({ auth, baseUrl: config.autosys?.baseUrl, tls: tls === undefined ? 0 : createHash('sha256').update(JSON.stringify(tls)).digest('hex') })
+    if (autosysGateway?.key === key) return autosysGateway.strategy
+    const secretRef = auth.clientSecretRef
+    const strategy = new ApigeeMtlsAuthStrategy(
+      httpClient,
+      {
+        tokenUrl: auth.tokenUrl,
+        clientId: auth.clientId,
+        // Read per token request, so a rotated secret applies at the next refresh (§15).
+        resolveClientSecret: async () => secrets.get(secretRef),
+        ...(auth.grantType !== undefined ? { grantType: auth.grantType } : {}),
+        ...(auth.scope !== undefined ? { scope: auth.scope } : {}),
+        ...(auth.clientAuthentication !== undefined ? { clientAuthentication: auth.clientAuthentication } : {}),
+        ...(auth.extraTokenParams !== undefined ? { extraTokenParams: auth.extraTokenParams } : {}),
+        ...(auth.tokenPath !== undefined ? { tokenPath: auth.tokenPath } : {}),
+        ...(auth.expiresInPath !== undefined ? { expiresInPath: auth.expiresInPath } : {}),
+        ...(auth.fallbackExpirySeconds !== undefined ? { fallbackExpirySeconds: auth.fallbackExpirySeconds } : {}),
+        ...(auth.refreshSkewSeconds !== undefined ? { refreshSkewSeconds: auth.refreshSkewSeconds } : {}),
+        ...(auth.tokenHeaderName !== undefined ? { tokenHeaderName: auth.tokenHeaderName } : {}),
+        ...(auth.tokenHeaderPrefix !== undefined ? { tokenHeaderPrefix: auth.tokenHeaderPrefix } : {}),
+        ...(auth.extraHeaders !== undefined ? { extraHeaders: auth.extraHeaders } : {}),
+      },
+      config.autosys?.baseUrl ?? auth.tokenUrl,
+      // The same certificate for the token request as for the API: one gateway, one identity.
+      async () => tls,
+    )
+    autosysGateway = { key, strategy }
+    return strategy
+  }
+
   async function atlassianConnection(product: AtlassianProductId): Promise<AtlassianConnection> {
     const info = atlassianProduct(product)
     const { config } = await configManager.load()
     const settings = config[product]
     if (settings?.baseUrl === undefined) {
       throw new AtlassianError(`${info.label} is not set up. Settings → DevOps → ${info.label}: enter the site address.`)
+    }
+    if (product === 'autosys' && config.autosys?.auth?.type === 'apigee') {
+      /*
+       * Through the gateway: no password, no user name — the token carries the identity. Client
+       * certificate material is resolved by the one TLS resolver like every other connection, so
+       * the machine certificate in Settings → Network applies unless this names its own.
+       */
+      const auth = config.autosys.auth
+      const passphraseRef = auth.passphraseRef ?? config.tls?.passphraseRef
+      const tls = await resolveConnectionTls({
+        ...(config.tls !== undefined ? { global: config.tls } : {}),
+        connection: {
+          ...(config.autosys.caFile !== undefined ? { caFile: config.autosys.caFile } : {}),
+          ...(config.autosys.rejectUnauthorized !== undefined ? { rejectUnauthorized: config.autosys.rejectUnauthorized } : {}),
+          ...(auth.certFile !== undefined ? { certFile: auth.certFile } : {}),
+          ...(auth.keyFile !== undefined ? { keyFile: auth.keyFile } : {}),
+          ...(auth.pfxFile !== undefined ? { pfxFile: auth.pfxFile } : {}),
+          ...(auth.useGlobalClientCertificate !== undefined ? { useGlobalClientCertificate: auth.useGlobalClientCertificate } : {}),
+        },
+        ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+        ...(passphraseRef !== undefined ? { passphrase: await secrets.get(passphraseRef) } : {}),
+        onPaths: (paths) => {
+          void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch((error: unknown) => {
+            logger.warn('could not add cert path to the deny list', String(error))
+          })
+        },
+      })
+      return {
+        baseUrl: settings.baseUrl,
+        token: '',
+        auth: await autosysGatewayAuth(config, tls),
+        ...(tls !== undefined ? { tls } : {}),
+      }
     }
     const token = settings.tokenRef !== undefined ? await secrets.get(settings.tokenRef) : undefined
     if (token === undefined || token.length === 0) {
@@ -7111,6 +7196,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           defaults,
         },
         hasToken,
+        ...(info.id === 'autosys'
+          ? {
+              gateway: gatewayView(
+                config.autosys?.auth,
+                ((await secrets.get(AUTOSYS_CLIENT_SECRET_REF)) ?? '').length > 0,
+                ((await secrets.get(AUTOSYS_PASSPHRASE_REF)) ?? '').length > 0,
+              ),
+            }
+          : {}),
       }
     }
     post({ type: 'atlassian', products })
@@ -7146,8 +7240,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         const value = (input.defaults[field.key] ?? '').trim()
         if (value.length > 0) defaults[field.key] = value
       }
+      const before = (await configManager.load()).config
       await configManager.save('user', {
         [product]: {
+          /*
+           * Settings this form does not show, carried through: the save replaces the whole block,
+           * so without this every save of the AutoSys form erased its gateway sign-in and any
+           * hand-set request paths.
+           */
+          ...(product === 'autosys' && before.autosys?.auth !== undefined ? { auth: before.autosys.auth } : {}),
+          ...(product === 'autosys' && before.autosys?.paths !== undefined ? { paths: before.autosys.paths } : {}),
           enabled: input.enabled,
           ...(baseUrl.length > 0 ? { baseUrl } : {}),
           ...(stored ? { tokenRef: info.tokenRef } : {}),
@@ -7163,6 +7265,50 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
+  }
+
+  async function handleSaveAutosysGateway(
+    input: AutosysGatewaySettings,
+    clientSecret: string | undefined,
+    passphrase: string | undefined,
+  ): Promise<void> {
+    try {
+      if (clientSecret !== undefined && clientSecret.trim().length > 0) await secrets.set(AUTOSYS_CLIENT_SECRET_REF, clientSecret.trim())
+      if (passphrase !== undefined && passphrase.length > 0) await secrets.set(AUTOSYS_PASSPHRASE_REF, passphrase)
+      const result = gatewayFromSettings(input, {
+        clientSecret: ((await secrets.get(AUTOSYS_CLIENT_SECRET_REF)) ?? '').length > 0,
+        passphrase: ((await secrets.get(AUTOSYS_PASSPHRASE_REF)) ?? '').length > 0,
+      })
+      if ('error' in result) {
+        post({ type: 'error', message: `AutoSys gateway: ${result.error}` })
+        return
+      }
+      const { config } = await configManager.load()
+      await configManager.save('user', { autosys: { ...(config.autosys ?? {}), auth: result.auth } })
+      // A new client, URL or certificate means the cached token was issued for something else.
+      autosysGateway = undefined
+      await loadSettings()
+      await postAtlassian()
+      post({ type: 'atlassianSaved', product: 'autosys' })
+    } catch (error) {
+      post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async function handleClearAutosysGatewaySecret(which: 'clientSecret' | 'passphrase'): Promise<void> {
+    await secrets.delete(which === 'clientSecret' ? AUTOSYS_CLIENT_SECRET_REF : AUTOSYS_PASSPHRASE_REF)
+    const { config } = await configManager.load()
+    const auth = config.autosys?.auth
+    if (auth !== undefined) {
+      const { [which === 'clientSecret' ? 'clientSecretRef' : 'passphraseRef']: _dropped, ...rest } = auth
+      void _dropped
+      // Without its secret the gateway cannot sign in; switching back to basic says so plainly.
+      const next = which === 'clientSecret' ? { ...rest, type: 'basic' as const } : rest
+      await configManager.save('user', { autosys: { ...(config.autosys ?? {}), auth: next } })
+    }
+    autosysGateway = undefined
+    await loadSettings()
+    await postAtlassian()
   }
 
   async function handleClearAtlassianToken(product: AtlassianProductId): Promise<void> {
@@ -7189,7 +7335,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             : product === 'jenkins'
               ? await (await jenkinsClient()).currentUser()
               : product === 'autosys'
-                ? await (await autosysClient()).probe((await configManager.load()).config.autosys?.username ?? '')
+                ? (await configManager.load()).config.autosys?.auth?.type === 'apigee'
+                  ? `the gateway client ${(await (await autosysClient()).probe((await configManager.load()).config.autosys?.auth?.clientId ?? ''))}`
+                  : await (await autosysClient()).probe((await configManager.load()).config.autosys?.username ?? '')
                 : await (await bitbucketClient()).currentUser()
       post({ type: 'atlassianTest', product, ok: true, detail: `Connected as ${who}.` })
     } catch (error) {
@@ -11300,6 +11448,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('postAtlassian', postAtlassian())
     } else if (message.type === 'saveAtlassian') {
       reportFailure('handleSaveAtlassian', handleSaveAtlassian(message.product, message.settings, message.token))
+    } else if (message.type === 'saveAutosysGateway') {
+      reportFailure('handleSaveAutosysGateway', handleSaveAutosysGateway(message.gateway, message.clientSecret, message.passphrase))
+    } else if (message.type === 'clearAutosysGatewaySecret') {
+      reportFailure('handleClearAutosysGatewaySecret', handleClearAutosysGatewaySecret(message.which))
     } else if (message.type === 'clearAtlassianToken') {
       reportFailure('handleClearAtlassianToken', handleClearAtlassianToken(message.product))
     } else if (message.type === 'testAtlassian') {

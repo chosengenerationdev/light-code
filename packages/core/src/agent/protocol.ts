@@ -61,6 +61,38 @@ export interface AtlassianSettingsView {
 export interface AtlassianProductStatus {
   settings: AtlassianSettingsView
   hasToken: boolean
+  /** AutoSys only: its API-gateway sign-in. Secrets appear only as whether one is stored. */
+  gateway?: AutosysGatewayView
+}
+
+/**
+ * AutoSys through an API gateway (Apigee): a token from `tokenUrl` with a client id and secret,
+ * sent to the AutoSys API. Header and token-parameter maps travel as `Name: value` / `key=value`
+ * lines, which is how they are typed.
+ */
+export interface AutosysGatewaySettings {
+  enabled: boolean
+  tokenUrl: string
+  clientId: string
+  scope: string
+  grantType: string
+  /** Client id and secret as form fields or as an HTTP Basic header on the token request. */
+  clientAuthentication: 'body' | 'header'
+  tokenPath: string
+  expiresInPath: string
+  tokenHeaderName: string
+  tokenHeaderPrefix: string
+  extraHeaders: string
+  extraTokenParams: string
+  certFile: string
+  keyFile: string
+  pfxFile: string
+  useGlobalClientCertificate: boolean
+}
+
+export interface AutosysGatewayView extends AutosysGatewaySettings {
+  hasClientSecret: boolean
+  hasPassphrase: boolean
 }
 
 export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data' | 'teamSkills'
@@ -789,6 +821,9 @@ export type UiToHostMessage =
    */
   | { type: 'saveAtlassian'; product: AtlassianProductId; settings: AtlassianSettingsView; token?: string }
   | { type: 'clearAtlassianToken'; product: AtlassianProductId }
+  /** Blank secrets mean "keep the stored one" (invariant 7); removing is its own message. */
+  | { type: 'saveAutosysGateway'; gateway: AutosysGatewaySettings; clientSecret?: string; passphrase?: string }
+  | { type: 'clearAutosysGatewaySecret'; which: 'clientSecret' | 'passphrase' }
   | { type: 'testAtlassian'; product: AtlassianProductId }
   /**
    * Creates the standing-instructions skill and opens it, or just opens it if it exists.

@@ -1,4 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
+import { replaceFile } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -60,14 +61,14 @@ export class FileConfigStore implements ConfigStore {
     // certificate path, which is not something to leave world-readable on a shared server.
     const temporary = `${filePath}.${process.pid.toString(36)}.tmp`
     await fs.writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 })
-    await fs.rename(temporary, filePath)
+    await replaceFile(temporary, filePath)
 
     // Written after the live file and from the same contents, so it exists from the first
     // save onward. See the VS Code store for why copying the previous file is not enough.
     try {
       const backupTemp = `${configBackupPath(filePath)}.tmp`
       await fs.writeFile(backupTemp, contents, { encoding: 'utf8', mode: 0o600 })
-      await fs.rename(backupTemp, configBackupPath(filePath))
+      await replaceFile(backupTemp, configBackupPath(filePath))
     } catch {
       // The live file is written; a missing backup costs recoverability, not correctness.
     }
