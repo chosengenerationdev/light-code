@@ -19,6 +19,17 @@
   ]]></description>
 
   <!--
+    The icons are the VS Code extension's own: META-INF/pluginIcon.svg is its listing icon, and the
+    tool window uses the activity-bar glyph, with a _dark variant the IDE picks for dark themes.
+  -->
+  <change-notes><![CDATA[
+    <ul>
+      <li>The Light Code icon in the Marketplace, the plugin list and the tool window.</li>
+      <li>Installs into every IntelliJ IDEA and PyCharm release from 2023.2 on; 0.1.0 refused anything newer than 2025.1.</li>
+    </ul>
+  ]]></change-notes>
+
+  <!--
     Only the platform. This plugin deliberately depends on nothing language-specific, so the same
     build installs into IDEA, PyCharm, GoLand and the rest — the assistant is about the files in
     the project, not about which language the IDE specialises in.
@@ -30,7 +41,7 @@
       id="Light Code"
       anchor="right"
       factoryClass="dev.chosengeneration.lightcode.LightCodeToolWindow"
-      icon="AllIcons.Toolwindows.ToolWindowMessages" />
+      icon="/icons/toolWindow.svg" />
 
     <applicationConfigurable
       parentId="tools"
