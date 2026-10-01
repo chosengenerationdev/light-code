@@ -9,7 +9,7 @@ import {
   validateMcpServerForm,
   venvPython,
 } from '@light-code/core/browser'
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { TrashIcon } from '../icons.js'
 import {
   colors,
@@ -29,6 +29,12 @@ export interface McpServerFormProps {
   /** Empty for a new server. */
   initialName: string
   initialConfig: McpServerConfig | undefined
+  /**
+   * Set when this new server starts as a copy of an existing one: the form is prefilled with that
+   * server's settings under `suggestedName`, and saving creates a new entry rather than renaming.
+   */
+  cloneOf?: string | undefined
+  suggestedName?: string | undefined
   existingNames: string[]
   platform: McpPlatform
   saving: boolean
@@ -186,7 +192,17 @@ function PairEditor(props: {
  * principle as the approval prompt: what you approve is what runs, not a description of it.
  */
 export function McpServerForm(props: McpServerFormProps): ReactElement {
-  const [name, setName] = useState(props.initialName)
+  const [name, setName] = useState(props.suggestedName ?? props.initialName)
+  /*
+   * What the probe and the picker held when this form opened.
+   *
+   * Both live in the app above the form and outlive it, so a new form mounted with the *previous*
+   * form's last detected interpreter and last browsed file — and copied them in. Reported as "it
+   * always shows the script that I previously added". Only a value that changes while this form
+   * is open is this form's.
+   */
+  const probeAtOpen = useRef(props.probe)
+  const pickedAtOpen = useRef(props.pickedPath)
   const [form, setForm] = useState<McpForm>(() =>
     props.initialConfig !== undefined ? toMcpServerForm(props.initialConfig) : BLANK_MCP_FORM,
   )
@@ -198,6 +214,7 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
    * ordinary editable input, so correcting it is typing over it, not fighting it.
    */
   useEffect(() => {
+    if (props.probe === probeAtOpen.current) return
     const found = props.probe?.interpreter
     if (found === undefined) return
     setForm((current) => ({
@@ -213,6 +230,7 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
    * open and there is nothing reliable to come back to.
    */
   useEffect(() => {
+    if (props.pickedPath === pickedAtOpen.current) return
     const picked = props.pickedPath
     if (picked === undefined) return
     const field = ({
@@ -248,7 +266,11 @@ export function McpServerForm(props: McpServerFormProps): ReactElement {
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily }}>
       <h3 style={{ margin: '0 0 12px', color: colors.foreground }}>
-        {props.initialName.length === 0 ? 'Add MCP server' : `Edit ${props.initialName}`}
+        {props.cloneOf !== undefined
+          ? `Clone ${props.cloneOf}`
+          : props.initialName.length === 0
+            ? 'Add MCP server'
+            : `Edit ${props.initialName}`}
       </h3>
 
       <Field

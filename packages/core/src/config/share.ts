@@ -45,6 +45,7 @@ import type { LightCodeConfig } from './schema.js'
 
 export type ShareSectionId =
   | 'profiles'
+  | 'project'
   | 'mcpServers'
   | 'search'
   | 'agents'
@@ -108,6 +109,20 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     label: 'Providers',
     description: 'Gateways, models and wire formats. API keys are not included.',
     keys: ['profiles', 'activeProfileId', 'programmingProfileId'],
+  },
+  {
+    id: 'project',
+    label: 'Project name and search scope',
+    description:
+      "This project's name — which labels new skills and tools and leads index names — and its default " +
+      'search scope. Imported into the project you have open, not as a default for every project.',
+    /*
+     * Stored per project (under `workspaces`), so the export carries the *open* project's values —
+     * the merged config the host passes in already holds them under `project` — and the host
+     * writes an import back to the open project rather than to the user's global settings. The
+     * author is not here: it names a person, which is `identity` and never shared.
+     */
+    keys: ['project'],
   },
   {
     id: 'mcpServers',
@@ -265,9 +280,6 @@ export const NEVER_SHARED: readonly (keyof LightCodeConfig)[] = [
   // Labels everything this machine writes to a shared index. Importing one attributes your work
   // to somebody else, and nothing downstream would ever question it (§12e).
   'identity',
-  // Set per project and stored under `workspaces`; a top-level value would name every project the
-  // same, and an imported one would label this machine's work with somebody else's project.
-  'project',
 ]
 
 export interface SectionSummary {

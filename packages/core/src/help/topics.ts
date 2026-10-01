@@ -329,6 +329,10 @@ command, using config:python (indexUrl). A tool waiting for approval that cannot
 exists shows an **Install** button beside it. Nothing is installed into an interpreter Light Code did
 not create.
 
+**The Python tab shows your saved settings when it opens** — it used to say Python tools were off,
+with nothing listed, until a message had been sent. Tools kept in a bucket appear once its folder
+has synced.
+
 **Reviewing a tool** shows its source syntax-highlighted. Approving loads each tool to make sure it
 runs, a few seconds apiece, so the panel shows a spinner on the one being checked, "Checking 2 of 5"
 and a progress bar.
@@ -353,7 +357,7 @@ definitions have to stay stable for a whole turn or the prompt cache is thrown a
   {
     id: 'mcp',
     title: 'MCP servers',
-    keywords: ['mcp', 'server', 'stdio', 'http', 'tools', 'npx', 'timeout', 'disable'],
+    keywords: ['mcp', 'server', 'stdio', 'http', 'tools', 'npx', 'timeout', 'disable', 'clone', 'copy server', 'duplicate'],
     body: `
 **Settings → MCP.** The config shape is the standard \`mcpServers\` one, so a config copied from
 another client can be pasted unchanged. Transport is inferred: \`command\` means stdio, \`url\`
@@ -362,6 +366,11 @@ means Streamable HTTP.
 Servers connect **when the Light Code panel opens**, not at editor startup, and their health is
 shown in the tab with a restart button. A mistyped command tells you so immediately rather than
 the first time something happens to need it.
+
+**Adding a server** starts from an empty form every time — a script browsed for, or an interpreter
+detected, for the previous server is not carried over. **Clone** on a server opens the form filled
+with that server's settings under a new name (\`name-copy\`); nothing is created until you save,
+which is how to set up a second server that differs by an argument or a folder.
 
 **Every tool is namespaced** (\`filesystem__read_file\`), because collisions between servers are
 inevitable.
@@ -556,6 +565,11 @@ codebase aliases** (with "Attach alias to my existing index"), and **Team skills
 sending your skills, and testing what colleagues can see. Each box saves on its own. Team names
 work on OpenSearch only.
 
+**Export and import.** "Share settings with your team" has a *Project name and search scope*
+section: exported from the project you have open, and imported into the project open on the other
+machine — never as a default for every project. The author is never exported. The index prefix and
+team aliases travel in the search section.
+
 **Searches stay in this project** — or whatever **Search scope** is set to on the Project tab:
 *This project*, *Only mine* (what you wrote, in any project) or *Everything*, saved per project in
 config:project (searchScope). \`search_docs\` and \`search_team_skills\` return this project's
@@ -637,9 +651,13 @@ one with an \`ac:image\` element naming the attachment.
 Python, buckets, Confluence and more. The assistant can write the same file with
 \`light_code_export_config\` for a guide or a page.
 
-**Never in the file**: any secret (API keys, passwords, tokens), approvals, per-project settings and
-identity. Index names that identify one person are stripped from the search section, because
-everyone must publish to their own collection.
+**Never in the file**: any secret (API keys, passwords, tokens), approvals, other per-project settings,
+and identity (the author). Index names that identify one person are stripped from the search section,
+because everyone must publish to their own collection.
+
+**Project name and search scope** are a section of their own. They are exported from the project you
+have open, and an import applies them **to the project open on the importing machine** — never as a
+default for every project. The index prefix and team aliases travel in the search section.
 
 **Each colleague then:**
 1. Settings → Providers → Share settings with your team → **Import**, choose the file, pick the
@@ -663,7 +681,7 @@ desktops of the same person; importing the file is how a second machine is set u
       'schedule', 'cron', 'timer', 'unattended', 'background', 'notify', 'report',
       // The words people use for it. Nobody types "unattended"; they type "every morning".
       'every morning', 'every day', 'daily', 'nightly', 'weekly', 'recurring', 'automatically',
-      'repeat', 'regularly',
+      'repeat', 'regularly', 'run now', 'play button', 'did not run', 'nothing happened',
     ],
     body: `
 **Settings → Schedules**, or ask the assistant to set one up and approve the result.
@@ -686,6 +704,12 @@ marked as such, so it reports what it needed instead of spending a step being re
 windows open on the same project do not both fire it. A claim from a crashed window is taken over
 after an hour, because a nightly job that stops for ever and silently is worse than an occasional
 double run.
+
+**Run it now** with the play button on the schedule. If a reply is still in progress — easy to hit
+right after asking the assistant to create the schedule — the run waits for it and says so, rather
+than being skipped. You are told when it starts and when it finishes, with a link to open the run.
+**A run that hits an error is recorded as failed** with the reason, and you are notified: errors are
+kept off the chat while a run works in the background, but never out of its record.
 
 **A run's report is a file.** Put findings in \`notify\`'s details and keep the one-line message
 saying what happened — that line is all that appears on screen, and the report is read in the
@@ -918,6 +942,10 @@ detects that and says so in its own instructions.
 
 **An MCP server will not start** — the MCP tab keeps its stderr. A package-runner command needs the
 network when the panel opens.
+
+**The Python tab says Python tools are off, or lists none, although they are on** — fixed: the tab
+now applies your saved settings when it opens. If it still says so, check config:python (dynamicTools)
+is \`on\` and a folder is open; tools kept in a bucket are listed once the bucket folder has synced.
 
 **A Python tool will not run** — it is probably unapproved. One that arrived from a bucket or a
 repository has no registry entry on this machine and stays inert until you read its source and say

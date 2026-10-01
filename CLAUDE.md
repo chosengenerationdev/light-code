@@ -1939,6 +1939,21 @@ skill, tool or index belonged to whom.
 - On the shared Node host, `runIndexRenames`, `runProjectStamp` and `installPythonPackages` are
   admin-only — none matches a mutating prefix, and all three write to what every user shares.
 
+- **Five reported faults (0.121.2).** (1) *Run did nothing in a demo.* A manual run hitting a busy
+  bridge — a reply still finishing, very likely the one that created the schedule — was skipped with
+  a log line; it now waits (up to 15 minutes) and says so, and announces start and finish. Worse:
+  `post` withholds `error` during a background run, and `handleSendMessage` reports failures as
+  messages rather than throwing, so **a failed run was recorded as a success** with an empty summary.
+  Errors are now collected (`backgroundRunErrors`) and turn the run into a failure with a
+  notification. (2) *Python tab "off" with tools on:* the manager was configured only on send, save or
+  decline; `requestPython` now configures from saved settings first (skipped mid-turn). (3) *MCP
+  add form showed the last script:* the last browsed path and detected interpreter live in the app
+  and outlive the form, and its effects applied them on mount; it now reacts only to changes made
+  while open. (4) *Clone* is a labelled button that opens the form prefilled under `name-copy`,
+  creating nothing until saved — the old icon-only Duplicate went unnoticed. (5) *Project settings in
+  export/import:* a `project` share section; the host writes an import to the **open project**
+  (`saveForWorkspace`) and keeps `project` out of the global save in every case. `reportedFixes.test.ts`
+  pins (1) and (2) by reading `bridge.ts`.
 - **Labelling never guesses author or project** (0.121.1, raised by the user: the existing files
   are mixed). The first version filled missing labels with *this machine's* author and project on
   every file in the folders we save to — which, once a publishing bucket became the save folder,
@@ -2753,6 +2768,14 @@ Primary development platform. These are silent-failure sources, not preferences.
 - Prefer fewer, more general tools over many narrow ones — it directly reduces context cost
   and improves selection accuracy.
 - New platform-specific behaviour goes behind an interface (§4), not inline.
+- **Every change updates Light Code's own help and, when settings change, export/import.** The
+  handbook (`help/topics.ts`) is what `light_code_help` repeats to users as fact, so a feature it does
+  not describe — or describes as it used to be — is answered wrongly. Add the questions people would
+  ask to `help/topics.test.ts`'s ranking table. Any new or moved setting must be reachable through
+  `config/share.ts` (a section, or `NEVER_SHARED` with the reason) and through the host's import —
+  including per-project values under `workspaces`, which need writing back to the open project, not
+  to global settings. Standing instruction from the user (2026-10-01); it is part of done, not a
+  follow-up.
 
 ### Commands
 
@@ -2844,8 +2867,8 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.121.1**, packaged and smoke-tested at
-`apps/vscode/light-code-vscode-0.121.1.vsix`, unpublished.
+until then, stale again. The local manifest is **0.121.2**, packaged and smoke-tested at
+`apps/vscode/light-code-vscode-0.121.2.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the
 gallery still returned 0.73.0 when queried minutes later; it appeared a few hours on. The same

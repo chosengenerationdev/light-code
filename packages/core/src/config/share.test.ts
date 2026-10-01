@@ -282,3 +282,26 @@ describe('what a team needs, and what only one person may have', () => {
     expect(search?.stripNote).toMatch(/index names/i)
   })
 })
+
+/**
+ * Settings → Project travels in an export (reported missing), and only the open project's values:
+ * the author names a person and stays out.
+ */
+describe('the project section', () => {
+  it('exports the project name and search scope, and never the author', () => {
+    const exported = buildExport(
+      { project: { name: 'Payments', searchScope: 'all' }, identity: { owner: 'ana' } } as never,
+      ['project'],
+    ) as Record<string, unknown>
+    expect(exported).toEqual({ project: { name: 'Payments', searchScope: 'all' } })
+  })
+
+  it('is written back to the open project by the host, not to global settings', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const bridge = fs.readFileSync(path.join(import.meta.dirname, '..', 'host', 'bridge.ts'), 'utf8')
+    const handler = bridge.slice(bridge.indexOf('async function handleImportConfig('))
+    expect(handler).toContain('const { project: importedProject, ...globalPart } = merged')
+    expect(handler).toContain('await configManager.saveForWorkspace({ project: importedProject ?? undefined })')
+  })
+})

@@ -1,5 +1,22 @@
 # light-code-vscode
 
+## 0.121.2
+
+### Patch Changes
+
+- **Running a schedule now always does something.** Pressing Run while a reply is still in progress
+  waits for it instead of being silently skipped, and you are told when the run starts and when it
+  finishes. A run that hits an error is recorded as failed, with the reason, and you are notified —
+  it used to be recorded as a success.
+- **The Python tab shows your tools when it opens.** It used to say Python tools were off, and list
+  nothing, until a message had been sent.
+- **Adding an MCP server starts from an empty form** instead of showing the previous server's script.
+- **Clone an MCP server** from its row: the form opens with its settings under a new name, and
+  nothing is created until you save.
+- **Export and import include the project name and search scope**, applied to the project open on
+  the importing machine.
+- The built-in help covers all of these.
+
 ## 0.121.1
 
 ### Patch Changes

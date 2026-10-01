@@ -1,7 +1,7 @@
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import type { McpPlatform, McpServerConfig, McpServerState, McpServerStatus, McpToolPermission } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
-import { CopyIcon, TrashIcon } from '../icons.js'
+import { TrashIcon } from '../icons.js'
 import {
   colors,
   fieldErrorStyle,
@@ -197,12 +197,12 @@ function ServerRow(props: {
         */}
         <button
           type="button"
-          aria-label={`Duplicate ${server.name}`}
-          title="Duplicate this server. The copy starts disabled so you can edit it first."
-          style={iconButtonStyle('ghost')}
+          aria-label={`Clone ${server.name}`}
+          title="Start a new server from this one's settings — nothing is created until you save"
+          style={secondaryButtonStyle()}
           onClick={() => props.onDuplicate(server.name)}
         >
-          <CopyIcon />
+          Clone
         </button>
         <button
           type="button"
@@ -310,11 +310,22 @@ function ServerRow(props: {
   )
 }
 
+/** `base`, or `base-2`, `base-3`… — the first a server is not already called. */
+function freeName(base: string, taken: readonly string[]): string {
+  if (!taken.includes(base)) return base
+  for (let index = 2; ; index += 1) {
+    const candidate = `${base}-${String(index)}`
+    if (!taken.includes(candidate)) return candidate
+  }
+}
+
 export function McpTab(props: McpTabProps): ReactElement {
   const [draft, setDraft] = useState(props.json)
   const [editing, setEditing] = useState(false)
   /** `''` means a new server; `undefined` means the form is closed. */
   const [formFor, setFormFor] = useState<string | undefined>(undefined)
+  /** The server a new one is being cloned from, when the form was opened by Clone. */
+  const [cloneFrom, setCloneFrom] = useState<string | undefined>(undefined)
   const [confirmDelete, setConfirmDelete] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
 
@@ -336,7 +347,10 @@ export function McpTab(props: McpTabProps): ReactElement {
     return (
       <McpServerForm
         initialName={formFor}
-        initialConfig={props.configs[formFor]}
+        initialConfig={cloneFrom !== undefined && formFor === '' ? props.configs[cloneFrom] : props.configs[formFor]}
+        {...(cloneFrom !== undefined && formFor === ''
+          ? { cloneOf: cloneFrom, suggestedName: freeName(`${cloneFrom}-copy`, props.servers.map((server) => server.name)) }
+          : {})}
         existingNames={props.servers.map((server) => server.name)}
         platform={props.platform}
         saving={saving}
@@ -442,7 +456,10 @@ export function McpTab(props: McpTabProps): ReactElement {
               onSetToolTimeout={props.onSetToolTimeout}
               onEdit={setFormFor}
               onDelete={setConfirmDelete}
-            onDuplicate={props.onDuplicateServer}
+            onDuplicate={(name) => {
+              setCloneFrom(name)
+              setFormFor('')
+            }}
             />
             {confirmDelete === server.name && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0 6px 22px', fontSize: 12 }}>
@@ -467,7 +484,14 @@ export function McpTab(props: McpTabProps): ReactElement {
       )}
 
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button type="button" style={primaryButtonStyle(false)} onClick={() => setFormFor('')}>
+        <button
+          type="button"
+          style={primaryButtonStyle(false)}
+          onClick={() => {
+            setCloneFrom(undefined)
+            setFormFor('')
+          }}
+        >
           Add server
         </button>
         <button

@@ -1910,12 +1910,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   function post(message: HostToUiMessage): void {
     // Only conversation traffic is withheld — see `backgroundMessages.ts` for why this is a
     // deny list rather than the allow list it started as.
-    if (backgroundRun && isTranscriptMessage(message.type)) return
+    if (backgroundRun && isTranscriptMessage(message.type)) {
+      // Withheld from the screen, never from the record: an error here is the run failing, and
+      // dropping it recorded a failed run as a success with nothing to say why.
+      if (message.type === 'error') backgroundRunErrors.push(message.message)
+      return
+    }
     transport.post(message)
   }
 
   /** True while a scheduled run is using the conversation, so the UI is not written to. */
   let backgroundRun = false
+  /** Errors a scheduled run raised while its conversation was hidden. See `post`. */
+  let backgroundRunErrors: string[] = []
 
   /**
    * True while the *user's* turn is in flight.
@@ -9256,6 +9263,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Brings the Python manager in line with saved settings before its status is shown.
+   *
+   * Reported: the Python tab said "Dynamic Python tools are off" and listed nothing, with them on.
+   * The manager was configured only when a message was sent, settings were saved, or a tool was
+   * declined — so a tab opened first after a reload showed the manager's starting state, not the
+   * settings. Cheap to repeat: an unchanged environment keeps its worker. Skipped mid-turn, because
+   * reconfiguring may restart the worker a turn is using.
+   */
+  async function configurePythonFromSettings(): Promise<void> {
+    if (userTurnRunning || runningScheduleId !== undefined) return
+    const config = await loadSettings()
+    await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
+  }
+
   async function postPython(): Promise<void> {
     const saved =
       (await configManager.load().then(
@@ -9992,10 +10014,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }),
       )
 
+      /*
+       * The project section belongs to the open project, never to global settings.
+       *
+       * It is stored per project; written at top level it would become every project's name. So
+       * `project` is kept out of the global save whether or not it was imported — `existing`
+       * holds the open project's values, and saving those globally would leak them too — and an
+       * imported one is written to this project's own settings.
+       */
+      const { project: importedProject, ...globalPart } = merged
       await configManager.save('user', {
-        ...merged,
+        ...globalPart,
         ...(merged.profiles === undefined ? {} : { profiles: reconciled }),
-      })
+      } as LightCodeConfig)
+      if (chosen.includes('project')) {
+        if (workspaceRoot === undefined) {
+          ui.showWarning('The project name and search scope were not imported: no folder is open to apply them to.')
+        } else {
+          await configManager.saveForWorkspace({ project: importedProject ?? undefined })
+          await postProject()
+        }
+      }
       await postProfiles()
       // The Agents tab lists these as the models a role can be given, so it goes stale the moment
       // the list changes — a provider added and then not offered reads as the tab being broken.
@@ -11399,7 +11438,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'deleteSkillFile') {
       reportFailure('handleDeleteSkillFile', handleDeleteSkillFile(message.name))
     } else if (message.type === 'requestPython') {
-      reportFailure('postPython', postPython())
+      reportFailure('postPython', configurePythonFromSettings().then(postPython))
     } else if (message.type === 'setPython') {
       reportFailure('handleSetPython', handleSetPython(message))
     } else if (message.type === 'requestNetwork') {
@@ -12123,6 +12162,31 @@ ${contents}
      */
     if (reason === 'due' && !(await claimSchedule(id))) return
 
+    /*
+     * A person pressed Run: it waits for what is in the way rather than being dropped.
+     *
+     * Reported from a demo: Run was pressed and nothing happened. A reply was still finishing —
+     * very likely the one that had just created the schedule — and a busy bridge skipped the run
+     * with a log line nobody sees. A due run may wait for the next tick; a person should be told
+     * what is happening and then get what they asked for.
+     */
+    if (reason === 'manual') {
+      const name = (await loadSchedules())[id]?.name ?? 'the schedule'
+      const busy = (): boolean => userTurnRunning || runningScheduleId !== undefined || scheduledRunInFlight !== undefined
+      if (busy()) {
+        ui.showInfo(
+          `"${name}" will run as soon as ${userTurnRunning ? 'the current reply finishes' : 'the schedule already running finishes'}.`,
+        )
+        const deadline = Date.now() + 15 * 60_000
+        while (busy() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 500))
+        if (busy()) {
+          ui.showWarning(`"${name}" did not run: Light Code was still busy after 15 minutes. Press Run again.`)
+          return
+        }
+      }
+      ui.showInfo(`Running "${name}" now — you will be told when it finishes.`)
+    }
+
     const run = runScheduleInner(id, reason)
     scheduledRunInFlight = run
     try {
@@ -12179,11 +12243,18 @@ ${contents}
     let result: 'ok' | 'error' = 'ok'
     let summary = ''
 
+    backgroundRunErrors = []
     try {
       await startNewTask()
       logger.info(`running schedule "${schedule.name}" (${reason})`)
       await handleSendMessage(schedule.prompt, undefined, schedule)
       summary = lastAssistantSummary()
+      // The turn reports its failures as messages rather than throwing; while the run is hidden
+      // they are collected instead, and a run that raised one did not succeed.
+      if (backgroundRunErrors.length > 0) throw new Error(backgroundRunErrors.join(' '))
+      if (reason === 'manual' && activeTaskId !== undefined) {
+        void openFromNotification(`"${schedule.name}" finished.`, 'info', activeTaskId)
+      }
     } catch (error) {
       result = 'error'
       summary = error instanceof Error ? error.message : String(error)
