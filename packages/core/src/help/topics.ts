@@ -994,6 +994,30 @@ useful use of it: the next step reads it before deciding what to do.
 `,
   },
   {
+    id: 'source-export',
+    title: 'Taking the Light Code source with you',
+    keywords: [
+      'export source', 'source code', 'export the source', 'build it myself', 'no github',
+      'offline development', 'zip of the project', 'work on light code', 'continue development',
+    ],
+    body: `
+The **export button beside Help** in the chat header (an arrow out of a box) saves the complete
+Light Code source as a zip — every app, CLAUDE.md, the build scripts and the lockfile — for working on
+Light Code where GitHub cannot be reached. It is the source of exactly the version you are running,
+packed when that version was built, so it needs no network to export.
+
+Extract it **to a short path** (C:\\src\\light-code, not deep inside Downloads): Windows will not
+start a program whose full path passes 260 characters, and the build tools sit deep in
+node_modules. Then open the folder in VS Code and follow **START_HERE.md**: Node 18 or newer, pnpm,
+\`pnpm install --ignore-scripts\` (from the npm registry or your organisation's mirror), then
+\`pnpm build\`, \`pnpm test\`, \`pnpm package\`. Start Claude Code in the folder; CLAUDE.md is the
+project's context and is read automatically.
+
+The export has no git history — START_HERE.md shows the three commands to begin a repository — and
+leaves out the demo animations. The Node host has its own \`--export-code\` for the Node half.
+`,
+  },
+  {
     id: 'checkpoints',
     /*
      * Not "undoing a change". A title word is weighted as though it were the subject, and

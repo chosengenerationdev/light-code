@@ -24,6 +24,7 @@
   -->
   <change-notes><![CDATA[
     <ul>
+      <li>No deprecated platform APIs (process listening uses ProcessListener).</li>
       <li>The Light Code icon in the Marketplace, the plugin list and the tool window.</li>
       <li>Installs into every IntelliJ IDEA and PyCharm release from 2023.2 on; 0.1.0 refused anything newer than 2025.1.</li>
     </ul>

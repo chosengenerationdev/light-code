@@ -175,6 +175,8 @@ describe('finding the right topic', () => {
       ['I pressed the play button on a schedule and it did not run', 'schedules'],
       ['why did my jenkins build fail', 'jenkins'],
       ['why has my autosys job not started', 'autosys'],
+      ['how do I export the source code to build it at work', 'source-export'],
+      ['I have no github access, can I continue development of light code', 'source-export'],
       ['I get EPERM when saving', 'troubleshooting'],
       ['error eperm operation not permitted on config.json', 'troubleshooting'],
       ['connect autosys through apigee with a client id and secret', 'autosys'],

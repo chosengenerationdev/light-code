@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.126.0
+
+### Minor Changes
+
+- An "Export source code" button beside Help saves the complete Light Code source as a zip — a project that opens in VS Code and builds as it stands, with a START_HERE.md — for continuing development where GitHub cannot be reached.
+
 ## 0.125.0
 
 ### Minor Changes

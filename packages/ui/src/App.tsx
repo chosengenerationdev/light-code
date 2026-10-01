@@ -65,7 +65,7 @@ import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
 import type { EmbedderState } from './settings/IndexingSection.js'
 import { HistoryList } from './history/HistoryList.js'
-import { BackIcon, HelpIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
+import { BackIcon, ExportSourceIcon, HelpIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
 import {
   applyAccent,
   applyAgentColor,
@@ -127,6 +127,8 @@ export function App(props: AppProps): ReactElement {
    * own Get Started page; a browser has none, so the UI shows the tour itself.
    */
   const [guide, setGuide] = useState<{ native: boolean; mediaBase?: string }>({ native: true })
+  /** Whether this host ships its own source as a zip — the VS Code extension does. */
+  const [exportsSource, setExportsSource] = useState(false)
   /*
    * Undefined until a host answers `requestVariables`. The VS Code bridge does not handle that
    * message, so the tab never appears there — the capability announces itself rather than being
@@ -598,6 +600,7 @@ export function App(props: AppProps): ReactElement {
           ...(message.theme === undefined ? {} : { theme: message.theme }),
         })
         setToolTimeoutSeconds(message.toolTimeoutSeconds)
+        setExportsSource(message.exportsSource === true)
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -1715,6 +1718,21 @@ export function App(props: AppProps): ReactElement {
             >
               <HelpIcon />
             </button>
+            {/*
+              Beside the guide, asked for there: somebody who cannot reach GitHub at work takes the
+              project with them as a zip that opens in VS Code and builds as it stands.
+            */}
+            {exportsSource && (
+              <button
+                type="button"
+                aria-label="Export source code"
+                title="Export the Light Code source code as a zip — a project you can open in VS Code and build"
+                style={iconButtonStyle('ghost')}
+                onClick={() => props.transport.post({ type: 'exportSource' } satisfies UiToHostMessage)}
+              >
+                <ExportSourceIcon />
+              </button>
+            )}
           </div>
         ) : (
           <button

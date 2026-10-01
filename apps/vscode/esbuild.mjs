@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import * as esbuild from 'esbuild'
+import { writeSourceArchive } from '../../scripts/source-archive.mjs'
 
 const watch = process.argv.includes('--watch')
 
@@ -144,6 +145,18 @@ if (watch) {
   await Promise.all(contexts.map((ctx) => ctx.dispose()))
   await copyRipgrepBinary()
   syncReadme()
+  writeSource()
+}
+
+/**
+ * The project's source as `dist/source.zip`, for the header's "Export source code" — somebody who
+ * cannot reach GitHub takes the project with them inside the extension they already have. Built
+ * here so every package carries the source of exactly that build; see scripts/source-archive.mjs.
+ */
+function writeSource() {
+  const version = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')).version
+  const result = writeSourceArchive(path.resolve('../..'), path.resolve('dist', 'source.zip'), version)
+  console.log(`[esbuild] source archive: ${result.files} files, ${Math.round(result.bytes / 1024)} KB`)
 }
 
 /**

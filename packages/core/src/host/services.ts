@@ -122,6 +122,15 @@ export interface WorkspaceState {
 }
 
 export interface HostServices {
+  /**
+   * The project's own source, zipped at build time, for "Export source code".
+   *
+   * Asked for by somebody who cannot reach GitHub from the office and wants to keep building this
+   * product there: the archive is a folder that opens in VS Code and builds as it stands. Built
+   * from the files git tracks, at package time, so it is exactly the source of this build. Absent
+   * hides the button — the Node host carries its own `--export-code` instead.
+   */
+  sourceArchive?: { path: string; defaultName: string } | undefined
   workspaceState: WorkspaceState
   transport: Transport
   /**

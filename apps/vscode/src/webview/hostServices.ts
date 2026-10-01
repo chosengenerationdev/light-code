@@ -1,3 +1,4 @@
+import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
@@ -139,5 +140,10 @@ export function createVSCodeHostServices(
      ripgrepPath: createRipgrepResolver(context.extensionPath, logger, { appRoot: vscode.env.appRoot }),
     logSink,
     readDebugSession,
+    // Built into dist/ by esbuild.mjs; the header offers to save it (scripts/source-archive.mjs).
+    sourceArchive: {
+      path: path.join(context.extensionPath, 'dist', 'source.zip'),
+      defaultName: `light-code-source-${String((context.extension.packageJSON as { version?: unknown }).version ?? 'dev')}.zip`,
+    },
   }
 }

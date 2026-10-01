@@ -18,7 +18,7 @@ const bannedNetworkImports = [
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/*.vsix', '**/*.d.ts'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/*.vsix', '**/*.d.ts', 'apps/host/light-code-pkg-*', 'apps/intellij/build/**', 'apps/intellij/.intellijPlatform/**', 'apps/intellij/.gradle/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

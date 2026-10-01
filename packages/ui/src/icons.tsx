@@ -386,6 +386,16 @@ export function HelpIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+/** Export the source — a box with an arrow out of it, for "take this project with you". */
+export function ExportSourceIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.6 7.2v5.4c0 .6.5 1.1 1.1 1.1h8.6c.6 0 1.1-.5 1.1-1.1V7.2" />
+      <path d="M8 1.8v7.6M5.2 4.6 8 1.8l2.8 2.8" />
+    </svg>
+  )
+}
+
 /** The tool catalogue — a toolbox, for the box everything is kept in. */
 export function ToolboxIcon({ size = 16 }: IconProps): ReactElement {
   return (

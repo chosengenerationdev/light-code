@@ -2088,6 +2088,36 @@ secret and certificates, used against another URL). `autosys.auth`, `atlassian/a
 **Not verified against a live gateway or AutoSys** — the flow is covered end to end against a fake
 that issues tokens at one host and serves the API at another.
 
+## 12w. The project carries its own source (0.126.0)
+
+Asked for: *"in my office i dont have access to github, i want to continue the building of this
+extension from my office"* — a button beside Help that exports the source as a compressed folder
+that opens in VS Code and builds, to carry on with Claude.
+
+- **Built at package time, copied at click time.** `scripts/source-archive.mjs` writes
+  `apps/vscode/dist/source.zip` from `esbuild.mjs`; the button (`exportSource`, shown when
+  `HostServices.sourceArchive` is set) only asks where to save and copies it. The extension has no
+  repository to read, and a zip made at build time is exactly the source of the running build.
+- **What git tracks plus new uncommitted files** (`ls-files --cached --others --exclude-standard`),
+  so `.gitignore` already excludes build output; minus `docs/gifs` (48 MB of demo animations) and
+  packaged artefacts. Without `.git` — an export being re-exported at the office — it walks the
+  tree with the same exclusions. The whole repository, unlike `apps/host/sourcePack.mjs`, which is
+  the Node half for `--export-code` and text-only.
+- **Zip, hand-written** (deflate + CRC table, fixed timestamps so an unchanged tree gives an
+  identical file): Windows opens it with nothing installed, and a library would be one more thing
+  the office build must fetch. Binary files go byte for byte — the icons are needed to package.
+- **`START_HERE.md` is generated into the folder**: Node and pnpm, `pnpm install --ignore-scripts`
+  (ripgrep is then absent, and the built-in search covers it), build/test/package, the host and
+  JetBrains builds, `git init` (the export has no history), and CLAUDE.md as the context.
+- **Verified by the round trip, which is the only real test**: extracted, installed, built, all
+  tests, packaged, VSIX smoke-tested. The first attempt "failed" with esbuild and rg `ENOENT` while
+  both files were present — the extraction path was past Windows' 260-character limit, which
+  CreateProcess reports as not found. Real at the office too, so `START_HERE.md` says to extract to
+  a short path. `sourceArchive.test.ts` pins the file list and reads the zip back with plain zlib;
+  the VSIX smoke test checks the archive is in the package.
+- **The JetBrains plugin had two deprecated-API uses** reported by Marketplace verification:
+  `ProcessAdapter`, replaced by implementing `ProcessListener` directly (0.2.2).
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2873,6 +2903,12 @@ Primary development platform. These are silent-failure sources, not preferences.
   to global settings. Standing instruction from the user (2026-10-01); it is part of done, not a
   follow-up.
 
+- **Versions: bump for every build that is handed over, and skip 66.** Never rebuild a VSIX, npm
+  package or plugin under a number that already left the machine — two different files with one
+  version cannot be told apart once installed. The user dislikes the number 66; when a bump would
+  land on it (in any manifest), go one further. (Standing preferences from the user, recorded here
+  so they travel with the source to machines where the assistant's own memory does not.)
+
 ### Commands
 
 ```bash
@@ -2963,7 +2999,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.125.0**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.126.0**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

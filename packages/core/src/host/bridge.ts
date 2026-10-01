@@ -2859,9 +2859,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     allowProgrammingProfile: boolean
     choosesTheme: boolean
     offersOffice: boolean
+    exportsSource: boolean
   } {
     return {
       nativeGuide: ui.openWalkthrough !== undefined,
+      exportsSource: services.sourceArchive !== undefined,
       /*
        * Whether this host has a theme of its own to follow.
        *
@@ -10204,6 +10206,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * separate question: some of a config is about one machine, and some of it is nobody else's
    * business. See `config/share.ts`.
    */
+  /**
+   * Saves the source archive the package carries. A copy of a file built at package time, not
+   * something assembled now: the extension has no repository to read, and a zip made at build time
+   * is exactly the source of the build that is running.
+   */
+  async function handleExportSource(): Promise<void> {
+    const archive = services.sourceArchive
+    if (archive === undefined) return
+    try {
+      await fs.access(archive.path)
+    } catch {
+      post({
+        type: 'error',
+        message: `This build does not carry its source archive (${archive.path} is missing). Packages built with "pnpm package" include it.`,
+      })
+      return
+    }
+    try {
+      const target = await ui.showSaveDialog({ defaultName: archive.defaultName, extensions: ['zip'] })
+      if (target === undefined) return
+      await fs.copyFile(archive.path, target)
+      ui.showInfo(
+        `Saved the Light Code source to ${target}. Extract it, open the folder in VS Code, and follow START_HERE.md — it builds as it stands.`,
+      )
+    } catch (error) {
+      post({ type: 'error', message: `Could not save the source: ${error instanceof Error ? error.message : String(error)}` })
+    }
+  }
+
   async function handleExportConfig(sections?: string[]): Promise<void> {
     try {
       const { config } = await configManager.load()
@@ -11934,6 +11965,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleRequestShareSections', handleRequestShareSections())
     } else if (message.type === 'previewImport') {
       reportFailure('handlePreviewImport', handlePreviewImport())
+    } else if (message.type === 'exportSource') {
+      reportFailure('handleExportSource', handleExportSource())
     } else if (message.type === 'exportConfig') {
       reportFailure('handleExportConfig', handleExportConfig(message.sections))
     } else if (message.type === 'importConfig') {

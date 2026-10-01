@@ -61,6 +61,14 @@ try {
     check(`referenced asset exists: ${relative}`, fs.existsSync(path.join(extensionRoot, relative)))
   }
 
+  // "Export source code" copies this file; without it the button only reports that it is missing.
+  const sourceZip = path.join(extensionRoot, 'dist', 'source.zip')
+  check(
+    'the source archive is bundled',
+    fs.existsSync(sourceZip) && fs.readFileSync(sourceZip).subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])),
+    fs.existsSync(sourceZip) ? `${Math.round(fs.statSync(sourceZip).size / 1024)} KB` : 'missing',
+  )
+
   // Mirrors resolveRipgrepPath: a universal VSIX nests binaries per platform, a
   // platform-specific one puts a single binary at the top of `bin`.
   const executable = process.platform === 'win32' ? 'rg.exe' : 'rg'

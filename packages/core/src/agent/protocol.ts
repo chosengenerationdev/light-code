@@ -1123,6 +1123,8 @@ export type UiToHostMessage =
   | { type: 'requestShareSections' }
   /** `sections` omitted means every section, which is what the old whole-file export did. */
   | { type: 'exportConfig'; sections?: string[] }
+  /** Save the project's source archive (the header button). */
+  | { type: 'exportSource' }
   /**
    * Opens a file and says what is in it, without saving anything.
    *
@@ -1316,6 +1318,8 @@ export type HostToUiMessage =
        * implemented. That is exactly what shipped in 0.31.0 for the browser.
        */
       nativeGuide: boolean
+      /** The host ships its own source as a zip; the header offers to save it. */
+      exportsSource?: boolean
       /** True where the host has no theme of its own, so the user picks one. */
       choosesTheme?: boolean
       /**

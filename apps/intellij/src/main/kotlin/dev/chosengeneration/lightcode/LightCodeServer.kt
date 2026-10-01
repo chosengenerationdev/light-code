@@ -2,7 +2,7 @@ package dev.chosengeneration.lightcode
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.OSProcessHandler
-import com.intellij.execution.process.ProcessAdapter
+import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessOutputTypes
 import com.intellij.openapi.Disposable
@@ -95,7 +95,7 @@ class LightCodeServer(private val project: Project) : Disposable {
      */
     val errors = StringBuilder()
     process.addProcessListener(
-      object : ProcessAdapter() {
+      object : ProcessListener {
         override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
           val line = event.text.trim()
           if (outputType == ProcessOutputTypes.STDERR) {
