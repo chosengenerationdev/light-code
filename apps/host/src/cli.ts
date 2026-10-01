@@ -815,8 +815,8 @@ async function exportPackage(target: string | undefined): Promise<void> {
       `  node ${path.basename(written)}\n` +
       `\n` +
       `It needs nothing else — no npm install, no node_modules, no network.\n` +
-      `Search is the one exception: ripgrep is not bundled, so search_files and\n` +
-      `list_files say so and the rest works.\n`,
+      `ripgrep is not bundled; search_files and list_files use a built-in search\n` +
+      `instead, which is slower on very large repositories and otherwise the same.\n`,
   )
 }
 

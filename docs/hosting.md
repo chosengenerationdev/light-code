@@ -744,10 +744,10 @@ extension and this bundle is CommonJS, so `light-code-pkg` and `light-code-pkg.c
 `light-code-pkg.mjs` would not.
 
 The one thing it cannot carry is ripgrep, which is a per-platform binary rather than JavaScript.
-`search_files` and `list_files` say so and everything else works. This is not something the other
-flag fixes either — `--export-code` builds with `--ignore-scripts`, so the binary is not fetched
-there either. On a machine with no route out, there is no search. Reading named files, editing,
-commands, MCP, Python and the browser UI are all unaffected.
+Search still works without it: `search_files` and `list_files` fall back to a built-in search in
+plain Node that honours `.gitignore` the same way. It is slower on a very large repository, and
+that is the only difference. `--export-code` does not fetch ripgrep either (it builds with
+`--ignore-scripts`), so the same applies there.
 
 ### `--export-code` — the source, to keep working on it
 

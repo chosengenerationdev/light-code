@@ -20,3 +20,4 @@ coverage/
 # PowerPoint owner files. Office creates these beside an open document and deletes them on
 # close, so they are never content — two were committed by a sweeping `git add -A`.
 ~$*
+apps/host/light-code-pkg-*.cjs

@@ -87,6 +87,8 @@ const ALLOWED_HOSTS = new Map([
   ['wiki.example.com', 'placeholder in the Confluence site address field'],
   ['jira.example.com', 'placeholder in the Jira site address field'],
   ['git.example.com', 'placeholder in the Bitbucket site address field'],
+  ['jenkins.example.com', 'placeholder in the Jenkins site address field and the handbook'],
+  ['autosys.example.com', 'placeholder in the AutoSys site address field and the handbook'],
   ['example.com', 'generic documentation example'],
   ['opensearch.internal', 'placeholder in the OpenSearch cluster URL field'],
   ['mcp.internal', 'placeholder in the MCP server URL field'],

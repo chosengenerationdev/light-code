@@ -28,7 +28,12 @@ intellijPlatform {
   pluginConfiguration {
     ideaVersion {
       sinceBuild = providers.gradleProperty("pluginSinceBuild")
-      untilBuild = providers.gradleProperty("pluginUntilBuild")
+      /*
+       * No upper bound. A fixed until-build makes every IDE released after it refuse the plugin —
+       * 251.* (2025.1) did exactly that to every later IntelliJ and PyCharm. The plugin uses only
+       * the tool window, JCEF and process APIs, which are stable across releases.
+       */
+      untilBuild = provider { null }
     }
   }
 
