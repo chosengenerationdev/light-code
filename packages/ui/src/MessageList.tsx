@@ -1,7 +1,8 @@
 import { Chart } from './charts/Chart.js'
 import { Diagram } from './diagrams/Diagram.js'
 import type { ToolCallSummary, TranscriptEntry } from '@light-code/core/browser'
-import { useState, type ReactElement } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
+import { MessageActions, type MessageFeedback } from './MessageActions.js'
 import {
   AgentIcon,
   CheckIcon,
@@ -39,6 +40,8 @@ export type DisplayMessage =
 export interface MessageListProps {
   messages: DisplayMessage[]
   error: string | undefined
+  /** Reply and reaction controls. Absent, messages render without them. */
+  feedback?: MessageFeedback | undefined
 }
 
 /**
@@ -72,8 +75,11 @@ function TextBlock(props: {
   informedBy?: string | undefined
   /** Marks the newest user message, so Chat can tell whether it is still on screen. */
   isLatestPrompt?: boolean
+  /** Offered on a finished assistant reply only: a half-streamed one is not a thing to point at yet. */
+  actions?: { key: string; feedback: MessageFeedback } | undefined
 }): ReactElement {
   const isAssistant = props.role === 'assistant'
+  const bubbleRef = useRef<HTMLDivElement>(null)
   const informed = agentColors(props.informedBy)
 
   const avatar = (
@@ -115,6 +121,7 @@ function TextBlock(props: {
     >
       {avatar}
       <div
+        ref={bubbleRef}
         className="lc-bubble"
         style={{
           maxWidth: '85%',
@@ -175,6 +182,15 @@ function TextBlock(props: {
          * writes markdown whether or not anything renders it.
          */}
         {isAssistant ? <MarkdownView text={props.content} /> : props.content}
+        {props.actions !== undefined && (
+          <MessageActions
+            messageKey={props.actions.key}
+            content={props.content}
+            source="message"
+            containerRef={bubbleRef}
+            feedback={props.actions.feedback}
+          />
+        )}
       </div>
     </div>
   )
@@ -387,8 +403,13 @@ function ToolBlock(props: {
  * rather than output — useful when you want to know *why* it did something, noise when you
  * do not. Expanding is sticky per block, so a long trace does not force scrolling past it.
  */
-function ReasoningBlock(props: { content: string; pending?: boolean | undefined }): ReactElement {
+function ReasoningBlock(props: {
+  content: string
+  pending?: boolean | undefined
+  actions?: { key: string; feedback: MessageFeedback } | undefined
+}): ReactElement {
   const [expanded, setExpanded] = useState(false)
+  const thinkingRef = useRef<HTMLPreElement>(null)
 
   return (
     <div className="lc-in-left" style={{ margin: '4px 10px 4px 40px' }}>
@@ -426,6 +447,7 @@ function ReasoningBlock(props: { content: string; pending?: boolean | undefined 
       </button>
       {expanded && (
         <pre
+          ref={thinkingRef}
           style={{
             margin: '2px 0 0 14px',
             padding: 8,
@@ -441,6 +463,18 @@ function ReasoningBlock(props: { content: string; pending?: boolean | undefined 
         >
           {props.content}
         </pre>
+      )}
+      {/* Only once it can be read: reacting to thinking you have not seen is a guess. */}
+      {expanded && props.pending !== true && props.actions !== undefined && (
+        <div style={{ marginLeft: 14 }}>
+          <MessageActions
+            messageKey={props.actions.key}
+            content={props.content}
+            source="reasoning"
+            containerRef={thinkingRef}
+            feedback={props.actions.feedback}
+          />
+        </div>
       )}
     </div>
   )
@@ -502,7 +536,12 @@ export function MessageList(props: MessageListProps): ReactElement {
             <strong style={{ color: colors.foreground }}>Chart not drawn.</strong> {message.message}
           </div>
         ) : message.kind === 'reasoning' ? (
-          <ReasoningBlock key={index} content={message.content} pending={message.pending} />
+          <ReasoningBlock
+            key={index}
+            content={message.content}
+            pending={message.pending}
+            actions={props.feedback === undefined ? undefined : { key: String(index), feedback: props.feedback }}
+          />
         ) : (
           <TextBlock
             key={index}
@@ -511,6 +550,11 @@ export function MessageList(props: MessageListProps): ReactElement {
             expertInformed={message.expertInformed}
             informedBy={message.informedBy}
             isLatestPrompt={index === latestPromptIndex}
+            actions={
+              props.feedback !== undefined && message.role === 'assistant' && message.pending !== true
+                ? { key: String(index), feedback: props.feedback }
+                : undefined
+            }
           />
         ),
       )}

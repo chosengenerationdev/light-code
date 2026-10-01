@@ -1,5 +1,5 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
-import { CUSTOM_ROLE_LIMIT, skillAliases } from '@light-code/core/browser'
+import { CUSTOM_ROLE_LIMIT, composeUserText, skillAliases, type MessageQuote, type Reaction } from '@light-code/core/browser'
 import type { S3Mirror } from './settings/S3Section.js'
 import type {
   AtlassianProductId,
@@ -288,6 +288,12 @@ export function App(props: AppProps): ReactElement {
   const [network, setNetwork] = useState<NetworkSettingsSummary | undefined>(undefined)
   const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
   const [queued, setQueued] = useState<{ text: string; images?: number }[]>([])
+  /** The part of an earlier message the next one answers. Cleared once sent. */
+  const [replyTo, setReplyTo] = useState<MessageQuote | undefined>(undefined)
+  /** Reactions given in this conversation, by message key, with the quote each points at. */
+  const [reactions, setReactions] = useState<Record<string, { reaction: Reaction; quote: MessageQuote }>>({})
+  /** Which of them the host still holds — the rest have reached the assistant. */
+  const [pendingFeedbackKeys, setPendingFeedbackKeys] = useState<string[]>([])
   const [searchConnections, setSearchConnections] = useState<SearchConnectionSummary[]>([])
   const [activeSearchId, setActiveSearchId] = useState<string | undefined>(undefined)
   const [searchIndexes, setSearchIndexes] = useState<SearchIndex[]>([])
@@ -668,6 +674,8 @@ export function App(props: AppProps): ReactElement {
         setSearchTestResult({ ok: message.ok, detail: message.detail })
       } else if (message.type === 'queued') {
         setQueued(message.messages)
+      } else if (message.type === 'pendingFeedback') {
+        setPendingFeedbackKeys(message.keys)
       } else if (message.type === 'queuedMessageConsumed') {
         // Enters the transcript as an ordinary user turn — which is what it became in the
         // conversation, so a reopened task renders it identically.
@@ -1003,6 +1011,9 @@ export function App(props: AppProps): ReactElement {
         // is opened, and in both cases the previous transcript is no longer what's shown.
         setMessages(message.entries)
         setActiveTaskId(message.taskId)
+        // Keys are positions in *this* transcript; the last one's reactions mean nothing here.
+        setReactions({})
+        setReplyTo(undefined)
         setError(undefined)
         setPendingApproval(undefined)
         setIsStreaming(false)
@@ -1069,22 +1080,55 @@ export function App(props: AppProps): ReactElement {
         type: 'queueMessage',
         text,
         ...(images.length > 0 ? { images } : {}),
+        ...(replyTo !== undefined ? { replyTo } : {}),
       } satisfies UiToHostMessage)
+      setReplyTo(undefined)
       return
     }
     setError(undefined)
     // The transcript shows what the user typed, mentions unexpanded — the host attaches
     // the file contents on the way to the model, and echoing them here would bury the
     // question under the source it refers to.
+    /*
+     * Composed with the function the host uses, from the reactions the host still holds, so the
+     * live bubble reads exactly as the saved transcript will after a reload.
+     */
+    const pendingReactions = pendingFeedbackKeys.flatMap((key) => (reactions[key] !== undefined ? [reactions[key]] : []))
+    const composed = composeUserText(text, { replyTo, reactions: pendingReactions })
     const shown =
       images.length > 0
-        ? `${text}${text.length > 0 ? '\n' : ''}[${images.length} image(s) attached]`
-        : text
+        ? `${composed}${composed.length > 0 ? '\n' : ''}[${images.length} image(s) attached]`
+        : composed
     setMessages((prev) => [...prev, { kind: 'text', role: 'user', content: shown }])
     setIsStreaming(true)
-    const outgoing: UiToHostMessage =
-      images.length > 0 ? { type: 'sendMessage', text, images } : { type: 'sendMessage', text }
+    const outgoing: UiToHostMessage = {
+      type: 'sendMessage',
+      text,
+      ...(images.length > 0 ? { images } : {}),
+      ...(replyTo !== undefined ? { replyTo } : {}),
+    }
     props.transport.post(outgoing)
+    setReplyTo(undefined)
+  }
+
+  const feedback = {
+    reactions: Object.fromEntries(Object.entries(reactions).map(([key, value]) => [key, value.reaction])),
+    pendingKeys: new Set(pendingFeedbackKeys),
+    onReply: (quote: MessageQuote) => setReplyTo(quote),
+    onReact: (key: string, reaction: Reaction | undefined, quote: MessageQuote) => {
+      setReactions((prev) => {
+        const next = { ...prev }
+        if (reaction === undefined) delete next[key]
+        else next[key] = { reaction, quote }
+        return next
+      })
+      props.transport.post({
+        type: 'reactToMessage',
+        key,
+        quote,
+        ...(reaction !== undefined ? { reaction } : {}),
+      } satisfies UiToHostMessage)
+    },
   }
 
   const unqueue = (index: number): void => {
@@ -2490,6 +2534,9 @@ export function App(props: AppProps): ReactElement {
             }}
             canRollback={canRollback}
             onSend={send}
+            feedback={feedback}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(undefined)}
             onCancel={cancel}
             onDecideApproval={decideApproval}
             onAlwaysAllow={alwaysAllow}

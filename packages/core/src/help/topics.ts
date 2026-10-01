@@ -946,6 +946,40 @@ without the prompt growing with it.
 `,
   },
   {
+    id: 'feedback',
+    title: 'Replying to a message, and reactions',
+    keywords: [
+      'reply', 'reply to a message', 'quote', 'react', 'reaction', 'thumbs up', 'thumbs down',
+      'feedback', 'focus', 'wrong direction', 'thought process', 'thinking', 'steer',
+    ],
+    body: `
+Under each finished reply from the assistant: **↩ Reply**, **👍** (right direction, keep this),
+**👎** (wrong, do not pursue this) and **🎯** (focus on this). The same controls appear under a
+**Thought process** once you expand it.
+
+**Point at one part.** Select a sentence inside the message first, then press Reply or a reaction:
+only the selection is quoted. With nothing selected the whole message is quoted, cut to a sensible
+length.
+
+**Reply** puts a "Replying to…" line above the composer (× removes it). Your next message goes with
+the quote above it, so the assistant answers about *that* part rather than guessing which.
+
+**Reactions never start a turn by themselves.** They wait: with your next message, or — if the
+assistant is working — at its next step, which is the earliest anything you add can reach it. A
+line above the composer says how many are waiting. Pressing the same reaction again takes it back
+while it is still waiting; once delivered it is part of the conversation and stays.
+
+**What the assistant actually receives is words**, written into your message: a quoted block for a
+reply, and a short list for reactions ("👎 Wrong, do not pursue this: '…' (from your thought
+process)"). The saved conversation shows exactly that text, so reopening it later reads the same.
+
+**Reacting to a thought process steers the next step; it does not change the thinking already
+done.** Most models do not see their earlier reasoning on the next turn at all, so the quote is how
+it learns which line of thought you meant. 👎 on an approach while it is still working is the most
+useful use of it: the next step reads it before deciding what to do.
+`,
+  },
+  {
     id: 'checkpoints',
     /*
      * Not "undoing a change". A title word is weighted as though it were the subject, and

@@ -7,6 +7,16 @@
  * Nothing exported here may import from `node:*` or any platform implementation.
  */
 export type { Transport } from './platform/transport.js'
+// The panel composes the live bubble with the same function the host uses for the model.
+export {
+  composeUserText,
+  clipQuote,
+  reactionLabel,
+  MAX_QUOTE_CHARS,
+  type MessageQuote,
+  type MessageReaction,
+  type Reaction,
+} from './agent/feedback.js'
 
 export type { WireFormat, Auth, ProviderProfile } from './providers/types.js'
 export type { ToolGroup, ToolPreview } from './tools/types.js'

@@ -87,6 +87,7 @@ import { createJiraProjectTool, createJiraReadIssueTool, createJiraSearchTool, c
 import { ATLASSIAN_PRODUCTS, atlassianProduct } from '../atlassian/products.js'
 import { AtlassianError, type AtlassianConnection } from '../atlassian/rest.js'
 import type { AtlassianProductId, AtlassianProductStatus, AtlassianSettingsView, ProjectStampEntry } from '../agent/protocol.js'
+import { clipQuote, composeUserText, type MessageQuote, type MessageReaction } from '../agent/feedback.js'
 import {
   createConfluenceReadPageTool,
   createConfluenceSearchTool,
@@ -1723,6 +1724,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * not, which from the outside reads as the model ignoring what it was shown.
    */
   let queuedMessages: { text: string; images?: ImageAttachmentInput[] }[] = []
+
+  /**
+   * Reactions not yet delivered, by the panel's key for the message.
+   *
+   * Held here rather than in the panel because the webview can be torn down and rebuilt at any
+   * moment, and a reaction that vanished with it would be feedback the user believes was given.
+   * Delivered with the next user message, or at the next step of a running turn — never as a
+   * turn of its own, which would spend a request on a thumbs-up.
+   */
+  const pendingReactions = new Map<string, MessageReaction>()
+
+  function postPendingFeedback(): void {
+    post({ type: 'pendingFeedback', keys: [...pendingReactions.keys()] })
+  }
+
+  /** Takes every pending reaction, for one delivery. */
+  function takeReactions(): MessageReaction[] {
+    if (pendingReactions.size === 0) return []
+    const taken = [...pendingReactions.values()]
+    pendingReactions.clear()
+    postPendingFeedback()
+    return taken
+  }
+
+  /** Never trust a quote's length from the panel: the host decides what reaches the model. */
+  function boundedQuote(quote: MessageQuote | undefined): MessageQuote | undefined {
+    if (quote === undefined || typeof quote.excerpt !== 'string' || quote.excerpt.trim().length === 0) return undefined
+    return { excerpt: clipQuote(quote.excerpt), source: quote.source === 'reasoning' ? 'reasoning' : 'message' }
+  }
 
   function postQueued(): void {
     post({
@@ -3746,6 +3776,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     conversation.restore(task.messages)
     readFiles.clear()
+    // Reactions point at the other conversation's messages; delivering them here would be nonsense.
+    pendingReactions.clear()
+    postPendingFeedback()
     /*
      * Both reset on a task switch. The spend counter is explicitly "since this task was
      * opened", and the expert session belongs to the work it was about — resuming it for a
@@ -3777,6 +3810,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // The current task is already saved after each turn, so nothing needs flushing here.
     conversation.reset()
     readFiles.clear()
+    pendingReactions.clear()
+    postPendingFeedback()
     resetExpertSpend()
     taskCheckpoint = undefined
     activeTaskCreatedAt = Date.now()
@@ -4145,8 +4180,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // CLAUDE.md §5 has called this configurable since Phase 0; until now it was not.
         maxIterations: cachedMaxIterations,
         drainQueuedMessages: () => {
-          if (queuedMessages.length === 0) return []
-          const drained = queuedMessages
+          /*
+           * Reactions given while the turn runs are delivered here, at the next step — the
+           * earliest any input can reach a model mid-turn. Folded into the first queued message
+           * when there is one, so a person who reacted and then typed is read as one remark.
+           */
+          const reactions = takeReactions()
+          if (queuedMessages.length === 0 && reactions.length === 0) return []
+          const drained =
+            reactions.length === 0
+              ? queuedMessages
+              : queuedMessages.length === 0
+                ? [{ text: composeUserText('', { reactions }) }]
+                : [
+                    { ...queuedMessages[0]!, text: composeUserText(queuedMessages[0]!.text, { reactions }) },
+                    ...queuedMessages.slice(1),
+                  ]
           queuedMessages = []
           postQueued()
           /*
@@ -10989,16 +11038,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }
         userTurnRunning = true
         try {
-          await handleSendMessage(message.text, message.images)
+          // Composed before anything else: the reply quote and any reactions are part of what
+          // the user said, so mentions and #roles are read from the same text the model sees.
+          await handleSendMessage(
+            composeUserText(message.text, { replyTo: boundedQuote(message.replyTo), reactions: takeReactions() }),
+            message.images,
+          )
         } finally {
           userTurnRunning = false
         }
       })()
     } else if (message.type === 'requestMentionCandidates') {
       reportFailure('handleMentionCandidates', handleMentionCandidates(message.query))
+    } else if (message.type === 'reactToMessage') {
+      const quote = boundedQuote(message.quote)
+      if (message.reaction === undefined || quote === undefined) pendingReactions.delete(message.key)
+      else pendingReactions.set(message.key, { reaction: message.reaction, quote })
+      postPendingFeedback()
     } else if (message.type === 'queueMessage') {
+      const replyTo = boundedQuote(message.replyTo)
       queuedMessages.push({
-        text: message.text,
+        text: composeUserText(message.text, { replyTo }),
         ...(message.images !== undefined && message.images.length > 0
           ? { images: message.images }
           : {}),

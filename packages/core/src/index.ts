@@ -794,3 +794,4 @@ export {
   belongsToSkill,
   type RemoveSkillResult,
 } from './s3/remove.js'
+export { composeUserText, clipQuote, type MessageQuote, type MessageReaction, type Reaction } from './agent/feedback.js'

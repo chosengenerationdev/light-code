@@ -14,6 +14,8 @@ import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.
 import { FormPrompt, type FormFieldValue, type PendingForm } from './FormPrompt.js'
 import { Composer } from './Composer.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
+import { FeedbackBanner, type MessageFeedback } from './MessageActions.js'
+import type { MessageQuote } from '@light-code/core/browser'
 import { PinnedPrompt } from './PinnedPrompt.js'
 import { ExpertSpend } from './ExpertSpend.js'
 import { TokenBar } from './TokenBar.js'
@@ -52,6 +54,10 @@ export interface ChatProps {
   directRoles: { role: string; name: string; summary: string }[]
   onSetPlan: (plan: string) => void
   messages: DisplayMessage[]
+  /** Reply and reaction controls on the assistant's messages. */
+  feedback?: MessageFeedback | undefined
+  replyTo?: MessageQuote | undefined
+  onClearReply?: () => void
   isStreaming: boolean
   error: string | undefined
   pendingApproval: PendingApproval | undefined
@@ -242,7 +248,7 @@ export function Chat(props: ChatProps): ReactElement {
         className="lc-scroll"
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollBehavior: 'smooth' }}
       >
-        <MessageList messages={props.messages} error={props.error} />
+        <MessageList messages={props.messages} error={props.error} feedback={props.feedback} />
         {workingLabel !== undefined && (
           <WorkingIndicator
             label={workingLabel}
@@ -297,6 +303,12 @@ export function Chat(props: ChatProps): ReactElement {
       {props.pendingTools !== undefined && <PendingToolApprovals {...props.pendingTools} />}
       <ExpertSpend {...props.expertSpend} />
       <TokenBar usage={props.usage} />
+      <FeedbackBanner
+        replyTo={props.replyTo}
+        onClearReply={() => props.onClearReply?.()}
+        pendingCount={props.feedback?.pendingKeys.size ?? 0}
+        isStreaming={props.isStreaming}
+      />
       <Composer
         plan={props.plan}
         planCheckpoints={props.planCheckpoints}

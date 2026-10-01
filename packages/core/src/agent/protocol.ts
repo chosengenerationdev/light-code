@@ -1,3 +1,4 @@
+import type { MessageQuote, Reaction } from './feedback.js'
 import type { CheckpointView } from './checkpoints.js'
 import type { FormField } from '../tools/askUserForm.js'
 import type { ExpertSavings } from '../expert/savings.js'
@@ -495,7 +496,8 @@ export interface ContextUsage {
 }
 
 export type UiToHostMessage =
-  | { type: 'sendMessage'; text: string; images?: ImageAttachmentInput[] }
+  /** `replyTo` is the part of an earlier message being answered — see `agent/feedback.ts`. */
+  | { type: 'sendMessage'; text: string; images?: ImageAttachmentInput[]; replyTo?: MessageQuote }
   /** Ask the host to resolve `@` mentions for autocomplete as the user types. */
   | { type: 'requestMentionCandidates'; query: string }
   | { type: 'cancel' }
@@ -506,7 +508,13 @@ export type UiToHostMessage =
    * a message typed mid-turn was dropped on the way to the queue, silently — the text arrived and
    * the picture it was about did not, which reads as the model ignoring what it was shown.
    */
-  | { type: 'queueMessage'; text: string; images?: ImageAttachmentInput[] }
+  | { type: 'queueMessage'; text: string; images?: ImageAttachmentInput[]; replyTo?: MessageQuote }
+  /**
+   * A reaction on a reply or a thought process. Held host-side and delivered with the next user
+   * message, or at the next step of a running turn — never a turn of its own. `reaction` absent
+   * withdraws one not yet delivered. `key` is the panel's handle for the message.
+   */
+  | { type: 'reactToMessage'; key: string; reaction?: Reaction; quote: MessageQuote }
   /** Removed before it was consumed. */
   | { type: 'unqueueMessage'; index: number }
   | { type: 'approvalResponse'; id: string; decision: ApprovalDecision }
@@ -1442,6 +1450,8 @@ export type HostToUiMessage =
    * screen.
    */
   | { type: 'queued'; messages: { text: string; images?: number }[] }
+  /** Reactions still waiting to reach the assistant, by the panel's key. Empty once delivered. */
+  | { type: 'pendingFeedback'; keys: string[] }
   /** A queued message entered the conversation; the UI shows it as an ordinary user turn. */
   | { type: 'queuedMessageConsumed'; text: string }
   /** Workspace-relative paths matching an `@` query, for composer autocomplete. */
