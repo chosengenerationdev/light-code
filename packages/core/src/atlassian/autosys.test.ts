@@ -74,7 +74,7 @@ describe('AutoSys tools', () => {
     })
     const result = await createAutosysJobTool({ client }).execute({ job: 'PAY_EOD' }, NONE)
     expect(result.content).toContain('condition: s(PAY_LOAD)')
-    expect(result.content).toContain('Status: PAY_EOD: RUNNING')
+    expect(result.content).toContain('Status: RUNNING')
     expect(result.content).toContain('- PAY_EXTRACT')
   })
 
@@ -168,5 +168,57 @@ describe('AutoSys tools', () => {
     for (const name of ['autosys_find_jobs', 'autosys_job', 'autosys_status', 'autosys_job_log', 'autosys_dependencies']) {
       expect(ALWAYS_ASK_TOOLS.has(name)).toBe(false)
     }
+  })
+
+  /* Asked for: status and details for many jobs at once, by list or by pattern. */
+  it('reports many jobs at once — names and patterns together — counted by status, failures first', async () => {
+    const { client } = fakeAutosys({
+      'GET /AEWS/job-run-info/PAY_LOAD': run('PAY_LOAD', 'SUCCESS'),
+      'GET /AEWS/job-run-info?filter=name==GL_*': {
+        json: [
+          { name: 'GL_A', status: 'SUCCESS' },
+          { name: 'GL_B', status: 'FAILURE', exitCode: 3 },
+          { name: 'PAY_LOAD', status: 'SUCCESS' },
+        ],
+      },
+    })
+    const result = await createAutosysStatusTool({ client }).execute({ jobs: ['PAY_LOAD', 'GL_*', 'PAY_LOAD'] }, NONE)
+    const lines = result.content.split('\n')
+    expect(lines[0]).toBe('3 job(s) — 2 SUCCESS · 1 FAILURE:')
+    expect(lines[1]).toContain('GL_B: FAILURE')
+
+    const failed = await createAutosysStatusTool({ client }).execute({ jobs: ['PAY_LOAD', 'GL_*'], only: ['FAILURE', 'TERMINATED'] }, NONE)
+    expect(failed.content).toContain('1 of the 3 matching job(s) are FAILURE or TERMINATED')
+    expect(failed.content).not.toContain('GL_A')
+  })
+
+  it('reads every job a pattern matches, only the attributes asked for, each with its status', async () => {
+    const { client } = fakeAutosys({
+      'GET /AEWS/job?filter=name==PAY_*': {
+        json: [
+          { name: 'PAY_A', command: '/bin/a.sh', machine: 'host1', owner: 'ops', startTimes: '02:00' },
+          { name: 'PAY_B', command: '/bin/b.sh', machine: 'host2', owner: 'ops' },
+        ],
+      },
+      'GET /AEWS/job-run-info/PAY_A': run('PAY_A', 'SUCCESS'),
+      'GET /AEWS/job-run-info/PAY_B': run('PAY_B', 'FAILURE'),
+    })
+    const result = await createAutosysJobTool({ client }).execute({ pattern: 'PAY_*', fields: ['command', 'start_times'] }, NONE)
+    expect(result.content).toContain('2 job(s). Status: 1 SUCCESS · 1 FAILURE.')
+    expect(result.content).toContain('command: /bin/a.sh')
+    expect(result.content).toContain('startTimes: 02:00')
+    expect(result.content).not.toContain('owner: ops')
+    expect(result.content).toContain('PAY_B:')
+  })
+
+  it('answers for the jobs it found and names the ones it did not', async () => {
+    const { client } = fakeAutosys({
+      'GET /AEWS/job/PAY_A': { json: { name: 'PAY_A', command: '/bin/a.sh' } },
+      'GET /AEWS/job-run-info/PAY_A': run('PAY_A', 'SUCCESS'),
+    })
+    const result = await createAutosysJobTool({ client }).execute({ jobs: ['PAY_A', 'PAY_GONE'] }, NONE)
+    expect(result.isError).toBeUndefined()
+    expect(result.content).toContain('PAY_A:')
+    expect(result.content).toMatch(/Not found: .*PAY_GONE/)
   })
 })

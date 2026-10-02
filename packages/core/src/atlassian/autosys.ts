@@ -314,33 +314,170 @@ export function createAutosysFindJobsTool(options: AutosysToolOptions): Tool<z.i
   }
 }
 
-const jobSchema = z.object({ job: z.string().min(1).describe('The exact job name.') })
+/** At most this many lookups in flight at once — enough to be quick, few enough not to flood the server. */
+const LOOKUPS_IN_FLIGHT = 4
+/** A request for more than this many jobs is answered for the first ones, and says so. */
+const MAX_JOBS = 200
+/** Full definitions shown before switching to the requested fields or a one-line summary each. */
+const MAX_FULL_DEFINITIONS = 10
+
+/** Runs `work` over `items`, a few at a time, keeping the input order in the result. */
+async function inBatches<T, R>(items: readonly T[], work: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length)
+  let next = 0
+  const lane = async (): Promise<void> => {
+    while (next < items.length) {
+      const at = next++
+      results[at] = await work(items[at] as T)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(LOOKUPS_IN_FLIGHT, items.length) }, () => lane()))
+  return results
+}
+
+/** Names and patterns from both parameters, trimmed and de-duplicated, in the order given. */
+function requested(jobs: readonly string[] | undefined, pattern: string | undefined, fallback: string | undefined): string[] {
+  const all = [...(jobs ?? []), ...(pattern !== undefined ? [pattern] : [])].map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+  const unique = [...new Set(all)]
+  return unique.length > 0 ? unique : fallback !== undefined ? [fallback] : []
+}
+
+const STATUSES = [
+  'FAILURE',
+  'TERMINATED',
+  'RUNNING',
+  'ON_HOLD',
+  'ON_ICE',
+  'SUCCESS',
+  'INACTIVE',
+  'STARTING',
+  'ACTIVATED',
+  'RESTART',
+  'QUE_WAIT',
+  'ON_NOEXEC',
+] as const
+
+/** "12 SUCCESS · 2 FAILURE · 1 RUNNING" — the line somebody asking "how are my jobs" wants first. */
+export function statusSummary(runs: readonly AutosysRun[]): string {
+  const counts = new Map<string, number>()
+  for (const run of runs) counts.set(run.status, (counts.get(run.status) ?? 0) + 1)
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([status, count]) => `${String(count)} ${status}`)
+    .join(' · ')
+}
+
+/** An attribute name as asked for matches its stored spelling in either style: start_times or startTimes. */
+function attributeMatches(key: string, wanted: readonly string[]): boolean {
+  const snake = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`).toLowerCase()
+  const flat = key.toLowerCase().replace(/_/g, '')
+  return wanted.some((name) => name === key.toLowerCase() || name === snake || name.replace(/_/g, '') === flat)
+}
+
+const jobSchema = z.object({
+  job: z.string().min(1).optional().describe('One exact job name.'),
+  jobs: z.array(z.string().min(1)).max(MAX_JOBS).optional().describe('Several job names or patterns (* wildcards) at once.'),
+  pattern: z.string().min(1).optional().describe('A name pattern, e.g. PAY_* — every matching job.'),
+  fields: z
+    .array(z.string().min(1))
+    .max(30)
+    .optional()
+    .describe('Only these attributes of each job, e.g. ["command", "machine", "start_times", "condition"]. Best for many jobs.'),
+})
 
 export function createAutosysJobTool(options: AutosysToolOptions): Tool<z.infer<typeof jobSchema>> {
   return {
     name: 'autosys_job',
     group: 'read',
     description:
-      'Read an AutoSys job’s definition — command, machine, owner, conditions, start times, calendars, output files and every other attribute — with its current status, and the jobs inside it if it is a box.',
+      'Read AutoSys job definitions — command, machine, owner, conditions, start times, calendars, output files and every ' +
+      'other attribute — with each job’s current status, and the jobs inside a box. Takes one job, a list (`jobs`), or a ' +
+      'pattern (`pattern`, * wildcards) for every matching job; with many jobs, name the attributes wanted in `fields`.',
     parametersSchema: jobSchema,
     async execute(params): Promise<ToolResult> {
       try {
         const client = await options.client()
-        const definition = await client.job(params.job)
-        const runs = await client.runInfo(params.job).catch(() => [] as AutosysRun[])
-        const type = (field(definition, 'jobType', 'job_type', 'type') ?? '').toUpperCase()
-        const members = type === 'BOX' || type === 'B' ? await client.boxMembers(params.job).catch(() => []) : []
-        return {
-          content: [
-            `Definition of ${params.job}:`,
-            ...renderDefinition(definition).map((line) => `  ${line}`),
-            '',
-            runs[0] !== undefined ? `Status: ${describeRun(runs[0])}` : 'Status: not available',
-            ...(members.length > 0
-              ? ['', `Jobs in this box (${String(members.length)}):`, ...members.map((member) => `- ${field(member, 'name', 'jobName') ?? '?'}`)]
-              : []),
-          ].join('\n'),
+        const wanted = requested([...(params.job !== undefined ? [params.job] : []), ...(params.jobs ?? [])], params.pattern, undefined)
+        if (wanted.length === 0) return { content: 'Name a job, a list of jobs, or a pattern.', isError: true }
+
+        // Patterns are expanded by the server; a name is read as itself.
+        const definitions = new Map<string, Record<string, unknown>>()
+        const problems: string[] = []
+        const found = await inBatches(wanted, async (entry) => {
+          try {
+            if (entry.includes('*')) {
+              const matches = await client.findJobs(entry)
+              if (matches.length === 0) problems.push(`No jobs match ${entry}.`)
+              return matches.map((job) => [field(job, 'name', 'jobName', 'job_name') ?? '?', job] as const)
+            }
+            return [[entry, await client.job(entry)] as const]
+          } catch (error) {
+            problems.push(error instanceof Error ? error.message : String(error))
+            return []
+          }
+        })
+        // Kept in the order asked for, whatever order the lookups finished in.
+        for (const [name, definition] of found.flat()) if (!definitions.has(name)) definitions.set(name, definition)
+        const names = [...definitions.keys()]
+        if (names.length === 0) return { content: problems.join('\n'), isError: true }
+        const shownNames = names.slice(0, MAX_JOBS)
+
+        // Status in the same answer: one lookup per job, a few at a time.
+        const statuses = new Map<string, AutosysRun>()
+        await inBatches(shownNames, async (name) => {
+          const runs = await client.runInfo(name).catch(() => [] as AutosysRun[])
+          if (runs[0] !== undefined) statuses.set(name, runs[0])
+        })
+
+        const fields = params.fields?.map((name) => name.trim().toLowerCase())
+        const pick = (definition: Record<string, unknown>): Record<string, unknown> =>
+          fields === undefined ? definition : Object.fromEntries(Object.entries(definition).filter(([key]) => attributeMatches(key, fields)))
+        const full = fields === undefined && shownNames.length <= MAX_FULL_DEFINITIONS
+
+        const sections: string[] = []
+        if (shownNames.length > 1) {
+          sections.push(
+            `${String(names.length)} job(s)${names.length > shownNames.length ? `, showing ${String(shownNames.length)}` : ''}. ` +
+              `Status: ${statusSummary([...statuses.values()]) || 'not available'}.`,
+          )
         }
+        for (const name of shownNames) {
+          const definition = definitions.get(name) ?? {}
+          const run = statuses.get(name)
+          const status = run !== undefined ? describeRun(run) : `${name}: status not available`
+          if (full || fields !== undefined) {
+            const lines = renderDefinition(pick(definition)).map((line) => `  ${line}`)
+            sections.push(
+              [
+                shownNames.length === 1 ? `Definition of ${name}:` : `${name}:`,
+                ...(lines.length > 0 ? lines : ['  (none of the requested attributes are set)']),
+                `  Status: ${run !== undefined ? status.slice(name.length + 2) : 'not available'}`,
+              ].join('\n'),
+            )
+          } else {
+            const type = field(definition, 'jobType', 'job_type', 'type')
+            const box = field(definition, 'boxName', 'box_name')
+            sections.push(`- ${status}${type !== undefined ? ` · ${type}` : ''}${box !== undefined ? ` · in ${box}` : ''}`)
+          }
+        }
+        // A single box still lists its members, as the one-job version always did.
+        if (shownNames.length === 1) {
+          const only = shownNames[0] as string
+          const type = (field(definitions.get(only) ?? {}, 'jobType', 'job_type', 'type') ?? '').toUpperCase()
+          if (type === 'BOX' || type === 'B') {
+            const members = await client.boxMembers(only).catch(() => [])
+            if (members.length > 0) {
+              sections.push(
+                [`Jobs in this box (${String(members.length)}):`, ...members.map((member) => `- ${field(member, 'name', 'jobName') ?? '?'}`)].join('\n'),
+              )
+            }
+          }
+        }
+        if (!full && fields === undefined) {
+          sections.push('One line per job. Ask again with `fields` (e.g. command, machine, start_times, condition) for the attributes needed.')
+        }
+        if (problems.length > 0) sections.push(`Not found: ${problems.join(' ')}`)
+        return { content: sections.join('\n\n') }
       } catch (error) {
         return errorResult(error)
       }
@@ -350,28 +487,76 @@ export function createAutosysJobTool(options: AutosysToolOptions): Tool<z.infer<
 
 const statusSchema = z.object({
   pattern: z.string().optional().describe('Job name or pattern (* wildcards). Defaults to the configured pattern.'),
+  jobs: z.array(z.string().min(1)).max(MAX_JOBS).optional().describe('Several job names or patterns at once, e.g. ["PAY_LOAD", "GL_*"].'),
   only: z
-    .enum(['FAILURE', 'TERMINATED', 'RUNNING', 'ON_HOLD', 'ON_ICE', 'SUCCESS', 'INACTIVE', 'STARTING', 'ACTIVATED', 'RESTART'])
+    .union([z.enum(STATUSES), z.array(z.enum(STATUSES)).min(1)])
     .optional()
-    .describe('Only jobs in this status, e.g. FAILURE for what failed.'),
+    .describe('Only jobs in this status (or any of these), e.g. FAILURE, or ["FAILURE", "TERMINATED"].'),
 })
+
+/** Failures first: they are what somebody reading a long list is looking for. */
+const STATUS_ORDER = ['FAILURE', 'TERMINATED', 'RUNNING', 'STARTING', 'RESTART', 'ON_HOLD', 'ON_ICE']
+const statusRank = (status: string): number => {
+  const at = STATUS_ORDER.indexOf(status.toUpperCase())
+  return at === -1 ? STATUS_ORDER.length : at
+}
 
 export function createAutosysStatusTool(options: AutosysToolOptions): Tool<z.infer<typeof statusSchema>> {
   return {
     name: 'autosys_status',
     group: 'read',
     description:
-      'Current status of AutoSys jobs — like autorep -J: status, last start and end, exit code, run number and machine. Use only: FAILURE to see what failed.',
+      'Current status of AutoSys jobs — like autorep -J: status, last start and end, exit code, run number and machine — ' +
+      'for one job, a pattern, or many at once (`jobs`), with a count by status first. Use only: FAILURE to see what failed. ' +
+      'To follow a job until it finishes, check, `wait`, and check again.',
     parametersSchema: statusSchema,
     async execute(params): Promise<ToolResult> {
       try {
-        const pattern = params.pattern ?? options.defaultPattern
-        if (pattern === undefined) return { content: 'Give a job name or pattern — no default pattern is configured.', isError: true }
-        const runs = (await (await options.client()).runInfo(pattern)).filter(
-          (run) => params.only === undefined || run.status.toUpperCase() === params.only,
-        )
-        if (runs.length === 0) return { content: `No jobs matching ${pattern}${params.only !== undefined ? ` are ${params.only}` : ''}.` }
-        return { content: [`${String(runs.length)} job(s):`, ...runs.slice(0, 200).map((run) => `- ${describeRun(run)}`)].join('\n') }
+        const wanted = requested(params.jobs, params.pattern, options.defaultPattern)
+        if (wanted.length === 0) return { content: 'Give a job name, a list of jobs or a pattern — no default pattern is configured.', isError: true }
+        const client = await options.client()
+        const problems: string[] = []
+        const lists = await inBatches(wanted, async (entry) => {
+          try {
+            return await client.runInfo(entry)
+          } catch (error) {
+            problems.push(`${entry}: ${error instanceof Error ? error.message : String(error)}`)
+            return [] as AutosysRun[]
+          }
+        })
+        // One job named twice, or matched by two patterns, is still one job.
+        const byName = new Map<string, AutosysRun>()
+        for (const run of lists.flat()) if (!byName.has(run.name)) byName.set(run.name, run)
+        const only =
+          params.only === undefined ? undefined : (Array.isArray(params.only) ? params.only : [params.only]).map((status) => status.toUpperCase())
+        const all = [...byName.values()]
+        const runs = all.filter((run) => only === undefined || only.includes(run.status.toUpperCase()))
+        const asked = wanted.join(', ')
+        const unreadable = problems.length > 0 ? ['', 'Could not read:', ...problems.map((problem) => `- ${problem}`)] : []
+        if (runs.length === 0) {
+          return {
+            content: [
+              all.length === 0
+                ? `No jobs match ${asked}.`
+                : `None of the ${String(all.length)} job(s) matching ${asked} are ${(only ?? []).join(' or ')} (${statusSummary(all)}).`,
+              ...unreadable,
+            ].join('\n'),
+            ...(problems.length > 0 && all.length === 0 ? { isError: true } : {}),
+          }
+        }
+        const sorted = [...runs].sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.name.localeCompare(b.name))
+        const heading =
+          only === undefined
+            ? `${String(runs.length)} job(s) — ${statusSummary(runs)}:`
+            : `${String(runs.length)} of the ${String(all.length)} matching job(s) are ${only.join(' or ')} (all: ${statusSummary(all)}):`
+        return {
+          content: [
+            heading,
+            ...sorted.slice(0, MAX_JOBS).map((run) => `- ${describeRun(run)}`),
+            ...(sorted.length > MAX_JOBS ? [`… and ${String(sorted.length - MAX_JOBS)} more; narrow the pattern or use only.`] : []),
+            ...unreadable,
+          ].join('\n'),
+        }
       } catch (error) {
         return errorResult(error)
       }

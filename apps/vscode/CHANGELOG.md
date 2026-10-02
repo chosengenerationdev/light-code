@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.128.0
+
+### Minor Changes
+
+- A wait tool, so the assistant can check something, wait, and check again — following an AutoSys job, a build or a file until it is ready. Waits are up to 15 minutes each and end the moment you type or react. AutoSys status and job details now take many jobs at once — a list of names, patterns, or both — with a count by status, failures first, and job details limited to the attributes you ask for.
+
 ## 0.127.0
 
 ### Minor Changes

@@ -636,9 +636,13 @@ runInfo, jobRunInfo, boxMembers, event, jil and log.
 
 **Reading** — ordinary read tools, which you may set to always allow:
 - \`autosys_find_jobs\` — jobs matching a name pattern, with type, box and machine.
-- \`autosys_job\` — a job's whole definition in JIL terms, its status, and a box's members.
-- \`autosys_status\` — like autorep: status, last start and end, exit code, run number; \`only:
-  FAILURE\` lists what failed.
+- \`autosys_job\` — job definitions in JIL terms with each job's status, and a box's members. One
+  job, a list, or a **pattern** for every matching job; for many jobs ask for just the attributes
+  you need ("the command and start times of every PAY_* job").
+- \`autosys_status\` — like autorep: status, last start and end, exit code, run number. One job, a
+  pattern, or **several at once** ("PAY_LOAD and every GL_* job"), with a count by status first and
+  failures at the top; \`only\` narrows to FAILURE, or to several statuses at once.
+- Ask it to **follow a job until it finishes**: it checks the status, waits, and checks again.
 - \`autosys_job_log\` — a job's stderr or stdout, the end of it or matching lines. If the server
   offers no log endpoint, it says which file on which machine the job writes to instead.
 - \`autosys_dependencies\` — **why has it not started?** Upstream: each job its condition names
@@ -1022,6 +1026,30 @@ project's context and is read automatically.
 
 The export has no git history — START_HERE.md shows the three commands to begin a repository — and
 leaves out the demo animations. The Node host has its own \`--export-code\` for the Node half.
+`,
+  },
+  {
+    id: 'waiting',
+    title: 'Waiting for something to finish',
+    keywords: [
+      'wait', 'waiting', 'wait for', 'until it finishes', 'keep checking', 'poll', 'check again',
+      'monitor', 'watch the job', 'when it is done', 'sleep', 'wait until', 'until the job finishes',
+      'job finishes', 'tell me when',
+    ],
+    body: `
+The assistant has a **wait** tool. Ask it to follow something — "watch PAY_EOD until it finishes",
+"tell me when the build is green", "check again in ten minutes" — and it checks with the ordinary
+tool, waits, and checks again, saying each time what it is waiting for.
+
+- **Each wait is up to 15 minutes**; for longer it checks and waits again.
+- **It stops waiting the moment you type a message or react**, so it never holds up your reply.
+- **Every check is an ordinary tool call**, shown and approved like any other. The wait itself does
+  nothing and never asks. To let it check without asking each time, allow that read tool always
+  (Settings → Approvals, or "Always allow" on the prompt).
+- Each check and each wait counts toward the step limit (config:maxIterations); a very long watch
+  may stop and ask you to continue — sending any message carries on.
+
+A scheduled run can wait too, which is how a nightly job can watch something finish and report.
 `,
   },
   {

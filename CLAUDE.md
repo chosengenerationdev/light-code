@@ -2135,6 +2135,26 @@ that opens in VS Code and builds, to carry on with Claude.
 - **The JetBrains plugin had two deprecated-API uses** reported by Marketplace verification:
   `ProcessAdapter`, replaced by implementing `ProcessListener` directly (0.2.2).
 
+## 12x. Waiting, and AutoSys for many jobs at once (0.128.0)
+
+Asked for: "tools to wait and look for things when needed", and AutoSys status and details for
+several jobs, or every job a pattern matches.
+
+- **`wait` only waits** (`tools/wait.ts`, `always` group, up to 900s). The tempting "wait until this
+  tool's result matches" would run another tool inside its own `execute`, which is exactly what the
+  loop's `call_tool` unwrapping exists to prevent — a tool run behind another's approval. So the
+  pattern is check, wait, check: every look is an ordinary, gated call. **It ends the moment the user
+  types or reacts** (`ToolExecutionContext.hasNewUserInput`, fed from the queue and pending
+  reactions), so a long wait never holds up a reply. It reaches nothing, so it is in
+  `ALWAYS_AVAILABLE_TO_SCHEDULES`. Each check and wait counts toward the step cap, deliberately —
+  that cap is what stops an unattended poll running for ever.
+- **`autosys_status` takes `jobs`** (names and patterns together) and `only` as one status or
+  several; jobs matched twice are one job; the answer leads with a count by status and puts failures
+  first. **`autosys_job` takes `jobs` or `pattern`** and `fields`: up to ten full definitions, beyond
+  that one line per job unless `fields` names the attributes (matched as `start_times` or
+  `startTimes`). Lookups run four at a time, in the order asked. A name that is not found is named,
+  and the rest are still answered — one bad name must not cost the other forty.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -3016,7 +3036,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.127.0**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.128.0**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

@@ -4123,6 +4123,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // Also withheld from a scheduled run: nobody is there to fill a form in, and a job
         // that stops to wait for one would never finish.
         ...(schedule === undefined ? { requestForm } : {}),
+        // So `wait` ends the moment the user types or reacts, rather than after its full time.
+        hasNewUserInput: () => queuedMessages.length > 0 || pendingReactions.size > 0,
         signal: activeAbortController.signal,
         /*
           * Supplied by the host, not imported by core: the binary is platform-specific and

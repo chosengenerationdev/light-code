@@ -71,6 +71,11 @@ export interface ToolExecutionContext {
    */
   requestPathAccess?: (realPath: string) => Promise<boolean>
   /**
+   * True once the user has typed a message or given a reaction this turn has not read yet. `wait`
+   * polls it so a long wait ends the moment somebody has something to say.
+   */
+  hasNewUserInput?: () => boolean
+  /**
    * Shows the user a form and waits for it.
    *
    * Absent means nobody is there to fill one in — an unattended scheduled run — and

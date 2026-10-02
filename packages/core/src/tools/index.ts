@@ -12,6 +12,7 @@ import { readDocumentTool } from './readDocument.js'
 import { ToolRegistry } from './registry.js'
 import { searchFilesTool } from './searchFiles.js'
 import { writeToFileTool } from './writeToFile.js'
+import { createWaitTool } from './wait.js'
 
 export * from './types.js'
 export { ToolRegistry } from './registry.js'
@@ -39,6 +40,7 @@ export {
 export { attemptCompletionTool } from './attemptCompletion.js'
 export { createReadToolResultTool } from './readToolResult.js'
 export { createLightCodeHelpTool, type LightCodeHelpParams } from './help.js'
+export { createWaitTool, MAX_WAIT_SECONDS, type WaitParams } from './wait.js'
 
 /**
  * The eight tools that don't require MCP (use_mcp_tool is Phase 5's job — there are no
@@ -65,6 +67,8 @@ export function createDefaultToolRegistry(): ToolRegistry {
    * `tools/help.ts` for why it stays advertised when the dispatcher hides most things.
    */
   registry.register(createLightCodeHelpTool())
+  // Check, wait, check: see tools/wait.ts for why it waits and never polls on its own.
+  registry.register(createWaitTool())
   registry.register(attemptCompletionTool)
   return registry
 }

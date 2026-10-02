@@ -191,6 +191,8 @@ export const ALWAYS_AVAILABLE_TO_SCHEDULES = [
   'read_tool_result',
   'search_docs',
   'call_tool',
+  // Reaches nothing; lets a run check, wait and check again — much of what a schedule is for.
+  'wait',
 ] as const
 
 /** Groups whose presence in a schedule's allowlist warrants a warning in the UI. */
