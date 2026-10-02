@@ -181,7 +181,11 @@ Other packages, from the same tree:
 - Node host: \`pnpm --filter @chosengeneration/light-code run build\`, then
   \`node apps/host/dist/cli.cjs\` (and \`--export-pkg\` for a single-file copy).
 - IntelliJ / PyCharm plugin: \`apps/intellij\`, built with Gradle 8 and a JDK 17
-  (\`gradle buildPlugin\`); the zip lands in \`apps/intellij/build/distributions\`.
+  (\`gradle buildPlugin\`) **after** the Node host, which it packs inside itself so it has
+  the same features and fixes; the zip lands in \`apps/intellij/build/distributions\`.
+
+Every release builds all three from the same commit, so each package has the same
+enhancements and fixes (CLAUDE.md §17).
 
 ## Working on it with Claude
 

@@ -2940,6 +2940,17 @@ Primary development platform. These are silent-failure sources, not preferences.
   to global settings. Standing instruction from the user (2026-10-01); it is part of done, not a
   follow-up.
 
+- **Every enhancement and fix ships in all three packages, every time.** Standing instruction from
+  the user (2026-10-02, "always"): the VS Code extension, the Node host and the JetBrains plugin are
+  built from the same commit for each release, so none of them is behind. The features live in
+  `packages/core` and `packages/ui`, shared by the extension and the host; the plugin is a panel and
+  a launcher, so it **packs the host built from that commit** (`host/light-code.cjs`, by
+  `build.gradle.kts`, which refuses to build without it) and runs it with `node` by default. It used
+  to run `@latest` from npm, which left IntelliJ and PyCharm a release behind until npm was
+  published. Build order: core and ui, then the host, then the plugin. Each package keeps its own
+  version number and gets a new one whenever it is rebuilt with newer contents — matching *content*
+  was the ask, not matching numbers. A change that only one host can have (the debug-session tool,
+  say) is the exception, and says so where it is made.
 - **Versions: bump for every build that is handed over, and skip 66.** Never rebuild a VSIX, npm
   package or plugin under a number that already left the machine — two different files with one
   version cannot be told apart once installed. The user dislikes the number 66; when a bump would
@@ -3036,7 +3047,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.128.0**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.128.1**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

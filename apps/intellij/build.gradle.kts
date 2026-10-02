@@ -24,6 +24,29 @@ dependencies {
 
 kotlin { jvmToolchain(17) }
 
+/*
+ * The Light Code this plugin runs, packed inside it.
+ *
+ * The plugin is a panel and a launcher; everything Light Code does is the Node host. Packing the
+ * host built from the same commit is what makes every enhancement and fix in the VS Code extension
+ * and the Node package reach IntelliJ and PyCharm in the same release, instead of whenever npm
+ * happens to be updated. Build the host first: `pnpm --filter @chosengeneration/light-code run build`.
+ */
+val bundledHost = layout.projectDirectory.file("../host/dist/cli.cjs")
+
+tasks.named<org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask>("prepareSandbox") {
+  doFirst {
+    require(bundledHost.asFile.isFile) {
+      "apps/host/dist/cli.cjs is missing. Build the Node host first (pnpm --filter @chosengeneration/light-code run build): " +
+        "the plugin packs it so IntelliJ and PyCharm run the same Light Code as the other packages."
+    }
+  }
+  from(bundledHost) {
+    into(intellijPlatform.projectName.map { "$it/host" })
+    rename { "light-code.cjs" }
+  }
+}
+
 intellijPlatform {
   pluginConfiguration {
     ideaVersion {

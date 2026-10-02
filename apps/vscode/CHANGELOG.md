@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.128.1
+
+### Patch Changes
+
+- The exported source's START_HERE.md gives the build order for all three packages; the JetBrains plugin now packs the Node host built from the same commit.
+
 ## 0.128.0
 
 ### Minor Changes

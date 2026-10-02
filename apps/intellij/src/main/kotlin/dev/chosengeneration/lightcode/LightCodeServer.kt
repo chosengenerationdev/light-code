@@ -1,6 +1,8 @@
 package dev.chosengeneration.lightcode
 
 import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.openapi.extensions.PluginId
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.process.ProcessEvent
@@ -140,14 +142,25 @@ class LightCodeServer(private val project: Project) : Disposable {
         splitCommand(configured)
       } else {
         /*
-         * `npx --yes` by default, so a fresh install needs no configuration at all.
+         * The Light Code built into this plugin, by default.
          *
-         * `--yes` is not optional: without it npx prompts before fetching a package it does not
-         * have, and a prompt nobody can see is a process that hangs for ever. It also serves the
-         * latest rather than whatever a stale cache holds, which this project has already been
-         * caught by once.
+         * Each plugin build carries the Node host built from the same commit (`host/light-code.cjs`,
+         * put there by the Gradle build), so every enhancement and fix in the VS Code extension and
+         * the Node package of that commit is in the plugin too — with nothing to publish first and
+         * no registry to reach. It used to run `@latest` from npm, which made what IntelliJ and
+         * PyCharm users had depend on whether an npm release had happened yet.
          */
-        listOf(npxExecutable(), "--yes", "@chosengeneration/light-code@latest")
+        val bundled = bundledHost()
+        if (bundled != null) {
+          listOf("node", bundled.absolutePath)
+        } else {
+          /*
+           * Only if the bundled copy is missing (a build made without it): the latest from npm.
+           * `--yes` is not optional — without it npx prompts, and a prompt nobody can see is a
+           * process that hangs for ever.
+           */
+          listOf(npxExecutable(), "--yes", "@chosengeneration/light-code@latest")
+        }
       }
 
     if (parts.isEmpty()) throw IllegalStateException("The configured command is empty.")
@@ -172,6 +185,12 @@ class LightCodeServer(private val project: Project) : Disposable {
     line.setWorkDirectory(File(root))
     line.charset = Charsets.UTF_8
     return line
+  }
+
+  /** The Node host packed into this plugin, when the build included it. */
+  private fun bundledHost(): File? {
+    val home = PluginManagerCore.getPlugin(PluginId.getId("dev.chosengeneration.lightcode"))?.pluginPath?.toFile() ?: return null
+    return File(home, "host/light-code.cjs").takeIf { it.isFile }
   }
 
   /**

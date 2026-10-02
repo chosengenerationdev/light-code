@@ -30,10 +30,11 @@ class LightCodeSettings : PersistentStateComponent<LightCodeSettings.State> {
 
   data class State(
     /**
-     * The command that starts the server. Empty means `npx --yes @chosengeneration/light-code@latest`.
+     * The command that starts the server. Empty means the Light Code built into this plugin, run
+     * with `node` — the same version as the plugin.
      *
      * Overridden for an offline machine, an internal registry, or a checkout being worked on —
-     * `node /path/to/light-code/apps/host/dist/cli.js` is the form that runs a local build.
+     * `node /path/to/light-code/apps/host/dist/cli.cjs` is the form that runs a local build.
      */
     var command: String = "",
     /**
@@ -80,8 +81,8 @@ class LightCodeConfigurable : Configurable {
         .addLabeledComponent("Start command", command)
         .addComponentToRightColumn(
           com.intellij.ui.components.JBLabel(
-            "<html>Leave empty for <code>npx --yes @chosengeneration/light-code@latest</code>.<br>" +
-              "For a local build: <code>node C:\\path\\to\\apps\\host\\dist\\cli.js</code></html>",
+            "<html>Leave empty to run the Light Code built into this plugin (needs Node.js 18+ on the PATH).<br>" +
+              "For a local build: <code>node C:\\path\\to\\apps\\host\\dist\\cli.cjs</code></html>",
           ),
         )
         .addLabeledComponent("Extra arguments", extra)
