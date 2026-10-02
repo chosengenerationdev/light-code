@@ -1304,7 +1304,19 @@ const searchSchema = z.object({
   from: z.string().optional().describe('Match part of the sender address.'),
   subject: z.string().optional().describe('Match part of the subject.'),
   contains: z.string().optional().describe('Match text in the subject or body.'),
-  since: z.string().optional().describe('Only messages received on or after this date, e.g. "2026-08-01".'),
+  since: z.string().optional().describe('Only messages received on or after this date, e.g. "2026-03-01".'),
+  /**
+   * The other end of a date range — what finding *old* mail needs.
+   *
+   * Without it a search for March started from today and read its way back through every message
+   * since, which on a large mailbox ran past the timeout and was reported as Outlook being busy.
+   * With both ends Outlook filters the range itself.
+   */
+  until: z
+    .string()
+    .optional()
+    .describe('Only messages received on or before this date, e.g. "2026-03-31". With since, a date range — the way to find old mail.'),
+  oldestFirst: z.boolean().optional().describe('Return the oldest matches first instead of the newest.'),
   /**
    * The one people actually reach for: "anything in the last two hours".
    *
@@ -1318,7 +1330,7 @@ const searchSchema = z.object({
     .max(20160)
     .optional()
     .describe('Only messages received in the last N minutes - 50 for the last 50 minutes, 120 for two hours.'),
-  limit: z.number().int().min(1).max(100).optional().describe('How many of the newest to return. Default 25.'),
+  limit: z.number().int().min(1).max(100).optional().describe('How many to return. Default 25.'),
 })
 
 export function createOutlookSearchTool(options: OfficeToolOptions): Tool<z.infer<typeof searchSchema>> {
@@ -1333,20 +1345,33 @@ export function createOutlookSearchTool(options: OfficeToolOptions): Tool<z.infe
       'user says to check Outlook directly, when a folder has never been indexed, or when they ' +
       'need something newer than the last sync. Give a folder path from outlook_folders to ' +
       'search one folder, withinMinutes for a recent window (two hours is 120), and limit for ' +
-      'how many of the newest to return. Returns subject, sender, date and a short preview - ' +
-      'use outlook_read_email with the returned id for the full message.',
+      'how many to return. FOR OLD MAIL give a date range - since and until - so Outlook filters ' +
+      'it rather than reading back from today; old mail is often in an Archive folder or an ' +
+      'Online Archive mailbox rather than the Inbox, so check outlook_folders for those. Returns ' +
+      'subject, sender, date and a short preview - use outlook_read_email with the returned id ' +
+      'for the full message.',
     parametersSchema: searchSchema,
     async execute(params): Promise<ToolResult> {
       try {
         const result = await options.bridge.request<{
           folder: string
           matches: { entryId: string; subject: string; from: string; received: string; unread: boolean; preview: string }[]
+          scanned?: number
+          stoppedEarly?: boolean
         }>({ op: 'outlook.search', ...params })
 
-        if (result.matches.length === 0) return { content: `No messages in ${result.folder} matched.` }
+        // Said, because "nothing matched" after looking at 2,000 of 40,000 messages is not "none".
+        const stopped =
+          result.stoppedEarly === true
+            ? `Stopped after looking at ${String(result.scanned ?? 0)} messages without filling the request. Narrow it with a date range (since and until), a sender or a subject, or search the folder the mail is likely in.`
+            : undefined
+        if (result.matches.length === 0) {
+          return { content: [`No messages in ${result.folder} matched.`, ...(stopped !== undefined ? [stopped] : [])].join(' ') }
+        }
         return {
           content: [
             `${String(result.matches.length)} message(s) in ${result.folder}:`,
+            ...(stopped !== undefined ? [stopped] : []),
             '',
             ...result.matches.map((match) =>
               [

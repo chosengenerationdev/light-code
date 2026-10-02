@@ -471,6 +471,8 @@ editing, commands and MCP never touch it.
       'excel', 'outlook', 'spreadsheet', 'workbook', 'email', 'mail', 'macro', 'vba', 'com',
       'draft', 'attachment', 'compose',
       'write an email', 'send an email', 'write a mail', 'draft an email',
+      'outlook busy', 'outlook is busy', 'outlook slow', 'old emails', 'old mail', 'archive',
+      'search outlook', 'outlook not responding',
     ],
     body: `
 **Settings → Tools** for the switches, **Settings → Outlook** for the mail index. Both off by
@@ -502,6 +504,22 @@ themselves are not included; save one out of Outlook to read it.
 **Outlook.** List folders, search, read a message, and open one on screen. Mail formatting is
 preserved as annotations — in an alerting mailbox the red line often *is* the message, and the
 plain-text rendering drops it.
+
+**When Outlook is busy or slow.** Outlook that is sending, receiving or syncing turns automation
+away for a while; Light Code now waits that out inside each call (up to 30 seconds) instead of
+failing at once. If a request still runs out of time, the helper that talks to Outlook is restarted
+on the spot, so the requests after it do not fail too — that is what "Outlook might be busy" over
+and over used to be. A request can also wait on a window in Outlook — its security prompt ("A
+program is trying to access e-mail address information…") holds a request until somebody answers
+it. If this machine is simply slow, raise the time in Settings → Tools.
+
+**Finding old mail.** Give a **date range** — "between 1 and 31 March" — so Outlook filters it
+itself; without one, a search starts from today and reads backwards. Say which folder: old mail is
+often in an **Archive** folder or an **Online Archive** mailbox rather than the Inbox (ask it to
+list the folders). Text to look for is filtered by Outlook too, and a search that looks at 2,000
+messages without finding enough stops and says so rather than timing out. Mail older than what
+Outlook keeps on this computer comes from the server, so it is slower; the indexed mail search
+(below) is fastest for anything it has indexed.
 
 **Composing mail.** \`outlook_create_draft\` fills in recipients, cc, bcc, subject, body,
 attachments and images embedded in the body, and **shows it to you**. It cannot send: there is no

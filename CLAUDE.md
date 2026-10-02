@@ -2155,6 +2155,33 @@ several jobs, or every job a pattern matches.
   `startTimes`). Lookups run four at a time, in the order asked. A name that is not found is named,
   and the rest are still answered — one bad name must not cost the other forty.
 
+## 12y. Outlook that does not give up (0.129.0)
+
+Reported: "many times it is not reading email from outlook and says outlook might be busy", worst when
+searching for old mail. Five causes, fixed together; `office/outlookResilience.test.ts` pins each.
+
+- **One stuck call failed every request behind it.** The helper answers one request at a time; a
+  timed-out COM call kept running inside it, and everything queued behind it timed out too — the
+  repeated "busy". A timeout now **restarts the helper** (process tree, §16), rejects what was waiting
+  with a reason, and the next request re-attaches in about a second. A replaced helper exiting late
+  must not clear its successor (`if (this.child !== child) return`).
+- **"Busy" was retried for ~3 seconds, tuned for an Excel cell edit.** A **COM message filter**
+  (`IOleMessageFilter` via `CoRegisterMessageFilter`, `-Sta` on the command line) now retries
+  RETRYLATER/REJECTED inside every call for up to 30s. Verified compiling and registering in real
+  Windows PowerShell 5.1. If it cannot register, the worker carries on as before.
+- **A busy health check dropped the handle**, sending a busy Outlook through a fresh attach that it
+  also refused, reported as not running. Busy codes now keep the handle; disconnected codes
+  (Outlook restarted) clear it and retry once.
+- **The busy advice said "Excel" for Outlook.** It names the application now, and the Outlook timeout
+  mentions its security prompt as a *possible* cause, never asserted (§12c's lesson).
+- **Search read every message body for `contains`, sorted the whole folder first, and had no upper
+  date.** Text is now a DASL filter (`textdescription LIKE`), Restrict comes before Sort, `until`
+  bounds the range (inclusive of the day), `oldestFirst` reverses, and a scan stops at 2,000 and says
+  so. Old mail: the description sends the model to date ranges and Archive/Online Archive folders.
+
+**Not verified against a live Outlook** — Outlook is installed on the development machine but not
+running, and starting somebody's Outlook is not a build step.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -3047,7 +3074,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.128.1**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.129.0**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

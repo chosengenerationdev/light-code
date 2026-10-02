@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.129.0
+
+### Minor Changes
+
+- Outlook: a busy Outlook is waited out inside each call instead of failing; a request that hangs restarts the helper so the requests after it do not fail too; a restarted Outlook is reconnected automatically; and messages name Outlook rather than Excel. Searching is faster and finds old mail: Outlook filters text and date ranges itself (new `until` and `oldestFirst`), and a long search stops and says so rather than timing out.
+
 ## 0.128.1
 
 ### Patch Changes

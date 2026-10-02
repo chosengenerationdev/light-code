@@ -121,6 +121,10 @@ function Get-OfficeApp {
             $null = $script:apps[$ProgId].Version
             return $script:apps[$ProgId]
         } catch {
+            # Busy is not gone. Dropping the handle here, as this did, sent a busy Outlook
+            # through a fresh attach - which a busy Outlook also refuses - and reported it as not
+            # running. Keep it and let the retry wait the busy spell out.
+            if ($script:transientComCodes -contains (Get-ComErrorCode -ErrorRecord $_)) { throw }
             $script:apps.Remove($ProgId)
         }
     }
@@ -191,6 +195,73 @@ function Get-AttachFailureMessage {
 #>
 $script:transientComCodes = @('0x80010001', '0x8001010A', '0x800AC472')
 
+<#
+  The application went away between requests - Outlook or Excel closed or restarted - and the
+  handle cached here points at nothing. Reconnecting once is right; reporting it is not, because
+  the user can see the application open again and would reasonably call the error nonsense.
+#>
+$script:disconnectedComCodes = @('0x80010108', '0x800706BA', '0x800706BE')
+
+<#
+  A COM message filter, so "busy" is waited out inside the call.
+
+  Office answers "not now" (SERVERCALL_RETRYLATER, or REJECTED while a cell is being edited)
+  whenever it is busy: Outlook syncing or sending, Excel recalculating. Without a filter COM
+  fails the call at once and the only recourse was the whole-request retry below, which gives
+  up after a few seconds - tuned for a cell edit, far too short for Outlook mid-sync, and the
+  source of "Outlook might be busy" when it was merely busy for ten seconds.
+
+  With the filter COM itself retries the rejected call every quarter second for up to
+  [LightCode.BusyFilter]::Patience milliseconds, inside every call, including the hundredth
+  call of a folder walk. Needs a single-threaded apartment, hence -Sta on the command line.
+  If it cannot be registered the worker carries on exactly as before.
+#>
+$script:messageFilterRegistered = $false
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace LightCode {
+    [ComImport, Guid("00000016-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IOleMessageFilter {
+        [PreserveSig] int HandleInComingCall(int dwCallType, IntPtr hTaskCaller, int dwTickCount, IntPtr lpInterfaceInfo);
+        [PreserveSig] int RetryRejectedCall(IntPtr hTaskCallee, int dwTickCount, int dwRejectType);
+        [PreserveSig] int MessagePending(IntPtr hTaskCallee, int dwTickCount, int dwPendingType);
+    }
+
+    public class BusyFilter : IOleMessageFilter {
+        // How long one call may keep being turned away before COM reports it, in milliseconds.
+        public static int Patience = 30000;
+
+        // SERVERCALL_ISHANDLED: this worker never receives calls, but must answer.
+        public int HandleInComingCall(int dwCallType, IntPtr hTaskCaller, int dwTickCount, IntPtr lpInterfaceInfo) { return 0; }
+
+        // 2 = SERVERCALL_RETRYLATER, 1 = SERVERCALL_REJECTED: both are Office saying "not now".
+        // Returning a delay retries after that many milliseconds; -1 gives up and fails the call.
+        public int RetryRejectedCall(IntPtr hTaskCallee, int dwTickCount, int dwRejectType) {
+            if ((dwRejectType == 2 || dwRejectType == 1) && dwTickCount < Patience) { return 250; }
+            return -1;
+        }
+
+        // PENDINGMSG_WAITDEFPROCESS.
+        public int MessagePending(IntPtr hTaskCallee, int dwTickCount, int dwPendingType) { return 2; }
+
+        [DllImport("ole32.dll")]
+        private static extern int CoRegisterMessageFilter(IOleMessageFilter newFilter, out IOleMessageFilter oldFilter);
+
+        public static bool Register() {
+            IOleMessageFilter previous;
+            return CoRegisterMessageFilter(new BusyFilter(), out previous) == 0;
+        }
+    }
+}
+'@
+    $script:messageFilterRegistered = [LightCode.BusyFilter]::Register()
+} catch {
+    [Console]::Error.WriteLine("COM message filter not registered; busy Office calls will be retried less patiently: $($_.Exception.Message)")
+}
+
 function Get-ComErrorCode {
     param($ErrorRecord)
 
@@ -210,6 +281,11 @@ function Invoke-ComWithRetry {
             return & $Action
         } catch {
             $code = Get-ComErrorCode -ErrorRecord $_
+            # Closed or restarted since the last request: forget the dead handle and go again, once.
+            if ($attempt -eq 1 -and $script:disconnectedComCodes -contains $code) {
+                $script:apps.Clear()
+                continue
+            }
             if ($attempt -ge $Attempts -or $script:transientComCodes -notcontains $code) { throw }
             Start-Sleep -Milliseconds $delayMs
             # Backed off rather than hammered: someone typing a sentence into a cell holds Excel
@@ -228,6 +304,17 @@ function Invoke-ComWithRetry {
 #>
 function Get-ComErrorAdvice {
     param([string]$Code, [string]$Operation)
+
+    if ($Operation -like 'outlook.*') {
+        switch ($Code) {
+            '0x80010001' { return "Outlook stayed busy for the whole time allowed ($Operation) - usually sending, receiving or syncing a large mailbox, or a window in Outlook is waiting for a click. Try again once it settles." }
+            '0x8001010A' { return "Outlook stayed busy for the whole time allowed and kept asking to be called back ($Operation). It is usually syncing; try again in a minute." }
+            '0x80010108' { return "Outlook was closed or restarted while this ran ($Operation). Try again - it reconnects on its own." }
+            '0x800706BA' { return "Outlook stopped responding to automation ($Operation). If it has frozen, restart it, then try again." }
+            '0x800401E3' { return "Outlook is not running, or is not reachable from here ($Operation). Open Outlook, then try again." }
+            default { return '' }
+        }
+    }
 
     switch ($Code) {
         '0x80010001' {
@@ -2293,7 +2380,6 @@ function Invoke-OutlookSearch {
     $folder = Get-OutlookFolder -Namespace $ns -Path $Request.folder
 
     $items = $folder.Items
-    $items.Sort('[ReceivedTime]', $true)
 
     $limit = 25
     if ($Request.limit) { $limit = [Math]::Min([int]$Request.limit, 100) }
@@ -2314,15 +2400,38 @@ function Invoke-OutlookSearch {
     if ($Request.withinMinutes) { $cutoff = (Get-Date).AddMinutes(-1 * [double]$Request.withinMinutes) }
     elseif ($Request.since) { $cutoff = [datetime]::Parse($Request.since) }
     if ($cutoff) { $filters += "urn:schemas:httpmail:datereceived >= '$($cutoff.ToString('yyyy-MM-dd HH:mm'))'" }
+    # The other end of the range, inclusive of the whole day named: received before the next midnight.
+    if ($Request.until) {
+        $end = ([datetime]::Parse($Request.until)).Date.AddDays(1)
+        $filters += "urn:schemas:httpmail:datereceived < '$($end.ToString('yyyy-MM-dd HH:mm'))'"
+    }
+    <#
+      Text the mail must contain, asked of Outlook rather than checked here.
+
+      This read every message's Body in turn until enough matched. A body is a round trip each, so
+      on a large folder over Exchange the search outran the timeout and was reported as Outlook
+      being busy. As a filter, Outlook (or Exchange) does the looking. The check below stays as a
+      second opinion on the few that come back, so a store that answers LIKE loosely is still exact.
+    #>
+    if ($Request.contains) {
+        $needle = $Request.contains -replace "'", "''"
+        $filters += "(urn:schemas:httpmail:subject LIKE '%$needle%' OR urn:schemas:httpmail:textdescription LIKE '%$needle%')"
+    }
 
     if ($filters.Count -gt 0) {
         $items = $items.Restrict('@SQL=' + ($filters -join ' AND '))
     }
+    # Sorted after narrowing, so only what matched is ordered - not the whole folder.
+    $items.Sort('[ReceivedTime]', -not [bool]$Request.oldestFirst)
 
     $results = @()
     $index = 0
+    # Bounded, so a filter a store cannot apply ends with "looked at this many" rather than a timeout.
+    $scanLimit = 2000
+    $stoppedEarly = $false
     foreach ($item in $items) {
         if ($results.Count -ge $limit) { break }
+        if ($index -ge $scanLimit) { $stoppedEarly = $true; break }
         $index++
         # Non-mail items (meeting requests, tasks) have no SenderName and would throw.
         try {
@@ -2341,7 +2450,7 @@ function Invoke-OutlookSearch {
             continue
         }
     }
-    return @{ folder = $folder.Name; matches = $results }
+    return @{ folder = $folder.Name; matches = $results; scanned = $index; stoppedEarly = $stoppedEarly }
 }
 
 function Invoke-OutlookRead {

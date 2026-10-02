@@ -175,6 +175,8 @@ describe('finding the right topic', () => {
       ['I pressed the play button on a schedule and it did not run', 'schedules'],
       ['why did my jenkins build fail', 'jenkins'],
       ['why has my autosys job not started', 'autosys'],
+      ['outlook keeps saying it might be busy', 'office'],
+      ['how do I find old emails in outlook', 'office'],
       ['status of all autosys jobs matching PAY_*', 'autosys'],
       ['can it wait until the job finishes and tell me', 'waiting'],
       ['keep checking the build every few minutes', 'waiting'],
