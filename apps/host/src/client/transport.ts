@@ -303,8 +303,7 @@ export class HttpTransport implements Transport {
             const frame = buffer.slice(0, boundary)
             buffer = buffer.slice(boundary + 2)
             if (frame.startsWith('data: ')) {
-              const message: unknown = JSON.parse(frame.slice(6))
-              for (const listener of this.listeners) listener(message)
+              this.deliver(JSON.parse(frame.slice(6)) as unknown)
             }
             boundary = buffer.indexOf('\n\n')
           }
@@ -382,6 +381,8 @@ export class HttpTransport implements Transport {
    * Every other status is a real refusal and is reported with its reason.
    */
   post(message: unknown): void {
+    // An embedding app's own business (Sun's per-codebase accent) never reaches the server.
+    if (this.outgoingFilter?.(message) === true) return
     if (!this.streamOpen) {
       if (this.queued.length >= MAX_QUEUED) {
         this.onStatus(
@@ -490,9 +491,7 @@ export class HttpTransport implements Transport {
       const messages = body.messages ?? []
       // Anything arriving means the conversation is live, so the next poll comes quickly.
       if (messages.length > 0) this.lastActivity = Date.now()
-      for (const message of messages) {
-        for (const listener of this.listeners) listener(message)
-      }
+      for (const message of messages) this.deliver(message)
     } catch {
       // One failure is the next poll's problem; a run of them is the user's.
       this.notePollFailure()
@@ -573,6 +572,33 @@ export class HttpTransport implements Transport {
   onMessage(listener: (message: unknown) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /**
+   * Adjusts each message before anyone sees it. Used when this page runs inside Sun Light Code,
+   * which sets the theme and accent for every pane: the `settings` message is rewritten on the way
+   * in, so the panel and the page agree and nothing is written to the user's config.
+   */
+  setIncomingFilter(filter: ((message: unknown) => unknown) | undefined): void {
+    this.incomingFilter = filter
+  }
+
+  /** Hands a message to the listeners as though it had just arrived — through the filter. */
+  redeliver(message: unknown): void {
+    this.deliver(message)
+  }
+
+  private incomingFilter: ((message: unknown) => unknown) | undefined
+  private outgoingFilter: ((message: unknown) => boolean) | undefined
+
+  /** Takes a message out of the stream before it is sent; returning true means it was handled. */
+  setOutgoingFilter(filter: ((message: unknown) => boolean) | undefined): void {
+    this.outgoingFilter = filter
+  }
+
+  private deliver(raw: unknown): void {
+    const message = this.incomingFilter === undefined ? raw : this.incomingFilter(raw)
+    for (const listener of this.listeners) listener(message)
   }
 }
 

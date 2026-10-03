@@ -1,0 +1,13 @@
+{
+  "name": "@light-code/sun",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Sun Light Code: build scripts. The published package is assembled from npm/ by scripts/build.mjs.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build:sun": "node scripts/build.mjs",
+    "smoke:sun": "node scripts/smoke.mjs",
+    "icon": "node scripts/make-icon.mjs"
+  }
+}

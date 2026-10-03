@@ -24,3 +24,7 @@ apps/host/light-code-pkg-*.cjs
 apps/intellij/.gradle/
 apps/intellij/.intellijPlatform/
 apps/intellij/build/
+
+# Sun Light Code: Rust build output, and the npm package staging folder.
+apps/sun/native/target/
+apps/sun/package/

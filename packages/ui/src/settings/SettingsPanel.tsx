@@ -74,6 +74,10 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onSetExpertColor: (value: string) => void
   /** Only where the host has no theme of its own — see `AppearanceSectionProps.theme`. */
   choosesTheme?: boolean
+  /** The app that sets the theme and accent instead of this panel — see `AppearanceSectionProps`. */
+  appearanceFrom?: string
+  accentInherited?: boolean
+  onInheritAccent?: () => void
   /** False where this host has no Excel, Outlook or mail index — the tab is then not listed. */
   offersOffice?: boolean
   theme?: 'system' | 'light' | 'dark'
@@ -330,6 +334,13 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               agentColors={props.agents.colors}
               onChangeAgentColor={props.onSetAgentColor}
               {...(props.theme === undefined ? {} : { theme: props.theme })}
+              {...(props.appearanceFrom === undefined
+                ? {}
+                : {
+                    appearanceFrom: props.appearanceFrom,
+                    accentInherited: props.accentInherited === true,
+                    ...(props.onInheritAccent !== undefined ? { onInheritAccent: props.onInheritAccent } : {}),
+                  })}
               {...(props.choosesTheme === true && props.onSetTheme !== undefined
                 ? { onChangeTheme: props.onSetTheme }
                 : {})}

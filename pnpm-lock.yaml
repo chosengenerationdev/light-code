@@ -82,6 +82,8 @@ importers:
         specifier: ^1.18.0
         version: 1.18.0
 
+  apps/sun: {}
+
   apps/vscode:
     dependencies:
       '@light-code/core':

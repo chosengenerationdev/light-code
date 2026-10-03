@@ -25,6 +25,7 @@ const compat = installNodeCompat()
 
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -242,6 +243,24 @@ async function main(): Promise<void> {
   }
   const workspaceRoot = path.resolve(valueOf(args, '--workspace') ?? process.cwd())
   const dataDir = valueOf(args, '--data-dir') ?? envPaths('light-code', { suffix: '' }).data
+  /*
+   * Settings and secrets kept somewhere other than the data directory.
+   *
+   * For Light Code Sun, which points a codebase at a config that already exists (the VS Code
+   * extension's, say) and shares one secrets file across every codebase it runs. One person's
+   * files only: on a shared server every user would be handed the same settings and keys.
+   */
+  const configFileArg = valueOf(args, '--config-file')
+  const secretsFileArg = valueOf(args, '--secrets-file')
+  if ((configFileArg !== undefined || secretsFileArg !== undefined) && args.includes('--server')) {
+    process.stderr.write(
+      'light-code: --config-file and --secrets-file are for one person on their own machine, and --server has many users. Leave them out on a shared server.\n',
+    )
+    process.exitCode = 1
+    return
+  }
+  const configFile = configFileArg === undefined ? undefined : path.resolve(configFileArg)
+  const secretsFile = secretsFileArg === undefined ? undefined : path.resolve(secretsFileArg)
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
   /*
    * How long the launch URL lives.
@@ -352,6 +371,10 @@ async function main(): Promise<void> {
   const server = await startServer({
     workspaceRoot,
     dataDir,
+    ...(configFile !== undefined ? { configFile } : {}),
+    ...(secretsFile !== undefined ? { secretsFile } : {}),
+    // Only for one person's machine: on a shared server stdout is the operator's log, not a desktop.
+    ...(args.includes('--desktop-notify') && !serverMode ? { desktopNotify: true } : {}),
     /*
      * Decoded once, at startup.
      *
@@ -403,6 +426,8 @@ async function main(): Promise<void> {
         `\n  That link ${reason === 'expired' ? 'expired' : 'had already been used'}. ` +
           `Here is a fresh one, good for ${String(handoffSeconds)} seconds:\n  ${fresh}\n\n`,
       )
+      // The program that started this reads the prefixed line, so it can reload its pane itself.
+      if (printUrl) process.stdout.write(`light-code-url: ${fresh}\n`)
     },
     port: Number.isNaN(port) ? 0 : port,
     ...(serverMode ? { roles: adminListPolicy(effectiveAdminIds), sharedConfig } : {}),
@@ -620,6 +645,9 @@ const KNOWN_FLAGS = new Set([
   '--workspace',
   '--port',
   '--data-dir',
+  '--config-file',
+  '--secrets-file',
+  '--desktop-notify',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -683,6 +711,14 @@ function valueOf(args: string[], flag: string): string | undefined {
  * function for the same reason: an import would be hoisted back to the top.
  */
 function resolveRipgrep(): string | undefined {
+  /*
+   * A binary the program that started this one ships beside itself. Light Code Sun carries rg.exe
+   * in its package rather than depending on `@vscode/ripgrep`, whose install script downloads the
+   * binary from GitHub — the step that fails on an office network, and the reason Sun installs
+   * with no scripts at all.
+   */
+  const bundled = process.env.LIGHT_CODE_RIPGREP
+  if (bundled !== undefined && bundled.length > 0 && existsSync(bundled)) return bundled
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     return (require('@vscode/ripgrep') as { rgPath: string }).rgPath
@@ -841,6 +877,13 @@ Usage: light-code [options]
   --version, -v       Print the version and exit
   --port <n>          Port to bind (default: an unused one)
   --data-dir <dir>    Where config, secrets and task history live
+  --config-file <file>   Use this config.json instead of the one in the data
+                      directory - an existing one, such as the VS Code
+                      extension's, is used in place (not with --server)
+  --secrets-file <file>  Keep secrets in this file instead (not with --server)
+  --desktop-notify    Print each notification from the notify tool as a line
+                      prefixed light-code-notify: for the program that started
+                      this one (Light Code Sun shows them as Windows notifications)
   --no-open           Print the URL instead of launching a browser
   --no-token          Serve with no bearer token, so any request to the port is
                       accepted. Origin and Host are still checked, so a page in

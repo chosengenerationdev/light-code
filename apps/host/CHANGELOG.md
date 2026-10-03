@@ -1,5 +1,17 @@
 # @chosengeneration/light-code
 
+## 0.103.0
+
+### Minor Changes
+
+- The Variables tab shows only your own variables when one person uses the host - in Sun Light Code and a personal `npx` - instead of a shared server's administrator sections. Administrator variables that exist are still shown, since they win.
+
+## 0.102.0
+
+### Minor Changes
+
+- Ready for Sun Light Code, the new Windows app that holds many codebases at once. `--config-file` and `--secrets-file` keep settings and secrets outside the data folder (an existing config can be used in place); `--desktop-notify` hands the notify tool's notifications to the program that started the host; a page embedded by a named `--allow-frame-ancestor` now loads; a bundled ripgrep can be named with `LIGHT_CODE_RIPGREP`. A secrets file shared by several processes no longer loses a key one of them saved. The handbook explains Sun.
+
 ## 0.101.0
 
 ### Minor Changes

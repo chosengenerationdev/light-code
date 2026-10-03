@@ -184,7 +184,11 @@ Other packages, from the same tree:
   (\`gradle buildPlugin\`) **after** the Node host, which it packs inside itself so it has
   the same features and fixes; the zip lands in \`apps/intellij/build/distributions\`.
 
-Every release builds all three from the same commit, so each package has the same
+- Sun Light Code, the Windows app for several codebases at once: \`apps/sun\`. Needs
+  Rust 1.86 or newer (\`rustup\`, MSVC toolchain). \`node apps/sun/scripts/build.mjs\` builds the
+  Node host, the exe and the npm package, which lands in \`apps/sun\`; it packs the host too.
+
+Every release builds all four from the same commit, so each package has the same
 enhancements and fixes (CLAUDE.md §17).
 
 ## Working on it with Claude

@@ -22,13 +22,32 @@ import type { SecretStore } from '@light-code/core'
 export class FileSecretStore implements SecretStore {
 
   private cache: Record<string, string> | undefined
+  /**
+   * The file's modification time and size when `cache` was read.
+   *
+   * Light Code Sun runs one process per codebase and points them all at one secrets file, so a key
+   * entered in one must reach the others, and one process saving must not write back a stale copy
+   * that drops what another just added. So a read checks the stamp and a write re-reads first.
+   */
+  private stamp: string | undefined
   /** Serialises writes: two concurrent saves would otherwise lose one another's keys. */
   private queue: Promise<void> = Promise.resolve()
 
   constructor(private readonly filePath: string) {}
 
+  private async currentStamp(): Promise<string | undefined> {
+    try {
+      const stat = await fs.stat(this.filePath)
+      return `${String(stat.mtimeMs)}:${String(stat.size)}`
+    } catch {
+      return undefined
+    }
+  }
+
   private async load(): Promise<Record<string, string>> {
-    if (this.cache !== undefined) return this.cache
+    const stamp = await this.currentStamp()
+    if (this.cache !== undefined && stamp === this.stamp) return this.cache
+    this.stamp = stamp
     try {
       const raw = await fs.readFile(this.filePath, 'utf8')
       const parsed: unknown = JSON.parse(raw)
@@ -44,6 +63,8 @@ export class FileSecretStore implements SecretStore {
 
   private write(mutate: (secrets: Record<string, string>) => void): Promise<void> {
     this.queue = this.queue.then(async () => {
+      // Fresh from disk, never the cache: another process may have saved since we last looked.
+      this.cache = undefined
       const secrets = await this.load()
       mutate(secrets)
       await fs.mkdir(path.dirname(this.filePath), { recursive: true })
@@ -53,6 +74,7 @@ export class FileSecretStore implements SecretStore {
       const temp = `${this.filePath}.${process.pid}.tmp`
       await fs.writeFile(temp, JSON.stringify(secrets, null, 2), { encoding: 'utf8', mode: 0o600 })
       await replaceFile(temp, this.filePath)
+      this.stamp = await this.currentStamp()
     })
     return this.queue
   }

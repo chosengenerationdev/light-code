@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.130.0
+
+### Minor Changes
+
+- The handbook (`light_code_help`) explains Sun Light Code, the new Windows app for working on several codebases at once with the same Light Code agent in each. No change in behaviour inside VS Code.
+
 ## 0.129.0
 
 ### Minor Changes

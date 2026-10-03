@@ -155,6 +155,17 @@ export interface HostServices {
    * Absent means offered, so the extension is unaffected.
    */
   offersOffice?: boolean
+  /**
+   * A real desktop notification, for a host that has one to give.
+   *
+   * Light Code Sun shows these as Windows notifications naming the codebase, so the `notify` tool
+   * reaches someone who is looking at a different chat — or at nothing, during a scheduled run.
+   * Called by `notify` only, never by the bridge's own status toasts: those are about the panel
+   * the user is looking at, and a desktop notification for "1 tool approved" is noise.
+   *
+   * Absent everywhere else, so the extension keeps its own toasts and nothing changes there.
+   */
+  desktopNotify?: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => void
   secrets: SecretStore
   configStore: ConfigStore
   ui: HostUi

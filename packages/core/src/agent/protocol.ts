@@ -618,6 +618,13 @@ export type UiToHostMessage =
   | { type: 'publishAllToBucket'; kind: 'skills' | 'tools' }
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
+  /**
+   * Go back to the embedding app's accent instead of one of this panel's own. Only Sun Light Code
+   * acts on it - its page intercepts it, with `setAccentColor`, and keeps the choice per codebase
+   * rather than in a config file that may be linked to VS Code. Offered only where `appearanceFrom`
+   * is set, so no other host is ever sent one.
+   */
+  | { type: 'inheritAccentColor' }
   | { type: 'setExpertColor'; value: string }
   /**
    * Light or dark in the browser, or follow the browser's own setting.
@@ -1267,6 +1274,13 @@ export type HostToUiMessage =
       adminIds: string[]
       /** False when the administrator's half is read-only for this session. */
       canEditAdmin: boolean
+      /**
+       * Whether this host has more than one user. Without one there is no administrator and nobody
+       * else, so the panel shows one person's variables and none of the server vocabulary - which
+       * in Sun Light Code or a personal `npx` was pure confusion. Absent means shared, so a newer
+       * panel talking to an older host keeps showing everything.
+       */
+      shared?: boolean
     }
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
@@ -1335,6 +1349,14 @@ export type HostToUiMessage =
       exportsSource?: boolean
       /** True where the host has no theme of its own, so the user picks one. */
       choosesTheme?: boolean
+      /**
+       * The app that sets this panel's theme and accent colour, when one does - Sun Light Code,
+       * which gives every codebase's pane its own appearance. The panel then names it instead of
+       * offering controls whose choice would be overridden. Role colours stay the panel's own.
+       */
+      appearanceFrom?: string
+      /** With `appearanceFrom`: the accent is that app's, not one chosen for this codebase. */
+      accentInherited?: boolean
       /**
        * Whether this host offers Excel, Outlook and the mail index.
        *

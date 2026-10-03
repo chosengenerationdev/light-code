@@ -1,0 +1,4 @@
+# Choose dependency versions that build with the rust-version in Cargo.toml, so Sun builds on
+# the toolchain a machine already has rather than demanding the newest.
+[resolver]
+incompatible-rust-versions = "fallback"

@@ -45,6 +45,9 @@ packages/ui        React chat + settings UI. Talks over a Transport interface.
 apps/vscode        Thin host: activation, SecretStorage, webview plumbing, ripgrep. ~400 LOC.
 apps/host          Node server + browser UI. Published as @chosengeneration/light-code.
                    See §14.
+apps/intellij      JetBrains plugin: a panel and a launcher that packs apps/host.
+apps/sun           Sun Light Code: a Windows app (Rust, WebView2) holding many codebases, one
+                   Node host per codebase. Published as @chosengeneration/sun-light-code. §14b.
 ```
 
 pnpm workspaces. No Turborepo — the repo is too small to justify it.
@@ -2783,6 +2786,71 @@ to make now.
 
 ---
 
+## 14b. Sun Light Code (0.1.0)
+
+Asked for as: one Windows UI for every codebase the user has open in separate VS Code windows; point
+each at its existing Light Code config or a new one; agents keep working in the background while
+another chat is on screen; very fast; installed with `npm i -g`; Windows only. `apps/sun`.
+
+**Rust for the window, not for the agent.** The question asked was "should this be Rust". The shell
+is: `native/` is wry + tao (what Tauri is built on, without Tauri's config machinery) over WebView2,
+1.3 MB, starting instantly. The agent is not rewritten: everything Light Code does is ~100k lines of
+TypeScript, an agent spends its time waiting on a model, and a rewrite would lose features for no
+speed. **Parallelism comes from processes**: each codebase runs its own Node host
+(`--workspace --data-dir --config-file --secrets-file --print-url --desktop-notify
+--allow-frame-ancestor http://sun.localhost`), so one busy agent cannot slow another and a crash is
+contained. The pane is the host's ordinary browser UI in an iframe, kept mounted while hidden
+(`visibility`, not `display`), so switching is instant and nothing pauses.
+
+- **A Windows job object per codebase**, created with KILL_ON_JOB_CLOSE. Stopping a codebase ends its
+  MCP servers, Python worker and commands with it (§16's process-tree rule), and if Sun is killed the
+  OS closes the handles and every agent goes too. The same job is the memory meter. Verified by the
+  smoke test: kill the window, no Node process for that home survives.
+- **Config: Link, Copy or New**, and the host is always given `--config-file`, so Sun knows the file
+  without knowing the host's per-user hash. Link uses e.g. the VS Code extension's `config.json` in
+  place; both apps write it atomically and the 0.122.1 unknown-key pass-through covers version skew.
+  **VS Code's secrets cannot come across** (its SecretStorage is encrypted for VS Code), and the UI
+  says so rather than half-importing. Secrets live in one `secrets.json` for every codebase, so a key
+  is entered once; `FileSecretStore` now re-reads a file another process changed and merges from
+  disk before every write, or two codebases saving keys would drop each other's.
+- **Embedding needed two host changes, both narrow.** The frame's first navigation is
+  `Sec-Fetch-Site: cross-site` (sun.localhost → 127.0.0.1) and was refused: `isAllowedFrameNavigation`
+  lets exactly a framed GET through, never `/api/`, and only when an ancestor is named. And the
+  client posts only a state word (idle/busy/attention), a shortcut, or an accent to its embedder's
+  origin — never text or paths. Shortcuts are forwarded because focus lives in the frame.
+- **Appearance is Sun's, applied without writing config.** The client rewrites the incoming
+  `settings` message (theme, accent, `appearanceFrom`, `accentInherited`) rather than saving: a
+  linked config is the VS Code extension's, and a window's look has no business changing it. A
+  codebase may keep its own accent — chosen in its own Appearance tab, intercepted on the way out
+  (`setOutgoingFilter`) and stored in Sun's state, not the config. Role colours stay the pane's. The
+  window and taskbar icon are drawn in the accent on a canvas and handed to Rust; the exe's own icon
+  is fixed at build and stays orange.
+- **`notify` reaches the desktop.** `HostServices.desktopNotify` (absent in the extension, so nothing
+  changes there) is called by the notify tool only — never by the bridge's own status toasts — and the
+  host prints it as a `light-code-notify:` line Sun turns into a Windows notification under its own
+  AUMID (registered in HKCU, no admin). Finished and needs-approval notifications come from the pane's
+  state word when that codebase is not on screen.
+- **Sleep, not swap.** Idle codebases (default 30 min) are stopped to free memory and restarted on
+  click; never while busy or waiting, never the one on screen, never one with an enabled schedule
+  (read from its config file — a sleeping host cannot be asked; an unreadable file means awake).
+- **Install copies files and nothing else.** No install scripts, no dependencies: the reason Electron
+  fails at the office is its postinstall download. The package carries the exe, the host built from
+  the same commit, rg.exe (`LIGHT_CODE_RIPGREP`, so `@vscode/ripgrep`'s GitHub download is never
+  needed) and `source.zip`. `scripts/smoke.mjs` fails if a script or dependency is ever added.
+- **One instance per data folder** (named mutex); a second launch brings the window forward. Rust is
+  pinned to 1.86 with the fallback resolver (`.cargo/config.toml`) so it builds on the toolchain a
+  machine has.
+- **Not in Sun**: the debug-session tool and editor pickers, exactly as in the Node host.
+- Sun's version lives in `npm/package.json` and `native/Cargo.toml`; `build.mjs` refuses a mismatch
+  (and 66).
+
+**Verified on Windows 11 by running it**, including screenshots of light, dark, both accents and the
+Add dialog, and `scripts/smoke.mjs` installing the tarball with plain npm. **Not verified**: Windows
+10, a machine without Node on PATH outside npm, notifications being clicked (they were not driven),
+and a long session with sleep and wake cycling.
+
+---
+
 ## 15. Config and secrets
 
 ### Config
@@ -2967,9 +3035,10 @@ Primary development platform. These are silent-failure sources, not preferences.
   to global settings. Standing instruction from the user (2026-10-01); it is part of done, not a
   follow-up.
 
-- **Every enhancement and fix ships in all three packages, every time.** Standing instruction from
+- **Every enhancement and fix ships in every package, every time.** Standing instruction from
   the user (2026-10-02, "always"): the VS Code extension, the Node host and the JetBrains plugin are
-  built from the same commit for each release, so none of them is behind. The features live in
+  built from the same commit for each release, so none of them is behind. **Sun Light Code is the
+  fourth** (2026-10-03): it packs the host exactly as the plugin does (`apps/sun/scripts/build.mjs`). The features live in
   `packages/core` and `packages/ui`, shared by the extension and the host; the plugin is a panel and
   a launcher, so it **packs the host built from that commit** (`host/light-code.cjs`, by
   `build.gradle.kts`, which refuses to build without it) and runs it with `node` by default. It used

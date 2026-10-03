@@ -14,6 +14,12 @@ export interface VariablesTabProps {
   adminIds: string[]
   /** False when the administrator's half is read-only for this session. */
   canEditAdmin: boolean
+  /**
+   * More than one person uses this host. When false (Sun Light Code, a personal `npx`) there is
+   * no administrator, so their half is not shown - unless it holds something, because a variable
+   * that wins must never be invisible.
+   */
+  shared?: boolean
   onSaveUser: (variables: SessionVariable[]) => void
   onSaveAdmin: (variables: SessionVariable[]) => void
   onSaveAdminIds: (ids: string[]) => void
@@ -28,6 +34,8 @@ export interface VariablesTabProps {
  * shows both.
  */
 export function VariablesTab(props: VariablesTabProps): ReactElement {
+  const shared = props.shared !== false
+  const showAdmin = shared || props.admin.length > 0
   return (
     <div style={{ padding: 12, overflowY: 'auto', fontFamily, fontSize: 13, color: colors.foreground }}>
       <h3 style={{ margin: '0 0 4px' }}>Variables</h3>
@@ -51,15 +59,25 @@ export function VariablesTab(props: VariablesTabProps): ReactElement {
           margin: '0 0 12px',
         }}
       >
-        <strong>Not secret.</strong> Everything a session runs does so as the server&rsquo;s own
-        account, so another user can have their assistant read these. Put an API key in{' '}
-        <strong>Providers</strong>, which stores it separately and never sends it back to a page.
+        {shared ? (
+          <>
+            <strong>Not secret.</strong> Everything a session runs does so as the server&rsquo;s own
+            account, so another user can have their assistant read these.
+          </>
+        ) : (
+          <>
+            <strong>Not secret.</strong> Every command and tool the assistant runs can read these, and
+            so can any program running as you.
+          </>
+        )}{' '}
+        Put an API key in <strong>Providers</strong>, which stores it separately and never sends it
+        back to a page.
       </p>
 
       <Panel id="variables.user" title="Yours" summary={`${String(props.user.length)} set`} defaultOpen>
       <VariableList
         title="Yours"
-        hint="Only your sessions see these."
+        hint={shared ? 'Only your sessions see these.' : 'Given to every command and Python tool the assistant runs here.'}
         variables={props.user}
         resolved={props.resolved}
         scope="user"
@@ -68,6 +86,7 @@ export function VariablesTab(props: VariablesTabProps): ReactElement {
       />
       </Panel>
 
+      {showAdmin && (
       <Panel id="variables.admin" title="Everyone's" summary={`${String(props.admin.length)} set`}>
       <VariableList
         title="Everyone's"
@@ -83,8 +102,9 @@ export function VariablesTab(props: VariablesTabProps): ReactElement {
         editable={props.canEditAdmin}
       />
       </Panel>
+      )}
 
-      {props.canEditAdmin && (
+      {shared && props.canEditAdmin && (
         <Panel id="variables.administrators" title="Administrators">
           <AdminIds ids={props.adminIds} onSave={props.onSaveAdminIds} />
         </Panel>

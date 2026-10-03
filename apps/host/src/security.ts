@@ -73,7 +73,12 @@ export function checkRequest(
   // Absent means an older browser or a non-browser client, where the bearer token carries
   // the weight instead.
   const fetchSite = request.headers['sec-fetch-site']
-  if (typeof fetchSite === 'string' && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+  if (
+    typeof fetchSite === 'string' &&
+    fetchSite !== 'same-origin' &&
+    fetchSite !== 'none' &&
+    !isAllowedFrameNavigation(request)
+  ) {
     return { status: 403, reason: `Cross-site request (Sec-Fetch-Site: ${fetchSite}) is not allowed.` }
   }
 
@@ -82,6 +87,24 @@ export function checkRequest(
     return { status: 403, reason: `Missing Origin header on a ${method}.` }
   }
   return undefined
+}
+
+/**
+ * The page being opened inside an embedding app's frame — the one cross-site request let through.
+ *
+ * An app named with `--allow-frame-ancestor` (Sun Light Code) loads this page in an iframe from
+ * its own origin, so the browser marks that first navigation `cross-site` and the check above
+ * refused it: the frame stayed blank. What is let through is exactly that: a GET that navigates a
+ * frame, never `/api/`, and only when the operator named an ancestor. It serves the static page and
+ * nothing else; the token still arrives in the fragment, which no request carries, and
+ * `frame-ancestors` still decides who may show the page at all. Every API call the page then makes
+ * is same-origin and checked as before.
+ */
+function isAllowedFrameNavigation(request: IncomingMessage): boolean {
+  if (frameAncestors.length === 0) return false
+  if ((request.method ?? 'GET').toUpperCase() !== 'GET') return false
+  if ((request.url ?? '/').startsWith('/api/')) return false
+  return request.headers['sec-fetch-dest'] === 'iframe' && request.headers['sec-fetch-mode'] === 'navigate'
 }
 
 /**

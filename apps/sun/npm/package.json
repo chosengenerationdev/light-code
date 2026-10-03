@@ -1,0 +1,45 @@
+{
+  "name": "@chosengeneration/sun-light-code",
+  "version": "0.1.1",
+  "description": "Sun Light Code: every codebase in one Windows window, each with its own Light Code agent working in parallel",
+  "license": "MIT",
+  "bin": {
+    "sun-light-code": "bin/sun-light-code.cjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "coding-assistant",
+    "llm",
+    "mcp",
+    "windows",
+    "desktop"
+  ],
+  "homepage": "https://github.com/chosengenerationdev/light-code#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chosengenerationdev/light-code.git",
+    "directory": "apps/sun"
+  },
+  "bugs": {
+    "url": "https://github.com/chosengenerationdev/light-code/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

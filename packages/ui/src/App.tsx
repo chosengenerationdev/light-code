@@ -89,6 +89,8 @@ interface VariablesState {
   resolved: ResolvedVariable[]
   adminIds: string[]
   canEditAdmin: boolean
+  /** More than one person uses this host — see `VariablesTabProps.shared`. */
+  shared: boolean
 }
 
 /** If the last message is still streaming, finalize it (drop the `pending` flag) in place. */
@@ -426,6 +428,9 @@ export function App(props: AppProps): ReactElement {
     choosesTheme: boolean
     theme?: 'system' | 'light' | 'dark'
   }>({ choosesTheme: false })
+  /** Who sets the theme and accent instead of this panel (Sun Light Code), if anyone. */
+  const [appearanceFrom, setAppearanceFrom] = useState<string | undefined>(undefined)
+  const [accentInherited, setAccentInherited] = useState(false)
   /**
    * Whether this host offers Excel, Outlook and the mail index.
    *
@@ -589,12 +594,15 @@ export function App(props: AppProps): ReactElement {
           resolved: message.resolved,
           adminIds: message.adminIds,
           canEditAdmin: message.canEditAdmin,
+          shared: message.shared !== false,
         })
       } else if (message.type === 'settings') {
         setModeId(message.modeId)
         setProgrammingProfileId(message.programmingProfileId)
         setAllowProgrammingProfile(message.allowProgrammingProfile)
         setOffersOffice(message.offersOffice !== false)
+        setAppearanceFrom(message.appearanceFrom)
+        setAccentInherited(message.accentInherited === true)
         setThemeChoice({
           choosesTheme: message.choosesTheme === true,
           ...(message.theme === undefined ? {} : { theme: message.theme }),
@@ -1927,6 +1935,14 @@ export function App(props: AppProps): ReactElement {
             }}
             offersOffice={offersOffice}
             {...(themeChoice.choosesTheme ? { choosesTheme: true } : {})}
+            {...(appearanceFrom !== undefined
+              ? {
+                  appearanceFrom,
+                  accentInherited,
+                  onInheritAccent: () =>
+                    props.transport.post({ type: 'inheritAccentColor' } satisfies UiToHostMessage),
+                }
+              : {})}
             {...(themeChoice.theme === undefined ? {} : { theme: themeChoice.theme })}
             onSetTheme={(theme) => {
               // Applied locally as well as saved, so the change is instant rather than waiting

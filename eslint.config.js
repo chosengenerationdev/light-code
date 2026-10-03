@@ -18,7 +18,7 @@ const bannedNetworkImports = [
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/*.vsix', '**/*.d.ts', 'apps/host/light-code-pkg-*', 'apps/intellij/build/**', 'apps/intellij/.intellijPlatform/**', 'apps/intellij/.gradle/**'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/*.vsix', '**/*.d.ts', 'apps/host/light-code-pkg-*', 'apps/intellij/build/**', 'apps/intellij/.intellijPlatform/**', 'apps/intellij/.gradle/**', 'apps/sun/package/**', 'apps/sun/native/target/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -76,6 +76,7 @@ export default tseslint.config(
       'apps/host/src/proxyIdentity.ts',
       'apps/host/src/identityTool.ts',
       'apps/host/src/security.test.ts',
+      'apps/host/src/frameAncestors.test.ts',
       'apps/host/src/proxyIdentity.test.ts',
       /*
        * A local stand-in for the reverse proxy, so shared mode can be tried on one machine.
@@ -127,6 +128,20 @@ export default tseslint.config(
       'apps/host/src/choosesTheme.test.ts',
     ],
     rules: { 'no-restricted-globals': 'off' },
+  },
+  {
+    /*
+     * Sun Light Code's window: plain browser JavaScript inside WebView2, with no bundler. It reaches
+     * the network not at all - its only channels are window.ipc to the Rust side and postMessage to
+     * the chat frames, each addressed to one origin.
+     */
+    files: ['apps/sun/native/ui/**/*.js'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
+  {
+    // The npm launcher is CommonJS on purpose: it runs under any Node from 18 with no build step.
+    files: ['apps/sun/npm/bin/*.cjs'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
   eslintConfigPrettier,
 )

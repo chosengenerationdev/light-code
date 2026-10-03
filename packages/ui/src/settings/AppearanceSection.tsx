@@ -29,6 +29,16 @@ export interface AppearanceSectionProps {
    */
   theme?: 'system' | 'light' | 'dark'
   onChangeTheme?: (theme: 'system' | 'light' | 'dark') => void
+  /**
+   * The app that sets this panel's theme and, by default, its accent (Sun Light Code). The theme is
+   * then that app's alone; an accent picked here is this codebase's own, and the app keeps it.
+   * Role colours are chosen here as always.
+   */
+  appearanceFrom?: string
+  /** With `appearanceFrom`: the accent is currently that app's rather than one chosen here. */
+  accentInherited?: boolean
+  /** With `appearanceFrom`: drop this codebase's own accent and follow the app's again. */
+  onInheritAccent?: () => void
 }
 
 interface ColourPickerProps {
@@ -185,6 +195,30 @@ export function AppearanceSection(props: AppearanceSectionProps): ReactElement {
       )}
       <Panel id="appearance.colours" title="Colours" defaultOpen>
 
+      {props.appearanceFrom !== undefined && (
+        <p style={{ margin: '0 0 12px', color: colors.muted, fontSize: 12 }}>
+          {props.accentInherited === true ? (
+            <>
+              Theme and accent follow <strong>{props.appearanceFrom}</strong>. Pick an accent below to give
+              this codebase its own — its icon in the sidebar follows it.
+            </>
+          ) : (
+            <>
+              Theme follows <strong>{props.appearanceFrom}</strong>; the accent below is this codebase&rsquo;s
+              own.{' '}
+              {props.onInheritAccent !== undefined && (
+                <button
+                  type="button"
+                  onClick={props.onInheritAccent}
+                  style={{ background: 'none', border: 0, padding: 0, color: colors.accent, cursor: 'pointer', font: 'inherit' }}
+                >
+                  Use {props.appearanceFrom}&rsquo;s accent
+                </button>
+              )}
+            </>
+          )}
+        </p>
+      )}
       <ColourPicker
         label="Accent colour"
         description="Buttons, your messages, selections and focus rings."

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Sun Light Code</title>
+    <link rel="stylesheet" href="shell.css" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <aside id="sidebar" class="sidebar" aria-label="Codebases">
+        <header class="brand">
+          <img src="icon.png" class="brand-mark" alt="" />
+          <span class="brand-name">Sun Light Code</span>
+          <button id="collapse" class="icon-btn" title="Hide sidebar (Ctrl+B)" aria-label="Hide sidebar">
+            <svg viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" /><path d="M6 3v10" /><path d="M4 6h-.5M4 8h-.5" /></svg>
+          </button>
+        </header>
+
+        <button id="search" class="search" title="Find a codebase (Ctrl+K)">
+          <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg>
+          <span>Search codebases</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+
+        <div class="section-label">
+          <span>Codebases</span>
+          <button id="add-small" class="icon-btn small" title="Add a codebase (Ctrl+N)" aria-label="Add a codebase">
+            <svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" /></svg>
+          </button>
+        </div>
+
+        <nav id="list" class="list" role="listbox" aria-label="Codebases"></nav>
+
+        <footer class="side-footer">
+          <button id="add" class="add-btn">
+            <svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" /></svg>
+            Add codebase
+          </button>
+          <div class="foot-row">
+            <span id="memory" class="memory" title="Memory used by all running agents and the tools they started"></span>
+            <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">
+              <svg viewBox="0 0 24 24" class="cog"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </footer>
+        <div id="resizer" class="resizer" title="Drag to resize"></div>
+      </aside>
+
+      <nav id="rail" class="rail" aria-label="Codebases">
+        <button id="expand" class="icon-btn" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar">
+          <svg viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" /><path d="M6 3v10" /><path d="m9 6 2 2-2 2" /></svg>
+        </button>
+        <div id="rail-list" class="rail-list"></div>
+        <button id="rail-add" class="icon-btn" title="Add a codebase (Ctrl+N)" aria-label="Add a codebase">
+          <svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" /></svg>
+        </button>
+        <button id="rail-settings" class="icon-btn" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24" class="cog"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </nav>
+
+      <main id="main" class="main">
+        <div id="panes" class="panes"></div>
+        <section id="empty" class="empty" hidden>
+          <img src="icon.png" class="empty-mark" alt="" />
+          <h1>Every codebase, one window</h1>
+          <p>Add the folders you work in. Each gets its own Light Code agent, with its own settings,
+            and keeps working while you are looking at another.</p>
+          <button id="empty-add" class="primary large">Add your first codebase</button>
+          <p class="hint"><kbd>Ctrl N</kbd> add · <kbd>Ctrl K</kbd> switch · <kbd>Ctrl B</kbd> hide the sidebar</p>
+        </section>
+      </main>
+    </div>
+
+    <div id="layer"></div>
+    <div id="notices" class="notices" aria-live="polite"></div>
+    <script src="shell.js"></script>
+  </body>
+</html>

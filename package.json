@@ -26,6 +26,8 @@
     "package:universal": "node scripts/fetch-ripgrep.mjs && pnpm --filter light-code-vscode exec node ./esbuild.mjs --target=universal && pnpm --filter light-code-vscode exec vsce package --no-dependencies",
     "serve": "pnpm --filter @chosengeneration/light-code run build && node apps/host/dist/cli.cjs",
     "smoke:npm": "node scripts/smoke-test-npm.mjs",
+    "build:sun": "node apps/sun/scripts/build.mjs",
+    "smoke:sun": "node apps/sun/scripts/smoke.mjs",
     "verify:npm": "pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @chosengeneration/light-code run build && pnpm smoke:npm",
     "generate:worker": "node scripts/generate-python-worker.mjs",
     "generate:office": "node scripts/generate-office-worker.mjs"

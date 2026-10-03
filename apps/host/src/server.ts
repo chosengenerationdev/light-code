@@ -112,6 +112,12 @@ const STREAM_PADDING = `: ${((): string => {
 export interface ServerOptions {
   workspaceRoot: string | undefined
   dataDir: string
+  /** See `SessionOptions.configFile`. */
+  configFile?: string
+  /** See `SessionOptions.secretsFile`. */
+  secretsFile?: string
+  /** See `SessionOptions.desktopNotify`. */
+  desktopNotify?: boolean
   /** Directory holding the built browser bundle. */
   /**
    * The browser bundle, in memory, keyed by the names in `CLIENT_ASSETS`.
@@ -437,6 +443,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       transport,
       workspaceRoot: options.workspaceRoot,
       dataDir: options.dataDir,
+      ...(options.configFile !== undefined ? { configFile: options.configFile } : {}),
+      ...(options.secretsFile !== undefined ? { secretsFile: options.secretsFile } : {}),
+      ...(options.desktopNotify === true ? { desktopNotify: true } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,
       /*
@@ -922,6 +931,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       resolved: resolveSessionVariables(admin, user),
       adminIds: sharedCache.adminIds,
       canEditAdmin: isAdminSession(principal),
+      shared: roles.shared,
     })
   }
 

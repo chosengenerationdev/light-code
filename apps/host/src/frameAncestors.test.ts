@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { securityHeaders, setFrameAncestors } from './security.js'
+import type { IncomingMessage } from 'node:http'
+import { checkRequest, securityHeaders, setFrameAncestors } from './security.js'
 
 const csp = (): string => securityHeaders()['Content-Security-Policy'] ?? ''
 
@@ -69,5 +70,42 @@ describe('frame-ancestors', () => {
     ]) {
       expect(policy).toContain(directive)
     }
+  })
+})
+
+/*
+ * Sun Light Code loads the page in an iframe from its own origin, which the browser marks
+ * `cross-site`. Exactly that navigation is let through, and only for a named ancestor.
+ */
+describe('the frame navigation an embedding app makes', () => {
+  const policy = { allowedHosts: ['127.0.0.1:7777'], allowedOrigins: ['http://127.0.0.1:7777'] }
+  const frameLoad = (overrides: Record<string, string> = {}, method = 'GET', url = '/') =>
+    ({
+      method,
+      url,
+      headers: {
+        host: '127.0.0.1:7777',
+        'sec-fetch-site': 'cross-site',
+        'sec-fetch-dest': 'iframe',
+        'sec-fetch-mode': 'navigate',
+        ...overrides,
+      },
+    }) as unknown as IncomingMessage
+
+  it('is refused while no ancestor is named', () => {
+    expect(checkRequest(frameLoad(), policy, { requireOrigin: false })?.status).toBe(403)
+  })
+
+  it('is allowed once one is', () => {
+    setFrameAncestors(['http://sun.localhost'])
+    expect(checkRequest(frameLoad(), policy, { requireOrigin: false })).toBeUndefined()
+  })
+
+  it('never reaches the API, and is nothing but a framed GET', () => {
+    setFrameAncestors(['http://sun.localhost'])
+    expect(checkRequest(frameLoad({}, 'GET', '/api/events'), policy, { requireOrigin: false })?.status).toBe(403)
+    expect(checkRequest(frameLoad({}, 'POST'), policy, { requireOrigin: false })?.status).toBe(403)
+    expect(checkRequest(frameLoad({ 'sec-fetch-dest': 'document' }), policy, { requireOrigin: false })?.status).toBe(403)
+    expect(checkRequest(frameLoad({ 'sec-fetch-mode': 'cors' }), policy, { requireOrigin: false })?.status).toBe(403)
   })
 })

@@ -834,6 +834,49 @@ desktops of the same person; importing the file is how a second machine is set u
 `,
   },
   {
+    id: 'sun',
+    title: 'Sun Light Code: several codebases in one Windows window',
+    keywords: [
+      'sun', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
+      'many projects', 'one window', 'parallel', 'background agents', 'desktop app', 'windows app',
+      'sidebar', 'sleep', 'idle', 'switch project',
+    ],
+    body: `
+**Sun Light Code** is a Windows app holding every codebase you work on, each with its own Light Code
+agent. Install with \`npm i -g @chosengeneration/sun-light-code\` and run \`sun-light-code\`. The
+package is prebuilt with no install scripts or dependencies, so nothing compiles or downloads.
+
+**Each codebase is its own process**, so agents work in parallel and keep going while you look at
+another chat. A dot on each codebase in the sidebar shows working, waiting for your approval, or
+finished; a Windows notification says so when that codebase is not on screen, and the \`notify\` tool
+appears there too, including from scheduled runs.
+
+**Adding a codebase**: + or Ctrl+N, then a folder (any folder; recent ones from VS Code, IntelliJ,
+PyCharm and earlier Light Code chats are offered). Its settings come from one of: **Link** an existing
+config.json in place (the VS Code extension's, or the Node host's that the JetBrains plugin uses), so
+edits in either app reach both; **Copy** one; or **New**. The folder's own .lightcode/config.json
+always applies. Right-click a codebase → Settings source… changes it later.
+
+**API keys do not come across**: VS Code keeps them in its encrypted storage, which another program
+cannot read. Enter each once in a codebase's Settings; Sun shares it with every codebase.
+
+**Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+B hide the sidebar (a strip of status
+dots stays), Ctrl+, Sun's settings.
+
+**Appearance**: Sun's Settings choose light, dark or system and an accent colour; every chat follows
+the theme. A codebase may keep its own accent — pick one in its Appearance tab — and its sidebar
+icon follows; "Use Sun Light Code's accent" goes back. Role colours stay each chat's own. None of this
+is written to the config file.
+
+**Memory**: idle codebases sleep after 30 minutes by default (Sun's Settings), freeing their agent,
+MCP servers and Python worker. Never while working, waiting for you, or holding enabled schedules.
+Clicking wakes it with the chat intact. Right-click → Keep awake exempts one.
+
+**Not in Sun**: reading a VS Code debug session, and editor file pickers — paths are typed. Sun's
+Settings → Export source code saves the whole repository as a zip that builds offline.
+`,
+  },
+  {
     id: 'schedules',
     title: 'Scheduled prompts and unattended runs',
     keywords: [

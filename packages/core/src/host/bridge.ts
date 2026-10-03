@@ -3157,6 +3157,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                */
               const saved = await saveReport(message, details)
               if (saved !== undefined) lastReportPath = saved
+              services.desktopNotify?.({
+                message,
+                level,
+                ...(saved !== undefined ? { reportPath: saved } : {}),
+              })
 
               const open = await ui.showActionMessage(message, 'Open report', level)
               if (!open) return
@@ -3173,6 +3178,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
            * turn but the closure would otherwise still point at whatever was open when it was
            * built.
            */
+          services.desktopNotify?.({ message, level })
           const taskId = runningScheduleId !== undefined ? activeTaskId : undefined
           if (taskId === undefined) {
             if (level === 'warning') ui.showWarning(message)

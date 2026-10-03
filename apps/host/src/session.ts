@@ -289,6 +289,24 @@ export interface SessionOptions {
   workspaceRoot: string | undefined
   /** Root for all per-user data. Each principal gets a subdirectory beneath it. */
   dataDir: string
+  /**
+   * Where this user's `config.json` lives, when it is not in their data directory.
+   *
+   * For Light Code Sun, which points a codebase at a config that already exists — the VS Code
+   * extension's, say — so its connections and per-project settings apply in place rather than as a
+   * copy that drifts. Single-user only; the CLI refuses it with `--server`.
+   */
+  configFile?: string
+  /**
+   * Where secrets live, when not in the data directory. Sun points every codebase at one file so a
+   * key is entered once, which is why `FileSecretStore` re-reads a file another process changed.
+   */
+  secretsFile?: string
+  /**
+   * Hand the `notify` tool's notifications to whoever started this process, one JSON line each on
+   * stdout prefixed `light-code-notify:`. Light Code Sun shows them as Windows notifications.
+   */
+  desktopNotify?: boolean
   ripgrepPath: () => string | undefined
   logSink: (line: string) => void
   /**
@@ -426,6 +444,14 @@ export async function createSession(
      * Windows, so a Linux server declines twice over and a Linux desktop declines once.
      */
     offersOffice: options.shared !== true,
+    ...(options.desktopNotify === true
+      ? {
+          desktopNotify: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => {
+            // JSON keeps it to one line whatever the message holds, so the reader can split on lines.
+            process.stdout.write(`light-code-notify: ${JSON.stringify(notification)}\n`)
+          },
+        }
+      : {}),
     transport: options.transport,
     /*
      * A shared profile's API key belongs to the administrator and lives beside the shared config;
@@ -433,18 +459,18 @@ export async function createSession(
      */
     secrets: withCredentialTool(
       options.sharedSecrets === undefined
-        ? new FileSecretStore(path.join(userDir, 'secrets.json'))
+        ? new FileSecretStore(options.secretsFile ?? path.join(userDir, 'secrets.json'))
         : new RoutedSecretStore(
-            new FileSecretStore(path.join(userDir, 'secrets.json')),
+            new FileSecretStore(options.secretsFile ?? path.join(userDir, 'secrets.json')),
             options.sharedSecrets,
           ),
       options,
     ),
     configStore: withSharedEntries(
       options.sharedProfiles === undefined
-        ? new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot)
+        ? new FileConfigStore(options.configFile ?? path.join(userDir, 'config.json'), options.workspaceRoot)
         : new SharedProfileConfigStore(
-            new FileConfigStore(path.join(userDir, 'config.json'), options.workspaceRoot),
+            new FileConfigStore(options.configFile ?? path.join(userDir, 'config.json'), options.workspaceRoot),
             options.sharedProfiles,
           ),
       options,
