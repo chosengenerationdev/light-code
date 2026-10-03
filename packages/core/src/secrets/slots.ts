@@ -35,7 +35,7 @@ const SECTION_WORDS: Record<string, string> = {
  * Every secret-storage key a config points at, labelled for a person.
  *
  * Used to hand a config's secrets from one store to another (the VS Code extension sharing its keys
- * with Sun Light Code). Found by walking for `*Ref` fields rather than listing them, unlike the
+ * with Sun Code). Found by walking for `*Ref` fields rather than listing them, unlike the
  * export summary in `config/share.ts`: there a wrong *name* misleads somebody, here a missed *key*
  * is a credential silently left behind - so a field added later must be picked up without anyone
  * remembering to add it. Plus the two places a key is not a `*Ref`: Python variables marked secret

@@ -1,7 +1,9 @@
-//! `sun-fs`: the parallel file helper behind Sun Light Code's file tools.
+//! `sun-fs`: the parallel file helper behind Sun Code's file tools.
 //!
-//! One JSON request on stdin, one JSON answer on stdout, then exit. It only ever **reads**: every
-//! write an agent makes goes through Light Code's own edit tools, which show a diff and ask. Where
+//! One JSON request on stdin, one JSON answer on stdout, then exit. It reads, with one exception:
+//! `transfer` (copy and move), reached only through `transfer_files`, which always asks first and
+//! shows the plan this computes. Every other write an agent makes goes through Light Code's own
+//! edit tools. Where
 //! to look is decided by the caller (which has already applied the deny lists and workspace rules);
 //! this program walks, reads and counts as fast as the machine allows - a parallel directory walker,
 //! and big files split into ranges searched on every core.
@@ -42,6 +44,8 @@ fn run(r: &Value) -> Result<Value, String> {
         "tail" => tail(r),
         "grep" => grep(r),
         "table" => table(r),
+        "transfer" => transfer(r),
+        "archive" => archive(r),
         other => Err(format!("Unknown operation \"{other}\".")),
     }
 }
@@ -927,4 +931,408 @@ fn table(r: &Value) -> Result<Value, String> {
         "offset": offset,
         "more": offset + limit < total,
     }))
+}
+
+// ─── transfer: copy and move ────────────────────────────────────────────────
+//
+// The one operation here that writes. It is reached only through Light Code's `transfer_files`,
+// which always asks: first it calls this with `plan: true` (nothing is touched), shows that plan
+// as the approval, and only after a person approves calls it again to do it. Every path has been
+// through the caller's deny lists and workspace rules.
+//
+// Copies run on every core (one task per file). A move inside one drive is a rename - instant
+// however large the folder; across drives it is a copy, checked, and only then the source removed.
+// Nothing is replaced unless `overwrite` was asked for and approved, and that is decided for the
+// whole request before anything is written, so a refusal leaves everything as it was.
+
+struct Planned {
+    from: PathBuf,
+    to: PathBuf,
+    is_dir: bool,
+    /// (source file, destination file, size), every file under a folder.
+    files: Vec<(PathBuf, PathBuf, u64)>,
+    dirs: Vec<PathBuf>,
+    conflicts: Vec<PathBuf>,
+}
+
+fn plan_item(from: &Path, to: &Path) -> Result<Planned, String> {
+    let meta = std::fs::symlink_metadata(from).map_err(|_| format!("{} was not found.", from.display()))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("{} is a link; copy what it points to instead.", from.display()));
+    }
+    let mut planned = Planned { from: from.to_path_buf(), to: to.to_path_buf(), is_dir: meta.is_dir(), files: Vec::new(), dirs: Vec::new(), conflicts: Vec::new() };
+    if to.starts_with(from) && meta.is_dir() {
+        return Err(format!("Cannot put {} inside itself.", from.display()));
+    }
+    if meta.is_dir() {
+        let mut stack = vec![from.to_path_buf()];
+        planned.dirs.push(to.to_path_buf());
+        while let Some(dir) = stack.pop() {
+            let entries = std::fs::read_dir(&dir).map_err(|e| format!("Could not read {}: {e}", dir.display()))?;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(kind) = entry.file_type() else { continue };
+                let target = to.join(path.strip_prefix(from).unwrap_or(&path));
+                if kind.is_symlink() {
+                    continue; // Links are not followed: a link out of the folder would copy the world.
+                } else if kind.is_dir() {
+                    planned.dirs.push(target);
+                    stack.push(path);
+                } else {
+                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    if target.exists() {
+                        planned.conflicts.push(target.clone());
+                    }
+                    planned.files.push((path, target, size));
+                }
+            }
+        }
+    } else {
+        if to.is_dir() {
+            return Err(format!("{} is a folder; give the full destination file name.", to.display()));
+        }
+        if to.exists() {
+            planned.conflicts.push(to.to_path_buf());
+        }
+        planned.files.push((from.to_path_buf(), to.to_path_buf(), meta.len()));
+    }
+    Ok(planned)
+}
+
+fn same_drive(a: &Path, b: &Path) -> bool {
+    let root = |p: &Path| p.components().next().map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase());
+    root(a).is_some() && root(a) == root(b)
+}
+
+fn transfer(r: &Value) -> Result<Value, String> {
+    let action = s(r, "action").unwrap_or("copy");
+    if action != "copy" && action != "move" {
+        return Err(format!("Unknown action \"{action}\": copy or move."));
+    }
+    let overwrite = b(r, "overwrite");
+    let items = r.get("items").and_then(Value::as_array).ok_or("Name what to copy or move.")?;
+    let mut plans = Vec::new();
+    for item in items {
+        let from = PathBuf::from(s(item, "from").ok_or("Each item needs from.")?);
+        let to = PathBuf::from(s(item, "to").ok_or("Each item needs to.")?);
+        plans.push(plan_item(&from, &to)?);
+    }
+    let described: Vec<Value> = plans
+        .iter()
+        .map(|p| {
+            json!({
+                "from": p.from.to_string_lossy(), "to": p.to.to_string_lossy(), "folder": p.is_dir,
+                "files": p.files.len(), "bytes": p.files.iter().map(|f| f.2).sum::<u64>(),
+                "replaces": p.conflicts.iter().take(20).map(|c| c.to_string_lossy().to_string()).collect::<Vec<_>>(),
+                "replaceCount": p.conflicts.len(),
+                "rename": action == "move" && same_drive(&p.from, &p.to) && !p.to.exists(),
+            })
+        })
+        .collect();
+    if b(r, "plan") {
+        return Ok(json!({ "ok": true, "plan": described }));
+    }
+    let conflicts: usize = plans.iter().map(|p| p.conflicts.len()).sum();
+    if conflicts > 0 && !overwrite {
+        return Err(format!("{conflicts} file(s) already exist at the destination; nothing was changed. Ask again with overwrite to replace them."));
+    }
+
+    let started = Instant::now();
+    let mut copied_files = 0usize;
+    let mut copied_bytes = 0u64;
+    let mut renamed = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    for plan in &plans {
+        // A move within one drive: one rename, nothing copied - when the destination is free.
+        if action == "move" && same_drive(&plan.from, &plan.to) && !plan.to.exists() {
+            if let Some(parent) = plan.to.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::rename(&plan.from, &plan.to).is_ok() {
+                renamed += 1;
+                copied_files += plan.files.len();
+                copied_bytes += plan.files.iter().map(|f| f.2).sum::<u64>();
+                continue;
+            }
+        }
+        for dir in &plan.dirs {
+            std::fs::create_dir_all(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
+        }
+        if let Some(parent) = plan.to.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let failed: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let done = AtomicUsize::new(0);
+        plan.files.par_iter().for_each(|(src, dst, size)| match std::fs::copy(src, dst) {
+            Ok(written) if written == *size || std::fs::metadata(src).map(|m| m.len() == written).unwrap_or(false) => {
+                done.fetch_add(1, Ordering::Relaxed);
+            }
+            Ok(_) => failed.lock().unwrap().push(format!("{}: the copy came out a different size", src.display())),
+            Err(e) => failed.lock().unwrap().push(format!("{}: {e}", src.display())),
+        });
+        let failed = failed.into_inner().unwrap_or_default();
+        copied_files += done.load(Ordering::Relaxed);
+        copied_bytes += plan.files.iter().map(|f| f.2).sum::<u64>();
+        if action == "move" {
+            if failed.is_empty() {
+                // Only now, with every file copied and checked, is the source removed.
+                let removed = if plan.is_dir { std::fs::remove_dir_all(&plan.from) } else { std::fs::remove_file(&plan.from) };
+                if let Err(e) = removed {
+                    errors.push(format!("Copied, but could not remove {}: {e}", plan.from.display()));
+                }
+            } else {
+                errors.push(format!("{} was not removed, because not every file copied.", plan.from.display()));
+            }
+        }
+        errors.extend(failed.into_iter().take(50));
+    }
+    Ok(json!({
+        "ok": errors.is_empty(), "action": action, "files": copied_files, "bytes": copied_bytes,
+        "renamed": renamed, "ms": started.elapsed().as_millis() as u64, "errors": errors, "plan": described,
+    }))
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    fn tree(base: &Path) {
+        std::fs::create_dir_all(base.join("src/sub")).unwrap();
+        for i in 0..40 {
+            std::fs::write(base.join(format!("src/file{i}.txt")), format!("content {i}")).unwrap();
+        }
+        std::fs::write(base.join("src/sub/deep.txt"), "deep").unwrap();
+    }
+
+    #[test]
+    fn copies_a_folder_and_refuses_to_overwrite_unless_asked() {
+        let base = std::env::temp_dir().join(format!("sun-fs-transfer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        tree(&base);
+        let req = |overwrite: bool, plan: bool| {
+            json!({ "op": "transfer", "action": "copy", "overwrite": overwrite, "plan": plan,
+                    "items": [{ "from": base.join("src"), "to": base.join("copy") }] })
+        };
+        let planned = transfer(&req(false, true)).unwrap();
+        assert_eq!(planned["plan"][0]["files"], 41);
+        assert!(!base.join("copy").exists(), "a plan changes nothing");
+
+        let done = transfer(&req(false, false)).unwrap();
+        assert_eq!(done["files"], 41);
+        assert_eq!(std::fs::read_to_string(base.join("copy/sub/deep.txt")).unwrap(), "deep");
+
+        let again = transfer(&req(false, false)).unwrap_err();
+        assert!(again.contains("already exist"), "{again}");
+        assert_eq!(transfer(&req(true, true)).unwrap()["plan"][0]["replaceCount"], 41);
+        assert!(transfer(&req(true, false)).unwrap()["ok"].as_bool().unwrap());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn moves_by_renaming_on_one_drive_and_never_into_itself() {
+        let base = std::env::temp_dir().join(format!("sun-fs-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        tree(&base);
+        let inside = json!({ "op": "transfer", "action": "move", "items": [{ "from": base.join("src"), "to": base.join("src/inner") }] });
+        assert!(transfer(&inside).unwrap_err().contains("inside itself"));
+        let moved = transfer(&json!({ "op": "transfer", "action": "move", "items": [{ "from": base.join("src"), "to": base.join("moved/here") }] })).unwrap();
+        assert_eq!(moved["renamed"], 1);
+        assert!(!base.join("src").exists());
+        assert!(base.join("moved/here/sub/deep.txt").is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+// ─── archive: zip create, extract, list ─────────────────────────────────────
+//
+// Like `transfer`, reached only through a tool that always asks and shows the plan this computes
+// with `plan: true`. Extraction refuses the whole archive if any entry would land outside the
+// destination ("zip slip": `../../x`, an absolute path), before writing anything.
+
+fn zip_err(e: zip::result::ZipError) -> String {
+    e.to_string()
+}
+
+/// Every file under the sources, with the name it gets inside the archive (relative to the
+/// source's own parent, so a folder keeps its name).
+fn archive_inputs(sources: &[String]) -> Result<Vec<(PathBuf, String, u64)>, String> {
+    let mut out = Vec::new();
+    for source in sources {
+        let root = PathBuf::from(source);
+        let meta = std::fs::symlink_metadata(&root).map_err(|_| format!("{source} was not found."))?;
+        let base = root.parent().map(Path::to_path_buf).unwrap_or_default();
+        let name = |p: &Path| p.strip_prefix(&base).unwrap_or(p).to_string_lossy().replace('\\', "/");
+        if meta.is_file() {
+            out.push((root.clone(), name(&root), meta.len()));
+            continue;
+        }
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).map_err(|e| format!("Could not read {}: {e}", dir.display()))?.flatten() {
+                let Ok(kind) = entry.file_type() else { continue };
+                let path = entry.path();
+                if kind.is_symlink() {
+                    continue;
+                } else if kind.is_dir() {
+                    stack.push(path);
+                } else {
+                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    out.push((path.clone(), name(&path), size));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.1.cmp(&b.1));
+    Ok(out)
+}
+
+fn archive(r: &Value) -> Result<Value, String> {
+    let action = s(r, "action").unwrap_or("list");
+    let path = PathBuf::from(s(r, "archive").ok_or("Name the .zip file.")?);
+    let overwrite = b(r, "overwrite");
+    match action {
+        "list" => {
+            let file = File::open(&path).map_err(|e| format!("Could not open {}: {e}", path.display()))?;
+            let mut zip = zip::ZipArchive::new(BufReader::new(file)).map_err(zip_err)?;
+            let limit = u(r, "limit", 200) as usize;
+            let mut entries = Vec::new();
+            let (mut total, mut packed) = (0u64, 0u64);
+            for i in 0..zip.len() {
+                let entry = zip.by_index_raw(i).map_err(zip_err)?;
+                total += entry.size();
+                packed += entry.compressed_size();
+                if entries.len() < limit {
+                    entries.push(json!({ "name": entry.name(), "size": entry.size(), "packed": entry.compressed_size(), "dir": entry.is_dir() }));
+                }
+            }
+            Ok(json!({ "ok": true, "count": zip.len(), "bytes": total, "packed": packed, "entries": entries }))
+        }
+        "create" => {
+            let sources = strings(r, "sources");
+            if sources.is_empty() {
+                return Err("Name the files or folders to put in the archive.".into());
+            }
+            let inputs = archive_inputs(&sources)?;
+            let bytes: u64 = inputs.iter().map(|i| i.2).sum();
+            if b(r, "plan") {
+                return Ok(json!({ "ok": true, "files": inputs.len(), "bytes": bytes, "exists": path.exists(),
+                    "sample": inputs.iter().take(15).map(|i| i.1.clone()).collect::<Vec<_>>() }));
+            }
+            if path.exists() && !overwrite {
+                return Err(format!("{} already exists; nothing was changed. Ask again with overwrite to replace it.", path.display()));
+            }
+            if inputs.iter().any(|i| path.starts_with(&i.0)) || inputs.iter().any(|i| i.0 == path) {
+                return Err("The archive cannot be written inside what it archives.".into());
+            }
+            let started = Instant::now();
+            // Written beside and renamed into place, so a failure never leaves half an archive.
+            let temp = path.with_extension("zip.partial");
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let result = (|| -> Result<(), String> {
+                let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(File::create(&temp).map_err(|e| e.to_string())?));
+                for (file, name, size) in &inputs {
+                    let options = zip::write::SimpleFileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated)
+                        .compression_level(Some(6))
+                        .large_file(*size >= u32::MAX as u64);
+                    zip.start_file(name.as_str(), options).map_err(zip_err)?;
+                    let mut reader = File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+                    std::io::copy(&mut reader, &mut zip).map_err(|e| format!("{}: {e}", file.display()))?;
+                }
+                zip.finish().map_err(zip_err)?;
+                Ok(())
+            })();
+            if let Err(e) = result {
+                let _ = std::fs::remove_file(&temp);
+                return Err(e);
+            }
+            if path.exists() {
+                let _ = std::fs::remove_file(&path);
+            }
+            std::fs::rename(&temp, &path).map_err(|e| format!("Could not put the archive in place: {e}"))?;
+            let written = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            Ok(json!({ "ok": true, "files": inputs.len(), "bytes": bytes, "archiveBytes": written, "ms": started.elapsed().as_millis() as u64 }))
+        }
+        "extract" => {
+            let to = PathBuf::from(s(r, "to").ok_or("Name the folder to extract into.")?);
+            let file = File::open(&path).map_err(|e| format!("Could not open {}: {e}", path.display()))?;
+            let mut zip = zip::ZipArchive::new(BufReader::new(file)).map_err(zip_err)?;
+            let mut plan = Vec::new();
+            for i in 0..zip.len() {
+                let entry = zip.by_index_raw(i).map_err(zip_err)?;
+                let Some(relative) = entry.enclosed_name() else {
+                    return Err(format!("The archive holds \"{}\", which would land outside {}. Nothing was extracted.", entry.name(), to.display()));
+                };
+                plan.push((i, to.join(relative), entry.is_dir(), entry.size()));
+            }
+            let conflicts: Vec<String> = plan.iter().filter(|p| !p.2 && p.1.exists()).map(|p| p.1.to_string_lossy().to_string()).collect();
+            let bytes: u64 = plan.iter().map(|p| p.3).sum();
+            let files = plan.iter().filter(|p| !p.2).count();
+            if b(r, "plan") {
+                return Ok(json!({ "ok": true, "files": files, "bytes": bytes, "replaceCount": conflicts.len(),
+                    "replaces": conflicts.iter().take(20).collect::<Vec<_>>() }));
+            }
+            if !conflicts.is_empty() && !overwrite {
+                return Err(format!("{} file(s) already exist in {}; nothing was changed. Ask again with overwrite to replace them.", conflicts.len(), to.display()));
+            }
+            let started = Instant::now();
+            for (i, target, is_dir, _) in &plan {
+                if *is_dir {
+                    std::fs::create_dir_all(target).map_err(|e| format!("{}: {e}", target.display()))?;
+                    continue;
+                }
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+                }
+                let mut entry = zip.by_index(*i).map_err(zip_err)?;
+                let mut out = File::create(target).map_err(|e| format!("{}: {e}", target.display()))?;
+                std::io::copy(&mut entry, &mut out).map_err(|e| format!("{}: {e}", target.display()))?;
+            }
+            Ok(json!({ "ok": true, "files": files, "bytes": bytes, "ms": started.elapsed().as_millis() as u64 }))
+        }
+        other => Err(format!("Unknown archive action \"{other}\": create, extract or list.")),
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+
+    #[test]
+    fn round_trips_a_folder_and_refuses_zip_slip() {
+        let base = std::env::temp_dir().join(format!("sun-fs-zip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("project/src")).unwrap();
+        std::fs::write(base.join("project/src/main.rs"), "fn main() {}\n".repeat(1000)).unwrap();
+        std::fs::write(base.join("project/README.md"), "# hi").unwrap();
+        let zip_path = base.join("out/project.zip");
+        let create = json!({ "op": "archive", "action": "create", "archive": zip_path, "sources": [base.join("project")] });
+        let made = archive(&create).unwrap();
+        assert_eq!(made["files"], 2);
+        assert!(made["archiveBytes"].as_u64().unwrap() < 13_000, "compressed");
+        assert!(archive(&create).unwrap_err().contains("already exists"));
+
+        let listed = archive(&json!({ "op": "archive", "action": "list", "archive": zip_path })).unwrap();
+        let names: Vec<&str> = listed["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["project/README.md", "project/src/main.rs"]);
+
+        let extract = json!({ "op": "archive", "action": "extract", "archive": zip_path, "to": base.join("back") });
+        archive(&extract).unwrap();
+        assert_eq!(std::fs::read_to_string(base.join("back/project/README.md")).unwrap(), "# hi");
+        assert_eq!(archive(&json!({ "op": "archive", "action": "extract", "archive": zip_path, "to": base.join("back"), "plan": true })).unwrap()["replaceCount"], 2);
+        assert!(archive(&extract).unwrap_err().contains("already exist"));
+
+        // An archive whose entry climbs out of the destination is refused whole.
+        let evil = base.join("evil.zip");
+        let mut w = zip::ZipWriter::new(File::create(&evil).unwrap());
+        w.start_file("ok.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        w.start_file("../../escaped.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        w.finish().unwrap();
+        let refused = archive(&json!({ "op": "archive", "action": "extract", "archive": evil, "to": base.join("safe") })).unwrap_err();
+        assert!(refused.contains("outside"), "{refused}");
+        assert!(!base.join("safe/ok.txt").exists(), "nothing extracted");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

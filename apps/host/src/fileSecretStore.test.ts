@@ -49,7 +49,7 @@ describe('FileSecretStore shared by several processes', () => {
   })
 })
 
-describe('FileSecretStore encrypted for Sun Light Code', () => {
+describe('FileSecretStore encrypted for Sun Code', () => {
   let dir: string | undefined
   afterEach(async () => {
     if (dir !== undefined) await fs.rm(dir, { recursive: true, force: true })

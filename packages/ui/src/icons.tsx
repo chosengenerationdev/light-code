@@ -311,6 +311,20 @@ export function ShieldIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+/**
+ * Review — a clipboard with a tick: work somebody else wrote, waiting to be checked. Not the shield,
+ * which is Approvals: the two tabs sat side by side with one icon and read as the same place.
+ */
+export function ReviewIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5.5 2.5h-1A1.5 1.5 0 0 0 3 4v8.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V4a1.5 1.5 0 0 0-1.5-1.5h-1" />
+      <rect x="5.5" y="1.5" width="5" height="2.2" rx="0.6" />
+      <path d="M5.6 9 7.2 10.6 10.4 7.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** MCP — connected blocks, for external servers. */
 export function ServerIcon({ size = 16 }: IconProps): ReactElement {
   return (

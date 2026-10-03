@@ -11,7 +11,7 @@ import type { ToolExecutionContext } from './types.js'
 import { writeToFileTool } from './writeToFile.js'
 
 /**
- * Sun Light Code's "reach anywhere": reads anywhere without a folder prompt, writes anywhere but
+ * Sun Code's "reach anywhere": reads anywhere without a folder prompt, writes anywhere but
  * always asked about, and a floor - credentials and Windows folders - that no setting lifts.
  */
 describe('reach anywhere', () => {
@@ -71,7 +71,7 @@ describe('reach anywhere', () => {
     expect(isSecretPath('C:\\Users\\a\\.ssh\\config')).toBe(true)
     expect(isSecretPath('C:\\Users\\a\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data')).toBe(true)
     expect(isSecretPath('\\\\server\\share\\certs\\client.pfx')).toBe(true)
-    expect(isSecretPath('C:\\Users\\a\\AppData\\Local\\sun-light-code\\vault.key')).toBe(true)
+    expect(isSecretPath('C:\\Users\\a\\AppData\\Local\\sun-code\\vault.key')).toBe(true)
     expect(isSecretPath('\\\\server\\finance\\q3\\report.xlsx')).toBe(false)
     expect(isSystemPath('C:\\Windows\\System32\\drivers\\etc\\hosts')).toBe(true)
     expect(isSystemPath('C:\\Program Files (x86)\\App\\x.ini')).toBe(true)

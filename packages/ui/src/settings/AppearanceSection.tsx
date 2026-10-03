@@ -30,7 +30,7 @@ export interface AppearanceSectionProps {
   theme?: 'system' | 'light' | 'dark'
   onChangeTheme?: (theme: 'system' | 'light' | 'dark') => void
   /**
-   * The app that sets this panel's theme and, by default, its accent (Sun Light Code). The theme is
+   * The app that sets this panel's theme and, by default, its accent (Sun Code). The theme is
    * then that app's alone; an accent picked here is this codebase's own, and the app keeps it.
    * Role colours are chosen here as always.
    */

@@ -1,4 +1,4 @@
-//! Sun Light Code: several codebases, each with its own Light Code agent, in one Windows window.
+//! Sun Code: several codebases, each with its own Light Code agent, in one Windows window.
 //!
 //! The window is a WebView2 page (`ui/`) holding a sidebar and one frame per codebase. Each frame
 //! is the ordinary Light Code browser UI, served by a Light Code Node host this process starts for
@@ -9,6 +9,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod configs;
+mod environment;
+mod reports;
 mod host;
 mod state;
 mod system;
@@ -53,6 +55,17 @@ enum UserEvent {
     Select(String),
     /// Keys arrived from the VS Code extension: who sent them, and their names.
     Shared { from: String, labels: Vec<String> },
+    /// The startup script finished: what it left, or why it did not.
+    ScriptDone(Result<environment::ScriptEnv, String>),
+}
+
+/// Where the startup script is. Agents asked to start while it runs wait for it, so none starts
+/// without the environment the script exists to provide.
+enum ScriptState {
+    None,
+    Running,
+    Done(environment::ScriptEnv),
+    Failed(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -124,6 +137,11 @@ struct App {
     import_items: Option<Vec<vault::Portable>>,
     /// Keys found for the JetBrains import, held here until confirmed; only names reach the page.
     jetbrains_keys: Option<Vec<(String, String, String)>>,
+    /// A problem with Sun's environment (a deleted credential) has been said; said again after a save.
+    env_warned: bool,
+    script: ScriptState,
+    /// Chats waiting for the startup script before they start.
+    waiting: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -167,6 +185,27 @@ enum Command {
     /// Keys the IntelliJ / PyCharm plugin's Node host keeps: listed by name, imported on confirm.
     ScanJetBrains,
     ImportJetBrains { indexes: Vec<usize> },
+    /// Sun's environment, validated as a whole: PATH folders and variables.
+    #[serde(rename_all = "camelCase")]
+    SaveEnvironment { path_prefix: Vec<String>, env: Vec<environment::EnvVar>, #[serde(default)] startup_script: Option<String> },
+    /// A report in Sun's Markdown viewer: from a link inside another report, or the list.
+    OpenReport { path: String },
+    /// Every report a codebase's chats have written, newest first.
+    Reports { id: String },
+    /// The report in the app Windows associates with it, or selected in File Explorer.
+    OpenReportExternally { path: String },
+    RevealReport { path: String },
+    /// Run the startup script again now, after editing it.
+    RunScript,
+    /// Choose the startup script file.
+    PickScript,
+    /// Which of these folders exist, for the page to mark the missing ones.
+    #[serde(rename_all = "camelCase")]
+    CheckFolders { path_prefix: Vec<String> },
+    /// Choose a folder for a PATH entry; the answer names the row it was for.
+    PickEnvFolder { index: usize },
+    /// Every running agent stopped and started again, to take a new environment.
+    RestartAll,
     /// Another chat on a codebase: its own agent, same folder, settings and keys.
     NewChat { id: String },
     /// Close an extra chat: its agent stops; its history stays in its folder.
@@ -181,6 +220,11 @@ fn main() {
     }
     let _ = std::fs::create_dir_all(&paths.root);
     let mut state = State::load(&paths);
+    if let Some(old) = paths.previous_root() {
+        if state.rebase(&old, &paths.root) {
+            state.save(&paths);
+        }
+    }
     let vault = Arc::new(vault::Vault::open(&paths).unwrap_or_else(|e| system::fatal(&e)));
 
     let icon_file = paths.root.join("icon.png");
@@ -191,7 +235,7 @@ fn main() {
     let proxy = event_loop.create_proxy();
 
     let mut builder = WindowBuilder::new()
-        .with_title("Sun Light Code")
+        .with_title("Sun Code")
         .with_min_inner_size(LogicalSize::new(720.0, 480.0))
         .with_transparent(true)
         .with_visible(false);
@@ -256,7 +300,7 @@ fn main() {
         .build(&window)
         .unwrap_or_else(|e| {
             system::fatal(&format!(
-                "Sun Light Code needs the Microsoft Edge WebView2 Runtime, which comes with Windows 11 and is \
+                "Sun Code needs the Microsoft Edge WebView2 Runtime, which comes with Windows 11 and is \
                  installed with Edge on Windows 10. It could not be started ({e}).\n\nInstall it from Microsoft \
                  (search for \"WebView2 Runtime\"), or ask IT to, then start Sun again."
             ))
@@ -278,7 +322,13 @@ fn main() {
         import_text: None,
         import_items: None,
         jetbrains_keys: None,
+        env_warned: false,
+        script: ScriptState::None,
+        waiting: Vec::new(),
     };
+    // Before anything can start, so the first agent already has what the script sets.
+    app.update_report_roots();
+    app.run_startup_script();
 
     // Keys from the VS Code extension, over a pipe only this Windows user can open.
     {
@@ -319,14 +369,15 @@ fn main() {
             }
             Event::UserEvent(UserEvent::Host(event)) => app.handle_host(event, &webview),
             Event::UserEvent(UserEvent::Toast { id, action }) => {
-                if let Some(path) = action.as_deref().and_then(|a| a.strip_prefix("report:")) {
-                    system::open_with_default_app(path);
-                }
                 window.set_minimized(false);
                 window.set_visible(true);
                 window.set_focus();
                 app.select(&id, &webview);
                 send(&webview, json!({ "type": "select", "id": id }));
+                // Over the chat it came from, so closing the report leaves you where the work is.
+                if let Some(path) = action.as_deref().and_then(|a| a.strip_prefix("report:")) {
+                    app.show_report(path, &webview);
+                }
             }
             Event::UserEvent(UserEvent::Tick) => app.tick(&webview),
             Event::UserEvent(UserEvent::Shared { from, labels }) => {
@@ -342,6 +393,7 @@ fn main() {
                 app.select(&id, &webview);
                 send(&webview, json!({ "type": "select", "id": id }));
             }
+            Event::UserEvent(UserEvent::ScriptDone(result)) => app.script_done(result, &webview),
             Event::UserEvent(UserEvent::StartLater(id)) => {
                 if app.runtime.get(&id).map(|r| r.phase == Phase::Stopped).unwrap_or(true) {
                     app.start(&id, &webview);
@@ -365,8 +417,28 @@ fn main() {
 }
 
 /// The shell's own files, from inside the exe. Nothing is fetched (invariant 4).
+/// Where reports may be read from: Sun's data folder and every codebase's folder. Kept current
+/// as codebases are added and removed; read by the frame that shows HTML reports.
+static REPORT_ROOTS: std::sync::RwLock<Vec<PathBuf>> = std::sync::RwLock::new(Vec::new());
+
+fn report_roots() -> Vec<PathBuf> {
+    REPORT_ROOTS.read().map(|r| r.clone()).unwrap_or_default()
+}
+
 fn serve(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let path = request.uri().path();
+    if path == "/report" {
+        let wanted = request.uri().query().and_then(|q| q.strip_prefix("p=")).map(reports::percent_decode).unwrap_or_default();
+        let read = reports::read(&report_roots(), &wanted);
+        return match read {
+            Ok((real, text)) if reports::kind(&real) == "html" => Response::builder()
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .header("Content-Security-Policy", reports::HTML_REPORT_POLICY)
+                .body(Cow::Owned(text.into_bytes()))
+                .unwrap(),
+            _ => Response::builder().status(StatusCode::NOT_FOUND).body(Cow::Borrowed(&b""[..])).unwrap(),
+        };
+    }
     let (body, kind): (&'static str, &str) = match path {
         "/" | "/index.html" => (INDEX_HTML, "text/html; charset=utf-8"),
         "/shell.css" => (SHELL_CSS, "text/css; charset=utf-8"),
@@ -387,7 +459,7 @@ fn serve(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         .header(
             "Content-Security-Policy",
             "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
-             frame-src http://127.0.0.1:*; connect-src 'self'; base-uri 'none'; form-action 'none'",
+             frame-src 'self' http://127.0.0.1:*; connect-src 'self'; base-uri 'none'; form-action 'none'",
         )
         .body(Cow::Borrowed(body.as_bytes()))
         .unwrap()
@@ -467,12 +539,30 @@ impl App {
     /// The saved credentials and where each is used - names only, never a value.
     fn push_credentials(&self, webview: &WebView) {
         match self.vault.list() {
-            Ok(list) => send(webview, json!({ "type": "credentials", "credentials": list, "pipe": share::pipe_name() })),
+            Ok(mut list) => {
+                // A credential feeding a Sun environment variable is in use too: say where.
+                for item in &mut list {
+                    let id = item["id"].as_str().unwrap_or_default().to_string();
+                    let users: Vec<Value> = self
+                        .state
+                        .settings
+                        .env
+                        .iter()
+                        .filter(|v| v.credential.as_deref().and_then(|c| c.split_once('#')).map(|(i, _)| i == id).unwrap_or(false))
+                        .map(|v| Value::String(format!("Sun environment: {}", v.name)))
+                        .collect();
+                    if let (false, Some(used)) = (users.is_empty(), item["usedBy"].as_array_mut()) {
+                        used.extend(users);
+                    }
+                }
+                send(webview, json!({ "type": "credentials", "credentials": list, "pipe": share::pipe_name() }))
+            }
             Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
         }
     }
 
     fn push_projects(&self, webview: &WebView) {
+        self.update_report_roots();
         send(webview, json!({ "type": "projects", "projects": self.project_views() }));
     }
 
@@ -505,6 +595,7 @@ impl App {
                     }
                 }
                 send(webview, self.statuses());
+                send(webview, self.script_status());
                 self.start_on_launch();
             }
             Command::PickFolder => {
@@ -523,6 +614,97 @@ impl App {
                         }),
                     );
                 }
+            }
+            Command::SaveEnvironment { path_prefix, env, startup_script } => {
+                let startup_script = startup_script.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                if let Some(script) = &startup_script {
+                    if let Err(text) = environment::check_script(script) {
+                        send(webview, json!({ "type": "environmentSaved", "ok": false, "error": text }));
+                        return;
+                    }
+                }
+                let script_changed = startup_script != self.state.settings.startup_script;
+                let path_prefix: Vec<String> = path_prefix.into_iter().map(|f| f.trim().to_string()).collect();
+                let env: Vec<environment::EnvVar> = env
+                    .into_iter()
+                    .map(|v| environment::EnvVar { name: v.name.trim().to_string(), ..v })
+                    .collect();
+                match environment::validate(&path_prefix, &env) {
+                    Err(text) => send(webview, json!({ "type": "environmentSaved", "ok": false, "error": text })),
+                    Ok(()) => {
+                        self.state.settings.path_prefix = path_prefix;
+                        self.state.settings.env = env;
+                        self.state.settings.startup_script = startup_script;
+                        self.state.save(&self.paths);
+                        if script_changed {
+                            self.run_startup_script();
+                            send(webview, self.script_status());
+                        }
+                        self.env_warned = false;
+                        let running = self.runtime.values().filter(|r| r.process.is_some()).count();
+                        send(webview, json!({ "type": "settings", "settings": self.state.settings }));
+                        send(
+                            webview,
+                            json!({
+                                "type": "environmentSaved", "ok": true, "running": running,
+                                "folders": environment::folder_status(&self.state.settings.path_prefix),
+                            }),
+                        );
+                        self.push_credentials(webview);
+                    }
+                }
+            }
+            Command::OpenReport { path } => self.show_report(&path, webview),
+            Command::Reports { id } => {
+                let dir = self.paths.project_dir(state::project_of(&id));
+                let items: Vec<Value> = reports::list(&dir)
+                    .into_iter()
+                    .map(|(path, name, modified)| json!({ "path": path, "name": name, "modified": modified }))
+                    .collect();
+                send(webview, json!({ "type": "reports", "id": id, "reports": items }));
+            }
+            Command::OpenReportExternally { path } => {
+                if let Ok(real) = reports::allowed(&report_roots(), &path) {
+                    system::open_with_default_app(&reports::plain(&real));
+                }
+            }
+            Command::RevealReport { path } => {
+                if let Ok(real) = reports::allowed(&report_roots(), &path) {
+                    let shown = reports::plain(&real);
+                    use std::os::windows::process::CommandExt;
+                    let _ = std::process::Command::new("explorer.exe").raw_arg(format!("/select,\"{shown}\"")).spawn();
+                }
+            }
+            Command::RunScript => {
+                self.run_startup_script();
+                send(webview, self.script_status());
+            }
+            Command::PickScript => {
+                let picked = rfd::FileDialog::new()
+                    .set_title("Choose a startup script")
+                    .add_filter("Scripts", &["cmd", "bat", "ps1"])
+                    .set_parent(window)
+                    .pick_file();
+                if let Some(file) = picked {
+                    send(webview, json!({ "type": "scriptPicked", "path": file.to_string_lossy() }));
+                }
+            }
+            Command::CheckFolders { path_prefix } => {
+                send(webview, json!({ "type": "folderStatus", "folders": environment::folder_status(&path_prefix) }));
+            }
+            Command::PickEnvFolder { index } => {
+                let picked = rfd::FileDialog::new().set_title("Choose a folder to put on PATH").set_parent(window).pick_folder();
+                if let Some(folder) = picked {
+                    send(webview, json!({ "type": "envFolderPicked", "index": index, "path": folder.to_string_lossy() }));
+                }
+            }
+            Command::RestartAll => {
+                let running: Vec<String> = self.runtime.iter().filter(|(_, r)| r.process.is_some()).map(|(k, _)| k.clone()).collect();
+                for key in &running {
+                    self.stop(key, Phase::Stopped);
+                    self.start(key, webview);
+                }
+                send(webview, json!({ "type": "notice", "level": "info", "text": format!("Restarted {} agent(s) with the new environment.", running.len()) }));
             }
             Command::PickConfig => {
                 let picked = rfd::FileDialog::new()
@@ -578,7 +760,7 @@ impl App {
                 let mut current = serde_json::to_value(&self.state.settings).unwrap_or(Value::Null);
                 if let (Some(target), Some(changes)) = (current.as_object_mut(), patch.as_object()) {
                     for (k, v) in changes {
-                        if k != "window" {
+                        if k != "window" && k != "env" && k != "pathPrefix" {
                             target.insert(k.clone(), v.clone());
                         }
                     }
@@ -680,7 +862,7 @@ impl App {
                     let target = rfd::FileDialog::new()
                         .set_title("Save the credentials file")
                         .set_file_name("credentials.sunkeys")
-                        .add_filter("Sun Light Code credentials", &["sunkeys"])
+                        .add_filter("Sun Code credentials", &["sunkeys"])
                         .set_parent(window)
                         .save_file();
                     if let Some(target) = target {
@@ -697,7 +879,7 @@ impl App {
             Command::ChooseCredentialImport => {
                 let picked = rfd::FileDialog::new()
                     .set_title("Import credentials")
-                    .add_filter("Sun Light Code credentials", &["sunkeys"])
+                    .add_filter("Sun Code credentials", &["sunkeys"])
                     .set_parent(window)
                     .pick_file();
                 if let Some(file) = picked {
@@ -926,6 +1108,16 @@ impl App {
         if rt.process.is_some() {
             return;
         }
+        if matches!(self.script, ScriptState::Running) {
+            // Shown as starting; it starts when the script has said what the environment is.
+            rt.phase = Phase::Starting;
+            rt.error = None;
+            if !self.waiting.iter().any(|w| w == id) {
+                self.waiting.push(id.to_string());
+            }
+            send(webview, self.statuses());
+            return;
+        }
         if !Path::new(&project.path).is_dir() {
             rt.phase = Phase::Failed;
             rt.error = Some(format!("The folder {} no longer exists. Remove it from Sun, or restore the folder.", project.path));
@@ -938,6 +1130,15 @@ impl App {
         rt.error = None;
         rt.url = None;
         rt.last_activity = Instant::now();
+        let script: &[(String, String)] = match &self.script {
+            ScriptState::Done(done) => &done.vars,
+            _ => &[],
+        };
+        let environment = environment::resolve(&self.state.settings.path_prefix, &self.state.settings.env, &self.vault, script);
+        if !environment.problems.is_empty() && !self.env_warned {
+            self.env_warned = true;
+            send(webview, json!({ "type": "notice", "level": "error", "text": environment.problems.join(" ") }));
+        }
         let proxy = self.proxy.clone();
         let spec = LaunchSpec {
             id: id.to_string(),
@@ -955,6 +1156,8 @@ impl App {
             credentials_file: self.vault.credentials_file().clone(),
             reach_anywhere: self.state.settings.reach_anywhere,
             fast_fs: system::fast_fs(),
+            env: environment.vars,
+            path: environment.path,
         };
         match host::launch(spec, move |event| {
             let _ = proxy.send_event(UserEvent::Host(event));
@@ -1101,6 +1304,94 @@ impl App {
         send(webview, self.statuses());
     }
 
+    fn update_report_roots(&self) {
+        let roots = std::iter::once(self.paths.root.clone()).chain(self.state.projects.iter().map(|p| PathBuf::from(&p.path))).collect();
+        if let Ok(mut current) = REPORT_ROOTS.write() {
+            *current = roots;
+        }
+    }
+
+    /// A report in Sun's viewer. One Sun cannot show - outside its folder, not text, too large -
+    /// goes to the default app as before, so "Open report" never does nothing.
+    fn show_report(&self, path: &str, webview: &WebView) {
+        match reports::read(&report_roots(), path) {
+            Ok((real, text)) => {
+                let shown = reports::plain(&real);
+                let name = real.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                send(webview, json!({ "type": "report", "path": shown, "name": name, "text": text, "kind": reports::kind(&real) }));
+            }
+            Err(text) => {
+                if Path::new(path).is_file() {
+                    system::open_with_default_app(path);
+                } else {
+                    send(webview, json!({ "type": "notice", "level": "error", "text": text }));
+                }
+            }
+        }
+    }
+
+    /// Runs the startup script in the background, if one is set. Agents wait for it (see start).
+    fn run_startup_script(&mut self) {
+        let Some(script) = self.state.settings.startup_script.clone() else {
+            self.script = ScriptState::None;
+            return;
+        };
+        self.script = ScriptState::Running;
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let _ = proxy.send_event(UserEvent::ScriptDone(environment::run_script(&script)));
+        });
+    }
+
+    fn script_done(&mut self, result: Result<environment::ScriptEnv, String>, webview: &WebView) {
+        match result {
+            Ok(done) => {
+                if done.exit_code != 0 {
+                    send(
+                        webview,
+                        json!({ "type": "notice", "level": "error", "text": format!(
+                            "The startup script ended with exit code {}. What it set is still applied.\n{}",
+                            done.exit_code, done.output_tail
+                        ) }),
+                    );
+                }
+                self.script = ScriptState::Done(done);
+            }
+            Err(text) => {
+                send(webview, json!({ "type": "notice", "level": "error", "text": format!("{text}\nAgents start without it.") }));
+                self.script = ScriptState::Failed(text);
+            }
+        }
+        send(webview, self.script_status());
+        let running = self.runtime.values().filter(|r| r.process.is_some()).count();
+        for key in std::mem::take(&mut self.waiting) {
+            if self.runtime.get(&key).map(|r| r.process.is_none() && r.phase == Phase::Starting).unwrap_or(false) {
+                self.start(&key, webview);
+            }
+        }
+        if running > 0 {
+            send(webview, json!({ "type": "scriptRanWithAgents", "running": running }));
+        }
+    }
+
+    /// For the page: names only, never values - a script may set a token.
+    fn script_status(&self) -> Value {
+        let script = self.state.settings.startup_script.clone();
+        match &self.script {
+            ScriptState::None => json!({ "type": "scriptStatus", "state": "none", "script": script }),
+            ScriptState::Running => json!({ "type": "scriptStatus", "state": "running", "script": script }),
+            ScriptState::Failed(text) => json!({ "type": "scriptStatus", "state": "failed", "script": script, "detail": text }),
+            ScriptState::Done(done) => {
+                let names: Vec<&str> = done.vars.iter().map(|(k, _)| k.as_str()).filter(|k| !k.eq_ignore_ascii_case("PATH")).collect();
+                let path_changed = done.vars.iter().any(|(k, _)| k.eq_ignore_ascii_case("PATH"));
+                json!({
+                    "type": "scriptStatus", "state": "done", "script": script, "names": names,
+                    "pathChanged": path_changed, "exitCode": done.exit_code, "output": done.output_tail,
+                })
+            }
+        }
+    }
+
     /// The codebase last open, at once; the next two most recent shortly after, so they are ready
     /// before they are clicked without competing with the first for the disk.
     fn start_on_launch(&mut self) {
@@ -1167,5 +1458,27 @@ impl App {
         if bounds.is_some() {
             self.state.settings.window = bounds;
         }
+    }
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    /// The page sends camelCase; a struct variant's fields are not renamed by the enum's own
+    /// `rename_all`, so each multi-word variant carries its own. A mismatch is a save that does nothing.
+    #[test]
+    fn the_environment_page_is_understood() {
+        let body = r#"{"cmd":"saveEnvironment","pathPrefix":["C:\\tools"],"env":[{"name":"A","value":"1"},{"name":"T","credential":"c1#value"}]}"#;
+        match serde_json::from_str::<Command>(body) {
+            Ok(Command::SaveEnvironment { path_prefix, env, .. }) => {
+                assert_eq!(path_prefix, vec![r"C:\tools".to_string()]);
+                assert_eq!(env[1].credential.as_deref(), Some("c1#value"));
+            }
+            _ => panic!("saveEnvironment was not understood"),
+        }
+        assert!(matches!(serde_json::from_str::<Command>(r#"{"cmd":"checkFolders","pathPrefix":[]}"#), Ok(Command::CheckFolders { .. })));
+        assert!(matches!(serde_json::from_str::<Command>(r#"{"cmd":"pickEnvFolder","index":2}"#), Ok(Command::PickEnvFolder { index: 2 })));
+        assert!(matches!(serde_json::from_str::<Command>(r#"{"cmd":"restartAll"}"#), Ok(Command::RestartAll)));
     }
 }

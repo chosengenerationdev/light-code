@@ -123,7 +123,7 @@ export class ShadowGit {
   }
 
   /**
-   * Restores only these files to the snapshot - for a codebase several chats share (Sun Light Code),
+   * Restores only these files to the snapshot - for a codebase several chats share (Sun Code),
    * where restoring everything would undo another chat's work too. A file that did not exist at the
    * snapshot is removed, as the whole-workspace restore removes it. Paths outside the workspace are
    * skipped: the snapshot never held them. Returns what was restored and what was removed.

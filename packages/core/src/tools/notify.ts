@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { resolveToolPath } from './paths.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -24,6 +25,14 @@ const paramsSchema = z.object({
         'clicks the notification. Put the report here and keep `message` to one line: a ' +
         'notification itself is plain text and cannot show formatting.',
     ),
+  report: z
+    .string()
+    .optional()
+    .describe(
+      'Optional path to a report file you have already written: .md, or .html for a styled report ' +
+        '(tables, colours, charts). Clicking the notification opens that file. Use it instead of ' +
+        '`details` when the report is a file.',
+    ),
 })
 export type NotifyParams = z.infer<typeof paramsSchema>
 
@@ -35,7 +44,7 @@ export interface NotifyOptions {
    * notification itself cannot render it: a VS Code toast is a plain string with buttons, so a
    * table or a coloured cell has to live in a document the toast offers to open.
    */
-  notify: (message: string, level: 'info' | 'warning', details?: string) => void
+  notify: (message: string, level: 'info' | 'warning', details?: string, reportFile?: string) => void
 }
 
 /**
@@ -72,7 +81,7 @@ export function createNotifyTool(options: NotifyOptions): Tool<NotifyParams> {
       'that needs attention; in an ordinary conversation they are already reading your reply.',
     parametersSchema: paramsSchema,
 
-    async execute(params): Promise<ToolResult> {
+    async execute(params, context): Promise<ToolResult> {
       /*
        * Flattened, not rejected.
        *
@@ -81,7 +90,21 @@ export function createNotifyTool(options: NotifyOptions): Tool<NotifyParams> {
        * readable, and `details` is where the model is told to put the real content.
        */
       const line = params.message.replace(/\s+/g, ' ').trim()
-      options.notify(line, params.level ?? 'info', params.details)
+      let reportFile: string | undefined
+      if (params.report !== undefined) {
+        // Read like any other file: the deny list and the workspace rules apply.
+        const resolved = await resolveToolPath(context, params.report)
+        if (!resolved.ok) return { content: resolved.message, isError: true }
+        if (!/\.(md|markdown|html?|txt)$/i.test(resolved.realPath)) {
+          return { content: `${params.report} is not a report: attach a .md, .html or .txt file.`, isError: true }
+        }
+        if (!(await context.fs.exists(resolved.realPath))) {
+          return { content: `${params.report} does not exist. Write the report first, then notify.`, isError: true }
+        }
+        reportFile = resolved.realPath
+      }
+      options.notify(line, params.level ?? 'info', reportFile === undefined ? params.details : undefined, reportFile)
+      if (reportFile !== undefined) return { content: `Notified the user: ${params.message} (opens ${params.report})` }
       return {
         content:
           params.details === undefined

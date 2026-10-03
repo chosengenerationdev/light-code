@@ -42,6 +42,9 @@ import { ALWAYS_AVAILABLE_TO_SCHEDULES, type Schedule } from './types.js'
  * wrapping it, so the policy gate — and that list — never runs.
  */
 export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
+  // Mass copies and moves need a person reading the plan; an unattended run has none.
+  'transfer_files',
+  'archive_files',
   'create_python_tool',
   'update_python_tool',
   'delete_python_tool',

@@ -8,17 +8,17 @@ use tauri_winrt_notification::{Duration, Toast};
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
 
-pub const APP_ID: &str = "ChosenGeneration.SunLightCode";
+pub const APP_ID: &str = "ChosenGeneration.SunCode";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Lets Windows show notifications as "Sun Light Code" with its icon.
+/// Lets Windows show notifications as "Sun Code" with its icon.
 ///
 /// An npm-installed program has no Start-menu shortcut to carry an identity, and without one a toast
 /// is either refused or shown as coming from PowerShell. Registering the id under the user's own
 /// classes is the documented route for an unpackaged desktop app and needs no administrator.
 pub fn register_app_identity(icon: &Path) {
     if let Ok((key, _)) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(format!("Software\\Classes\\AppUserModelId\\{APP_ID}")) {
-        let _ = key.set_value("DisplayName", &"Sun Light Code");
+        let _ = key.set_value("DisplayName", &"Sun Code");
         let _ = key.set_value("IconUri", &icon.to_string_lossy().to_string());
         let _ = key.set_value("IconBackgroundColor", &"00000000");
     }
@@ -43,7 +43,7 @@ pub fn notify(
         toast = toast.text2(detail);
     }
     if icon.is_file() {
-        toast = toast.icon(icon, tauri_winrt_notification::IconCrop::Square, "Sun Light Code");
+        toast = toast.icon(icon, tauri_winrt_notification::IconCrop::Square, "Sun Code");
     }
     for (label, action) in buttons {
         toast = toast.add_button(label, action);
@@ -91,12 +91,12 @@ pub fn open_in_vscode(path: &str) -> bool {
 
 /// Node: the one npm used to install Sun when the launcher says so, otherwise whatever is on PATH.
 pub fn node_executable() -> PathBuf {
-    std::env::var_os("SUN_LIGHT_CODE_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node.exe"))
+    std::env::var_os("SUN_CODE_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node.exe"))
 }
 
 /// The Light Code host bundled beside the exe, or a development build of it.
 pub fn host_script() -> PathBuf {
-    if let Some(explicit) = std::env::var_os("SUN_LIGHT_CODE_HOST") {
+    if let Some(explicit) = std::env::var_os("SUN_CODE_HOST") {
         return PathBuf::from(explicit);
     }
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
@@ -137,20 +137,20 @@ pub fn hand_over_to_running_instance(home: &Path) -> bool {
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE};
-    // Per data folder: a second Sun with its own SUN_LIGHT_CODE_HOME (a test, a second profile)
+    // Per data folder: a second Sun with its own SUN_CODE_HOME (a test, a second profile)
     // shares nothing with the first and may run beside it.
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in home.to_string_lossy().to_lowercase().bytes() {
         hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
     }
-    let name: Vec<u16> = format!("Local\\SunLightCode.{hash:016x}").encode_utf16().chain(std::iter::once(0)).collect();
+    let name: Vec<u16> = format!("Local\\SunCode.{hash:016x}").encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         // Deliberately never closed: it must live exactly as long as this process.
         let mutex = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         if mutex.is_null() || GetLastError() != ERROR_ALREADY_EXISTS {
             return false;
         }
-        let title: Vec<u16> = "Sun Light Code".encode_utf16().chain(std::iter::once(0)).collect();
+        let title: Vec<u16> = "Sun Code".encode_utf16().chain(std::iter::once(0)).collect();
         let window = FindWindowW(std::ptr::null(), title.as_ptr());
         if !window.is_null() {
             if IsIconic(window) != 0 {
@@ -165,7 +165,7 @@ pub fn hand_over_to_running_instance(home: &Path) -> bool {
 /// A plain error box, for failures that happen before there is a window to show them in.
 pub fn fatal(message: &str) -> ! {
     rfd::MessageDialog::new()
-        .set_title("Sun Light Code")
+        .set_title("Sun Code")
         .set_description(message)
         .set_level(rfd::MessageLevel::Error)
         .show();

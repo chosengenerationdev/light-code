@@ -1,4 +1,4 @@
-//! Receives keys from the VS Code extension ("Light Code: Share API keys with Sun Light Code").
+//! Receives keys from the VS Code extension ("Light Code: Share API keys with Sun Code").
 //!
 //! VS Code keeps its keys in its own encrypted storage, which nothing else can read. The extension
 //! can, so it sends them here, after the person confirmed the list of names. The channel is a named
@@ -23,7 +23,7 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 
 /// The pipe's name: per Windows user, so two people on one machine never meet.
 pub fn pipe_name() -> String {
-    format!(r"\\.\pipe\sun-light-code.{}", std::env::var("USERNAME").unwrap_or_else(|_| "user".into()).to_lowercase())
+    format!(r"\\.\pipe\sun-code.{}", std::env::var("USERNAME").unwrap_or_else(|_| "user".into()).to_lowercase())
 }
 
 #[derive(Deserialize)]

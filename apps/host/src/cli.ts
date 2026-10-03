@@ -263,7 +263,7 @@ async function main(): Promise<void> {
   const configFile = configFileArg === undefined ? undefined : path.resolve(configFileArg)
   const secretsFile = secretsFileArg === undefined ? undefined : path.resolve(secretsFileArg)
   /*
-   * Sun Light Code's vault: the key that encrypts the secrets file arrives as the first line on
+   * Sun Code's vault: the key that encrypts the secrets file arrives as the first line on
    * stdin, never as an argument (visible in the process list) or a variable (inherited by every
    * command the agent runs). And the list of saved credentials, for the settings pickers.
    */
@@ -740,7 +740,7 @@ function valueOf(args: string[], flag: string): string | undefined {
  * once shipped a VSIX that could not activate at all (§19). The require is inside a
  * function for the same reason: an import would be hoisted back to the top.
  */
-/** The first line of stdin, which Sun Light Code writes and then closes. */
+/** The first line of stdin, which Sun Code writes and then closes. */
 function readStdinLine(): Promise<string> {
   return new Promise((resolve) => {
     let text = ''
@@ -933,11 +933,11 @@ Usage: light-code [options]
                       prefixed light-code-notify: for the program that started
                       this one (Light Code Sun shows them as Windows notifications)
   --secrets-key-stdin Read the key that encrypts --secrets-file from the first
-                      line of stdin (64 hex characters). Used by Sun Light Code
+                      line of stdin (64 hex characters). Used by Sun Code
   --reach-anywhere    Let the assistant read any drive or share and write
                       anywhere, asking every time it writes outside the
-                      workspace (not with --server). Used by Sun Light Code
-  --shared-workspace  Other agents work in this folder too (Sun Light Code's
+                      workspace (not with --server). Used by Sun Code
+  --shared-workspace  Other agents work in this folder too (Sun Code's
                       chat tabs): Rollback undoes only this chat's files
   --fast-fs <exe>     The sun-fs helper: adds find_files, read_many_files,
                       big_file and query_table

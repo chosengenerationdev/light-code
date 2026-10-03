@@ -129,7 +129,7 @@ export interface ServerOptions {
   /** See `SessionOptions.secretsKey`. */
   secretsKey?: Buffer
   /**
-   * Sun Light Code's list of saved credentials: names and kinds, never values. Offered in every
+   * Sun Code's list of saved credentials: names and kinds, never values. Offered in every
    * secret field's "Use a saved credential" menu, and re-sent when the file changes.
    */
   credentialsFile?: string

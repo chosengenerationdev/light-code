@@ -7,11 +7,13 @@ import { recordRead } from './readStamps.js'
 import type { Tool, ToolExecutionContext, ToolResult } from './types.js'
 
 /**
- * File tools backed by `sun-fs`, Sun Light Code's parallel Rust helper (`HostServices.fastFs`).
+ * File tools backed by `sun-fs`, Sun Code's parallel Rust helper (`HostServices.fastFs`).
  *
  * Absent wherever the host has no helper - the VS Code extension, a plain Node host - rather than
- * present and failing. All four only **read**: the helper has no write operation at all, and every
- * change an agent makes still goes through `write_to_file` / `apply_diff`, which show a diff and ask.
+ * present and failing. Four only **read**. The fifth, `transfer_files` (copy and move), is the one
+ * write here: it is in `ALWAYS_ASK_TOOLS`, never available to a schedule, and its approval is the
+ * plan the helper computes without touching anything - every source, destination, file count, size,
+ * and each file that would be replaced.
  *
  * Every path goes through `resolveToolPath` first, so the deny list, the workspace rules and Sun's
  * "reach anywhere" floor (`fs/reach.ts`) apply exactly as they do to `read_file`; the helper is
@@ -148,7 +150,84 @@ const tableSchema = z.object({
   limit: z.number().int().min(1).max(500).optional().describe('Rows to return (default 50).'),
 })
 
-/** The four tools, for a host that ships `sun-fs`. */
+const transferSchema = z.object({
+  action: z.enum(['copy', 'move']).describe('copy leaves the source; move removes it once everything is copied.'),
+  items: z
+    .array(z.object({ from: z.string().min(1), to: z.string().min(1).describe('The full destination path: the new folder or file, not its parent.') }))
+    .min(1)
+    .max(50),
+  overwrite: z
+    .boolean()
+    .optional()
+    .describe('Replace files that already exist at the destination. Without it, nothing is changed when any exists.'),
+})
+type TransferParams = z.infer<typeof transferSchema>
+
+interface PlannedItem {
+  from: string
+  to: string
+  folder: boolean
+  files: number
+  bytes: number
+  replaces: string[]
+  replaceCount: number
+  rename: boolean
+}
+
+/** Sources and destinations, each through the same rules as any read or write. */
+async function transferPaths(
+  context: ToolExecutionContext,
+  params: TransferParams,
+): Promise<{ ok: true; items: { from: string; to: string }[]; outside: boolean } | { ok: false; message: string }> {
+  const items: { from: string; to: string }[] = []
+  let outside = false
+  for (const item of params.items) {
+    // A move deletes its source, so the source is held to the write rules too.
+    const from = await resolveToolPath(context, item.from, params.action === 'move' ? { write: true } : {})
+    if (!from.ok) return from
+    const to = await resolveToolPath(context, item.to, { write: true })
+    if (!to.ok) return to
+    if (isSecretPath(from.realPath) || isSecretPath(to.realPath)) {
+      return { ok: false, message: `"${item.from}" → "${item.to}" touches a folder that holds keys or credentials.` }
+    }
+    outside ||= to.outsideWorkspace === true || from.outsideWorkspace === true
+    items.push({ from: from.realPath, to: to.realPath })
+  }
+  return { ok: true, items, outside }
+}
+
+function describePlan(params: TransferParams, plan: PlannedItem[], outside: boolean): string {
+  const verb = params.action === 'move' ? 'Move' : 'Copy'
+  const files = plan.reduce((n, p) => n + p.files, 0)
+  const bytes = plan.reduce((n, p) => n + p.bytes, 0)
+  const replacing = plan.reduce((n, p) => n + p.replaceCount, 0)
+  const lines = [`${verb} ${String(plan.length)} item${plan.length === 1 ? '' : 's'}: ${files.toLocaleString('en')} file${files === 1 ? '' : 's'}, ${formatBytes(bytes)}`, '']
+  for (const p of plan) {
+    lines.push(`  ${p.from}  (${p.folder ? `folder, ${p.files.toLocaleString('en')} files` : 'file'}, ${formatBytes(p.bytes)})`)
+    lines.push(`    → ${p.to}${params.action === 'move' && p.rename ? '   [rename: same drive, instant]' : ''}`)
+    if (p.replaceCount > 0) {
+      lines.push(`    ${params.overwrite === true ? 'REPLACES' : 'already exists, so nothing will be changed'}: ${String(p.replaceCount)} file(s)`)
+      for (const r of p.replaces) lines.push(`      ${r}`)
+      if (p.replaceCount > p.replaces.length) lines.push(`      … and ${String(p.replaceCount - p.replaces.length)} more`)
+    }
+  }
+  lines.push('')
+  if (replacing > 0 && params.overwrite !== true) lines.push('Some destinations exist and overwrite was not asked for: approving changes nothing and says which.')
+  if (params.action === 'move') lines.push('A move across drives copies everything, checks it, and only then removes the source.')
+  if (outside) lines.push('Outside the codebase: Rollback cannot undo this part.')
+  return lines.join('\n')
+}
+
+const archiveSchema = z.object({
+  action: z.enum(['create', 'extract', 'list']).describe('create a .zip from files and folders; extract one into a folder; list what one holds.'),
+  archive: z.string().min(1).describe('The .zip file.'),
+  sources: z.array(z.string().min(1)).max(50).optional().describe('create: the files and folders to put in it. A folder keeps its name inside the archive.'),
+  to: z.string().optional().describe('extract: the folder to extract into.'),
+  overwrite: z.boolean().optional().describe('create: replace an existing .zip. extract: replace files that already exist.'),
+})
+type ArchiveParams = z.infer<typeof archiveSchema>
+
+/** The tools, for a host that ships `sun-fs`. */
 export function createFastFsTools(exe: string): Tool[] {
   const findTool: Tool<z.infer<typeof findSchema>> = {
     name: 'find_files',
@@ -331,5 +410,131 @@ export function createFastFsTools(exe: string): Tool[] {
     },
   }
 
-  return [findTool, readManyTool, bigFileTool, tableTool] as unknown as Tool[]
+  const transferTool: Tool<TransferParams> = {
+    name: 'transfer_files',
+    group: 'edit',
+    description:
+      'Copy or move files and whole folders fast - every CPU core copies at once, and a move within one drive is an ' +
+      'instant rename however large the folder. Always asks first, showing every source, destination, file count, ' +
+      'size and anything it would replace. Give the full destination path (the new folder or file name). Prefer it ' +
+      'to shell copy/move commands for anything bigger than a few files.',
+    parametersSchema: transferSchema,
+    async preview(params, context) {
+      const paths = await transferPaths(context, params)
+      if (!paths.ok) return { kind: 'text', text: paths.message }
+      const answer = await runHelper(exe, { op: 'transfer', plan: true, action: params.action, overwrite: params.overwrite === true, items: paths.items })
+      if (answer.ok !== true) return { kind: 'text', text: `Could not plan this: ${answer.error ?? 'unknown error'}` }
+      return { kind: 'text', text: describePlan(params, answer.plan as PlannedItem[], paths.outside) }
+    },
+    async execute(params, context): Promise<ToolResult> {
+      const paths = await transferPaths(context, params)
+      if (!paths.ok) return { content: paths.message, isError: true }
+      const answer = await runHelper(exe, { op: 'transfer', action: params.action, overwrite: params.overwrite === true, items: paths.items }, context.signal)
+      if (answer.ok !== true && answer.files === undefined) return { content: answer.error ?? 'Nothing was copied.', isError: true }
+      for (const item of paths.items) context.changedFiles?.add(item.to)
+      const errors = (answer.errors as string[] | undefined) ?? []
+      const verb = params.action === 'move' ? 'Moved' : 'Copied'
+      return {
+        content:
+          `${verb} ${Number(answer.files).toLocaleString('en')} file(s), ${formatBytes(Number(answer.bytes))}, in ${(Number(answer.ms) / 1000).toFixed(1)} s` +
+          (Number(answer.renamed) > 0 ? ` (${String(answer.renamed)} by rename)` : '') +
+          '.' +
+          (errors.length > 0 ? `\n\nProblems:\n${errors.map((e) => `- ${e}`).join('\n')}` : ''),
+        ...(errors.length > 0 ? { isError: true } : {}),
+      }
+    },
+  }
+
+  /** Paths for an archive request, through the same rules as any read or write. */
+  const archivePaths = async (
+    context: ToolExecutionContext,
+    params: ArchiveParams,
+  ): Promise<{ ok: true; request: Record<string, unknown>; outside: boolean } | { ok: false; message: string }> => {
+    const zipPath = await resolveToolPath(context, params.archive, params.action === 'create' ? { write: true } : {})
+    if (!zipPath.ok) return zipPath
+    if (!/\.zip$/i.test(zipPath.realPath)) return { ok: false, message: `${params.archive} is not a .zip file.` }
+    let outside = zipPath.outsideWorkspace === true
+    const request: Record<string, unknown> = { op: 'archive', action: params.action, archive: zipPath.realPath, overwrite: params.overwrite === true }
+    if (params.action === 'create') {
+      if ((params.sources ?? []).length === 0) return { ok: false, message: 'Name the files or folders to archive in sources.' }
+      const sources: string[] = []
+      for (const s of params.sources ?? []) {
+        const r = await readable(context, s)
+        if (!r.ok) return r
+        sources.push(r.path)
+      }
+      request.sources = sources
+    } else if (params.action === 'extract') {
+      if (params.to === undefined) return { ok: false, message: 'Name the folder to extract into with to.' }
+      const to = await resolveToolPath(context, params.to, { write: true })
+      if (!to.ok) return to
+      if (isSecretPath(to.realPath)) return { ok: false, message: `"${params.to}" holds keys or credentials.` }
+      outside ||= to.outsideWorkspace === true
+      request.to = to.realPath
+    }
+    return { ok: true, request, outside }
+  }
+
+  const archiveTool: Tool<ArchiveParams> = {
+    name: 'archive_files',
+    group: 'edit',
+    description:
+      'Zip files and folders, extract a .zip, or list what one holds. Creating and extracting always ask first, ' +
+      'showing what goes in or comes out and anything replaced. An archive whose entries would land outside the ' +
+      'destination folder is refused whole.',
+    parametersSchema: archiveSchema,
+    async preview(params, context) {
+      const paths = await archivePaths(context, params)
+      if (!paths.ok) return { kind: 'text', text: paths.message }
+      if (params.action === 'list') return { kind: 'text', text: `List the contents of ${String(paths.request.archive)}` }
+      const plan = await runHelper(exe, { ...paths.request, plan: true })
+      if (plan.ok !== true) return { kind: 'text', text: `Could not plan this: ${plan.error ?? 'unknown error'}` }
+      const lines =
+        params.action === 'create'
+          ? [
+              `Create ${String(paths.request.archive)}${plan.exists === true ? (params.overwrite === true ? '  (REPLACES the existing file)' : '  (already exists, so nothing will be changed)') : ''}`,
+              `  from ${(paths.request.sources as string[]).join(', ')}`,
+              `  ${Number(plan.files).toLocaleString('en')} file(s), ${formatBytes(Number(plan.bytes))} before compression`,
+              ...((plan.sample as string[]) ?? []).map((n) => `    ${n}`),
+            ]
+          : [
+              `Extract ${String(paths.request.archive)}`,
+              `  into ${String(paths.request.to)}`,
+              `  ${Number(plan.files).toLocaleString('en')} file(s), ${formatBytes(Number(plan.bytes))}`,
+              ...(Number(plan.replaceCount) > 0
+                ? [
+                    `  ${params.overwrite === true ? 'REPLACES' : 'already exists, so nothing will be changed'}: ${String(plan.replaceCount)} file(s)`,
+                    ...((plan.replaces as string[]) ?? []).map((n) => `    ${n}`),
+                  ]
+                : []),
+            ]
+      if (paths.outside) lines.push('', 'Outside the codebase: Rollback cannot undo this part.')
+      return { kind: 'text', text: lines.join('\n') }
+    },
+    async execute(params, context): Promise<ToolResult> {
+      const paths = await archivePaths(context, params)
+      if (!paths.ok) return { content: paths.message, isError: true }
+      const answer = await runHelper(exe, paths.request, context.signal)
+      if (answer.ok !== true) return { content: answer.error ?? 'The archive operation failed.', isError: true }
+      if (params.action === 'list') {
+        const entries = (answer.entries as { name: string; size: number; dir: boolean }[]) ?? []
+        return {
+          content:
+            `${String(answer.count)} entries, ${formatBytes(Number(answer.bytes))} (${formatBytes(Number(answer.packed))} packed):\n` +
+            entries.map((e) => (e.dir ? `  ${e.name}` : `  ${e.name}  ${formatBytes(e.size)}`)).join('\n') +
+            (Number(answer.count) > entries.length ? `\n  … and ${String(Number(answer.count) - entries.length)} more` : ''),
+        }
+      }
+      if (params.action === 'create') {
+        context.changedFiles?.add(String(paths.request.archive))
+        return {
+          content: `Created ${String(paths.request.archive)}: ${String(answer.files)} file(s), ${formatBytes(Number(answer.bytes))} → ${formatBytes(Number(answer.archiveBytes))}, in ${(Number(answer.ms) / 1000).toFixed(1)} s.`,
+        }
+      }
+      context.changedFiles?.add(String(paths.request.to))
+      return { content: `Extracted ${String(answer.files)} file(s), ${formatBytes(Number(answer.bytes))}, into ${String(paths.request.to)} in ${(Number(answer.ms) / 1000).toFixed(1)} s.` }
+    },
+  }
+
+  return [findTool, readManyTool, bigFileTool, tableTool, transferTool, archiveTool] as unknown as Tool[]
 }

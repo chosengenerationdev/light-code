@@ -74,7 +74,7 @@ describe('frame-ancestors', () => {
 })
 
 /*
- * Sun Light Code loads the page in an iframe from its own origin, which the browser marks
+ * Sun Code loads the page in an iframe from its own origin, which the browser marks
  * `cross-site`. Exactly that navigation is let through, and only for a named ancestor.
  */
 describe('the frame navigation an embedding app makes', () => {

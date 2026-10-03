@@ -428,7 +428,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                 />
                 <div style={{ flex: 1 }}>
                   {row.secret ? (
-                    // A secret variable may be a saved credential (Sun Light Code), picked by name.
+                    // A secret variable may be a saved credential (Sun Code), picked by name.
                     <SecretInput
                       value={row.value}
                       placeholder={row.hasValue ? 'Set — type to replace' : 'Value'}

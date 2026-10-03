@@ -37,7 +37,11 @@ describe('contrast selection', () => {
   it('picks dark text on the light end of the palette', () => {
     expect(contrastFor('#F59E0B')).toBe('#12111a') // amber, luminance 0.44
     expect(contrastFor('#22C55E')).toBe('#12111a') // green, 0.42
-    expect(contrastFor('#14B8A6')).toBe('#12111a') // teal, 0.37
+  })
+
+  /** Reported from real use: teal reads as a dark accent, and dark text on it looked wrong. */
+  it('keeps white text on teal', () => {
+    expect(contrastFor('#14B8A6')).toBe('#ffffff') // teal, 0.37
   })
 
   /**

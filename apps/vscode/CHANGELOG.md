@@ -1,5 +1,13 @@
 # light-code-vscode
 
+## 0.134.0
+
+### Minor Changes
+
+- `notify` can attach a report file the agent wrote (.md or .html); "Open report" opens it.
+- Teal accents get white text; the Review tab has its own icon.
+- "Share API keys" reaches Sun Code under its new name (and still reaches Sun Light Code). The handbook covers Sun Code.
+
 ## 0.133.0
 
 ### Minor Changes

@@ -6,7 +6,7 @@ import { secretSlots, type ConfigManager, type SecretSlot } from '@light-code/co
 import { VSCodeSecretStore } from './platform/secrets.js'
 
 /**
- * "Light Code: Share API keys with Sun Light Code".
+ * "Light Code: Share API keys with Sun Code".
  *
  * VS Code keeps Light Code's keys in its own encrypted storage, which no other program can read -
  * so a codebase in Sun linked to this config had every provider and connection but none of their
@@ -19,7 +19,7 @@ import { VSCodeSecretStore } from './platform/secrets.js'
  */
 export async function shareKeysWithSun(context: vscode.ExtensionContext, configManager: ConfigManager): Promise<void> {
   if (process.platform !== 'win32') {
-    void vscode.window.showInformationMessage('Sun Light Code is a Windows app; there is nothing to share keys with on this system.')
+    void vscode.window.showInformationMessage('Sun Code is a Windows app; there is nothing to share keys with on this system.')
     return
   }
 
@@ -37,12 +37,12 @@ export async function shareKeysWithSun(context: vscode.ExtensionContext, configM
 
   // Ground truth before anything leaves (invariant 8): the names of exactly what will be sent.
   const choice = await vscode.window.showWarningMessage(
-    `Share ${String(found.length)} key${found.length === 1 ? '' : 's'} with Sun Light Code?`,
+    `Share ${String(found.length)} key${found.length === 1 ? '' : 's'} with Sun Code?`,
     {
       modal: true,
       detail:
         `${found.map((f) => `• ${f.label}`).join('\n')}\n\n` +
-        'They are sent to Sun Light Code on this computer, which stores them encrypted for your Windows ' +
+        'They are sent to Sun Code on this computer, which stores them encrypted for your Windows ' +
         'account as saved credentials every codebase can use. Values are never shown. VS Code keeps its own copy.',
     },
     'Share',
@@ -51,16 +51,16 @@ export async function shareKeysWithSun(context: vscode.ExtensionContext, configM
 
   try {
     const reply = await sendToSun({ type: 'share', from: 'VS Code', entries: found })
-    if (reply.ok !== true) throw new Error(reply.error ?? 'Sun Light Code refused the keys.')
+    if (reply.ok !== true) throw new Error(reply.error ?? 'Sun Code refused the keys.')
     void vscode.window.showInformationMessage(
-      `Shared ${String(reply.stored?.length ?? found.length)} key(s) with Sun Light Code. Codebases linked to this config can use them now.`,
+      `Shared ${String(reply.stored?.length ?? found.length)} key(s) with Sun Code. Codebases linked to this config can use them now.`,
     )
   } catch (error) {
     const missing = (error as NodeJS.ErrnoException).code === 'ENOENT'
     void vscode.window.showErrorMessage(
       missing
-        ? 'Sun Light Code is not running. Open it (run sun-light-code), then share the keys again.'
-        : `Could not share the keys with Sun Light Code: ${error instanceof Error ? error.message : String(error)}`,
+        ? 'Sun Code is not running. Open it (run sun-code), then share the keys again.'
+        : `Could not share the keys with Sun Code: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
 }
@@ -96,17 +96,27 @@ async function collectSlots(context: vscode.ExtensionContext, configManager: Con
 }
 
 /** The pipe Sun listens on: per Windows user, matching `share.rs`. */
-export function sunPipeName(): string {
-  return `\\\\.\\pipe\\sun-light-code.${(process.env.USERNAME ?? 'user').toLowerCase()}`
+export function sunPipeName(name = 'sun-code'): string {
+  return `\\\\.\\pipe\\${name}.${(process.env.USERNAME ?? 'user').toLowerCase()}`
 }
 
-function sendToSun(message: unknown): Promise<{ ok?: boolean; error?: string; stored?: string[] }> {
+/** Sun Code first; then the pipe Sun listened on while it was called Sun Light Code (0.4.x). */
+async function sendToSun(message: unknown): Promise<{ ok?: boolean; error?: string; stored?: string[] }> {
+  try {
+    return await sendOnPipe(sunPipeName(), message)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return sendOnPipe(sunPipeName('sun-light-code'), message)
+  }
+}
+
+function sendOnPipe(pipe: string, message: unknown): Promise<{ ok?: boolean; error?: string; stored?: string[] }> {
   return new Promise((resolve, reject) => {
-    const socket = connect(sunPipeName())
+    const socket = connect(pipe)
     let text = ''
     const timer = setTimeout(() => {
       socket.destroy()
-      reject(new Error('Sun Light Code did not answer within 15 seconds.'))
+      reject(new Error('Sun Code did not answer within 15 seconds.'))
     }, 15_000)
     socket.setEncoding('utf8')
     socket.on('connect', () => socket.write(`${JSON.stringify(message)}\n`))
@@ -119,7 +129,7 @@ function sendToSun(message: unknown): Promise<{ ok?: boolean; error?: string; st
       try {
         resolve(JSON.parse(text.slice(0, end)) as { ok?: boolean; error?: string; stored?: string[] })
       } catch {
-        reject(new Error('Sun Light Code sent an answer that could not be read.'))
+        reject(new Error('Sun Code sent an answer that could not be read.'))
       }
     })
     socket.on('error', (error) => {

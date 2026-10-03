@@ -835,19 +835,24 @@ desktops of the same person; importing the file is how a second machine is set u
   },
   {
     id: 'sun',
-    title: 'Sun Light Code: several codebases in one Windows window',
+    title: 'Sun Code: several codebases in one Windows window',
     keywords: [
-      'sun', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
+      'sun', 'sun code', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
       'many projects', 'one window', 'parallel', 'background agents', 'desktop app', 'windows app',
       'sidebar', 'sleep', 'idle', 'switch project', 'credentials', 'saved credential',
       'share keys', 'share api keys', 'pycharm', 'intellij keys', 'shared drive', 'network drive',
       'big log', 'large log', 'big csv', 'large csv', 'huge file', 'find files', 'duplicate files',
       'several chats', 'two chats', 'parallel chats', 'parallel agents', 'chat tabs', 'new chat tab',
       'two agents same codebase', 'same codebase at once', 'same codebase', 'second chat',
+      'environment variable', 'environment variables', 'startup script', 'setenv', 'add to path',
+      'path variable', 'report viewer', 'open report', 'html report', 'markdown report',
+      'copy folder', 'move folder', 'move files', 'copy files', 'zip', 'unzip', 'archive', 'compress',
+      'export credentials', 'sun code',
     ],
     body: `
-**Sun Light Code** is a Windows app holding every codebase you work on, each with its own Light Code
-agent. Install with \`npm i -g @chosengeneration/sun-light-code\` and run \`sun-light-code\`. The
+**Sun Code** (called Sun Light Code until 0.5.0) is a Windows app holding every codebase you work on,
+each with its own Light Code agent. Install with \`npm i -g @chosengeneration/sun-code\` and run
+\`sun-code\`. Its data moves across from the old name by itself on first start. The
 package is prebuilt with no install scripts or dependencies, so nothing compiles or downloads.
 
 **Each codebase is its own process**, so agents work in parallel and keep going while you look at
@@ -864,7 +869,7 @@ always applies. Right-click a codebase → Settings source… changes it later.
 **Credentials** (the key button in Sun's sidebar): keys and passwords saved once, by name, encrypted for
 your Windows account, and picked in any codebase's settings with "Use a saved credential" — changing one
 updates everything that uses it. Values are never shown again. Bring keys in from VS Code with the command
-"Light Code: Share API keys with Sun Light Code", from IntelliJ / PyCharm with the button on the
+"Light Code: Share API keys with Sun Code", from IntelliJ / PyCharm with the button on the
 Credentials page, or from another computer with Export / Import (a passphrase-encrypted file).
 
 **Several chats per codebase**: the tabs above the chat. + (or Ctrl+T, or right-click → New chat) opens
@@ -874,12 +879,32 @@ this safe: an edit is refused when the file changed since that chat read it (ano
 program edited it) — the agent re-reads and edits what is there now; and **Rollback undoes only the files
 that chat changed**, never another chat's work.
 
+**Environment** (Sun's Settings → Environment): given to every agent in every codebase. A **startup
+script** (.cmd, .bat or .ps1) runs when Sun starts, and the variables it sets and folders it adds to PATH
+reach every session — agents wait for it; Run now re-runs it after an edit. **Folders put in front of
+PATH** (%NAME% expands). **Variables**, each a value or a saved credential (use a credential for anything
+secret). Commands the agents run see all of it; Python tools and MCP servers see PATH only, unless their
+own settings name a variable. Changes apply to agents started afterwards — the page offers to restart the
+running ones.
+
+**Reports**: "Open report" on a notification opens it in Sun's own viewer — Markdown (tables, code,
+lists) or HTML (shown with its styles, but no scripts and nothing loaded from the internet).
+Right-click a codebase → Reports… lists every report its chats wrote. An agent can attach a report file
+it wrote, .md or .html, with \`notify\`'s \`report\`.
+
+**Copy, move and zip** (Rust, every core): \`transfer_files\` copies or moves files and whole folders
+(a move on one drive is an instant rename), and \`archive_files\` creates, extracts or lists a .zip.
+Both **always ask**, showing every source, destination, file count, size and anything replaced, and are
+never available to a schedule. An archive whose entries would land outside the destination is refused.
+
+**Exporting credentials**: tick the ones to export (nothing is ticked to begin with; filter by label).
+
 **Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+T new chat, Ctrl+W close chat, Ctrl+B
 hide the sidebar (a strip of status dots stays), Ctrl+, Sun's settings.
 
 **Appearance**: Sun's Settings choose light, dark or system and an accent colour; every chat follows
 the theme. A codebase may keep its own accent — pick one in its Appearance tab — and its sidebar
-icon follows; "Use Sun Light Code's accent" goes back. Role colours stay each chat's own. None of this
+icon follows; "Use Sun Code's accent" goes back. Role colours stay each chat's own. None of this
 is written to the config file.
 
 **Memory**: idle codebases sleep after 30 minutes by default (Sun's Settings), freeing their agent,
@@ -1155,7 +1180,7 @@ fixed in the same turn rather than found later.
 **In VS Code** this is VS Code's own language support: whatever language extensions you have installed
 already answer, nothing extra runs. To add a language, install its VS Code extension.
 
-**In the Node host, PyCharm / IntelliJ and Sun Light Code** Light Code starts language servers itself —
+**In the Node host, PyCharm / IntelliJ and Sun Code** Light Code starts language servers itself —
 the ones already installed on the machine, found on PATH, started the first time a file in that
 language is checked. Nothing is downloaded. Supported: Python (pyright, basedpyright, pylsp,
 jedi-language-server), TypeScript / JavaScript (typescript-language-server), Java (jdtls), C# (csharp-ls,
@@ -1202,7 +1227,7 @@ nothing, which is worse than not having one.
 believing you can undo something you cannot. If \`git\` is missing entirely, checkpoints are
 disabled with a warning rather than the session breaking.
 
-**Where several chats share a codebase** (Sun Light Code's chat tabs, or a host started with
+**Where several chats share a codebase** (Sun Code's chat tabs, or a host started with
 \`--shared-workspace\`), Rollback restores only the files that chat changed, so another chat's work is
 kept; files outside the codebase are not covered either way.
 

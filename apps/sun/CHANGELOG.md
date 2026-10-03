@@ -1,4 +1,13 @@
-# @chosengeneration/sun-light-code
+# @chosengeneration/sun-code
+
+## 0.5.0
+
+- **Renamed to Sun Code.** Install `@chosengeneration/sun-code` and run `sun-code`. Your codebases, chats and credentials move across from Sun Light Code on first start. Uninstall the old package with `npm uninstall -g @chosengeneration/sun-light-code`.
+- **Settings → Environment**: a startup script (.cmd, .bat or .ps1) whose variables and PATH changes reach every codebase's agents; folders put in front of PATH; variables with plain values or saved credentials.
+- **Reports open in Sun**: Markdown and HTML reports in Sun's own viewer, from a notification or a codebase's Reports… list. HTML reports keep their styling; scripts and remote content are blocked.
+- **Copy, move and zip** with the Rust helper: `transfer_files` and `archive_files`, which always ask and show exactly what will be copied, moved, replaced or extracted.
+- **Exporting credentials**: choose which ones; nothing is ticked to begin with.
+- Carries Light Code 0.108.0: code highlighted as in VS Code, white text on teal, a Review icon of its own.
 
 ## 0.4.0
 

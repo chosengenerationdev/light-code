@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 
 /**
- * The encrypted secrets file Sun Light Code keeps, shared with its Rust side (`native/src/vault.rs`).
+ * The encrypted secrets file Sun Code keeps, shared with its Rust side (`native/src/vault.rs`).
  *
  * AES-256-GCM over the JSON map of secrets, in a small JSON envelope. The key never touches disk in
  * the clear: Sun keeps it protected by Windows (DPAPI, per user - the protection VS Code's own

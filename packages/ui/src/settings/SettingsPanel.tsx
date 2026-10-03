@@ -43,6 +43,7 @@ import {
   ProviderIcon,
   SearchIcon,
   ServerIcon,
+  ReviewIcon,
   ShieldIcon,
   PythonIcon,
   ToolboxIcon,
@@ -213,7 +214,7 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'customData', label: 'Custom data', Icon: DatabaseIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
-  { id: 'reviews', label: 'Review', Icon: ShieldIcon },
+  { id: 'reviews', label: 'Review', Icon: ReviewIcon },
   { id: 'variables', label: 'Variables', Icon: VariablesIcon },
   { id: 'appearance', label: 'Appearance', Icon: PaletteIcon },
 ]

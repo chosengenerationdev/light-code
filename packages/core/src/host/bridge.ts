@@ -3159,13 +3159,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * built from this same registry, and a run that could not report would be pointless.
      */
     if (diagnosticsProvider !== undefined) combined.register(getDiagnosticsTool)
-    // Sun Light Code's parallel file tools, where the host ships the helper.
+    // Sun Code's parallel file tools, where the host ships the helper.
     if (services.fastFs !== undefined) {
       for (const tool of createFastFsTools(services.fastFs)) combined.register(tool)
     }
     combined.register(
       createNotifyTool({
-        notify: (message, level, details) => {
+        notify: (message, level, details, reportFile) => {
+          // A report the agent wrote as a file (an HTML one, say): opened as it is, not copied.
+          if (reportFile !== undefined) {
+            lastReportPath = reportFile
+            services.desktopNotify?.({ message, level, reportPath: reportFile })
+            void (async () => {
+              const open = await ui.showActionMessage(message, 'Open report', level)
+              if (open && ui.openFile !== undefined) await ui.openFile(reportFile)
+            })()
+            return
+          }
           /*
            * A report goes to a document, because the toast cannot hold one. VS Code
            * notifications are a plain string plus buttons — no Markdown, no table, no colour —

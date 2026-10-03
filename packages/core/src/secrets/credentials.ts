@@ -3,7 +3,7 @@ import type { SecretStore } from '../platform/secrets.js'
 /**
  * Saved credentials: named values kept once and used from any setting that takes a secret.
  *
- * Sun Light Code's credential manager stores each credential's value(s) in the shared secret store
+ * Sun Code's credential manager stores each credential's value(s) in the shared secret store
  * under `credential:<id>#<field>`. A setting that should use one does not get a copy - its secret
  * slot holds a **pointer**, the string `credential:<id>#<field>`, which this store resolves on
  * read. So replacing a password in the manager changes every codebase and setting using it at once,

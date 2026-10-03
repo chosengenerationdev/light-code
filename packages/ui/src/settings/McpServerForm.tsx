@@ -181,7 +181,7 @@ function PairEditor(props: {
             <TrashIcon />
           </button>
           </div>
-          {/* Sun Light Code: pick a saved credential instead of typing a reference to one. */}
+          {/* Sun Code: pick a saved credential instead of typing a reference to one. */}
           {credentials !== undefined && credentialsMentioned(value, credentials).length > 0 && (
             <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '2px 0 0 2px' }}>
               🔑 Uses {credentialsMentioned(value, credentials).join(', ')}

@@ -109,10 +109,10 @@ can — the settings UI and the config file share one schema, so both fail the s
 
 ### Several codebases at once, on Windows
 
-**Sun Light Code** puts every codebase you work on in one window, each with its own Light Code
+**Sun Code** puts every codebase you work on in one window, each with its own Light Code
 agent working in parallel — background chats keep going while you look at another. It can use the
 settings a codebase already has (the VS Code extension's, or IntelliJ/PyCharm's), installs with
-`npm i -g @chosengeneration/sun-light-code` without compiling or downloading anything, and is
+`npm i -g @chosengeneration/sun-code` without compiling or downloading anything, and is
 described in [apps/sun/README.md](apps/sun/README.md).
 
 ### Where things are stored
@@ -196,7 +196,7 @@ pnpm package                    # produces a .vsix
 
 Press <kbd>F5</kbd> in VS Code to launch an Extension Development Host.
 
-Sun Light Code (`apps/sun`) also needs Rust 1.86+ with the MSVC toolchain:
+Sun Code (`apps/sun`) also needs Rust 1.86+ with the MSVC toolchain:
 `node apps/sun/scripts/build.mjs` builds the host, the exe and the npm package, and
 `node apps/sun/scripts/smoke.mjs` installs that package with plain npm and runs it.
 

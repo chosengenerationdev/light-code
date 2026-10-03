@@ -230,6 +230,10 @@ describe('finding the right topic', () => {
       ['can it use pyright', 'diagnostics'],
       ['can two agents work on the same codebase at once', 'sun'],
       ['how do I open a second chat tab in sun', 'sun'],
+      ['run a startup script that sets environment variables in sun', 'sun'],
+      ['how do I add a folder to the path for every codebase', 'sun'],
+      ['can it zip a folder', 'sun'],
+      ['where do I see the html report from the nightly run', 'sun'],
     ]
     for (const [query, expected] of cases) {
       const content = await answer(query)

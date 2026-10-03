@@ -55,6 +55,11 @@ function categoryEnabled(group: ToolGroup, settings: AutoApproveSettings | undef
  * only means a human sees the source once, which is what §13 asks for and all it asks for.
  */
 export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
+  // Copying or moving whole folders (Sun Code's helper): the approval is the computed plan, and a
+  // move removes the source. Asked every time, whatever "edit" is set to.
+  'transfer_files',
+  // Zipping and extracting write whole trees too; the approval is the computed plan.
+  'archive_files',
   'create_python_tool',
   'update_python_tool',
   'delete_python_tool',

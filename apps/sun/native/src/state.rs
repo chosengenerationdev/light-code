@@ -95,6 +95,12 @@ pub struct Settings {
     /// Let each codebase's assistant read any drive or share and write anywhere, asking every time
     /// it writes outside the codebase. On by default; the floor in core's `fs/reach.ts` always holds.
     pub reach_anywhere: bool,
+    /// Folders put in front of PATH for every agent Sun starts, first one first. `%NAME%` expands.
+    pub path_prefix: Vec<String>,
+    /// Variables every agent Sun starts is given; a value may come from a saved credential.
+    pub env: Vec<crate::environment::EnvVar>,
+    /// A .cmd, .bat or .ps1 run when Sun starts; the environment it leaves is given to every agent.
+    pub startup_script: Option<String>,
     pub window: Option<WindowBounds>,
 }
 
@@ -110,6 +116,9 @@ impl Default for Settings {
             theme: "system".into(),
             accent: "#f26b1d".into(),
             reach_anywhere: true,
+            path_prefix: Vec::new(),
+            env: Vec::new(),
+            startup_script: None,
             window: None,
         }
     }
@@ -122,7 +131,7 @@ pub struct State {
     pub settings: Settings,
 }
 
-/// Where everything lives. `%LOCALAPPDATA%\sun-light-code`, because none of it should roam.
+/// Where everything lives. `%LOCALAPPDATA%\sun-code`, because none of it should roam.
 #[derive(Clone)]
 pub struct Paths {
     pub root: PathBuf,
@@ -130,11 +139,27 @@ pub struct Paths {
 
 impl Paths {
     pub fn new() -> Paths {
-        let base = std::env::var_os("SUN_LIGHT_CODE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("sun-light-code")))
-            .unwrap_or_else(|| PathBuf::from(".sun-light-code"));
-        Paths { root: base }
+        if let Some(home) = std::env::var_os("SUN_CODE_HOME") {
+            return Paths { root: PathBuf::from(home) };
+        }
+        let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
+            return Paths { root: PathBuf::from(".sun-code") };
+        };
+        let root = local.join("sun-code");
+        let old = local.join("sun-light-code");
+        // Sun Code was Sun Light Code until 0.5.0. Its folder moves across once, keeping the vault,
+        // the codebases and their chats. If the move cannot happen - the old app is still open -
+        // the old folder is used where it is, and the move is tried again next launch.
+        if !root.exists() && old.join("state.json").is_file() && std::fs::rename(&old, &root).is_err() {
+            return Paths { root: old };
+        }
+        Paths { root }
+    }
+
+    /// The folder this data lived in under the old name, for rewriting paths saved inside it.
+    pub fn previous_root(&self) -> Option<PathBuf> {
+        let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+        (self.root == local.join("sun-code")).then(|| local.join("sun-light-code"))
     }
     pub fn state_file(&self) -> PathBuf {
         self.root.join("state.json")
@@ -175,6 +200,25 @@ impl State {
             },
             Err(_) => State::default(),
         }
+    }
+
+    /// Settings files kept in the data folder were saved with its old path; after the folder moved
+    /// they are found under the new one. True when something changed.
+    pub fn rebase(&mut self, old: &Path, new: &Path) -> bool {
+        let old_text = old.to_string_lossy().to_string();
+        let mut changed = false;
+        for p in &mut self.projects {
+            let n = old_text.len();
+            let under = p.config_file.len() > n
+                && p.config_file.is_char_boundary(n)
+                && p.config_file[..n].eq_ignore_ascii_case(&old_text)
+                && p.config_file[n..].starts_with(['\\', '/']);
+            if under {
+                p.config_file = format!("{}{}", new.to_string_lossy(), &p.config_file[n..]);
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub fn save(&self, paths: &Paths) {
@@ -283,6 +327,24 @@ mod tests {
         assert_eq!(state.chat_keys("abc"), vec!["abc", "abc~2", "abc~3"]);
         assert_eq!(state.chat_title("abc~2").as_deref(), Some("Payments · Chat 2"));
         assert_eq!(state.chat_title("abc").as_deref(), Some("Payments"));
+    }
+
+    #[test]
+    fn settings_files_follow_the_data_folder_when_it_moves() {
+        let mut p = project("abc", &[]);
+        p.config_file = r"C:\Users\a\AppData\Local\Sun-Light-Code\projects\abc\config.json".into();
+        let mut linked = project("def", &[]);
+        linked.config_file = r"C:\Users\a\AppData\Roaming\Code\config.json".into();
+        let mut lookalike = project("ghi", &[]);
+        lookalike.config_file = r"C:\Users\a\AppData\Local\sun-light-code-old\config.json".into();
+        let mut state = State { projects: vec![p, linked, lookalike], settings: Settings::default() };
+        let old = PathBuf::from(r"C:\Users\a\AppData\Local\sun-light-code");
+        let new = PathBuf::from(r"C:\Users\a\AppData\Local\sun-code");
+        assert!(state.rebase(&old, &new));
+        assert_eq!(state.projects[0].config_file, r"C:\Users\a\AppData\Local\sun-code\projects\abc\config.json");
+        assert_eq!(state.projects[1].config_file, r"C:\Users\a\AppData\Roaming\Code\config.json");
+        assert_eq!(state.projects[2].config_file, r"C:\Users\a\AppData\Local\sun-light-code-old\config.json");
+        assert!(!state.rebase(&old, &new));
     }
 
     #[test]

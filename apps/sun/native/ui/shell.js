@@ -1,4 +1,4 @@
-// Sun Light Code — the sidebar, the panes and the dialogs.
+// Sun Code — the sidebar, the panes and the dialogs.
 //
 // Plain DOM, no framework: this page has to be on screen in the first frame, and the heavy UI is
 // the chat inside each pane, which is the Light Code UI served by that codebase's own host.
@@ -48,6 +48,7 @@ const ICONS = {
   copy: '<rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5"/><path d="M10.75 5.25v-1.5c0-.83-.67-1.5-1.5-1.5h-5.5c-.83 0-1.5.67-1.5 1.5v5.5c0 .83.67 1.5 1.5 1.5h1.5"/>',
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
+  up: '<path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7"/>',
   alert: '<path d="M8 1.75 14.5 13.5h-13z"/><path d="M8 6.25v3.5M8 11.6v.01"/>',
 }
 
@@ -175,7 +176,35 @@ const HANDLERS = {
   credentials(m) {
     model.credentials = m.credentials
     model.pipe = m.pipe
-    if (openModal?.kind === 'credentials') openModal.refresh()
+    if (openModal?.kind === 'credentials' || openModal?.kind === 'environment') openModal.refresh()
+  },
+  report(m) {
+    if (openModal?.kind === 'report') openModal.show(m)
+    else openReport(m)
+  },
+  reports(m) {
+    if (openModal?.kind === 'reportList') openModal.list(m.reports)
+  },
+  scriptStatus(m) {
+    model.scriptStatus = m
+    if (openModal?.kind === 'environment') openModal.refresh()
+    if (openModal?.kind === 'settings') openModal.refresh()
+  },
+  scriptPicked(m) {
+    if (openModal?.kind === 'environment') openModal.scriptPicked(m.path)
+  },
+  scriptRanWithAgents(m) {
+    if (openModal?.kind === 'environment') openModal.saved({ ok: true, running: m.running, folders: undefined })
+    else notice(`The startup script finished. ${m.running} agent${m.running === 1 ? ' is' : 's are'} still running with the environment from before — restart them from Settings → Environment.`)
+  },
+  environmentSaved(m) {
+    if (openModal?.kind === 'environment') openModal.saved(m)
+  },
+  folderStatus(m) {
+    if (openModal?.kind === 'environment') openModal.folders(m.folders)
+  },
+  envFolderPicked(m) {
+    if (openModal?.kind === 'environment') openModal.picked(m.index, m.path)
   },
   credentialSaved() {
     if (openModal?.kind === 'credentials') openModal.saved()
@@ -759,6 +788,307 @@ window.addEventListener('message', (event) => {
   if (data.ready === true) sendAppearance(frame)
 })
 
+// ─── Reports: Sun's Markdown viewer ──────────────────────────────────────────
+//
+// Agent reports (scheduled runs, notify) are Markdown files in the codebase's data folder. Shown
+// here rather than handed to whatever Windows associates with .md. The renderer builds DOM nodes
+// and never assigns report text as HTML: a report is model-written, and this page can talk to Rust.
+
+const MD_KEYWORDS = new Set(
+  ('and as assert async await break case catch class const continue def default del do elif else enum except export ' +
+    'extends false final finally fn for from func function go if impl import in interface is lambda let loop match mod ' +
+    'module mut new nil none not null or package pass private protected pub public raise return self select static ' +
+    'struct super switch then this throw true try type typeof use var void where while with yield True False None')
+    .split(' '),
+)
+
+/** A code block, lightly coloured: comments, strings, numbers, keywords. Text nodes only. */
+function mdCode(code, lang) {
+  const pre = el('pre', { class: 'md-pre' })
+  const block = el('code', {})
+  const hashComments = /^(py|python|sh|bash|shell|yaml|yml|toml|ps1|powershell|r|rb|ruby|perl|make|dockerfile|ini|conf)$/i.test(lang)
+  const pattern = new RegExp(
+    [
+      '(\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*' + (hashComments ? '|#[^\\n]*' : '') + (/^sql$/i.test(lang) ? '|--[^\\n]*' : '') + ')',
+      '("(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)',
+      '(\\b\\d+(?:\\.\\d+)?\\b)',
+      '([A-Za-z_][A-Za-z0-9_]*)',
+    ].join('|'),
+    'g',
+  )
+  let last = 0
+  for (const m of code.matchAll(pattern)) {
+    if (m.index > last) block.append(document.createTextNode(code.slice(last, m.index)))
+    const kind = m[1] !== undefined ? 'c' : m[2] !== undefined ? 's' : m[3] !== undefined ? 'n' : MD_KEYWORDS.has(m[4]) ? 'k' : undefined
+    block.append(kind === undefined ? document.createTextNode(m[0]) : el('span', { class: `tk-${kind}`, text: m[0] }))
+    last = m.index + m[0].length
+  }
+  if (last < code.length) block.append(document.createTextNode(code.slice(last)))
+  pre.append(block)
+  const wrap = el('div', { class: 'md-code' }, lang ? el('span', { class: 'md-lang', text: lang }) : null, pre)
+  wrap.append(
+    el('button', {
+      class: 'md-copy',
+      text: 'Copy',
+      onclick: (e) => {
+        navigator.clipboard?.writeText(code)
+        e.currentTarget.textContent = 'Copied'
+      },
+    }),
+  )
+  return wrap
+}
+
+/** Where a link inside a report goes: the web in the browser, another report in this viewer. */
+function mdLink(href, label, base) {
+  const a = el('a', { href: '#', title: href })
+  a.append(...label)
+  a.addEventListener('click', (e) => {
+    e.preventDefault()
+    if (/^https?:\/\//i.test(href)) return send('openExternal', { url: href })
+    if (/^[a-z]+:/i.test(href) && !/^[a-z]:[\\/]/i.test(href)) return
+    const path = /^[a-z]:[\\/]|^\\\\/i.test(href) ? href : mdJoin(base, decodeURIComponent(href.split('#')[0]))
+    if (path) send('openReport', { path })
+  })
+  return a
+}
+
+function mdJoin(base, relative) {
+  if (!base || !relative) return undefined
+  const parts = base.split(/[\\/]/)
+  parts.pop()
+  for (const part of relative.split(/[\\/]/)) {
+    if (part === '..') parts.pop()
+    else if (part !== '.' && part !== '') parts.push(part)
+  }
+  return parts.join('\\')
+}
+
+/** Inline Markdown: code, links, emphasis. Returns nodes; never HTML. */
+function mdInline(text, base) {
+  const out = []
+  const pattern =
+    /(`+)([\s\S]*?[^`])\1(?!`)|!?\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<)\]]+[^\s<)\].,;:!?'"])|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|~~([\s\S]+?)~~|\*([^\s*][\s\S]*?)\*|(?<![\w])_([^\s_][\s\S]*?)_(?![\w])/g
+  let last = 0
+  for (const m of text.matchAll(pattern)) {
+    if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)))
+    if (m[1] !== undefined) out.push(el('code', { class: 'md-inline', text: m[2].replace(/^ (.*) $/, '$1') }))
+    else if (m[4] !== undefined) {
+      const image = m[0].startsWith('!')
+      // Images are not fetched: a report may name any URL, and Sun loads nothing remote.
+      out.push(mdLink(m[4], image ? [`[image: ${m[3] || m[4]}]`] : mdInline(m[3] || m[4], base), base))
+    } else if (m[5] !== undefined || m[6] !== undefined) out.push(mdLink(m[5] ?? m[6], [m[5] ?? m[6]], base))
+    else if (m[7] !== undefined || m[8] !== undefined) out.push(el('strong', {}, ...mdInline(m[7] ?? m[8], base)))
+    else if (m[9] !== undefined) out.push(el('del', {}, ...mdInline(m[9], base)))
+    else out.push(el('em', {}, ...mdInline(m[10] ?? m[11], base)))
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push(document.createTextNode(text.slice(last)))
+  return out
+}
+
+const MD_LIST = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/
+const MD_TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
+const mdCells = (line) =>
+  line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, '|'))
+const mdStartsBlock = (line, next) =>
+  /^\s*(```|~~~)/.test(line) || /^#{1,6}\s/.test(line) || /^\s*>/.test(line) || MD_LIST.test(line) ||
+  /^\s*([-*_])(\s*\1){2,}\s*$/.test(line) || (line.includes('|') && next !== undefined && MD_TABLE_RULE.test(next))
+
+/** Block Markdown into a fragment. */
+function renderMarkdown(text, base) {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  const out = document.createDocumentFragment()
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.trim() === '') {
+      i++
+      continue
+    }
+    const fence = /^(\s*)(```+|~~~+)\s*([\w+#.-]*)/.exec(line)
+    if (fence) {
+      const body = []
+      i++
+      while (i < lines.length && !lines[i].trim().startsWith(fence[2])) body.push(lines[i++].slice(fence[1].length))
+      i++
+      out.append(mdCode(body.join('\n'), fence[3]))
+      continue
+    }
+    const heading = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line)
+    if (heading) {
+      out.append(el(`h${heading[1].length}`, { class: 'md-h' }, ...mdInline(heading[2], base)))
+      i++
+      continue
+    }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      out.append(el('hr'))
+      i++
+      continue
+    }
+    if (/^\s*>/.test(line)) {
+      const quoted = []
+      while (i < lines.length && /^\s*>/.test(lines[i])) quoted.push(lines[i++].replace(/^\s*> ?/, ''))
+      const quote = el('blockquote')
+      quote.append(renderMarkdown(quoted.join('\n'), base))
+      out.append(quote)
+      continue
+    }
+    if (line.includes('|') && i + 1 < lines.length && MD_TABLE_RULE.test(lines[i + 1])) {
+      const head = mdCells(line)
+      const align = mdCells(lines[i + 1]).map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : 'left'))
+      i += 2
+      const table = el('table', { class: 'md-table' })
+      table.append(el('thead', {}, el('tr', {}, ...head.map((c, k) => el('th', { style: `text-align: ${align[k] ?? 'left'}` }, ...mdInline(c, base))))))
+      const body = el('tbody')
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+        const cells = mdCells(lines[i++])
+        body.append(el('tr', {}, ...head.map((_, k) => el('td', { style: `text-align: ${align[k] ?? 'left'}` }, ...mdInline(cells[k] ?? '', base)))))
+      }
+      table.append(body)
+      out.append(el('div', { class: 'md-table-wrap' }, table))
+      continue
+    }
+    const item = MD_LIST.exec(line)
+    if (item) {
+      const indent = item[1].length
+      const ordered = /\d/.test(item[2])
+      const list = el(ordered ? 'ol' : 'ul', ordered && parseInt(item[2], 10) !== 1 ? { start: String(parseInt(item[2], 10)) } : {})
+      while (i < lines.length) {
+        const m = MD_LIST.exec(lines[i])
+        if (!m || m[1].length !== indent || /\d/.test(m[2]) !== ordered) break
+        const content = [m[3]]
+        i++
+        // Continuation and nested lines: indented past the marker, or blank lines followed by such.
+        while (i < lines.length) {
+          const next = lines[i]
+          if (next.trim() === '') {
+            if (i + 1 < lines.length && /^\s+/.test(lines[i + 1]) && lines[i + 1].search(/\S/) > indent) {
+              content.push('')
+              i++
+              continue
+            }
+            break
+          }
+          const nested = MD_LIST.exec(next)
+          if (nested && nested[1].length <= indent) break
+          if (!nested && next.search(/\S/) <= indent && mdStartsBlock(next, lines[i + 1])) break
+          content.push(next.replace(new RegExp(`^\\s{0,${indent + 4}}`), ''))
+          i++
+        }
+        const li = el('li')
+        const task = /^\[([ xX])\]\s+/.exec(content[0])
+        if (task) {
+          content[0] = content[0].slice(task[0].length)
+          li.classList.add('md-task')
+          li.append(el('input', { type: 'checkbox', disabled: true, checked: task[1] !== ' ' }))
+        }
+        const inner = renderMarkdown(content.join('\n'), base)
+        // A one-paragraph item reads as text, not as a paragraph with margins.
+        if (inner.childNodes.length === 1 && inner.firstChild.tagName === 'P') li.append(...inner.firstChild.childNodes)
+        else li.append(inner)
+        list.append(li)
+      }
+      out.append(list)
+      continue
+    }
+    const para = []
+    while (i < lines.length && lines[i].trim() !== '' && (para.length === 0 || !mdStartsBlock(lines[i], lines[i + 1]))) para.push(lines[i++])
+    const p = el('p')
+    para.forEach((l, k) => {
+      p.append(...mdInline(l.trim(), base))
+      if (k < para.length - 1) p.append(/ {2,}$|\\$/.test(l) ? el('br') : document.createTextNode(' '))
+    })
+    out.append(p)
+  }
+  return out
+}
+
+function openReport(report) {
+  showModal('report', (scrim, modal) => {
+    let source = false
+    const card = el('div', { class: 'modal report-modal' })
+    scrim.append(card)
+    const render = () => {
+      const body = el('div', { class: 'report-body' })
+      if (source || report.kind === 'text') body.append(el('pre', { class: 'md-source', text: report.text }))
+      else if (report.kind === 'html') {
+        // Served by Sun under its own policy: the report's styles, and no script or request.
+        body.classList.add('html')
+        body.append(el('iframe', { class: 'report-frame', sandbox: '', title: report.name, src: `report?p=${encodeURIComponent(report.path)}` }))
+      } else {
+        const doc = el('article', { class: 'md' })
+        doc.append(renderMarkdown(report.text, report.path))
+        body.append(doc)
+      }
+      card.replaceChildren(
+        el(
+          'header',
+          { class: 'report-head' },
+          el('span', { class: 'meta' }, el('h2', { text: report.name }), el('span', { class: 'sub', text: report.path })),
+          el(
+            'div',
+            { class: 'report-actions' },
+            report.kind === 'text' ? null : el('div', { class: 'segmented small' },
+              el('button', { class: source ? '' : 'on', text: 'Rendered', onclick: () => { source = false; render() } }),
+              el('button', { class: source ? 'on' : '', text: 'Source', onclick: () => { source = true; render() } }),
+            ),
+            el('button', { class: 'secondary', text: 'Copy', onclick: (e) => { navigator.clipboard?.writeText(report.text); e.currentTarget.textContent = 'Copied' } }),
+            el('button', { class: 'secondary', text: 'Show in folder', onclick: () => send('revealReport', { path: report.path }) }),
+            el('button', { class: 'secondary', text: 'Open with…', onclick: () => send('openReportExternally', { path: report.path }) }),
+            el('button', { class: 'icon-btn small', title: 'Close', 'aria-label': 'Close', html: svg(ICONS.close), onclick: closeModal }),
+          ),
+        ),
+        body,
+      )
+    }
+    modal.show = (next) => {
+      report = next
+      source = false
+      render()
+    }
+    render()
+  })
+}
+
+/** A codebase's reports, newest first; each opens in the viewer. */
+function openReportList(project) {
+  showModal('reportList', (scrim, modal) => {
+    const card = el('div', { class: 'modal', style: 'width: min(560px, calc(100vw - 48px))' })
+    scrim.append(card)
+    const render = (items) => {
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: `Reports — ${project.name}` }), el('p', { class: 'sub', text: 'Markdown and HTML reports written by scheduled runs and the notify tool, in every chat on this codebase.' })),
+        el(
+          'div',
+          { class: 'body' },
+          items === undefined
+            ? el('div', { class: 'note', html: '<span class="spinner"></span><span>Looking…</span>' })
+            : items.length === 0
+              ? el('div', { class: 'note', text: 'No reports yet.' })
+              : el('div', { class: 'report-list' },
+                  ...items.map((r) =>
+                    el('button', { class: 'report-item', onclick: () => send('openReport', { path: r.path }) },
+                      el('span', { html: svg(ICONS.log) }),
+                      el('span', { class: 'meta' }, el('b', { text: r.name }), el('span', { text: new Date(r.modified).toLocaleString() })),
+                    ),
+                  ),
+                ),
+        ),
+        el('footer', {}, el('span', { class: 'spacer' }), el('button', { class: 'secondary', text: 'Close', onclick: closeModal })),
+      )
+    }
+    modal.list = render
+    render(undefined)
+    send('reports', { id: project.id })
+  })
+}
+
 // ─── Shortcuts ───────────────────────────────────────────────────────────────
 
 function shortcut(name) {
@@ -834,6 +1164,7 @@ function showMenu(project, x, y) {
     el('hr'),
     item('settings', 'Settings source…', () => openConfigChooser(project)),
     item('rename', 'Rename', () => startRename(project)),
+    item('log', 'Reports…', () => openReportList(project)),
     item('log', 'View agent log', () => send('openLog', { id: current })),
     el('hr'),
     item('remove', 'Remove from Sun…', () => confirmRemove(project), { danger: true }),
@@ -1184,7 +1515,7 @@ function openSettings() {
         }
       })
       card.replaceChildren(
-        el('header', {}, el('h2', { text: 'Settings' }), el('p', { class: 'sub', text: `Sun Light Code ${model.version}` })),
+        el('header', {}, el('h2', { text: 'Settings' }), el('p', { class: 'sub', text: `Sun Code ${model.version}` })),
         el(
           'div',
           { class: 'body' },
@@ -1253,6 +1584,17 @@ function openSettings() {
           el(
             'div',
             { class: 'row' },
+            el(
+              'span',
+              { class: 'meta' },
+              el('b', { text: 'Environment' }),
+              el('span', { text: environmentSummary(s) }),
+            ),
+            el('button', { class: 'secondary', text: 'Edit…', onclick: openEnvironment }),
+          ),
+          el(
+            'div',
+            { class: 'row' },
             el('span', { class: 'meta' }, el('b', { text: 'Data folder' }), el('span', { text: model.dataFolder })),
             el('button', { class: 'secondary', text: 'Open', onclick: () => send('openDataFolder') }),
           ),
@@ -1274,6 +1616,201 @@ function openSettings() {
       )
     }
     modal.refresh()
+  })
+}
+
+/** One line for the Settings row: what Sun adds to every agent's environment. */
+function environmentSummary(s) {
+  const folders = (s.pathPrefix ?? []).length
+  const vars = (s.env ?? []).length
+  const script = s.startupScript ? 1 : 0
+  if (folders === 0 && vars === 0 && script === 0) return 'A startup script, folders to put on PATH and variables for every agent. None set.'
+  const parts = []
+  if (script) parts.push('startup script')
+  if (folders > 0) parts.push(`${folders} folder${folders === 1 ? '' : 's'} on PATH`)
+  if (vars > 0) parts.push(`${vars} variable${vars === 1 ? '' : 's'}`)
+  return `${parts.join(' · ')} — given to every agent Sun starts.`
+}
+
+/**
+ * Settings → Environment. Edited as a draft and saved as a whole, because Rust validates it as a
+ * whole (a name listed twice is a property of the list). Values typed here are stored in Sun's
+ * state file; a secret should come from a saved credential instead, which is resolved each time an
+ * agent starts and never written here.
+ */
+function openEnvironment() {
+  showModal('environment', (scrim, modal) => {
+    const card = el('div', { class: 'modal', style: 'width: min(640px, calc(100vw - 48px))' })
+    scrim.append(card)
+    const draft = {
+      script: model.settings.startupScript ?? '',
+      folders: [...(model.settings.pathPrefix ?? [])],
+      env: (model.settings.env ?? []).map((v) => ({ ...v })),
+    }
+    let status = {}
+    let error
+    let result
+    send('credentials')
+    if (draft.folders.length > 0) send('checkFolders', { pathPrefix: draft.folders })
+
+    // Every credential field a variable can take: one for a secret, two for a login.
+    const choices = () =>
+      (model.credentials ?? []).flatMap((c) =>
+        c.kind === 'login'
+          ? [
+              { value: `${c.id}#username`, label: `${c.label} — username` },
+              { value: `${c.id}#password`, label: `${c.label} — password` },
+            ]
+          : [{ value: `${c.id}#value`, label: c.label }],
+      )
+
+    const iconButton = (title, icon, onclick, disabled = false) =>
+      el('button', { class: 'icon-btn small', title, 'aria-label': title, html: svg(ICONS[icon]), disabled, onclick })
+
+    const folderRows = () =>
+      draft.folders.map((folder, index) => {
+        const input = el('input', { type: 'text', value: folder, placeholder: 'C:\\tools\\bin  or  %USERPROFILE%\\bin', 'aria-label': `PATH folder ${index + 1}`, spellcheck: 'false' })
+        input.addEventListener('input', () => (draft.folders[index] = input.value))
+        input.addEventListener('change', () => send('checkFolders', { pathPrefix: draft.folders }))
+        const known = status[folder.trim()]
+        return el(
+          'div',
+          { class: 'env-row' },
+          el('span', { class: 'env-order', text: String(index + 1) }),
+          input,
+          el('button', { class: 'secondary', text: 'Browse…', onclick: () => send('pickEnvFolder', { index }) }),
+          iconButton('Move up', 'up', () => {
+            ;[draft.folders[index - 1], draft.folders[index]] = [draft.folders[index], draft.folders[index - 1]]
+            render()
+          }, index === 0),
+          iconButton('Remove', 'close', () => {
+            draft.folders.splice(index, 1)
+            render()
+          }),
+          known !== undefined && !known.exists
+            ? el('div', { class: 'env-warning', text: `Not found${known.expanded !== folder.trim() ? ` (${known.expanded})` : ''} — kept, in case it is a share that is offline.` })
+            : null,
+        )
+      })
+
+    const varRows = () =>
+      draft.env.map((v, index) => {
+        const name = el('input', { type: 'text', value: v.name, placeholder: 'NAME', 'aria-label': `Variable ${index + 1} name`, spellcheck: 'false', class: 'env-name' })
+        name.addEventListener('input', () => (v.name = name.value))
+        const fromCredential = v.credential !== undefined
+        const mode = el('div', { class: 'segmented small' },
+          el('button', { class: fromCredential ? '' : 'on', text: 'Value', onclick: () => { v.value = v.value ?? ''; delete v.credential; render() } }),
+          el('button', { class: fromCredential ? 'on' : '', text: 'Saved credential', onclick: () => { v.credential = v.credential ?? choices()[0]?.value ?? ''; delete v.value; render() } }),
+        )
+        let field
+        if (fromCredential) {
+          const options = choices()
+          field =
+            options.length === 0
+              ? el('span', { class: 'env-hint', text: 'No saved credentials yet — add one on the Credentials page.' })
+              : el('select', { 'aria-label': `Variable ${index + 1} credential`, class: 'env-select' },
+                  ...options.map((o) => el('option', { value: o.value, text: o.label, selected: o.value === v.credential })),
+                )
+          if (field.tagName === 'SELECT') {
+            if (!options.some((o) => o.value === v.credential)) v.credential = options[0].value
+            field.addEventListener('change', () => (v.credential = field.value))
+          }
+        } else {
+          field = el('input', { type: 'text', value: v.value ?? '', placeholder: 'value', 'aria-label': `Variable ${index + 1} value`, spellcheck: 'false' })
+          field.addEventListener('input', () => (v.value = field.value))
+        }
+        return el('div', { class: 'env-row var' }, name, mode, field, iconButton('Remove', 'close', () => { draft.env.splice(index, 1); render() }))
+      })
+
+    // What the script left last time it ran: names only - a script may set a token.
+    const scriptLine = () => {
+      const st = model.scriptStatus
+      if (st === undefined || st.state === 'none') return null
+      if (st.state === 'running') return el('div', { class: 'note', html: '<span class="spinner"></span><span>Running the startup script… agents wait for it.</span>' })
+      if (st.state === 'failed') return el('div', { class: 'form-error', style: 'white-space: pre-wrap', text: st.detail })
+      const names = st.names ?? []
+      const what = [names.length > 0 ? `set ${names.join(', ')}` : '', st.pathChanged ? 'changed PATH' : ''].filter(Boolean).join(' and ') || 'changed nothing'
+      return el('div', { class: st.exitCode === 0 ? 'note ok' : 'form-error' },
+        el('span', { text: `Last run ${st.exitCode === 0 ? '' : `(exit code ${st.exitCode}) `}${what}.` }),
+      )
+    }
+    const scriptInput = () => {
+      const input = el('input', { type: 'text', value: draft.script, placeholder: 'C:\\team\\setenv.cmd  or  %USERPROFILE%\\setup.ps1', 'aria-label': 'Startup script', spellcheck: 'false' })
+      input.addEventListener('input', () => (draft.script = input.value))
+      return el('div', { class: 'env-row' }, input,
+        el('button', { class: 'secondary', text: 'Browse…', onclick: () => send('pickScript') }),
+        el('button', { class: 'secondary', text: 'Run now', disabled: (model.settings.startupScript ?? '') === '' || model.scriptStatus?.state === 'running', title: 'Runs the saved script again', onclick: () => send('runScript') }),
+      )
+    }
+
+    const render = () => {
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: 'Environment' }), el('p', { class: 'sub', text: 'Given to every agent Sun starts, in every codebase and chat.' })),
+        el(
+          'div',
+          { class: 'body' },
+          el('label', { class: 'field-label', text: 'Startup script' }),
+          el('p', { class: 'env-hint', text: 'A .cmd, .bat or .ps1 run when Sun starts. The variables it sets and the folders it adds to PATH are given to every codebase\'s agents; it cannot change Sun itself. It must finish on its own — nothing can answer a pause or a prompt. The variables below are applied after it, so they win.' }),
+          scriptInput(),
+          scriptLine(),
+          el('label', { class: 'field-label', text: 'Folders put in front of PATH' }),
+          el('p', { class: 'env-hint', text: 'Searched first, in this order, before the PATH Sun was started with — so a tool here wins over another copy. Python tools and MCP servers see these too. %NAME% expands.' }),
+          ...folderRows(),
+          el('button', { class: 'secondary', text: 'Add folder', onclick: () => { draft.folders.push(''); render() } }),
+          el('label', { class: 'field-label', text: 'Variables' }),
+          el('p', { class: 'env-hint', text: 'Every command an agent runs sees these — so can the model, if a command prints them. Python tools and MCP servers do not, unless their own settings name them. Use a saved credential for anything secret: a typed value is stored in Sun\'s settings file.' }),
+          ...varRows(),
+          el('button', { class: 'secondary', text: 'Add variable', onclick: () => { draft.env.push({ name: '', value: '' }); render() } }),
+          error !== undefined ? el('div', { class: 'form-error', text: error }) : null,
+          result !== undefined && result.running > 0
+            ? el('div', { class: 'note ok', html: `${svg(ICONS.check)}<span>Saved. ${result.running} agent${result.running === 1 ? ' is' : 's are'} running with the old environment.</span>` },
+                el('button', { class: 'secondary', text: 'Restart them', onclick: () => { send('restartAll'); result = undefined; render() } }))
+            : result !== undefined
+              ? el('div', { class: 'note ok', html: `${svg(ICONS.check)}<span>Saved. Agents get it the next time they start.</span>` })
+              : null,
+        ),
+        el(
+          'footer',
+          {},
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Close', onclick: closeModal }),
+          el('button', {
+            class: 'primary',
+            text: 'Save',
+            onclick: () => {
+              error = undefined
+              result = undefined
+              const env = draft.env.map((v) => (v.credential !== undefined ? { name: v.name, credential: v.credential } : { name: v.name, value: v.value ?? '' }))
+              send('saveEnvironment', { pathPrefix: draft.folders, env, startupScript: draft.script.trim() === '' ? null : draft.script.trim() })
+            },
+          }),
+        ),
+      )
+    }
+    modal.saved = (m) => {
+      if (m.ok) {
+        result = m
+        error = undefined
+        if (m.folders !== undefined) status = Object.fromEntries(m.folders.map((f) => [f.path.trim(), f]))
+      } else error = m.error
+      render()
+    }
+    modal.scriptPicked = (path) => {
+      draft.script = path
+      render()
+    }
+    modal.folders = (folders) => {
+      status = Object.fromEntries(folders.map((f) => [f.path.trim(), f]))
+      render()
+    }
+    modal.picked = (index, path) => {
+      draft.folders[index] = path
+      send('checkFolders', { pathPrefix: draft.folders })
+      render()
+    }
+    // A credential list arriving while open fills the pickers.
+    modal.refresh = render
+    render()
   })
 }
 
@@ -1471,9 +2008,9 @@ function openCredentials() {
           { class: 'body' },
           rows.length > 0
             ? el('div', {}, ...rows)
-            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here, press <b>From IntelliJ / PyCharm</b> below, or in VS Code run <b>Light Code: Share API keys with Sun Light Code</b> to bring every key over at once.</span>` }),
+            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here, press <b>From IntelliJ / PyCharm</b> below, or in VS Code run <b>Light Code: Share API keys with Sun Code</b> to bring every key over at once.</span>` }),
           rows.length > 0
-            ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Keys from VS Code: run <b>Light Code: Share API keys with Sun Light Code</b> in VS Code while Sun is open.</span>` })
+            ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Keys from VS Code: run <b>Light Code: Share API keys with Sun Code</b> in VS Code while Sun is open.</span>` })
             : null,
         ),
         el(
@@ -1521,22 +2058,57 @@ function openCredentials() {
     }
 
     // Export: pick credentials and a passphrase. The file opens only with that passphrase.
-    const exportForm = () => {
+    // Nothing is ticked to begin with: what leaves this machine is chosen, one label at a time.
+    const exportForm = (preselect = []) => {
       const credentials = model.credentials ?? []
-      const chosen = new Set(credentials.map((c) => c.id))
+      // Kept across a re-render (a failed passphrase check redraws the form).
+      const chosen = editing?.export && editing.chosen !== undefined ? editing.chosen : new Set(preselect)
       const pass = el('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'Passphrase' })
       const again = el('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'Passphrase again' })
-      editing = { export: true }
+      const filter = el('input', { type: 'text', placeholder: 'Filter by label', 'aria-label': 'Filter credentials', spellcheck: 'false' })
+      const count = el('span', { class: 'export-count' })
+      const go = el('button', { class: 'primary', text: 'Export…' })
+      const rows = credentials.map((c) => {
+        const box = el('input', { type: 'checkbox', checked: chosen.has(c.id) })
+        box.addEventListener('change', () => {
+          if (box.checked) chosen.add(c.id)
+          else chosen.delete(c.id)
+          update()
+        })
+        const row = el('label', { class: 'row export-row' }, box,
+          el('span', { class: 'meta' }, el('b', { text: c.label }), el('span', { text: c.kind === 'login' ? 'Username and password' : 'Secret' })))
+        return { id: c.id, label: c.label.toLowerCase(), row, box }
+      })
+      const update = () => {
+        count.textContent = `${chosen.size} of ${credentials.length} chosen`
+        go.disabled = chosen.size === 0
+        go.textContent = chosen.size === 0 ? 'Export…' : `Export ${chosen.size}…`
+      }
+      filter.addEventListener('input', () => {
+        const q = filter.value.trim().toLowerCase()
+        for (const r of rows) r.row.hidden = q !== '' && !r.label.includes(q)
+      })
+      go.addEventListener('click', () => {
+        if (chosen.size === 0) return modal.failed('Choose at least one credential.')
+        if (pass.value !== again.value) return modal.failed('The two passphrases differ.')
+        if ([...pass.value].length < 12) return modal.failed('Use a passphrase of at least 12 characters.')
+        error = undefined
+        send('exportCredentials', { ids: [...chosen], passphrase: pass.value })
+      })
+      update()
+      editing = { export: true, chosen }
       card.replaceChildren(
         el('header', {}, el('h2', { text: 'Export credentials' }), el('p', { class: 'sub', text: 'For another computer or a colleague. The file is encrypted with the passphrase you choose — it is only as safe as that passphrase, so send the two separately.' })),
         el(
           'div',
           { class: 'body' },
-          ...credentials.map((c) => {
-            const box = el('input', { type: 'checkbox', checked: true })
-            box.addEventListener('change', () => (box.checked ? chosen.add(c.id) : chosen.delete(c.id)))
-            return el('label', { class: 'row', style: 'padding: 6px 0' }, box, el('span', { class: 'meta' }, el('b', { text: c.label })))
-          }),
+          el('label', { class: 'field-label', text: 'Credentials to export' }),
+          filter,
+          el('div', { class: 'export-tools' }, count, el('span', { class: 'spacer' }),
+            el('button', { class: 'link', text: 'Select shown', onclick: () => { for (const r of rows) if (!r.row.hidden) { r.box.checked = true; chosen.add(r.id) } update() } }),
+            el('button', { class: 'link', text: 'Clear', onclick: () => { chosen.clear(); for (const r of rows) r.box.checked = false; update() } }),
+          ),
+          el('div', { class: 'export-list' }, ...rows.map((r) => r.row)),
           el('label', { class: 'field-label', text: 'Passphrase (at least 12 characters)' }),
           pass,
           el('label', { class: 'field-label', text: 'Passphrase again' }),
@@ -1548,16 +2120,7 @@ function openCredentials() {
           {},
           el('span', { class: 'spacer' }),
           el('button', { class: 'secondary', text: 'Back', onclick: () => modal.saved() }),
-          el('button', {
-            class: 'primary',
-            text: 'Export…',
-            onclick: () => {
-              if (pass.value !== again.value) return modal.failed('The two passphrases differ.')
-              if ([...pass.value].length < 12) return modal.failed('Use a passphrase of at least 12 characters.')
-              error = undefined
-              send('exportCredentials', { ids: [...chosen], passphrase: pass.value })
-            },
-          }),
+          go,
         ),
       )
     }

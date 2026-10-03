@@ -42,7 +42,7 @@ export class FileSecretStore implements SecretStore {
   private sealedShut = false
 
   /**
-   * `key` encrypts the file (Sun Light Code; see `vaultCrypto.ts`). Without one it is plain JSON,
+   * `key` encrypts the file (Sun Code; see `vaultCrypto.ts`). Without one it is plain JSON,
    * as it always was. A plain file read with a key is taken as it is and encrypted on the next save,
    * which is how existing secrets move into the vault.
    */
@@ -99,7 +99,7 @@ export class FileSecretStore implements SecretStore {
       const secrets = await this.load()
       if (this.sealedShut) {
         throw new Error(
-          `${this.filePath} is encrypted and this process cannot open it, so nothing was saved - saving would have replaced every key in it. Start this codebase from Sun Light Code.`,
+          `${this.filePath} is encrypted and this process cannot open it, so nothing was saved - saving would have replaced every key in it. Start this codebase from Sun Code.`,
         )
       }
       mutate(secrets)
@@ -143,6 +143,6 @@ export class FileSecretStore implements SecretStore {
   backendName(): string {
     return this.key === undefined
       ? 'file (owner-only permissions, not an OS keychain)'
-      : 'encrypted file (Windows per-user protection, through Sun Light Code)'
+      : 'encrypted file (Windows per-user protection, through Sun Code)'
   }
 }

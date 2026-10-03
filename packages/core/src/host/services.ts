@@ -167,12 +167,12 @@ export interface HostServices {
    * Absent everywhere else, so the extension keeps its own toasts and nothing changes there.
    */
   /**
-   * `anywhere`: Sun Light Code's reach - read any drive or share, write anywhere with approval each
+   * `anywhere`: Sun Code's reach - read any drive or share, write anywhere with approval each
    * time. See `ToolExecutionContext.reach`. Absent everywhere else, so nothing changes there.
    */
   fileReach?: 'anywhere'
   /**
-   * Other agents may be working in this codebase at the same time (Sun Light Code's chat tabs). Rollback
+   * Other agents may be working in this codebase at the same time (Sun Code's chat tabs). Rollback
    * then undoes only the files this chat's edit tools changed, never the whole workspace.
    */
   sharedWorkspace?: boolean

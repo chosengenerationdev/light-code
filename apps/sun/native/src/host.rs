@@ -96,13 +96,17 @@ pub struct LaunchSpec {
     /// Reach beyond the codebase (Settings); and the parallel file helper, when it is beside Sun.
     pub reach_anywhere: bool,
     pub fast_fs: Option<PathBuf>,
+    /// Sun's environment (Settings → Environment): variables, and the whole PATH when folders are
+    /// put in front of it. Applied before Sun's own variables, so neither can replace those.
+    pub env: Vec<(String, String)>,
+    pub path: Option<String>,
 }
 
 pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static) -> Result<HostProcess, String> {
     fs::create_dir_all(&spec.data_dir).map_err(|e| format!("Could not create {}: {e}", spec.data_dir.display()))?;
     if !spec.host_script.is_file() {
         return Err(format!(
-            "The Light Code host was not found at {}. Reinstall with npm i -g @chosengeneration/sun-light-code.",
+            "The Light Code host was not found at {}. Reinstall with npm i -g @chosengeneration/sun-code.",
             spec.host_script.display()
         ));
     }
@@ -143,6 +147,13 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     }
     if let Some(helper) = &spec.fast_fs {
         command.arg("--fast-fs").arg(helper);
+    }
+    for (name, value) in &spec.env {
+        command.env(name, value);
+    }
+    if let Some(path) = &spec.path {
+        // Windows names are case-insensitive, so this replaces "Path" as well.
+        command.env("PATH", path);
     }
     if let Some(rg) = &spec.ripgrep {
         command.env("LIGHT_CODE_RIPGREP", rg);

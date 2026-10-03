@@ -46,8 +46,8 @@ apps/vscode        Thin host: activation, SecretStorage, webview plumbing, ripgr
 apps/host          Node server + browser UI. Published as @chosengeneration/light-code.
                    See §14.
 apps/intellij      JetBrains plugin: a panel and a launcher that packs apps/host.
-apps/sun           Sun Light Code: a Windows app (Rust, WebView2) holding many codebases, one
-                   Node host per codebase. Published as @chosengeneration/sun-light-code. §14b.
+apps/sun           Sun Code: a Windows app (Rust, WebView2) holding many codebases, one
+                   Node host per codebase. Published as @chosengeneration/sun-code. §14b.
 ```
 
 pnpm workspaces. No Turborepo — the repo is too small to justify it.
@@ -2237,6 +2237,54 @@ sidebar rolls a codebase's chats up (liveliest phase, most urgent agent state); 
 chat. Closing a chat keeps its folder. Ctrl+T / Ctrl+W are forwarded from the pane like Sun's other
 shortcuts. **Verified by running it** with three chats on one codebase.
 
+
+## 12aa. Sun Code 0.5.0: the name, its environment, reports, and writing helpers
+
+- **Renamed Sun Light Code → Sun Code** (npm `@chosengeneration/sun-code`, command `sun-code`,
+  `sun-code.exe`, `%LOCALAPPDATA%\sun-code`). The data folder is **moved, not copied**, on first
+  start (`Paths::new`), and `State::rebase` rewrites settings-file paths saved under the old folder;
+  if the old app holds it open the old folder is used and the move retried next launch. Both folder
+  names stay on the reach floor (`fs/reach.ts`), the VS Code share tries the new pipe then the old
+  one, and the `.sunkeys` field name is unchanged so files exported by 0.4 still import.
+- **Settings → Environment** (`environment.rs`): a **startup script** (.cmd/.bat/.ps1) run once at
+  launch in its own shell; the environment it leaves, diffed against Sun's own, is given to every host.
+  Agents asked to start while it runs **wait** (`ScriptState::Running` + `waiting`), because an agent
+  started without what the script provides is the failure the script exists to prevent. Read behind a
+  marker, never off the output (a script prints). 90 s cap, tree-killed, and the message says a pause
+  or prompt never finishes. Order: script, then listed variables (so they win), then PATH folders in
+  front of whichever PATH the script left. A variable may be a **saved credential**, resolved per
+  launch and never written to Sun's state. Names only reach the page, never values. Validated as a
+  whole in Rust (`PATH` is refused as a variable - it would replace the whole PATH - and Sun's own
+  names too). **Verified live**: the host process saw the variables, the script's variable and its
+  PATH change, in that order.
+- **Reports** (`reports.rs`): "Open report" opens Sun's viewer instead of the default app. Reads
+  only text reports inside Sun's data folder or a codebase folder - the path arrives in a host line or
+  a link, neither of which should be able to read an arbitrary file. Markdown is rendered by building
+  DOM nodes, never HTML (a report is model-written; this page can talk to Rust); images are not
+  fetched. **HTML reports** are served from `sun://…/report` under their own policy
+  (`style-src 'unsafe-inline'; img-src data:; sandbox`, no script) in a sandboxed frame; the shell's
+  `frame-src` gained `'self'` for it. `notify` got `report`: a .md/.html file the agent wrote, read
+  through `resolveToolPath`, opened as it is.
+- **`sun-fs` writes now, in exactly two operations**: `transfer` (copy/move, parallel; a same-drive
+  move is a rename; a cross-drive move removes the source only after every file copied at the right
+  size) and `archive` (zip create/extract/list; extraction refuses the whole archive if any entry
+  escapes the destination). Both are reached only through `transfer_files` / `archive_files`, which
+  are in `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES`; the approval is the plan the helper
+  computes with `plan: true`, which touches nothing. Nothing is replaced unless `overwrite` was asked
+  and approved, decided for the whole request first. `zip` is pinned `=2.4.2` (Rust 1.73 floor).
+- **Export picks credentials deliberately**: nothing ticked at first, a filter, a count on the button.
+- **Highlighting in the browser host**: `client.css` never defined the `--vscode-debugTokenExpression-*`
+  and `--vscode-charts-*` variables the highlighter colours with, so code was plain in the Node host,
+  Sun and the plugin while coloured in VS Code. VS Code's own default values now, light and dark;
+  `syntaxColours.test.ts` reads both files. The code font is Consolas with ligatures off, as VS Code.
+- **Contrast threshold 0.35 → 0.40**: teal (0.37) gets white text, reported as reading wrong in dark;
+  green and amber keep dark text.
+- **Review and Approvals had the same icon**; Review has its own (`ReviewIcon`).
+- **Excel and Outlook were not moved to Rust**, asked and answered: their cost is COM round trips to
+  another process, which no language changes, and the PowerShell worker is already persistent.
+- **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
+  contents changed. A change in core or ui reaches all four, because each bundles or packs them.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2838,7 +2886,7 @@ to make now.
 
 ---
 
-## 14b. Sun Light Code (0.1.0)
+## 14b. Sun Code (0.1.0)
 
 Asked for as: one Windows UI for every codebase the user has open in separate VS Code windows; point
 each at its existing Light Code config or a new one; agents keep working in the background while
@@ -3110,9 +3158,12 @@ Primary development platform. These are silent-failure sources, not preferences.
   to global settings. Standing instruction from the user (2026-10-01); it is part of done, not a
   follow-up.
 
+- **Build only a package that has changes** (2026-10-03, "going forward"). A Sun-only change
+  rebuilds Sun alone; a change in packages/core or packages/ui reaches every package, since each
+  bundles them or packs the host. Those still ship everywhere, per the next rule.
 - **Every enhancement and fix ships in every package, every time.** Standing instruction from
   the user (2026-10-02, "always"): the VS Code extension, the Node host and the JetBrains plugin are
-  built from the same commit for each release, so none of them is behind. **Sun Light Code is the
+  built from the same commit for each release, so none of them is behind. **Sun Code is the
   fourth** (2026-10-03): it packs the host exactly as the plugin does (`apps/sun/scripts/build.mjs`). The features live in
   `packages/core` and `packages/ui`, shared by the extension and the host; the plugin is a panel and
   a launcher, so it **packs the host built from that commit** (`host/light-code.cjs`, by

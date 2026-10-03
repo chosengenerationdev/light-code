@@ -1,5 +1,14 @@
 # @chosengeneration/light-code
 
+## 0.108.0
+
+### Minor Changes
+
+- **Code is highlighted again** in the browser: strings, numbers and keywords in chat, diffs and charts, in VS Code's colours, with VS Code's code font and no ligatures.
+- `notify` can attach a report file the agent wrote (.md or .html).
+- Teal accents get white text; the Review tab has its own icon.
+- For Sun Code: `transfer_files` (copy and move) and `archive_files` (zip), always asking first, when Sun's helper is present; the handbook covers Sun Code's new name, environment, reports and tools.
+
 ## 0.107.0
 
 ### Minor Changes

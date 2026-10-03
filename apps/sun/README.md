@@ -1,4 +1,4 @@
-# Sun Light Code
+# Sun Code
 
 Every codebase you work on, in one Windows window — each with its own
 [Light Code](https://github.com/chosengenerationdev/light-code) agent, all working at the same time.
@@ -20,15 +20,25 @@ Every codebase you work on, in one Windows window — each with its own
 - **Fast, parallel file tools** written in Rust: find files across whole drives and shares, summarise a
   folder, spot duplicates, read many files at once, and work through huge logs and CSV or Excel files
   part by part — search, read any window, filter, group and total millions of rows in about a second.
+- **Copy, move and zip** whole folders on every core — always asking first, with exactly what will be
+  copied, moved, replaced or extracted.
+- **Several chats per codebase**, each its own agent, safe to run side by side.
+- **Reports in Sun**: Markdown and HTML reports from scheduled runs open in Sun's own viewer.
+- **One environment for every agent**: a startup script (.cmd, .bat or .ps1), folders to put on PATH,
+  and variables — plain values or saved credentials.
 - **Everything Light Code does**: the same tools, MCP, Python tools, skills, Excel and Outlook,
   Confluence, Jira, Bitbucket, Jenkins, AutoSys, search and schedules — it is the same agent.
 
 ## Install
 
 ```
-npm i -g @chosengeneration/sun-light-code
-sun-light-code
+npm i -g @chosengeneration/sun-code
+sun-code
 ```
+
+Used **Sun Light Code** before? Sun Code is its new name. Your codebases, chats and credentials move
+across by themselves the first time Sun Code starts; then remove the old package with
+`npm uninstall -g @chosengeneration/sun-light-code`.
 
 Windows 10 or 11 (x64) and Node.js 18 or newer. The package is prebuilt: it has **no install
 scripts and no dependencies**, so installing only copies files — nothing is compiled and nothing is
@@ -49,7 +59,7 @@ A folder's own `.lightcode/config.json` is always used, whichever you choose.
 
 **API keys and passwords are not in config files.** The VS Code extension keeps them in VS Code's
 encrypted storage, which another program cannot read, so enter each once in Sun — it then shares
-them with every codebase. Sun keeps them in `%LOCALAPPDATA%\sun-light-code\secrets.json`, readable
+them with every codebase. Sun keeps them in `%LOCALAPPDATA%\sun-code\secrets.json`, readable
 by your Windows account only, not in an OS keychain; it says so rather than implying otherwise.
 
 ## What it connects to

@@ -12,7 +12,7 @@ import type { ToolExecutionContext } from './types.js'
 import { writeToFileTool } from './writeToFile.js'
 
 /**
- * The safeguards that let several chats work in one codebase at once (Sun Light Code): an edit made
+ * The safeguards that let several chats work in one codebase at once (Sun Code): an edit made
  * from a stale read is refused, and rolling a chat back restores only the files that chat changed.
  */
 describe('several chats in one codebase', () => {

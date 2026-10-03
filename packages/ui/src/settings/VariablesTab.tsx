@@ -15,7 +15,7 @@ export interface VariablesTabProps {
   /** False when the administrator's half is read-only for this session. */
   canEditAdmin: boolean
   /**
-   * More than one person uses this host. When false (Sun Light Code, a personal `npx`) there is
+   * More than one person uses this host. When false (Sun Code, a personal `npx`) there is
    * no administrator, so their half is not shown - unless it holds something, because a variable
    * that wins must never be invisible.
    */

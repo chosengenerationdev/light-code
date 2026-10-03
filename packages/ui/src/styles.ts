@@ -138,7 +138,7 @@ function luminance({ r, g, b }: Rgb): number {
 /**
  * Text colour for a filled accent surface — a user bubble, the send button, a swatch tick.
  *
- * **0.35, not the WCAG crossover at ~0.18.** Maximising the contrast ratio would put black
+ * **0.40, not the WCAG crossover at ~0.18.** Maximising the contrast ratio would put black
  * text on purple, indigo and blue, because dark text technically scores higher on every
  * mid-tone. Nobody ships that: white on a saturated brand colour is the universal convention
  * and reads better than the arithmetic suggests at bubble sizes. The threshold is placed
@@ -150,7 +150,7 @@ function luminance({ r, g, b }: Rgb): number {
 export function contrastFor(hex: string): string {
   const rgb = parseHex(hex)
   if (rgb === undefined) return '#ffffff'
-  return luminance(rgb) > 0.35 ? '#12111a' : '#ffffff'
+  return luminance(rgb) > 0.4 ? '#12111a' : '#ffffff'
 }
 
 /**

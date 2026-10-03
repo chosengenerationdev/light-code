@@ -1,5 +1,5 @@
 /**
- * What "reach anywhere" still refuses (Sun Light Code; `HostServices.fileReach`).
+ * What "reach anywhere" still refuses (Sun Code; `HostServices.fileReach`).
  *
  * Sun lets a codebase's assistant read anywhere - every drive, every share - and write anywhere
  * with the user's approval each time. That widening is only safe with a floor under it, so two
@@ -34,6 +34,8 @@ export const SECRET_FOLDERS = [
   '/appdata/roaming/microsoft/systemcertificates/',
   '/appdata/roaming/mozilla/firefox/profiles/',
   // Light Code's and Sun's own stores: the vault, its key, per-user secrets.
+  '/appdata/local/sun-code/',
+  // Its name until 0.5.0; a folder the move could not take is still the vault.
   '/appdata/local/sun-light-code/',
   '/appdata/local/light-code/data/users/',
   '/windows/system32/config/',

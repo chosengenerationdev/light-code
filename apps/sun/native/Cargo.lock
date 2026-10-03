@@ -2361,13 +2361,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "sun-light-code"
-version = "0.4.0"
+name = "sun-code"
+version = "0.5.0"
 dependencies = [
  "aes-gcm",
  "calamine",
  "csv",
  "embed-resource",
+ "flate2",
  "ignore",
  "memchr",
  "pbkdf2",
@@ -2383,6 +2384,7 @@ dependencies = [
  "windows-sys 0.60.2",
  "winreg 0.56.0",
  "wry",
+ "zip",
 ]
 
 [[package]]

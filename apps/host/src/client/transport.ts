@@ -575,7 +575,7 @@ export class HttpTransport implements Transport {
   }
 
   /**
-   * Adjusts each message before anyone sees it. Used when this page runs inside Sun Light Code,
+   * Adjusts each message before anyone sees it. Used when this page runs inside Sun Code,
    * which sets the theme and accent for every pane: the `settings` message is rewritten on the way
    * in, so the panel and the page agree and nothing is written to the user's config.
    */

@@ -110,6 +110,11 @@ impl Vault {
         Ok(vault)
     }
 
+    /// One field of a saved credential, for Sun's own environment. Never sent to the page.
+    pub fn value(&self, id: &str, field: &str) -> Option<String> {
+        self.read_secrets().ok()?.get(&pointer(id, field)).cloned()
+    }
+
     pub fn key_hex(&self) -> String {
         self.key.iter().map(|b| format!("{b:02x}")).collect()
     }
@@ -377,9 +382,9 @@ impl Vault {
     /// Opens an export file. Nothing is stored: the caller shows what is inside and asks first.
     pub fn open_export(text: &str, passphrase: &str) -> Result<Vec<Portable>, String> {
         let file: ExportFile = serde_json::from_str(text.trim_start_matches('﻿'))
-            .map_err(|_| "This is not a Sun Light Code credentials file.".to_string())?;
+            .map_err(|_| "This is not a Sun Code credentials file.".to_string())?;
         if file.sun_light_code_credentials != 1 || file.kdf != "pbkdf2-sha256" {
-            return Err("This credentials file comes from a newer Sun Light Code; update this one first.".into());
+            return Err("This credentials file comes from a newer Sun Code; update this one first.".into());
         }
         if file.rounds < 100_000 {
             return Err("This credentials file is too weakly protected to trust.".into());

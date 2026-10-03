@@ -302,18 +302,18 @@ export interface SessionOptions {
    * key is entered once, which is why `FileSecretStore` re-reads a file another process changed.
    */
   secretsFile?: string
-  /** Encrypts `secretsFile` (Sun Light Code, handed over on stdin). See `vaultCrypto.ts`. */
+  /** Encrypts `secretsFile` (Sun Code, handed over on stdin). See `vaultCrypto.ts`. */
   secretsKey?: Buffer
   /**
    * Hand the `notify` tool's notifications to whoever started this process, one JSON line each on
    * stdout prefixed `light-code-notify:`. Light Code Sun shows them as Windows notifications.
    */
   desktopNotify?: boolean
-  /** Sun Light Code: read any drive or share, write anywhere with approval each time. */
+  /** Sun Code: read any drive or share, write anywhere with approval each time. */
   reachAnywhere?: boolean
   /** Other chats share this codebase (Sun's chat tabs): Rollback undoes only this chat's files. */
   sharedWorkspace?: boolean
-  /** Sun Light Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
+  /** Sun Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
   logSink: (line: string) => void

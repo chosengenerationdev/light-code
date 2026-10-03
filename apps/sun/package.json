@@ -2,7 +2,7 @@
   "name": "@light-code/sun",
   "version": "0.3.0",
   "private": true,
-  "description": "Sun Light Code: build scripts. The published package is assembled from npm/ by scripts/build.mjs.",
+  "description": "Sun Code: build scripts. The published package is assembled from npm/ by scripts/build.mjs.",
   "license": "MIT",
   "type": "module",
   "scripts": {

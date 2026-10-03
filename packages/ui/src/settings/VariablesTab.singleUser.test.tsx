@@ -8,7 +8,7 @@ import { VariablesTab, type VariablesTabProps } from './VariablesTab.js'
 /**
  * The administrator's half belongs to a shared server only.
  *
- * Reported from Sun Light Code, where every codebase runs a single-user Node host: a tab offering
+ * Reported from Sun Code, where every codebase runs a single-user Node host: a tab offering
  * "Everyone's" variables and a list of administrators, on a machine with one person on it, read as
  * something added by mistake. A render test because the fix is which sections are drawn.
  */

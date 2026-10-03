@@ -4,7 +4,7 @@ import { Select } from '../Select.js'
 import { colors, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 /**
- * Saved credentials, where the host has them (Sun Light Code). `undefined` everywhere else - the VS
+ * Saved credentials, where the host has them (Sun Code). `undefined` everywhere else - the VS
  * Code extension, a plain Node host - and then no picker is drawn at all, so nothing changes there.
  */
 export const CredentialsContext = createContext<CredentialSummary[] | undefined>(undefined)
@@ -28,7 +28,7 @@ export function CredentialPicker(props: {
     if (props.quiet === true) return null
     return (
       <span style={{ display: 'block', marginTop: 4, color: colors.muted, fontSize: 11 }}>
-        No saved credentials yet — add them in Sun Light Code&rsquo;s Credentials to pick one here.
+        No saved credentials yet — add them in Sun Code&rsquo;s Credentials to pick one here.
       </span>
     )
   }

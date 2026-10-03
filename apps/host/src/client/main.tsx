@@ -155,7 +155,7 @@ if (embedder !== undefined) {
       choosesTheme: false,
       theme: sunAppearance.theme,
       accentColor: sunAppearance.accent,
-      appearanceFrom: 'Sun Light Code',
+      appearanceFrom: 'Sun Code',
       accentInherited: !sunAppearance.own,
     }
   })

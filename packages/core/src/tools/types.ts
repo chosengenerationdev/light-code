@@ -61,7 +61,7 @@ export interface ToolExecutionContext {
    */
   readRoots?: string[]
   /**
-   * `anywhere` (Sun Light Code): read any path - every drive and share - and write any path with the
+   * `anywhere` (Sun Code): read any path - every drive and share - and write any path with the
    * user's approval each time. The deny list and `fs/reach.ts`'s floor still apply. Absent means the
    * workspace rules above, which is every other host.
    */
