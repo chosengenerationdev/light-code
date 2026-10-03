@@ -188,6 +188,8 @@ describe('finding the right topic', () => {
       ['do agents keep working in the background when I switch projects', 'sun'],
       ['my vs code api keys did not come across to sun', 'sun'],
       ['how do I share my pycharm api keys with sun', 'sun'],
+      ['can it read files on a shared drive outside the codebase', 'sun'],
+      ['analyse a big log file part by part', 'sun'],
       ['error eperm operation not permitted on config.json', 'troubleshooting'],
       ['connect autosys through apigee with a client id and secret', 'autosys'],
       ['apigee token and basic auth username and password for autosys', 'autosys'],

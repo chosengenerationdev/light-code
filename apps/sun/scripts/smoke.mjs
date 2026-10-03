@@ -39,7 +39,7 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sun-smoke-'))
 const prefix = path.join(work, 'prefix')
 execFileSync('npm', ['install', '-g', '--prefix', JSON.stringify(prefix), '--no-audit', '--no-fund', JSON.stringify(tarball)], { stdio: 'inherit', shell: true })
 const installed = path.join(prefix, 'node_modules', '@chosengeneration', 'sun-light-code')
-for (const file of ['bin/sun-light-code.cjs', 'dist/sun-light-code.exe', 'dist/host/light-code.cjs', 'dist/rg.exe', 'dist/source.zip', 'README.md', 'LICENSE']) {
+for (const file of ['bin/sun-light-code.cjs', 'dist/sun-light-code.exe', 'dist/sun-fs.exe', 'dist/host/light-code.cjs', 'dist/rg.exe', 'dist/source.zip', 'README.md', 'LICENSE']) {
   if (!fs.existsSync(path.join(installed, file))) fail(`installed package lacks ${file}`)
 }
 ok('installed with plain npm; every file present')

@@ -1,6 +1,6 @@
 [package]
 name = "sun-light-code"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Sun Light Code: several codebases, each with its own Light Code agent, in one Windows window"
@@ -10,6 +10,11 @@ publish = false
 [[bin]]
 name = "sun-light-code"
 path = "src/main.rs"
+
+# The parallel file helper the agents call: find, summarise, read many, big files, tables.
+[[bin]]
+name = "sun-fs"
+path = "src/bin/sun_fs.rs"
 
 [dependencies]
 tao = "0.37"
@@ -23,6 +28,12 @@ winreg = "0.56"
 aes-gcm = "0.10"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 sha2 = "0.10"
+ignore = "=0.4.23"
+rayon = "1"
+regex = "1"
+memchr = "2"
+csv = "1"
+calamine = "0.26"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [

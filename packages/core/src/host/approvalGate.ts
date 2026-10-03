@@ -34,7 +34,10 @@ export class WebviewApprovalGate implements ApprovalGate {
         ...(request.alwaysScope === undefined ? {} : { alwaysScope: request.alwaysScope }),
         // Said so the prompt offers no "Always allow": for these it would record a rule that the
         // policy never consults, which is a button that lies.
-        ...(ALWAYS_ASK_TOOLS.has(request.toolName) ? { alwaysAsk: true } : {}),
+        ...(ALWAYS_ASK_TOOLS.has(request.toolName) ||
+        (request.preview.kind === 'diff' && request.preview.outsideWorkspace === true)
+          ? { alwaysAsk: true }
+          : {}),
       })
     })
   }

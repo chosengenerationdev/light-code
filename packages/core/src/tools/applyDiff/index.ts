@@ -68,6 +68,12 @@ export const applyDiffTool: Tool<ApplyDiffParams> = {
     if (!result.ok) {
       return { kind: 'text', text: `This edit would fail: ${result.message}` }
     }
-    return { kind: 'diff', path: params.path, before: original, after: result.content }
+    return {
+      kind: 'diff',
+      path: params.path,
+      before: original,
+      after: result.content,
+      ...(resolved.outsideWorkspace === true ? { outsideWorkspace: true } : {}),
+    }
   },
 }

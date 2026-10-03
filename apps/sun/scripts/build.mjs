@@ -66,6 +66,8 @@ fs.mkdirSync(path.join(stage, 'dist', 'host'), { recursive: true })
 fs.cpSync(path.join(sun, 'npm'), stage, { recursive: true })
 fs.copyFileSync(path.join(sun, 'README.md'), path.join(stage, 'README.md'))
 fs.copyFileSync(exe, path.join(stage, 'dist', 'sun-light-code.exe'))
+// The parallel file helper behind find_files, read_many_files, big_file and query_table.
+fs.copyFileSync(path.join(native, 'target', 'release', 'sun-fs.exe'), path.join(stage, 'dist', 'sun-fs.exe'))
 fs.copyFileSync(host, path.join(stage, 'dist', 'host', 'light-code.cjs'))
 fs.copyFileSync(ripgrep, path.join(stage, 'dist', 'rg.exe'))
 const archive = writeSourceArchive(repo, path.join(stage, 'dist', 'source.zip'), `sun-${version}`)

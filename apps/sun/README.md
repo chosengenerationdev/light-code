@@ -15,6 +15,11 @@ Every codebase you work on, in one Windows window — each with its own
   with `notify` — including scheduled runs. Click one to jump to that chat.
 - **Idle codebases sleep** after a while to give memory back (never while working, waiting for you,
   or holding schedules), and wake in a moment when clicked.
+- **Reach beyond the codebase**: agents read any drive or shared folder, and may write anywhere — asking
+  you every time they write outside the codebase. Keys, passwords and Windows folders stay off-limits.
+- **Fast, parallel file tools** written in Rust: find files across whole drives and shares, summarise a
+  folder, spot duplicates, read many files at once, and work through huge logs and CSV or Excel files
+  part by part — search, read any window, filter, group and total millions of rows in about a second.
 - **Everything Light Code does**: the same tools, MCP, Python tools, skills, Excel and Outlook,
   Confluence, Jira, Bitbucket, Jenkins, AutoSys, search and schedules — it is the same agent.
 

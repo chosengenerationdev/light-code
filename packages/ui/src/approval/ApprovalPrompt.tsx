@@ -53,6 +53,11 @@ function PreviewBody(props: { preview: ToolPreview }): ReactElement {
           model wrote is judged differently from source the assistant you are talking to wrote,
           and this prompt is the only place that can be said before the file exists.
         */}
+        {preview.outsideWorkspace === true && (
+          <div style={{ color: colors.warning, fontSize: 12, marginBottom: 4 }}>
+            Outside this codebase — Rollback cannot undo this change. Check the path and the diff.
+          </div>
+        )}
         {preview.note !== undefined && (
           <div style={{ color: colors.muted, fontSize: 11, marginBottom: 4 }}>{preview.note}</div>
         )}

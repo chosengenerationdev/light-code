@@ -71,6 +71,9 @@ pub struct Settings {
     pub theme: String,
     /// The accent colour, #rrggbb. Every pane follows it too; role colours stay each pane's own.
     pub accent: String,
+    /// Let each codebase's assistant read any drive or share and write anywhere, asking every time
+    /// it writes outside the codebase. On by default; the floor in core's `fs/reach.ts` always holds.
+    pub reach_anywhere: bool,
     pub window: Option<WindowBounds>,
 }
 
@@ -85,6 +88,7 @@ impl Default for Settings {
             notifications: true,
             theme: "system".into(),
             accent: "#f26b1d".into(),
+            reach_anywhere: true,
             window: None,
         }
     }

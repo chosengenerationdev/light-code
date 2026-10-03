@@ -265,6 +265,7 @@ import {
   parseDocEntryId,
   type DocEntryKind,
   createNotifyTool,
+  createFastFsTools,
   parseNamespacedToolName,
   type ToolCatalogueEntry,
   syncVectorStores,
@@ -3137,6 +3138,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * user is already reading the reply — and the description says so; but a scheduled run is
      * built from this same registry, and a run that could not report would be pointless.
      */
+    // Sun Light Code's parallel file tools, where the host ships the helper.
+    if (services.fastFs !== undefined) {
+      for (const tool of createFastFsTools(services.fastFs)) combined.register(tool)
+    }
     combined.register(
       createNotifyTool({
         notify: (message, level, details) => {
@@ -4118,6 +4123,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         denylist,
         readFiles,
         readRoots: cachedReadRoots,
+        ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
         // Resolved per turn by the host, so an edit applies to the next command rather than
         // needing a new session. Absent in the extension, where there is nothing to resolve.
         ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv() } : {}),

@@ -2840,6 +2840,27 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
 - **One instance per data folder** (named mutex); a second launch brings the window forward. Rust is
   pinned to 1.86 with the fallback resolver (`.cargo/config.toml`) so it builds on the toolchain a
   machine has.
+- **Reach anywhere** (`--reach-anywhere`, Sun's Settings, on by default; `ToolExecutionContext.reach`).
+  Reads go anywhere with no folder prompt - they follow the ordinary read approval exactly as inside
+  the workspace. Writes go anywhere, but the write tools mark their diff `outsideWorkspace` and
+  `decideFromPolicy` never auto-approves one (checked right after `ALWAYS_ASK_TOOLS`), the prompt hides
+  "Always allow" and says Rollback cannot undo it - checkpoints cover only the workspace. A floor no
+  setting lifts, `fs/reach.ts`: credential folders and files (SSH, cloud CLIs, Windows credential and
+  vault folders, browser logins, Light Code's and Sun's own stores, key/cert extensions) are never read
+  or written, and Windows/program folders are never written. The configured deny list (invariant 6)
+  is checked first as always. Single-user only: refused with `--server`. **Known gap**: a write whose
+  preview *threw* would degrade to a text preview and fall to the ordinary edit policy; neither write
+  tool's preview can throw today.
+- **`sun-fs`, the parallel Rust helper** (`native/src/bin/sun_fs.rs`, `--fast-fs`): JSON in, JSON out,
+  read-only by construction (it has no write operation). `ignore`'s parallel walker for folders;
+  big files split into line-aligned ranges per core, newlines counted with `memchr`, regex search per
+  range with offsets so line numbers are exact; `csv`/`calamine` tables filtered and grouped with
+  `rayon`. Four tools in `tools/fastFs.ts` (`find_files` find/summary/duplicates, `read_many_files`,
+  `big_file` inspect/lines/tail/search, `query_table`), registered only when the host names the helper.
+  Every path goes through `resolveToolPath` first; the walker never enters `SECRET_FOLDERS`; results
+  are filtered again. Measured: a 100 MB, 2-million-line log inspected in 0.37 s and searched in 0.24 s;
+  1 million CSV rows filtered, grouped and summed in 1.0 s (process start included).
+  `ignore` is pinned to 0.4.23: later releases use let-chains while still claiming an older Rust.
 - **Not in Sun**: the debug-session tool and editor pickers, exactly as in the Node host.
 - Sun's version lives in `npm/package.json` and `native/Cargo.toml`; `build.mjs` refuses a mismatch
   (and 66).

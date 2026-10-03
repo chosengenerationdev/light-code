@@ -50,6 +50,12 @@ export const writeToFileTool: Tool<WriteToFileParams> = {
     const before = (await context.fs.exists(resolved.realPath))
       ? await context.fs.readFile(resolved.realPath).catch(() => '')
       : ''
-    return { kind: 'diff', path: params.path, before, after: params.content }
+    return {
+      kind: 'diff',
+      path: params.path,
+      before,
+      after: params.content,
+      ...(resolved.outsideWorkspace === true ? { outsideWorkspace: true } : {}),
+    }
   },
 }

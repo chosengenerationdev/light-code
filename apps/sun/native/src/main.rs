@@ -904,6 +904,8 @@ impl App {
             ripgrep: system::bundled_ripgrep(),
             vault_key: self.vault.key_hex(),
             credentials_file: self.vault.credentials_file().clone(),
+            reach_anywhere: self.state.settings.reach_anywhere,
+            fast_fs: system::fast_fs(),
         };
         match host::launch(spec, move |event| {
             let _ = proxy.send_event(UserEvent::Host(event));

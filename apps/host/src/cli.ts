@@ -276,6 +276,8 @@ async function main(): Promise<void> {
       return
     }
   }
+  const fastFsArg = valueOf(args, '--fast-fs')
+  const fastFs = fastFsArg !== undefined && existsSync(fastFsArg) ? path.resolve(fastFsArg) : undefined
   const credentialsFileArg = valueOf(args, '--credentials-file')
   const credentialsFile = credentialsFileArg === undefined ? undefined : path.resolve(credentialsFileArg)
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
@@ -394,6 +396,9 @@ async function main(): Promise<void> {
     ...(args.includes('--desktop-notify') && !serverMode ? { desktopNotify: true } : {}),
     ...(secretsKey !== undefined ? { secretsKey } : {}),
     ...(credentialsFile !== undefined ? { credentialsFile } : {}),
+    // Single-user only, like --config-file: on a shared server this would be every user reaching everywhere.
+    ...(args.includes('--reach-anywhere') && !serverMode ? { reachAnywhere: true } : {}),
+    ...(fastFs !== undefined ? { fastFs } : {}),
     /*
      * Decoded once, at startup.
      *
@@ -669,6 +674,8 @@ const KNOWN_FLAGS = new Set([
   '--desktop-notify',
   '--secrets-key-stdin',
   '--credentials-file',
+  '--reach-anywhere',
+  '--fast-fs',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -925,6 +932,11 @@ Usage: light-code [options]
                       this one (Light Code Sun shows them as Windows notifications)
   --secrets-key-stdin Read the key that encrypts --secrets-file from the first
                       line of stdin (64 hex characters). Used by Sun Light Code
+  --reach-anywhere    Let the assistant read any drive or share and write
+                      anywhere, asking every time it writes outside the
+                      workspace (not with --server). Used by Sun Light Code
+  --fast-fs <exe>     The sun-fs helper: adds find_files, read_many_files,
+                      big_file and query_table
   --credentials-file <file>  Saved credentials offered in every secret field
                       (names only; values live in the secrets file)
   --no-open           Print the URL instead of launching a browser

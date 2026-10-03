@@ -1,9 +1,12 @@
 import path from 'node:path'
 import { confineToAny, PathConfinementError, realpathAllowingMissing } from '../fs/confine.js'
 import { normalizeWindowsPath } from '../fs/windowsPath.js'
+import { isSecretPath, isSystemPath } from '../fs/reach.js'
 import type { ToolExecutionContext } from './types.js'
 
-export type ResolvedToolPath = { ok: true; realPath: string } | { ok: false; message: string }
+export type ResolvedToolPath =
+  | { ok: true; realPath: string; outsideWorkspace?: boolean }
+  | { ok: false; message: string }
 
 export interface ResolveOptions {
   /**
@@ -44,6 +47,24 @@ export async function resolveToolPath(
      * and only when there is someone to ask.
      */
     const denied = { ok: false as const, message: error.message }
+
+    /*
+     * Sun Light Code: reach anywhere. Reads need no folder prompt; writes are allowed and always
+     * asked about (the write tools mark their preview `outsideWorkspace`, which the policy never
+     * auto-approves). The deny list and the credential and system floors in `fs/reach.ts` still
+     * refuse first, and they are not something the user can be talked into approving.
+     */
+    if (context.reach === 'anywhere') {
+      const outside = await realpathAllowingMissing(absolute)
+      if ((await context.denylist.isDenied(outside)) || isSecretPath(outside)) {
+        return { ok: false, message: `Access to "${requestedPath}" is denied — it holds keys, passwords or credentials.` }
+      }
+      if (options.write === true && isSystemPath(outside)) {
+        return { ok: false, message: `Light Code does not write into Windows or program folders ("${requestedPath}").` }
+      }
+      return { ok: true, realPath: outside, outsideWorkspace: true }
+    }
+
     if (options.write === true || context.requestPathAccess === undefined) return denied
 
     const outside = await realpathAllowingMissing(absolute)

@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.132.0
+
+### Patch Changes
+
+- The handbook explains Sun Light Code's new reach and parallel file tools. No change in behaviour inside VS Code.
+
 ## 0.131.0
 
 ### Patch Changes

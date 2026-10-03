@@ -1091,6 +1091,17 @@ function openSettings() {
           el(
             'div',
             { class: 'row' },
+            el(
+              'span',
+              { class: 'meta' },
+              el('b', { text: 'Reach beyond the codebase' }),
+              el('span', { text: 'Agents may read any drive or shared folder, and write anywhere — asking you every time they write outside the codebase. Keys, passwords and Windows folders stay off-limits. Applies when a codebase next starts.' }),
+            ),
+            toggle(s.reachAnywhere !== false, (on) => patch({ reachAnywhere: on })),
+          ),
+          el(
+            'div',
+            { class: 'row' },
             el('span', { class: 'meta' }, el('b', { text: 'Windows notifications' }), el('span', { text: 'When a background agent finishes, needs approval, or sends one with notify.' })),
             toggle(s.notifications, (on) => patch({ notifications: on })),
           ),

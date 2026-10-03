@@ -809,3 +809,5 @@ export {
   type CredentialSummary,
 } from './secrets/credentials.js'
 export { secretSlots, type SecretSlot } from './secrets/slots.js'
+export { createFastFsTools } from './tools/fastFs.js'
+export { isSecretPath, isSystemPath } from './fs/reach.js'

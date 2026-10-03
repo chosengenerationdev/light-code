@@ -840,7 +840,8 @@ desktops of the same person; importing the file is how a second machine is set u
       'sun', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
       'many projects', 'one window', 'parallel', 'background agents', 'desktop app', 'windows app',
       'sidebar', 'sleep', 'idle', 'switch project', 'credentials', 'saved credential',
-      'share keys', 'share api keys', 'pycharm', 'intellij keys',
+      'share keys', 'share api keys', 'pycharm', 'intellij keys', 'shared drive', 'network drive',
+      'big log', 'large log', 'big csv', 'large csv', 'huge file', 'find files', 'duplicate files',
     ],
     body: `
 **Sun Light Code** is a Windows app holding every codebase you work on, each with its own Light Code
@@ -875,6 +876,18 @@ is written to the config file.
 **Memory**: idle codebases sleep after 30 minutes by default (Sun's Settings), freeing their agent,
 MCP servers and Python worker. Never while working, waiting for you, or holding enabled schedules.
 Clicking wakes it with the chat intact. Right-click → Keep awake exempts one.
+
+**Reach beyond the codebase** (Sun's Settings, on by default): agents read any drive or shared folder
+(\\\\server\\share) without a folder prompt, and may write anywhere — but every write outside the codebase
+asks, shows the diff, and says Rollback cannot undo it. Keys, passwords, browser logins, Light Code's
+own vault and Windows/program folders stay off-limits whatever the setting.
+
+**Parallel file tools** (Rust, every CPU core), for big jobs: \`find_files\` (find by name, type, size or
+date across drives and shares; summarise a folder; find duplicate files), \`read_many_files\` (up to 50
+at once), \`big_file\` (inspect, read any window, tail, or search a huge log with context) and
+\`query_table\` (filter, group and total a CSV or Excel sheet of millions of rows, a page at a time).
+All read-only. Ask in plain words — "summarise the errors in this 2 GB log", "total sales by region in
+this spreadsheet".
 
 **Not in Sun**: reading a VS Code debug session, and editor file pickers — paths are typed. Sun's
 Settings → Export source code saves the whole repository as a zip that builds offline.

@@ -165,6 +165,13 @@ export interface HostServices {
    *
    * Absent everywhere else, so the extension keeps its own toasts and nothing changes there.
    */
+  /**
+   * `anywhere`: Sun Light Code's reach - read any drive or share, write anywhere with approval each
+   * time. See `ToolExecutionContext.reach`. Absent everywhere else, so nothing changes there.
+   */
+  fileReach?: 'anywhere'
+  /** Path to `sun-fs`, the parallel Rust file helper; its four tools are registered only when set. */
+  fastFs?: string
   desktopNotify?: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => void
   secrets: SecretStore
   configStore: ConfigStore

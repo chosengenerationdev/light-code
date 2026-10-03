@@ -93,6 +93,9 @@ pub struct LaunchSpec {
     /// The vault key, written to the host's stdin and nowhere else.
     pub vault_key: String,
     pub credentials_file: PathBuf,
+    /// Reach beyond the codebase (Settings); and the parallel file helper, when it is beside Sun.
+    pub reach_anywhere: bool,
+    pub fast_fs: Option<PathBuf>,
 }
 
 pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static) -> Result<HostProcess, String> {
@@ -132,6 +135,12 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         .stderr(Stdio::piped())
         // No console window flashing up per codebase.
         .creation_flags(CREATE_NO_WINDOW);
+    if spec.reach_anywhere {
+        command.arg("--reach-anywhere");
+    }
+    if let Some(helper) = &spec.fast_fs {
+        command.arg("--fast-fs").arg(helper);
+    }
     if let Some(rg) = &spec.ripgrep {
         command.env("LIGHT_CODE_RIPGREP", rg);
     }

@@ -120,6 +120,10 @@ export interface ServerOptions {
   secretsFile?: string
   /** See `SessionOptions.desktopNotify`. */
   desktopNotify?: boolean
+  /** See `SessionOptions.reachAnywhere`. */
+  reachAnywhere?: boolean
+  /** See `SessionOptions.fastFs`. */
+  fastFs?: string
   /** See `SessionOptions.secretsKey`. */
   secretsKey?: Buffer
   /**
@@ -456,6 +460,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.secretsFile !== undefined ? { secretsFile: options.secretsFile } : {}),
       ...(options.desktopNotify === true ? { desktopNotify: true } : {}),
       ...(options.secretsKey !== undefined ? { secretsKey: options.secretsKey } : {}),
+      ...(options.reachAnywhere === true ? { reachAnywhere: true } : {}),
+      ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,
       /*

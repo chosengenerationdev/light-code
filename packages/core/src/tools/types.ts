@@ -50,6 +50,12 @@ export interface ToolExecutionContext {
    */
   readRoots?: string[]
   /**
+   * `anywhere` (Sun Light Code): read any path - every drive and share - and write any path with the
+   * user's approval each time. The deny list and `fs/reach.ts`'s floor still apply. Absent means the
+   * workspace rules above, which is every other host.
+   */
+  reach?: 'anywhere'
+  /**
    * Values made visible to whatever this session spawns — shell commands, Python tools.
    *
    * Optional and absent in the VS Code extension, which has one user and their own environment
@@ -121,6 +127,11 @@ export type ToolPreview =
        * can be said before the file exists.
        */
       note?: string
+      /**
+       * The file is outside the workspace (Sun's "reach anywhere"). Always asked about, whatever is
+       * auto-approved, and the prompt says it cannot be rolled back - checkpoints cover the workspace.
+       */
+      outsideWorkspace?: boolean
     }
   /** Fallback for tools with nothing richer to show — the resolved parameters. */
   | { kind: 'text'; text: string }

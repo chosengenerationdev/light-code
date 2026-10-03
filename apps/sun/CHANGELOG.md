@@ -1,5 +1,11 @@
 # @chosengeneration/sun-light-code
 
+## 0.3.0
+
+- **Reach beyond the codebase** (Settings, on by default): read any drive or shared folder; write anywhere, asking every time outside the codebase, with the diff and a warning that Rollback cannot undo it. Keys, passwords and Windows folders stay off-limits.
+- **Parallel Rust file tools**: find files across drives and shares, summarise folders, find duplicates, read many files at once, and work through huge logs and CSV/Excel files part by part.
+- Carries Light Code 0.106.0.
+
 ## 0.2.1
 
 - Carries Light Code 0.105.0.

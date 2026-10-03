@@ -108,6 +108,12 @@ pub fn host_script() -> PathBuf {
     exe_dir.join("..").join("..").join("..").join("..").join("host").join("dist").join("cli.cjs")
 }
 
+/// sun-fs.exe, the parallel file helper, packed beside the exe (or built beside it in development).
+pub fn fast_fs() -> Option<PathBuf> {
+    let helper = std::env::current_exe().ok()?.parent()?.join("sun-fs.exe");
+    helper.is_file().then_some(helper)
+}
+
 /// rg.exe packed beside the exe by the build.
 pub fn bundled_ripgrep() -> Option<PathBuf> {
     let rg = std::env::current_exe().ok()?.parent()?.join("rg.exe");

@@ -1,5 +1,11 @@
 # @chosengeneration/light-code
 
+## 0.106.0
+
+### Minor Changes
+
+- `--reach-anywhere` and `--fast-fs` for Sun Light Code. Sun Light Code can let agents reach beyond the codebase (read any drive or share; every outside write asks) and adds parallel Rust file tools: find_files, read_many_files, big_file and query_table. The handbook explains both.
+
 ## 0.105.0
 
 ### Patch Changes

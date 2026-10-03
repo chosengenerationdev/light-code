@@ -169,6 +169,9 @@ export function decideFromPolicy(
    * ordinary edit.
    */
   if (ALWAYS_ASK_TOOLS.has(request.toolName)) return undefined
+  // A write outside the workspace (Sun's reach anywhere): no checkpoint covers it, so a person
+  // approves every one, whatever is auto-approved or always-allowed.
+  if (request.preview.kind === 'diff' && request.preview.outsideWorkspace === true) return undefined
 
   /*
    * Checked before the allowlist, before the category toggle, and before `approvals` is even
