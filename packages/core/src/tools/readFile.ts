@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import { normalizeForComparison } from '../fs/confine.js'
 import { countLines, formatBytes, readLineWindow, readTail, SMALL_FILE_BYTES } from './largeFile.js'
 import { resolveToolPath } from './paths.js'
+import { recordRead } from './readStamps.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -61,7 +61,7 @@ export const readFileTool: Tool<ReadFileParams> = {
     }
 
     // Marked read before any windowing: the model has seen this file, whichever part of it.
-    context.readFiles.add(normalizeForComparison(resolved.realPath))
+    await recordRead(context, resolved.realPath)
 
     try {
       if (size <= REQUIRE_WINDOW_BYTES) {

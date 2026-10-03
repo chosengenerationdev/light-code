@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { normalizeForComparison } from '../../fs/confine.js'
 import { resolveToolPath } from '../paths.js'
+import { changedSinceRead, recordWrite } from '../readStamps.js'
+import { diagnosticsAfterEdit } from '../diagnostics.js'
 import type { Tool, ToolPreview, ToolResult } from '../types.js'
 import { applyDiff } from './apply.js'
 
@@ -32,6 +34,9 @@ export const applyDiffTool: Tool<ApplyDiffParams> = {
       }
     }
 
+    const changed = await changedSinceRead(context, resolved.realPath, params.path)
+    if (changed !== undefined) return { content: changed, isError: true, path: params.path }
+
     let original: string
     try {
       original = await context.fs.readFile(resolved.realPath)
@@ -49,7 +54,8 @@ export const applyDiffTool: Tool<ApplyDiffParams> = {
     }
 
     await context.fs.writeFile(resolved.realPath, result.content)
-    return { content: result.message, path: params.path }
+    await recordWrite(context, resolved.realPath)
+    return { content: result.message + (await diagnosticsAfterEdit(context, resolved.realPath, params.path)), path: params.path }
   },
   async preview(params, context): Promise<ToolPreview> {
     const resolved = await resolveToolPath(context, params.path, { write: true })

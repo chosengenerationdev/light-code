@@ -2185,6 +2185,58 @@ searching for old mail. Five causes, fixed together; `office/outlookResilience.t
 **Not verified against a live Outlook** — Outlook is installed on the development machine but not
 running, and starting somebody's Outlook is not a build step.
 
+
+## 12z. Language servers, and several agents in one folder (0.133.0)
+
+Asked for together: parallel agents per codebase (Sun) and LSP, "for many popular languages".
+
+- **Diagnostics come from whoever already has them.** `HostServices.diagnostics` is VS Code's own
+  (`apps/vscode/src/platform/diagnostics.ts`: open the document, wait for the next
+  `onDidChangeDiagnostics` or a quiet period) - every installed language extension already answers,
+  so the extension starts nothing. Hosts without an editor set `languageServers: true` and the bridge
+  builds an `LspManager` (`lsp/`): a hand-written Content-Length JSON-RPC client, a catalogue of ~25
+  languages with candidate servers each, found on PATH, **started lazily on the first file of that
+  language**, kept for the session, and remembered as failed after one failed start. Nothing is
+  downloaded (invariant 3 and the install rule both).
+- **After-edit diagnostics are appended to the edit's result**, best effort: a missing or slow server
+  adds nothing rather than failing an edit that already happened. `get_diagnostics` (read group)
+  checks other files. Both exist only where a provider exists - absent, not present and failing.
+- **`lsp` is user-scope only and NEVER_SHARED**: `servers.<lang>.command` names an executable,
+  `python.uvPath`'s threat exactly; and it describes this machine, not the team.
+- **Servers spell file URIs their own way, and matching by string heard nothing.** Measured against a
+  real pyright: it publishes `file:///c%3A/...` for a file opened as `file:///C:/...`, so every
+  report was dropped and pyright looked silent. Keys are `fileURLToPath`, lower-cased on Windows.
+  `lsp/client.test.ts`'s fake server respells URIs that way so it cannot come back.
+- **typescript-language-server needs a TypeScript with tsserver.js**; TypeScript 7 (native) has none
+  and the server refuses to start. The failure detail says so, and the handbook too.
+- Measured: cold start about 2s, later checks 0.7-0.8s, for both pyright and
+  typescript-language-server. `findOnPath` is memoised for a minute because the panel asks about
+  every candidate of every language and a PATH walk each was about a second.
+
+**Several agents in one folder** need two safeguards, both in core so any host can use them:
+
+- **Read stamps** (`tools/readStamps.ts`): every read records mtime:size; `write_to_file` and
+  `apply_diff` refuse when it changed since, and ask for a re-read. `apply_diff` already failed
+  safely on vanished text; `write_to_file` would have silently put back what another agent just
+  wrote. A stamp, not a hash, because it runs on every write. The session's own writes re-stamp.
+- **Per-file rollback** (`ShadowGit.restoreFiles`), used when `HostServices.sharedWorkspace`
+  (host flag `--shared-workspace`, always passed by Sun): only the files this chat changed are
+  restored or removed, so another chat's work survives. The whole-workspace restore stays the default
+  everywhere else.
+- **Found while testing it: rollback was rewriting line endings.** The shadow repo inherited the
+  user's global `core.autocrlf=true`, so an LF file came back CRLF; and a workspace `.gitattributes`
+  could apply eol rules too. `-c core.autocrlf=false` on every git call, and `* -text -filter -diff`
+  in the shadow repo's `info/attributes` (which outranks the workspace's), written on every snapshot so
+  existing shadow repos get it.
+
+**Sun's chat tabs**: each chat is its own host process (§14b's parallelism argument, one level down).
+The runtime key is the codebase id for the first chat and `<id>~<n>` for the others; `State::project`
+resolves either, so most of Sun needed no change. Extra chats are saved on the project; each keeps its
+history in `projects/<id>/chats/<n>`; config, secrets and the vault key are the codebase's. The
+sidebar rolls a codebase's chats up (liveliest phase, most urgent agent state); notifications name the
+chat. Closing a chat keeps its folder. Ctrl+T / Ctrl+W are forwarded from the pane like Sun's other
+shortcuts. **Verified by running it** with three chats on one codebase.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2861,6 +2913,8 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   are filtered again. Measured: a 100 MB, 2-million-line log inspected in 0.37 s and searched in 0.24 s;
   1 million CSV rows filtered, grouped and summed in 1.0 s (process start included).
   `ignore` is pinned to 0.4.23: later releases use let-chains while still claiming an older Rust.
+- **Several chats per codebase** (0.4.0): tabs, each its own host on the same folder and settings,
+  with stale-read refusal and per-file rollback - §12z.
 - **Not in Sun**: the debug-session tool and editor pickers, exactly as in the Node host.
 - Sun's version lives in `npm/package.json` and `native/Cargo.toml`; `build.mjs` refuses a mismatch
   (and 66).
@@ -3164,7 +3218,7 @@ the first run reported a failure that the source had already fixed.
 **Current phase:** **Shipped and in daily use**, which is now where most changes come from. Published to the Visual Studio Marketplace by manual upload — the Azure
 DevOps org creation demanded an Azure subscription, so `VSCE_PAT` does not exist and the Release
 workflow has never run. **0.118.0 is live as of 2026-09-26**, queried from the gallery — this paragraph said 0.104.0
-until then, stale again. The local manifest is **0.129.0**, packaged and smoke-tested at
+until then, stale again. The local manifest is **0.133.0**, packaged and smoke-tested at
 `apps/vscode/light-code-vscode-0.123.0.vsix`, unpublished.
 
 **Indexing lag is real and looks exactly like a failed upload.** 0.79.1 was uploaded and the

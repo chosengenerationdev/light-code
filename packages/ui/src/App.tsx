@@ -1,6 +1,7 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
 import { CUSTOM_ROLE_LIMIT, composeUserText, skillAliases, type MessageQuote, type Reaction } from '@light-code/core/browser'
 import type { CredentialSummary } from '@light-code/core/browser'
+import type { LanguageServersState } from './settings/LanguageServersSection.js'
 import type { S3Mirror } from './settings/S3Section.js'
 import type {
   AtlassianProductId,
@@ -435,6 +436,8 @@ export function App(props: AppProps): ReactElement {
   const [accentInherited, setAccentInherited] = useState(false)
   /** Saved credentials from Sun Light Code; undefined where the host has none to offer. */
   const [credentials, setCredentials] = useState<CredentialSummary[] | undefined>(undefined)
+  /** Language servers for after-edit diagnostics, as the host reports them. */
+  const [lsp, setLsp] = useState<LanguageServersState | undefined>(undefined)
   /**
    * Whether this host offers Excel, Outlook and the mail index.
    *
@@ -593,6 +596,8 @@ export function App(props: AppProps): ReactElement {
         setReviews({ items: message.items, canDecide: message.canDecide })
       } else if (message.type === 'credentials') {
         setCredentials(message.credentials)
+      } else if (message.type === 'lsp') {
+        setLsp({ provider: message.provider, settings: message.settings, languages: message.languages })
       } else if (message.type === 'variables') {
         setVariables({
           user: message.user,
@@ -1073,6 +1078,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestVariables' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestCredentials' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestLsp' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestReviews' } satisfies UiToHostMessage)
 
     return unsubscribe
@@ -2346,6 +2352,9 @@ export function App(props: AppProps): ReactElement {
                   type: 'setToolTimeout',
                   ...(seconds === undefined ? {} : { seconds }),
                 } satisfies UiToHostMessage),
+              lsp,
+              onSaveLsp: (settings) => props.transport.post({ type: 'saveLsp', settings } satisfies UiToHostMessage),
+              onRefreshLsp: () => props.transport.post({ type: 'requestLsp' } satisfies UiToHostMessage),
               onSetOffice: (excel, outlook) => {
                 setToolCatalogue((current) => ({
                   ...current,

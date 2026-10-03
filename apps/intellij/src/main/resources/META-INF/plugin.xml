@@ -24,6 +24,7 @@
   -->
   <change-notes><![CDATA[
     <ul>
+      <li>Light Code 0.107.0: after every edit the assistant sees the errors and warnings its change produced, from language servers installed on this machine (Python, Java, Kotlin, TypeScript, Go and more), and a get_diagnostics tool checks any file without a build; an edit made from a stale read is refused; rollback keeps line endings exactly.</li>
       <li>Light Code 0.106.0: the handbook covers Sun Light Code's reach and parallel file tools.</li>
       <li>Light Code 0.105.0: your keys can be brought into Sun Light Code with its "From IntelliJ / PyCharm" button; the Variables tab shows only your own variables; the handbook explains Sun Light Code, the new Windows app for several codebases at once; a secrets file shared by several processes no longer loses a key.</li>
       <li>Light Code 0.101.0: Outlook waits out a busy Outlook instead of failing, recovers from a hung request, and finds old mail by date range.</li>

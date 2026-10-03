@@ -284,6 +284,8 @@ export const NEVER_SHARED: readonly (keyof LightCodeConfig)[] = [
   // Labels everything this machine writes to a shared index. Importing one attributes your work
   // to somebody else, and nothing downstream would ever question it (§12e).
   'identity',
+  // Language-server programs found on this machine, by path - another machine has its own.
+  'lsp',
 ]
 
 export interface SectionSummary {

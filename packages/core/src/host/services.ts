@@ -1,3 +1,4 @@
+import type { DiagnosticsProvider } from '../lsp/manager.js'
 import type { ConfigStore } from '../platform/config.js'
 import type { HttpClient } from '../platform/http.js'
 import type { SecretStore } from '../platform/secrets.js'
@@ -170,6 +171,15 @@ export interface HostServices {
    * time. See `ToolExecutionContext.reach`. Absent everywhere else, so nothing changes there.
    */
   fileReach?: 'anywhere'
+  /**
+   * Other agents may be working in this codebase at the same time (Sun Light Code's chat tabs). Rollback
+   * then undoes only the files this chat's edit tools changed, never the whole workspace.
+   */
+  sharedWorkspace?: boolean
+  /** Diagnostics from the host's own language support - the extension passes VS Code's. */
+  diagnostics?: DiagnosticsProvider
+  /** Start installed language servers itself (Node host, Sun, PyCharm). Ignored when `diagnostics` is set. */
+  languageServers?: boolean
   /** Path to `sun-fs`, the parallel Rust file helper; its four tools are registered only when set. */
   fastFs?: string
   desktopNotify?: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => void

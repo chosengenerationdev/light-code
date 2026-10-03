@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { documentKindFor, extractDocument, DocumentError } from '../documents/extract.js'
-import { normalizeForComparison } from '../fs/confine.js'
 import { resolveToolPath } from './paths.js'
+import { recordRead } from './readStamps.js'
 import type { Tool, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -67,7 +67,7 @@ export const readDocumentTool: Tool<ReadDocumentParams> = {
      * one it has seen — otherwise the read-before-edit rule (§6) would refuse an edit to an
      * HTML file it had just read in full, which would be baffling.
      */
-    context.readFiles.add(normalizeForComparison(resolved.realPath))
+    await recordRead(context, resolved.realPath)
 
     if (extracted.text.trim().length === 0) {
       return {

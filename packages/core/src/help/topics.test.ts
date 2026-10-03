@@ -225,6 +225,11 @@ describe('finding the right topic', () => {
       ['my mcp server will not connect', 'mcp'],
       ['how do I use a jupyter notebook', 'jupyter'],
       ['how do I change which model it uses', 'providers'],
+      ['does it see type errors after an edit', 'diagnostics'],
+      ['how do I set up a language server for go', 'diagnostics'],
+      ['can it use pyright', 'diagnostics'],
+      ['can two agents work on the same codebase at once', 'sun'],
+      ['how do I open a second chat tab in sun', 'sun'],
     ]
     for (const [query, expected] of cases) {
       const content = await answer(query)

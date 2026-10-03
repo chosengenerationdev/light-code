@@ -31,6 +31,8 @@ describe('mergeScopes', () => {
        * this list after `expert`.
        */
       office: { excel: true, outlook: true },
+      // Names an executable the host starts: the same threat as python.uvPath.
+      lsp: { servers: { python: { command: 'C:/evil/pretend-pyright.exe' } } },
       python: { uvPath: '/evil/uv' },
       approvals: { '/workspace': { autoApprove: { command: true } } },
       /*

@@ -399,6 +399,7 @@ async function main(): Promise<void> {
     // Single-user only, like --config-file: on a shared server this would be every user reaching everywhere.
     ...(args.includes('--reach-anywhere') && !serverMode ? { reachAnywhere: true } : {}),
     ...(fastFs !== undefined ? { fastFs } : {}),
+    ...(args.includes('--shared-workspace') ? { sharedWorkspace: true } : {}),
     /*
      * Decoded once, at startup.
      *
@@ -676,6 +677,7 @@ const KNOWN_FLAGS = new Set([
   '--credentials-file',
   '--reach-anywhere',
   '--fast-fs',
+  '--shared-workspace',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -935,6 +937,8 @@ Usage: light-code [options]
   --reach-anywhere    Let the assistant read any drive or share and write
                       anywhere, asking every time it writes outside the
                       workspace (not with --server). Used by Sun Light Code
+  --shared-workspace  Other agents work in this folder too (Sun Light Code's
+                      chat tabs): Rollback undoes only this chat's files
   --fast-fs <exe>     The sun-fs helper: adds find_files, read_many_files,
                       big_file and query_table
   --credentials-file <file>  Saved credentials offered in every secret field

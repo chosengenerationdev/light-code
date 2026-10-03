@@ -2,6 +2,8 @@ import path from 'node:path'
 import { z } from 'zod'
 import { normalizeForComparison } from '../fs/confine.js'
 import { resolveToolPath } from './paths.js'
+import { changedSinceRead, recordWrite } from './readStamps.js'
+import { diagnosticsAfterEdit } from './diagnostics.js'
 import type { Tool, ToolPreview, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -34,13 +36,21 @@ export const writeToFileTool: Tool<WriteToFileParams> = {
       }
     }
 
+    if (exists) {
+      const changed = await changedSinceRead(context, resolved.realPath, params.path)
+      if (changed !== undefined) return { content: changed, isError: true, path: params.path }
+    }
+
     if (!exists) {
       await context.fs.mkdir(path.dirname(resolved.realPath))
     }
     await context.fs.writeFile(resolved.realPath, params.content)
-    context.readFiles.add(normalizeForComparison(resolved.realPath))
+    await recordWrite(context, resolved.realPath)
 
-    return { content: `Wrote ${params.content.length} characters to "${params.path}".`, path: params.path }
+    return {
+      content: `Wrote ${params.content.length} characters to "${params.path}".` + (await diagnosticsAfterEdit(context, resolved.realPath, params.path)),
+      path: params.path,
+    }
   },
   async preview(params, context): Promise<ToolPreview> {
     const resolved = await resolveToolPath(context, params.path, { write: true })

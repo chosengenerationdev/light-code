@@ -1,5 +1,12 @@
 # @chosengeneration/sun-light-code
 
+## 0.4.0
+
+- **Several chats per codebase.** Tabs above the chat: + (or Ctrl+T) opens another chat on the same codebase — its own agent, working at the same time, with the same settings and keys. Rename with a double-click, close with × or Ctrl+W. The sidebar shows how many are working.
+- **Safe in parallel**: an edit is refused when the file changed since that chat read it, and Rollback undoes only the files that chat changed.
+- **Language servers**: after every edit the agent sees the errors its change produced, for every language with a server installed on this machine.
+- Carries Light Code 0.107.0.
+
 ## 0.3.0
 
 - **Reach beyond the codebase** (Settings, on by default): read any drive or shared folder; write anywhere, asking every time outside the codebase, with the diff and a warning that Rollback cannot undo it. Keys, passwords and Windows folders stay off-limits.

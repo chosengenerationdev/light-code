@@ -129,6 +129,9 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         .arg("120")
         .arg("--allow-frame-ancestor")
         .arg(&spec.frame_ancestor)
+        // Several chats may work in this folder at once: rollback restores only this chat's files,
+        // and an edit made from a stale read is refused.
+        .arg("--shared-workspace")
         .current_dir(&spec.workspace)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -266,6 +266,10 @@ import {
   type DocEntryKind,
   createNotifyTool,
   createFastFsTools,
+  getDiagnosticsTool,
+  LspManager,
+  type DiagnosticsProvider,
+  type LspSettings,
   parseNamespacedToolName,
   type ToolCatalogueEntry,
   syncVectorStores,
@@ -1666,6 +1670,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // Files read via read_file this session; write_to_file/apply_diff check this before
   // touching an existing file. Session-scoped, so it lives alongside the conversation.
   const readFiles = new Set<string>()
+  /** When each read file was read - see `tools/readStamps.ts`. Cleared with `readFiles`. */
+  const readStamps = new Map<string, string>()
+  /** Files this task's edit tools changed, for a per-chat rollback in a shared codebase. */
+  const changedFiles = new Set<string>()
   const denylist = new PathDenylist()
   /** Certificates are re-read every request; without this the same warning would repeat. */
   const warnedExpiries = new Set<string>()
@@ -2153,6 +2161,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * next message rather than needing a reload.
    */
   let cachedReadRoots: string[] = []
+  /** Language-server settings, read with the rest of the config. */
+  let cachedLsp: LspSettings = {}
+  /**
+   * Diagnostics: the host's own (VS Code), or language servers started here (Node host, Sun,
+   * PyCharm). Absent otherwise, and then neither the tool nor the after-edit report exists.
+   */
+  const diagnosticsProvider: DiagnosticsProvider | undefined =
+    services.diagnostics ??
+    (services.languageServers === true && workspaceRoot !== undefined
+      ? new LspManager(workspaceRoot, () => cachedLsp, storageDir, services.logSink)
+      : undefined)
 
   /**
    * Paths approved for this session only.
@@ -2655,6 +2674,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         : {}),
     }
     cachedMentionExcludes = config.filesystem?.excludeFromMentions
+    cachedLsp = config.lsp ?? {}
     cachedReadRoots = (config.filesystem?.readRoots ?? [])
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
@@ -3138,6 +3158,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * user is already reading the reply — and the description says so; but a scheduled run is
      * built from this same registry, and a run that could not report would be pointless.
      */
+    if (diagnosticsProvider !== undefined) combined.register(getDiagnosticsTool)
     // Sun Light Code's parallel file tools, where the host ships the helper.
     if (services.fastFs !== undefined) {
       for (const tool of createFastFsTools(services.fastFs)) combined.register(tool)
@@ -3793,6 +3814,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     conversation.restore(task.messages)
     readFiles.clear()
+    readStamps.clear()
+    changedFiles.clear()
     // Reactions point at the other conversation's messages; delivering them here would be nonsense.
     pendingReactions.clear()
     postPendingFeedback()
@@ -3827,6 +3850,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // The current task is already saved after each turn, so nothing needs flushing here.
     conversation.reset()
     readFiles.clear()
+    readStamps.clear()
+    changedFiles.clear()
     pendingReactions.clear()
     postPendingFeedback()
     resetExpertSpend()
@@ -4122,6 +4147,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         workspaceRoot,
         denylist,
         readFiles,
+        readStamps,
+        changedFiles,
+        ...(diagnosticsProvider !== undefined ? { diagnostics: diagnosticsProvider } : {}),
         readRoots: cachedReadRoots,
         ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
         // Resolved per turn by the host, so an edit applies to the next command rather than
@@ -9958,6 +9986,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     })
   }
 
+  /** The language servers panel: settings, and each language's server and state. */
+  function postLsp(): void {
+    post({
+      type: 'lsp',
+      provider: services.diagnostics !== undefined ? 'host' : diagnosticsProvider !== undefined ? 'servers' : 'none',
+      settings: cachedLsp,
+      languages: diagnosticsProvider?.status() ?? [],
+    })
+  }
+
   async function handleSaveNetwork(input: NetworkSettingsInput): Promise<void> {
     try {
       const certDir = input.certDir?.trim()
@@ -10418,14 +10456,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       return
     }
     try {
-      await shadowGit.restore(taskCheckpoint)
+      if (services.sharedWorkspace === true) {
+        /*
+         * Other chats may be editing this codebase right now (Sun). Restoring the whole workspace would
+         * undo their work too, so only the files this chat's edit tools changed go back. Changes made
+         * through shell commands cannot be attributed to a chat, and are said not to be undone.
+         */
+        const { restored, removed } = await shadowGit.restoreFiles(taskCheckpoint, [...changedFiles])
+        const files = [...restored, ...removed]
+        conversation.addUserMessage(
+          files.length === 0
+            ? 'I pressed Rollback, but your edit tools had changed no files in this codebase, so nothing was undone.'
+            : `I rolled back the files you changed: ${files.join(', ')}. Other chats' work and changes made by shell commands were left as they are.`,
+        )
+        ui.showInfo(files.length === 0 ? 'Nothing to roll back in this chat.' : `Rolled back ${String(files.length)} file(s) this chat changed.`)
+      } else {
+        await shadowGit.restore(taskCheckpoint)
+        // The model's view of the files is now stale — say so rather than letting it keep
+        // editing against content that no longer exists.
+        conversation.addUserMessage('I rolled the workspace back to its state before your edits.')
+        ui.showInfo('Workspace rolled back.')
+      }
       taskCheckpoint = undefined
-      // The model's view of the files is now stale — say so rather than letting it keep
-      // editing against content that no longer exists.
-      conversation.addUserMessage('I rolled the workspace back to its state before your edits.')
+      changedFiles.clear()
       readFiles.clear()
+      readStamps.clear()
       post({ type: 'rolledBack' })
-      ui.showInfo('Workspace rolled back.')
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     }
@@ -11803,6 +11859,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleSetPython', handleSetPython(message))
     } else if (message.type === 'requestNetwork') {
       reportFailure('postNetwork', postNetwork())
+    } else if (message.type === 'requestLsp') {
+      postLsp()
+    } else if (message.type === 'saveLsp') {
+      reportFailure(
+        'saveLsp',
+        (async () => {
+          await configManager.save('user', { lsp: message.settings })
+          cachedLsp = message.settings
+          postLsp()
+        })(),
+      )
     } else if (message.type === 'saveNetwork') {
       reportFailure('handleSaveNetwork', handleSaveNetwork(message.settings))
     } else if (message.type === 'requestExpert') {

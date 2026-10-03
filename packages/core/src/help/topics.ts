@@ -842,6 +842,8 @@ desktops of the same person; importing the file is how a second machine is set u
       'sidebar', 'sleep', 'idle', 'switch project', 'credentials', 'saved credential',
       'share keys', 'share api keys', 'pycharm', 'intellij keys', 'shared drive', 'network drive',
       'big log', 'large log', 'big csv', 'large csv', 'huge file', 'find files', 'duplicate files',
+      'several chats', 'two chats', 'parallel chats', 'parallel agents', 'chat tabs', 'new chat tab',
+      'two agents same codebase', 'same codebase at once', 'same codebase', 'second chat',
     ],
     body: `
 **Sun Light Code** is a Windows app holding every codebase you work on, each with its own Light Code
@@ -865,8 +867,15 @@ updates everything that uses it. Values are never shown again. Bring keys in fro
 "Light Code: Share API keys with Sun Light Code", from IntelliJ / PyCharm with the button on the
 Credentials page, or from another computer with Export / Import (a passphrase-encrypted file).
 
-**Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+B hide the sidebar (a strip of status
-dots stays), Ctrl+, Sun's settings.
+**Several chats per codebase**: the tabs above the chat. + (or Ctrl+T, or right-click → New chat) opens
+another chat on the same codebase — its own agent, working at the same time, with the same settings and
+keys. Double-click a tab to rename it; × or Ctrl+W closes it (its history is kept). Two safeguards make
+this safe: an edit is refused when the file changed since that chat read it (another chat, you, or any
+program edited it) — the agent re-reads and edits what is there now; and **Rollback undoes only the files
+that chat changed**, never another chat's work.
+
+**Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+T new chat, Ctrl+W close chat, Ctrl+B
+hide the sidebar (a strip of status dots stays), Ctrl+, Sun's settings.
 
 **Appearance**: Sun's Settings choose light, dark or system and an accent colour; every chat follows
 the theme. A codebase may keep its own accent — pick one in its Appearance tab — and its sidebar
@@ -1131,6 +1140,40 @@ A scheduled run can wait too, which is how a nightly job can watch something fin
 `,
   },
   {
+    id: 'diagnostics',
+    title: 'Language servers: compile and type errors after every edit',
+    keywords: [
+      'language server', 'language servers', 'lsp', 'diagnostics', 'type errors', 'compile errors',
+      'compiler errors', 'pyright', 'pylsp', 'gopls', 'rust-analyzer', 'clangd', 'jdtls',
+      'typescript-language-server', 'get_diagnostics', 'red squiggles', 'errors after edit',
+    ],
+    body: `
+After every edit, the result tells the assistant the **errors and warnings its change produced**, and
+\`get_diagnostics\` checks any file — without running a build. So a broken import or a type error is
+fixed in the same turn rather than found later.
+
+**In VS Code** this is VS Code's own language support: whatever language extensions you have installed
+already answer, nothing extra runs. To add a language, install its VS Code extension.
+
+**In the Node host, PyCharm / IntelliJ and Sun Light Code** Light Code starts language servers itself —
+the ones already installed on the machine, found on PATH, started the first time a file in that
+language is checked. Nothing is downloaded. Supported: Python (pyright, basedpyright, pylsp,
+jedi-language-server), TypeScript / JavaScript (typescript-language-server), Java (jdtls), C# (csharp-ls,
+OmniSharp), Go (gopls), Rust (rust-analyzer), C / C++ (clangd), Kotlin, PHP, Ruby, Swift, Dart, Scala,
+Lua, Bash, PowerShell, YAML, JSON, HTML, CSS, Terraform, Elixir, Haskell, Zig and SQL.
+
+**Settings → Tools → Language servers** lists each language with its state — running, available, not
+installed (with what to install), off or failed (with why) — and lets you turn one off or name the
+command to use (e.g. a server outside PATH). Unticking "Check edits with language servers" turns it off.
+In the config file: \`lsp.enabled\` and \`lsp.servers\` (a language set to false is off; otherwise
+\`{ "command": ..., "args": [...] }\`). User settings only — a repository cannot choose a program to run.
+
+A server's first check takes a few seconds while it indexes; later ones are under a second. The
+typescript-language-server needs a TypeScript 5 install (in the project or globally) — TypeScript 7
+ships no tsserver, and the panel shows that as the failure.
+`,
+  },
+  {
     id: 'checkpoints',
     /*
      * Not "undoing a change". A title word is weighted as though it were the subject, and
@@ -1158,6 +1201,10 @@ nothing, which is worse than not having one.
 **If a snapshot cannot be taken, the edit does not happen.** Editing anyway would leave you
 believing you can undo something you cannot. If \`git\` is missing entirely, checkpoints are
 disabled with a warning rather than the session breaking.
+
+**Where several chats share a codebase** (Sun Light Code's chat tabs, or a host started with
+\`--shared-workspace\`), Rollback restores only the files that chat changed, so another chat's work is
+kept; files outside the codebase are not covered either way.
 
 Conversations survive closing the panel, reloading the window and restarting the editor. A resumed
 task must **re-read a file before editing it**, deliberately: the file may have changed since the

@@ -1,5 +1,14 @@
 # @chosengeneration/light-code
 
+## 0.107.0
+
+### Minor Changes
+
+- **Language servers.** After every edit the assistant is told the errors and warnings its change produced, and `get_diagnostics` checks any file without a build. Language servers already installed on the machine are found on PATH and started on first use — Python, TypeScript/JavaScript, Java, C#, Go, Rust, C/C++, Kotlin, PHP, Ruby, Swift, Dart, Scala, Lua, Bash, PowerShell, YAML, JSON, HTML, CSS, Terraform, Elixir, Haskell, Zig and SQL. Nothing is downloaded. Settings → Tools → Language servers shows each one and lets you turn one off or name the command.
+- **An edit made from a stale read is refused**, so two agents (or an agent and you) never silently overwrite each other's change.
+- `--shared-workspace`: Rollback restores only the files this chat changed, for several agents working in one folder (Sun Light Code's chat tabs).
+- Rollback keeps line endings exactly; a global `core.autocrlf` no longer turns LF files into CRLF.
+
 ## 0.106.0
 
 ### Minor Changes

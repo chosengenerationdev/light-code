@@ -1,3 +1,4 @@
+import type { DiagnosticsProvider } from '../lsp/manager.js'
 import type { AskUserFormParams, FormAnswer } from './askUserForm.js'
 import type { z } from 'zod'
 import type { PathDenylist } from '../fs/denylist.js'
@@ -39,6 +40,16 @@ export interface ToolExecutionContext {
    * invariant, eliminates a class of hallucinated edits. See CLAUDE.md §6.
    */
   readFiles: Set<string>
+  /**
+   * What each read file looked like when read (`readStamps.ts`), so a write can refuse a file that
+   * changed since - another chat in Sun, the user, or another program. Optional: absent means the
+   * check is skipped, which is how tests and older call sites behave.
+   */
+  readStamps?: Map<string, string>
+  /** Files this chat's edit tools changed, so Rollback can undo only those when chats share a codebase. */
+  changedFiles?: Set<string>
+  /** Language-server diagnostics, where the host has them (`lsp/manager.ts`; VS Code's own in the extension). */
+  diagnostics?: DiagnosticsProvider
   /**
    * Extra directories tools may **read** from, beyond the workspace.
    *

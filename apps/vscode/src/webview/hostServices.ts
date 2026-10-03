@@ -2,6 +2,7 @@ import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
+import { createVSCodeDiagnostics } from '../platform/diagnostics.js'
 import { readDebugSession, startTrackingDebugSessions } from '../platform/debugSession.js'
 import { createRipgrepResolver } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
@@ -129,6 +130,8 @@ export function createVSCodeHostServices(
     },
     ui,
     workspaceRoot,
+    // Diagnostics from the language support VS Code already runs; nothing is started for this.
+    diagnostics: createVSCodeDiagnostics(),
     storageDir: context.globalStorageUri.fsPath,
     /*
       * Asked per turn, not once. `context.extensionPath` names a version-stamped folder, and

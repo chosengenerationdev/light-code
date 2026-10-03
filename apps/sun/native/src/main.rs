@@ -167,6 +167,11 @@ enum Command {
     /// Keys the IntelliJ / PyCharm plugin's Node host keeps: listed by name, imported on confirm.
     ScanJetBrains,
     ImportJetBrains { indexes: Vec<usize> },
+    /// Another chat on a codebase: its own agent, same folder, settings and keys.
+    NewChat { id: String },
+    /// Close an extra chat: its agent stops; its history stays in its folder.
+    CloseChat { id: String },
+    RenameChat { id: String, name: String },
 }
 
 fn main() {
@@ -431,6 +436,7 @@ impl App {
                         "configSource": p.config_source,
                         "keepAwake": p.keep_awake,
                         "accent": p.accent,
+                        "chats": p.chats,
                         "hasWorkspaceConfig": configs::has_workspace_config(&p.path),
                         "missing": !Path::new(&p.path).is_dir(),
                     })
@@ -545,7 +551,9 @@ impl App {
             }
             Command::Add { path, name, mode, source } => self.add(path, name, mode, source, webview),
             Command::Remove { id } => {
-                self.runtime.remove(&id);
+                for key in self.state.chat_keys(&id) {
+                    self.runtime.remove(&key);
+                }
                 self.state.projects.retain(|p| p.id != id);
                 if self.active.as_deref() == Some(id.as_str()) {
                     self.active = None;
@@ -623,10 +631,12 @@ impl App {
                         }
                         self.state.save(&self.paths);
                         self.push_projects(webview);
-                        // The host reads its settings file once, at start.
-                        if self.runtime.get(&id).map(|r| r.process.is_some()).unwrap_or(false) {
-                            self.stop(&id, Phase::Stopped);
-                            self.start(&id, webview);
+                        // The host reads its settings file once, at start - every chat's host.
+                        for key in self.state.chat_keys(&id) {
+                            if self.runtime.get(&key).map(|r| r.process.is_some()).unwrap_or(false) {
+                                self.stop(&key, Phase::Stopped);
+                                self.start(&key, webview);
+                            }
                         }
                     }
                     Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
@@ -759,6 +769,44 @@ impl App {
                     Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
                 }
             }
+            Command::NewChat { id } => {
+                let Some(p) = self.state.project_mut(&id) else { return };
+                let next = p.chats.iter().map(|c| c.id).max().unwrap_or(1) + 1;
+                p.chats.push(state::Chat { id: next, name: format!("Chat {next}") });
+                let key = format!("{}~{}", p.id, next);
+                self.state.save(&self.paths);
+                self.push_projects(webview);
+                self.select(&key, webview);
+                send(webview, json!({ "type": "select", "id": key }));
+            }
+            Command::CloseChat { id } => {
+                let Some(chat) = state::chat_of(&id).and_then(|c| c.parse::<u32>().ok()) else { return };
+                self.stop(&id, Phase::Stopped);
+                self.runtime.remove(&id);
+                if let Some(p) = self.state.project_mut(&id) {
+                    p.chats.retain(|c| c.id != chat);
+                }
+                let first = state::project_of(&id).to_string();
+                if self.active.as_deref() == Some(id.as_str()) {
+                    self.select(&first, webview);
+                    send(webview, json!({ "type": "select", "id": first }));
+                }
+                self.state.save(&self.paths);
+                self.push_projects(webview);
+                send(webview, json!({ "type": "removed", "id": id }));
+                send(webview, self.statuses());
+            }
+            Command::RenameChat { id, name } => {
+                let name = name.trim().to_string();
+                let chat = state::chat_of(&id).and_then(|c| c.parse::<u32>().ok());
+                if let (false, Some(chat)) = (name.is_empty(), chat) {
+                    if let Some(c) = self.state.project_mut(&id).and_then(|p| p.chats.iter_mut().find(|c| c.id == chat)) {
+                        c.name = name;
+                    }
+                    self.state.save(&self.paths);
+                    self.push_projects(webview);
+                }
+            }
             Command::ProjectAccent { id, accent } => {
                 let valid = accent.filter(|a| a.len() == 7 && a.starts_with('#') && a[1..].chars().all(|c| c.is_ascii_hexdigit()));
                 if let Some(p) = self.state.project_mut(&id) {
@@ -843,6 +891,7 @@ impl App {
             keep_awake: false,
             last_used: state::now_millis(),
             accent: None,
+            chats: Vec::new(),
         });
         self.state.save(&self.paths);
         self.push_projects(webview);
@@ -851,7 +900,7 @@ impl App {
     }
 
     fn select(&mut self, id: &str, webview: &WebView) {
-        if self.state.project(id).is_none() {
+        if !self.state.has_chat(id) {
             return;
         }
         self.active = Some(id.to_string());
@@ -962,10 +1011,10 @@ impl App {
                 send(webview, json!({ "type": "unload", "id": id }));
                 send(webview, self.statuses());
                 if self.state.settings.notifications {
-                    if let Some(p) = self.state.project(&id) {
+                    if let Some(title) = self.state.chat_title(&id) {
                         let proxy = self.proxy.clone();
                         let pid = id.clone();
-                        system::notify(&p.name, "The agent stopped unexpectedly.", Some("Open Sun to see why and restart it."), &self.icon_file, &[], move |action| {
+                        system::notify(&title, "The agent stopped unexpectedly.", Some("Open Sun to see why and restart it."), &self.icon_file, &[], move |action| {
                             let _ = proxy.send_event(UserEvent::Toast { id: pid.clone(), action });
                         });
                     }
@@ -977,7 +1026,7 @@ impl App {
                         rt.unread = true;
                     }
                 }
-                let Some(p) = self.state.project(&id) else { return };
+                let Some(title) = self.state.chat_title(&id) else { return };
                 if !self.state.settings.notifications {
                     return;
                 }
@@ -989,7 +1038,7 @@ impl App {
                     buttons.push(("Open report", action));
                 }
                 let detail = if level == "warning" { Some("Warning") } else { None };
-                system::notify(&p.name, &message, detail, &self.icon_file, &buttons, move |action| {
+                system::notify(&title, &message, detail, &self.icon_file, &buttons, move |action| {
                     let _ = proxy.send_event(UserEvent::Toast { id: pid.clone(), action });
                 });
                 send(webview, self.statuses());
@@ -1006,11 +1055,11 @@ impl App {
         if away && (finished || (changed && agent == "attention")) {
             rt.unread = true;
             if self.state.settings.notifications {
-                if let Some(p) = self.state.project(id) {
+                if let Some(title) = self.state.chat_title(id) {
                     let body = if agent == "attention" { "Waiting for your approval." } else { "The agent has finished." };
                     let proxy = self.proxy.clone();
                     let pid = id.to_string();
-                    system::notify(&p.name, body, None, &self.icon_file, &[], move |action| {
+                    system::notify(&title, body, None, &self.icon_file, &[], move |action| {
                         let _ = proxy.send_event(UserEvent::Toast { id: pid.clone(), action });
                     });
                 }
@@ -1036,9 +1085,13 @@ impl App {
                         && rt.last_activity.elapsed() >= limit
                         && self.active.as_deref() != Some(id.as_str())
                 })
-                .filter_map(|(id, _)| self.state.project(id))
-                .filter(|p| !p.keep_awake && !configs::has_active_schedules(&p.config_file, &p.path))
-                .map(|p| p.id.clone())
+                .filter(|(id, _)| {
+                    self.state
+                        .project(id)
+                        .map(|p| !p.keep_awake && !configs::has_active_schedules(&p.config_file, &p.path))
+                        .unwrap_or(false)
+                })
+                .map(|(id, _)| id.clone())
                 .collect();
             for id in sleepy {
                 self.stop(&id, Phase::Sleeping);
@@ -1055,7 +1108,7 @@ impl App {
             return;
         }
         self.launched = true;
-        let first = self.state.settings.last_project.clone().filter(|id| self.state.project(id).is_some());
+        let first = self.state.settings.last_project.clone().filter(|id| self.state.has_chat(id));
         if let Some(id) = &first {
             let _ = self.proxy.send_event(UserEvent::Select(id.clone()));
         }

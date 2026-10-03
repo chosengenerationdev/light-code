@@ -5,6 +5,8 @@ import type { ToolCatalogueEntry } from '@light-code/core/browser'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
+import { LanguageServersSection, type LanguageServersState } from './LanguageServersSection.js'
+import type { LspSettings } from '@light-code/core/browser'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -55,6 +57,10 @@ export interface ToolsTabProps {
    * with a pasted config — but that is the host's problem, not the reader's: one box per row.
    */
   onSetToolTimeoutFor: (name: string, seconds?: number) => void
+  /** Language servers for after-edit diagnostics; undefined until the host answers. */
+  lsp?: LanguageServersState | undefined
+  onSaveLsp?: (settings: LspSettings) => void
+  onRefreshLsp?: () => void
 }
 
 const SOURCE_LABELS: Record<ToolCatalogueEntry['source'], string> = {
@@ -205,6 +211,8 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
       )}
 
       <OfficeSection office={props.office} onSet={props.onSetOffice} />
+
+      <LanguageServersSection lsp={props.lsp} onSave={(settings) => props.onSaveLsp?.(settings)} onRefresh={() => props.onRefreshLsp?.()} />
 
 
       <TimeoutSection value={props.toolTimeoutSeconds} onSet={props.onSetToolTimeout} />

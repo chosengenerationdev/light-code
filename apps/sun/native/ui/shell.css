@@ -506,6 +506,131 @@ kbd {
   box-shadow: 0 0 0 2px var(--side-bg), 0 0 0 4px var(--accent);
 }
 
+/* ─── Chat tabs ─────────────────────────────────────────────────────────── */
+
+/* Several chats per codebase: a thin strip above the pane, flush with it. */
+.tabs {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.main.with-tabs .panes {
+  top: 32px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 200px;
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.tab .dot {
+  position: static;
+  width: 7px;
+  height: 7px;
+  border: 0;
+  flex: none;
+}
+
+.tab .dot.stopped,
+.tab .dot.sleeping {
+  display: block;
+  background: var(--line-strong);
+}
+
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 0.7;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+
+.tab-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tab-rename {
+  width: 110px;
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tab-new {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  margin: 4px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: default;
+}
+
+.tab-new:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.tab-new svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* ─── Panes ──────────────────────────────────────────────────────────────── */
 
 .panes {

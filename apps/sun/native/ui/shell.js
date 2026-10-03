@@ -47,6 +47,7 @@ const ICONS = {
   link: '<path d="M6.75 9.25a3 3 0 0 0 4.24 0l2-2a3 3 0 0 0-4.24-4.24l-.75.75"/><path d="M9.25 6.75a3 3 0 0 0-4.24 0l-2 2a3 3 0 0 0 4.24 4.24l.75-.75"/>',
   copy: '<rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5"/><path d="M10.75 5.25v-1.5c0-.83-.67-1.5-1.5-1.5h-5.5c-.83 0-1.5.67-1.5 1.5v5.5c0 .83.67 1.5 1.5 1.5h1.5"/>',
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   alert: '<path d="M8 1.75 14.5 13.5h-13z"/><path d="M8 6.25v3.5M8 11.6v.01"/>',
 }
 
@@ -59,7 +60,10 @@ const model = {
   statuses: {},
   urls: {},
   settings: {},
+  /** The chat on screen: a codebase id for its first chat, `<id>~<n>` for the others. */
   active: undefined,
+  /** The chat last open in each codebase, so clicking the codebase returns to it. */
+  lastChat: {},
   version: '',
   hasSource: false,
   dataFolder: '',
@@ -89,6 +93,7 @@ const HANDLERS = {
   },
   projects(m) {
     model.projects = m.projects
+    renderTabs()
     renderList()
     renderEmpty()
     renderPanes()
@@ -104,6 +109,7 @@ const HANDLERS = {
     model.totalMemory = m.totalMemory
     if (changed && !busyEditing()) renderList()
     if (changed) renderPanes()
+    if (changed) renderTabs()
     renderMemory()
   },
   url(m) {
@@ -117,17 +123,23 @@ const HANDLERS = {
     renderPanes()
   },
   removed(m) {
-    delete model.urls[m.id]
-    $(`.pane[data-id="${m.id}"]`)?.remove()
-    if (model.active === m.id) {
+    // A codebase takes all its chats with it; a chat key takes only itself.
+    const gone = (key) => key === m.id || (!m.id.includes('~') && projectOf(key) === m.id)
+    for (const key of Object.keys(model.urls)) if (gone(key)) delete model.urls[key]
+    for (const pane of panes.querySelectorAll('.pane')) if (gone(pane.dataset.id)) pane.remove()
+    if (model.lastChat[projectOf(m.id)] === m.id) delete model.lastChat[projectOf(m.id)]
+    if (model.active !== undefined && gone(model.active)) {
       model.active = undefined
-      const next = model.projects[0]
-      if (next !== undefined) select(next.id)
+      const next = model.projects.find((p) => p.id !== m.id)
+      if (next !== undefined) openProject(next.id)
     }
     renderEmpty()
+    renderTabs()
   },
   select(m) {
     model.active = m.id
+    model.lastChat[projectOf(m.id)] = m.id
+    renderTabs()
     renderList()
     renderPanes()
     renderEmpty()
@@ -153,6 +165,7 @@ const HANDLERS = {
     if (!m.ok) return notice(m.text, 'error')
     closeModal()
     model.active = m.id
+    renderTabs()
     renderList()
     renderPanes()
   },
@@ -230,7 +243,7 @@ function applyAppearance() {
 function sendAppearance(frame) {
   const url = frame?.dataset.url
   if (url === undefined || frame.contentWindow === null) return
-  const project = model.projects.find((p) => p.id === frame.closest('.pane')?.dataset.id)
+  const project = model.projects.find((p) => p.id === projectOf(frame.closest('.pane')?.dataset.id ?? ''))
   const own = validHex(project?.accent)
   const message = { ...appearance(), ...(own ? { accent: project.accent } : {}), own }
   frame.contentWindow.postMessage({ source: 'sun', appearance: message }, new URL(url).origin)
@@ -333,16 +346,135 @@ const shortPath = (p) => {
 const busyEditing = () => dragId !== undefined || document.querySelector(".item-rename") !== null
 const statusOf = (id) => model.statuses[id] ?? { phase: 'stopped', agent: 'idle', memory: 0 }
 
+// ─── Chats ───────────────────────────────────────────────────────────────────
+//
+// Each codebase can hold several chats, each its own agent on the same folder, settings and keys.
+// The first chat is the codebase id itself; the others are `<id>~<n>`.
+
+const projectOf = (key) => key.split('~')[0]
+const chatKeys = (p) => [p.id, ...(p.chats ?? []).map((c) => `${p.id}~${c.id}`)]
+const chatName = (key) => {
+  const p = model.projects.find((x) => x.id === projectOf(key))
+  if (!key.includes('~')) return 'Chat 1'
+  return p?.chats?.find((c) => `${p.id}~${c.id}` === key)?.name ?? 'Chat'
+}
+const PHASE_RANK = ['stopped', 'sleeping', 'failed', 'starting', 'running']
+const AGENT_RANK = ['idle', 'busy', 'attention']
+
+/** A codebase's state across its chats: the liveliest phase, the most urgent agent state. */
+const projectStatus = (p) => {
+  const all = chatKeys(p).map(statusOf)
+  const first = statusOf(p.id)
+  const running = all.filter((s) => s.phase === 'running')
+  return {
+    phase: all.reduce((best, s) => (PHASE_RANK.indexOf(s.phase) > PHASE_RANK.indexOf(best) ? s.phase : best), first.phase),
+    agent: running.reduce((best, s) => (AGENT_RANK.indexOf(s.agent) > AGENT_RANK.indexOf(best) ? s.agent : best), 'idle'),
+    memory: all.reduce((sum, s) => sum + (s.memory ?? 0), 0),
+    unread: all.some((s) => s.unread),
+    error: first.error,
+    chats: all.length,
+    working: running.filter((s) => s.agent !== 'idle').length,
+  }
+}
+
+/** The sidebar dot for a codebase: its chats taken together. */
+const projectDot = (p) => {
+  const s = projectStatus(p)
+  return s.phase === 'running' ? (s.agent === 'idle' ? 'running' : s.agent) : s.phase
+}
+
+/** Opens a codebase at the chat last open in it. */
+function openProject(id) {
+  const p = model.projects.find((x) => x.id === id)
+  if (p === undefined) return
+  const last = model.lastChat[id]
+  select(last !== undefined && chatKeys(p).includes(last) ? last : id)
+}
+
+const tabs = $('#tabs')
+
+function renderTabs() {
+  const key = model.active
+  const p = key === undefined ? undefined : model.projects.find((x) => x.id === projectOf(key))
+  tabs.hidden = p === undefined
+  $('#main').classList.toggle('with-tabs', p !== undefined)
+  if (p === undefined) return tabs.replaceChildren()
+  tabs.replaceChildren(
+    ...chatKeys(p).map((k) => {
+      const s = statusOf(k)
+      const tab = el(
+        'button',
+        {
+          class: `tab${k === key ? ' active' : ''}`,
+          role: 'tab',
+          'aria-selected': String(k === key),
+          title: k.includes('~') ? 'Double-click to rename · middle-click to close' : 'The first chat',
+          onclick: () => select(k),
+          onauxclick: (e) => {
+            if (e.button === 1 && k.includes('~')) closeChat(k)
+          },
+          ondblclick: () => k.includes('~') && renameChat(k, tab),
+        },
+        el('span', { class: `dot ${dotClass(k)}` }),
+        el('span', { class: 'tab-name', text: chatName(k) }),
+        s.unread && k !== key ? el('span', { class: 'unread' }) : null,
+        k.includes('~')
+          ? el('span', {
+              class: 'tab-close',
+              title: 'Close this chat',
+              html: svg(ICONS.close),
+              onclick: (e) => {
+                e.stopPropagation()
+                closeChat(k)
+              },
+            })
+          : null,
+      )
+      return tab
+    }),
+    el('button', {
+      class: 'tab-new',
+      title: 'New chat (Ctrl+T) - another agent on this codebase',
+      'aria-label': 'New chat',
+      html: svg(ICONS.plus),
+      onclick: () => send('newChat', { id: p.id }),
+    }),
+  )
+}
+
+function closeChat(key) {
+  const s = statusOf(key)
+  if (s.phase === 'running' && s.agent !== 'idle' && !confirm(`${chatName(key)} is still working. Stop it and close the chat?`)) return
+  send('closeChat', { id: key })
+}
+
+function renameChat(key, tab) {
+  const name = $('.tab-name', tab)
+  const input = el('input', { class: 'tab-rename', value: chatName(key) })
+  name.replaceWith(input)
+  input.focus()
+  input.select()
+  const done = (save) => {
+    if (save && input.value.trim() !== '') send('renameChat', { id: key, name: input.value.trim() })
+    renderTabs()
+  }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') done(true)
+    if (e.key === 'Escape') done(false)
+  })
+  input.addEventListener('blur', () => done(true))
+}
+
 /** What the row says under the name: the agent's state when it has one, otherwise where it lives. */
 const describe = (project) => {
-  const s = statusOf(project.id)
+  const s = projectStatus(project)
   if (project.missing) return ['Folder not found', 'failed']
   if (s.phase === 'failed') return ['Agent stopped — open to see why', 'failed']
   if (s.phase === 'starting') return ['Starting…', 'busy']
   if (s.phase === 'sleeping') return ['Sleeping to save memory', '']
   if (s.phase === 'running' && s.agent === 'attention') return ['Needs your approval', 'attention']
-  if (s.phase === 'running' && s.agent === 'busy') return ['Working…', 'busy']
-  return [shortPath(project.path), '']
+  if (s.phase === 'running' && s.agent === 'busy') return [s.working > 1 ? `${s.working} chats working…` : 'Working…', 'busy']
+  return [s.chats > 1 ? `${s.chats} chats · ${shortPath(project.path)}` : shortPath(project.path), '']
 }
 
 const dotClass = (id) => {
@@ -360,19 +492,20 @@ function renderList() {
   list.replaceChildren(
     ...model.projects.map((p, index) => {
       const [sub, tone] = describe(p)
-      const s = statusOf(p.id)
+      const s = projectStatus(p)
+      const here = model.active !== undefined && projectOf(model.active) === p.id
       const face = avatar(p.name, '', accentOf(p))
-      face.append(el('span', { class: `dot ${dotClass(p.id)}` }))
+      face.append(el('span', { class: `dot ${projectDot(p)}` }))
       const row = el(
         'button',
         {
-          class: `item${p.id === model.active ? ' active' : ''}`,
+          class: `item${here ? ' active' : ''}`,
           role: 'option',
-          'aria-selected': String(p.id === model.active),
+          'aria-selected': String(here),
           'data-id': p.id,
           title: `${p.name}\n${p.path}${s.memory > 0 ? `\n${megabytes(s.memory)}` : ''}${index < 9 ? `\nCtrl+${index + 1}` : ''}`,
           draggable: 'true',
-          onclick: () => select(p.id),
+          onclick: () => openProject(p.id),
           oncontextmenu: (e) => {
             e.preventDefault()
             showMenu(p, e.clientX, e.clientY)
@@ -404,7 +537,7 @@ function renderList() {
         },
         face,
         el('span', { class: 'item-text' }, el('span', { class: 'item-name', text: p.name }), el('span', { class: `item-sub ${tone}`, text: sub })),
-        s.unread && p.id !== model.active ? el('span', { class: 'unread', title: 'Something happened here' }) : null,
+        s.unread && !here ? el('span', { class: 'unread', title: 'Something happened here' }) : null,
         s.phase === 'sleeping' ? el('span', { class: 'moon', html: svg(ICONS.moon), title: 'Sleeping' }) : null,
         p.keepAwake ? el('span', { class: 'pin', html: svg(ICONS.pin), title: 'Kept awake' }) : null,
       )
@@ -417,10 +550,10 @@ function renderList() {
 function renderRail() {
   $('#rail-list').replaceChildren(
     ...model.projects.map((p) => {
-      const face = avatar(p.name, p.id === model.active ? 'active' : '', accentOf(p))
-      face.append(el('span', { class: `dot ${dotClass(p.id)}` }))
+      const face = avatar(p.name, model.active !== undefined && projectOf(model.active) === p.id ? 'active' : '', accentOf(p))
+      face.append(el('span', { class: `dot ${projectDot(p)}` }))
       face.title = `${p.name} — ${describe(p)[0]}`
-      face.addEventListener('click', () => select(p.id))
+      face.addEventListener('click', () => openProject(p.id))
       face.addEventListener('contextmenu', (e) => {
         e.preventDefault()
         showMenu(p, e.clientX, e.clientY)
@@ -441,9 +574,12 @@ function renderEmpty() {
 }
 
 function select(id) {
-  if (model.projects.every((p) => p.id !== id)) return
+  const project = model.projects.find((p) => p.id === projectOf(id))
+  if (project === undefined || !chatKeys(project).includes(id)) return
   model.active = id
+  model.lastChat[project.id] = id
   send('select', { id })
+  renderTabs()
   renderList()
   renderPanes()
   // Focus follows: typing goes straight into that codebase's composer.
@@ -452,9 +588,9 @@ function select(id) {
 
 function selectRelative(step) {
   if (model.projects.length === 0) return
-  const at = model.projects.findIndex((p) => p.id === model.active)
+  const at = model.projects.findIndex((p) => model.active !== undefined && p.id === projectOf(model.active))
   const next = model.projects[(at + step + model.projects.length) % model.projects.length]
-  select(next.id)
+  openProject(next.id)
 }
 
 // ─── Sidebar: hide, show, resize ─────────────────────────────────────────────
@@ -499,21 +635,23 @@ $('#resizer').addEventListener('pointerdown', (event) => {
 const panes = $('#panes')
 
 function renderPanes() {
-  for (const project of model.projects) {
-    let pane = $(`.pane[data-id="${project.id}"]`, panes)
+  const keys = []
+  for (const project of model.projects) for (const key of chatKeys(project)) {
+    keys.push(key)
+    let pane = $(`.pane[data-id="${key}"]`, panes)
     if (pane === null) {
-      pane = el('div', { class: 'pane', 'data-id': project.id })
+      pane = el('div', { class: 'pane', 'data-id': key })
       panes.append(pane)
     }
-    pane.classList.toggle('active', project.id === model.active)
+    pane.classList.toggle('active', key === model.active)
 
-    const s = statusOf(project.id)
-    const url = model.urls[project.id]
+    const s = statusOf(key)
+    const url = model.urls[key]
     let frame = $('iframe', pane)
     if (url !== undefined && s.phase === 'running') {
       if (frame === null) {
         frame = el('iframe', {
-          title: `Light Code — ${project.name}`,
+          title: `Light Code — ${project.name}${key.includes('~') ? ` — ${chatName(key)}` : ''}`,
           allow: 'clipboard-read; clipboard-write',
           src: url,
         })
@@ -525,14 +663,14 @@ function renderPanes() {
         frame.src = url
       }
     }
-    renderPaneState(pane, project, s, frame !== null && s.phase === 'running')
+    renderPaneState(pane, project, s, frame !== null && s.phase === 'running', key)
   }
   for (const pane of panes.querySelectorAll('.pane')) {
-    if (model.projects.every((p) => p.id !== pane.dataset.id)) pane.remove()
+    if (!keys.includes(pane.dataset.id)) pane.remove()
   }
 }
 
-function renderPaneState(pane, project, s, live) {
+function renderPaneState(pane, project, s, live, key) {
   const want = project.missing
     ? 'missing'
     : live
@@ -577,7 +715,7 @@ function renderPaneState(pane, project, s, live) {
             ? 'It was idle, so its agent was stopped to save memory. Your chats are saved; waking it takes a moment.'
             : 'Start its agent to continue. Your chats are saved.',
       }),
-      el('div', { class: 'actions' }, el('button', { class: 'primary', text: want === 'sleeping' ? 'Wake up' : 'Start', onclick: () => send('start', { id: project.id }) })),
+      el('div', { class: 'actions' }, el('button', { class: 'primary', text: want === 'sleeping' ? 'Wake up' : 'Start', onclick: () => send('start', { id: key }) })),
     )
   } else if (want === 'missing') {
     state.append(
@@ -594,8 +732,8 @@ function renderPaneState(pane, project, s, live) {
       el(
         'div',
         { class: 'actions' },
-        el('button', { class: 'primary', text: 'Restart', onclick: () => send('restart', { id: project.id }) }),
-        el('button', { class: 'secondary', text: 'Open log', onclick: () => send('openLog', { id: project.id }) }),
+        el('button', { class: 'primary', text: 'Restart', onclick: () => send('restart', { id: key }) }),
+        el('button', { class: 'secondary', text: 'Open log', onclick: () => send('openLog', { id: key }) }),
       ),
     )
   }
@@ -606,17 +744,19 @@ function renderPaneState(pane, project, s, live) {
 window.addEventListener('message', (event) => {
   const data = event.data
   if (data === null || typeof data !== 'object' || data.source !== 'light-code') return
-  const project = model.projects.find((p) => $(`.pane[data-id="${p.id}"] iframe`)?.contentWindow === event.source)
+  const frame = [...panes.querySelectorAll('.pane iframe')].find((f) => f.contentWindow === event.source)
+  const key = frame?.closest('.pane')?.dataset.id
+  const project = key === undefined ? undefined : model.projects.find((p) => p.id === projectOf(key))
   if (project === undefined) return
-  const url = model.urls[project.id]
+  const url = model.urls[key]
   if (url === undefined || new URL(url).origin !== event.origin) return
   if (typeof data.state === 'string' && ['idle', 'busy', 'attention'].includes(data.state)) {
-    send('agentState', { id: project.id, state: data.state, finished: data.finished === true })
+    send('agentState', { id: key, state: data.state, finished: data.finished === true })
   }
   if (typeof data.shortcut === 'string') shortcut(data.shortcut)
   // An accent picked in that codebase's own Appearance tab, or null to follow Sun's again.
   if (data.accent === null || validHex(data.accent)) send('projectAccent', { id: project.id, accent: data.accent })
-  if (data.ready === true) sendAppearance($(`.pane[data-id="${project.id}"] iframe`))
+  if (data.ready === true) sendAppearance(frame)
 })
 
 // ─── Shortcuts ───────────────────────────────────────────────────────────────
@@ -626,11 +766,13 @@ function shortcut(name) {
   if (name === 'k') return openSwitcher()
   if (name === 'n') return openAdd()
   if (name === ',') return openSettings()
+  if (name === 't' && model.active !== undefined) return send('newChat', { id: projectOf(model.active) })
+  if (name === 'w' && model.active?.includes('~')) return closeChat(model.active)
   if (name === 'tab') return selectRelative(1)
   if (name === 'shift+tab') return selectRelative(-1)
   if (/^[1-9]$/.test(name)) {
     const project = model.projects[Number(name) - 1]
-    if (project !== undefined) select(project.id)
+    if (project !== undefined) openProject(project.id)
   }
 }
 
@@ -643,7 +785,7 @@ window.addEventListener(
     }
     if (!event.ctrlKey || event.altKey) return
     const key = event.key.toLowerCase()
-    if (['b', 'k', 'n', ',', 'tab'].includes(key) || /^[1-9]$/.test(key)) {
+    if (['b', 'k', 'n', ',', 'tab', 't', 'w'].includes(key) || /^[1-9]$/.test(key)) {
       event.preventDefault()
       shortcut(`${event.shiftKey && key === 'tab' ? 'shift+' : ''}${key}`)
     }
@@ -659,8 +801,10 @@ function closeMenu() {
 
 function showMenu(project, x, y) {
   closeMenu()
-  const s = statusOf(project.id)
+  const s = projectStatus(project)
   const running = s.phase === 'running' || s.phase === 'starting'
+  const each = (cmd) => () => chatKeys(project).forEach((id) => send(cmd, { id }))
+  const current = model.lastChat[project.id] ?? project.id
   const item = (icon, label, action, extra = {}) =>
     el(
       'button',
@@ -681,15 +825,16 @@ function showMenu(project, x, y) {
     item('vscode', 'Open in VS Code', () => send('openVsCode', { id: project.id })),
     item('explorer', 'Open in File Explorer', () => send('openExplorer', { id: project.id })),
     el('hr'),
+    item('plus', 'New chat', () => send('newChat', { id: project.id })),
     running
-      ? item('sleep', 'Sleep now', () => send('sleep', { id: project.id }))
-      : item('play', 'Start agent', () => send('start', { id: project.id })),
-    item('restart', 'Restart agent', () => send('restart', { id: project.id })),
+      ? item('sleep', s.chats > 1 ? 'Sleep all chats' : 'Sleep now', each('sleep'))
+      : item('play', 'Start agent', () => send('start', { id: current })),
+    item('restart', s.chats > 1 ? 'Restart all chats' : 'Restart agent', each('restart')),
     item('pin', 'Keep awake', () => send('keepAwake', { id: project.id, on: !project.keepAwake }), { checked: project.keepAwake }),
     el('hr'),
     item('settings', 'Settings source…', () => openConfigChooser(project)),
     item('rename', 'Rename', () => startRename(project)),
-    item('log', 'View agent log', () => send('openLog', { id: project.id })),
+    item('log', 'View agent log', () => send('openLog', { id: current })),
     el('hr'),
     item('remove', 'Remove from Sun…', () => confirmRemove(project), { danger: true }),
   )

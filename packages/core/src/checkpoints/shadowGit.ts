@@ -43,7 +43,25 @@ export class ShadowGit {
   ) {}
 
   private gitArgs(args: string[]): string[] {
-    return ['--git-dir', this.shadowDir, '--work-tree', this.workspaceRoot, ...args]
+    // A snapshot keeps bytes exactly as they were. Without this the user's global core.autocrlf
+    // (true on most Windows installs) turned every LF file into CRLF on rollback.
+    return ['-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', '--git-dir', this.shadowDir, '--work-tree', this.workspaceRoot, ...args]
+  }
+
+  /**
+   * The workspace's own .gitattributes would still apply eol and filter rules; in the shadow repo's
+   * info/attributes, which outranks them, everything is just bytes. Written on every snapshot so a
+   * shadow repo made by an older version gets it too.
+   */
+  private async keepBytes(): Promise<void> {
+    const file = path.join(this.shadowDir, 'info', 'attributes')
+    try {
+      if ((await fs.readFile(file, 'utf8')).includes('* -text')) return
+    } catch {
+      // Not there yet.
+    }
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, '* -text -filter -diff\n')
   }
 
   /** Safe to call repeatedly; only the first call does any work. */
@@ -72,6 +90,7 @@ export class ShadowGit {
 
   async snapshot(): Promise<Checkpoint> {
     await this.init()
+    await this.keepBytes()
     await runGit(this.gitArgs(['add', '-A']), this.workspaceRoot)
 
     // `--allow-empty` so a snapshot with no changes since the last one still yields a
@@ -101,6 +120,32 @@ export class ShadowGit {
       throw new Error(`Could not roll back to checkpoint: ${restore.stderr || restore.stdout}`)
     }
     await runGit(this.gitArgs(['clean', '-fd']), this.workspaceRoot)
+  }
+
+  /**
+   * Restores only these files to the snapshot - for a codebase several chats share (Sun Light Code),
+   * where restoring everything would undo another chat's work too. A file that did not exist at the
+   * snapshot is removed, as the whole-workspace restore removes it. Paths outside the workspace are
+   * skipped: the snapshot never held them. Returns what was restored and what was removed.
+   */
+  async restoreFiles(checkpoint: Checkpoint, files: readonly string[]): Promise<{ restored: string[]; removed: string[] }> {
+    const restored: string[] = []
+    const removed: string[] = []
+    for (const file of files) {
+      const relative = path.relative(this.workspaceRoot, file)
+      if (relative.startsWith('..') || path.isAbsolute(relative)) continue
+      const spec = relative.split(path.sep).join('/')
+      const existed = await runGit(this.gitArgs(['cat-file', '-e', `${checkpoint.commit}:${spec}`]), this.workspaceRoot)
+      if (existed.code === 0) {
+        const result = await runGit(this.gitArgs(['restore', '--source', checkpoint.commit, '--worktree', '--', spec]), this.workspaceRoot)
+        if (result.code !== 0) throw new Error(`Could not roll back ${spec}: ${result.stderr || result.stdout}`)
+        restored.push(spec)
+      } else {
+        await fs.rm(file, { force: true })
+        removed.push(spec)
+      }
+    }
+    return { restored, removed }
   }
 
   /** Whether `git` is on PATH at all — checkpoints degrade to unavailable, not to a crash. */

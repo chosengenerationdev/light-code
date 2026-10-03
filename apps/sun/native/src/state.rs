@@ -43,6 +43,27 @@ pub struct Project {
     /// not in the config file, which may be linked to VS Code's.
     #[serde(default)]
     pub accent: Option<String>,
+    /// Chats beyond the first, each its own agent on the same folder, settings and keys. The first
+    /// chat is the codebase itself (runtime key = project id); these are `<id>~<chat id>`.
+    #[serde(default)]
+    pub chats: Vec<Chat>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Chat {
+    pub id: u32,
+    pub name: String,
+}
+
+/// The codebase a runtime key belongs to: `abc` and `abc~2` are both codebase `abc`.
+pub fn project_of(key: &str) -> &str {
+    key.split('~').next().unwrap_or(key)
+}
+
+/// The chat part of a runtime key, for the extra chats; None for a codebase's first chat.
+pub fn chat_of(key: &str) -> Option<&str> {
+    key.split_once('~').map(|(_, chat)| chat)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -123,8 +144,13 @@ impl Paths {
     pub fn secrets_file(&self) -> PathBuf {
         self.root.join("secrets.json")
     }
-    pub fn project_dir(&self, id: &str) -> PathBuf {
-        self.root.join("projects").join(id)
+    /// A codebase's data folder; an extra chat keeps its history in a folder of its own inside it.
+    pub fn project_dir(&self, key: &str) -> PathBuf {
+        let base = self.root.join("projects").join(project_of(key));
+        match chat_of(key) {
+            Some(chat) => base.join("chats").join(chat),
+            None => base,
+        }
     }
     pub fn webview_dir(&self) -> PathBuf {
         self.root.join("webview")
@@ -163,11 +189,37 @@ impl State {
         }
     }
 
-    pub fn project(&self, id: &str) -> Option<&Project> {
+    /// The codebase for a project id or a chat's runtime key.
+    pub fn project(&self, key: &str) -> Option<&Project> {
+        let id = project_of(key);
         self.projects.iter().find(|p| p.id == id)
     }
-    pub fn project_mut(&mut self, id: &str) -> Option<&mut Project> {
+    pub fn project_mut(&mut self, key: &str) -> Option<&mut Project> {
+        let id = project_of(key);
         self.projects.iter_mut().find(|p| p.id == id)
+    }
+    /// Whether this runtime key names a chat that exists: the codebase itself, or one of its chats.
+    pub fn has_chat(&self, key: &str) -> bool {
+        match (self.project(key), chat_of(key)) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(p), Some(chat)) => p.chats.iter().any(|c| c.id.to_string() == chat),
+        }
+    }
+    /// Every runtime key of a codebase: its first chat, then the others.
+    pub fn chat_keys(&self, id: &str) -> Vec<String> {
+        match self.project(id) {
+            None => Vec::new(),
+            Some(p) => std::iter::once(p.id.clone()).chain(p.chats.iter().map(|c| format!("{}~{}", p.id, c.id))).collect(),
+        }
+    }
+    /// A notification's title: the codebase, and the chat when it is not the first.
+    pub fn chat_title(&self, key: &str) -> Option<String> {
+        let p = self.project(key)?;
+        Some(match chat_of(key).and_then(|chat| p.chats.iter().find(|c| c.id.to_string() == chat)) {
+            Some(c) => format!("{} · {}", p.name, c.name),
+            None => p.name.clone(),
+        })
     }
 }
 
@@ -190,4 +242,53 @@ pub fn now_millis() -> u64 {
 /// A short id that sorts by creation and never repeats on one machine.
 pub fn new_id() -> String {
     format!("p{:x}{:04x}", now_millis(), std::process::id() as u16 ^ (now_millis() as u16).rotate_left(7))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(id: &str, chats: &[u32]) -> Project {
+        Project {
+            id: id.into(),
+            name: "Payments".into(),
+            path: "D:/work/payments".into(),
+            config_mode: ConfigMode::New,
+            config_file: "config.json".into(),
+            config_source: None,
+            keep_awake: false,
+            last_used: 0,
+            accent: None,
+            chats: chats.iter().map(|&n| Chat { id: n, name: format!("Chat {n}") }).collect(),
+        }
+    }
+
+    #[test]
+    fn a_chat_key_names_its_codebase_and_its_own_folder() {
+        assert_eq!(project_of("abc~3"), "abc");
+        assert_eq!(project_of("abc"), "abc");
+        assert_eq!(chat_of("abc"), None);
+        let paths = Paths { root: PathBuf::from("R") };
+        assert_eq!(paths.project_dir("abc"), PathBuf::from("R").join("projects").join("abc"));
+        assert_eq!(paths.project_dir("abc~3"), PathBuf::from("R").join("projects").join("abc").join("chats").join("3"));
+    }
+
+    #[test]
+    fn only_chats_that_exist_are_chats() {
+        let state = State { projects: vec![project("abc", &[2, 3])], settings: Settings::default() };
+        assert!(state.has_chat("abc"));
+        assert!(state.has_chat("abc~3"));
+        assert!(!state.has_chat("abc~4"));
+        assert!(!state.has_chat("zzz"));
+        assert_eq!(state.chat_keys("abc"), vec!["abc", "abc~2", "abc~3"]);
+        assert_eq!(state.chat_title("abc~2").as_deref(), Some("Payments · Chat 2"));
+        assert_eq!(state.chat_title("abc").as_deref(), Some("Payments"));
+    }
+
+    #[test]
+    fn a_saved_project_without_chats_still_loads() {
+        let json = r#"{"id":"abc","name":"P","path":"D:/p","configMode":"new","configFile":"c.json"}"#;
+        let p: Project = serde_json::from_str(json).unwrap();
+        assert!(p.chats.is_empty());
+    }
 }

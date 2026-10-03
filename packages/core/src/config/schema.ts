@@ -1061,6 +1061,22 @@ export const configSchema = z
       })
       .partial(),
     /**
+     * Language servers, for diagnostics after every edit (`lsp/`). On unless `enabled` is false.
+     * `servers` overrides the detected command per language, or `false` switches one off.
+     *
+     * **User-scope only** (invariant 5): it names programs to run. A repository able to set a command
+     * here would run a program of its choosing the first time a file in that language was edited.
+     */
+    lsp: z
+      .object({
+        enabled: z.boolean(),
+        servers: z.record(
+          z.string(),
+          z.union([z.literal(false), z.object({ command: z.string().min(1), args: z.array(z.string()).optional() })]),
+        ),
+      })
+      .partial(),
+    /**
      * A Confluence Data Center / Server site the assistant may search, read and write pages in.
      *
      * **User-scope only** (invariant 5): it names an endpoint and a credential that can publish

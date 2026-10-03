@@ -311,6 +311,8 @@ export interface SessionOptions {
   desktopNotify?: boolean
   /** Sun Light Code: read any drive or share, write anywhere with approval each time. */
   reachAnywhere?: boolean
+  /** Other chats share this codebase (Sun's chat tabs): Rollback undoes only this chat's files. */
+  sharedWorkspace?: boolean
   /** Sun Light Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
@@ -450,9 +452,12 @@ export async function createSession(
      * Windows, so a Linux server declines twice over and a Linux desktop declines once.
      */
     offersOffice: options.shared !== true,
+    // Installed language servers, started when a file in their language is first checked.
+    languageServers: true,
     // One person's own machine only: on a shared server the account reaching everywhere is the service's.
     ...(options.reachAnywhere === true && options.shared !== true ? { fileReach: 'anywhere' as const } : {}),
     ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
+    ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
     ...(options.desktopNotify === true
       ? {
           desktopNotify: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => {

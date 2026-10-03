@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
 import { z } from 'zod'
-import { normalizeForComparison } from '../fs/confine.js'
 import { isSecretPath, SECRET_FOLDERS } from '../fs/reach.js'
 import { formatBytes } from './largeFile.js'
 import { resolveToolPath } from './paths.js'
+import { recordRead } from './readStamps.js'
 import type { Tool, ToolExecutionContext, ToolResult } from './types.js'
 
 /**
@@ -240,7 +240,7 @@ export function createFastFsTools(exe: string): Tool[] {
         const asked = files[i]?.asked ?? f.path
         if (f.error !== undefined) return `## ${asked}\nCould not read: ${f.error}`
         if (f.binary === true) return `## ${asked}\nBinary file (${formatBytes(f.size ?? 0)}) — not shown. Use big_file inspect or query_table for spreadsheets.`
-        context.readFiles.add(normalizeForComparison(f.path))
+        void recordRead(context, f.path)
         const start = f.startLine ?? 1
         const body = (f.lines ?? []).map((line, n) => `${String(start + n).padStart(6)}\t${line}`).join('\n')
         return `## ${asked}\n${body}${f.more === true ? `\n… more follows; read on with fromLine ${String(start + (f.lines?.length ?? 0))}.` : ''}`

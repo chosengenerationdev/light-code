@@ -113,7 +113,8 @@ const reportState = (next: typeof agentState, finished = false): void => {
 /*
  * Sun's own shortcuts, passed up. Keystrokes in a frame never reach the page around it, and focus
  * is almost always here, in the composer — so without this Ctrl+B and Ctrl+K would work only after
- * clicking the sidebar. Only these combinations, which the chat itself does not use.
+ * clicking the sidebar. Only these combinations, which the chat itself does not use. Ctrl+T and
+ * Ctrl+W open and close a chat tab.
  */
 if (embedder !== undefined) {
   window.addEventListener(
@@ -122,7 +123,7 @@ if (embedder !== undefined) {
       if (!event.ctrlKey || event.altKey || event.metaKey) return
       const key = event.key.toLowerCase()
       const shortcut =
-        key === 'b' || key === 'k' || key === 'n' || key === ',' || /^[1-9]$/.test(key) || key === 'tab'
+        key === 'b' || key === 'k' || key === 'n' || key === 't' || key === 'w' || key === ',' || /^[1-9]$/.test(key) || key === 'tab'
           ? `${event.shiftKey ? 'shift+' : ''}${key}`
           : undefined
       if (shortcut === undefined) return

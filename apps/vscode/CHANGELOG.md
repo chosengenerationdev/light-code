@@ -1,5 +1,13 @@
 # light-code-vscode
 
+## 0.133.0
+
+### Minor Changes
+
+- **Errors after every edit.** An edit's result now tells the assistant the errors and warnings its change produced, from VS Code's own language support (whatever language extensions you have), and the new `get_diagnostics` tool checks any file without running a build. Settings → Tools → Language servers says where they come from.
+- **An edit made from a stale read is refused.** If a file changed after the assistant read it — you, another program or another agent edited it — `write_to_file` and `apply_diff` ask it to read again rather than overwrite what is there now.
+- **Rollback keeps line endings exactly.** The checkpoint snapshot was affected by a global `core.autocrlf` (true on most Windows machines) and could turn LF files into CRLF on rollback.
+
 ## 0.132.0
 
 ### Patch Changes

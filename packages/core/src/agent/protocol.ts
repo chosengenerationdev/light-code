@@ -10,6 +10,7 @@ import type { Schedule } from '../schedule/types.js'
 import type { ExpertPricing } from '../expert/pricing.js'
 import type { ResolvedVariable, SessionVariable } from '../session/variables.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
+import type { LanguageServerStatus, LspSettings } from '../lsp/manager.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
@@ -585,6 +586,9 @@ export type UiToHostMessage =
   | { type: 'requestVariables' }
   /** Sun Light Code's saved credentials, for the settings pickers. Other hosts do not answer. */
   | { type: 'requestCredentials' }
+  /** The language servers panel. */
+  | { type: 'requestLsp' }
+  | { type: 'saveLsp'; settings: LspSettings }
   /* The review queue. Administrator-only except for listing, which shows an author their own. */
   | { type: 'requestReviews' }
   | { type: 'decideReview'; id: string; approved: boolean; reason?: string }
@@ -1287,6 +1291,11 @@ export type HostToUiMessage =
     }
   /** Saved credentials a secret field can use: labels and kinds, never values (invariant 7). */
   | { type: 'credentials'; credentials: CredentialSummary[] }
+  /**
+   * Diagnostics support: `host` when the host's own language support answers (VS Code), `servers` when
+   * installed language servers are started here, `none` otherwise.
+   */
+  | { type: 'lsp'; provider: 'host' | 'servers' | 'none'; settings: LspSettings; languages: LanguageServerStatus[] }
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */

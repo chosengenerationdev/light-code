@@ -210,6 +210,7 @@ export {
   type AtlassianDefaultField,
   type AtlassianProductInfo,
 } from './atlassian/products.js'
+export type { LanguageServerStatus, LspSettings } from './lsp/manager.js'
 export {
   credentialChoices,
   describePointer,

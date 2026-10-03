@@ -122,6 +122,8 @@ export interface ServerOptions {
   desktopNotify?: boolean
   /** See `SessionOptions.reachAnywhere`. */
   reachAnywhere?: boolean
+  /** See `SessionOptions.sharedWorkspace`. */
+  sharedWorkspace?: boolean
   /** See `SessionOptions.fastFs`. */
   fastFs?: string
   /** See `SessionOptions.secretsKey`. */
@@ -461,6 +463,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.desktopNotify === true ? { desktopNotify: true } : {}),
       ...(options.secretsKey !== undefined ? { secretsKey: options.secretsKey } : {}),
       ...(options.reachAnywhere === true ? { reachAnywhere: true } : {}),
+      ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
       ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,
