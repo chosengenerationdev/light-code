@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { Select } from '../Select.js'
+import { SecretInput } from './CredentialPicker.js'
 import {
   colors,
   labelStyle,
@@ -273,23 +274,11 @@ export function S3Section(props: S3SectionProps): ReactElement {
                 blank means "unchanged" rather than "clear". Read the other way, a save about the
                 region would wipe the key on the way past.
               */}
-              <input
-                type="password"
-                value={secret}
-                spellCheck={false}
-                onChange={(event) => setSecret(event.target.value)}
-                style={textFieldStyle()}
-              />
+              <SecretInput value={secret} onChange={setSecret} />
               <label style={labelStyle()}>
                 Session token <span style={{ color: colors.muted, fontWeight: 400 }}>(only for temporary credentials)</span>
               </label>
-              <input
-                type="password"
-                value={sessionToken}
-                spellCheck={false}
-                onChange={(event) => setSessionToken(event.target.value)}
-                style={textFieldStyle()}
-              />
+              <SecretInput value={sessionToken} onChange={setSessionToken} />
               <label style={labelStyle()}>
                 Endpoint <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
               </label>

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import { replaceFile } from '@light-code/core'
 import path from 'node:path'
 import type { SecretStore } from '@light-code/core'
+import { isVaultEnvelope, openSecrets, sealSecrets } from './vaultCrypto.js'
 
 /**
  * Secrets in a file with owner-only permissions.
@@ -33,7 +34,22 @@ export class FileSecretStore implements SecretStore {
   /** Serialises writes: two concurrent saves would otherwise lose one another's keys. */
   private queue: Promise<void> = Promise.resolve()
 
-  constructor(private readonly filePath: string) {}
+  /**
+   * Set when the file is encrypted and could not be opened - no key, or the wrong one. Writes are
+   * then refused: treating it as empty, as an unreadable plain file is, would replace every saved
+   * key with whatever was saved next.
+   */
+  private sealedShut = false
+
+  /**
+   * `key` encrypts the file (Sun Light Code; see `vaultCrypto.ts`). Without one it is plain JSON,
+   * as it always was. A plain file read with a key is taken as it is and encrypted on the next save,
+   * which is how existing secrets move into the vault.
+   */
+  constructor(
+    private readonly filePath: string,
+    private readonly key?: Buffer,
+  ) {}
 
   private async currentStamp(): Promise<string | undefined> {
     try {
@@ -50,8 +66,23 @@ export class FileSecretStore implements SecretStore {
     this.stamp = stamp
     try {
       const raw = await fs.readFile(this.filePath, 'utf8')
-      const parsed: unknown = JSON.parse(raw)
-      this.cache = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, string>) : {}
+      const parsed: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''))
+      this.sealedShut = false
+      if (isVaultEnvelope(parsed)) {
+        if (this.key === undefined) {
+          this.sealedShut = true
+          this.cache = {}
+        } else {
+          try {
+            this.cache = openSecrets(parsed, this.key)
+          } catch {
+            this.sealedShut = true
+            this.cache = {}
+          }
+        }
+      } else {
+        this.cache = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, string>) : {}
+      }
     } catch {
       // Missing or unreadable both mean "no secrets yet". A corrupt file must not take the
       // whole session down; the user re-enters a key, which is recoverable, and a crash on
@@ -66,13 +97,19 @@ export class FileSecretStore implements SecretStore {
       // Fresh from disk, never the cache: another process may have saved since we last looked.
       this.cache = undefined
       const secrets = await this.load()
+      if (this.sealedShut) {
+        throw new Error(
+          `${this.filePath} is encrypted and this process cannot open it, so nothing was saved - saving would have replaced every key in it. Start this codebase from Sun Light Code.`,
+        )
+      }
       mutate(secrets)
       await fs.mkdir(path.dirname(this.filePath), { recursive: true })
       // Written to a temp file and renamed, so an interrupted write cannot replace a good
       // file with a truncated one. `mode` is set at create time rather than chmod'd after,
       // which would leave a window where the file exists and is world-readable.
       const temp = `${this.filePath}.${process.pid}.tmp`
-      await fs.writeFile(temp, JSON.stringify(secrets, null, 2), { encoding: 'utf8', mode: 0o600 })
+      const body = this.key === undefined ? secrets : sealSecrets(secrets, this.key)
+      await fs.writeFile(temp, JSON.stringify(body, null, 2), { encoding: 'utf8', mode: 0o600 })
       await replaceFile(temp, this.filePath)
       this.stamp = await this.currentStamp()
     })
@@ -104,6 +141,8 @@ export class FileSecretStore implements SecretStore {
 
   /** Surfaced in the UI so it never implies keychain-grade protection (§15). */
   backendName(): string {
-    return 'file (owner-only permissions, not an OS keychain)'
+    return this.key === undefined
+      ? 'file (owner-only permissions, not an OS keychain)'
+      : 'encrypted file (Windows per-user protection, through Sun Light Code)'
   }
 }

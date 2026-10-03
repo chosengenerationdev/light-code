@@ -12,9 +12,12 @@ mod configs;
 mod host;
 mod state;
 mod system;
+mod share;
+mod vault;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -48,6 +51,8 @@ enum UserEvent {
     StartLater(String),
     /// Open a codebase as if its row were clicked: the one last open, at launch.
     Select(String),
+    /// Keys arrived from the VS Code extension: who sent them, and their names.
+    Shared { from: String, labels: Vec<String> },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -112,6 +117,11 @@ struct App {
     ticks: u64,
     /// The launch-time start has run. Once: a reloaded page must not restart anything.
     launched: bool,
+    vault: Arc<vault::Vault>,
+    /// A credentials file being imported: its text, then what it held once opened. Never sent to
+    /// the page - only names are.
+    import_text: Option<String>,
+    import_items: Option<Vec<vault::Portable>>,
 }
 
 #[derive(Deserialize)]
@@ -143,6 +153,15 @@ enum Command {
     SetIcon { size: u32, rgba: String, png: String },
     /// A codebase's own accent, or None to follow Sun's again.
     ProjectAccent { id: String, accent: Option<String> },
+    Credentials,
+    /// Values travel page -> Rust only, and an empty one means "keep what is stored".
+    SaveCredential { id: Option<String>, label: String, kind: String, note: Option<String>, values: BTreeMap<String, String> },
+    DeleteCredential { id: String },
+    ExportCredentials { ids: Vec<String>, passphrase: String },
+    /// Choose a credentials file; its contents are only read once the passphrase arrives.
+    ChooseCredentialImport,
+    OpenCredentialImport { passphrase: String },
+    ImportCredentials { indexes: Vec<usize> },
 }
 
 fn main() {
@@ -152,6 +171,7 @@ fn main() {
     }
     let _ = std::fs::create_dir_all(&paths.root);
     let mut state = State::load(&paths);
+    let vault = Arc::new(vault::Vault::open(&paths).unwrap_or_else(|e| system::fatal(&e)));
 
     let icon_file = paths.root.join("icon.png");
     let _ = std::fs::write(&icon_file, ICON_PNG);
@@ -244,7 +264,22 @@ fn main() {
         icon_file,
         ticks: 0,
         launched: false,
+        vault: vault.clone(),
+        import_text: None,
+        import_items: None,
     };
+
+    // Keys from the VS Code extension, over a pipe only this Windows user can open.
+    {
+        let vault = vault.clone();
+        let proxy = proxy.clone();
+        share::serve(
+            move |entries| vault.import(entries),
+            move |from, labels| {
+                let _ = proxy.send_event(UserEvent::Shared { from, labels });
+            },
+        );
+    }
 
     // Memory, status and the sleep check run on a timer rather than per event, so a busy agent
     // streaming hundreds of chunks never costs the window anything.
@@ -283,6 +318,15 @@ fn main() {
                 send(&webview, json!({ "type": "select", "id": id }));
             }
             Event::UserEvent(UserEvent::Tick) => app.tick(&webview),
+            Event::UserEvent(UserEvent::Shared { from, labels }) => {
+                let text = if labels.is_empty() {
+                    format!("{from} sent no keys - nothing it holds was set.")
+                } else {
+                    format!("{from} shared {} key(s): {}. Every codebase can use them now.", labels.len(), labels.join(", "))
+                };
+                send(&webview, json!({ "type": "notice", "level": "info", "text": text }));
+                app.push_credentials(&webview);
+            }
             Event::UserEvent(UserEvent::Select(id)) => {
                 app.select(&id, &webview);
                 send(&webview, json!({ "type": "select", "id": id }));
@@ -406,6 +450,14 @@ impl App {
             );
         }
         json!({ "type": "status", "statuses": map, "totalMemory": total })
+    }
+
+    /// The saved credentials and where each is used - names only, never a value.
+    fn push_credentials(&self, webview: &WebView) {
+        match self.vault.list() {
+            Ok(list) => send(webview, json!({ "type": "credentials", "credentials": list, "pipe": share::pipe_name() })),
+            Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
+        }
     }
 
     fn push_projects(&self, webview: &WebView) {
@@ -596,6 +648,86 @@ impl App {
             }
             Command::OpenDataFolder => system::open_in_explorer(&self.paths.root.to_string_lossy()),
             Command::ExportSource => self.export_source(window, webview),
+            Command::Credentials => self.push_credentials(webview),
+            Command::SaveCredential { id, label, kind, note, values } => {
+                match self.vault.save(id, &label, &kind, note, &values) {
+                    Ok(_) => {
+                        send(webview, json!({ "type": "credentialSaved" }));
+                        self.push_credentials(webview);
+                    }
+                    Err(text) => send(webview, json!({ "type": "credentialError", "text": text })),
+                }
+            }
+            Command::ExportCredentials { ids, passphrase } => match self.vault.export(&ids, &passphrase) {
+                Err(text) => send(webview, json!({ "type": "credentialError", "text": text })),
+                Ok((text, count)) => {
+                    let target = rfd::FileDialog::new()
+                        .set_title("Save the credentials file")
+                        .set_file_name("credentials.sunkeys")
+                        .add_filter("Sun Light Code credentials", &["sunkeys"])
+                        .set_parent(window)
+                        .save_file();
+                    if let Some(target) = target {
+                        match std::fs::write(&target, text) {
+                            Ok(()) => {
+                                send(webview, json!({ "type": "credentialSaved" }));
+                                send(webview, json!({ "type": "notice", "level": "info", "text": format!("Exported {count} credential(s) to {}. Send the passphrase separately from the file.", target.display()) }));
+                            }
+                            Err(e) => send(webview, json!({ "type": "credentialError", "text": format!("Could not write {}: {e}", target.display()) })),
+                        }
+                    }
+                }
+            },
+            Command::ChooseCredentialImport => {
+                let picked = rfd::FileDialog::new()
+                    .set_title("Import credentials")
+                    .add_filter("Sun Light Code credentials", &["sunkeys"])
+                    .set_parent(window)
+                    .pick_file();
+                if let Some(file) = picked {
+                    match std::fs::read_to_string(&file) {
+                        Ok(text) => {
+                            self.import_text = Some(text);
+                            self.import_items = None;
+                            send(webview, json!({ "type": "importNeedsPassphrase", "file": file.to_string_lossy() }));
+                        }
+                        Err(e) => send(webview, json!({ "type": "notice", "level": "error", "text": format!("Could not read {}: {e}", file.display()) })),
+                    }
+                }
+            }
+            Command::OpenCredentialImport { passphrase } => {
+                let Some(text) = self.import_text.as_deref() else { return };
+                match vault::Vault::open_export(text, &passphrase) {
+                    Ok(items) => {
+                        let preview: Vec<Value> = items
+                            .iter()
+                            .map(|i| json!({ "label": i.label, "kind": i.kind, "exists": self.vault.has_label(&i.label) }))
+                            .collect();
+                        self.import_items = Some(items);
+                        send(webview, json!({ "type": "importPreview", "items": preview }));
+                    }
+                    Err(text) => send(webview, json!({ "type": "credentialError", "text": text })),
+                }
+            }
+            Command::ImportCredentials { indexes } => {
+                let items = self.import_items.take().unwrap_or_default();
+                self.import_text = None;
+                let chosen: Vec<vault::Portable> = items.into_iter().enumerate().filter(|(i, _)| indexes.contains(i)).map(|(_, c)| c).collect();
+                match self.vault.import_portable(&chosen) {
+                    Ok(count) => {
+                        send(webview, json!({ "type": "credentialSaved" }));
+                        send(webview, json!({ "type": "notice", "level": "info", "text": format!("Imported {count} credential(s).") }));
+                        self.push_credentials(webview);
+                    }
+                    Err(text) => send(webview, json!({ "type": "credentialError", "text": text })),
+                }
+            }
+            Command::DeleteCredential { id } => {
+                match self.vault.delete(&id) {
+                    Ok(()) => self.push_credentials(webview),
+                    Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
+                }
+            }
             Command::ProjectAccent { id, accent } => {
                 let valid = accent.filter(|a| a.len() == 7 && a.starts_with('#') && a[1..].chars().all(|c| c.is_ascii_hexdigit()));
                 if let Some(p) = self.state.project_mut(&id) {
@@ -739,6 +871,8 @@ impl App {
             log_file: self.paths.log_file(id),
             frame_ancestor: SHELL_ORIGIN.to_string(),
             ripgrep: system::bundled_ripgrep(),
+            vault_key: self.vault.key_hex(),
+            credentials_file: self.vault.credentials_file().clone(),
         };
         match host::launch(spec, move |event| {
             let _ = proxy.send_event(UserEvent::Host(event));

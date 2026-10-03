@@ -1,5 +1,6 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
 import { CUSTOM_ROLE_LIMIT, composeUserText, skillAliases, type MessageQuote, type Reaction } from '@light-code/core/browser'
+import type { CredentialSummary } from '@light-code/core/browser'
 import type { S3Mirror } from './settings/S3Section.js'
 import type {
   AtlassianProductId,
@@ -60,6 +61,7 @@ import { ModeSelector } from './ModeSelector.js'
 import { Guide } from './guide/Guide.js'
 import type { ReviewItem } from './settings/ReviewsTab.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
+import { CredentialsContext } from './settings/CredentialPicker.js'
 import type { SkillsTabProps } from './settings/SkillsTab.js'
 import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
@@ -431,6 +433,8 @@ export function App(props: AppProps): ReactElement {
   /** Who sets the theme and accent instead of this panel (Sun Light Code), if anyone. */
   const [appearanceFrom, setAppearanceFrom] = useState<string | undefined>(undefined)
   const [accentInherited, setAccentInherited] = useState(false)
+  /** Saved credentials from Sun Light Code; undefined where the host has none to offer. */
+  const [credentials, setCredentials] = useState<CredentialSummary[] | undefined>(undefined)
   /**
    * Whether this host offers Excel, Outlook and the mail index.
    *
@@ -587,6 +591,8 @@ export function App(props: AppProps): ReactElement {
         })
       } else if (message.type === 'reviews') {
         setReviews({ items: message.items, canDecide: message.canDecide })
+      } else if (message.type === 'credentials') {
+        setCredentials(message.credentials)
       } else if (message.type === 'variables') {
         setVariables({
           user: message.user,
@@ -1066,6 +1072,7 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'requestSchedules' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestTools' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestVariables' } satisfies UiToHostMessage)
+    props.transport.post({ type: 'requestCredentials' } satisfies UiToHostMessage)
     props.transport.post({ type: 'requestReviews' } satisfies UiToHostMessage)
 
     return unsubscribe
@@ -1808,6 +1815,7 @@ export function App(props: AppProps): ReactElement {
             }}
           />
         ) : view === 'settings' ? (
+          <CredentialsContext.Provider value={credentials}>
           <SettingsPanel
             {...(requestedTab !== undefined ? { requestedTab } : {})}
             profiles={profiles}
@@ -2461,6 +2469,7 @@ export function App(props: AppProps): ReactElement {
                 props.transport.post({ type: 'saveNetwork', settings } satisfies UiToHostMessage),
             }}
           />
+          </CredentialsContext.Provider>
         ) : view === 'history' ? (
           <HistoryList
             tasks={tasks}

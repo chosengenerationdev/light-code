@@ -1,5 +1,11 @@
 # @chosengeneration/light-code
 
+## 0.104.0
+
+### Minor Changes
+
+- Saved credentials for Sun Light Code: every secret field can pick one by name, and changing it once updates everything that uses it. The secrets file can be encrypted (`--secrets-key-stdin`), and a process that cannot open it refuses to save rather than replacing every key.
+
 ## 0.103.0
 
 ### Minor Changes

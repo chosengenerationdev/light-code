@@ -13,6 +13,7 @@ import { PathField, type BrowseRequest } from './PathField.js'
 import { MigrateFolder, type MigrateFolderProps } from './MigrateFolder.js'
 import { S3Section, type S3SectionProps } from './S3Section.js'
 import { Panel } from './Panel.js'
+import { SecretInput } from './CredentialPicker.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -426,13 +427,25 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                   style={{ ...textFieldStyle(), fontFamily: monospace, flex: '0 0 34%' }}
                 />
                 <div style={{ flex: 1 }}>
+                  {row.secret ? (
+                    // A secret variable may be a saved credential (Sun Light Code), picked by name.
+                    <SecretInput
+                      value={row.value}
+                      placeholder={row.hasValue ? 'Set — type to replace' : 'Value'}
+                      ariaLabel="Variable value"
+                      onChange={(value) =>
+                        setEnvVars((rows) =>
+                          rows.map((existing, at) => (at === index ? { ...existing, value } : existing)),
+                        )
+                      }
+                      style={{ ...textFieldStyle(), fontFamily: monospace, width: '100%' }}
+                    />
+                  ) : (
                   <input
-                    type={row.secret ? 'password' : 'text'}
+                    type="text"
                     value={row.value}
                     spellCheck={false}
-                    placeholder={
-                      row.secret ? (row.hasValue ? 'Set — type to replace' : 'Value') : 'Value'
-                    }
+                    placeholder="Value"
                     aria-label="Variable value"
                     onChange={(event) =>
                       setEnvVars((rows) =>
@@ -443,6 +456,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
                     }
                     style={{ ...textFieldStyle(), fontFamily: monospace, width: '100%' }}
                   />
+                  )}
                   <label
                     style={{
                       display: 'flex',

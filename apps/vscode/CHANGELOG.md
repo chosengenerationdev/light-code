@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- The handbook (`light_code_help`) explains Sun Light Code, the new Windows app for working on several codebases at once with the same Light Code agent in each. No change in behaviour inside VS Code.
+- New command **Light Code: Share API keys with Sun Light Code**: after confirming the list of names, sends this config's keys to Sun, which keeps them encrypted as saved credentials. The handbook (`light_code_help`) explains Sun Light Code, the new Windows app for working on several codebases at once with the same Light Code agent in each. No change in behaviour inside VS Code.
 
 ## 0.129.0
 

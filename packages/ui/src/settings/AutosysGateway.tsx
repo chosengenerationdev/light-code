@@ -2,6 +2,7 @@ import type { AutosysGatewaySettings, AutosysGatewayView } from '@light-code/cor
 import type { ReactElement } from 'react'
 
 import { colors, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { SecretInput } from './CredentialPicker.js'
 
 /**
  * AutoSys through an API gateway such as Apigee: a token from one URL, using a client id and
@@ -92,14 +93,11 @@ export function AutosysGatewaySection(props: {
       <label htmlFor="lc-autosys-gw-secret" style={labelStyle()}>
         Client secret
       </label>
-      <input
+      <SecretInput
         id="lc-autosys-gw-secret"
-        type="password"
-        autoComplete="off"
         value={props.secret}
         placeholder={props.hasClientSecret ? 'Stored — leave blank to keep it' : 'Paste the client secret'}
-        onChange={(event) => props.onSecret(event.target.value)}
-        style={textFieldStyle()}
+        onChange={props.onSecret}
       />
       <span style={hintStyle}>Kept in secure storage, never in the settings file.</span>
 

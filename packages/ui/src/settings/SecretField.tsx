@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from 'react'
 import { labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { CredentialInUse, CredentialPicker, isCredentialPointer } from './CredentialPicker.js'
 
 export interface SecretFieldProps {
   id: string
@@ -45,6 +46,10 @@ export function SecretField(props: SecretFieldProps): ReactElement {
       <label htmlFor={props.id} style={labelStyle()}>
         {props.label}
       </label>
+      {isCredentialPointer(props.value) ? (
+        <CredentialInUse pointer={props.value} onClear={() => props.onChange('')} />
+      ) : (
+      <>
       <div style={{ display: 'flex', gap: 8 }}>
         <input
           id={props.id}
@@ -67,6 +72,9 @@ export function SecretField(props: SecretFieldProps): ReactElement {
           </button>
         )}
       </div>
+      <CredentialPicker id={`${props.id}-credential`} onPick={props.onChange} />
+      </>
+      )}
     </div>
   )
 }

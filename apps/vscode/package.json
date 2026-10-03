@@ -58,6 +58,10 @@
       {
         "command": "lightCode.openSettings",
         "title": "Light Code: Open Settings"
+      },
+      {
+        "command": "lightCode.shareKeysWithSun",
+        "title": "Light Code: Share API keys with Sun Light Code"
       }
     ],
     "viewsContainers": {

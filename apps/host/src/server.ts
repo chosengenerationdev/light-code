@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises'
+import { watchFile } from 'node:fs'
+import type { CredentialSummary } from '@light-code/core'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import {
@@ -118,6 +120,13 @@ export interface ServerOptions {
   secretsFile?: string
   /** See `SessionOptions.desktopNotify`. */
   desktopNotify?: boolean
+  /** See `SessionOptions.secretsKey`. */
+  secretsKey?: Buffer
+  /**
+   * Sun Light Code's list of saved credentials: names and kinds, never values. Offered in every
+   * secret field's "Use a saved credential" menu, and re-sent when the file changes.
+   */
+  credentialsFile?: string
   /** Directory holding the built browser bundle. */
   /**
    * The browser bundle, in memory, keyed by the names in `CLIENT_ASSETS`.
@@ -446,6 +455,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.configFile !== undefined ? { configFile: options.configFile } : {}),
       ...(options.secretsFile !== undefined ? { secretsFile: options.secretsFile } : {}),
       ...(options.desktopNotify === true ? { desktopNotify: true } : {}),
+      ...(options.secretsKey !== undefined ? { secretsKey: options.secretsKey } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,
       /*
@@ -935,6 +945,37 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     })
   }
 
+  /**
+   * The saved credentials a settings field can offer. Read fresh each time: Sun writes the file
+   * whenever one is added, renamed or removed, and an empty list is the answer to any failure.
+   */
+  async function readCredentials(): Promise<CredentialSummary[]> {
+    if (options.credentialsFile === undefined) return []
+    try {
+      const parsed = JSON.parse(await fs.readFile(options.credentialsFile, 'utf8')) as { credentials?: unknown }
+      const list = Array.isArray(parsed.credentials) ? parsed.credentials : []
+      return list.flatMap((entry): CredentialSummary[] => {
+        const c = entry as Partial<CredentialSummary>
+        if (typeof c.id !== 'string' || typeof c.label !== 'string') return []
+        return [{ id: c.id, label: c.label, kind: c.kind === 'login' ? 'login' : 'secret', ...(typeof c.note === 'string' ? { note: c.note } : {}) }]
+      })
+    } catch {
+      return []
+    }
+  }
+
+  async function postCredentials(connection: Connection): Promise<void> {
+    if (options.credentialsFile === undefined) return
+    connection.transport.post({ type: 'credentials', credentials: await readCredentials() })
+  }
+
+  if (options.credentialsFile !== undefined) {
+    // Polled rather than watched: fs.watch on Windows misses a rename-over, which is how Sun saves.
+    watchFile(options.credentialsFile, { interval: 1500 }, () => {
+      for (const connection of connections.values()) void postCredentials(connection)
+    })
+  }
+
   /** True when the message was one of ours and has been dealt with. */
   async function handleVariableMessage(
     principal: Principal,
@@ -942,6 +983,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     body: unknown,
     connection: Connection,
   ): Promise<boolean> {
+    if (type === 'requestCredentials') {
+      await postCredentials(connection)
+      return true
+    }
     const payload = body as { variables?: unknown; ids?: unknown }
     if (type === 'requestReviews') {
       await postReviews(principal, connection)

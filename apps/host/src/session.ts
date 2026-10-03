@@ -1,5 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
-import { replaceFile } from '@light-code/core'
+import { CredentialPointerStore, replaceFile } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -302,6 +302,8 @@ export interface SessionOptions {
    * key is entered once, which is why `FileSecretStore` re-reads a file another process changed.
    */
   secretsFile?: string
+  /** Encrypts `secretsFile` (Sun Light Code, handed over on stdin). See `vaultCrypto.ts`. */
+  secretsKey?: Buffer
   /**
    * Hand the `notify` tool's notifications to whoever started this process, one JSON line each on
    * stdout prefixed `light-code-notify:`. Light Code Sun shows them as Windows notifications.
@@ -457,14 +459,21 @@ export async function createSession(
      * A shared profile's API key belongs to the administrator and lives beside the shared config;
      * everything else is this user's. Routed by the reference, which is all a secret store gets.
      */
-    secrets: withCredentialTool(
-      options.sharedSecrets === undefined
-        ? new FileSecretStore(options.secretsFile ?? path.join(userDir, 'secrets.json'))
-        : new RoutedSecretStore(
-            new FileSecretStore(options.secretsFile ?? path.join(userDir, 'secrets.json')),
-            options.sharedSecrets,
-          ),
-      options,
+    /*
+     * Saved credentials resolve on the outside: a setting whose stored value is a pointer to one
+     * (`credential:<id>#<field>`) reads the credential, wherever it is used. Harmless where there are
+     * no credentials - no stored value is then a pointer.
+     */
+    secrets: new CredentialPointerStore(
+      withCredentialTool(
+        options.sharedSecrets === undefined
+          ? new FileSecretStore(options.secretsFile ?? path.join(userDir, 'secrets.json'), options.secretsKey)
+          : new RoutedSecretStore(
+              new FileSecretStore(options.secretsFile ?? path.join(userDir, 'secrets.json'), options.secretsKey),
+              options.sharedSecrets,
+            ),
+        options,
+      ),
     ),
     configStore: withSharedEntries(
       options.sharedProfiles === undefined

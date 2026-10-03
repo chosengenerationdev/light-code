@@ -9,6 +9,7 @@ import type { SearchLogEntry } from '../rag/searchLog.js'
 import type { Schedule } from '../schedule/types.js'
 import type { ExpertPricing } from '../expert/pricing.js'
 import type { ResolvedVariable, SessionVariable } from '../session/variables.js'
+import type { CredentialSummary } from '../secrets/credentials.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
@@ -582,6 +583,8 @@ export type UiToHostMessage =
    * not. The shapes live here because this is where the UI's protocol is defined.
    */
   | { type: 'requestVariables' }
+  /** Sun Light Code's saved credentials, for the settings pickers. Other hosts do not answer. */
+  | { type: 'requestCredentials' }
   /* The review queue. Administrator-only except for listing, which shows an author their own. */
   | { type: 'requestReviews' }
   | { type: 'decideReview'; id: string; approved: boolean; reason?: string }
@@ -1282,6 +1285,8 @@ export type HostToUiMessage =
        */
       shared?: boolean
     }
+  /** Saved credentials a secret field can use: labels and kinds, never values (invariant 7). */
+  | { type: 'credentials'; credentials: CredentialSummary[] }
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */

@@ -9,7 +9,7 @@ import {
   validateMcpServerForm,
   venvPython,
 } from '@light-code/core/browser'
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useContext, useEffect, useRef, useState, type ReactElement } from 'react'
 import { TrashIcon } from '../icons.js'
 import {
   colors,
@@ -23,6 +23,7 @@ import {
 } from '../theme.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { Select } from '../Select.js'
+import { CredentialPicker, CredentialsContext, credentialsMentioned, withCredential } from './CredentialPicker.js'
 
 /** The HTTP protocols, as other clients name them in `"type"`. */
 const TRANSPORTS = [
@@ -140,6 +141,7 @@ function PairEditor(props: {
   // Kept as an array while editing: a record cannot hold a half-typed duplicate or empty
   // key, and rebuilding it on every keystroke reorders the rows under the cursor.
   const [rows, setRows] = useState<[string, string][]>(() => Object.entries(props.pairs))
+  const credentials = useContext(CredentialsContext)
 
   const push = (next: [string, string][]): void => {
     setRows(next)
@@ -152,7 +154,8 @@ function PairEditor(props: {
       {rows.map(([key, value], index) => (
         // Keyed by position on purpose: the key is being typed, so keying on it would
         // remount the input on every keystroke and lose focus after one character.
-        <div key={index} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+        <div key={index} style={{ marginBottom: 6 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
           <input
             aria-label={`${props.label} name ${index + 1}`}
             value={key}
@@ -177,6 +180,17 @@ function PairEditor(props: {
           >
             <TrashIcon />
           </button>
+          </div>
+          {/* Sun Light Code: pick a saved credential instead of typing a reference to one. */}
+          {credentials !== undefined && credentialsMentioned(value, credentials).length > 0 && (
+            <span style={{ display: 'block', color: colors.muted, fontSize: 11, margin: '2px 0 0 2px' }}>
+              🔑 Uses {credentialsMentioned(value, credentials).join(', ')}
+            </span>
+          )}
+          <CredentialPicker
+            quiet
+            onPick={(pointer) => push(rows.map((row, i) => (i === index ? [row[0], withCredential(row[1], pointer)] : row)))}
+          />
         </div>
       ))}
       <button type="button" style={secondaryButtonStyle()} onClick={() => setRows([...rows, ['', '']])}>

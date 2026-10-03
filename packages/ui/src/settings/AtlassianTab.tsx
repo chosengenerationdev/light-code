@@ -12,6 +12,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
+import { SecretInput } from './CredentialPicker.js'
 
 /**
  * Confluence, Jira, Bitbucket and Jenkins: one panel each, from one component and the product table in
@@ -205,17 +206,14 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       <label htmlFor={id('token')} style={labelStyle()}>
         {info.tokenLabel}
       </label>
-      <input
+      <SecretInput
         id={id('token')}
-        type="password"
         value={token}
-        autoComplete="off"
         placeholder={props.hasToken ? 'Stored — leave blank to keep it' : 'Paste a token'}
-        onChange={(event) => {
+        onChange={(value) => {
           setSaved(false)
-          setToken(event.target.value)
+          setToken(value)
         }}
-        style={textFieldStyle()}
       />
       <span style={hintStyle}>
         {info.tokenHint}

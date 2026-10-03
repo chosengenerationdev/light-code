@@ -1,6 +1,6 @@
 {
   "name": "@chosengeneration/sun-light-code",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Sun Light Code: every codebase in one Windows window, each with its own Light Code agent working in parallel",
   "license": "MIT",
   "bin": {

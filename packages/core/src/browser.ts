@@ -210,3 +210,10 @@ export {
   type AtlassianDefaultField,
   type AtlassianProductInfo,
 } from './atlassian/products.js'
+export {
+  credentialChoices,
+  describePointer,
+  isCredentialPointer,
+  type CredentialChoice,
+  type CredentialSummary,
+} from './secrets/credentials.js'

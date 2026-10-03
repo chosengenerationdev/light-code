@@ -90,6 +90,9 @@ pub struct LaunchSpec {
     pub frame_ancestor: String,
     /// rg.exe shipped beside Sun, so search needs nothing downloaded at install.
     pub ripgrep: Option<PathBuf>,
+    /// The vault key, written to the host's stdin and nowhere else.
+    pub vault_key: String,
+    pub credentials_file: PathBuf,
 }
 
 pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static) -> Result<HostProcess, String> {
@@ -112,6 +115,9 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         .arg(&spec.config_file)
         .arg("--secrets-file")
         .arg(&spec.secrets_file)
+        .arg("--secrets-key-stdin")
+        .arg("--credentials-file")
+        .arg(&spec.credentials_file)
         .arg("--print-url")
         .arg("--no-open")
         .arg("--desktop-notify")
@@ -121,7 +127,7 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         .arg("--allow-frame-ancestor")
         .arg(&spec.frame_ancestor)
         .current_dir(&spec.workspace)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // No console window flashing up per codebase.
@@ -133,6 +139,12 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     let mut child = command.spawn().map_err(|e| {
         format!("Could not start Node ({}): {e}. Is Node.js installed and on PATH?", spec.node.display())
     })?;
+
+    // The key, on stdin and then closed: not an argument (visible in the process list) and not a
+    // variable (inherited by every command the agent runs).
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = writeln!(stdin, "{}", spec.vault_key);
+    }
 
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if job.is_null() {

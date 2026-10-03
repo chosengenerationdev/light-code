@@ -4,6 +4,7 @@ import { VSCodeConfigStore } from './platform/config.js'
 import { WebviewTransport } from './platform/transport.js'
 import { ChatViewProvider } from './webview/chatViewProvider.js'
 import { createVSCodeHostServices } from './webview/hostServices.js'
+import { shareKeysWithSun } from './shareWithSun.js'
 
 /** How often the host looks in on the scheduler. Frequent enough to revive it within a minute. */
 const SCHEDULE_POLL_MS = 30_000
@@ -164,7 +165,15 @@ export function activate(context: vscode.ExtensionContext): void {
     })()
   }, SCHEDULE_POLL_MS)
 
-  context.subscriptions.push(viewDisposable, openCommand, walkthroughCommand, settingsCommand, {
+  /*
+   * Hands this config's keys to Sun Light Code, which cannot read VS Code's encrypted storage itself.
+   * The names are shown and confirmed before anything is sent; see shareWithSun.ts.
+   */
+  const shareCommand = vscode.commands.registerCommand('lightCode.shareKeysWithSun', () =>
+    shareKeysWithSun(context, configManager),
+  )
+
+  context.subscriptions.push(viewDisposable, openCommand, walkthroughCommand, settingsCommand, shareCommand, {
     dispose: () => {
       clearInterval(poll)
       bridge?.dispose()

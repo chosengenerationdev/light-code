@@ -41,7 +41,7 @@ const ICONS = {
   remove: '<path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 9h6.3l.6-9"/>',
   check: '<path d="m3.5 8.25 3 3 6-6.5"/>',
   info: '<circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v4M8 5v.01"/>',
-  key: '<circle cx="5.5" cy="10.5" r="2.75"/><path d="m7.5 8.5 6-6M11.25 4.75l1.5 1.5"/>',
+  key: '<path d="M14.5 6.5a4 4 0 1 1-7.9.9L2.75 11.25v2h2v-1.5h1.5v-1.5h1.5l1.4-1.4a4 4 0 0 1 5.35-2.35z"/><circle cx="11.25" cy="5" r=".9"/>',
   sun: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.06 1.06M11.54 11.54l1.06 1.06M3.4 12.6l1.06-1.06M11.54 4.46l1.06-1.06"/>',
   link: '<path d="M6.75 9.25a3 3 0 0 0 4.24 0l2-2a3 3 0 0 0-4.24-4.24l-.75.75"/><path d="M9.25 6.75a3 3 0 0 0-4.24 0l-2 2a3 3 0 0 0 4.24 4.24l.75-.75"/>',
   copy: '<rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5"/><path d="M10.75 5.25v-1.5c0-.83-.67-1.5-1.5-1.5h-5.5c-.83 0-1.5.67-1.5 1.5v5.5c0 .83.67 1.5 1.5 1.5h1.5"/>',
@@ -157,6 +157,24 @@ const HANDLERS = {
   },
   notice(m) {
     notice(m.text, m.level)
+  },
+  credentials(m) {
+    model.credentials = m.credentials
+    model.pipe = m.pipe
+    if (openModal?.kind === 'credentials') openModal.refresh()
+  },
+  credentialSaved() {
+    if (openModal?.kind === 'credentials') openModal.saved()
+  },
+  importNeedsPassphrase(m) {
+    if (openModal?.kind === 'credentials') openModal.askPassphrase(m.file)
+  },
+  importPreview(m) {
+    if (openModal?.kind === 'credentials') openModal.preview(m.items)
+  },
+  credentialError(m) {
+    if (openModal?.kind === 'credentials') openModal.failed(m.text)
+    else notice(m.text, 'error')
   },
 }
 
@@ -1153,6 +1171,301 @@ function openSwitcher() {
   })
 }
 
+// ─── Credentials ─────────────────────────────────────────────────────────────
+//
+// Saved once, used by any codebase: every secret field in a codebase's Light Code settings offers
+// "Use a saved credential". Write-only: values go to Sun and are never shown again - replacing is
+// typing a new one. Where each is used comes from the vault, so deleting one says what will stop.
+
+function openCredentials() {
+  showModal('credentials', (scrim, modal) => {
+    const card = el('div', { class: 'modal', style: 'width: min(640px, calc(100vw - 48px))' })
+    scrim.append(card)
+    let editing // undefined = list; {} = new; credential = change that one
+    let error
+    const kinds = [
+      ['secret', 'Key or token'],
+      ['login', 'Username and password'],
+    ]
+
+    const form = () => {
+      const isNew = editing.id === undefined
+      const draft = { label: editing.label ?? '', kind: editing.kind ?? 'secret', note: editing.note ?? '', values: {} }
+      const fieldsFor = (kind) => (kind === 'login' ? [['username', 'Username'], ['password', 'Password']] : [['value', 'Value']])
+      const body = el('div', { class: 'body' })
+      const renderBody = () => {
+        const label = el('input', { type: 'text', value: draft.label, placeholder: 'Corp LDAP, DeepSeek key…', 'aria-label': 'Name' })
+        label.addEventListener('input', () => (draft.label = label.value))
+        const note = el('input', { type: 'text', value: draft.note, placeholder: 'Optional — what it is for', 'aria-label': 'Note' })
+        note.addEventListener('input', () => (draft.note = note.value))
+        body.replaceChildren(
+          el('label', { class: 'field-label', text: 'Name' }),
+          label,
+          el('label', { class: 'field-label', text: 'Kind' }),
+          el(
+            'div',
+            { class: 'segmented' },
+            ...kinds.map(([value, text]) =>
+              el('button', {
+                class: draft.kind === value ? 'on' : '',
+                text,
+                disabled: !isNew && draft.kind !== value,
+                onclick: () => {
+                  draft.kind = value
+                  renderBody()
+                },
+              }),
+            ),
+          ),
+          ...fieldsFor(draft.kind).flatMap(([field, text]) => {
+            const input = el('input', {
+              type: field === 'username' ? 'text' : 'password',
+              placeholder: isNew ? '' : 'Saved — leave blank to keep it',
+              autocomplete: 'off',
+              spellcheck: 'false',
+              'aria-label': text,
+            })
+            input.value = draft.values[field] ?? ''
+            input.addEventListener('input', () => (draft.values[field] = input.value))
+            return [el('label', { class: 'field-label', text }), input]
+          }),
+          el('label', { class: 'field-label', text: 'Note' }),
+          note,
+          error !== undefined ? el('div', { class: 'form-error', text: error }) : null,
+        )
+        requestAnimationFrame(() => label.focus())
+      }
+      renderBody()
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: isNew ? 'New credential' : `Change ${editing.label}` }), el('p', { class: 'sub', text: 'Stored encrypted for your Windows account. It cannot be shown again once saved.' })),
+        body,
+        el(
+          'footer',
+          {},
+          el('span', { class: 'spacer' }),
+          el('button', {
+            class: 'secondary',
+            text: 'Back',
+            onclick: () => {
+              editing = undefined
+              error = undefined
+              modal.refresh()
+            },
+          }),
+          el('button', {
+            class: 'primary',
+            text: 'Save',
+            onclick: () => {
+              error = undefined
+              send('saveCredential', { id: editing.id ?? null, label: draft.label, kind: draft.kind, note: draft.note, values: draft.values })
+            },
+          }),
+        ),
+      )
+    }
+
+    const list = () => {
+      const credentials = model.credentials ?? []
+      const rows = credentials.map((c) =>
+        el(
+          'div',
+          { class: 'credential' },
+          el('span', { class: 'glyph', html: svg(ICONS.key) }),
+          el(
+            'span',
+            { class: 'meta' },
+            el('b', { text: c.label }),
+            el('span', { class: 'tag', style: 'margin-left: 8px', text: c.kind === 'login' ? 'Username and password' : 'Key or token' }),
+            c.note ? el('span', { class: 'detail', text: c.note }) : null,
+            el('span', {
+              class: 'detail',
+              text: c.usedBy.length > 0 ? `Used by: ${c.usedBy.join(' · ')}` : 'Not used yet — pick it in any codebase\'s settings.',
+            }),
+            c.complete ? null : el('span', { class: 'detail warn', text: 'Has no value stored — change it to add one.' }),
+          ),
+          el(
+            'span',
+            { class: 'actions' },
+            el('button', {
+              class: 'secondary',
+              text: 'Change',
+              onclick: () => {
+                editing = c
+                form()
+              },
+            }),
+            el('button', {
+              class: 'icon-btn',
+              title: 'Delete',
+              'aria-label': `Delete ${c.label}`,
+              html: svg(ICONS.remove),
+              onclick: () => confirmDelete(c),
+            }),
+          ),
+        ),
+      )
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: 'Credentials' }), el('p', { class: 'sub', text: 'Saved once, used by every codebase: each key or password field in a codebase\'s settings can pick one by name. Encrypted for your Windows account; values are never shown again.' })),
+        el(
+          'div',
+          { class: 'body' },
+          rows.length > 0
+            ? el('div', {}, ...rows)
+            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here — or, in VS Code, run <b>Light Code: Share API keys with Sun Light Code</b> to bring every key over at once.</span>` }),
+          rows.length > 0
+            ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Keys from VS Code: run <b>Light Code: Share API keys with Sun Light Code</b> in VS Code while Sun is open.</span>` })
+            : null,
+        ),
+        el(
+          'footer',
+          {},
+          el('button', {
+            class: 'secondary',
+            text: 'New credential',
+            onclick: () => {
+              editing = {}
+              form()
+            },
+          }),
+          el('button', { class: 'secondary', text: 'Import…', onclick: () => send('chooseCredentialImport') }),
+          rows.length > 0 ? el('button', { class: 'secondary', text: 'Export…', onclick: () => { error = undefined; exportForm() } }) : null,
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'primary', text: 'Done', onclick: closeModal }),
+        ),
+      )
+    }
+
+    const confirmDelete = (c) => {
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: `Delete ${c.label}?` })),
+        el(
+          'div',
+          { class: 'body' },
+          el('p', {
+            class: 'sub',
+            text:
+              c.usedBy.length > 0
+                ? `These stop working until they are given another credential or a typed value: ${c.usedBy.join(' · ')}.`
+                : 'Nothing uses it. Its value is removed from the vault.',
+          }),
+        ),
+        el(
+          'footer',
+          {},
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Cancel', onclick: () => modal.refresh() }),
+          el('button', { class: 'primary', text: 'Delete', onclick: () => send('deleteCredential', { id: c.id }) }),
+        ),
+      )
+    }
+
+    // Export: pick credentials and a passphrase. The file opens only with that passphrase.
+    const exportForm = () => {
+      const credentials = model.credentials ?? []
+      const chosen = new Set(credentials.map((c) => c.id))
+      const pass = el('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'Passphrase' })
+      const again = el('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'Passphrase again' })
+      editing = { export: true }
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: 'Export credentials' }), el('p', { class: 'sub', text: 'For another computer or a colleague. The file is encrypted with the passphrase you choose — it is only as safe as that passphrase, so send the two separately.' })),
+        el(
+          'div',
+          { class: 'body' },
+          ...credentials.map((c) => {
+            const box = el('input', { type: 'checkbox', checked: true })
+            box.addEventListener('change', () => (box.checked ? chosen.add(c.id) : chosen.delete(c.id)))
+            return el('label', { class: 'row', style: 'padding: 6px 0' }, box, el('span', { class: 'meta' }, el('b', { text: c.label })))
+          }),
+          el('label', { class: 'field-label', text: 'Passphrase (at least 12 characters)' }),
+          pass,
+          el('label', { class: 'field-label', text: 'Passphrase again' }),
+          again,
+          error !== undefined ? el('div', { class: 'form-error', text: error }) : null,
+        ),
+        el(
+          'footer',
+          {},
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Back', onclick: () => modal.saved() }),
+          el('button', {
+            class: 'primary',
+            text: 'Export…',
+            onclick: () => {
+              if (pass.value !== again.value) return modal.failed('The two passphrases differ.')
+              if ([...pass.value].length < 12) return modal.failed('Use a passphrase of at least 12 characters.')
+              error = undefined
+              send('exportCredentials', { ids: [...chosen], passphrase: pass.value })
+            },
+          }),
+        ),
+      )
+    }
+    const importPassphrase = (file) => {
+      editing = { importing: true, file }
+      const pass = el('input', { type: 'password', 'aria-label': 'Passphrase' })
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: 'Import credentials' }), el('p', { class: 'sub', text: file })),
+        el('div', { class: 'body' }, el('label', { class: 'field-label', text: 'Passphrase the file was exported with' }), pass, error !== undefined ? el('div', { class: 'form-error', text: error }) : null),
+        el(
+          'footer',
+          {},
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Cancel', onclick: () => modal.saved() }),
+          el('button', { class: 'primary', text: 'Open', onclick: () => send('openCredentialImport', { passphrase: pass.value }) }),
+        ),
+      )
+      requestAnimationFrame(() => pass.focus())
+    }
+    const importPreview = (items) => {
+      editing = { importing: true }
+      error = undefined
+      const chosen = new Set(items.map((_, i) => i))
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: 'Import credentials' }), el('p', { class: 'sub', text: 'Choose which to bring in. One with the same name as a credential here replaces its value.' })),
+        el(
+          'div',
+          { class: 'body' },
+          ...items.map((item, i) => {
+            const box = el('input', { type: 'checkbox', checked: true })
+            box.addEventListener('change', () => (box.checked ? chosen.add(i) : chosen.delete(i)))
+            return el(
+              'label',
+              { class: 'row', style: 'padding: 6px 0' },
+              box,
+              el('span', { class: 'meta' }, el('b', { text: item.label }), el('span', { text: item.exists ? 'Replaces the value of the one here' : 'New' })),
+            )
+          }),
+        ),
+        el(
+          'footer',
+          {},
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Cancel', onclick: () => modal.saved() }),
+          el('button', { class: 'primary', text: 'Import', onclick: () => send('importCredentials', { indexes: [...chosen] }) }),
+        ),
+      )
+    }
+    modal.askPassphrase = (file) => importPassphrase(file)
+    modal.preview = (items) => importPreview(items)
+
+    modal.refresh = () => (editing === undefined ? list() : editing.export ? exportForm() : editing.importing ? undefined : form())
+    modal.saved = () => {
+      editing = undefined
+      error = undefined
+      list()
+    }
+    modal.failed = (text) => {
+      error = text
+      if (editing?.export) exportForm()
+      else if (editing?.importing) importPassphrase(editing.file ?? '')
+      else if (editing !== undefined) form()
+      else notice(text, 'error')
+    }
+    list()
+    send('credentials')
+  })
+}
+
 // ─── Notices ─────────────────────────────────────────────────────────────────
 
 function notice(text, level = 'info') {
@@ -1167,6 +1480,8 @@ for (const id of ['#add', '#add-small', '#rail-add', '#empty-add']) $(id).addEve
 $('#search').addEventListener('click', openSwitcher)
 $('#settings-btn').addEventListener('click', openSettings)
 $('#rail-settings').addEventListener('click', openSettings)
+$('#credentials-btn').addEventListener('click', openCredentials)
+$('#rail-credentials').addEventListener('click', openCredentials)
 document.addEventListener('contextmenu', (e) => {
   // The browser's own menu (Reload, Inspect) has nothing for anyone here.
   if (!(e.target instanceof HTMLInputElement)) e.preventDefault()

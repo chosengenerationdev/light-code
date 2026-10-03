@@ -1,6 +1,6 @@
 [package]
 name = "sun-light-code"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Sun Light Code: several codebases, each with its own Light Code agent, in one Windows window"
@@ -20,6 +20,9 @@ serde_json = "1"
 window-vibrancy = "0.8"
 tauri-winrt-notification = "0.8"
 winreg = "0.56"
+aes-gcm = "0.10"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
@@ -30,6 +33,11 @@ windows-sys = { version = "0.60", features = [
   "Win32_System_ProcessStatus",
   "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Shell",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Pipes",
+  "Win32_System_IO",
 ] }
 
 [build-dependencies]

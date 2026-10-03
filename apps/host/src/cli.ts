@@ -26,6 +26,7 @@ const compat = installNodeCompat()
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { parseVaultKey } from './vaultCrypto.js'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -261,6 +262,22 @@ async function main(): Promise<void> {
   }
   const configFile = configFileArg === undefined ? undefined : path.resolve(configFileArg)
   const secretsFile = secretsFileArg === undefined ? undefined : path.resolve(secretsFileArg)
+  /*
+   * Sun Light Code's vault: the key that encrypts the secrets file arrives as the first line on
+   * stdin, never as an argument (visible in the process list) or a variable (inherited by every
+   * command the agent runs). And the list of saved credentials, for the settings pickers.
+   */
+  let secretsKey: Buffer | undefined
+  if (args.includes('--secrets-key-stdin')) {
+    secretsKey = parseVaultKey(await readStdinLine())
+    if (secretsKey === undefined) {
+      process.stderr.write('light-code: --secrets-key-stdin expected 64 hex characters on the first line of stdin.\n')
+      process.exitCode = 1
+      return
+    }
+  }
+  const credentialsFileArg = valueOf(args, '--credentials-file')
+  const credentialsFile = credentialsFileArg === undefined ? undefined : path.resolve(credentialsFileArg)
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
   /*
    * How long the launch URL lives.
@@ -375,6 +392,8 @@ async function main(): Promise<void> {
     ...(secretsFile !== undefined ? { secretsFile } : {}),
     // Only for one person's machine: on a shared server stdout is the operator's log, not a desktop.
     ...(args.includes('--desktop-notify') && !serverMode ? { desktopNotify: true } : {}),
+    ...(secretsKey !== undefined ? { secretsKey } : {}),
+    ...(credentialsFile !== undefined ? { credentialsFile } : {}),
     /*
      * Decoded once, at startup.
      *
@@ -648,6 +667,8 @@ const KNOWN_FLAGS = new Set([
   '--config-file',
   '--secrets-file',
   '--desktop-notify',
+  '--secrets-key-stdin',
+  '--credentials-file',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -710,6 +731,24 @@ function valueOf(args: string[], flag: string): string | undefined {
  * once shipped a VSIX that could not activate at all (§19). The require is inside a
  * function for the same reason: an import would be hoisted back to the top.
  */
+/** The first line of stdin, which Sun Light Code writes and then closes. */
+function readStdinLine(): Promise<string> {
+  return new Promise((resolve) => {
+    let text = ''
+    const done = (): void => {
+      process.stdin.removeAllListeners('data')
+      process.stdin.pause()
+      resolve(text.split(/\r?\n/)[0] ?? '')
+    }
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', (chunk: string) => {
+      text += chunk
+      if (text.includes('\n')) done()
+    })
+    process.stdin.once('end', done)
+  })
+}
+
 function resolveRipgrep(): string | undefined {
   /*
    * A binary the program that started this one ships beside itself. Light Code Sun carries rg.exe
@@ -884,6 +923,10 @@ Usage: light-code [options]
   --desktop-notify    Print each notification from the notify tool as a line
                       prefixed light-code-notify: for the program that started
                       this one (Light Code Sun shows them as Windows notifications)
+  --secrets-key-stdin Read the key that encrypts --secrets-file from the first
+                      line of stdin (64 hex characters). Used by Sun Light Code
+  --credentials-file <file>  Saved credentials offered in every secret field
+                      (names only; values live in the secrets file)
   --no-open           Print the URL instead of launching a browser
   --no-token          Serve with no bearer token, so any request to the port is
                       accepted. Origin and Host are still checked, so a page in

@@ -796,3 +796,16 @@ export {
 } from './s3/remove.js'
 export { composeUserText, clipQuote, type MessageQuote, type MessageReaction, type Reaction } from './agent/feedback.js'
 export { replaceFile, FileReplaceError } from './platform/node/replaceFile.js'
+export {
+  CREDENTIAL_PREFIX,
+  CredentialPointerStore,
+  credentialChoices,
+  credentialFields,
+  credentialPointer,
+  describePointer,
+  isCredentialPointer,
+  type CredentialChoice,
+  type CredentialKind,
+  type CredentialSummary,
+} from './secrets/credentials.js'
+export { secretSlots, type SecretSlot } from './secrets/slots.js'

@@ -48,3 +48,46 @@ describe('FileSecretStore shared by several processes', () => {
     expect(await b.get('k')).toBeUndefined()
   })
 })
+
+describe('FileSecretStore encrypted for Sun Light Code', () => {
+  let dir: string | undefined
+  afterEach(async () => {
+    if (dir !== undefined) await fs.rm(dir, { recursive: true, force: true })
+  })
+  const key = Buffer.alloc(32, 7)
+  const file = async (): Promise<string> => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-vault-'))
+    return path.join(dir, 'secrets.json')
+  }
+
+  it('writes nothing readable, and reads back what it wrote', async () => {
+    const at = await file()
+    await new FileSecretStore(at, key).set('profile:gw:apiKey', 'sk-very-secret')
+    const raw = await fs.readFile(at, 'utf8')
+    expect(raw).not.toContain('sk-very-secret')
+    expect(raw).not.toContain('profile:gw:apiKey')
+    expect(JSON.parse(raw)).toMatchObject({ sunVault: 1 })
+    expect(await new FileSecretStore(at, key).get('profile:gw:apiKey')).toBe('sk-very-secret')
+  })
+
+  it('moves an existing plain file into the vault on the next save, keeping its keys', async () => {
+    const at = await file()
+    await fs.writeFile(at, JSON.stringify({ old: 'kept' }))
+    const store = new FileSecretStore(at, key)
+    expect(await store.get('old')).toBe('kept')
+    await store.set('new', 'added')
+    expect(await fs.readFile(at, 'utf8')).not.toContain('kept')
+    expect(await new FileSecretStore(at, key).get('old')).toBe('kept')
+  })
+
+  it('without the key, refuses to save rather than replacing every key', async () => {
+    const at = await file()
+    await new FileSecretStore(at, key).set('precious', 'value')
+    const keyless = new FileSecretStore(at)
+    expect(await keyless.get('precious')).toBeUndefined()
+    await expect(keyless.set('other', 'x')).rejects.toThrow(/encrypted/)
+    const wrongKey = new FileSecretStore(at, Buffer.alloc(32, 9))
+    await expect(wrongKey.set('other', 'x')).rejects.toThrow(/encrypted/)
+    expect(await new FileSecretStore(at, key).get('precious')).toBe('value')
+  })
+})
