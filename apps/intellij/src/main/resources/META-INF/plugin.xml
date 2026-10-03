@@ -24,7 +24,7 @@
   -->
   <change-notes><![CDATA[
     <ul>
-      <li>Light Code 0.103.0: the handbook explains Sun Light Code, the new Windows app for several codebases at once; a secrets file shared by several processes no longer loses a key.</li>
+      <li>Light Code 0.104.0: the Variables tab shows only your own variables; the handbook explains Sun Light Code, the new Windows app for several codebases at once; a secrets file shared by several processes no longer loses a key.</li>
       <li>Light Code 0.101.0: Outlook waits out a busy Outlook instead of failing, recovers from a hung request, and finds old mail by date range.</li>
       <li>Light Code now comes inside the plugin: every feature and fix of the matching VS Code and Node releases, with no npm download. Needs Node.js 18 or newer on the PATH.</li>
       <li>New in Light Code: reply to a message or react to it and to its thinking; a wait tool for following a job or build until it is done; AutoSys status and details for many jobs at once; AutoSys through an API gateway, with a username and password where the gateway needs them.</li>
