@@ -839,7 +839,8 @@ desktops of the same person; importing the file is how a second machine is set u
     keywords: [
       'sun', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
       'many projects', 'one window', 'parallel', 'background agents', 'desktop app', 'windows app',
-      'sidebar', 'sleep', 'idle', 'switch project',
+      'sidebar', 'sleep', 'idle', 'switch project', 'credentials', 'saved credential',
+      'share keys', 'share api keys', 'pycharm', 'intellij keys',
     ],
     body: `
 **Sun Light Code** is a Windows app holding every codebase you work on, each with its own Light Code
@@ -857,8 +858,11 @@ config.json in place (the VS Code extension's, or the Node host's that the JetBr
 edits in either app reach both; **Copy** one; or **New**. The folder's own .lightcode/config.json
 always applies. Right-click a codebase → Settings source… changes it later.
 
-**API keys do not come across**: VS Code keeps them in its encrypted storage, which another program
-cannot read. Enter each once in a codebase's Settings; Sun shares it with every codebase.
+**Credentials** (the key button in Sun's sidebar): keys and passwords saved once, by name, encrypted for
+your Windows account, and picked in any codebase's settings with "Use a saved credential" — changing one
+updates everything that uses it. Values are never shown again. Bring keys in from VS Code with the command
+"Light Code: Share API keys with Sun Light Code", from IntelliJ / PyCharm with the button on the
+Credentials page, or from another computer with Export / Import (a passphrase-encrypted file).
 
 **Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+B hide the sidebar (a strip of status
 dots stays), Ctrl+, Sun's settings.

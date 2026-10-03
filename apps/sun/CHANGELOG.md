@@ -1,5 +1,10 @@
 # @chosengeneration/sun-light-code
 
+## 0.2.1
+
+- Carries Light Code 0.105.0.
+- Credentials → **From IntelliJ / PyCharm** brings in the keys Light Code keeps for those IDEs on this computer, by name, after you confirm.
+
 ## 0.2.0
 
 - Credentials: save keys and passwords once, by name, and pick them in any codebase's settings; changing one updates everything that uses it. Values are never shown again.

@@ -1,6 +1,6 @@
 [package]
 name = "sun-light-code"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.86"
 description = "Sun Light Code: several codebases, each with its own Light Code agent, in one Windows window"

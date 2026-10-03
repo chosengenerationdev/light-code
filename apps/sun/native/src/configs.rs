@@ -296,3 +296,133 @@ mod tests {
         assert_eq!(describe(&f), "2 providers, 1 MCP server");
     }
 }
+
+/// Keys kept by the Light Code Node host - which the IntelliJ / PyCharm plugin runs - as
+/// (secret-storage key, label, value), for importing into Sun's vault.
+///
+/// That host keeps them in a plain file readable by this Windows account (`secrets.json` beside its
+/// `config.json`), so unlike VS Code's storage they can be read directly. Only keys a config refers to
+/// are taken, labelled by the setting that refers to them; pointers to credentials and to a
+/// credential tool are references, not keys, and are skipped. A vault-sealed file (Sun's own format)
+/// is skipped too.
+pub fn node_host_keys() -> Vec<(String, String, String)> {
+    let mut found: Vec<(String, String, String)> = Vec::new();
+    let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) else { return found };
+    let Ok(users) = fs::read_dir(local.join("light-code").join("Data").join("users")) else { return found };
+    for user in users.flatten() {
+        let Ok(secrets) = read_json(&user.path().join("secrets.json")) else { continue };
+        if secrets.get("sunVault").is_some() {
+            continue;
+        }
+        let config = read_json(&user.path().join("config.json")).unwrap_or(serde_json::Value::Null);
+        for (key, label) in secret_slots(&config) {
+            let Some(value) = secrets.get(&key).and_then(|v| v.as_str()) else { continue };
+            if value.is_empty() || value.starts_with("credential:") || value.starts_with("tool:") || found.iter().any(|f| f.0 == key) {
+                continue;
+            }
+            found.push((key, label, value.to_string()));
+        }
+    }
+    found
+}
+
+/// Every secret-storage key a config names, labelled - the Rust twin of `secretSlots` in core.
+fn secret_slots(config: &serde_json::Value) -> Vec<(String, String)> {
+    fn words(field: &str) -> String {
+        match field {
+            "apiKeyRef" => "API key".into(),
+            "clientSecretRef" => "client secret".into(),
+            "passphraseRef" => "key passphrase".into(),
+            "passwordRef" => "password".into(),
+            "usernameRef" => "username".into(),
+            "tokenRef" => "token".into(),
+            "secretAccessKeyRef" => "secret access key".into(),
+            "sessionTokenRef" => "session token".into(),
+            "valueRef" => "header value".into(),
+            other => other.trim_end_matches("Ref").to_string(),
+        }
+    }
+    fn section(part: &str) -> Option<&'static str> {
+        Some(match part {
+            "confluence" => "Confluence",
+            "jira" => "Jira",
+            "bitbucket" => "Bitbucket",
+            "jenkins" => "Jenkins",
+            "autosys" => "AutoSys",
+            "tls" => "Global client key",
+            "vectorStores" => "Search connection",
+            "s3" => "S3",
+            _ => return None,
+        })
+    }
+    fn walk(value: &serde_json::Value, path: &mut Vec<String>, owner: Option<String>, out: &mut Vec<(String, String)>) {
+        match value {
+            serde_json::Value::Array(items) => items.iter().for_each(|i| walk(i, path, owner.clone(), out)),
+            serde_json::Value::Object(map) => {
+                let named = ["label", "name"]
+                    .iter()
+                    .find_map(|k| map.get(*k).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from));
+                let here = named.or(owner);
+                for (field, child) in map {
+                    if let (Some(text), true) = (child.as_str(), field.ends_with("Ref")) {
+                        if !text.is_empty() && !text.starts_with("env:") {
+                            let who = here
+                                .clone()
+                                .or_else(|| path.iter().find_map(|p| section(p)).map(String::from))
+                                .unwrap_or_else(|| path.last().cloned().unwrap_or_else(|| "Setting".into()));
+                            out.push((text.to_string(), format!("{who}: {}", words(field))));
+                        }
+                    } else if path.is_empty() && field == "mcpServers" {
+                        if let Some(servers) = child.as_object() {
+                            for (server, entry) in servers {
+                                let text = entry.to_string();
+                                for piece in text.split("${secret:").skip(1) {
+                                    if let Some(end) = piece.find('}') {
+                                        out.push((piece[..end].to_string(), format!("MCP server {server}: {}", &piece[..end])));
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if path.is_empty() && field == "python" {
+                            if let Some(env) = child.get("env").and_then(|e| e.as_object()) {
+                                for (name, entry) in env {
+                                    if entry.get("secret").and_then(|s| s.as_bool()) == Some(true) {
+                                        out.push((format!("python:env:{name}"), format!("Python variable {name}")));
+                                    }
+                                }
+                            }
+                        }
+                        path.push(field.clone());
+                        walk(child, path, here.clone(), out);
+                        path.pop();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(config, &mut Vec::new(), None, &mut out);
+    out
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::secret_slots;
+
+    #[test]
+    fn labels_the_keys_a_config_names() {
+        let config = serde_json::json!({
+            "profiles": [{ "label": "DeepSeek", "auth": { "type": "apiKey", "apiKeyRef": "profile:ds:apiKey" } }],
+            "jira": { "tokenRef": "jira:token" },
+            "python": { "env": { "DB_PASSWORD": { "secret": true } } },
+            "mcpServers": { "github": { "env": { "TOKEN": "${secret:gh}" } } }
+        });
+        let slots = secret_slots(&config);
+        assert!(slots.contains(&("profile:ds:apiKey".into(), "DeepSeek: API key".into())));
+        assert!(slots.contains(&("jira:token".into(), "Jira: token".into())));
+        assert!(slots.contains(&("python:env:DB_PASSWORD".into(), "Python variable DB_PASSWORD".into())));
+        assert!(slots.contains(&("gh".into(), "MCP server github: gh".into())));
+    }
+}

@@ -122,6 +122,8 @@ struct App {
     /// the page - only names are.
     import_text: Option<String>,
     import_items: Option<Vec<vault::Portable>>,
+    /// Keys found for the JetBrains import, held here until confirmed; only names reach the page.
+    jetbrains_keys: Option<Vec<(String, String, String)>>,
 }
 
 #[derive(Deserialize)]
@@ -162,6 +164,9 @@ enum Command {
     ChooseCredentialImport,
     OpenCredentialImport { passphrase: String },
     ImportCredentials { indexes: Vec<usize> },
+    /// Keys the IntelliJ / PyCharm plugin's Node host keeps: listed by name, imported on confirm.
+    ScanJetBrains,
+    ImportJetBrains { indexes: Vec<usize> },
 }
 
 fn main() {
@@ -267,6 +272,7 @@ fn main() {
         vault: vault.clone(),
         import_text: None,
         import_items: None,
+        jetbrains_keys: None,
     };
 
     // Keys from the VS Code extension, over a pipe only this Windows user can open.
@@ -717,6 +723,31 @@ impl App {
                     Ok(count) => {
                         send(webview, json!({ "type": "credentialSaved" }));
                         send(webview, json!({ "type": "notice", "level": "info", "text": format!("Imported {count} credential(s).") }));
+                        self.push_credentials(webview);
+                    }
+                    Err(text) => send(webview, json!({ "type": "credentialError", "text": text })),
+                }
+            }
+            Command::ScanJetBrains => {
+                let keys = configs::node_host_keys();
+                if keys.is_empty() {
+                    send(webview, json!({ "type": "notice", "level": "info", "text": "No saved keys were found for Light Code in IntelliJ or PyCharm on this computer." }));
+                } else {
+                    let items: Vec<Value> = keys
+                        .iter()
+                        .map(|(_, label, _)| json!({ "label": label, "exists": self.vault.has_label(label) }))
+                        .collect();
+                    self.jetbrains_keys = Some(keys);
+                    send(webview, json!({ "type": "jetbrainsPreview", "items": items }));
+                }
+            }
+            Command::ImportJetBrains { indexes } => {
+                let keys = self.jetbrains_keys.take().unwrap_or_default();
+                let chosen: Vec<(String, String, String)> = keys.into_iter().enumerate().filter(|(i, _)| indexes.contains(i)).map(|(_, k)| k).collect();
+                match self.vault.import(&chosen) {
+                    Ok(labels) => {
+                        send(webview, json!({ "type": "credentialSaved" }));
+                        send(webview, json!({ "type": "notice", "level": "info", "text": format!("Imported {} key(s) from IntelliJ / PyCharm. Codebases linked to that config can use them now.", labels.len()) }));
                         self.push_credentials(webview);
                     }
                     Err(text) => send(webview, json!({ "type": "credentialError", "text": text })),

@@ -25,7 +25,8 @@ const el = (tag, props = {}, ...children) => {
 }
 const COG = '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'
 const svg = (paths, extra = '') =>
-  paths === 'cog' ? `<svg viewBox="0 0 24 24" class="cog" ${extra}>${COG}</svg>` : `<svg viewBox="0 0 16 16" ${extra}>${paths}</svg>`
+  paths === 'cog' ? `<svg viewBox="0 0 24 24" class="cog" ${extra}>${COG}</svg>` :
+  paths === 'key24' ? `<svg viewBox="0 0 24 24" class="cog" ${extra}><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>` : `<svg viewBox="0 0 16 16" ${extra}>${paths}</svg>`
 const ICONS = {
   folder: '<path d="M1.75 4.25c0-.83.67-1.5 1.5-1.5h3l1.5 1.75h5c.83 0 1.5.67 1.5 1.5v5.75c0 .83-.67 1.5-1.5 1.5h-9.5c-.83 0-1.5-.67-1.5-1.5z"/>',
   moon: '<path d="M13.25 9.6A5.5 5.5 0 0 1 6.4 2.75a5.5 5.5 0 1 0 6.85 6.85z"/>',
@@ -41,7 +42,7 @@ const ICONS = {
   remove: '<path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 9h6.3l.6-9"/>',
   check: '<path d="m3.5 8.25 3 3 6-6.5"/>',
   info: '<circle cx="8" cy="8" r="6.25"/><path d="M8 7.25v4M8 5v.01"/>',
-  key: '<path d="M14.5 6.5a4 4 0 1 1-7.9.9L2.75 11.25v2h2v-1.5h1.5v-1.5h1.5l1.4-1.4a4 4 0 0 1 5.35-2.35z"/><circle cx="11.25" cy="5" r=".9"/>',
+  key: 'key24',
   sun: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.06 1.06M11.54 11.54l1.06 1.06M3.4 12.6l1.06-1.06M11.54 4.46l1.06-1.06"/>',
   link: '<path d="M6.75 9.25a3 3 0 0 0 4.24 0l2-2a3 3 0 0 0-4.24-4.24l-.75.75"/><path d="M9.25 6.75a3 3 0 0 0-4.24 0l-2 2a3 3 0 0 0 4.24 4.24l.75-.75"/>',
   copy: '<rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5"/><path d="M10.75 5.25v-1.5c0-.83-.67-1.5-1.5-1.5h-5.5c-.83 0-1.5.67-1.5 1.5v5.5c0 .83.67 1.5 1.5 1.5h1.5"/>',
@@ -168,6 +169,9 @@ const HANDLERS = {
   },
   importNeedsPassphrase(m) {
     if (openModal?.kind === 'credentials') openModal.askPassphrase(m.file)
+  },
+  jetbrainsPreview(m) {
+    if (openModal?.kind === 'credentials') openModal.preview(m.items, 'importJetBrains', 'Keys found for Light Code in IntelliJ / PyCharm')
   },
   importPreview(m) {
     if (openModal?.kind === 'credentials') openModal.preview(m.items)
@@ -1311,7 +1315,7 @@ function openCredentials() {
           { class: 'body' },
           rows.length > 0
             ? el('div', {}, ...rows)
-            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here — or, in VS Code, run <b>Light Code: Share API keys with Sun Light Code</b> to bring every key over at once.</span>` }),
+            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here, press <b>From IntelliJ / PyCharm</b> below, or in VS Code run <b>Light Code: Share API keys with Sun Light Code</b> to bring every key over at once.</span>` }),
           rows.length > 0
             ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Keys from VS Code: run <b>Light Code: Share API keys with Sun Light Code</b> in VS Code while Sun is open.</span>` })
             : null,
@@ -1328,6 +1332,7 @@ function openCredentials() {
             },
           }),
           el('button', { class: 'secondary', text: 'Import…', onclick: () => send('chooseCredentialImport') }),
+          el('button', { class: 'secondary', text: 'From IntelliJ / PyCharm', title: 'Bring in the keys Light Code keeps for IntelliJ and PyCharm on this computer', onclick: () => send('scanJetBrains') }),
           rows.length > 0 ? el('button', { class: 'secondary', text: 'Export…', onclick: () => { error = undefined; exportForm() } }) : null,
           el('span', { class: 'spacer' }),
           el('button', { class: 'primary', text: 'Done', onclick: closeModal }),
@@ -1416,12 +1421,12 @@ function openCredentials() {
       )
       requestAnimationFrame(() => pass.focus())
     }
-    const importPreview = (items) => {
+    const importPreview = (items, command = 'importCredentials', title = 'Import credentials') => {
       editing = { importing: true }
       error = undefined
       const chosen = new Set(items.map((_, i) => i))
       card.replaceChildren(
-        el('header', {}, el('h2', { text: 'Import credentials' }), el('p', { class: 'sub', text: 'Choose which to bring in. One with the same name as a credential here replaces its value.' })),
+        el('header', {}, el('h2', { text: title }), el('p', { class: 'sub', text: 'Choose which to bring in. One with the same name as a credential here replaces its value. Values are never shown.' })),
         el(
           'div',
           { class: 'body' },
@@ -1441,12 +1446,12 @@ function openCredentials() {
           {},
           el('span', { class: 'spacer' }),
           el('button', { class: 'secondary', text: 'Cancel', onclick: () => modal.saved() }),
-          el('button', { class: 'primary', text: 'Import', onclick: () => send('importCredentials', { indexes: [...chosen] }) }),
+          el('button', { class: 'primary', text: 'Import', onclick: () => send(command, { indexes: [...chosen] }) }),
         ),
       )
     }
     modal.askPassphrase = (file) => importPassphrase(file)
-    modal.preview = (items) => importPreview(items)
+    modal.preview = (items, command, title) => importPreview(items, command, title)
 
     modal.refresh = () => (editing === undefined ? list() : editing.export ? exportForm() : editing.importing ? undefined : form())
     modal.saved = () => {

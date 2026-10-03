@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.131.0
+
+### Patch Changes
+
+- The handbook explains Sun Light Code's credentials, including bringing keys in from VS Code and from IntelliJ / PyCharm.
+
 ## 0.130.0
 
 ### Minor Changes
