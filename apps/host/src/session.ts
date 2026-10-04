@@ -199,7 +199,7 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
      * A plain recursive walk, since there is no editor index to borrow. Pruned at the
      * directories that would otherwise dominate the result and the runtime.
      */
-    async findFiles(segment, limit, excludeFolders) {
+    async findFiles(segment, limit, excludeFolders, mode, depth) {
       if (workspaceRoot === undefined) return []
       /*
        * Compared directly, because this host walks the tree itself and has no glob to speak.
@@ -214,8 +214,8 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
       const skip = new Set(excludeFolders)
       const found: string[] = []
 
-      const walk = async (dir: string, depth: number): Promise<void> => {
-        if (found.length >= limit || depth > 12) return
+      const walk = async (dir: string, level: number): Promise<void> => {
+        if (found.length >= limit || level > 12 || (depth !== undefined && level > depth)) return
         let entries
         try {
           entries = await fs.readdir(dir, { withFileTypes: true })
@@ -227,8 +227,13 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
           if (entry.name.startsWith('.') && entry.name !== '.env') continue
           const full = path.join(dir, entry.name)
           if (entry.isDirectory()) {
-            if (!skip.has(entry.name)) await walk(full, depth + 1)
-          } else if (needle.length === 0 || entry.name.toLowerCase().includes(needle)) {
+            if (!skip.has(entry.name)) await walk(full, level + 1)
+          } else if (depth !== undefined && level !== depth) {
+            continue
+          } else if (
+            needle.length === 0 ||
+            (mode === 'prefix' ? entry.name.toLowerCase().startsWith(needle) : entry.name.toLowerCase().includes(needle))
+          ) {
             found.push(full)
           }
         }
@@ -313,6 +318,8 @@ export interface SessionOptions {
   reachAnywhere?: boolean
   /** Other chats share this codebase (Sun's chat tabs): Rollback undoes only this chat's files. */
   sharedWorkspace?: boolean
+  /** Another process runs this codebase's schedules (Sun's extra chat tabs). */
+  noSchedules?: boolean
   /** Sun Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
@@ -458,6 +465,7 @@ export async function createSession(
     ...(options.reachAnywhere === true && options.shared !== true ? { fileReach: 'anywhere' as const } : {}),
     ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
     ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
+    ...(options.noSchedules === true ? { runsSchedules: false } : {}),
     ...(options.desktopNotify === true
       ? {
           desktopNotify: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => {

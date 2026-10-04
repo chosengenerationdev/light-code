@@ -2282,6 +2282,13 @@ shortcuts. **Verified by running it** with three chats on one codebase.
 - **Review and Approvals had the same icon**; Review has its own (`ReviewIcon`).
 - **Excel and Outlook were not moved to Rust**, asked and answered: their cost is COM round trips to
   another process, which no language changes, and the PowerShell worker is already persistent.
+- **`@` in a large codebase** (0.135.0, reported: `@abc` showed only `jobs/bat/...` scripts, never
+  `src/abc/abc_report.py`). Two causes. The index scan is capped at 2000 and returns matches in its
+  own order, so with thousands of matching scripts the cap chose and the ranking never saw the file;
+  `context/mentionSearch.ts` now follows a full scan with a **prefix pass one folder depth at a time,
+  shallowest first** (`mentionGlob(seg, 'prefix', depth)` = `*/*/[aA]…*`, measured against `rg.exe`) -
+  the ranking's own order, so its top is exact. And answers arrived out of order: the page now keeps
+  only the answer to the latest query. Not reproducible with two files - it needs the volume.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
 
@@ -2931,8 +2938,14 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   AUMID (registered in HKCU, no admin). Finished and needs-approval notifications come from the pane's
   state word when that codebase is not on screen.
 - **Sleep, not swap.** Idle codebases (default 30 min) are stopped to free memory and restarted on
-  click; never while busy or waiting, never the one on screen, never one with an enabled schedule
-  (read from its config file — a sleeping host cannot be asked; an unreadable file means awake).
+  click; never while busy or waiting, never the one on screen.
+- **Sun keeps the schedule timetable** (0.5.1). It reads each codebase's `schedules` (an object keyed
+  by id - 0.1-0.5 read it as a list, saw nothing, and slept codebases whose jobs then never ran) and
+  starts the first chat a minute before the soonest `nextRunAt`, asleep or never started. The host
+  then runs the job as it always has, overdue included. Kept awake while a run's claim file exists or
+  another run is within ten minutes; otherwise back to sleep two idle minutes after a schedule wake.
+  Extra chats get `--no-schedules` (`HostServices.runsSchedules: false`), because every chat is its
+  own host and each ran the same job. **Verified live**: woken before due, ran on time, slept again.
 - **Install copies files and nothing else.** No install scripts, no dependencies: the reason Electron
   fails at the office is its postinstall download. The package carries the exe, the host built from
   the same commit, rg.exe (`LIGHT_CODE_RIPGREP`, so `@vscode/ripgrep`'s GitHub download is never

@@ -101,6 +101,8 @@ struct Runtime {
     memory: u64,
     /// Something happened here while it was not on screen.
     unread: bool,
+    /// Started by Sun's schedule timer rather than by you: it goes back to sleep soon after the run.
+    woke_for_schedule: bool,
 }
 
 impl Runtime {
@@ -115,6 +117,7 @@ impl Runtime {
             error: None,
             memory: 0,
             unread: false,
+            woke_for_schedule: false,
         }
     }
 }
@@ -530,6 +533,7 @@ impl App {
                     "memory": rt.memory,
                     "error": rt.error,
                     "unread": rt.unread,
+                    "schedule": rt.woke_for_schedule,
                 }),
             );
         }
@@ -1094,6 +1098,8 @@ impl App {
         let rt = self.runtime.entry(id.to_string()).or_insert_with(Runtime::new);
         rt.unread = false;
         rt.last_activity = Instant::now();
+        // You are looking at it: it sleeps on the ordinary rule now, not the schedule's.
+        rt.woke_for_schedule = false;
         // A failed agent waits for Restart rather than looping on a fault the user has not seen.
         if matches!(rt.phase, Phase::Stopped | Phase::Sleeping) {
             self.start(id, webview);
@@ -1158,6 +1164,7 @@ impl App {
             fast_fs: system::fast_fs(),
             env: environment.vars,
             path: environment.path,
+            no_schedules: state::chat_of(id).is_some(),
         };
         match host::launch(spec, move |event| {
             let _ = proxy.send_event(UserEvent::Host(event));
@@ -1276,23 +1283,43 @@ impl App {
         for rt in self.runtime.values_mut() {
             rt.memory = rt.process.as_ref().map(|p| p.memory()).unwrap_or(0);
         }
+        // Every 15 seconds: wake a codebase whose schedule is about to come due.
+        if self.ticks % 5 == 0 {
+            self.wake_for_schedules(webview);
+        }
         // Every 30 seconds: put idle codebases to sleep.
-        if self.ticks % 10 == 0 && self.state.settings.sleep_minutes > 0 {
+        if self.ticks % 10 == 0 {
             let limit = Duration::from_secs(self.state.settings.sleep_minutes as u64 * 60);
+            let now = state::now_millis();
             let sleepy: Vec<String> = self
                 .runtime
                 .iter()
                 .filter(|(id, rt)| {
-                    rt.phase == Phase::Running
+                    // Woken only to run a schedule: back to sleep two idle minutes after it.
+                    let idle_for = if rt.woke_for_schedule { Duration::from_secs(120) } else { limit };
+                    let sleeping_allowed = rt.woke_for_schedule || self.state.settings.sleep_minutes > 0;
+                    sleeping_allowed
+                        && rt.phase == Phase::Running
                         && rt.agent == "idle"
-                        && rt.last_activity.elapsed() >= limit
+                        && rt.last_activity.elapsed() >= idle_for
                         && self.active.as_deref() != Some(id.as_str())
                 })
                 .filter(|(id, _)| {
-                    self.state
-                        .project(id)
-                        .map(|p| !p.keep_awake && !configs::has_active_schedules(&p.config_file, &p.path))
-                        .unwrap_or(false)
+                    let Some(p) = self.state.project(id) else { return false };
+                    if p.keep_awake {
+                        return false;
+                    }
+                    // A schedule's first chat stays up while a run is going or one is near.
+                    if state::chat_of(id).is_none() {
+                        if configs::schedule_running(&self.paths.project_dir(id)) {
+                            return false;
+                        }
+                        let s = configs::schedule_state(&p.config_file, &p.path);
+                        if s.unreadable || s.unarmed || s.next_due.map(|d| d <= now + 10 * 60 * 1000).unwrap_or(false) {
+                            return false;
+                        }
+                    }
+                    true
                 })
                 .map(|(id, _)| id.clone())
                 .collect();
@@ -1389,6 +1416,33 @@ impl App {
                     "pathChanged": path_changed, "exitCode": done.exit_code, "output": done.output_tail,
                 })
             }
+        }
+    }
+
+    /// Sun's own schedule timer. A codebase holding a schedule no longer has to stay awake all day
+    /// to run it: Sun reads when each is due and starts that codebase's first chat a minute before,
+    /// whether it was asleep or never started this session. The host then runs the job exactly as
+    /// it always has, including one missed while the PC slept (it is overdue, so due at once).
+    fn wake_for_schedules(&mut self, webview: &WebView) {
+        let now = state::now_millis();
+        let due: Vec<String> = self
+            .state
+            .projects
+            .iter()
+            .filter(|p| Path::new(&p.path).is_dir())
+            .filter(|p| {
+                let s = configs::schedule_state(&p.config_file, &p.path);
+                s.unarmed || s.next_due.map(|d| d <= now + 60 * 1000).unwrap_or(false)
+            })
+            .map(|p| p.id.clone())
+            .collect();
+        for id in due {
+            let rt = self.runtime.entry(id.clone()).or_insert_with(Runtime::new);
+            if rt.process.is_some() || rt.phase == Phase::Failed {
+                continue;
+            }
+            rt.woke_for_schedule = true;
+            self.start(&id, webview);
         }
     }
 

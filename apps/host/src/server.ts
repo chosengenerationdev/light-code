@@ -124,6 +124,8 @@ export interface ServerOptions {
   reachAnywhere?: boolean
   /** See `SessionOptions.sharedWorkspace`. */
   sharedWorkspace?: boolean
+  /** See `SessionOptions.noSchedules`. */
+  noSchedules?: boolean
   /** See `SessionOptions.fastFs`. */
   fastFs?: string
   /** See `SessionOptions.secretsKey`. */
@@ -464,6 +466,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.secretsKey !== undefined ? { secretsKey: options.secretsKey } : {}),
       ...(options.reachAnywhere === true ? { reachAnywhere: true } : {}),
       ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
+      ...(options.noSchedules === true ? { noSchedules: true } : {}),
       ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,

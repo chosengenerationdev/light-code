@@ -66,6 +66,7 @@ export {
 } from './context/mentionExcludes.js'
 export { compareMentionCandidates, matchesMentionQuery } from './context/mentionRanking.js'
 export { mentionGlob, mentionSegment } from './context/mentionGlob.js'
+export { searchMentions, type MentionIndex } from './context/mentionSearch.js'
 export {
   JUPYTER_CONNECTION_ENV,
   checkConnectionFile,

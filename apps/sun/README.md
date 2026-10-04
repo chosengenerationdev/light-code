@@ -13,6 +13,8 @@ Every codebase you work on, in one Windows window — each with its own
   search connections and project settings apply in place. Or copy one, or start fresh.
 - **Windows notifications** when a background agent finishes, needs your approval, or sends one
   with `notify` — including scheduled runs. Click one to jump to that chat.
+- **Schedules run on time even for sleeping codebases**: Sun wakes a codebase just before its job is due
+  and lets it sleep again afterwards.
 - **Idle codebases sleep** after a while to give memory back (never while working, waiting for you,
   or holding schedules), and wake in a moment when clicked.
 - **Reach beyond the codebase**: agents read any drive or shared folder, and may write anywhere — asking

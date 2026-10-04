@@ -1,5 +1,12 @@
 # @chosengeneration/sun-code
 
+## 0.5.1
+
+- **Sun runs the schedule timetable.** A codebase no longer has to stay awake all day for its schedules: Sun wakes it a minute before a job is due — asleep, or never opened this session — and lets it sleep again a couple of minutes after.
+- Fixed: earlier versions never noticed a codebase's schedules, so a sleeping codebase's jobs did not run.
+- Fixed: with several chats open on one codebase, each ran the same scheduled job. Only the first chat runs them now.
+- Carries Light Code 0.109.0, where `@` always finds the file you mean in a large codebase.
+
 ## 0.5.0
 
 - **Renamed to Sun Code.** Install `@chosengeneration/sun-code` and run `sun-code`. Your codebases, chats and credentials move across from Sun Light Code on first start. Uninstall the old package with `npm uninstall -g @chosengeneration/sun-light-code`.

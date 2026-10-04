@@ -221,24 +221,75 @@ fn file_uri_to_path(uri: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// Whether this codebase has a schedule that could fire. Such a codebase is never put to sleep:
-/// schedules run inside its host, and a sleeping host would silently miss them.
-///
-/// Read from the file rather than asked of the host, because a sleeping host cannot be asked. Any
-/// doubt - an unreadable file - answers yes, which only costs memory.
-pub fn has_active_schedules(config_file: &str, workspace: &str) -> bool {
+/// A codebase's schedules as Sun's timer needs them: how many are on here, and when the soonest
+/// is due. Read from the file, because a sleeping host cannot be asked.
+#[derive(Debug, Default, PartialEq)]
+pub struct ScheduleState {
+    pub enabled: usize,
+    /// Milliseconds since the epoch; the soonest `nextRunAt` of an enabled schedule here.
+    pub next_due: Option<u64>,
+    /// An enabled schedule with no `nextRunAt` yet: only a running host arms it.
+    pub unarmed: bool,
+    /// The file could not be read - treated as "keep it awake", which only costs memory.
+    pub unreadable: bool,
+}
+
+/// `schedules` is an object keyed by id in Light Code's config. Sun once read it as a list, so it
+/// never saw a schedule and put codebases holding them to sleep - where they never ran.
+pub fn schedule_state(config_file: &str, workspace: &str) -> ScheduleState {
     let Ok(value) = read_json(Path::new(config_file)) else {
-        return Path::new(config_file).exists();
+        return ScheduleState { unreadable: Path::new(config_file).exists(), ..Default::default() };
     };
-    let Some(schedules) = value.get("schedules").and_then(|v| v.as_array()) else { return false };
-    schedules.iter().any(|s| {
+    let entries: Vec<&serde_json::Value> = match value.get("schedules") {
+        Some(serde_json::Value::Object(map)) => map.values().collect(),
+        Some(serde_json::Value::Array(list)) => list.iter().collect(),
+        _ => Vec::new(),
+    };
+    let mut state = ScheduleState::default();
+    for s in entries {
         let enabled = s.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
         let here = match s.get("workspaceRoot").and_then(|v| v.as_str()) {
             None => true,
             Some(root) => same_path(root, workspace),
         };
-        enabled && here
-    })
+        if !(enabled && here) {
+            continue;
+        }
+        state.enabled += 1;
+        match s.get("nextRunAt").and_then(|v| v.as_f64()) {
+            Some(at) => state.next_due = Some(state.next_due.map_or(at as u64, |d| d.min(at as u64))),
+            None => state.unarmed = true,
+        }
+    }
+    state
+}
+
+/// A scheduled run in progress somewhere under this folder: its claim file, written when a due run
+/// starts and removed when it ends. A claim older than an hour is a crashed run, as the host treats it.
+pub fn schedule_running(dir: &Path) -> bool {
+    fn walk(dir: &Path, depth: usize) -> bool {
+        let Ok(entries) = fs::read_dir(dir) else { return false };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            if entry.file_name() == "schedule-claims" {
+                let fresh = fs::read_dir(&path).into_iter().flatten().flatten().any(|claim| {
+                    claim.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|age| age.as_secs() < 3600).unwrap_or(false)
+                });
+                if fresh {
+                    return true;
+                }
+            } else if depth < 5 && !matches!(entry.file_name().to_string_lossy().as_ref(), "webview" | "tasks" | "tool-results" | "checkpoints") {
+                if walk(&path, depth + 1) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    walk(dir, 0)
 }
 
 /// The codebase's own `.lightcode/config.json`, which every host reads whatever Sun is told.
@@ -258,30 +309,47 @@ mod tests {
         file
     }
 
+    /// The shape Light Code writes: an object keyed by schedule id.
     #[test]
-    fn schedules_for_another_project_do_not_keep_this_one_awake() {
-        let f = temp("other", r#"{"schedules":[{"enabled":true,"workspaceRoot":"C:\\other"}]}"#);
-        assert!(!has_active_schedules(f.to_str().unwrap(), "D:\\mine"));
+    fn reads_schedules_as_light_code_stores_them() {
+        let f = temp(
+            "keyed",
+            r#"{"schedules":{
+                "a":{"enabled":true,"nextRunAt":1900000000000},
+                "b":{"enabled":true,"nextRunAt":1800000000000,"workspaceRoot":"d:/Mine/"},
+                "c":{"enabled":true,"nextRunAt":1700000000000,"workspaceRoot":"C:\\other"},
+                "d":{"enabled":false,"nextRunAt":1600000000000}
+            }}"#,
+        );
+        let s = schedule_state(f.to_str().unwrap(), "D:\\mine");
+        assert_eq!(s.enabled, 2, "another project's and a disabled one do not count");
+        assert_eq!(s.next_due, Some(1_800_000_000_000), "the soonest of this project's");
+        assert!(!s.unarmed && !s.unreadable);
     }
 
     #[test]
-    fn an_enabled_schedule_here_or_anywhere_keeps_it_awake() {
-        let here = temp("here", r#"{"schedules":[{"enabled":true,"workspaceRoot":"d:/Mine/"}]}"#);
-        assert!(has_active_schedules(here.to_str().unwrap(), "D:\\mine"));
-        let anywhere = temp("anywhere", r#"{"schedules":[{"enabled":true}]}"#);
-        assert!(has_active_schedules(anywhere.to_str().unwrap(), "D:\\mine"));
+    fn an_unarmed_schedule_needs_its_host_once() {
+        let f = temp("unarmed", r#"{"schedules":{"a":{"enabled":true}}}"#);
+        assert!(schedule_state(f.to_str().unwrap(), "D:\\mine").unarmed);
     }
 
     #[test]
-    fn a_disabled_schedule_does_not() {
-        let f = temp("off", r#"{"schedules":[{"enabled":false}]}"#);
-        assert!(!has_active_schedules(f.to_str().unwrap(), "D:\\mine"));
+    fn nothing_scheduled_and_unreadable_files() {
+        let none = temp("none", r#"{"profiles":[]}"#);
+        assert_eq!(schedule_state(none.to_str().unwrap(), "D:\\mine"), ScheduleState::default());
+        let bad = temp("bad", "{not json");
+        assert!(schedule_state(bad.to_str().unwrap(), "D:\\mine").unreadable, "doubt keeps it awake");
     }
 
     #[test]
-    fn an_unreadable_config_errs_towards_staying_awake() {
-        let f = temp("bad", "{not json");
-        assert!(has_active_schedules(f.to_str().unwrap(), "D:\\mine"));
+    fn a_claim_file_means_a_run_is_going() {
+        let dir = std::env::temp_dir().join(format!("sun-claims-{}", std::process::id()));
+        let claims = dir.join("users").join("local").join("schedule-claims");
+        fs::create_dir_all(&claims).unwrap();
+        assert!(!schedule_running(&dir));
+        fs::write(claims.join("nightly.json"), "{}").unwrap();
+        assert!(schedule_running(&dir));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

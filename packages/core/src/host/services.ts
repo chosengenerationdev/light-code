@@ -107,7 +107,14 @@ export interface HostUi {
    * `excludeFolders` is a list of folder names to skip at any depth, resolved by the caller from
    * config. Passed rather than read here because each host excludes differently.
    */
-  findFiles(segment: string, limit: number, excludeFolders: readonly string[]): Promise<string[]>
+  findFiles(
+    segment: string,
+    limit: number,
+    excludeFolders: readonly string[],
+    /** `prefix`: names that start with the segment. With `depth`, only files that many folders down. */
+    mode?: 'contains' | 'prefix',
+    depth?: number,
+  ): Promise<string[]>
 }
 
 /**
@@ -176,6 +183,11 @@ export interface HostServices {
    * then undoes only the files this chat's edit tools changed, never the whole workspace.
    */
   sharedWorkspace?: boolean
+  /**
+   * False when another process on this codebase runs its schedules: Sun Code's extra chat tabs,
+   * where every chat is its own host and each would otherwise run the same nightly job.
+   */
+  runsSchedules?: boolean
   /** Diagnostics from the host's own language support - the extension passes VS Code's. */
   diagnostics?: DiagnosticsProvider
   /** Start installed language servers itself (Node host, Sun, PyCharm). Ignored when `diagnostics` is set. */

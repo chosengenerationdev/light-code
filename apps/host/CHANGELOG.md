@@ -1,5 +1,12 @@
 # @chosengeneration/light-code
 
+## 0.109.0
+
+### Minor Changes
+
+- **`@` finds the file in large codebases**: names that start with what you typed are always found, nearest first, however many other files match; stale answers no longer replace the list.
+- `--no-schedules`: leave a codebase's schedules to another process (Sun Code's extra chats), so a job runs once. The handbook explains Sun Code waking codebases for their schedules.
+
 ## 0.108.0
 
 ### Minor Changes

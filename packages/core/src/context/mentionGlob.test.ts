@@ -68,3 +68,11 @@ describe('mentionSegment', () => {
     expect(mentionSegment('')).toBe('')
   })
 })
+
+describe('the prefix pass', () => {
+  it('matches names that start with the text, optionally at one depth', () => {
+    expect(mentionGlob('ab', 'prefix')).toBe('**/[aA][bB]*')
+    expect(mentionGlob('ab', 'prefix', 0)).toBe('[aA][bB]*')
+    expect(mentionGlob('ab', 'prefix', 2)).toBe('*/*/[aA][bB]*')
+  })
+})

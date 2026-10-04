@@ -400,6 +400,7 @@ const projectStatus = (p) => {
     agent: running.reduce((best, s) => (AGENT_RANK.indexOf(s.agent) > AGENT_RANK.indexOf(best) ? s.agent : best), 'idle'),
     memory: all.reduce((sum, s) => sum + (s.memory ?? 0), 0),
     unread: all.some((s) => s.unread),
+    schedule: statusOf(p.id).schedule === true,
     error: first.error,
     chats: all.length,
     working: running.filter((s) => s.agent !== 'idle').length,
@@ -502,6 +503,7 @@ const describe = (project) => {
   if (s.phase === 'starting') return ['Starting…', 'busy']
   if (s.phase === 'sleeping') return ['Sleeping to save memory', '']
   if (s.phase === 'running' && s.agent === 'attention') return ['Needs your approval', 'attention']
+  if (s.schedule && s.phase === 'running') return ['Woken to run a schedule — sleeps again after', 'busy']
   if (s.phase === 'running' && s.agent === 'busy') return [s.working > 1 ? `${s.working} chats working…` : 'Working…', 'busy']
   return [s.chats > 1 ? `${s.chats} chats · ${shortPath(project.path)}` : shortPath(project.path), '']
 }
@@ -1549,7 +1551,7 @@ function openSettings() {
           el(
             'div',
             { class: 'row' },
-            el('span', { class: 'meta' }, el('b', { text: 'Sleep idle codebases after' }), el('span', { text: 'Frees memory. Never while an agent is working, waiting for you, or has schedules.' })),
+            el('span', { class: 'meta' }, el('b', { text: 'Sleep idle codebases after' }), el('span', { text: 'Frees memory. Never while an agent is working or waiting for you. A sleeping codebase is woken in time for its schedules.' })),
             el(
               'div',
               { class: 'segmented' },

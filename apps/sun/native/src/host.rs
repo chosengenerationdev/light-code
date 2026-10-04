@@ -100,6 +100,8 @@ pub struct LaunchSpec {
     /// put in front of it. Applied before Sun's own variables, so neither can replace those.
     pub env: Vec<(String, String)>,
     pub path: Option<String>,
+    /// An extra chat: the codebase's first chat runs its schedules, so a job runs once.
+    pub no_schedules: bool,
 }
 
 pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static) -> Result<HostProcess, String> {
@@ -144,6 +146,9 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         .creation_flags(CREATE_NO_WINDOW);
     if spec.reach_anywhere {
         command.arg("--reach-anywhere");
+    }
+    if spec.no_schedules {
+        command.arg("--no-schedules");
     }
     if let Some(helper) = &spec.fast_fs {
         command.arg("--fast-fs").arg(helper);

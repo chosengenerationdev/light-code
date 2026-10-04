@@ -1,5 +1,12 @@
 # light-code-vscode
 
+## 0.135.0
+
+### Patch Changes
+
+- **`@` finds the file in large codebases.** When a name matched thousands of files, the picker could show only some of them (all job scripts, say) and never the one you meant; files whose names start with what you typed are now always found, nearest first. A slow answer to an earlier keystroke can no longer replace the list either.
+- The handbook explains how Sun Code runs schedules for sleeping codebases.
+
 ## 0.134.0
 
 ### Minor Changes

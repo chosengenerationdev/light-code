@@ -48,7 +48,7 @@ import {
   type ResolvedVariable,
   type SessionVariable,
 } from '@light-code/core/browser'
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { Chat } from './Chat.js'
 import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
@@ -706,7 +706,9 @@ export function App(props: AppProps): ReactElement {
           { kind: 'text', role: 'user', content: message.text },
         ])
       } else if (message.type === 'mentionCandidates') {
-        setMentionCandidates(message.paths)
+        if (latestMentionQuery.current === undefined || message.query === latestMentionQuery.current) {
+          setMentionCandidates(message.paths)
+        }
       } else if (message.type === 'capabilities') {
         setSupportsVision(message.supportsVision)
       } else if (message.type === 'pathPicked') {
@@ -1159,7 +1161,14 @@ export function App(props: AppProps): ReactElement {
     props.transport.post({ type: 'unqueueMessage', index } satisfies UiToHostMessage)
   }
 
+  /**
+   * The query the picker is showing results for. Answers arrive out of order - each keystroke
+   * sends one, and a search for `ab` can finish after the one for `abc` - so only the answer to
+   * the latest question may replace the list. Otherwise a slow, stale answer wins.
+   */
+  const latestMentionQuery = useRef<string | undefined>(undefined)
   const queryMentions = (query: string): void => {
+    latestMentionQuery.current = query
     props.transport.post({ type: 'requestMentionCandidates', query } satisfies UiToHostMessage)
   }
 

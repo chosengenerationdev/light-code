@@ -19,12 +19,11 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 
-import { mentionSegment } from '../context/mentionGlob.js'
 import { buildAutoGuidance } from '../modes/autoGuidance.js'
 import { describeMigration, planMigration, runMigration } from '../migrate/folders.js'
 import { defaultPythonToolsDir } from '../python/registry.js'
 import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
-import { compareMentionCandidates, matchesMentionQuery } from '../context/mentionRanking.js'
+import { searchMentions } from '../context/mentionSearch.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
@@ -5012,16 +5011,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * is the host's business, and getting that wrong is invisible from here — see
        * `context/mentionGlob.ts` for the two ways it was wrong, and how each was measured.
        */
-      const found = await ui.findFiles(
-        mentionSegment(query),
-        MENTION_SCAN_LIMIT,
+      // `context/mentionSearch.ts`: why a capped scan is followed by a depth-ordered prefix pass.
+      const paths = await searchMentions(
+        (segment, limit, excludes, mode, depth) => ui.findFiles(segment, limit, excludes, mode, depth),
+        workspaceRoot,
+        query,
         mentionExcludes(cachedMentionExcludes),
+        MENTION_SCAN_LIMIT,
+        MENTION_RESULT_LIMIT,
       )
-      const paths = found
-        .map((absolute) => path.relative(workspaceRoot, absolute).split(path.sep).join('/'))
-        .filter(matchesMentionQuery(query))
-        .sort(compareMentionCandidates(query))
-        .slice(0, MENTION_RESULT_LIMIT)
       post({ type: 'mentionCandidates', query, paths })
     } catch (error) {
       logger.warn('mention lookup failed', String(error))
@@ -12982,7 +12980,7 @@ ${contents}
    * background service — and the Schedules tab says so rather than letting someone believe a
    * nightly job runs on a closed laptop.
    */
-  startScheduleTimer()
+  if (services.runsSchedules !== false) startScheduleTimer()
   // Same lifetime, same reason: bucket folders are brought down while this bridge is alive.
   startMirrorSync()
 

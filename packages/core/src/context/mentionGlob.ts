@@ -61,10 +61,13 @@ function caseInsensitive(character: string): string {
  * An empty segment means "everything", which is what someone who has typed `@` or `@src/` wants:
  * the ranking then decides which of it to show.
  */
-export function mentionGlob(segment: string): string {
+export function mentionGlob(segment: string, mode: 'contains' | 'prefix' = 'contains', depth?: number): string {
   if (segment.length === 0) return '**/*'
   const body = [...segment].map(caseInsensitive).join('')
-  return `**/*${body}*`
+  if (mode === 'contains') return `**/*${body}*`
+  // `prefix`: names that start with it - the pass that runs when the first scan hit its cap
+  // (`mentionSearch.ts`). With a depth, exactly that many folders down: `*` never crosses `/`.
+  return depth === undefined ? `**/${body}*` : `${'*/'.repeat(depth)}${body}*`
 }
 
 /**

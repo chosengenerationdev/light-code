@@ -400,6 +400,7 @@ async function main(): Promise<void> {
     ...(args.includes('--reach-anywhere') && !serverMode ? { reachAnywhere: true } : {}),
     ...(fastFs !== undefined ? { fastFs } : {}),
     ...(args.includes('--shared-workspace') ? { sharedWorkspace: true } : {}),
+    ...(args.includes('--no-schedules') ? { noSchedules: true } : {}),
     /*
      * Decoded once, at startup.
      *
@@ -678,6 +679,7 @@ const KNOWN_FLAGS = new Set([
   '--reach-anywhere',
   '--fast-fs',
   '--shared-workspace',
+  '--no-schedules',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -939,6 +941,8 @@ Usage: light-code [options]
                       workspace (not with --server). Used by Sun Code
   --shared-workspace  Other agents work in this folder too (Sun Code's
                       chat tabs): Rollback undoes only this chat's files
+  --no-schedules      Leave this codebase's schedules to another process
+                      (Sun Code's extra chat tabs, so a job runs once)
   --fast-fs <exe>     The sun-fs helper: adds find_files, read_many_files,
                       big_file and query_table
   --credentials-file <file>  Saved credentials offered in every secret field

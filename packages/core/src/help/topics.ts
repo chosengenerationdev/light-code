@@ -908,7 +908,11 @@ icon follows; "Use Sun Code's accent" goes back. Role colours stay each chat's o
 is written to the config file.
 
 **Memory**: idle codebases sleep after 30 minutes by default (Sun's Settings), freeing their agent,
-MCP servers and Python worker. Never while working, waiting for you, or holding enabled schedules.
+MCP servers and Python worker. Never while working or waiting for you. **Schedules still run**: Sun
+keeps their timetable itself and wakes a codebase a minute before a job is due — asleep or never
+started this session — then lets it sleep again a couple of minutes after. A job missed while the PC
+slept runs when Sun next sees it. Only a codebase's first chat runs its schedules, so a job runs once
+however many chats are open.
 Clicking wakes it with the chat intact. Right-click → Keep awake exempts one.
 
 **Reach beyond the codebase** (Sun's Settings, on by default): agents read any drive or shared folder

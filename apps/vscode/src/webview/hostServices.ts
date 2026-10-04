@@ -101,7 +101,7 @@ export function createVSCodeHostServices(
      * ended up in the picker. Passing `undefined` restores the editor's own handling, which is
      * what an emptied list should mean.
      */
-    async findFiles(segment, limit, excludeFolders) {
+    async findFiles(segment, limit, excludeFolders, mode, depth) {
       /*
        * Compiled here, because this is the host whose index speaks glob.
        *
@@ -110,7 +110,7 @@ export function createVSCodeHostServices(
        * were real and both looked like the search failing rather than the pattern — see
        * `context/mentionGlob.ts`, which owns the compilation and records what was measured.
        */
-      const pattern = mentionGlob(segment)
+      const pattern = mentionGlob(segment, mode, depth)
       const exclude = mentionExcludeGlob(excludeFolders)
       const found =
         exclude === undefined
