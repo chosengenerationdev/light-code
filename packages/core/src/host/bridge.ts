@@ -23,7 +23,9 @@ import { buildAutoGuidance } from '../modes/autoGuidance.js'
 import { describeMigration, planMigration, runMigration } from '../migrate/folders.js'
 import { defaultPythonToolsDir } from '../python/registry.js'
 import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
-import { searchMentions } from '../context/mentionSearch.js'
+import { searchMentions, type MentionIndex } from '../context/mentionSearch.js'
+import { siblingMention } from '../context/mentions.js'
+import { ChangeLedger, RecordedChanges } from '../checkpoints/changeLedger.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
@@ -1672,7 +1674,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** When each read file was read - see `tools/readStamps.ts`. Cleared with `readFiles`. */
   const readStamps = new Map<string, string>()
   /** Files this task's edit tools changed, for a per-chat rollback in a shared codebase. */
-  const changedFiles = new Set<string>()
+  const changeLedger = services.changeLedger !== undefined ? new ChangeLedger(services.changeLedger.file, services.changeLedger.chat) : undefined
+  // Each file this chat's tools change also goes to the codebase's shared ledger (Sun's chat tabs).
+  const changedFiles = new RecordedChanges(changeLedger)
   const denylist = new PathDenylist()
   /** Certificates are re-read every request; without this the same warning would repeat. */
   const warnedExpiries = new Set<string>()
@@ -4137,6 +4141,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             parts.push(activeMode.guidance)
           }
           if (scheduledGuidance !== undefined) parts.push(scheduledGuidance)
+          const others = services.siblings ?? []
+          if (others.length > 0) {
+            parts.push(
+              [
+                '## Other codebases open in Sun Code',
+                'The user also works on these. You may read their files (use the full paths below with read_file,',
+                'search_files and the file tools); writing there asks the user every time. When the user writes',
+                '`@name:path`, that file is attached from that codebase.',
+                ...others.map((s) => `- ${s.name}: ${s.path}`),
+              ].join('\n'),
+            )
+          }
           return parts.length > 0 ? { modeGuidance: parts.join('\n\n') } : {}
         })(),
       })
@@ -4159,7 +4175,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         readStamps,
         changedFiles,
         ...(diagnosticsProvider !== undefined ? { diagnostics: diagnosticsProvider } : {}),
-        readRoots: cachedReadRoots,
+        // The other codebases in Sun are readable like a configured read root.
+        readRoots: [...cachedReadRoots, ...(services.siblings ?? []).map((s) => s.path)],
         ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
         // Resolved per turn by the host, so an edit applies to the next command rather than
         // needing a new session. Absent in the extension, where there is nothing to resolve.
@@ -4207,7 +4224,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // `@`-mentions are resolved here, not by the model: the user named these paths
       // explicitly, so there is nothing to decide and nothing to approve. Confinement and
       // the deny list still apply, since the path is user-typed text.
-      const mentions = await resolveMentions(text, { fs: toolContext.fs, workspaceRoot, denylist })
+      const mentions = await resolveMentions(text, {
+        fs: toolContext.fs,
+        workspaceRoot,
+        denylist,
+        ...(services.siblings !== undefined ? { siblings: services.siblings } : {}),
+      })
       /*
        * `#role` is resolved here for the same reason `@path` is: the user named the specialist,
        * so there is nothing for the model to decide. Left to guidance it would be a suggestion
@@ -5012,15 +5034,32 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * `context/mentionGlob.ts` for the two ways it was wrong, and how each was measured.
        */
       // `context/mentionSearch.ts`: why a capped scan is followed by a depth-ordered prefix pass.
+      const find: MentionIndex = (segment, limit, excludes, mode, depth, root) =>
+        ui.findFiles(segment, limit, excludes, mode, depth, root)
+      const siblings = services.siblings ?? []
+      // `@payments-api:src/a` searches inside that codebase, and its answers keep the prefix.
+      const sibling = siblingMention(query, siblings)
+      if (sibling !== undefined) {
+        const inside = await searchMentions(find, sibling.root, sibling.rest, mentionExcludes(cachedMentionExcludes), MENTION_SCAN_LIMIT, MENTION_RESULT_LIMIT, sibling.root)
+        post({ type: 'mentionCandidates', query, paths: inside.map((p) => `${sibling.name}:${p}`) })
+        return
+      }
       const paths = await searchMentions(
-        (segment, limit, excludes, mode, depth) => ui.findFiles(segment, limit, excludes, mode, depth),
+        find,
         workspaceRoot,
         query,
         mentionExcludes(cachedMentionExcludes),
         MENTION_SCAN_LIMIT,
         MENTION_RESULT_LIMIT,
       )
-      post({ type: 'mentionCandidates', query, paths })
+      // Codebases whose name starts with what was typed come first, as `name:`; choosing one keeps
+      // the picker open inside it.
+      const needle = query.trim().toLowerCase()
+      // A bare `@` lists them all, so the other codebases are found without knowing their names.
+      const codebases = /[\\/:]/.test(needle)
+        ? []
+        : siblings.filter((s) => s.name.toLowerCase().startsWith(needle)).map((s) => `${s.name}:`)
+      post({ type: 'mentionCandidates', query, paths: [...codebases, ...paths].slice(0, MENTION_RESULT_LIMIT) })
     } catch (error) {
       logger.warn('mention lookup failed', String(error))
       post({ type: 'mentionCandidates', query, paths: [] })
@@ -10470,14 +10509,40 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * undo their work too, so only the files this chat's edit tools changed go back. Changes made
          * through shell commands cannot be attributed to a chat, and are said not to be undone.
          */
-        const { restored, removed } = await shadowGit.restoreFiles(taskCheckpoint, [...changedFiles])
+        /*
+         * A file another chat also changed since this chat's checkpoint: restoring it would discard
+         * that chat's work as well. Asked, never assumed - and left alone unless the user says so.
+         */
+        let targets = [...changedFiles]
+        let kept: string[] = []
+        if (changeLedger !== undefined) {
+          const shared = await changeLedger.othersSince(targets, taskCheckpoint.createdAt)
+          if (shared.size > 0) {
+            const shown = (file: string): string => path.relative(workspaceRoot ?? '', file).split(path.sep).join('/')
+            const detail = [...shared].map(([file, chats]) => `${shown(file)} (${chats.join(', ')})`).join('; ')
+            const all = await ui.showActionMessage(
+              `Another chat also changed ${String(shared.size)} of these files after this chat started: ${detail}. Rolling them back would undo that chat's changes too.`,
+              'Roll those back too',
+              'warning',
+            )
+            if (!all) {
+              kept = [...shared.keys()].map(shown)
+              targets = targets.filter((file) => !shared.has(file))
+            }
+          }
+        }
+        const { restored, removed } = await shadowGit.restoreFiles(taskCheckpoint, targets)
         const files = [...restored, ...removed]
+        const keptNote = kept.length > 0 ? ` Left as they are, because another chat changed them too: ${kept.join(', ')}.` : ''
         conversation.addUserMessage(
-          files.length === 0
-            ? 'I pressed Rollback, but your edit tools had changed no files in this codebase, so nothing was undone.'
-            : `I rolled back the files you changed: ${files.join(', ')}. Other chats' work and changes made by shell commands were left as they are.`,
+          (files.length === 0
+            ? 'I pressed Rollback, but there was nothing of yours to undo.'
+            : `I rolled back the files you changed: ${files.join(', ')}. Other chats' work and changes made by shell commands were left as they are.`) + keptNote,
         )
-        ui.showInfo(files.length === 0 ? 'Nothing to roll back in this chat.' : `Rolled back ${String(files.length)} file(s) this chat changed.`)
+        ui.showInfo(
+          (files.length === 0 ? 'Nothing rolled back.' : `Rolled back ${String(files.length)} file(s) this chat changed.`) +
+            (kept.length > 0 ? ` Kept ${String(kept.length)} another chat also changed.` : ''),
+        )
       } else {
         await shadowGit.restore(taskCheckpoint)
         // The model's view of the files is now stale — say so rather than letting it keep

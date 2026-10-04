@@ -9,6 +9,7 @@ export type MentionIndex = (
   excludeFolders: readonly string[],
   mode?: 'contains' | 'prefix',
   depth?: number,
+  root?: string,
 ) => Promise<string[]>
 
 /**
@@ -32,13 +33,15 @@ export async function searchMentions(
   excludeFolders: readonly string[],
   scanLimit: number,
   resultLimit: number,
+  /** Search another folder (a sibling codebase) instead of the workspace. */
+  otherRoot?: string,
 ): Promise<string[]> {
   const segment = mentionSegment(query)
-  let found = await find(segment, scanLimit, excludeFolders)
+  let found = await find(segment, scanLimit, excludeFolders, undefined, undefined, otherRoot)
   if (found.length >= scanLimit && segment.length > 0) {
     const leading: string[] = []
     for (let depth = 0; depth <= 12 && leading.length < resultLimit; depth++) {
-      leading.push(...(await find(segment, scanLimit, excludeFolders, 'prefix', depth)))
+      leading.push(...(await find(segment, scanLimit, excludeFolders, 'prefix', depth, otherRoot)))
     }
     found = [...new Set([...leading, ...found])]
   }

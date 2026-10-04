@@ -27,6 +27,11 @@ interface HelperAnswer {
   [key: string]: unknown
 }
 
+/** One request to the helper. Exported for the Node host's `@` search. */
+export function runFastFs(exe: string, request: object, signal?: AbortSignal): Promise<HelperAnswer> {
+  return runHelper(exe, request, signal)
+}
+
 function runHelper(exe: string, request: object, signal?: AbortSignal): Promise<HelperAnswer> {
   return new Promise((resolve, reject) => {
     const child = spawn(exe, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })

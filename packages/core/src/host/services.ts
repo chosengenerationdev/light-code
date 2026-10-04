@@ -114,6 +114,8 @@ export interface HostUi {
     /** `prefix`: names that start with the segment. With `depth`, only files that many folders down. */
     mode?: 'contains' | 'prefix',
     depth?: number,
+    /** Another folder to search instead of the workspace: a sibling codebase (`siblings`). */
+    root?: string,
   ): Promise<string[]>
 }
 
@@ -183,6 +185,17 @@ export interface HostServices {
    * then undoes only the files this chat's edit tools changed, never the whole workspace.
    */
   sharedWorkspace?: boolean
+  /**
+   * The other codebases open beside this one (Sun Code), by the short name used to mention them:
+   * `@payments-api:src/app.py`. The agent is told about them and may read them; writing there
+   * follows the ordinary outside-the-workspace rules.
+   */
+  siblings?: { name: string; path: string }[]
+  /**
+   * Shared by every chat on this codebase (Sun Code): which chat changed which file, so a rollback
+   * can ask before undoing another chat's work. `chat` is how the user knows this one.
+   */
+  changeLedger?: { file: string; chat: string }
   /**
    * False when another process on this codebase runs its schedules: Sun Code's extra chat tabs,
    * where every chat is its own host and each would otherwise run the same nightly job.

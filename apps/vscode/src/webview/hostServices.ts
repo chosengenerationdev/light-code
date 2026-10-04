@@ -101,6 +101,7 @@ export function createVSCodeHostServices(
      * ended up in the picker. Passing `undefined` restores the editor's own handling, which is
      * what an emptied list should mean.
      */
+    // No sibling codebases in VS Code, so `root` never arrives here.
     async findFiles(segment, limit, excludeFolders, mode, depth) {
       /*
        * Compiled here, because this is the host whose index speaks glob.

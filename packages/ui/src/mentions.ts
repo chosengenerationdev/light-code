@@ -67,9 +67,11 @@ export function insertMention(text: string, caret: number, candidatePath: string
   if (at === -1) return undefined
 
   const rendered = renderMention(candidatePath)
+  // `payments-api:` is a codebase, not a file: no space, so the picker carries on inside it.
+  const space = candidatePath.endsWith(':') ? '' : ' '
   return {
-    text: `${text.slice(0, at)}${rendered} ${text.slice(caret)}`,
-    caret: at + rendered.length + 1,
+    text: `${text.slice(0, at)}${rendered}${space}${text.slice(caret)}`,
+    caret: at + rendered.length + space.length,
   }
 }
 

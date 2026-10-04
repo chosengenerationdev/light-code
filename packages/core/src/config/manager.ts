@@ -191,7 +191,7 @@ export class ConfigManager {
     let raw: unknown
     try {
       const text = await this.store.read(scope)
-      raw = text === undefined ? undefined : JSON.parse(text)
+      raw = text === undefined ? undefined : JSON.parse(text.replace(/^\uFEFF/, ''))
     } catch {
       return {}
     }

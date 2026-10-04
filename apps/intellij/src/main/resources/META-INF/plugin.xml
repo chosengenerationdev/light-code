@@ -24,6 +24,7 @@
   -->
   <change-notes><![CDATA[
     <ul>
+      <li>Light Code 0.110.0: a config saved with a byte-order mark is read; a shell command naming a file changed since it was read waits for a re-read.</li>
       <li>Light Code 0.109.0: @ always finds the file you mean in a large codebase; the handbook covers Sun Code's schedule timetable.</li>
       <li>Light Code 0.108.0: code in chat is highlighted again, in VS Code's colours; notify can attach a report file (.md or .html); white text on teal accents; a Review icon of its own.</li>
       <li>Light Code 0.107.0: after every edit the assistant sees the errors and warnings its change produced, from language servers installed on this machine (Python, Java, Kotlin, TypeScript, Go and more), and a get_diagnostics tool checks any file without a build; an edit made from a stale read is refused; rollback keeps line endings exactly.</li>

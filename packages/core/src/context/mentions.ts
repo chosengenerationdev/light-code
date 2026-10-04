@@ -37,6 +37,22 @@ export interface MentionContext {
   fs: FileSystem
   workspaceRoot: string
   denylist?: PathDenylist
+  /** Other codebases, mentioned as `@name:path` (Sun Code). */
+  siblings?: readonly { name: string; path: string }[]
+}
+
+/**
+ * `name:rest` when `name` is one of the other codebases - and only then, so `C:\\x` stays a path.
+ * Returns the codebase and the path inside it.
+ */
+export function siblingMention(
+  raw: string,
+  siblings: readonly { name: string; path: string }[] | undefined,
+): { name: string; root: string; rest: string } | undefined {
+  const match = /^([A-Za-z0-9][A-Za-z0-9._-]+):(.*)$/.exec(raw)
+  if (match === null || siblings === undefined) return undefined
+  const sibling = siblings.find((s) => s.name.toLowerCase() === (match[1] ?? '').toLowerCase())
+  return sibling === undefined ? undefined : { name: sibling.name, root: sibling.path, rest: (match[2] ?? '').replace(/^[\\/]+/, '') }
 }
 
 /** Extracts mention targets in the order they appear, de-duplicated. */
@@ -45,27 +61,33 @@ export function parseMentions(text: string): string[] {
   for (const match of text.matchAll(MENTION_PATTERN)) {
     const target = match[1] ?? match[2]
     if (target === undefined || target.length === 0) continue
-    // Trailing punctuation is almost always sentence structure, not part of the path.
-    const cleaned = target.replace(/[.,;:!?)]+$/, '')
+    // Trailing punctuation is almost always sentence structure, not part of the path - except a
+    // bare codebase name, `@payments-api:`, where the colon is what makes it one (its root folder).
+    const cleaned = /^[A-Za-z0-9][A-Za-z0-9._-]+:$/.test(target) ? target : target.replace(/[.,;:!?)]+$/, '')
     if (cleaned.length > 0 && !found.includes(cleaned)) found.push(cleaned)
   }
   return found
 }
 
 async function resolveOne(raw: string, context: MentionContext): Promise<ResolvedMention> {
-  const absolute = path.isAbsolute(raw) ? raw : path.join(context.workspaceRoot, raw)
-  const relativePath = path.relative(context.workspaceRoot, absolute).split(path.sep).join('/')
+  // `@payments-api:src/app.py` - a file in another codebase, confined to that codebase.
+  const sibling = siblingMention(raw, context.siblings)
+  const base = sibling?.root ?? context.workspaceRoot
+  const inner = sibling?.rest ?? raw
+  const absolute = path.isAbsolute(inner) ? inner : path.join(base, inner)
+  const relativePath =
+    (sibling !== undefined ? `${sibling.name}:` : '') + path.relative(base, absolute).split(path.sep).join('/')
 
   let confined: string
   try {
     // Same rule as every path-taking tool: resolve symlinks, then compare (§16).
-    confined = await confine(absolute, context.workspaceRoot)
+    confined = await confine(absolute, base)
   } catch {
     return {
       raw,
       kind: 'error',
       relativePath,
-      content: `Could not attach "${raw}": it is outside the workspace.`,
+      content: `Could not attach "${raw}": it is outside ${sibling !== undefined ? `the ${sibling.name} codebase` : 'the workspace'}.`,
     }
   }
 

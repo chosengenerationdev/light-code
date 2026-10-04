@@ -1191,6 +1191,21 @@ impl App {
             env: environment.vars,
             path: environment.path,
             no_schedules: state::chat_of(id).is_some(),
+            change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
+            chat_label: match state::chat_of(id) {
+                Some(chat) => project.chats.iter().find(|c| c.id.to_string() == chat).map(|c| c.name.clone()).unwrap_or_else(|| format!("Chat {chat}")),
+                None => "Chat 1".to_string(),
+            },
+            siblings: {
+                let names = state::mention_names(&self.state.projects);
+                self.state
+                    .projects
+                    .iter()
+                    .zip(names)
+                    .filter(|(p, _)| p.id != project.id && Path::new(&p.path).is_dir())
+                    .map(|(p, (_, name))| (name, p.path.clone()))
+                    .collect()
+            },
         };
         match host::launch(spec, move |event| {
             let _ = proxy.send_event(UserEvent::Host(event));

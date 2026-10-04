@@ -1387,7 +1387,12 @@ export function parseConfig(raw: string | undefined): LightCodeConfig {
 
   let json: unknown
   try {
-    json = JSON.parse(raw)
+    /*
+     * A byte-order mark is not JSON, but Notepad and Windows PowerShell put one at the start of a
+     * file they save as UTF-8, so a config edited by hand on Windows was refused as "not valid
+     * JSON" over an invisible character. Found when a test wrote a config with Set-Content.
+     */
+    json = JSON.parse(raw.replace(/^\uFEFF/, ''))
   } catch (error) {
     throw new ConfigValidationError(
       `Config file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,

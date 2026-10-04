@@ -102,6 +102,11 @@ pub struct LaunchSpec {
     pub path: Option<String>,
     /// An extra chat: the codebase's first chat runs its schedules, so a job runs once.
     pub no_schedules: bool,
+    /// The other codebases, by mention name: readable, and `@name:path` in the composer.
+    pub siblings: Vec<(String, String)>,
+    /// Shared by the codebase's chats: who changed which file, for rollback. And this chat's name.
+    pub change_ledger: PathBuf,
+    pub chat_label: String,
 }
 
 pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static) -> Result<HostProcess, String> {
@@ -149,6 +154,10 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     }
     if spec.no_schedules {
         command.arg("--no-schedules");
+    }
+    command.arg("--change-ledger").arg(&spec.change_ledger).arg("--chat-label").arg(&spec.chat_label);
+    for (name, path) in &spec.siblings {
+        command.arg("--sibling").arg(format!("{name}={path}"));
     }
     if let Some(helper) = &spec.fast_fs {
         command.arg("--fast-fs").arg(helper);

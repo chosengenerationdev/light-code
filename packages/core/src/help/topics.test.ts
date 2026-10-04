@@ -234,6 +234,7 @@ describe('finding the right topic', () => {
       ['how do I add a folder to the path for every codebase', 'sun'],
       ['can it zip a folder', 'sun'],
       ['does sun show which files changed in git', 'sun'],
+      ['how do I refer to a file in another codebase', 'sun'],
       ['will my schedule run if sun put the codebase to sleep', 'sun'],
       ['where do I see the html report from the nightly run', 'sun'],
     ]

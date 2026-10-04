@@ -126,6 +126,10 @@ export interface ServerOptions {
   sharedWorkspace?: boolean
   /** See `SessionOptions.noSchedules`. */
   noSchedules?: boolean
+  /** See `SessionOptions.siblings`. */
+  siblings?: { name: string; path: string }[]
+  /** See `SessionOptions.changeLedger`. */
+  changeLedger?: { file: string; chat: string }
   /** See `SessionOptions.fastFs`. */
   fastFs?: string
   /** See `SessionOptions.secretsKey`. */
@@ -467,6 +471,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.reachAnywhere === true ? { reachAnywhere: true } : {}),
       ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
       ...(options.noSchedules === true ? { noSchedules: true } : {}),
+      ...(options.siblings !== undefined ? { siblings: options.siblings } : {}),
+      ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
       ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,

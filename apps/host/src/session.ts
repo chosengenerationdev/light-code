@@ -1,5 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
-import { CredentialPointerStore, replaceFile } from '@light-code/core'
+import { CredentialPointerStore, replaceFile, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -152,7 +152,12 @@ class FileWorkspaceState implements WorkspaceState {
  * VS Code Browse buttons were built as an addition to the text input rather than a
  * replacement for it.
  */
-function createBrowserUi(workspaceRoot: string | undefined, post: (line: string) => void): HostUi {
+function createBrowserUi(
+  workspaceRoot: string | undefined,
+  post: (line: string) => void,
+  /** Sun Code's Rust helper, when present: the `@` search runs on it. */
+  fastFs?: string,
+): HostUi {
   return {
     showInfo: (message) => post(`[info] ${message}`),
     showWarning: (message) => post(`[warn] ${message}`),
@@ -199,8 +204,30 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
      * A plain recursive walk, since there is no editor index to borrow. Pruned at the
      * directories that would otherwise dominate the result and the runtime.
      */
-    async findFiles(segment, limit, excludeFolders, mode, depth) {
-      if (workspaceRoot === undefined) return []
+    async findFiles(segment, limit, excludeFolders, mode, depth, root) {
+      const searchRoot = root ?? workspaceRoot
+      if (searchRoot === undefined) return []
+      /*
+       * Sun Code's Rust helper, when it is here: every core, and it honours .gitignore, which the
+       * walk below does not - so build output and vendored folders stay out of the picker. The
+       * walk is the fallback, for the plain Node host and any helper failure.
+       */
+      if (fastFs !== undefined) {
+        try {
+          const answer = await runFastFs(fastFs, {
+            op: 'names',
+            root: searchRoot,
+            needle: segment,
+            mode: mode ?? 'contains',
+            ...(depth !== undefined ? { depth } : {}),
+            limit,
+            exclude: excludeFolders,
+          })
+          if (answer.ok === true && Array.isArray(answer.paths)) return answer.paths as string[]
+        } catch {
+          // Fall through to the walk.
+        }
+      }
       /*
        * Compared directly, because this host walks the tree itself and has no glob to speak.
        *
@@ -239,7 +266,7 @@ function createBrowserUi(workspaceRoot: string | undefined, post: (line: string)
         }
       }
 
-      await walk(workspaceRoot, 0)
+      await walk(searchRoot, 0)
       return found
     },
   }
@@ -320,6 +347,10 @@ export interface SessionOptions {
   sharedWorkspace?: boolean
   /** Another process runs this codebase's schedules (Sun's extra chat tabs). */
   noSchedules?: boolean
+  /** The other codebases open in Sun Code, by mention name. */
+  siblings?: { name: string; path: string }[]
+  /** The ledger shared by this codebase's chats, and this chat's name in it. */
+  changeLedger?: { file: string; chat: string }
   /** Sun Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
@@ -466,6 +497,8 @@ export async function createSession(
     ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
     ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
     ...(options.noSchedules === true ? { runsSchedules: false } : {}),
+    ...(options.siblings !== undefined && options.siblings.length > 0 ? { siblings: options.siblings } : {}),
+    ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
     ...(options.desktopNotify === true
       ? {
           desktopNotify: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => {
@@ -505,7 +538,7 @@ export async function createSession(
       options,
     ),
     workspaceState,
-    ui: createBrowserUi(options.workspaceRoot, options.logSink),
+    ui: createBrowserUi(options.workspaceRoot, options.logSink, options.fastFs),
     workspaceRoot: options.workspaceRoot,
     storageDir: userDir,
     ripgrepPath: options.ripgrepPath,

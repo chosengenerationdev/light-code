@@ -810,7 +810,9 @@ export {
   type CredentialSummary,
 } from './secrets/credentials.js'
 export { secretSlots, type SecretSlot } from './secrets/slots.js'
-export { createFastFsTools } from './tools/fastFs.js'
+export { createFastFsTools, runFastFs } from './tools/fastFs.js'
+export { siblingMention } from './context/mentions.js'
+export { ChangeLedger, RecordedChanges } from './checkpoints/changeLedger.js'
 export { getDiagnosticsTool } from './tools/diagnostics.js'
 export { LspManager, describeDiagnostics, type DiagnosticsProvider, type LanguageServerStatus, type LspSettings } from './lsp/manager.js'
 export type { LspDiagnostic } from './lsp/client.js'

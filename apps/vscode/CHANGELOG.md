@@ -1,5 +1,12 @@
 # light-code-vscode
 
+## 0.136.0
+
+### Minor Changes
+
+- A config file starting with a byte-order mark (as Notepad and Windows PowerShell save UTF-8) is read instead of refused as "not valid JSON".
+- A shell command that names a file changed since the agent read it - by you or another program - waits for a re-read, as the edit tools already do. Reading commands are unaffected.
+
 ## 0.135.0
 
 ### Patch Changes

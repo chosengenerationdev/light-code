@@ -1,5 +1,12 @@
 # @chosengeneration/sun-code
 
+## 0.5.3
+
+- **Refer to other codebases.** Type `@` and the other codebases are listed first; pick one (`payments-api:`) and the picker carries on inside it, or type `@payments-api:src/app.py`. Every agent also knows the other codebases by name and may read them; writing there asks every time.
+- **`@` search runs on the Rust helper**: faster in big codebases, and files your .gitignore excludes stay out.
+- **Parallel chats, safer**: a shell command naming a file another chat changed since this chat read it is refused until it reads the file again; Rollback asks before undoing changes another chat also made to the same file.
+- Carries Light Code 0.110.0.
+
 ## 0.5.2
 
 - **Git changes in the sidebar**: a codebase managed by git shows how many files are new, modified and deleted (+3 ~5 −1), with the branch on hover. Refreshed every 30 seconds, when you open the codebase, and when an agent finishes; it never takes git's lock.

@@ -847,7 +847,8 @@ desktops of the same person; importing the file is how a second machine is set u
       'environment variable', 'environment variables', 'startup script', 'setenv', 'add to path',
       'path variable', 'report viewer', 'open report', 'html report', 'markdown report',
       'copy folder', 'move folder', 'move files', 'copy files', 'zip', 'unzip', 'archive', 'compress',
-      'export credentials', 'sun code',
+      'export credentials', 'sun code', 'other codebase', 'another codebase', 'refer to another project',
+      'file from another codebase', 'cross codebase',
     ],
     body: `
 **Sun Code** (called Sun Light Code until 0.5.0) is a Windows app holding every codebase you work on,
@@ -877,7 +878,9 @@ another chat on the same codebase — its own agent, working at the same time, w
 keys. Double-click a tab to rename it; × or Ctrl+W closes it (its history is kept). Two safeguards make
 this safe: an edit is refused when the file changed since that chat read it (another chat, you, or any
 program edited it) — the agent re-reads and edits what is there now; and **Rollback undoes only the files
-that chat changed**, never another chat's work.
+that chat changed**, never another chat's work. If another chat also changed one of those files since,
+Rollback asks first and leaves it alone unless you say so. A **shell command** that names a file which
+changed since the chat read it is refused until the chat reads it again (reading commands are fine).
 
 **Environment** (Sun's Settings → Environment): given to every agent in every codebase. A **startup
 script** (.cmd, .bat or .ps1) runs when Sun starts, and the variables it sets and folders it adds to PATH
@@ -896,6 +899,13 @@ it wrote, .md or .html, with \`notify\`'s \`report\`.
 (a move on one drive is an instant rename), and \`archive_files\` creates, extracts or lists a .zip.
 Both **always ask**, showing every source, destination, file count, size and anything replaced, and are
 never available to a schedule. An archive whose entries would land outside the destination is refused.
+
+**Other codebases**: every agent knows the other codebases open in Sun, by a short name (shown when you
+type \`@\`), and may read them. \`@payments-api:\` opens the picker inside that codebase;
+\`@payments-api:src/app.py\` attaches that file. Writing in another codebase asks every time. Just ask
+"how does payments-api handle retries?" and the agent can look.
+
+**@ search** in Sun runs on the Rust helper: every core, and files your .gitignore excludes stay out.
 
 **What changed, at a glance**: a codebase managed by git shows **+new ~modified −deleted** on its sidebar
 row (only the non-zero ones; hover for the branch). Refreshed every 30 seconds, when you open it, and when

@@ -46,6 +46,7 @@ fn run(r: &Value) -> Result<Value, String> {
         "table" => table(r),
         "transfer" => transfer(r),
         "archive" => archive(r),
+        "names" => names(r),
         other => Err(format!("Unknown operation \"{other}\".")),
     }
 }
@@ -1333,6 +1334,98 @@ mod archive_tests {
         let refused = archive(&json!({ "op": "archive", "action": "extract", "archive": evil, "to": base.join("safe") })).unwrap_err();
         assert!(refused.contains("outside"), "{refused}");
         assert!(!base.join("safe/ok.txt").exists(), "nothing extracted");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+// ─── names: the `@` picker's file search ────────────────────────────────────
+//
+// File names containing (or starting with) some text, on every core, honouring .gitignore - so
+// build output and vendored folders stay out of the picker - and skipping folders named exactly
+// as excluded (`build` must not hide `buildings`). Read-only, like everything here but transfer
+// and archive. `depth` limits a prefix pass to one folder level (see core's mentionSearch.ts).
+
+fn names(r: &Value) -> Result<Value, String> {
+    let root = PathBuf::from(s(r, "root").ok_or("Name the folder to search.")?);
+    let needle = s(r, "needle").unwrap_or("").to_lowercase();
+    let prefix = s(r, "mode") == Some("prefix");
+    let depth = r.get("depth").and_then(Value::as_u64).map(|d| d as usize);
+    let limit = u(r, "limit", 2000).min(20_000) as usize;
+    let exclude: std::collections::HashSet<String> = strings(r, "exclude").into_iter().map(|e| e.to_lowercase()).collect();
+    let found = Mutex::new(Vec::new());
+    let stop = AtomicBool::new(false);
+    let mut builder = ignore::WalkBuilder::new(&root);
+    builder
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .parents(true)
+        .follow_links(false)
+        .threads(threads())
+        .filter_entry(move |e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            !(is_dir && e.depth() > 0 && exclude.contains(&e.file_name().to_string_lossy().to_lowercase()))
+        });
+    // Entries are counted from the root itself at depth 0, so a file `d` folders down is at d + 1.
+    builder.max_depth(Some(depth.map_or(13, |d| d + 1)));
+    builder.build_parallel().run(|| {
+        Box::new(|result| {
+            if stop.load(Ordering::Relaxed) {
+                return ignore::WalkState::Quit;
+            }
+            let Ok(entry) = result else { return ignore::WalkState::Continue };
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                return ignore::WalkState::Continue;
+            }
+            if depth.map(|d| entry.depth() != d + 1).unwrap_or(false) {
+                return ignore::WalkState::Continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            let hit = needle.is_empty() || if prefix { name.starts_with(&needle) } else { name.contains(&needle) };
+            if hit {
+                let mut list = found.lock().unwrap();
+                list.push(entry.path().to_string_lossy().to_string());
+                if list.len() >= limit {
+                    stop.store(true, Ordering::Relaxed);
+                    return ignore::WalkState::Quit;
+                }
+            }
+            ignore::WalkState::Continue
+        })
+    });
+    let paths = found.into_inner().unwrap();
+    Ok(json!({ "ok": true, "limitReached": paths.len() >= limit, "paths": paths }))
+}
+
+#[cfg(test)]
+mod names_tests {
+    use super::*;
+
+    #[test]
+    fn finds_names_honours_gitignore_and_exact_exclusions() {
+        let base = std::env::temp_dir().join(format!("sun-fs-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        for dir in ["fct/src/abc", "fct/src/jobs/bat", "build", "buildings", "generated", ".git"] {
+            std::fs::create_dir_all(base.join(dir)).unwrap();
+        }
+        for file in ["fct/src/abc/abc_report.py", "fct/src/jobs/bat/abc_report.bat", "build/abc.out", "buildings/abc_plan.txt", "generated/abc_gen.py"] {
+            std::fs::write(base.join(file), "x").unwrap();
+        }
+        std::fs::write(base.join(".gitignore"), "generated/\n").unwrap();
+        let ask = |extra: Value| {
+            let mut request = json!({ "op": "names", "root": base, "needle": "ABC", "exclude": ["build"] });
+            request.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let mut paths: Vec<String> = names(&request).unwrap()["paths"].as_array().unwrap().iter()
+                .map(|p| Path::new(p.as_str().unwrap()).strip_prefix(&base).unwrap().to_string_lossy().replace('\\', "/"))
+                .collect();
+            paths.sort();
+            paths
+        };
+        assert_eq!(ask(json!({})), vec!["buildings/abc_plan.txt", "fct/src/abc/abc_report.py", "fct/src/jobs/bat/abc_report.bat"]);
+        assert_eq!(ask(json!({ "mode": "prefix", "depth": 3 })), vec!["fct/src/abc/abc_report.py"]);
+        assert_eq!(ask(json!({ "mode": "prefix", "depth": 1 })), vec!["buildings/abc_plan.txt"]);
         let _ = std::fs::remove_dir_all(&base);
     }
 }

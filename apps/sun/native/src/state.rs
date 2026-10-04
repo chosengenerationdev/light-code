@@ -56,6 +56,39 @@ pub struct Chat {
     pub name: String,
 }
 
+/// The short name each codebase is mentioned by in another's chat - `@payments-api:src/app.py`:
+/// its sidebar name in lower case, anything but letters, digits, `.`, `_` and `-` turned into `-`,
+/// and `-2`, `-3` added when two would collide. Computed from the whole list so every host agrees.
+pub fn mention_names(projects: &[Project]) -> Vec<(String, String)> {
+    let mut taken: Vec<String> = Vec::new();
+    projects
+        .iter()
+        .map(|p| {
+            let mut slug: String = p
+                .name
+                .to_lowercase()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+                .collect();
+            while slug.contains("--") {
+                slug = slug.replace("--", "-");
+            }
+            let mut slug = slug.trim_matches(|c| c == '-' || c == '.').to_string();
+            if slug.len() < 2 || !slug.chars().next().is_some_and(|c| c.is_ascii_alphanumeric()) {
+                slug = format!("codebase-{slug}").trim_end_matches('-').to_string();
+            }
+            let mut name = slug.clone();
+            let mut n = 2;
+            while taken.contains(&name) {
+                name = format!("{slug}-{n}");
+                n += 1;
+            }
+            taken.push(name.clone());
+            (p.id.clone(), name)
+        })
+        .collect()
+}
+
 /// The codebase a runtime key belongs to: `abc` and `abc~2` are both codebase `abc`.
 pub fn project_of(key: &str) -> &str {
     key.split('~').next().unwrap_or(key)
@@ -352,5 +385,32 @@ mod tests {
         let json = r#"{"id":"abc","name":"P","path":"D:/p","configMode":"new","configFile":"c.json"}"#;
         let p: Project = serde_json::from_str(json).unwrap();
         assert!(p.chats.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod mention_name_tests {
+    use super::*;
+
+    fn named(name: &str) -> Project {
+        Project {
+            id: name.into(),
+            name: name.into(),
+            path: "D:/x".into(),
+            config_mode: ConfigMode::New,
+            config_file: "c.json".into(),
+            config_source: None,
+            keep_awake: false,
+            last_used: 0,
+            accent: None,
+            chats: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn short_names_people_can_type() {
+        let projects = [named("Payments API"), named("payments-api"), named("Report Jobs (old)"), named("x"), named("中文")];
+        let names: Vec<String> = mention_names(&projects).into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names, vec!["payments-api", "payments-api-2", "report-jobs-old", "codebase-x", "codebase"]);
     }
 }

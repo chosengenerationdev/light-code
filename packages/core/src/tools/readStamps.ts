@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { normalizeForComparison } from '../fs/confine.js'
 import type { ToolExecutionContext } from './types.js'
 
@@ -41,6 +42,45 @@ export async function changedSinceRead(context: ToolExecutionContext, realPath: 
     `"${shown}" changed after you last read it — another chat, the user or another program edited it. ` +
     'Read it again with read_file, then make your edit against what is there now.'
   )
+}
+
+/**
+ * Files this session read that a shell command names and that have changed since - another chat,
+ * the user or another program edited them. Matched on the full path, the workspace-relative path
+ * (either slash) or the bare file name standing on its own, case-insensitively.
+ *
+ * The edit tools check one file they were given; a command can change any file it names, through
+ * `sed -i`, a redirect or a script, so without this an agent working from a stale read overwrote
+ * another chat's change with a command where its edit tool would have been refused.
+ */
+export async function staleFilesNamedIn(context: ToolExecutionContext, command: string): Promise<string[]> {
+  if (context.readStamps === undefined || context.readStamps.size === 0) return []
+  const text = command.toLowerCase()
+  const root = normalizeForComparison(context.workspaceRoot)
+  const stands = (needle: string): boolean => {
+    if (needle.length < 3) return false
+    let at = text.indexOf(needle)
+    while (at !== -1) {
+      const before = at === 0 ? ' ' : (text[at - 1] ?? ' ')
+      const after = text[at + needle.length] ?? ' '
+      if (/[\s"'=<>|&;(/\\]/.test(before) && /[\s"'<>|&;)]/.test(after)) return true
+      at = text.indexOf(needle, at + 1)
+    }
+    return false
+  }
+  const stale: string[] = []
+  for (const [key, known] of context.readStamps) {
+    const relative = path.relative(root, key)
+    const names = [key, relative, relative.split(path.sep).join('/'), path.basename(key)].map((n) => n.toLowerCase())
+    if (!names.some(stands)) continue
+    try {
+      const s = await context.fs.stat(key)
+      if (`${String(s.mtimeMs)}:${String(s.size)}` !== known) stale.push(relative.split(path.sep).join('/'))
+    } catch {
+      // Gone: the command cannot overwrite what is not there.
+    }
+  }
+  return stale
 }
 
 /** After a successful write: the file is now as this session left it, and it changed it. */

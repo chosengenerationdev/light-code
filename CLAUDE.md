@@ -2294,6 +2294,23 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   load-bearing flag: a status that took `index.lock` would make the user's own commit fail at random.
   Untracked folders count once (`-unormal`), because `-uall` lists every file in an unignored
   `node_modules`. A non-repository or missing git shows nothing, never an error.
+- **Other codebases** (Sun 0.5.3): Sun passes every other codebase as `--sibling name=folder`
+  (`state::mention_names`, one slug per codebase computed from the whole list so every host agrees).
+  They join `readRoots` - readable like a configured folder, writes still ask - and the prompt lists
+  them. `@name:path` resolves through `siblingMention` and is **confined to that codebase**; a
+  bare `@` lists the codebases first and choosing `name:` keeps the picker open. A name only counts
+  if it is one of the codebases, so `C:\\x` stays a path. Codebases added later reach a running
+  chat when it next starts.
+- **`@` on the Rust helper** (`names` op): `.gitignore` honoured, excluded folder names matched
+  exactly. **Found by driving a real host**: the first version referred to an `options` that was not in
+  scope in `createBrowserUi` - esbuild bundles without type checking, so `pnpm build` passed and every
+  `@` failed. `pnpm typecheck` catches it; run it with every build.
+- **Parallel chats, both gaps closed**: `staleFilesNamedIn` refuses a non-read-only command that names
+  a file changed since this chat read it (`isSafeCommand` decides read-only); and a shared
+  `changes.jsonl` per codebase (`ChangeLedger`, append-only) lets Rollback ask before restoring a file
+  another chat changed after this chat's checkpoint - unconfirmed, it is left alone.
+- **A BOM in config.json** was "not valid JSON". Found by a test that wrote the file with
+  Set-Content; Notepad does the same. Stripped in `parseConfig` and in `ConfigManager`'s raw read.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
 

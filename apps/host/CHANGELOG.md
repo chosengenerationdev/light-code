@@ -1,5 +1,13 @@
 # @chosengeneration/light-code
 
+## 0.110.0
+
+### Minor Changes
+
+- A config file starting with a byte-order mark (as Notepad and Windows PowerShell save UTF-8) is read instead of refused as "not valid JSON".
+- A shell command that names a file changed since the agent read it waits for a re-read, as the edit tools do; reading commands are unaffected.
+- For Sun Code: `--sibling` (other codebases, `@name:path`), `--change-ledger` / `--chat-label` (Rollback asks before undoing another chat's work), and `@` search on the Rust helper when present.
+
 ## 0.109.0
 
 ### Minor Changes

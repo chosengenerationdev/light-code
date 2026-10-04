@@ -8,6 +8,8 @@ import { PathDenylist } from '../fs/denylist.js'
 import { NodeFileSystem } from '../platform/node/filesystem.js'
 import { applyDiffTool } from './applyDiff/index.js'
 import { readFileTool } from './readFile.js'
+import { executeCommandTool } from './executeCommand.js'
+import { staleFilesNamedIn } from './readStamps.js'
 import type { ToolExecutionContext } from './types.js'
 import { writeToFileTool } from './writeToFile.js'
 
@@ -89,5 +91,18 @@ describe('several chats in one codebase', () => {
     expect(await fs.readFile(path.join(workspace, 'mine.txt'), 'utf8')).toBe('original mine\n')
     expect(await fs.readFile(path.join(workspace, 'theirs.txt'), 'utf8')).toBe('edited by another chat\n')
     await expect(fs.access(path.join(workspace, 'created.txt'))).rejects.toThrow()
+  })
+
+  it('refuses a command that would write to a file changed since this chat read it', async () => {
+    await fs.writeFile(path.join(workspace, 'notes.txt'), 'first\n')
+    const a = chat()
+    await readFileTool.execute({ path: 'notes.txt' }, a)
+    expect(await staleFilesNamedIn(a, 'sed -i s/first/second/ notes.txt')).toEqual([])
+    await fs.writeFile(path.join(workspace, 'notes.txt'), 'changed by another chat\n')
+    expect(await staleFilesNamedIn(a, 'sed -i s/first/second/ notes.txt')).toEqual(['notes.txt'])
+    expect(await staleFilesNamedIn(a, 'echo done > othernotes.txt')).toEqual([])
+    const refused = await executeCommandTool.execute({ command: 'sed -i s/first/second/ notes.txt' } as never, a)
+    expect(refused.isError).toBe(true)
+    expect(refused.content).toContain('changed after you last read it')
   })
 })

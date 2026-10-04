@@ -258,7 +258,8 @@ export function Composer(props: ComposerProps): ReactElement {
     if (inserted === undefined) return
 
     setText(inserted.text)
-    setMentionQuery(undefined)
+    // A codebase (`name:`) opens the picker inside it; a file closes it.
+    setMentionQuery(candidatePath.endsWith(':') ? candidatePath : undefined)
 
     // Restore the caret after the inserted mention rather than leaving it at the end.
     requestAnimationFrame(() => {

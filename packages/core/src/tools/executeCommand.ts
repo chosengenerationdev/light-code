@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { isSafeCommand } from '../approval/safeCommands.js'
+import { staleFilesNamedIn } from './readStamps.js'
 import type { Tool, ToolPreview, ToolResult } from './types.js'
 
 const paramsSchema = z.object({
@@ -19,6 +21,20 @@ export const executeCommandTool: Tool<ExecuteCommandParams> = {
   description: 'Run a shell command in the workspace and return its combined stdout/stderr and exit code.',
   parametersSchema: paramsSchema,
   async execute(params, context): Promise<ToolResult> {
+    /*
+     * A command that names a file which changed after this chat read it - another chat, the user,
+     * another program - waits until the file is read again, exactly as the edit tools do. Reading
+     * commands (type, cat, grep, git diff …) cannot overwrite anything, so they are let through.
+     */
+    const stale = await staleFilesNamedIn(context, params.command)
+    if (stale.length > 0 && !isSafeCommand(params.command)) {
+      return {
+        content:
+          `${stale.join(', ')} changed after you last read ${stale.length === 1 ? 'it' : 'them'} - another chat, the user or ` +
+          'another program edited it. Read it again with read_file, then run the command against what is there now.',
+        isError: true,
+      }
+    }
     const cwd = params.cwd !== undefined ? params.cwd : context.workspaceRoot
     /*
      * Layered over the inherited environment rather than replacing it: a command still needs PATH

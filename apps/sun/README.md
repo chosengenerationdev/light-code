@@ -13,6 +13,7 @@ Every codebase you work on, in one Windows window — each with its own
   search connections and project settings apply in place. Or copy one, or start fresh.
 - **Windows notifications** when a background agent finishes, needs your approval, or sends one
   with `notify` — including scheduled runs. Click one to jump to that chat.
+- **Refer to other codebases**: `@payments-api:src/app.py`, or just `@` and pick one; every agent knows the others.
 - **Git changes at a glance**: +new ~modified −deleted on each codebase that git manages.
 - **Schedules run on time even for sleeping codebases**: Sun wakes a codebase just before its job is due
   and lets it sleep again afterwards.

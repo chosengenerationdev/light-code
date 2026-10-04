@@ -278,6 +278,12 @@ async function main(): Promise<void> {
   }
   const fastFsArg = valueOf(args, '--fast-fs')
   const fastFs = fastFsArg !== undefined && existsSync(fastFsArg) ? path.resolve(fastFsArg) : undefined
+  const changeLedgerFile = valueOf(args, '--change-ledger')
+  // Every `--sibling name=folder`: the other codebases open in Sun Code.
+  const siblings = args
+    .flatMap((arg, i) => (arg === '--sibling' && args[i + 1] !== undefined ? [args[i + 1] as string] : []))
+    .map((value) => ({ name: value.slice(0, value.indexOf('=')).trim(), path: value.slice(value.indexOf('=') + 1).trim() }))
+    .filter((s) => /^[A-Za-z0-9][A-Za-z0-9._-]+$/.test(s.name) && s.path.length > 0 && existsSync(s.path))
   const credentialsFileArg = valueOf(args, '--credentials-file')
   const credentialsFile = credentialsFileArg === undefined ? undefined : path.resolve(credentialsFileArg)
   const port = Number.parseInt(valueOf(args, '--port') ?? '0', 10)
@@ -401,6 +407,8 @@ async function main(): Promise<void> {
     ...(fastFs !== undefined ? { fastFs } : {}),
     ...(args.includes('--shared-workspace') ? { sharedWorkspace: true } : {}),
     ...(args.includes('--no-schedules') ? { noSchedules: true } : {}),
+    ...(siblings.length > 0 ? { siblings } : {}),
+    ...(changeLedgerFile !== undefined ? { changeLedger: { file: changeLedgerFile, chat: valueOf(args, '--chat-label') ?? 'another chat' } } : {}),
     /*
      * Decoded once, at startup.
      *
@@ -680,6 +688,9 @@ const KNOWN_FLAGS = new Set([
   '--fast-fs',
   '--shared-workspace',
   '--no-schedules',
+  '--sibling',
+  '--change-ledger',
+  '--chat-label',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -941,6 +952,11 @@ Usage: light-code [options]
                       workspace (not with --server). Used by Sun Code
   --shared-workspace  Other agents work in this folder too (Sun Code's
                       chat tabs): Rollback undoes only this chat's files
+  --sibling <name>=<folder>  Another codebase the agent may read, mentioned as
+                      @name:path (repeatable; used by Sun Code)
+  --change-ledger <file>  Shared by chats on one codebase: who changed which file,
+                      so Rollback asks before undoing another chat's work
+  --chat-label <name>  This chat's name in that ledger
   --no-schedules      Leave this codebase's schedules to another process
                       (Sun Code's extra chat tabs, so a job runs once)
   --fast-fs <exe>     The sun-fs helper: adds find_files, read_many_files,
