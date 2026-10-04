@@ -140,7 +140,9 @@ Read this before using it anywhere sensitive.
 > Light Code makes no network connection you have not configured. It ships with zero default
 > endpoints, no telemetry, no update checks, and no remote assets. The only hosts it
 > contacts are the model gateway, the MCP servers, and — if you enable indexing — the vector
-> store and embedding endpoint named in your config.
+> store and embedding endpoint named in your config. Each other integration you switch on (S3,
+> Confluence, Jira, Bitbucket, Jenkins, AutoSys, a JupyterHub codebase in Fire Code) contacts
+> only the address you gave it.
 
 **Indexing is the largest egress in the product.** Enabling it sends the contents of your
 workspace to the embedding endpoint you configured. It is opt-in, ships disabled, and
