@@ -897,6 +897,10 @@ it wrote, .md or .html, with \`notify\`'s \`report\`.
 Both **always ask**, showing every source, destination, file count, size and anything replaced, and are
 never available to a schedule. An archive whose entries would land outside the destination is refused.
 
+**What changed, at a glance**: a codebase managed by git shows **+new ~modified −deleted** on its sidebar
+row (only the non-zero ones; hover for the branch). Refreshed every 30 seconds, when you open it, and when
+an agent finishes. It never takes git's lock, so it cannot get in the way of your own git commands.
+
 **Exporting credentials**: tick the ones to export (nothing is ticked to begin with; filter by label).
 
 **Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+T new chat, Ctrl+W close chat, Ctrl+B

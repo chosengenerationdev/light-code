@@ -1,5 +1,10 @@
 # @chosengeneration/sun-code
 
+## 0.5.2
+
+- **Git changes in the sidebar**: a codebase managed by git shows how many files are new, modified and deleted (+3 ~5 −1), with the branch on hover. Refreshed every 30 seconds, when you open the codebase, and when an agent finishes; it never takes git's lock.
+- Carries Light Code 0.109.0.
+
 ## 0.5.1
 
 - **Sun runs the schedule timetable.** A codebase no longer has to stay awake all day for its schedules: Sun wakes it a minute before a job is due — asleep, or never opened this session — and lets it sleep again a couple of minutes after.

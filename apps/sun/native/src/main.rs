@@ -10,6 +10,7 @@
 
 mod configs;
 mod environment;
+mod git;
 mod reports;
 mod host;
 mod state;
@@ -57,6 +58,8 @@ enum UserEvent {
     Shared { from: String, labels: Vec<String> },
     /// The startup script finished: what it left, or why it did not.
     ScriptDone(Result<environment::ScriptEnv, String>),
+    /// `git status` counts for some codebases, worked out off the UI thread.
+    Git(Vec<(String, Option<git::GitCounts>)>),
 }
 
 /// Where the startup script is. Agents asked to start while it runs wait for it, so none starts
@@ -145,6 +148,10 @@ struct App {
     script: ScriptState,
     /// Chats waiting for the startup script before they start.
     waiting: Vec<String>,
+    /// What git says has changed in each codebase, for the sidebar.
+    git: HashMap<String, git::GitCounts>,
+    /// One refresh at a time: a slow repository must not pile up processes behind it.
+    git_busy: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Deserialize)]
@@ -328,6 +335,8 @@ fn main() {
         env_warned: false,
         script: ScriptState::None,
         waiting: Vec::new(),
+        git: HashMap::new(),
+        git_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     // Before anything can start, so the first agent already has what the script sets.
     app.update_report_roots();
@@ -397,6 +406,19 @@ fn main() {
                 send(&webview, json!({ "type": "select", "id": id }));
             }
             Event::UserEvent(UserEvent::ScriptDone(result)) => app.script_done(result, &webview),
+            Event::UserEvent(UserEvent::Git(results)) => {
+                for (id, counts) in results {
+                    match counts {
+                        Some(c) => {
+                            app.git.insert(id, c);
+                        }
+                        None => {
+                            app.git.remove(&id);
+                        }
+                    }
+                }
+                send(&webview, app.git_message());
+            }
             Event::UserEvent(UserEvent::StartLater(id)) => {
                 if app.runtime.get(&id).map(|r| r.phase == Phase::Stopped).unwrap_or(true) {
                     app.start(&id, &webview);
@@ -600,6 +622,8 @@ impl App {
                 }
                 send(webview, self.statuses());
                 send(webview, self.script_status());
+                send(webview, self.git_message());
+                self.refresh_git(None);
                 self.start_on_launch();
             }
             Command::PickFolder => {
@@ -1089,6 +1113,8 @@ impl App {
         if !self.state.has_chat(id) {
             return;
         }
+        // Looking at it is when its counts matter most.
+        self.refresh_git(Some(state::project_of(id).to_string()));
         self.active = Some(id.to_string());
         if let Some(p) = self.state.project_mut(id) {
             p.last_used = state::now_millis();
@@ -1260,8 +1286,14 @@ impl App {
         let away = self.active.as_deref() != Some(id) || !self.focused;
         let Some(rt) = self.runtime.get_mut(id) else { return };
         let changed = rt.agent != agent;
+        let was_busy = rt.agent == "busy";
         rt.agent = agent.clone();
         rt.last_activity = Instant::now();
+        if was_busy && agent != "busy" {
+            // An agent just stopped working: it may have changed files.
+            self.refresh_git(Some(state::project_of(id).to_string()));
+        }
+        let Some(rt) = self.runtime.get_mut(id) else { return };
         if away && (finished || (changed && agent == "attention")) {
             rt.unread = true;
             if self.state.settings.notifications {
@@ -1282,6 +1314,10 @@ impl App {
         self.ticks += 1;
         for rt in self.runtime.values_mut() {
             rt.memory = rt.process.as_ref().map(|p| p.memory()).unwrap_or(0);
+        }
+        // Every 30 seconds: what git says has changed in each codebase.
+        if self.ticks % 10 == 5 {
+            self.refresh_git(None);
         }
         // Every 15 seconds: wake a codebase whose schedule is about to come due.
         if self.ticks % 5 == 0 {
@@ -1355,6 +1391,33 @@ impl App {
                 }
             }
         }
+    }
+
+    /// `git status` for one codebase, or all of them, in the background. Skipped while the last
+    /// refresh is still running - a huge repository is then simply refreshed less often.
+    fn refresh_git(&self, only: Option<String>) {
+        use std::sync::atomic::Ordering;
+        if self.git_busy.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let folders: Vec<(String, String)> = self
+            .state
+            .projects
+            .iter()
+            .filter(|p| only.as_deref().map(|o| o == p.id).unwrap_or(true))
+            .map(|p| (p.id.clone(), p.path.clone()))
+            .collect();
+        let busy = self.git_busy.clone();
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let results = folders.into_iter().map(|(id, path)| (id, git::status(&path))).collect();
+            busy.store(false, Ordering::SeqCst);
+            let _ = proxy.send_event(UserEvent::Git(results));
+        });
+    }
+
+    fn git_message(&self) -> Value {
+        json!({ "type": "git", "git": self.git })
     }
 
     /// Runs the startup script in the background, if one is set. Agents wait for it (see start).

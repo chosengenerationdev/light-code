@@ -1941,3 +1941,27 @@ input[type='password']:focus {
 .env-row.var .segmented {
   flex: none;
 }
+
+/* ─── Git changes on a codebase row ──────────────────────────────────────── */
+
+.git {
+  display: flex;
+  gap: 5px;
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  font: 600 11px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.git .add {
+  color: var(--ok);
+}
+
+.git .mod {
+  color: var(--warn);
+}
+
+.git .del {
+  color: var(--bad);
+}

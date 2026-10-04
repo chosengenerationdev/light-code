@@ -185,6 +185,11 @@ const HANDLERS = {
   reports(m) {
     if (openModal?.kind === 'reportList') openModal.list(m.reports)
   },
+  git(m) {
+    const before = JSON.stringify(model.git ?? {})
+    model.git = m.git ?? {}
+    if (JSON.stringify(model.git) !== before && !busyEditing()) renderList()
+  },
   scriptStatus(m) {
     model.scriptStatus = m
     if (openModal?.kind === 'environment') openModal.refresh()
@@ -569,6 +574,7 @@ function renderList() {
         face,
         el('span', { class: 'item-text' }, el('span', { class: 'item-name', text: p.name }), el('span', { class: `item-sub ${tone}`, text: sub })),
         s.unread && !here ? el('span', { class: 'unread', title: 'Something happened here' }) : null,
+        gitBadge(p),
         s.phase === 'sleeping' ? el('span', { class: 'moon', html: svg(ICONS.moon), title: 'Sleeping' }) : null,
         p.keepAwake ? el('span', { class: 'pin', html: svg(ICONS.pin), title: 'Kept awake' }) : null,
       )
@@ -576,6 +582,28 @@ function renderList() {
     }),
   )
   renderRail()
+}
+
+/**
+ * What git says has changed: +new ~modified −deleted, only the kinds that are non-zero. Nothing
+ * at all for a clean repository or a folder git does not manage - a badge with nothing to say is
+ * noise on every row.
+ */
+function gitBadge(project) {
+  const g = model.git?.[project.id]
+  if (g === undefined) return null
+  const parts = [
+    [g.added, 'add', '+', 'new'],
+    [g.modified, 'mod', '~', 'modified'],
+    [g.deleted, 'del', '−', 'deleted'],
+  ].filter(([n]) => n > 0)
+  if (parts.length === 0) return null
+  const words = parts.map(([n, , , word]) => `${n} ${word}`).join(', ')
+  return el(
+    'span',
+    { class: 'git', title: `${words}${g.branch ? ` — on ${g.branch}` : ''}\nfrom git status, not yet committed` },
+    ...parts.map(([n, cls, sign]) => el('span', { class: cls, text: `${sign}${n}` })),
+  )
 }
 
 function renderRail() {

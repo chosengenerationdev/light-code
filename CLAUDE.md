@@ -2289,6 +2289,11 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   shallowest first** (`mentionGlob(seg, 'prefix', depth)` = `*/*/[aA]…*`, measured against `rg.exe`) -
   the ranking's own order, so its top is exact. And answers arrived out of order: the page now keeps
   only the answer to the latest query. Not reproducible with two files - it needs the volume.
+- **Git counts in the sidebar** (Sun 0.5.2, `git.rs`): `git --no-optional-locks status --porcelain=v1 -z
+  --branch`, off the UI thread, one refresh at a time, 20 s cap. `--no-optional-locks` is the
+  load-bearing flag: a status that took `index.lock` would make the user's own commit fail at random.
+  Untracked folders count once (`-unormal`), because `-uall` lists every file in an unignored
+  `node_modules`. A non-repository or missing git shows nothing, never an error.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
 
