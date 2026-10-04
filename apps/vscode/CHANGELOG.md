@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.138.0
+
+### Minor Changes
+
+- "Share API keys with Fire Code" retries briefly when Windows refuses or drops the connection, and a failure now says what to do - check Fire Code's Credentials page (the keys may have arrived), update Fire Code, or start both apps the same way (normal or administrator) - instead of a bare EPERM.
+
 ## 0.137.0
 
 ### Patch Changes

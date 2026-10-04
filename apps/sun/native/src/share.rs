@@ -12,13 +12,13 @@
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::os::windows::io::{AsRawHandle, FromRawHandle};
+use std::os::windows::io::FromRawHandle;
 
 use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW};
 use windows_sys::Win32::Security::{GetTokenInformation, TokenUser, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER};
-use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
-use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT};
+use windows_sys::Win32::Storage::FileSystem::{FlushFileBuffers, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
+use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT};
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 /// The pipe's name: per Windows user, so two people on one machine never meet.
@@ -45,6 +45,15 @@ struct Entry {
 
 /// Serves until the process ends. `import` stores the keys and returns their labels; `received`
 /// tells the window what arrived (names only).
+///
+/// Two things this got wrong, reported as an EPERM from VS Code's "Share API keys":
+///
+/// - **The reply was thrown away.** It was written and the pipe disconnected at once, and
+///   `DisconnectNamedPipe` discards whatever the client has not read yet - so VS Code saw a broken
+///   pipe even when the keys had been stored. `FlushFileBuffers` now waits until it has been read.
+/// - **Callers were turned away between connections.** There was one instance, recreated after each
+///   client, and a connection attempt in that gap is refused with access denied (EPERM in Node). Now
+///   the next instance is listening before the current caller is served, so there is always one.
 pub fn serve(
     import: impl Fn(&[(String, String, String)]) -> Result<Vec<String>, String> + Send + 'static,
     received: impl Fn(String, Vec<String>) + Send + 'static,
@@ -52,55 +61,79 @@ pub fn serve(
     std::thread::spawn(move || {
         let Some(sddl) = user_only_sddl() else { return };
         let name: Vec<u16> = pipe_name().encode_utf16().chain(std::iter::once(0)).collect();
-        let mut first = true;
+        // The first instance claims the name: another Fire Code (a second data folder) already
+        // listening keeps it, and one receiver is enough.
+        let Some(mut listening) = create_instance(&name, &sddl, true) else { return };
         loop {
-            let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-            let sddl_wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
-            if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl_wide.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) } == 0 {
-                return;
-            }
-            let attributes = SECURITY_ATTRIBUTES {
-                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-                lpSecurityDescriptor: descriptor,
-                bInheritHandle: 0,
-            };
-            let pipe: HANDLE = unsafe {
-                CreateNamedPipeW(
-                    name.as_ptr(),
-                    PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 },
-                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                    1,
-                    64 * 1024,
-                    1024 * 1024,
-                    0,
-                    &attributes,
-                )
-            };
-            unsafe {
-                LocalFree(descriptor as _);
-            }
-            if pipe == INVALID_HANDLE_VALUE || pipe.is_null() {
-                // Another Fire Code (a second data folder) already listens; one receiver is enough.
-                return;
-            }
-            first = false;
-            if unsafe { ConnectNamedPipe(pipe, std::ptr::null_mut()) } == 0 && std::io::Error::last_os_error().raw_os_error() != Some(535) {
+            let connected = unsafe { ConnectNamedPipe(listening, std::ptr::null_mut()) } != 0
                 // 535 = ERROR_PIPE_CONNECTED: the client was already there, which is fine.
+                || std::io::Error::last_os_error().raw_os_error() == Some(535);
+            if !connected {
                 unsafe {
-                    CloseHandle(pipe);
+                    CloseHandle(listening);
+                }
+                match create_instance(&name, &sddl, false) {
+                    Some(next) => listening = next,
+                    None => return,
                 }
                 continue;
             }
-            let mut file = unsafe { File::from_raw_handle(pipe as _) };
-            let reply = handle(&mut file, &import, &received);
-            let _ = writeln!(file, "{reply}");
-            let _ = file.flush();
-            unsafe {
-                DisconnectNamedPipe(file.as_raw_handle() as HANDLE);
+            let current = listening;
+            let next = create_instance(&name, &sddl, false);
+            serve_one(current, &import, &received);
+            match next.or_else(|| create_instance(&name, &sddl, false)) {
+                Some(next) => listening = next,
+                None => return,
             }
-            drop(file);
         }
     });
+}
+
+/// One instance of the pipe, readable and writable only by this Windows user, local callers only.
+fn create_instance(name: &[u16], sddl: &str, first: bool) -> Option<HANDLE> {
+    let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    let sddl_wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+    if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl_wide.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) } == 0 {
+        return None;
+    }
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    let pipe: HANDLE = unsafe {
+        CreateNamedPipeW(
+            name.as_ptr(),
+            PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 },
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            PIPE_UNLIMITED_INSTANCES,
+            64 * 1024,
+            1024 * 1024,
+            0,
+            &attributes,
+        )
+    };
+    unsafe {
+        LocalFree(descriptor as _);
+    }
+    (pipe != INVALID_HANDLE_VALUE && !pipe.is_null()).then_some(pipe)
+}
+
+/// Reads one request, answers it, and waits for the answer to be read before hanging up.
+fn serve_one(
+    pipe: HANDLE,
+    import: &impl Fn(&[(String, String, String)]) -> Result<Vec<String>, String>,
+    received: &impl Fn(String, Vec<String>),
+) {
+    let mut file = unsafe { File::from_raw_handle(pipe as _) };
+    let reply = handle(&mut file, import, received);
+    let _ = writeln!(file, "{reply}");
+    unsafe {
+        // Blocks until the client has read everything written - disconnecting first discards it.
+        FlushFileBuffers(pipe);
+        DisconnectNamedPipe(pipe);
+    }
+    drop(file);
 }
 
 fn handle(

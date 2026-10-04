@@ -2322,6 +2322,14 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   `ask_followup_question`, which used to read as finished). Fire Code shows a badge on top of the
   tile, an amber row, a marked tab, a "N waiting" chip that cycles through them, the count in the title
   bar, and `request_user_attention` (taskbar flash) when unfocused.
+- **The key pipe** (`share.rs`, 0.6.1, reported as EPERM from VS Code): the server must
+  `FlushFileBuffers` before `DisconnectNamedPipe` - disconnecting discards what the client has not
+  read, so a share that worked was reported as a broken pipe - and must create the next instance
+  (`PIPE_UNLIMITED_INSTANCES`) *before* serving the current caller: with one instance recreated after
+  each client, a connect in the gap gets ERROR_ACCESS_DENIED, which Node reports as EPERM. VS Code's
+  `sendWithRetry` retries EPERM/EACCES/EBUSY/EPIPE/ECONNRESET (re-storing a key is harmless) and
+  `describeShareFailure` turns each into advice. Verified with a second Fire Code under another
+  `USERNAME` (the pipe name derives from it), so the running one was never touched.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
 

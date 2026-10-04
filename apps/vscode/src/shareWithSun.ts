@@ -56,12 +56,7 @@ export async function shareKeysWithSun(context: vscode.ExtensionContext, configM
       `Shared ${String(reply.stored?.length ?? found.length)} key(s) with Fire Code. Codebases linked to this config can use them now.`,
     )
   } catch (error) {
-    const missing = (error as NodeJS.ErrnoException).code === 'ENOENT'
-    void vscode.window.showErrorMessage(
-      missing
-        ? 'Fire Code is not running. Open it (run fire-code), then share the keys again.'
-        : `Could not share the keys with Fire Code: ${error instanceof Error ? error.message : String(error)}`,
-    )
+    void vscode.window.showErrorMessage(describeShareFailure(error))
   }
 }
 
@@ -95,6 +90,30 @@ async function collectSlots(context: vscode.ExtensionContext, configManager: Con
   return [...seen.values()]
 }
 
+/** Codes Windows gives while Fire Code is between callers or busy: worth one more try shortly. */
+const TRANSIENT = new Set(['EPERM', 'EACCES', 'EBUSY', 'EPIPE', 'ECONNRESET'])
+
+/** What to tell somebody when sharing failed, naming what to do rather than an errno. */
+export function describeShareFailure(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  if (code === 'ENOENT') return 'Fire Code is not running. Open it (run fire-code), then share the keys again.'
+  if (code === 'EPERM' || code === 'EACCES') {
+    return (
+      'Fire Code refused the connection. If one of VS Code and Fire Code runs as administrator and the other ' +
+      'does not, start both the same way. Otherwise update Fire Code (npm i -g @chosengeneration/fire-code) - ' +
+      'versions before 0.6.1 turned callers away between connections. Check the Credentials page in Fire Code ' +
+      'first: the keys may already be there.'
+    )
+  }
+  if (code === 'EPIPE' || code === 'ECONNRESET') {
+    return (
+      'Fire Code hung up before answering. Check its Credentials page - the keys may already be there - and ' +
+      'update Fire Code (npm i -g @chosengeneration/fire-code) if they are not.'
+    )
+  }
+  return `Could not share the keys with Fire Code: ${error instanceof Error ? error.message : String(error)}`
+}
+
 /** The pipe Fire Code listens on: per Windows user, matching `share.rs`. */
 export function sunPipeName(name = 'fire-code'): string {
   return `\\\\.\\pipe\\${name}.${(process.env.USERNAME ?? 'user').toLowerCase()}`
@@ -108,13 +127,36 @@ async function sendToSun(message: unknown): Promise<{ ok?: boolean; error?: stri
   let last: unknown
   for (const name of ['fire-code', 'sun-code', 'sun-light-code']) {
     try {
-      return await sendOnPipe(sunPipeName(name), message)
+      return await sendWithRetry(sunPipeName(name), message)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       last = error
     }
   }
   throw last
+}
+
+/**
+ * A refused or dropped connection is retried a few times over about two seconds: an older Fire Code
+ * has a moment between callers where Windows refuses a connection outright. Storing the same keys
+ * twice is harmless, so a retry after a reply was lost costs nothing.
+ */
+export async function sendWithRetry(
+  pipe: string,
+  message: unknown,
+  send: (pipe: string, message: unknown) => Promise<{ ok?: boolean; error?: string; stored?: string[] }> = sendOnPipe,
+  delays: readonly number[] = [150, 400, 1200],
+): Promise<{ ok?: boolean; error?: string; stored?: string[] }> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send(pipe, message)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      const delay = delays[attempt]
+      if (code === undefined || !TRANSIENT.has(code) || delay === undefined) throw error
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
 }
 
 function sendOnPipe(pipe: string, message: unknown): Promise<{ ok?: boolean; error?: string; stored?: string[] }> {

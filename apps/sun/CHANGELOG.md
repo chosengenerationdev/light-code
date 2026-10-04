@@ -1,5 +1,10 @@
 # @chosengeneration/fire-code
 
+## 0.6.1
+
+- **Sharing keys from VS Code no longer fails with EPERM.** Fire Code hung up before VS Code had read its answer, so a share that had worked was reported as failing; and between two callers there was a moment when Windows refused a connection outright (EPERM). It now waits for the answer to be read and always has the next connection open.
+- Carries Light Code 0.111.0 (unchanged).
+
 ## 0.6.0
 
 - **Renamed to Fire Code.** Install `@chosengeneration/fire-code` and run `fire-code`. Codebases, chats and credentials move across from Sun Code (or Sun Light Code) on first start; then `npm uninstall -g @chosengeneration/sun-code`.
