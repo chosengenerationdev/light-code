@@ -1,5 +1,15 @@
 # @chosengeneration/light-code
 
+## 0.112.0
+
+### Minor Changes
+
+- `--mirror-dir <dir>`: keep copies of bucket folders in one place shared with other hosts on this machine, so a Python tool approved once is approved for each (Fire Code uses it). While tools wait for approval, a host notices an approval made by another within a few seconds.
+- Approval records and synced files are written whole (temporary file, then rename).
+- `@payments-api` on its own attaches that codebase's top folder (it used to look for a file called payments-api).
+- A search connection's Username can be a saved credential, like its Password.
+- Hovering a dropdown, or any choice in it, shows the full text when it is cut short.
+
 ## 0.111.0
 
 ### Minor Changes

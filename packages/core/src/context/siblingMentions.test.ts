@@ -45,4 +45,13 @@ describe('mentioning another codebase', () => {
     expect(listing).toMatchObject({ kind: 'directory', content: 'src/' })
     expect(escape?.kind).toBe('error')
   })
+
+  it('reads a bare codebase name as that codebase, unless this workspace has something by that name', async () => {
+    const [bare] = await resolveMentions('look at @payments-api', { fs: new NodeFileSystem(), workspaceRoot: here, siblings: siblings() })
+    expect(bare).toMatchObject({ kind: 'directory', relativePath: 'payments-api:', content: 'src/' })
+    await fs.writeFile(path.join(here, 'payments-api'), 'a local file')
+    const [local] = await resolveMentions('look at @payments-api', { fs: new NodeFileSystem(), workspaceRoot: here, siblings: siblings() })
+    expect(local).toMatchObject({ kind: 'file', content: 'a local file' })
+    await fs.rm(path.join(here, 'payments-api'))
+  })
 })

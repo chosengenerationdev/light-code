@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { normalizeForComparison } from '../fs/confine.js'
 import type { Logger } from '../logging/logger.js'
+import { replaceFile } from '../platform/node/replaceFile.js'
 import type { PythonWorker, WorkerToolDescription } from './worker.js'
 
 /**
@@ -113,7 +114,12 @@ async function readRegistryFile(toolsDir: string): Promise<RegistryFile> {
 
 export async function writeRegistryFile(toolsDir: string, registry: RegistryFile): Promise<void> {
   await fs.mkdir(toolsDir, { recursive: true })
-  await fs.writeFile(path.join(toolsDir, REGISTRY_FILE), JSON.stringify(registry, null, 2), 'utf8')
+  // Temp and rename: in Fire Code several codebases share this folder, and one reading a
+  // half-written file would see nothing approved.
+  const target = path.join(toolsDir, REGISTRY_FILE)
+  const temporary = `${target}.${String(process.pid)}.${String(Date.now())}.tmp`
+  await fs.writeFile(temporary, JSON.stringify(registry, null, 2), 'utf8')
+  await replaceFile(temporary, target)
 }
 
 /**

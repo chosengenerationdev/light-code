@@ -53,4 +53,9 @@ export interface FileSystem {
   readdir(path: string): Promise<DirEntry[]>
   exists(path: string): Promise<boolean>
   mkdir(path: string): Promise<void>
+  /**
+   * Moves a file over another in one step, so a reader sees the old file or the new one and never
+   * half of one. Optional: callers fall back to writing in place where a host has no rename.
+   */
+  rename?(from: string, to: string): Promise<void>
 }

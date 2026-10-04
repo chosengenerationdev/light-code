@@ -166,7 +166,7 @@ export async function syncFromS3(options: SyncOptions): Promise<S3SyncResult> {
       }
 
       await options.fs.mkdir(dirname(localPath))
-      await options.fs.writeBytes(localPath, bytes)
+      await writeWhole(options.fs, localPath, bytes)
       result.written.push(relative)
     } catch (error) {
       // Forgotten, so a file that failed is fetched in full next time rather than skipped.
@@ -187,7 +187,7 @@ export async function syncFromS3(options: SyncOptions): Promise<S3SyncResult> {
   if (manifestChanged) {
     try {
       await options.fs.mkdir(options.localDir)
-      await options.fs.writeBytes(manifestPath, Buffer.from(JSON.stringify(manifest)))
+      await writeWhole(options.fs, manifestPath, Buffer.from(JSON.stringify(manifest)))
     } catch {
       // See above.
     }
@@ -244,6 +244,21 @@ export async function uploadToS3(options: {
 function join(dir: string, relative: string): string {
   const left = dir.replace(/[\\/]+$/, '')
   return `${left}/${relative}`
+}
+
+/**
+ * Writes beside the file and renames over it. Several codebases in Fire Code share one copy of a
+ * bucket folder, so another may be reading a tool while this writes it - and half a file has a
+ * different hash, which would read as "changed since approved" for a moment.
+ */
+async function writeWhole(fs: FileSystem, target: string, bytes: Uint8Array): Promise<void> {
+  if (fs.rename === undefined) {
+    await fs.writeBytes(target, bytes)
+    return
+  }
+  const temporary = `${target}.${String(process.pid)}.${String(Date.now())}.part`
+  await fs.writeBytes(temporary, bytes)
+  await fs.rename(temporary, target)
 }
 
 function dirname(filePath: string): string {

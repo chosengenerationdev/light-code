@@ -1,5 +1,15 @@
 # @chosengeneration/fire-code
 
+## 0.7.0
+
+- **Python tools from a bucket are reviewed once, not once per codebase.** Every codebase and chat now uses one copy of each bucket folder, and the approval is kept with it; approve in one codebase and the others stop asking within a few seconds. They ask one more time after this update.
+- **Right-click a codebase to see its @ name**, with a Copy button.
+- **Credentials shared from VS Code**: a username and password for the same connection now arrive as one login (offered as "— username" and "— password"), replacing the two loose entries earlier versions made.
+- `@payments-api` on its own attaches that codebase's top folder (it used to look for a file called payments-api).
+- A search connection's Username can be a saved credential, like its Password.
+- Hovering a dropdown, or any choice in it, shows the full text when it is cut short.
+- Carries Light Code 0.112.0.
+
 ## 0.6.1
 
 - **Sharing keys from VS Code no longer fails with EPERM.** Fire Code hung up before VS Code had read its answer, so a share that had worked was reported as failing; and between two callers there was a moment when Windows refused a connection outright (EPERM). It now waits for the answer to be read and always has the next connection open.

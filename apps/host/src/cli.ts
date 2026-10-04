@@ -279,6 +279,7 @@ async function main(): Promise<void> {
   const fastFsArg = valueOf(args, '--fast-fs')
   const fastFs = fastFsArg !== undefined && existsSync(fastFsArg) ? path.resolve(fastFsArg) : undefined
   const changeLedgerFile = valueOf(args, '--change-ledger')
+  const mirrorDir = valueOf(args, '--mirror-dir')
   // Every `--sibling name=folder`: the other codebases open in Fire Code.
   const siblings = args
     .flatMap((arg, i) => (arg === '--sibling' && args[i + 1] !== undefined ? [args[i + 1] as string] : []))
@@ -408,6 +409,7 @@ async function main(): Promise<void> {
     ...(args.includes('--shared-workspace') ? { sharedWorkspace: true } : {}),
     ...(args.includes('--no-schedules') ? { noSchedules: true } : {}),
     ...(siblings.length > 0 ? { siblings } : {}),
+    ...(mirrorDir !== undefined ? { mirrorRoot: path.resolve(mirrorDir) } : {}),
     ...(changeLedgerFile !== undefined ? { changeLedger: { file: changeLedgerFile, chat: valueOf(args, '--chat-label') ?? 'another chat' } } : {}),
     /*
      * Decoded once, at startup.
@@ -691,6 +693,7 @@ const KNOWN_FLAGS = new Set([
   '--sibling',
   '--change-ledger',
   '--chat-label',
+  '--mirror-dir',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -957,6 +960,9 @@ Usage: light-code [options]
   --change-ledger <file>  Shared by chats on one codebase: who changed which file,
                       so Rollback asks before undoing another chat's work
   --chat-label <name>  This chat's name in that ledger
+  --mirror-dir <dir>  Keep copies of bucket folders here, shared with other
+                      hosts on this machine (Fire Code), so a tool approved
+                      once is approved for every codebase
   --no-schedules      Leave this codebase's schedules to another process
                       (Fire Code's extra chat tabs, so a job runs once)
   --fast-fs <exe>     The fire-fs helper: adds find_files, read_many_files,

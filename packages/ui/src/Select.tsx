@@ -222,7 +222,8 @@ export function Select(props: SelectProps): ReactElement {
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={props.ariaLabel}
-        title={props.title}
+        // The full text on hover: a narrow field cuts long labels short.
+        title={props.title ?? (label.length > 0 ? label : undefined)}
         disabled={props.disabled}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={onKeyDown}
@@ -320,6 +321,7 @@ export function Select(props: SelectProps): ReactElement {
                   key={option.value}
                   role="option"
                   data-index={index}
+                  title={option.detail !== undefined ? `${option.label} — ${option.detail}` : option.label}
                   aria-selected={isSelected}
                   aria-disabled={option.disabled === true}
                   onPointerEnter={() => option.disabled !== true && setHighlighted(index)}

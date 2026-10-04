@@ -237,6 +237,7 @@ describe('finding the right topic', () => {
       ['does fire code show which files changed in git', 'fire-code'],
       ['how do I refer to a file in another codebase', 'fire-code'],
       ['how do I know which codebase is waiting for me', 'fire-code'],
+      ['what is the short name of a codebase for @', 'fire-code'],
       ['will my schedule run if fire code put the codebase to sleep', 'fire-code'],
       ['where do I see the html report from the nightly run', 'fire-code'],
     ]

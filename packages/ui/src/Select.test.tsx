@@ -66,6 +66,15 @@ const key = (element: Element, k: string): void => {
 }
 
 describe('Select', () => {
+  it('shows the full text of a long choice on hover, closed and in the list', () => {
+    const long = 'Search connection Production cluster in the shared environment — password'
+    render({ value: 'long', options: [{ value: 'long', label: long }, { value: 'b', label: 'Short', detail: 'ok' }] })
+    expect(trigger().title).toBe(long)
+    click(trigger())
+    const titles = [...document.querySelectorAll('[role="option"]')].map((o) => o.getAttribute('title'))
+    expect(titles).toEqual([long, 'Short — ok'])
+  })
+
   it('shows the selected option and opens on click', () => {
     render()
     expect(trigger().textContent).toContain('Option 0')

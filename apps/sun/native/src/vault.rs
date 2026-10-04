@@ -255,22 +255,44 @@ impl Vault {
     /// Keys handed over by the VS Code extension: each becomes a saved credential named as VS Code
     /// names it, and the setting it belonged to points at it - so a codebase linked to that config
     /// works at once, and the key can be replaced here later for everything that uses it.
+    ///
+    /// A username and a password for the same thing ("Search connection Prod: username" and
+    /// "...: password") become **one login** named "Search connection Prod", so a picker offers its
+    /// username to a username field and its password to a password field. Earlier versions made two
+    /// unrelated secrets of them; those are removed when a share replaces them, unless something
+    /// still points at them.
     pub fn import(&self, entries: &[(String, String, String)]) -> Result<Vec<String>, String> {
+        let usable: Vec<&(String, String, String)> = entries
+            .iter()
+            .filter(|(slot, _, value)| !slot.is_empty() && !value.is_empty() && !slot.starts_with("credential:"))
+            .collect();
+        let half_of = |label: &str| -> Option<(String, &'static str)> {
+            ["username", "password"]
+                .into_iter()
+                .find_map(|field| label.strip_suffix(&format!(": {field}")).map(|owner| (owner.to_string(), field)))
+        };
+        let has = |owner: &str, field: &str| usable.iter().any(|(_, l, _)| half_of(l) == Some((owner.to_string(), field)));
+
         let mut file = self.read_credentials();
         let mut labels = Vec::new();
-        let mut assignments: Vec<(String, String, String)> = Vec::new();
-        for (slot, label, value) in entries {
-            if slot.is_empty() || value.is_empty() || slot.starts_with("credential:") {
-                continue;
-            }
-            let id = match file.credentials.iter().find(|c| c.label.eq_ignore_ascii_case(label)) {
+        let mut assignments: Vec<(String, String, &'static str, String)> = Vec::new();
+        let mut replaced: Vec<String> = Vec::new();
+        for (slot, label, value) in usable.iter().copied() {
+            let (name, kind, field) = match half_of(label) {
+                Some((owner, field)) if has(&owner, "username") && has(&owner, "password") => {
+                    replaced.push(label.clone());
+                    (owner, "login", field)
+                }
+                _ => (label.clone(), "secret", "value"),
+            };
+            let id = match file.credentials.iter().find(|c| c.kind == kind && c.label.eq_ignore_ascii_case(&name)) {
                 Some(c) => c.id.clone(),
                 None => {
-                    let id = new_credential_id(label);
+                    let id = new_credential_id(&name);
                     file.credentials.push(Credential {
                         id: id.clone(),
-                        label: label.clone(),
-                        kind: "secret".into(),
+                        label: name.clone(),
+                        kind: kind.into(),
                         note: Some("Shared from VS Code".into()),
                         updated: now_millis(),
                     });
@@ -281,15 +303,36 @@ impl Vault {
                 c.updated = now_millis();
             }
             file.slot_labels.insert(slot.clone(), label.clone());
-            assignments.push((slot.clone(), id, value.clone()));
-            labels.push(label.clone());
+            assignments.push((slot.clone(), id, field, value.clone()));
+            if !labels.contains(&name) {
+                labels.push(name);
+            }
         }
+        let stale: Vec<String> = file
+            .credentials
+            .iter()
+            .filter(|c| {
+                c.kind == "secret"
+                    && c.note.as_deref() == Some("Shared from VS Code")
+                    && replaced.iter().any(|l| l.eq_ignore_ascii_case(&c.label))
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        let mut removed: Vec<String> = Vec::new();
         self.update_secrets(|map| {
-            for (slot, id, value) in &assignments {
-                map.insert(pointer(id, "value"), value.clone());
-                map.insert(slot.clone(), pointer(id, "value"));
+            for (slot, id, field, value) in &assignments {
+                map.insert(pointer(id, field), value.clone());
+                map.insert(slot.clone(), pointer(id, field));
+            }
+            for id in &stale {
+                let old = pointer(id, "value");
+                if !map.values().any(|v| v == &old) {
+                    map.remove(&old);
+                    removed.push(id.clone());
+                }
             }
         })?;
+        file.credentials.retain(|c| !removed.contains(&c.id));
         self.write_credentials(&file)?;
         Ok(labels)
     }
@@ -548,6 +591,32 @@ mod tests {
         assert_eq!(secrets.get(slot).map(String::as_str), Some("sk-1"));
         let listed = serde_json::to_string(&vault.list().unwrap()).unwrap();
         assert!(listed.contains("\"usedBy\":[\"DeepSeek: API key\"]"));
+    }
+
+    #[test]
+    fn a_shared_username_and_password_become_one_login_replacing_the_old_pair() {
+        let paths = temp_paths("login");
+        let vault = Vault::open(&paths).unwrap();
+        // What an earlier version made of them: two loose secrets.
+        vault.import(&[("search:p:user".into(), "Search connection Prod: username".into(), "alice".into())]).unwrap();
+        vault.import(&[("search:p:pass".into(), "Search connection Prod: password".into(), "pw-old".into())]).unwrap();
+        let labels = vault
+            .import(&[
+                ("search:p:user".into(), "Search connection Prod: username".into(), "alice".into()),
+                ("search:p:pass".into(), "Search connection Prod: password".into(), "pw".into()),
+            ])
+            .unwrap();
+        assert_eq!(labels, vec!["Search connection Prod".to_string()]);
+        let secrets = vault.read_secrets().unwrap();
+        let user = secrets.get("search:p:user").unwrap();
+        let pass = secrets.get("search:p:pass").unwrap();
+        assert!(user.ends_with("#username") && pass.ends_with("#password"));
+        assert_eq!(secrets.get(user).map(String::as_str), Some("alice"));
+        assert_eq!(secrets.get(pass).map(String::as_str), Some("pw"));
+        let file = vault.read_credentials();
+        assert_eq!(file.credentials.len(), 1, "the two loose secrets are gone");
+        assert_eq!(file.credentials[0].kind, "login");
+        assert!(!secrets.values().any(|v| v == "pw-old"));
     }
 
     #[test]

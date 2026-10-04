@@ -57,6 +57,7 @@ export function CredentialInUse(props: { pointer: string; onClear: () => void })
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <span
+        title={label}
         style={{
           padding: '3px 10px',
           borderRadius: 999,

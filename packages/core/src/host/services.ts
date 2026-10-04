@@ -216,6 +216,12 @@ export interface HostServices {
   /** Per-user directory for tasks, spilled tool results and the user-scope config. */
   storageDir: string
   /**
+   * Where copies of bucket folders (skills, Python tools) are kept, when not under `storageDir`.
+   * Fire Code gives every codebase and chat the same one: approving a tool is recorded in its
+   * folder, so separate copies meant reviewing the same tools once per codebase.
+   */
+  mirrorRoot?: string
+  /**
    * Where ripgrep is **right now**, or undefined to degrade `search_files` and `list_files`
    * with a clear message.
    *

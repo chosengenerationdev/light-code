@@ -1221,9 +1221,16 @@ function showMenu(project, x, y) {
       label,
       extra.checked ? el('span', { class: 'check', html: svg(ICONS.check) }) : null,
     )
+  // How other codebases' chats refer to this one - shown so it can be typed after @.
+  const mention = project.mention ? `@${project.mention}` : undefined
   const menu = el(
     'div',
     { class: 'menu', role: 'menu' },
+    mention
+      ? el('div', { class: 'menu-label', title: 'Type this in a chat on another codebase to refer to this one' }, 'In other chats: ', el('code', { text: mention }))
+      : null,
+    mention ? item('copy', `Copy ${mention}`, () => navigator.clipboard?.writeText(mention)) : null,
+    mention ? el('hr') : null,
     item('vscode', 'Open in VS Code', () => send('openVsCode', { id: project.id })),
     item('explorer', 'Open in File Explorer', () => send('openExplorer', { id: project.id })),
     el('hr'),
@@ -2080,9 +2087,9 @@ function openCredentials() {
           { class: 'body' },
           rows.length > 0
             ? el('div', {}, ...rows)
-            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here, press <b>From IntelliJ / PyCharm</b> below, or in VS Code run <b>Light Code: Share API keys with Fire Code</b> to bring every key over at once.</span>` }),
+            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here, press <b>From IntelliJ / PyCharm</b> below, or in VS Code run <b>Light Code: Share credentials with Fire Code</b> to bring them all over at once.</span>` }),
           rows.length > 0
-            ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Keys from VS Code: run <b>Light Code: Share API keys with Fire Code</b> in VS Code while Fire Code is open.</span>` })
+            ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Credentials from VS Code: run <b>Light Code: Share credentials with Fire Code</b> in VS Code while Fire Code is open.</span>` })
             : null,
         ),
         el(

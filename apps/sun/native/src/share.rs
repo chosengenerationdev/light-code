@@ -1,4 +1,4 @@
-//! Receives keys from the VS Code extension ("Light Code: Share API keys with Fire Code").
+//! Receives keys from the VS Code extension ("Light Code: Share credentials with Fire Code").
 //!
 //! VS Code keeps its keys in its own encrypted storage, which nothing else can read. The extension
 //! can, so it sends them here, after the person confirmed the list of names. The channel is a named
@@ -46,7 +46,7 @@ struct Entry {
 /// Serves until the process ends. `import` stores the keys and returns their labels; `received`
 /// tells the window what arrived (names only).
 ///
-/// Two things this got wrong, reported as an EPERM from VS Code's "Share API keys":
+/// Two things this got wrong, reported as an EPERM from VS Code's "Share credentials":
 ///
 /// - **The reply was thrown away.** It was written and the pipe disconnected at once, and
 ///   `DisconnectNamedPipe` discards whatever the client has not read yet - so VS Code saw a broken

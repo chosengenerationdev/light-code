@@ -21,6 +21,7 @@ import { DispatcherSection, type DispatcherSectionProps } from './DispatcherSect
 import { SearchActivity, type SearchActivityProps } from './SearchActivity.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { SecretField } from './SecretField.js'
+import { CredentialInUse, CredentialPicker, isCredentialPointer } from './CredentialPicker.js'
 import { Panel } from './Panel.js'
 
 export interface SearchIndex {
@@ -315,14 +316,22 @@ export function SearchTab(props: SearchTabProps): ReactElement {
           <label htmlFor="lc-os-user" style={labelStyle()}>
             Username
           </label>
-          <input
-            id="lc-os-user"
-            type="text"
-            value={username}
-            placeholder={editing.hasUsername ? 'Set — type to replace' : ''}
-            onChange={(event) => setUsername(event.target.value)}
-            style={textFieldStyle()}
-          />
+          {isCredentialPointer(username) ? (
+            <CredentialInUse pointer={username} onClear={() => setUsername('')} />
+          ) : (
+            <>
+              <input
+                id="lc-os-user"
+                type="text"
+                value={username}
+                placeholder={editing.hasUsername ? 'Set — type to replace' : ''}
+                onChange={(event) => setUsername(event.target.value)}
+                style={textFieldStyle()}
+              />
+              {/* A username can be a saved credential too - a login's username, or one shared from VS Code. */}
+              <CredentialPicker id="lc-os-user-credential" onPick={setUsername} />
+            </>
+          )}
         </div>
 
         <SecretField

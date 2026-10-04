@@ -21,7 +21,7 @@ import path from 'node:path'
 
 import { buildAutoGuidance } from '../modes/autoGuidance.js'
 import { describeMigration, planMigration, runMigration } from '../migrate/folders.js'
-import { defaultPythonToolsDir } from '../python/registry.js'
+import { defaultPythonToolsDir, REGISTRY_FILE } from '../python/registry.js'
 import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
 import { searchMentions, type MentionIndex } from '../context/mentionSearch.js'
 import { siblingMention } from '../context/mentions.js'
@@ -515,6 +515,9 @@ export interface ChatBridge {
 
 export function wireChatBridge(services: HostServices): ChatBridge {
   const { transport, secrets, ui, workspaceRoot, storageDir } = services
+  // Where bucket folders are copied: shared by every codebase in Fire Code, so a tool approved once
+  // is approved everywhere on this machine (approval lives in the folder's .registry.json).
+  const mirrorRoot = services.mirrorRoot ?? storageDir
   const logger = new Logger({ level: 'debug', sink: services.logSink })
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
@@ -1107,7 +1110,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const target = targetById(cachedS3, marked.connectionId)
     if (target === undefined || target.readOnly === true) return undefined
     return mirrorFolder({
-      storageDir,
+      storageDir: mirrorRoot,
       connectionId: marked.connectionId,
       kind,
       ...(marked.prefix !== undefined ? { prefix: marked.prefix } : {}),
@@ -1493,7 +1496,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     for (const mirror of cachedSkillMirrors) {
       if (mirror.enabled !== true) continue
       const localDir = mirrorFolder({
-        storageDir,
+        storageDir: mirrorRoot,
         connectionId: mirror.connectionId,
         kind: 'skills',
         ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
@@ -2707,7 +2710,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .filter((mirror) => mirror.enabled === true)
       .map((mirror) =>
         mirrorFolder({
-          storageDir,
+          storageDir: mirrorRoot,
           connectionId: mirror.connectionId,
           kind: 'skills',
           ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
@@ -2736,7 +2739,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .filter((mirror) => mirror.enabled === true)
       .map((mirror) =>
         mirrorFolder({
-          storageDir,
+          storageDir: mirrorRoot,
           connectionId: mirror.connectionId,
           kind: 'tools',
           ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
@@ -7703,6 +7706,37 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
   let mirrorSyncStartup: ReturnType<typeof setTimeout> | undefined
 
+  /*
+   * Another codebase in Fire Code can approve a tool in a folder this one shares (the bucket copies
+   * live under one `mirrorRoot`). While anything here waits for approval, each tool folder's
+   * approval record is checked every few seconds and the list refreshed when one changes - so
+   * approving once clears the card in every codebase. Nothing waiting: nothing is read.
+   */
+  let approvalWatch: ReturnType<typeof setInterval> | undefined
+  const approvalStamps = new Map<string, number>()
+  async function checkSharedApprovals(): Promise<void> {
+    if (userTurnRunning || runningScheduleId !== undefined) return
+    if (!python.status().issues.some((issue) => issue.recoverable)) return
+    let changed = false
+    for (const dir of python.toolDirectories()) {
+      const file = path.join(dir, REGISTRY_FILE)
+      const stamp = await fs.stat(file).then(
+        (stat) => stat.mtimeMs,
+        () => 0,
+      )
+      if (approvalStamps.has(file) && approvalStamps.get(file) !== stamp) changed = true
+      approvalStamps.set(file, stamp)
+    }
+    if (!changed) return
+    await python.refresh()
+    await postPython()
+  }
+  function startApprovalWatch(): void {
+    approvalWatch = setInterval(() => {
+      checkSharedApprovals().catch((error: unknown) => logger.warn('approval check failed', String(error)))
+    }, 5_000)
+  }
+
   async function syncMirrorsOf(kind: 'skills' | 'tools'): Promise<void> {
     const { config } = await configManager.load()
     const mirrors = (config.s3?.[kind] ?? []).filter((mirror) => mirror.enabled === true)
@@ -7729,7 +7763,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       }
 
       const localDir = mirrorFolder({
-        storageDir,
+        storageDir: mirrorRoot,
         connectionId: mirror.connectionId,
         kind,
         ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
@@ -13048,6 +13082,7 @@ ${contents}
   if (services.runsSchedules !== false) startScheduleTimer()
   // Same lifetime, same reason: bucket folders are brought down while this bridge is alive.
   startMirrorSync()
+  startApprovalWatch()
 
   return {
     /**
@@ -13119,6 +13154,7 @@ ${contents}
       // Nor a bucket sync, which would post to a dead webview and hold a connection open.
       if (mirrorSyncTimer !== undefined) clearInterval(mirrorSyncTimer)
       if (mirrorSyncStartup !== undefined) clearTimeout(mirrorSyncStartup)
+      if (approvalWatch !== undefined) clearInterval(approvalWatch)
       // Nothing may outlive the bridge, least of all something that spends money.
       stopKeepAlive()
       unsubscribe()

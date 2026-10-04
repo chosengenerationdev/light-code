@@ -849,7 +849,7 @@ desktops of the same person; importing the file is how a second machine is set u
       'copy folder', 'move folder', 'move files', 'copy files', 'zip', 'unzip', 'archive', 'compress',
       'export credentials', 'sun code', 'other codebase', 'another codebase', 'refer to another project',
       'file from another codebase', 'cross codebase', 'waiting for me', 'which codebase is waiting',
-      'needs my approval',
+      'needs my approval', 'short name', 'codebase name', 'review python tools once',
     ],
     body: `
 **Fire Code** (called Sun Code until 0.6.0, and Sun Light Code before that) is a Windows app holding every codebase you work on,
@@ -871,8 +871,16 @@ always applies. Right-click a codebase → Settings source… changes it later.
 **Credentials** (the key button in Fire Code's sidebar): keys and passwords saved once, by name, encrypted for
 your Windows account, and picked in any codebase's settings with "Use a saved credential" — changing one
 updates everything that uses it. Values are never shown again. Bring keys in from VS Code with the command
-"Light Code: Share API keys with Fire Code", from IntelliJ / PyCharm with the button on the
+"Light Code: Share credentials with Fire Code" (API keys, passwords, usernames, tokens), from IntelliJ / PyCharm with the button on the
 Credentials page, or from another computer with Export / Import (a passphrase-encrypted file).
+Codebases whose settings are linked to or copied from that VS Code config work at once - their settings
+already point at what was shared. A codebase with its own (New) settings picks them with "Use a saved
+credential". A username and password for the same connection arrive as one login, offered as
+"— username" and "— password". Hover a long name in any dropdown to see it in full.
+
+**Python tools from a bucket are reviewed once for all codebases**: every codebase and chat in Fire Code
+uses one copy of each bucket folder, and the approval is kept with it - approve in one codebase and the
+others stop asking within a few seconds. (The first time after updating, they ask once more.)
 
 **Several chats per codebase**: the tabs above the chat. + (or Ctrl+T, or right-click → New chat) opens
 another chat on the same codebase — its own agent, working at the same time, with the same settings and
@@ -902,7 +910,8 @@ Both **always ask**, showing every source, destination, file count, size and any
 never available to a schedule. An archive whose entries would land outside the destination is refused.
 
 **Other codebases**: every agent knows the other codebases open in Fire Code, by a short name (shown when you
-type \`@\`), and may read them. \`@payments-api:\` opens the picker inside that codebase;
+type \`@\`, and at the top of the codebase's right-click menu with a Copy button), and may read them.
+\`@payments-api\` attaches that codebase's top folder; \`@payments-api:\` opens the picker inside it;
 \`@payments-api:src/app.py\` attaches that file. Writing in another codebase asks every time. Just ask
 "how does payments-api handle retries?" and the agent can look.
 

@@ -6,7 +6,7 @@ import { secretSlots, type ConfigManager, type SecretSlot } from '@light-code/co
 import { VSCodeSecretStore } from './platform/secrets.js'
 
 /**
- * "Light Code: Share API keys with Fire Code".
+ * "Light Code: Share credentials with Fire Code" - API keys, passwords, usernames and tokens alike.
  *
  * VS Code keeps Light Code's keys in its own encrypted storage, which no other program can read -
  * so a codebase in Fire Code linked to this config had every provider and connection but none of their
@@ -19,7 +19,7 @@ import { VSCodeSecretStore } from './platform/secrets.js'
  */
 export async function shareKeysWithSun(context: vscode.ExtensionContext, configManager: ConfigManager): Promise<void> {
   if (process.platform !== 'win32') {
-    void vscode.window.showInformationMessage('Fire Code is a Windows app; there is nothing to share keys with on this system.')
+    void vscode.window.showInformationMessage('Fire Code is a Windows app; there is nothing to share credentials with on this system.')
     return
   }
 
@@ -31,13 +31,13 @@ export async function shareKeysWithSun(context: vscode.ExtensionContext, configM
     if (value !== undefined && value.length > 0) found.push({ ...slot, value })
   }
   if (found.length === 0) {
-    void vscode.window.showInformationMessage('Light Code has no stored keys to share — nothing in its settings has a key saved.')
+    void vscode.window.showInformationMessage('Light Code has no stored credentials to share — nothing in its settings has one saved.')
     return
   }
 
   // Ground truth before anything leaves (invariant 8): the names of exactly what will be sent.
   const choice = await vscode.window.showWarningMessage(
-    `Share ${String(found.length)} key${found.length === 1 ? '' : 's'} with Fire Code?`,
+    `Share ${String(found.length)} credential${found.length === 1 ? '' : 's'} with Fire Code?`,
     {
       modal: true,
       detail:
@@ -51,9 +51,9 @@ export async function shareKeysWithSun(context: vscode.ExtensionContext, configM
 
   try {
     const reply = await sendToSun({ type: 'share', from: 'VS Code', entries: found })
-    if (reply.ok !== true) throw new Error(reply.error ?? 'Fire Code refused the keys.')
+    if (reply.ok !== true) throw new Error(reply.error ?? 'Fire Code refused the credentials.')
     void vscode.window.showInformationMessage(
-      `Shared ${String(reply.stored?.length ?? found.length)} key(s) with Fire Code. Codebases linked to this config can use them now.`,
+      `Shared with Fire Code: ${(reply.stored ?? []).join(', ') || String(found.length) + ' credential(s)'}. Codebases using this config can use them now; elsewhere pick them with "Use a saved credential".`,
     )
   } catch (error) {
     void vscode.window.showErrorMessage(describeShareFailure(error))
@@ -96,7 +96,7 @@ const TRANSIENT = new Set(['EPERM', 'EACCES', 'EBUSY', 'EPIPE', 'ECONNRESET'])
 /** What to tell somebody when sharing failed, naming what to do rather than an errno. */
 export function describeShareFailure(error: unknown): string {
   const code = (error as NodeJS.ErrnoException | undefined)?.code
-  if (code === 'ENOENT') return 'Fire Code is not running. Open it (run fire-code), then share the keys again.'
+  if (code === 'ENOENT') return 'Fire Code is not running. Open it (run fire-code), then share the credentials again.'
   if (code === 'EPERM' || code === 'EACCES') {
     return (
       'Fire Code refused the connection. If one of VS Code and Fire Code runs as administrator and the other ' +
@@ -111,7 +111,7 @@ export function describeShareFailure(error: unknown): string {
       'update Fire Code (npm i -g @chosengeneration/fire-code) if they are not.'
     )
   }
-  return `Could not share the keys with Fire Code: ${error instanceof Error ? error.message : String(error)}`
+  return `Could not share the credentials with Fire Code: ${error instanceof Error ? error.message : String(error)}`
 }
 
 /** The pipe Fire Code listens on: per Windows user, matching `share.rs`. */

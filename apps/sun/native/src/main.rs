@@ -525,14 +525,18 @@ fn folder_name(path: &str) -> String {
 
 impl App {
     fn project_views(&self) -> Value {
+        let names = state::mention_names(&self.state.projects);
         Value::Array(
             self.state
                 .projects
                 .iter()
-                .map(|p| {
+                .zip(names)
+                .map(|(p, (_, mention))| {
                     json!({
                         "id": p.id,
                         "name": p.name,
+                        // What other codebases' chats call it: `@<mention>:path`.
+                        "mention": mention,
                         "path": p.path,
                         "configMode": p.config_mode,
                         "configFile": p.config_file,
@@ -1199,6 +1203,7 @@ impl App {
             path: environment.path,
             no_schedules: state::chat_of(id).is_some(),
             change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
+            mirror_dir: self.paths.root.join("mirrors"),
             chat_label: match state::chat_of(id) {
                 Some(chat) => project.chats.iter().find(|c| c.id.to_string() == chat).map(|c| c.name.clone()).unwrap_or_else(|| format!("Chat {chat}")),
                 None => "Chat 1".to_string(),

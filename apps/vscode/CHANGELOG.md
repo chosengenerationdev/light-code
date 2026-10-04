@@ -1,5 +1,14 @@
 # light-code-vscode
 
+## 0.139.0
+
+### Minor Changes
+
+- **"Share API keys with Fire Code" is now "Share credentials with Fire Code"**, because it sends passwords, usernames and tokens as well. The confirmation names what is shared.
+- `@payments-api` on its own attaches that codebase's top folder (it used to look for a file called payments-api).
+- A search connection's Username can be a saved credential, like its Password.
+- Hovering a dropdown, or any choice in it, shows the full text when it is cut short.
+
 ## 0.138.0
 
 ### Minor Changes

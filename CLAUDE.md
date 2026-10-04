@@ -2330,6 +2330,18 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   `sendWithRetry` retries EPERM/EACCES/EBUSY/EPIPE/ECONNRESET (re-storing a key is harmless) and
   `describeShareFailure` turns each into advice. Verified with a second Fire Code under another
   `USERNAME` (the pipe name derives from it), so the running one was never touched.
+- **Python tools from a bucket were reviewed once per codebase** (0.7.0, reported). Approval lives in
+  the tool folder's `.registry.json`, and every codebase and chat kept its own copy of the bucket
+  folder under its own data dir. `HostServices.mirrorRoot` (host `--mirror-dir`, Fire Code passes
+  `<data>/mirrors`) puts every copy in one place; still per machine, as §13 requires. Shared means
+  concurrent: the registry and synced files are written temp-and-rename, and while tools wait for
+  approval each host stats the registry every 5 s and refreshes when another host approved.
+  `python/sharedApprovals.test.ts` pins that every `mirrorFolder` call uses `mirrorRoot`.
+- **Shared credentials** (0.7.0): the command is "Share credentials with Fire Code" (id unchanged). A
+  `<who>: username` / `<who>: password` pair is imported as one `login` credential named `<who>`;
+  the loose secrets an earlier share made are removed unless something still points at them. A
+  search connection's Username takes a saved credential. `@name` without a colon means that
+  codebase unless the workspace has a file by that name; the right-click menu shows the name.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
 

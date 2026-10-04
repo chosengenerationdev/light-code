@@ -2027,3 +2027,15 @@ input[type='password']:focus {
   color: var(--warn);
   font-weight: 700;
 }
+
+/* The codebase's @ name, at the top of its right-click menu. */
+.menu-label {
+  padding: 6px 10px 4px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.menu-label code {
+  color: var(--text);
+  font-family: var(--mono);
+}

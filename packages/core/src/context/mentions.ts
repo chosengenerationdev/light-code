@@ -126,8 +126,23 @@ async function resolveOne(raw: string, context: MentionContext): Promise<Resolve
 export async function resolveMentions(text: string, context: MentionContext): Promise<ResolvedMention[]> {
   const targets = parseMentions(text)
   const resolved: ResolvedMention[] = []
-  for (const target of targets) resolved.push(await resolveOne(target, context))
+  for (const target of targets) resolved.push(await resolveOne(await bareCodebase(target, context), context))
   return resolved
+}
+
+/**
+ * `@payments-api` - a codebase's name typed without its colon - means that codebase, unless this
+ * workspace has a file or folder of that name, which the person more likely meant.
+ */
+async function bareCodebase(raw: string, context: MentionContext): Promise<string> {
+  const sibling = context.siblings?.find((s) => s.name.toLowerCase() === raw.toLowerCase())
+  if (sibling === undefined) return raw
+  try {
+    await context.fs.stat(path.join(context.workspaceRoot, raw))
+    return raw
+  } catch {
+    return `${sibling.name}:`
+  }
 }
 
 /**

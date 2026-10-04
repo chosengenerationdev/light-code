@@ -351,6 +351,8 @@ export interface SessionOptions {
   siblings?: { name: string; path: string }[]
   /** The ledger shared by this codebase's chats, and this chat's name in it. */
   changeLedger?: { file: string; chat: string }
+  /** One folder for every host's copies of bucket folders, so approvals are shared (Fire Code). */
+  mirrorRoot?: string
   /** Fire Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
@@ -499,6 +501,7 @@ export async function createSession(
     ...(options.noSchedules === true ? { runsSchedules: false } : {}),
     ...(options.siblings !== undefined && options.siblings.length > 0 ? { siblings: options.siblings } : {}),
     ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
+    ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
     ...(options.desktopNotify === true
       ? {
           desktopNotify: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => {

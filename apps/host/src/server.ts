@@ -130,6 +130,8 @@ export interface ServerOptions {
   siblings?: { name: string; path: string }[]
   /** See `SessionOptions.changeLedger`. */
   changeLedger?: { file: string; chat: string }
+  /** See `SessionOptions.mirrorRoot`. */
+  mirrorRoot?: string
   /** See `SessionOptions.fastFs`. */
   fastFs?: string
   /** See `SessionOptions.secretsKey`. */
@@ -473,6 +475,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.noSchedules === true ? { noSchedules: true } : {}),
       ...(options.siblings !== undefined ? { siblings: options.siblings } : {}),
       ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
+      ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
       ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,

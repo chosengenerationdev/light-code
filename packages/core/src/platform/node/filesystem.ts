@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import type { DirEntry, FileSystem, FileStat } from '../filesystem.js'
+import { replaceFile } from './replaceFile.js'
 
 export class NodeFileSystem implements FileSystem {
   async readFile(path: string): Promise<string> {
@@ -33,6 +34,10 @@ export class NodeFileSystem implements FileSystem {
   /** The counterpart of `readBytes`, and deliberately as bare as `writeFile` beside it. */
   async writeBytes(path: string, contents: Uint8Array): Promise<void> {
     await fs.writeFile(path, contents)
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await replaceFile(from, to)
   }
 
   async stat(path: string): Promise<FileStat> {

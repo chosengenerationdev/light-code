@@ -106,6 +106,9 @@ pub struct LaunchSpec {
     pub siblings: Vec<(String, String)>,
     /// Shared by the codebase's chats: who changed which file, for rollback. And this chat's name.
     pub change_ledger: PathBuf,
+    /// One folder for every codebase's copies of bucket folders, so a tool approved once is approved
+    /// in every codebase (the approval lives in the copied folder).
+    pub mirror_dir: PathBuf,
     pub chat_label: String,
 }
 
@@ -155,6 +158,7 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     if spec.no_schedules {
         command.arg("--no-schedules");
     }
+    command.arg("--mirror-dir").arg(&spec.mirror_dir);
     command.arg("--change-ledger").arg(&spec.change_ledger).arg("--chat-label").arg(&spec.chat_label);
     for (name, path) in &spec.siblings {
         command.arg("--sibling").arg(format!("{name}={path}"));
