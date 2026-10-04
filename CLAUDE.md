@@ -2342,6 +2342,9 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   the loose secrets an earlier share made are removed unless something still points at them. A
   search connection's Username takes a saved credential. `@name` without a colon means that
   codebase unless the workspace has a file by that name; the right-click menu shows the name.
+  A codebase's own name works in its own chats (`HostServices.mentionName`, `--mention-name`, used
+  for mentions only - not a sibling, not a read root). An @ search with no matches says so: an
+  empty picker was reported as @ search being broken.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
 

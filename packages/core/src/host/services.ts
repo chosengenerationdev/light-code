@@ -192,6 +192,11 @@ export interface HostServices {
    */
   siblings?: { name: string; path: string }[]
   /**
+   * This codebase's own short name in Fire Code, so `@tyj:src/main.rs` works in tyj's own chat as it
+   * does in every other one. Used for mentions only - it is not another codebase.
+   */
+  mentionName?: string
+  /**
    * Shared by every chat on this codebase (Fire Code): which chat changed which file, so a rollback
    * can ask before undoing another chat's work. `chat` is how the user knows this one.
    */

@@ -52,6 +52,8 @@ export interface ComposerProps {
   supportsVision: boolean
   /** Paths matching the current `@` query, supplied by the host. */
   mentionCandidates: string[]
+  /** The query `mentionCandidates` answers; with none found, the picker says so instead of vanishing. */
+  mentionAnsweredFor?: string | undefined
   /** Specialists that can answer, for the `#` picker. Unavailable ones are not offered. */
   directRoles: { role: string; name: string; summary: string }[]
   onQueryMentions: (query: string) => void
@@ -159,6 +161,12 @@ export function Composer(props: ComposerProps): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const showingMentions = mentionQuery !== undefined && props.mentionCandidates.length > 0
+  // An empty picker looks exactly like a broken one, so a search that found nothing says so.
+  const nothingMatches =
+    mentionQuery !== undefined &&
+    mentionQuery.length > 0 &&
+    props.mentionCandidates.length === 0 &&
+    props.mentionAnsweredFor === mentionQuery
   // Matched on the id and the name, because somebody typing `#rev` means the reviewer and
   // somebody typing `#DB` means the role they called DB reviewer.
   const matchingRoles =
@@ -418,6 +426,16 @@ export function Composer(props: ComposerProps): ReactElement {
               {candidate}
             </button>
           ))}
+        </div>
+      )}
+
+      {nothingMatches && (
+        <div
+          role="status"
+          style={{ padding: '4px 12px', fontSize: 12, color: colors.muted, borderBottom: `1px solid ${colors.border}` }}
+        >
+          No file or folder name matches “{mentionQuery}”. @ looks at names; to find text inside files, ask the
+          assistant.
         </div>
       )}
 

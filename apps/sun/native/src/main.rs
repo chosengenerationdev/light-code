@@ -1204,6 +1204,11 @@ impl App {
             no_schedules: state::chat_of(id).is_some(),
             change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
             mirror_dir: self.paths.root.join("mirrors"),
+            mention_name: state::mention_names(&self.state.projects)
+                .into_iter()
+                .find(|(pid, _)| *pid == project.id)
+                .map(|(_, name)| name)
+                .unwrap_or_default(),
             chat_label: match state::chat_of(id) {
                 Some(chat) => project.chats.iter().find(|c| c.id.to_string() == chat).map(|c| c.name.clone()).unwrap_or_else(|| format!("Chat {chat}")),
                 None => "Chat 1".to_string(),

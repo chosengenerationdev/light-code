@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.140.0
+
+### Minor Changes
+
+- When @ finds no file or folder name matching what you typed, the picker says so instead of disappearing.
+
 ## 0.139.0
 
 ### Minor Changes

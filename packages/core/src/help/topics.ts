@@ -912,7 +912,9 @@ never available to a schedule. An archive whose entries would land outside the d
 **Other codebases**: every agent knows the other codebases open in Fire Code, by a short name (shown when you
 type \`@\`, and at the top of the codebase's right-click menu with a Copy button), and may read them.
 \`@payments-api\` attaches that codebase's top folder; \`@payments-api:\` opens the picker inside it;
-\`@payments-api:src/app.py\` attaches that file. Writing in another codebase asks every time. Just ask
+\`@payments-api:src/app.py\` attaches that file. A codebase's own name works in its own chats too.
+@ matches file and folder **names**; when nothing matches, the picker says so - to find text inside
+files, ask the assistant. Writing in another codebase asks every time. Just ask
 "how does payments-api handle retries?" and the agent can look.
 
 **@ search** in Fire Code runs on the Rust helper: every core, and files your .gitignore excludes stay out.

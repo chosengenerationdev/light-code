@@ -294,6 +294,8 @@ export function App(props: AppProps): ReactElement {
   const [expert, setExpert] = useState<ExpertState | undefined>(undefined)
   const [network, setNetwork] = useState<NetworkSettingsSummary | undefined>(undefined)
   const [mentionCandidates, setMentionCandidates] = useState<string[]>([])
+  // Which query those candidates answer, so "nothing matches" is said only once the answer is in.
+  const [mentionAnsweredFor, setMentionAnsweredFor] = useState<string | undefined>(undefined)
   const [queued, setQueued] = useState<{ text: string; images?: number }[]>([])
   /** The part of an earlier message the next one answers. Cleared once sent. */
   const [replyTo, setReplyTo] = useState<MessageQuote | undefined>(undefined)
@@ -708,6 +710,7 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'mentionCandidates') {
         if (latestMentionQuery.current === undefined || message.query === latestMentionQuery.current) {
           setMentionCandidates(message.paths)
+          setMentionAnsweredFor(message.query)
         }
       } else if (message.type === 'capabilities') {
         setSupportsVision(message.supportsVision)
@@ -2617,6 +2620,7 @@ export function App(props: AppProps): ReactElement {
             expertSpend={expertSpend}
             supportsVision={supportsVision}
             mentionCandidates={mentionCandidates}
+            mentionAnsweredFor={mentionAnsweredFor}
             onQueryMentions={queryMentions}
             profiles={profiles}
             activeProfileId={activeProfileId}

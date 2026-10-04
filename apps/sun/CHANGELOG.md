@@ -1,5 +1,11 @@
 # @chosengeneration/fire-code
 
+## 0.7.1
+
+- **A codebase's own @ name works in its own chats** (`@tyj:src/main.rs` in tyj's chat). Before, only other codebases' names did, so the picker stayed empty.
+- When @ finds no file or folder name matching what you typed, the picker says so instead of disappearing.
+- Carries Light Code 0.113.0.
+
 ## 0.7.0
 
 - **Python tools from a bucket are reviewed once, not once per codebase.** Every codebase and chat now uses one copy of each bucket folder, and the approval is kept with it; approve in one codebase and the others stop asking within a few seconds. They ask one more time after this update.

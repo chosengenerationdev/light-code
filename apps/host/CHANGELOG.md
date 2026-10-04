@@ -1,5 +1,12 @@
 # @chosengeneration/light-code
 
+## 0.113.0
+
+### Minor Changes
+
+- `--mention-name <name>`: this codebase's own @ name, so `@name:path` works in its own chats (Fire Code passes it).
+- When @ finds no file or folder name matching what you typed, the picker says so instead of disappearing.
+
 ## 0.112.0
 
 ### Minor Changes

@@ -84,6 +84,7 @@ export interface ChatProps {
   }
   supportsVision: boolean
   mentionCandidates: string[]
+  mentionAnsweredFor?: string | undefined
   onQueryMentions: (query: string) => void
   profiles: ProfileSummary[]
   activeProfileId: string | undefined
@@ -319,6 +320,7 @@ export function Chat(props: ChatProps): ReactElement {
         onCancel={props.onCancel}
         supportsVision={props.supportsVision}
         mentionCandidates={props.mentionCandidates}
+        mentionAnsweredFor={props.mentionAnsweredFor}
         onQueryMentions={props.onQueryMentions}
         profiles={props.profiles}
         activeProfileId={props.activeProfileId}

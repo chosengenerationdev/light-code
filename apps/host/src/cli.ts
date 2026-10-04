@@ -280,6 +280,7 @@ async function main(): Promise<void> {
   const fastFs = fastFsArg !== undefined && existsSync(fastFsArg) ? path.resolve(fastFsArg) : undefined
   const changeLedgerFile = valueOf(args, '--change-ledger')
   const mirrorDir = valueOf(args, '--mirror-dir')
+  const mentionName = valueOf(args, '--mention-name')
   // Every `--sibling name=folder`: the other codebases open in Fire Code.
   const siblings = args
     .flatMap((arg, i) => (arg === '--sibling' && args[i + 1] !== undefined ? [args[i + 1] as string] : []))
@@ -410,6 +411,7 @@ async function main(): Promise<void> {
     ...(args.includes('--no-schedules') ? { noSchedules: true } : {}),
     ...(siblings.length > 0 ? { siblings } : {}),
     ...(mirrorDir !== undefined ? { mirrorRoot: path.resolve(mirrorDir) } : {}),
+    ...(mentionName !== undefined && mentionName.length > 0 ? { mentionName } : {}),
     ...(changeLedgerFile !== undefined ? { changeLedger: { file: changeLedgerFile, chat: valueOf(args, '--chat-label') ?? 'another chat' } } : {}),
     /*
      * Decoded once, at startup.
@@ -694,6 +696,7 @@ const KNOWN_FLAGS = new Set([
   '--change-ledger',
   '--chat-label',
   '--mirror-dir',
+  '--mention-name',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -960,6 +963,7 @@ Usage: light-code [options]
   --change-ledger <file>  Shared by chats on one codebase: who changed which file,
                       so Rollback asks before undoing another chat's work
   --chat-label <name>  This chat's name in that ledger
+  --mention-name <name>  This codebase's own @name, so @name:path works here too
   --mirror-dir <dir>  Keep copies of bucket folders here, shared with other
                       hosts on this machine (Fire Code), so a tool approved
                       once is approved for every codebase

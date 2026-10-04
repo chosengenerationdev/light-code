@@ -4231,7 +4231,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         fs: toolContext.fs,
         workspaceRoot,
         denylist,
-        ...(services.siblings !== undefined ? { siblings: services.siblings } : {}),
+        siblings: mentionCodebases(),
       })
       /*
        * `#role` is resolved here for the same reason `@path` is: the user named the specialist,
@@ -5041,7 +5041,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ui.findFiles(segment, limit, excludes, mode, depth, root)
       const siblings = services.siblings ?? []
       // `@payments-api:src/a` searches inside that codebase, and its answers keep the prefix.
-      const sibling = siblingMention(query, siblings)
+      const sibling = siblingMention(query, mentionCodebases())
       if (sibling !== undefined) {
         const inside = await searchMentions(find, sibling.root, sibling.rest, mentionExcludes(cachedMentionExcludes), MENTION_SCAN_LIMIT, MENTION_RESULT_LIMIT, sibling.root)
         post({ type: 'mentionCandidates', query, paths: inside.map((p) => `${sibling.name}:${p}`) })
@@ -5061,12 +5061,24 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // A bare `@` lists them all, so the other codebases are found without knowing their names.
       const codebases = /[\\/:]/.test(needle)
         ? []
-        : siblings.filter((s) => s.name.toLowerCase().startsWith(needle)).map((s) => `${s.name}:`)
+        : mentionCodebases()
+            // This codebase's own name only once something is typed: a bare @ lists the others.
+            .filter((s) => s.name.toLowerCase().startsWith(needle) && (needle.length > 0 || siblings.includes(s)))
+            .map((s) => `${s.name}:`)
       post({ type: 'mentionCandidates', query, paths: [...codebases, ...paths].slice(0, MENTION_RESULT_LIMIT) })
     } catch (error) {
       logger.warn('mention lookup failed', String(error))
       post({ type: 'mentionCandidates', query, paths: [] })
     }
+  }
+
+  /** Every codebase a mention can name: this one by its own name (Fire Code), then the others. */
+  function mentionCodebases(): { name: string; path: string }[] {
+    const self =
+      services.mentionName !== undefined && workspaceRoot !== undefined
+        ? [{ name: services.mentionName, path: workspaceRoot }]
+        : []
+    return [...self, ...(services.siblings ?? [])]
   }
 
   /**

@@ -109,6 +109,8 @@ pub struct LaunchSpec {
     /// One folder for every codebase's copies of bucket folders, so a tool approved once is approved
     /// in every codebase (the approval lives in the copied folder).
     pub mirror_dir: PathBuf,
+    /// This codebase's own @name, so `@name:path` works in its own chats too.
+    pub mention_name: String,
     pub chat_label: String,
 }
 
@@ -159,6 +161,7 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         command.arg("--no-schedules");
     }
     command.arg("--mirror-dir").arg(&spec.mirror_dir);
+    command.arg("--mention-name").arg(&spec.mention_name);
     command.arg("--change-ledger").arg(&spec.change_ledger).arg("--chat-label").arg(&spec.chat_label);
     for (name, path) in &spec.siblings {
         command.arg("--sibling").arg(format!("{name}={path}"));
