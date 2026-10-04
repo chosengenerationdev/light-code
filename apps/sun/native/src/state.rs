@@ -1,4 +1,4 @@
-//! What Sun remembers between runs: the codebases, how each finds its settings, and the window.
+//! What Fire Code remembers between runs: the codebases, how each finds its settings, and the window.
 //!
 //! One JSON file, written to a sibling and renamed so a crash mid-write leaves the old file rather
 //! than half of a new one. The same rule the Node host follows for `config.json` (CLAUDE.md §15),
@@ -39,7 +39,7 @@ pub struct Project {
     pub keep_awake: bool,
     #[serde(default)]
     pub last_used: u64,
-    /// An accent chosen for this codebase in its own Appearance tab; Sun's when absent. Kept here,
+    /// An accent chosen for this codebase in its own Appearance tab; Fire Code's when absent. Kept here,
     /// not in the config file, which may be linked to VS Code's.
     #[serde(default)]
     pub accent: Option<String>,
@@ -128,11 +128,11 @@ pub struct Settings {
     /// Let each codebase's assistant read any drive or share and write anywhere, asking every time
     /// it writes outside the codebase. On by default; the floor in core's `fs/reach.ts` always holds.
     pub reach_anywhere: bool,
-    /// Folders put in front of PATH for every agent Sun starts, first one first. `%NAME%` expands.
+    /// Folders put in front of PATH for every agent Fire Code starts, first one first. `%NAME%` expands.
     pub path_prefix: Vec<String>,
-    /// Variables every agent Sun starts is given; a value may come from a saved credential.
+    /// Variables every agent Fire Code starts is given; a value may come from a saved credential.
     pub env: Vec<crate::environment::EnvVar>,
-    /// A .cmd, .bat or .ps1 run when Sun starts; the environment it leaves is given to every agent.
+    /// A .cmd, .bat or .ps1 run when Fire Code starts; the environment it leaves is given to every agent.
     pub startup_script: Option<String>,
     pub window: Option<WindowBounds>,
 }
@@ -164,7 +164,10 @@ pub struct State {
     pub settings: Settings,
 }
 
-/// Where everything lives. `%LOCALAPPDATA%\sun-code`, because none of it should roam.
+/// Earlier names of this app's data folder, newest first.
+const PREVIOUS_NAMES: [&str; 2] = ["sun-code", "sun-light-code"];
+
+/// Where everything lives. `%LOCALAPPDATA%\fire-code`, because none of it should roam.
 #[derive(Clone)]
 pub struct Paths {
     pub root: PathBuf,
@@ -172,27 +175,38 @@ pub struct Paths {
 
 impl Paths {
     pub fn new() -> Paths {
-        if let Some(home) = std::env::var_os("SUN_CODE_HOME") {
+        if let Some(home) = std::env::var_os("FIRE_CODE_HOME") {
             return Paths { root: PathBuf::from(home) };
         }
         let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
-            return Paths { root: PathBuf::from(".sun-code") };
+            return Paths { root: PathBuf::from(".fire-code") };
         };
-        let root = local.join("sun-code");
-        let old = local.join("sun-light-code");
-        // Sun Code was Sun Light Code until 0.5.0. Its folder moves across once, keeping the vault,
-        // the codebases and their chats. If the move cannot happen - the old app is still open -
-        // the old folder is used where it is, and the move is tried again next launch.
-        if !root.exists() && old.join("state.json").is_file() && std::fs::rename(&old, &root).is_err() {
-            return Paths { root: old };
+        let root = local.join("fire-code");
+        // Fire Code was Sun Code (0.5.x) and before that Sun Light Code. The newest earlier folder
+        // moves across once, keeping the vault, the codebases and their chats. If the move cannot
+        // happen - the old app is still open - that folder is used where it is, and the move is
+        // tried again next launch.
+        if !root.exists() {
+            for name in PREVIOUS_NAMES {
+                let old = local.join(name);
+                if old.join("state.json").is_file() {
+                    if std::fs::rename(&old, &root).is_err() {
+                        return Paths { root: old };
+                    }
+                    break;
+                }
+            }
         }
         Paths { root }
     }
 
-    /// The folder this data lived in under the old name, for rewriting paths saved inside it.
-    pub fn previous_root(&self) -> Option<PathBuf> {
-        let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
-        (self.root == local.join("sun-code")).then(|| local.join("sun-light-code"))
+    /// The folders this data may have lived in under earlier names, for rewriting paths saved inside them.
+    pub fn previous_roots(&self) -> Vec<PathBuf> {
+        let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) else { return Vec::new() };
+        if self.root != local.join("fire-code") {
+            return Vec::new();
+        }
+        PREVIOUS_NAMES.iter().map(|name| local.join(name)).collect()
     }
     pub fn state_file(&self) -> PathBuf {
         self.root.join("state.json")
@@ -372,9 +386,9 @@ mod tests {
         lookalike.config_file = r"C:\Users\a\AppData\Local\sun-light-code-old\config.json".into();
         let mut state = State { projects: vec![p, linked, lookalike], settings: Settings::default() };
         let old = PathBuf::from(r"C:\Users\a\AppData\Local\sun-light-code");
-        let new = PathBuf::from(r"C:\Users\a\AppData\Local\sun-code");
+        let new = PathBuf::from(r"C:\Users\a\AppData\Local\fire-code");
         assert!(state.rebase(&old, &new));
-        assert_eq!(state.projects[0].config_file, r"C:\Users\a\AppData\Local\sun-code\projects\abc\config.json");
+        assert_eq!(state.projects[0].config_file, r"C:\Users\a\AppData\Local\fire-code\projects\abc\config.json");
         assert_eq!(state.projects[1].config_file, r"C:\Users\a\AppData\Roaming\Code\config.json");
         assert_eq!(state.projects[2].config_file, r"C:\Users\a\AppData\Local\sun-light-code-old\config.json");
         assert!(!state.rebase(&old, &new));

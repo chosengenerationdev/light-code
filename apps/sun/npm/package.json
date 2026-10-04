@@ -1,10 +1,10 @@
 {
-  "name": "@chosengeneration/sun-code",
-  "version": "0.5.3",
-  "description": "Sun Code: every codebase in one Windows window, each with its own Light Code agent working in parallel",
+  "name": "@chosengeneration/fire-code",
+  "version": "0.6.0",
+  "description": "Fire Code: every codebase in one Windows window, each with its own Light Code agent working in parallel",
   "license": "MIT",
   "bin": {
-    "sun-code": "bin/sun-code.cjs"
+    "fire-code": "bin/fire-code.cjs"
   },
   "files": [
     "bin/",

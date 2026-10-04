@@ -92,9 +92,9 @@ const transport = new HttpTransport((text, level) => {
   if (bootingDetail !== null && level !== 'ok') bootingDetail.textContent = text
 })
 /**
- * Tells Light Code Sun, when this page is one of its panes, what the agent is doing.
+ * Tells Light Code Fire Code, when this page is one of its panes, what the agent is doing.
  *
- * Sun shows a dot per codebase — working, waiting for you, finished — and only puts an idle
+ * Fire Code shows a dot per codebase — working, waiting for you, finished — and only puts an idle
  * codebase to sleep. It cannot see inside the frame, so the page says. Only a state word crosses:
  * never text, never a path. Sent to the embedding origin alone, which the CSP's `frame-ancestors`
  * has already restricted to what the operator allowed.
@@ -105,13 +105,16 @@ const embedder = ((): string | undefined => {
   return ancestors !== undefined && ancestors.length > 0 ? ancestors[0] : undefined
 })()
 let agentState: 'idle' | 'busy' | 'attention' = 'idle'
-const reportState = (next: typeof agentState, finished = false): void => {
-  if (embedder === undefined || (next === agentState && !finished)) return
+/** What a waiting chat waits for - one fixed word, never text: approval, form or question. */
+let waitingFor: 'approval' | 'form' | 'question' | undefined
+const reportState = (next: typeof agentState, finished = false, reason?: 'approval' | 'form' | 'question'): void => {
+  if (embedder === undefined || (next === agentState && !finished && reason === waitingFor)) return
   agentState = next
-  window.parent.postMessage({ source: 'light-code', state: next, finished }, embedder)
+  waitingFor = next === 'attention' ? reason : undefined
+  window.parent.postMessage({ source: 'light-code', state: next, finished, ...(waitingFor !== undefined ? { reason: waitingFor } : {}) }, embedder)
 }
 /*
- * Sun's own shortcuts, passed up. Keystrokes in a frame never reach the page around it, and focus
+ * Fire Code's own shortcuts, passed up. Keystrokes in a frame never reach the page around it, and focus
  * is almost always here, in the composer — so without this Ctrl+B and Ctrl+K would work only after
  * clicking the sidebar. Only these combinations, which the chat itself does not use. Ctrl+T and
  * Ctrl+W open and close a chat tab.
@@ -135,11 +138,11 @@ if (embedder !== undefined) {
 }
 
 /*
- * Sun's theme and accent colour, which every pane follows while it runs there.
+ * Fire Code's theme and accent colour, which every pane follows while it runs there.
  *
  * Applied by rewriting the `settings` message on its way in rather than by saving anything: the
  * config may be linked to the VS Code extension's, and a window's appearance has no business
- * changing that file. The panel is told who sets them (`appearanceFrom`) so it names Sun instead
+ * changing that file. The panel is told who sets them (`appearanceFrom`) so it names Fire Code instead
  * of offering a picker whose choice would be overridden. Role colours are left alone.
  */
 let sunAppearance: { theme: 'system' | 'light' | 'dark'; accent: string; own: boolean } | undefined
@@ -155,12 +158,12 @@ if (embedder !== undefined) {
       choosesTheme: false,
       theme: sunAppearance.theme,
       accentColor: sunAppearance.accent,
-      appearanceFrom: 'Sun Code',
+      appearanceFrom: 'Fire Code',
       accentInherited: !sunAppearance.own,
     }
   })
   /*
-   * An accent picked in this panel is this codebase's own, and Sun keeps it - not the config file,
+   * An accent picked in this panel is this codebase's own, and Fire Code keeps it - not the config file,
    * which may be the VS Code extension's and would then change VS Code's accent too.
    */
   transport.setOutgoingFilter((message) => {
@@ -196,7 +199,11 @@ transport.onMessage((message) => {
   const incoming = message as { type?: string; theme?: string }
   if (incoming.type !== undefined) {
     if (BUSY_MESSAGES.has(incoming.type)) reportState('busy')
-    else if (incoming.type === 'approvalRequest' || incoming.type === 'formRequest') reportState('attention')
+    else if (incoming.type === 'approvalRequest') reportState('attention', false, 'approval')
+    else if (incoming.type === 'formRequest') reportState('attention', false, 'form')
+    // A turn that ended by asking you something is waiting for your answer, not finished.
+    else if (incoming.type === 'done' && (message as { awaitingAnswer?: boolean }).awaitingAnswer === true)
+      reportState('attention', true, 'question')
     else if (incoming.type === 'done' || incoming.type === 'error') reportState('idle', agentState !== 'idle')
   }
   if (incoming.type === 'settings') applyTheme(incoming.theme)

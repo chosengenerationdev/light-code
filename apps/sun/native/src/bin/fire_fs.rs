@@ -1,4 +1,4 @@
-//! `sun-fs`: the parallel file helper behind Sun Code's file tools.
+//! `fire-fs`: the parallel file helper behind Fire Code's file tools.
 //!
 //! One JSON request on stdin, one JSON answer on stdout, then exit. It reads, with one exception:
 //! `transfer` (copy and move), reached only through `transfer_files`, which always asks first and
@@ -1107,7 +1107,7 @@ mod transfer_tests {
 
     #[test]
     fn copies_a_folder_and_refuses_to_overwrite_unless_asked() {
-        let base = std::env::temp_dir().join(format!("sun-fs-transfer-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("fire-fs-transfer-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         tree(&base);
         let req = |overwrite: bool, plan: bool| {
@@ -1131,7 +1131,7 @@ mod transfer_tests {
 
     #[test]
     fn moves_by_renaming_on_one_drive_and_never_into_itself() {
-        let base = std::env::temp_dir().join(format!("sun-fs-move-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("fire-fs-move-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         tree(&base);
         let inside = json!({ "op": "transfer", "action": "move", "items": [{ "from": base.join("src"), "to": base.join("src/inner") }] });
@@ -1303,7 +1303,7 @@ mod archive_tests {
 
     #[test]
     fn round_trips_a_folder_and_refuses_zip_slip() {
-        let base = std::env::temp_dir().join(format!("sun-fs-zip-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("fire-fs-zip-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("project/src")).unwrap();
         std::fs::write(base.join("project/src/main.rs"), "fn main() {}\n".repeat(1000)).unwrap();
@@ -1405,7 +1405,7 @@ mod names_tests {
 
     #[test]
     fn finds_names_honours_gitignore_and_exact_exclusions() {
-        let base = std::env::temp_dir().join(format!("sun-fs-names-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("fire-fs-names-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         for dir in ["fct/src/abc", "fct/src/jobs/bat", "build", "buildings", "generated", ".git"] {
             std::fs::create_dir_all(base.join(dir)).unwrap();

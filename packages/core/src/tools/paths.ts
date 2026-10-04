@@ -49,7 +49,7 @@ export async function resolveToolPath(
     const denied = { ok: false as const, message: error.message }
 
     /*
-     * Sun Code: reach anywhere. Reads need no folder prompt; writes are allowed and always
+     * Fire Code: reach anywhere. Reads need no folder prompt; writes are allowed and always
      * asked about (the write tools mark their preview `outsideWorkspace`, which the policy never
      * auto-approves). The deny list and the credential and system floors in `fs/reach.ts` still
      * refuse first, and they are not something the user can be talked into approving.

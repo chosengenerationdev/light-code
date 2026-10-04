@@ -166,7 +166,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }, SCHEDULE_POLL_MS)
 
   /*
-   * Hands this config's keys to Sun Code, which cannot read VS Code's encrypted storage itself.
+   * Hands this config's keys to Fire Code, which cannot read VS Code's encrypted storage itself.
    * The names are shown and confirmed before anything is sent; see shareWithSun.ts.
    */
   const shareCommand = vscode.commands.registerCommand('lightCode.shareKeysWithSun', () =>

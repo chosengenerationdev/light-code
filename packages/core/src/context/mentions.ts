@@ -37,7 +37,7 @@ export interface MentionContext {
   fs: FileSystem
   workspaceRoot: string
   denylist?: PathDenylist
-  /** Other codebases, mentioned as `@name:path` (Sun Code). */
+  /** Other codebases, mentioned as `@name:path` (Fire Code). */
   siblings?: readonly { name: string; path: string }[]
 }
 

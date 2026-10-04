@@ -4,7 +4,7 @@ import { Select } from '../Select.js'
 import { colors, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 
 /**
- * Saved credentials, where the host has them (Sun Code). `undefined` everywhere else - the VS
+ * Saved credentials, where the host has them (Fire Code). `undefined` everywhere else - the VS
  * Code extension, a plain Node host - and then no picker is drawn at all, so nothing changes there.
  */
 export const CredentialsContext = createContext<CredentialSummary[] | undefined>(undefined)
@@ -13,7 +13,7 @@ export const CredentialsContext = createContext<CredentialSummary[] | undefined>
  * "Use a saved credential" beside a secret field.
  *
  * Picking one hands the field a pointer (`credential:<id>#<field>`), saved like any typed value; the
- * host resolves it whenever the secret is read, so replacing the credential in Sun updates every
+ * host resolves it whenever the secret is read, so replacing the credential in Fire Code updates every
  * place that uses it. Labels only - no value ever reaches this page (invariant 7).
  */
 export function CredentialPicker(props: {
@@ -28,7 +28,7 @@ export function CredentialPicker(props: {
     if (props.quiet === true) return null
     return (
       <span style={{ display: 'block', marginTop: 4, color: colors.muted, fontSize: 11 }}>
-        No saved credentials yet — add them in Sun Code&rsquo;s Credentials to pick one here.
+        No saved credentials yet — add them in Fire Code&rsquo;s Credentials to pick one here.
       </span>
     )
   }
@@ -94,7 +94,7 @@ export function withCredential(current: string, pointer: string): string {
 
 /**
  * A password box that can also take a saved credential - for the secret fields that are not a
- * `SecretField` (DevOps tokens, S3 keys, the AutoSys gateway, Python variables). Outside Sun it is
+ * `SecretField` (DevOps tokens, S3 keys, the AutoSys gateway, Python variables). Outside Fire Code it is
  * exactly the password box it replaces.
  */
 export function SecretInput(props: {

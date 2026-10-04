@@ -584,7 +584,7 @@ export type UiToHostMessage =
    * not. The shapes live here because this is where the UI's protocol is defined.
    */
   | { type: 'requestVariables' }
-  /** Sun Code's saved credentials, for the settings pickers. Other hosts do not answer. */
+  /** Fire Code's saved credentials, for the settings pickers. Other hosts do not answer. */
   | { type: 'requestCredentials' }
   /** The language servers panel. */
   | { type: 'requestLsp' }
@@ -626,7 +626,7 @@ export type UiToHostMessage =
   /** Cosmetic; persisted in config so it survives a reload and follows the user. */
   | { type: 'setAccentColor'; value: string }
   /**
-   * Go back to the embedding app's accent instead of one of this panel's own. Only Sun Code
+   * Go back to the embedding app's accent instead of one of this panel's own. Only Fire Code
    * acts on it - its page intercepts it, with `setAccentColor`, and keeps the choice per codebase
    * rather than in a config file that may be linked to VS Code. Offered only where `appearanceFrom`
    * is set, so no other host is ever sent one.
@@ -1284,7 +1284,7 @@ export type HostToUiMessage =
       /**
        * Whether this host has more than one user. Without one there is no administrator and nobody
        * else, so the panel shows one person's variables and none of the server vocabulary - which
-       * in Sun Code or a personal `npx` was pure confusion. Absent means shared, so a newer
+       * in Fire Code or a personal `npx` was pure confusion. Absent means shared, so a newer
        * panel talking to an older host keeps showing everything.
        */
       shared?: boolean
@@ -1364,7 +1364,7 @@ export type HostToUiMessage =
       /** True where the host has no theme of its own, so the user picks one. */
       choosesTheme?: boolean
       /**
-       * The app that sets this panel's theme and accent colour, when one does - Sun Code,
+       * The app that sets this panel's theme and accent colour, when one does - Fire Code,
        * which gives every codebase's pane its own appearance. The panel then names it instead of
        * offering controls whose choice would be overridden. Role colours stay the panel's own.
        */
@@ -1513,7 +1513,8 @@ export type HostToUiMessage =
   /** Nothing is sent when the dialog is cancelled — a dismissed picker changes no field. */
   | { type: 'pathPicked'; purpose: string; path: string }
   | { type: 'mcpSaveError'; message: string }
-  | { type: 'done' }
+  /** `awaitingAnswer`: the turn ended with a question to the user (Fire Code marks the codebase as waiting). */
+  | { type: 'done'; awaitingAnswer?: boolean }
   | { type: 'error'; message: string }
   | { type: 'profiles'; profiles: ProfileSummary[]; activeProfileId: string | undefined }
   | { type: 'profileSaved' }

@@ -1,4 +1,4 @@
-// Sun Code — the sidebar, the panes and the dialogs.
+// Fire Code — the sidebar, the panes and the dialogs.
 //
 // Plain DOM, no framework: this page has to be on screen in the first frame, and the heavy UI is
 // the chat inside each pane, which is the Light Code UI served by that codebase's own host.
@@ -231,7 +231,7 @@ const HANDLERS = {
 
 // ─── Appearance ──────────────────────────────────────────────────────────────
 //
-// Sun's theme and accent, applied here and handed to every chat pane, which follows them (see
+// Fire Code's theme and accent, applied here and handed to every chat pane, which follows them (see
 // apps/host/src/client/main.tsx). Role colours stay each pane's own.
 
 const ACCENTS = ['#f26b1d', '#f59e0b', '#e11d48', '#db2777', '#9333ea', '#4f46e5', '#2563eb', '#0891b2', '#0d9488', '#16a34a', '#64748b']
@@ -271,8 +271,8 @@ function applyAppearance() {
 }
 
 /**
- * To one pane, addressed to its own origin only: Sun's theme, and the codebase's own accent when
- * it was given one in its Appearance tab, Sun's otherwise.
+ * To one pane, addressed to its own origin only: Fire Code's theme, and the codebase's own accent when
+ * it was given one in its Appearance tab, Fire Code's otherwise.
  */
 function sendAppearance(frame) {
   const url = frame?.dataset.url
@@ -283,7 +283,7 @@ function sendAppearance(frame) {
   frame.contentWindow.postMessage({ source: 'sun', appearance: message }, new URL(url).origin)
 }
 
-/** The accent a codebase is drawn in: its own, or Sun's. */
+/** The accent a codebase is drawn in: its own, or Fire Code's. */
 const accentOf = (project) => (validHex(project?.accent) ? project.accent : appearance().accent)
 
 darkQuery.addEventListener('change', applyAppearance)
@@ -408,6 +408,9 @@ const projectStatus = (p) => {
     schedule: statusOf(p.id).schedule === true,
     error: first.error,
     chats: all.length,
+    // Chats waiting for you, and what the first one waits for.
+    waitingChats: all.filter((s) => s.phase === 'running' && s.agent === 'attention').length,
+    waitingFor: all.find((s) => s.phase === 'running' && s.agent === 'attention')?.waiting,
     working: running.filter((s) => s.agent !== 'idle').length,
   }
 }
@@ -440,7 +443,7 @@ function renderTabs() {
       const tab = el(
         'button',
         {
-          class: `tab${k === key ? ' active' : ''}`,
+          class: `tab${k === key ? ' active' : ''}${s.phase === 'running' && s.agent === 'attention' ? ' waiting' : ''}`,
           role: 'tab',
           'aria-selected': String(k === key),
           title: k.includes('~') ? 'Double-click to rename · middle-click to close' : 'The first chat',
@@ -500,6 +503,16 @@ function renameChat(key, tab) {
   input.addEventListener('blur', () => done(true))
 }
 
+const WAITING_WORDS = {
+  approval: 'Waiting for your approval',
+  question: 'Asked you a question',
+  form: 'Waiting for you to fill in a form',
+}
+
+/** A badge on top of a codebase's tile while its agent is waiting for you to do something. */
+const waitingBadge = (count) =>
+  el('span', { class: 'waiting-badge', title: 'Waiting for you', text: count > 1 ? String(count) : '!' })
+
 /** What the row says under the name: the agent's state when it has one, otherwise where it lives. */
 const describe = (project) => {
   const s = projectStatus(project)
@@ -507,7 +520,10 @@ const describe = (project) => {
   if (s.phase === 'failed') return ['Agent stopped — open to see why', 'failed']
   if (s.phase === 'starting') return ['Starting…', 'busy']
   if (s.phase === 'sleeping') return ['Sleeping to save memory', '']
-  if (s.phase === 'running' && s.agent === 'attention') return ['Needs your approval', 'attention']
+  if (s.phase === 'running' && s.agent === 'attention') {
+    if (s.waitingChats > 1) return [`${s.waitingChats} chats are waiting for you`, 'attention']
+    return [WAITING_WORDS[s.waitingFor] ?? 'Waiting for you', 'attention']
+  }
   if (s.schedule && s.phase === 'running') return ['Woken to run a schedule — sleeps again after', 'busy']
   if (s.phase === 'running' && s.agent === 'busy') return [s.working > 1 ? `${s.working} chats working…` : 'Working…', 'busy']
   return [s.chats > 1 ? `${s.chats} chats · ${shortPath(project.path)}` : shortPath(project.path), '']
@@ -532,10 +548,11 @@ function renderList() {
       const here = model.active !== undefined && projectOf(model.active) === p.id
       const face = avatar(p.name, '', accentOf(p))
       face.append(el('span', { class: `dot ${projectDot(p)}` }))
+      if (s.waitingChats > 0) face.append(waitingBadge(s.waitingChats))
       const row = el(
         'button',
         {
-          class: `item${here ? ' active' : ''}`,
+          class: `item${here ? ' active' : ''}${s.waitingChats > 0 ? ' waiting' : ''}`,
           role: 'option',
           'aria-selected': String(here),
           'data-id': p.id,
@@ -606,11 +623,35 @@ function gitBadge(project) {
   )
 }
 
+/**
+ * "2 waiting" beside the Codebases heading, while any agent is waiting for you. Each click opens the
+ * next one, so working through them is one button.
+ */
+function renderWaitingChip() {
+  const chip = $('#waiting-chip')
+  if (chip === null) return
+  const waiting = model.projects.filter((p) => projectStatus(p).waitingChats > 0)
+  chip.hidden = waiting.length === 0
+  chip.textContent = waiting.length === 0 ? '' : `${waiting.length} waiting`
+  chip.title = waiting.map((p) => `${p.name}: ${describe(p)[0]}`).join('\n')
+  chip.onclick = () => {
+    if (waiting.length === 0) return
+    const current = model.active === undefined ? -1 : waiting.findIndex((p) => p.id === projectOf(model.active))
+    const next = waiting[(current + 1) % waiting.length]
+    // The chat that is waiting, not just the codebase.
+    const key = chatKeys(next).find((k) => statusOf(k).agent === 'attention') ?? next.id
+    select(key)
+  }
+}
+
 function renderRail() {
+  renderWaitingChip()
   $('#rail-list').replaceChildren(
     ...model.projects.map((p) => {
       const face = avatar(p.name, model.active !== undefined && projectOf(model.active) === p.id ? 'active' : '', accentOf(p))
       face.append(el('span', { class: `dot ${projectDot(p)}` }))
+      const waitingHere = projectStatus(p).waitingChats
+      if (waitingHere > 0) face.append(waitingBadge(waitingHere))
       face.title = `${p.name} — ${describe(p)[0]}`
       face.addEventListener('click', () => openProject(p.id))
       face.addEventListener('contextmenu', (e) => {
@@ -780,8 +821,8 @@ function renderPaneState(pane, project, s, live, key) {
     state.append(
       el('span', { html: svg(ICONS.folder, 'class="state-icon"') }),
       el('h2', { text: 'Folder not found' }),
-      el('p', { text: `${project.path} no longer exists. Restore it, or remove this codebase from Sun.` }),
-      el('div', { class: 'actions' }, el('button', { class: 'secondary', text: 'Remove from Sun', onclick: () => confirmRemove(project) })),
+      el('p', { text: `${project.path} no longer exists. Restore it, or remove this codebase from Fire Code.` }),
+      el('div', { class: 'actions' }, el('button', { class: 'secondary', text: 'Remove from Fire Code', onclick: () => confirmRemove(project) })),
     )
   } else {
     state.append(
@@ -810,15 +851,16 @@ window.addEventListener('message', (event) => {
   const url = model.urls[key]
   if (url === undefined || new URL(url).origin !== event.origin) return
   if (typeof data.state === 'string' && ['idle', 'busy', 'attention'].includes(data.state)) {
-    send('agentState', { id: key, state: data.state, finished: data.finished === true })
+    const reason = ['approval', 'form', 'question'].includes(data.reason) ? data.reason : undefined
+    send('agentState', { id: key, state: data.state, finished: data.finished === true, ...(reason ? { reason } : {}) })
   }
   if (typeof data.shortcut === 'string') shortcut(data.shortcut)
-  // An accent picked in that codebase's own Appearance tab, or null to follow Sun's again.
+  // An accent picked in that codebase's own Appearance tab, or null to follow Fire Code's again.
   if (data.accent === null || validHex(data.accent)) send('projectAccent', { id: project.id, accent: data.accent })
   if (data.ready === true) sendAppearance(frame)
 })
 
-// ─── Reports: Sun's Markdown viewer ──────────────────────────────────────────
+// ─── Reports: Fire Code's Markdown viewer ──────────────────────────────────────────
 //
 // Agent reports (scheduled runs, notify) are Markdown files in the codebase's data folder. Shown
 // here rather than handed to whatever Windows associates with .md. The renderer builds DOM nodes
@@ -905,7 +947,7 @@ function mdInline(text, base) {
     if (m[1] !== undefined) out.push(el('code', { class: 'md-inline', text: m[2].replace(/^ (.*) $/, '$1') }))
     else if (m[4] !== undefined) {
       const image = m[0].startsWith('!')
-      // Images are not fetched: a report may name any URL, and Sun loads nothing remote.
+      // Images are not fetched: a report may name any URL, and Fire Code loads nothing remote.
       out.push(mdLink(m[4], image ? [`[image: ${m[3] || m[4]}]`] : mdInline(m[3] || m[4], base), base))
     } else if (m[5] !== undefined || m[6] !== undefined) out.push(mdLink(m[5] ?? m[6], [m[5] ?? m[6]], base))
     else if (m[7] !== undefined || m[8] !== undefined) out.push(el('strong', {}, ...mdInline(m[7] ?? m[8], base)))
@@ -1048,7 +1090,7 @@ function openReport(report) {
       const body = el('div', { class: 'report-body' })
       if (source || report.kind === 'text') body.append(el('pre', { class: 'md-source', text: report.text }))
       else if (report.kind === 'html') {
-        // Served by Sun under its own policy: the report's styles, and no script or request.
+        // Served by Fire Code under its own policy: the report's styles, and no script or request.
         body.classList.add('html')
         body.append(el('iframe', { class: 'report-frame', sandbox: '', title: report.name, src: `report?p=${encodeURIComponent(report.path)}` }))
       } else {
@@ -1197,7 +1239,7 @@ function showMenu(project, x, y) {
     item('log', 'Reports…', () => openReportList(project)),
     item('log', 'View agent log', () => send('openLog', { id: current })),
     el('hr'),
-    item('remove', 'Remove from Sun…', () => confirmRemove(project), { danger: true }),
+    item('remove', 'Remove from Fire Code…', () => confirmRemove(project), { danger: true }),
   )
   document.body.append(menu)
   const box = menu.getBoundingClientRect()
@@ -1347,7 +1389,7 @@ function configChooser(state, rerender) {
     parts.push(
       el('div', {
         class: 'note',
-        html: `${svg(ICONS.key)}<span>API keys and passwords are not inside a config file. Ones kept by VS Code cannot be read by another app, so enter each once in this window's Settings — Sun then shares it with every codebase.</span>`,
+        html: `${svg(ICONS.key)}<span>API keys and passwords are not inside a config file. Ones kept by VS Code cannot be read by another app, so enter each once in this window's Settings — Fire Code then shares it with every codebase.</span>`,
       }),
     )
   }
@@ -1440,7 +1482,7 @@ function openAdd() {
       if (m.existingId) {
         closeModal()
         select(m.existingId)
-        notice(`${m.name} is already in Sun.`)
+        notice(`${m.name} is already in Fire Code.`)
         return
       }
       state.folder = m.path
@@ -1545,14 +1587,14 @@ function openSettings() {
         }
       })
       card.replaceChildren(
-        el('header', {}, el('h2', { text: 'Settings' }), el('p', { class: 'sub', text: `Sun Code ${model.version}` })),
+        el('header', {}, el('h2', { text: 'Settings' }), el('p', { class: 'sub', text: `Fire Code ${model.version}` })),
         el(
           'div',
           { class: 'body' },
           el(
             'div',
             { class: 'row' },
-            el('span', { class: 'meta' }, el('b', { text: 'Theme' }), el('span', { text: "Sun and every codebase's chat follow it." })),
+            el('span', { class: 'meta' }, el('b', { text: 'Theme' }), el('span', { text: "Fire Code and every codebase's chat follow it." })),
             el(
               'div',
               { class: 'segmented' },
@@ -1566,7 +1608,7 @@ function openSettings() {
           el(
             'div',
             { class: 'row stacked' },
-            el('span', { class: 'meta' }, el('b', { text: 'Accent colour' }), el('span', { text: "Buttons, selection and your messages, in Sun and every chat. Role colours stay each chat's own." })),
+            el('span', { class: 'meta' }, el('b', { text: 'Accent colour' }), el('span', { text: "Buttons, selection and your messages, in Fire Code and every chat. Role colours stay each chat's own." })),
             el(
               'div',
               { class: 'swatches' },
@@ -1649,7 +1691,7 @@ function openSettings() {
   })
 }
 
-/** One line for the Settings row: what Sun adds to every agent's environment. */
+/** One line for the Settings row: what Fire Code adds to every agent's environment. */
 function environmentSummary(s) {
   const folders = (s.pathPrefix ?? []).length
   const vars = (s.env ?? []).length
@@ -1659,12 +1701,12 @@ function environmentSummary(s) {
   if (script) parts.push('startup script')
   if (folders > 0) parts.push(`${folders} folder${folders === 1 ? '' : 's'} on PATH`)
   if (vars > 0) parts.push(`${vars} variable${vars === 1 ? '' : 's'}`)
-  return `${parts.join(' · ')} — given to every agent Sun starts.`
+  return `${parts.join(' · ')} — given to every agent Fire Code starts.`
 }
 
 /**
  * Settings → Environment. Edited as a draft and saved as a whole, because Rust validates it as a
- * whole (a name listed twice is a property of the list). Values typed here are stored in Sun's
+ * whole (a name listed twice is a property of the list). Values typed here are stored in Fire Code's
  * state file; a secret should come from a saved credential instead, which is resolved each time an
  * agent starts and never written here.
  */
@@ -1775,20 +1817,20 @@ function openEnvironment() {
 
     const render = () => {
       card.replaceChildren(
-        el('header', {}, el('h2', { text: 'Environment' }), el('p', { class: 'sub', text: 'Given to every agent Sun starts, in every codebase and chat.' })),
+        el('header', {}, el('h2', { text: 'Environment' }), el('p', { class: 'sub', text: 'Given to every agent Fire Code starts, in every codebase and chat.' })),
         el(
           'div',
           { class: 'body' },
           el('label', { class: 'field-label', text: 'Startup script' }),
-          el('p', { class: 'env-hint', text: 'A .cmd, .bat or .ps1 run when Sun starts. The variables it sets and the folders it adds to PATH are given to every codebase\'s agents; it cannot change Sun itself. It must finish on its own — nothing can answer a pause or a prompt. The variables below are applied after it, so they win.' }),
+          el('p', { class: 'env-hint', text: 'A .cmd, .bat or .ps1 run when Fire Code starts. The variables it sets and the folders it adds to PATH are given to every codebase\'s agents; it cannot change Fire Code itself. It must finish on its own — nothing can answer a pause or a prompt. The variables below are applied after it, so they win.' }),
           scriptInput(),
           scriptLine(),
           el('label', { class: 'field-label', text: 'Folders put in front of PATH' }),
-          el('p', { class: 'env-hint', text: 'Searched first, in this order, before the PATH Sun was started with — so a tool here wins over another copy. Python tools and MCP servers see these too. %NAME% expands.' }),
+          el('p', { class: 'env-hint', text: 'Searched first, in this order, before the PATH Fire Code was started with — so a tool here wins over another copy. Python tools and MCP servers see these too. %NAME% expands.' }),
           ...folderRows(),
           el('button', { class: 'secondary', text: 'Add folder', onclick: () => { draft.folders.push(''); render() } }),
           el('label', { class: 'field-label', text: 'Variables' }),
-          el('p', { class: 'env-hint', text: 'Every command an agent runs sees these — so can the model, if a command prints them. Python tools and MCP servers do not, unless their own settings name them. Use a saved credential for anything secret: a typed value is stored in Sun\'s settings file.' }),
+          el('p', { class: 'env-hint', text: 'Every command an agent runs sees these — so can the model, if a command prints them. Python tools and MCP servers do not, unless their own settings name them. Use a saved credential for anything secret: a typed value is stored in Fire Code\'s settings file.' }),
           ...varRows(),
           el('button', { class: 'secondary', text: 'Add variable', onclick: () => { draft.env.push({ name: '', value: '' }); render() } }),
           error !== undefined ? el('div', { class: 'form-error', text: error }) : null,
@@ -1901,7 +1943,7 @@ function openSwitcher() {
 // ─── Credentials ─────────────────────────────────────────────────────────────
 //
 // Saved once, used by any codebase: every secret field in a codebase's Light Code settings offers
-// "Use a saved credential". Write-only: values go to Sun and are never shown again - replacing is
+// "Use a saved credential". Write-only: values go to Fire Code and are never shown again - replacing is
 // typing a new one. Where each is used comes from the vault, so deleting one says what will stop.
 
 function openCredentials() {
@@ -2038,9 +2080,9 @@ function openCredentials() {
           { class: 'body' },
           rows.length > 0
             ? el('div', {}, ...rows)
-            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here, press <b>From IntelliJ / PyCharm</b> below, or in VS Code run <b>Light Code: Share API keys with Sun Code</b> to bring every key over at once.</span>` }),
+            : el('div', { class: 'note', html: `${svg(ICONS.key)}<span>No saved credentials yet. Add one here, press <b>From IntelliJ / PyCharm</b> below, or in VS Code run <b>Light Code: Share API keys with Fire Code</b> to bring every key over at once.</span>` }),
           rows.length > 0
-            ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Keys from VS Code: run <b>Light Code: Share API keys with Sun Code</b> in VS Code while Sun is open.</span>` })
+            ? el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Keys from VS Code: run <b>Light Code: Share API keys with Fire Code</b> in VS Code while Fire Code is open.</span>` })
             : null,
         ),
         el(

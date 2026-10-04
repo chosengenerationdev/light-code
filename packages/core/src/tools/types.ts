@@ -42,7 +42,7 @@ export interface ToolExecutionContext {
   readFiles: Set<string>
   /**
    * What each read file looked like when read (`readStamps.ts`), so a write can refuse a file that
-   * changed since - another chat in Sun, the user, or another program. Optional: absent means the
+   * changed since - another chat in Fire Code, the user, or another program. Optional: absent means the
    * check is skipped, which is how tests and older call sites behave.
    */
   readStamps?: Map<string, string>
@@ -61,7 +61,7 @@ export interface ToolExecutionContext {
    */
   readRoots?: string[]
   /**
-   * `anywhere` (Sun Code): read any path - every drive and share - and write any path with the
+   * `anywhere` (Fire Code): read any path - every drive and share - and write any path with the
    * user's approval each time. The deny list and `fs/reach.ts`'s floor still apply. Absent means the
    * workspace rules above, which is every other host.
    */
@@ -139,7 +139,7 @@ export type ToolPreview =
        */
       note?: string
       /**
-       * The file is outside the workspace (Sun's "reach anywhere"). Always asked about, whatever is
+       * The file is outside the workspace (Fire Code's "reach anywhere"). Always asked about, whatever is
        * auto-approved, and the prompt says it cannot be rolled back - checkpoints cover the workspace.
        */
       outsideWorkspace?: boolean

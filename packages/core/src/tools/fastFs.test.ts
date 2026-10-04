@@ -15,9 +15,9 @@ import type { Tool, ToolExecutionContext } from './types.js'
  * The four tools against the real Rust helper, where it has been built (`cargo build --release` in
  * apps/sun/native). Skipped elsewhere - CI without Rust still runs every other test.
  */
-const exe = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../apps/sun/native/target/release/sun-fs.exe')
+const exe = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../apps/sun/native/target/release/fire-fs.exe')
 
-describe.skipIf(!existsSync(exe))('sun-fs tools', () => {
+describe.skipIf(!existsSync(exe))('fire-fs tools', () => {
   let dir: string
   let tools: Record<string, Tool>
   let context: ToolExecutionContext

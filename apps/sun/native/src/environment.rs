@@ -1,8 +1,8 @@
-//! Sun's own environment for every agent it starts: folders put in front of PATH, and variables.
+//! Fire Code's own environment for every agent it starts: folders put in front of PATH, and variables.
 //!
-//! Set once in Sun's Settings rather than per codebase, because these describe the machine - the
+//! Set once in Fire Code's Settings rather than per codebase, because these describe the machine - the
 //! folder an internal tool is installed in, the proxy, the region - not a project. A value can come
-//! from a saved credential, so a token is not written into Sun's state file in plain text.
+//! from a saved credential, so a token is not written into Fire Code's state file in plain text.
 //!
 //! What reaches what: the host process gets all of it, and so does every command an agent runs
 //! (they inherit the host's environment). Python tools and MCP servers are given a minimal,
@@ -26,13 +26,13 @@ pub struct EnvVar {
     pub credential: Option<String>,
 }
 
-/// Names Sun sets itself, or that would undo something it relies on.
+/// Names Fire Code sets itself, or that would undo something it relies on.
 fn reserved(name: &str) -> Option<&'static str> {
     let upper = name.to_ascii_uppercase();
     if upper == "PATH" {
         Some("Add folders to PATH in the list above instead - a variable would replace the whole PATH.")
-    } else if upper.starts_with("SUN_CODE_") || upper.starts_with("SUN_LIGHT_CODE_") || upper == "LIGHT_CODE_RIPGREP" {
-        Some("Sun sets this one itself.")
+    } else if upper.starts_with("FIRE_CODE_") || upper.starts_with("SUN_LIGHT_CODE_") || upper == "LIGHT_CODE_RIPGREP" {
+        Some("Fire Code sets this one itself.")
     } else {
         None
     }
@@ -80,7 +80,7 @@ pub fn validate(path_prefix: &[String], env: &[EnvVar]) -> Result<(), String> {
     Ok(())
 }
 
-/// `%NAME%` replaced from Sun's own environment, as cmd would; an unknown name is left as written.
+/// `%NAME%` replaced from Fire Code's own environment, as cmd would; an unknown name is left as written.
 pub fn expand(text: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
@@ -124,7 +124,7 @@ pub fn folder_status(path_prefix: &[String]) -> Vec<serde_json::Value> {
 /// What an agent is started with.
 pub struct Resolved {
     pub vars: Vec<(String, String)>,
-    /// The whole PATH: the folders first, then Sun's own. None when no folders are set.
+    /// The whole PATH: the folders first, then Fire Code's own. None when no folders are set.
     pub path: Option<String>,
     /// Variables left out, and why - a deleted credential, say. Said once, not per agent.
     pub problems: Vec<String>,
@@ -132,7 +132,7 @@ pub struct Resolved {
 
 /// Everything an agent is started with, in the order it is applied: what the startup script left,
 /// then the variables listed here (so a listed one wins over the script's), then the PATH folders
-/// in front of whichever PATH the script left - or Sun's own when it changed none.
+/// in front of whichever PATH the script left - or Fire Code's own when it changed none.
 pub fn resolve(path_prefix: &[String], env: &[EnvVar], vault: &Vault, script: &[(String, String)]) -> Resolved {
     let mut vars: Vec<(String, String)> = script.iter().filter(|(k, _)| !k.eq_ignore_ascii_case("PATH")).cloned().collect();
     let script_path = script.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v.clone());
@@ -188,7 +188,7 @@ mod tests {
         assert!(validate(&[r"tools\bin".into()], &[]).unwrap_err().contains("full path"));
         assert!(validate(&[r"C:\a;C:\b".into()], &[]).unwrap_err().contains(';'));
         assert!(validate(&[], &[var("Path", Some("x"), None)]).unwrap_err().contains("replace the whole PATH"));
-        assert!(validate(&[], &[var("SUN_CODE_HOME", Some("x"), None)]).is_err());
+        assert!(validate(&[], &[var("FIRE_CODE_HOME", Some("x"), None)]).is_err());
         assert!(validate(&[], &[var("1ST", Some("x"), None)]).is_err());
         assert!(validate(&[], &[var("A", Some("1"), None), var("a", Some("2"), None)]).unwrap_err().contains("twice"));
         assert!(validate(&[], &[var("A", None, None)]).is_err());
@@ -197,8 +197,8 @@ mod tests {
 
     #[test]
     fn expands_like_cmd() {
-        std::env::set_var("SUN_CODE_TEST_DIR", r"D:\x");
-        assert_eq!(expand(r"%SUN_CODE_TEST_DIR%\bin"), r"D:\x\bin");
+        std::env::set_var("FIRE_CODE_TEST_DIR", r"D:\x");
+        assert_eq!(expand(r"%FIRE_CODE_TEST_DIR%\bin"), r"D:\x\bin");
         assert_eq!(expand(r"%NO_SUCH_VARIABLE_HERE%\bin"), r"%NO_SUCH_VARIABLE_HERE%\bin");
         assert_eq!(expand("100%"), "100%");
     }
@@ -206,16 +206,16 @@ mod tests {
 
 // ─── The startup script ──────────────────────────────────────────────────────
 //
-// A .cmd/.bat or .ps1 the user names (Settings → Environment), run once when Sun starts. Whatever
+// A .cmd/.bat or .ps1 the user names (Settings → Environment), run once when Fire Code starts. Whatever
 // environment it leaves behind - variables it sets, folders it adds to PATH - is captured and given
-// to every agent Sun starts, so a team's existing "setenv" script works unchanged instead of being
-// retyped as a list. It runs in its own shell, so it cannot change Sun itself: only the difference
+// to every agent Fire Code starts, so a team's existing "setenv" script works unchanged instead of being
+// retyped as a list. It runs in its own shell, so it cannot change Fire Code itself: only the difference
 // it makes to the environment is taken.
 
 const MARKER: &str = "===SUN-CODE-ENV===";
 const SCRIPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
-/// What a script left: variables that are new or changed from Sun's own environment.
+/// What a script left: variables that are new or changed from Fire Code's own environment.
 #[derive(Clone, Debug, Default)]
 pub struct ScriptEnv {
     pub vars: Vec<(String, String)>,
@@ -367,7 +367,7 @@ mod script_tests {
     /// Both shells for real: the variables a script sets, and a folder it puts on PATH.
     #[test]
     fn real_scripts_in_both_shells() {
-        let dir = std::env::temp_dir().join(format!("sun-code-script-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("fire-code-script-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let cmd = dir.join("set env.cmd");
         std::fs::write(&cmd, "@echo off\r\necho preparing\r\nset SUN_SCRIPT_TEST=from cmd\r\nset PATH=C:\\sun-script-test;%PATH%\r\n").unwrap();

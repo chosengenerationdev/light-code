@@ -55,7 +55,7 @@ function categoryEnabled(group: ToolGroup, settings: AutoApproveSettings | undef
  * only means a human sees the source once, which is what §13 asks for and all it asks for.
  */
 export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
-  // Copying or moving whole folders (Sun Code's helper): the approval is the computed plan, and a
+  // Copying or moving whole folders (Fire Code's helper): the approval is the computed plan, and a
   // move removes the source. Asked every time, whatever "edit" is set to.
   'transfer_files',
   // Zipping and extracting write whole trees too; the approval is the computed plan.
@@ -174,7 +174,7 @@ export function decideFromPolicy(
    * ordinary edit.
    */
   if (ALWAYS_ASK_TOOLS.has(request.toolName)) return undefined
-  // A write outside the workspace (Sun's reach anywhere): no checkpoint covers it, so a person
+  // A write outside the workspace (Fire Code's reach anywhere): no checkpoint covers it, so a person
   // approves every one, whatever is auto-approved or always-allowed.
   if (request.preview.kind === 'diff' && request.preview.outsideWorkspace === true) return undefined
 

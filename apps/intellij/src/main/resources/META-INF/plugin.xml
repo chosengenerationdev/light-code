@@ -24,12 +24,13 @@
   -->
   <change-notes><![CDATA[
     <ul>
+      <li>Light Code 0.111.0: the handbook covers Fire Code (formerly Sun Code).</li>
       <li>Light Code 0.110.0: a config saved with a byte-order mark is read; a shell command naming a file changed since it was read waits for a re-read.</li>
-      <li>Light Code 0.109.0: @ always finds the file you mean in a large codebase; the handbook covers Sun Code's schedule timetable.</li>
+      <li>Light Code 0.109.0: @ always finds the file you mean in a large codebase; the handbook covers Fire Code's schedule timetable.</li>
       <li>Light Code 0.108.0: code in chat is highlighted again, in VS Code's colours; notify can attach a report file (.md or .html); white text on teal accents; a Review icon of its own.</li>
       <li>Light Code 0.107.0: after every edit the assistant sees the errors and warnings its change produced, from language servers installed on this machine (Python, Java, Kotlin, TypeScript, Go and more), and a get_diagnostics tool checks any file without a build; an edit made from a stale read is refused; rollback keeps line endings exactly.</li>
-      <li>Light Code 0.106.0: the handbook covers Sun Code's reach and parallel file tools.</li>
-      <li>Light Code 0.105.0: your keys can be brought into Sun Code with its "From IntelliJ / PyCharm" button; the Variables tab shows only your own variables; the handbook explains Sun Code, the new Windows app for several codebases at once; a secrets file shared by several processes no longer loses a key.</li>
+      <li>Light Code 0.106.0: the handbook covers Fire Code's reach and parallel file tools.</li>
+      <li>Light Code 0.105.0: your keys can be brought into Fire Code with its "From IntelliJ / PyCharm" button; the Variables tab shows only your own variables; the handbook explains Fire Code, the new Windows app for several codebases at once; a secrets file shared by several processes no longer loses a key.</li>
       <li>Light Code 0.101.0: Outlook waits out a busy Outlook instead of failing, recovers from a hung request, and finds old mail by date range.</li>
       <li>Light Code now comes inside the plugin: every feature and fix of the matching VS Code and Node releases, with no npm download. Needs Node.js 18 or newer on the PATH.</li>
       <li>New in Light Code: reply to a message or react to it and to its thinking; a wait tool for following a job or build until it is done; AutoSys status and details for many jobs at once; AutoSys through an API gateway, with a username and password where the gateway needs them.</li>

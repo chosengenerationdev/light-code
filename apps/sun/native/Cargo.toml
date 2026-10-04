@@ -1,20 +1,20 @@
 [package]
-name = "sun-code"
-version = "0.5.3"
+name = "fire-code"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.86"
-description = "Sun Code: several codebases, each with its own Light Code agent, in one Windows window"
+description = "Fire Code: several codebases, each with its own Light Code agent, in one Windows window"
 license = "MIT"
 publish = false
 
 [[bin]]
-name = "sun-code"
+name = "fire-code"
 path = "src/main.rs"
 
 # The parallel file helper the agents call: find, summarise, read many, big files, tables.
 [[bin]]
-name = "sun-fs"
-path = "src/bin/sun_fs.rs"
+name = "fire-fs"
+path = "src/bin/fire_fs.rs"
 
 [dependencies]
 tao = "0.37"

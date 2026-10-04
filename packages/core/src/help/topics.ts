@@ -834,10 +834,10 @@ desktops of the same person; importing the file is how a second machine is set u
 `,
   },
   {
-    id: 'sun',
-    title: 'Sun Code: several codebases in one Windows window',
+    id: 'fire-code',
+    title: 'Fire Code: several codebases in one Windows window',
     keywords: [
-      'sun', 'sun code', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
+      'fire', 'fire code', 'sun', 'sun code', 'sun light code', 'several codebases', 'multiple codebases', 'multiple projects',
       'many projects', 'one window', 'parallel', 'background agents', 'desktop app', 'windows app',
       'sidebar', 'sleep', 'idle', 'switch project', 'credentials', 'saved credential',
       'share keys', 'share api keys', 'pycharm', 'intellij keys', 'shared drive', 'network drive',
@@ -848,12 +848,13 @@ desktops of the same person; importing the file is how a second machine is set u
       'path variable', 'report viewer', 'open report', 'html report', 'markdown report',
       'copy folder', 'move folder', 'move files', 'copy files', 'zip', 'unzip', 'archive', 'compress',
       'export credentials', 'sun code', 'other codebase', 'another codebase', 'refer to another project',
-      'file from another codebase', 'cross codebase',
+      'file from another codebase', 'cross codebase', 'waiting for me', 'which codebase is waiting',
+      'needs my approval',
     ],
     body: `
-**Sun Code** (called Sun Light Code until 0.5.0) is a Windows app holding every codebase you work on,
-each with its own Light Code agent. Install with \`npm i -g @chosengeneration/sun-code\` and run
-\`sun-code\`. Its data moves across from the old name by itself on first start. The
+**Fire Code** (called Sun Code until 0.6.0, and Sun Light Code before that) is a Windows app holding every codebase you work on,
+each with its own Light Code agent. Install with \`npm i -g @chosengeneration/fire-code\` and run
+\`fire-code\`. Its data moves across from the old name by itself on first start. The
 package is prebuilt with no install scripts or dependencies, so nothing compiles or downloads.
 
 **Each codebase is its own process**, so agents work in parallel and keep going while you look at
@@ -867,10 +868,10 @@ config.json in place (the VS Code extension's, or the Node host's that the JetBr
 edits in either app reach both; **Copy** one; or **New**. The folder's own .lightcode/config.json
 always applies. Right-click a codebase → Settings source… changes it later.
 
-**Credentials** (the key button in Sun's sidebar): keys and passwords saved once, by name, encrypted for
+**Credentials** (the key button in Fire Code's sidebar): keys and passwords saved once, by name, encrypted for
 your Windows account, and picked in any codebase's settings with "Use a saved credential" — changing one
 updates everything that uses it. Values are never shown again. Bring keys in from VS Code with the command
-"Light Code: Share API keys with Sun Code", from IntelliJ / PyCharm with the button on the
+"Light Code: Share API keys with Fire Code", from IntelliJ / PyCharm with the button on the
 Credentials page, or from another computer with Export / Import (a passphrase-encrypted file).
 
 **Several chats per codebase**: the tabs above the chat. + (or Ctrl+T, or right-click → New chat) opens
@@ -882,15 +883,15 @@ that chat changed**, never another chat's work. If another chat also changed one
 Rollback asks first and leaves it alone unless you say so. A **shell command** that names a file which
 changed since the chat read it is refused until the chat reads it again (reading commands are fine).
 
-**Environment** (Sun's Settings → Environment): given to every agent in every codebase. A **startup
-script** (.cmd, .bat or .ps1) runs when Sun starts, and the variables it sets and folders it adds to PATH
+**Environment** (Fire Code's Settings → Environment): given to every agent in every codebase. A **startup
+script** (.cmd, .bat or .ps1) runs when Fire Code starts, and the variables it sets and folders it adds to PATH
 reach every session — agents wait for it; Run now re-runs it after an edit. **Folders put in front of
 PATH** (%NAME% expands). **Variables**, each a value or a saved credential (use a credential for anything
 secret). Commands the agents run see all of it; Python tools and MCP servers see PATH only, unless their
 own settings name a variable. Changes apply to agents started afterwards — the page offers to restart the
 running ones.
 
-**Reports**: "Open report" on a notification opens it in Sun's own viewer — Markdown (tables, code,
+**Reports**: "Open report" on a notification opens it in Fire Code's own viewer — Markdown (tables, code,
 lists) or HTML (shown with its styles, but no scripts and nothing loaded from the internet).
 Right-click a codebase → Reports… lists every report its chats wrote. An agent can attach a report file
 it wrote, .md or .html, with \`notify\`'s \`report\`.
@@ -900,12 +901,17 @@ it wrote, .md or .html, with \`notify\`'s \`report\`.
 Both **always ask**, showing every source, destination, file count, size and anything replaced, and are
 never available to a schedule. An archive whose entries would land outside the destination is refused.
 
-**Other codebases**: every agent knows the other codebases open in Sun, by a short name (shown when you
+**Other codebases**: every agent knows the other codebases open in Fire Code, by a short name (shown when you
 type \`@\`), and may read them. \`@payments-api:\` opens the picker inside that codebase;
 \`@payments-api:src/app.py\` attaches that file. Writing in another codebase asks every time. Just ask
 "how does payments-api handle retries?" and the agent can look.
 
-**@ search** in Sun runs on the Rust helper: every core, and files your .gitignore excludes stay out.
+**@ search** in Fire Code runs on the Rust helper: every core, and files your .gitignore excludes stay out.
+
+**Waiting for you**: when an agent needs you - an approval, an answer to its question, a form - a "!"
+appears on top of that codebase's tile, its row turns amber and says what it needs, its chat tab is marked,
+and "2 waiting" appears beside the Codebases heading (each click opens the next one). The title bar counts
+them, the taskbar button flashes when Fire Code is in the background, and a notification says which.
 
 **What changed, at a glance**: a codebase managed by git shows **+new ~modified −deleted** on its sidebar
 row (only the non-zero ones; hover for the branch). Refreshed every 30 seconds, when you open it, and when
@@ -914,22 +920,22 @@ an agent finishes. It never takes git's lock, so it cannot get in the way of you
 **Exporting credentials**: tick the ones to export (nothing is ticked to begin with; filter by label).
 
 **Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+T new chat, Ctrl+W close chat, Ctrl+B
-hide the sidebar (a strip of status dots stays), Ctrl+, Sun's settings.
+hide the sidebar (a strip of status dots stays), Ctrl+, Fire Code's settings.
 
-**Appearance**: Sun's Settings choose light, dark or system and an accent colour; every chat follows
+**Appearance**: Fire Code's Settings choose light, dark or system and an accent colour; every chat follows
 the theme. A codebase may keep its own accent — pick one in its Appearance tab — and its sidebar
-icon follows; "Use Sun Code's accent" goes back. Role colours stay each chat's own. None of this
+icon follows; "Use Fire Code's accent" goes back. Role colours stay each chat's own. None of this
 is written to the config file.
 
-**Memory**: idle codebases sleep after 30 minutes by default (Sun's Settings), freeing their agent,
-MCP servers and Python worker. Never while working or waiting for you. **Schedules still run**: Sun
+**Memory**: idle codebases sleep after 30 minutes by default (Fire Code's Settings), freeing their agent,
+MCP servers and Python worker. Never while working or waiting for you. **Schedules still run**: Fire Code
 keeps their timetable itself and wakes a codebase a minute before a job is due — asleep or never
 started this session — then lets it sleep again a couple of minutes after. A job missed while the PC
-slept runs when Sun next sees it. Only a codebase's first chat runs its schedules, so a job runs once
+slept runs when Fire Code next sees it. Only a codebase's first chat runs its schedules, so a job runs once
 however many chats are open.
 Clicking wakes it with the chat intact. Right-click → Keep awake exempts one.
 
-**Reach beyond the codebase** (Sun's Settings, on by default): agents read any drive or shared folder
+**Reach beyond the codebase** (Fire Code's Settings, on by default): agents read any drive or shared folder
 (\\\\server\\share) without a folder prompt, and may write anywhere — but every write outside the codebase
 asks, shows the diff, and says Rollback cannot undo it. Keys, passwords, browser logins, Light Code's
 own vault and Windows/program folders stay off-limits whatever the setting.
@@ -941,7 +947,7 @@ at once), \`big_file\` (inspect, read any window, tail, or search a huge log wit
 All read-only. Ask in plain words — "summarise the errors in this 2 GB log", "total sales by region in
 this spreadsheet".
 
-**Not in Sun**: reading a VS Code debug session, and editor file pickers — paths are typed. Sun's
+**Not in Fire Code**: reading a VS Code debug session, and editor file pickers — paths are typed. Fire Code's
 Settings → Export source code saves the whole repository as a zip that builds offline.
 `,
   },
@@ -1198,7 +1204,7 @@ fixed in the same turn rather than found later.
 **In VS Code** this is VS Code's own language support: whatever language extensions you have installed
 already answer, nothing extra runs. To add a language, install its VS Code extension.
 
-**In the Node host, PyCharm / IntelliJ and Sun Code** Light Code starts language servers itself —
+**In the Node host, PyCharm / IntelliJ and Fire Code** Light Code starts language servers itself —
 the ones already installed on the machine, found on PATH, started the first time a file in that
 language is checked. Nothing is downloaded. Supported: Python (pyright, basedpyright, pylsp,
 jedi-language-server), TypeScript / JavaScript (typescript-language-server), Java (jdtls), C# (csharp-ls,
@@ -1245,7 +1251,7 @@ nothing, which is worse than not having one.
 believing you can undo something you cannot. If \`git\` is missing entirely, checkpoints are
 disabled with a warning rather than the session breaking.
 
-**Where several chats share a codebase** (Sun Code's chat tabs, or a host started with
+**Where several chats share a codebase** (Fire Code's chat tabs, or a host started with
 \`--shared-workspace\`), Rollback restores only the files that chat changed, so another chat's work is
 kept; files outside the codebase are not covered either way.
 

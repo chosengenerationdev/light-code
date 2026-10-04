@@ -431,10 +431,10 @@ export function App(props: AppProps): ReactElement {
     choosesTheme: boolean
     theme?: 'system' | 'light' | 'dark'
   }>({ choosesTheme: false })
-  /** Who sets the theme and accent instead of this panel (Sun Code), if anyone. */
+  /** Who sets the theme and accent instead of this panel (Fire Code), if anyone. */
   const [appearanceFrom, setAppearanceFrom] = useState<string | undefined>(undefined)
   const [accentInherited, setAccentInherited] = useState(false)
-  /** Saved credentials from Sun Code; undefined where the host has none to offer. */
+  /** Saved credentials from Fire Code; undefined where the host has none to offer. */
   const [credentials, setCredentials] = useState<CredentialSummary[] | undefined>(undefined)
   /** Language servers for after-edit diagnostics, as the host reports them. */
   const [lsp, setLsp] = useState<LanguageServersState | undefined>(undefined)

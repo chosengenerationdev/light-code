@@ -92,7 +92,7 @@ export function checkRequest(
 /**
  * The page being opened inside an embedding app's frame — the one cross-site request let through.
  *
- * An app named with `--allow-frame-ancestor` (Sun Code) loads this page in an iframe from
+ * An app named with `--allow-frame-ancestor` (Fire Code) loads this page in an iframe from
  * its own origin, so the browser marks that first navigation `cross-site` and the check above
  * refused it: the frame stayed blank. What is let through is exactly that: a GET that navigates a
  * frame, never `/api/`, and only when the operator named an ancestor. It serves the static page and

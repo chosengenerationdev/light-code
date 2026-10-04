@@ -168,7 +168,7 @@ export interface HostServices {
   /**
    * A real desktop notification, for a host that has one to give.
    *
-   * Light Code Sun shows these as Windows notifications naming the codebase, so the `notify` tool
+   * Light Code Fire Code shows these as Windows notifications naming the codebase, so the `notify` tool
    * reaches someone who is looking at a different chat — or at nothing, during a scheduled run.
    * Called by `notify` only, never by the bridge's own status toasts: those are about the panel
    * the user is looking at, and a desktop notification for "1 tool approved" is noise.
@@ -176,36 +176,36 @@ export interface HostServices {
    * Absent everywhere else, so the extension keeps its own toasts and nothing changes there.
    */
   /**
-   * `anywhere`: Sun Code's reach - read any drive or share, write anywhere with approval each
+   * `anywhere`: Fire Code's reach - read any drive or share, write anywhere with approval each
    * time. See `ToolExecutionContext.reach`. Absent everywhere else, so nothing changes there.
    */
   fileReach?: 'anywhere'
   /**
-   * Other agents may be working in this codebase at the same time (Sun Code's chat tabs). Rollback
+   * Other agents may be working in this codebase at the same time (Fire Code's chat tabs). Rollback
    * then undoes only the files this chat's edit tools changed, never the whole workspace.
    */
   sharedWorkspace?: boolean
   /**
-   * The other codebases open beside this one (Sun Code), by the short name used to mention them:
+   * The other codebases open beside this one (Fire Code), by the short name used to mention them:
    * `@payments-api:src/app.py`. The agent is told about them and may read them; writing there
    * follows the ordinary outside-the-workspace rules.
    */
   siblings?: { name: string; path: string }[]
   /**
-   * Shared by every chat on this codebase (Sun Code): which chat changed which file, so a rollback
+   * Shared by every chat on this codebase (Fire Code): which chat changed which file, so a rollback
    * can ask before undoing another chat's work. `chat` is how the user knows this one.
    */
   changeLedger?: { file: string; chat: string }
   /**
-   * False when another process on this codebase runs its schedules: Sun Code's extra chat tabs,
+   * False when another process on this codebase runs its schedules: Fire Code's extra chat tabs,
    * where every chat is its own host and each would otherwise run the same nightly job.
    */
   runsSchedules?: boolean
   /** Diagnostics from the host's own language support - the extension passes VS Code's. */
   diagnostics?: DiagnosticsProvider
-  /** Start installed language servers itself (Node host, Sun, PyCharm). Ignored when `diagnostics` is set. */
+  /** Start installed language servers itself (Node host, Fire Code, PyCharm). Ignored when `diagnostics` is set. */
   languageServers?: boolean
-  /** Path to `sun-fs`, the parallel Rust file helper; its four tools are registered only when set. */
+  /** Path to `fire-fs`, the parallel Rust file helper; its four tools are registered only when set. */
   fastFs?: string
   desktopNotify?: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => void
   secrets: SecretStore

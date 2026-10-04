@@ -46,8 +46,8 @@ apps/vscode        Thin host: activation, SecretStorage, webview plumbing, ripgr
 apps/host          Node server + browser UI. Published as @chosengeneration/light-code.
                    See §14.
 apps/intellij      JetBrains plugin: a panel and a launcher that packs apps/host.
-apps/sun           Sun Code: a Windows app (Rust, WebView2) holding many codebases, one
-                   Node host per codebase. Published as @chosengeneration/sun-code. §14b.
+apps/sun           Fire Code: a Windows app (Rust, WebView2) holding many codebases, one
+                   Node host per codebase. Published as @chosengeneration/fire-code. §14b.
 ```
 
 pnpm workspaces. No Turborepo — the repo is too small to justify it.
@@ -2188,7 +2188,7 @@ running, and starting somebody's Outlook is not a build step.
 
 ## 12z. Language servers, and several agents in one folder (0.133.0)
 
-Asked for together: parallel agents per codebase (Sun) and LSP, "for many popular languages".
+Asked for together: parallel agents per codebase (Fire Code) and LSP, "for many popular languages".
 
 - **Diagnostics come from whoever already has them.** `HostServices.diagnostics` is VS Code's own
   (`apps/vscode/src/platform/diagnostics.ts`: open the document, wait for the next
@@ -2220,7 +2220,7 @@ Asked for together: parallel agents per codebase (Sun) and LSP, "for many popula
   safely on vanished text; `write_to_file` would have silently put back what another agent just
   wrote. A stamp, not a hash, because it runs on every write. The session's own writes re-stamp.
 - **Per-file rollback** (`ShadowGit.restoreFiles`), used when `HostServices.sharedWorkspace`
-  (host flag `--shared-workspace`, always passed by Sun): only the files this chat changed are
+  (host flag `--shared-workspace`, always passed by Fire Code): only the files this chat changed are
   restored or removed, so another chat's work survives. The whole-workspace restore stays the default
   everywhere else.
 - **Found while testing it: rollback was rewriting line endings.** The shadow repo inherited the
@@ -2229,43 +2229,43 @@ Asked for together: parallel agents per codebase (Sun) and LSP, "for many popula
   in the shadow repo's `info/attributes` (which outranks the workspace's), written on every snapshot so
   existing shadow repos get it.
 
-**Sun's chat tabs**: each chat is its own host process (§14b's parallelism argument, one level down).
+**Fire Code's chat tabs**: each chat is its own host process (§14b's parallelism argument, one level down).
 The runtime key is the codebase id for the first chat and `<id>~<n>` for the others; `State::project`
-resolves either, so most of Sun needed no change. Extra chats are saved on the project; each keeps its
+resolves either, so most of Fire Code needed no change. Extra chats are saved on the project; each keeps its
 history in `projects/<id>/chats/<n>`; config, secrets and the vault key are the codebase's. The
 sidebar rolls a codebase's chats up (liveliest phase, most urgent agent state); notifications name the
-chat. Closing a chat keeps its folder. Ctrl+T / Ctrl+W are forwarded from the pane like Sun's other
+chat. Closing a chat keeps its folder. Ctrl+T / Ctrl+W are forwarded from the pane like Fire Code's other
 shortcuts. **Verified by running it** with three chats on one codebase.
 
 
-## 12aa. Sun Code 0.5.0: the name, its environment, reports, and writing helpers
+## 12aa. Fire Code 0.5.0: the name, its environment, reports, and writing helpers
 
-- **Renamed Sun Light Code → Sun Code** (npm `@chosengeneration/sun-code`, command `sun-code`,
-  `sun-code.exe`, `%LOCALAPPDATA%\sun-code`). The data folder is **moved, not copied**, on first
+- **Renamed Sun Light Code → Fire Code** (npm `@chosengeneration/fire-code`, command `fire-code`,
+  `fire-code.exe`, `%LOCALAPPDATA%\fire-code`). The data folder is **moved, not copied**, on first
   start (`Paths::new`), and `State::rebase` rewrites settings-file paths saved under the old folder;
   if the old app holds it open the old folder is used and the move retried next launch. Both folder
   names stay on the reach floor (`fs/reach.ts`), the VS Code share tries the new pipe then the old
   one, and the `.sunkeys` field name is unchanged so files exported by 0.4 still import.
 - **Settings → Environment** (`environment.rs`): a **startup script** (.cmd/.bat/.ps1) run once at
-  launch in its own shell; the environment it leaves, diffed against Sun's own, is given to every host.
+  launch in its own shell; the environment it leaves, diffed against Fire Code's own, is given to every host.
   Agents asked to start while it runs **wait** (`ScriptState::Running` + `waiting`), because an agent
   started without what the script provides is the failure the script exists to prevent. Read behind a
   marker, never off the output (a script prints). 90 s cap, tree-killed, and the message says a pause
   or prompt never finishes. Order: script, then listed variables (so they win), then PATH folders in
   front of whichever PATH the script left. A variable may be a **saved credential**, resolved per
-  launch and never written to Sun's state. Names only reach the page, never values. Validated as a
-  whole in Rust (`PATH` is refused as a variable - it would replace the whole PATH - and Sun's own
+  launch and never written to Fire Code's state. Names only reach the page, never values. Validated as a
+  whole in Rust (`PATH` is refused as a variable - it would replace the whole PATH - and Fire Code's own
   names too). **Verified live**: the host process saw the variables, the script's variable and its
   PATH change, in that order.
-- **Reports** (`reports.rs`): "Open report" opens Sun's viewer instead of the default app. Reads
-  only text reports inside Sun's data folder or a codebase folder - the path arrives in a host line or
+- **Reports** (`reports.rs`): "Open report" opens Fire Code's viewer instead of the default app. Reads
+  only text reports inside Fire Code's data folder or a codebase folder - the path arrives in a host line or
   a link, neither of which should be able to read an arbitrary file. Markdown is rendered by building
   DOM nodes, never HTML (a report is model-written; this page can talk to Rust); images are not
   fetched. **HTML reports** are served from `sun://…/report` under their own policy
   (`style-src 'unsafe-inline'; img-src data:; sandbox`, no script) in a sandboxed frame; the shell's
   `frame-src` gained `'self'` for it. `notify` got `report`: a .md/.html file the agent wrote, read
   through `resolveToolPath`, opened as it is.
-- **`sun-fs` writes now, in exactly two operations**: `transfer` (copy/move, parallel; a same-drive
+- **`fire-fs` writes now, in exactly two operations**: `transfer` (copy/move, parallel; a same-drive
   move is a rename; a cross-drive move removes the source only after every file copied at the right
   size) and `archive` (zip create/extract/list; extraction refuses the whole archive if any entry
   escapes the destination). Both are reached only through `transfer_files` / `archive_files`, which
@@ -2275,7 +2275,7 @@ shortcuts. **Verified by running it** with three chats on one codebase.
 - **Export picks credentials deliberately**: nothing ticked at first, a filter, a count on the button.
 - **Highlighting in the browser host**: `client.css` never defined the `--vscode-debugTokenExpression-*`
   and `--vscode-charts-*` variables the highlighter colours with, so code was plain in the Node host,
-  Sun and the plugin while coloured in VS Code. VS Code's own default values now, light and dark;
+  Fire Code and the plugin while coloured in VS Code. VS Code's own default values now, light and dark;
   `syntaxColours.test.ts` reads both files. The code font is Consolas with ligatures off, as VS Code.
 - **Contrast threshold 0.35 → 0.40**: teal (0.37) gets white text, reported as reading wrong in dark;
   green and amber keep dark text.
@@ -2289,12 +2289,12 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   shallowest first** (`mentionGlob(seg, 'prefix', depth)` = `*/*/[aA]…*`, measured against `rg.exe`) -
   the ranking's own order, so its top is exact. And answers arrived out of order: the page now keeps
   only the answer to the latest query. Not reproducible with two files - it needs the volume.
-- **Git counts in the sidebar** (Sun 0.5.2, `git.rs`): `git --no-optional-locks status --porcelain=v1 -z
+- **Git counts in the sidebar** (Fire Code 0.5.2, `git.rs`): `git --no-optional-locks status --porcelain=v1 -z
   --branch`, off the UI thread, one refresh at a time, 20 s cap. `--no-optional-locks` is the
   load-bearing flag: a status that took `index.lock` would make the user's own commit fail at random.
   Untracked folders count once (`-unormal`), because `-uall` lists every file in an unignored
   `node_modules`. A non-repository or missing git shows nothing, never an error.
-- **Other codebases** (Sun 0.5.3): Sun passes every other codebase as `--sibling name=folder`
+- **Other codebases** (Fire Code 0.5.3): Fire Code passes every other codebase as `--sibling name=folder`
   (`state::mention_names`, one slug per codebase computed from the whole list so every host agrees).
   They join `readRoots` - readable like a configured folder, writes still ask - and the prompt lists
   them. `@name:path` resolves through `siblingMention` and is **confined to that codebase**; a
@@ -2311,6 +2311,17 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   another chat changed after this chat's checkpoint - unconfirmed, it is left alone.
 - **A BOM in config.json** was "not valid JSON". Found by a test that wrote the file with
   Set-Content; Notepad does the same. Stripped in `parseConfig` and in `ConfigManager`'s raw read.
+- **Renamed Sun Code → Fire Code** (0.6.0, asked by the user; it was Sun Light Code before 0.5.0).
+  `@chosengeneration/fire-code`, `fire-code.exe`, helper `fire-fs.exe`, `%LOCALAPPDATA%\fire-code`,
+  `FIRE_CODE_*`, pipe `fire-code.<user>`. The newest earlier data folder (`sun-code`, then
+  `sun-light-code`) is moved on first start and saved paths rebased from each; both stay on the reach
+  floor; VS Code's share tries all three pipes. The source folder stays `apps/sun` and the internal
+  `sun://` scheme is unchanged - nothing user-visible. Handbook topic id is now `fire-code`.
+- **Waiting for you** (0.6.0): the chat page reports `attention` with a fixed reason word -
+  `approval`, `form`, or `question` (new: `done.awaitingAnswer` when a turn ended with
+  `ask_followup_question`, which used to read as finished). Fire Code shows a badge on top of the
+  tile, an amber row, a marked tab, a "N waiting" chip that cycles through them, the count in the title
+  bar, and `request_user_attention` (taskbar flash) when unfocused.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
 
@@ -2915,7 +2926,7 @@ to make now.
 
 ---
 
-## 14b. Sun Code (0.1.0)
+## 14b. Fire Code (0.1.0)
 
 Asked for as: one Windows UI for every codebase the user has open in separate VS Code windows; point
 each at its existing Light Code config or a new one; agents keep working in the background while
@@ -2932,10 +2943,10 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
 (`visibility`, not `display`), so switching is instant and nothing pauses.
 
 - **A Windows job object per codebase**, created with KILL_ON_JOB_CLOSE. Stopping a codebase ends its
-  MCP servers, Python worker and commands with it (§16's process-tree rule), and if Sun is killed the
+  MCP servers, Python worker and commands with it (§16's process-tree rule), and if Fire Code is killed the
   OS closes the handles and every agent goes too. The same job is the memory meter. Verified by the
   smoke test: kill the window, no Node process for that home survives.
-- **Config: Link, Copy or New**, and the host is always given `--config-file`, so Sun knows the file
+- **Config: Link, Copy or New**, and the host is always given `--config-file`, so Fire Code knows the file
   without knowing the host's per-user hash. Link uses e.g. the VS Code extension's `config.json` in
   place; both apps write it atomically and the 0.122.1 unknown-key pass-through covers version skew.
   **VS Code's secrets cannot come across** (its SecretStorage is encrypted for VS Code), and the UI
@@ -2947,21 +2958,21 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   lets exactly a framed GET through, never `/api/`, and only when an ancestor is named. And the
   client posts only a state word (idle/busy/attention), a shortcut, or an accent to its embedder's
   origin — never text or paths. Shortcuts are forwarded because focus lives in the frame.
-- **Appearance is Sun's, applied without writing config.** The client rewrites the incoming
+- **Appearance is Fire Code's, applied without writing config.** The client rewrites the incoming
   `settings` message (theme, accent, `appearanceFrom`, `accentInherited`) rather than saving: a
   linked config is the VS Code extension's, and a window's look has no business changing it. A
   codebase may keep its own accent — chosen in its own Appearance tab, intercepted on the way out
-  (`setOutgoingFilter`) and stored in Sun's state, not the config. Role colours stay the pane's. The
+  (`setOutgoingFilter`) and stored in Fire Code's state, not the config. Role colours stay the pane's. The
   window and taskbar icon are drawn in the accent on a canvas and handed to Rust; the exe's own icon
   is fixed at build and stays orange.
 - **`notify` reaches the desktop.** `HostServices.desktopNotify` (absent in the extension, so nothing
   changes there) is called by the notify tool only — never by the bridge's own status toasts — and the
-  host prints it as a `light-code-notify:` line Sun turns into a Windows notification under its own
+  host prints it as a `light-code-notify:` line Fire Code turns into a Windows notification under its own
   AUMID (registered in HKCU, no admin). Finished and needs-approval notifications come from the pane's
   state word when that codebase is not on screen.
 - **Sleep, not swap.** Idle codebases (default 30 min) are stopped to free memory and restarted on
   click; never while busy or waiting, never the one on screen.
-- **Sun keeps the schedule timetable** (0.5.1). It reads each codebase's `schedules` (an object keyed
+- **Fire Code keeps the schedule timetable** (0.5.1). It reads each codebase's `schedules` (an object keyed
   by id - 0.1-0.5 read it as a list, saw nothing, and slept codebases whose jobs then never ran) and
   starts the first chat a minute before the soonest `nextRunAt`, asleep or never started. The host
   then runs the job as it always has, overdue included. Kept awake while a run's claim file exists or
@@ -2975,18 +2986,18 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
 - **One instance per data folder** (named mutex); a second launch brings the window forward. Rust is
   pinned to 1.86 with the fallback resolver (`.cargo/config.toml`) so it builds on the toolchain a
   machine has.
-- **Reach anywhere** (`--reach-anywhere`, Sun's Settings, on by default; `ToolExecutionContext.reach`).
+- **Reach anywhere** (`--reach-anywhere`, Fire Code's Settings, on by default; `ToolExecutionContext.reach`).
   Reads go anywhere with no folder prompt - they follow the ordinary read approval exactly as inside
   the workspace. Writes go anywhere, but the write tools mark their diff `outsideWorkspace` and
   `decideFromPolicy` never auto-approves one (checked right after `ALWAYS_ASK_TOOLS`), the prompt hides
   "Always allow" and says Rollback cannot undo it - checkpoints cover only the workspace. A floor no
   setting lifts, `fs/reach.ts`: credential folders and files (SSH, cloud CLIs, Windows credential and
-  vault folders, browser logins, Light Code's and Sun's own stores, key/cert extensions) are never read
+  vault folders, browser logins, Light Code's and Fire Code's own stores, key/cert extensions) are never read
   or written, and Windows/program folders are never written. The configured deny list (invariant 6)
   is checked first as always. Single-user only: refused with `--server`. **Known gap**: a write whose
   preview *threw* would degrade to a text preview and fall to the ordinary edit policy; neither write
   tool's preview can throw today.
-- **`sun-fs`, the parallel Rust helper** (`native/src/bin/sun_fs.rs`, `--fast-fs`): JSON in, JSON out,
+- **`fire-fs`, the parallel Rust helper** (`native/src/bin/fire_fs.rs`, `--fast-fs`): JSON in, JSON out,
   read-only by construction (it has no write operation). `ignore`'s parallel walker for folders;
   big files split into line-aligned ranges per core, newlines counted with `memchr`, regex search per
   range with offsets so line numbers are exact; `csv`/`calamine` tables filtered and grouped with
@@ -2998,8 +3009,8 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   `ignore` is pinned to 0.4.23: later releases use let-chains while still claiming an older Rust.
 - **Several chats per codebase** (0.4.0): tabs, each its own host on the same folder and settings,
   with stale-read refusal and per-file rollback - §12z.
-- **Not in Sun**: the debug-session tool and editor pickers, exactly as in the Node host.
-- Sun's version lives in `npm/package.json` and `native/Cargo.toml`; `build.mjs` refuses a mismatch
+- **Not in Fire Code**: the debug-session tool and editor pickers, exactly as in the Node host.
+- Fire Code's version lives in `npm/package.json` and `native/Cargo.toml`; `build.mjs` refuses a mismatch
   (and 66).
 
 **Verified on Windows 11 by running it**, including screenshots of light, dark, both accents and the
@@ -3193,12 +3204,12 @@ Primary development platform. These are silent-failure sources, not preferences.
   to global settings. Standing instruction from the user (2026-10-01); it is part of done, not a
   follow-up.
 
-- **Build only a package that has changes** (2026-10-03, "going forward"). A Sun-only change
-  rebuilds Sun alone; a change in packages/core or packages/ui reaches every package, since each
+- **Build only a package that has changes** (2026-10-03, "going forward"). A Fire Code-only change
+  rebuilds Fire Code alone; a change in packages/core or packages/ui reaches every package, since each
   bundles them or packs the host. Those still ship everywhere, per the next rule.
 - **Every enhancement and fix ships in every package, every time.** Standing instruction from
   the user (2026-10-02, "always"): the VS Code extension, the Node host and the JetBrains plugin are
-  built from the same commit for each release, so none of them is behind. **Sun Code is the
+  built from the same commit for each release, so none of them is behind. **Fire Code is the
   fourth** (2026-10-03): it packs the host exactly as the plugin does (`apps/sun/scripts/build.mjs`). The features live in
   `packages/core` and `packages/ui`, shared by the extension and the host; the plugin is a panel and
   a launcher, so it **packs the host built from that commit** (`host/light-code.cjs`, by

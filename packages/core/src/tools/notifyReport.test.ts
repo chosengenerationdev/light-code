@@ -10,7 +10,7 @@ import type { ToolExecutionContext } from './types.js'
 
 /**
  * `notify` can point at a report the agent wrote as a file - an HTML one with its own styling - so
- * the notification opens that file (in Sun Code's viewer, or VS Code) instead of a copy of text.
+ * the notification opens that file (in Fire Code's viewer, or VS Code) instead of a copy of text.
  */
 describe('notify with a report file', () => {
   let workspace: string

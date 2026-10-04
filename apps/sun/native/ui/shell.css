@@ -1,5 +1,5 @@
 /*
- * Sun Code — the window around the chats.
+ * Fire Code — the window around the chats.
  *
  * Windows 11's own vocabulary: Mica behind the sidebar (the page is transparent there and the
  * window material shows through), a raised content surface with one rounded corner, Segoe UI
@@ -42,7 +42,7 @@
   --side-width: 264px;
 }
 
-/* Dark, when Sun's theme says so - or says "system" and Windows is dark. Set by shell.js. */
+/* Dark, when Fire Code's theme says so - or says "system" and Windows is dark. Set by shell.js. */
 :root.dark {
   color-scheme: dark;
   --accent: #ff8a3d;
@@ -1919,7 +1919,7 @@ input[type='password']:focus {
   width: 100%;
   height: 100%;
   border: 0;
-  /* A report is a document: white, as a browser would show it, whatever Sun's theme. */
+  /* A report is a document: white, as a browser would show it, whatever Fire Code's theme. */
   background: #ffffff;
 }
 
@@ -1964,4 +1964,66 @@ input[type='password']:focus {
 
 .git .del {
   color: var(--bad);
+}
+
+/* ─── Waiting for you ─────────────────────────────────────────────────────── */
+
+/* On top of the codebase's tile: the agent there needs you - an approval, an answer, a form. */
+.waiting-badge {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--warn);
+  color: #1b1b1f;
+  font: 700 11px/1 var(--font-display);
+  box-shadow: 0 0 0 2px var(--side-bg);
+  animation: waiting-pulse 1.6s ease-in-out infinite;
+  z-index: 2;
+}
+
+@keyframes waiting-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waiting-badge { animation: none; }
+}
+
+.item.waiting {
+  box-shadow: inset 3px 0 0 var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.item.waiting .item-sub {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.waiting-chip {
+  margin-left: auto;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--warn);
+  color: #1b1b1f;
+  font: 700 11px/1.4 var(--font-display);
+  cursor: default;
+}
+
+.waiting-chip:hover {
+  filter: brightness(1.08);
+}
+
+.tab.waiting .tab-name::after {
+  content: ' !';
+  color: var(--warn);
+  font-weight: 700;
 }

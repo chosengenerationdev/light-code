@@ -1,4 +1,4 @@
-//! Receives keys from the VS Code extension ("Light Code: Share API keys with Sun Code").
+//! Receives keys from the VS Code extension ("Light Code: Share API keys with Fire Code").
 //!
 //! VS Code keeps its keys in its own encrypted storage, which nothing else can read. The extension
 //! can, so it sends them here, after the person confirmed the list of names. The channel is a named
@@ -23,7 +23,7 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 
 /// The pipe's name: per Windows user, so two people on one machine never meet.
 pub fn pipe_name() -> String {
-    format!(r"\\.\pipe\sun-code.{}", std::env::var("USERNAME").unwrap_or_else(|_| "user".into()).to_lowercase())
+    format!(r"\\.\pipe\fire-code.{}", std::env::var("USERNAME").unwrap_or_else(|_| "user".into()).to_lowercase())
 }
 
 #[derive(Deserialize)]
@@ -80,7 +80,7 @@ pub fn serve(
                 LocalFree(descriptor as _);
             }
             if pipe == INVALID_HANDLE_VALUE || pipe.is_null() {
-                // Another Sun (a second data folder) already listens; one receiver is enough.
+                // Another Fire Code (a second data folder) already listens; one receiver is enough.
                 return;
             }
             first = false;
@@ -115,7 +115,7 @@ fn handle(
     }
     let request: Request = match serde_json::from_str(&line) {
         Ok(r) => r,
-        Err(_) => return serde_json::json!({ "ok": false, "error": "Sun did not understand the request." }).to_string(),
+        Err(_) => return serde_json::json!({ "ok": false, "error": "Fire Code did not understand the request." }).to_string(),
     };
     if request.kind != "share" {
         return serde_json::json!({ "ok": false, "error": "Unknown request." }).to_string();

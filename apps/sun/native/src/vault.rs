@@ -1,4 +1,4 @@
-//! Sun's credential vault: every codebase's secrets, encrypted for this Windows user.
+//! Fire Code's credential vault: every codebase's secrets, encrypted for this Windows user.
 //!
 //! - `vault.key` is 32 random bytes protected with DPAPI (CryptProtectData, per user) - the same
 //!   protection VS Code's own secret storage has. Nothing else can open the vault as another user.
@@ -8,7 +8,7 @@
 //!   values sit in the vault under `credential:<id>#<field>`. A setting that uses one stores a
 //!   pointer to it, so replacing a credential here changes every place that uses it.
 //!
-//! Hosts get the key on stdin when Sun starts them (never in an environment variable, which every
+//! Hosts get the key on stdin when Fire Code starts them (never in an environment variable, which every
 //! command an agent runs would inherit). Values only ever travel page -> Rust, never back: the
 //! Credentials page is write-only, like every secret field in Light Code.
 
@@ -75,7 +75,7 @@ fn pointer(id: &str, field: &str) -> String {
 }
 
 impl Vault {
-    /// Opens the vault, creating its key on first use, and moves a plain secrets file (Sun 0.1.x)
+    /// Opens the vault, creating its key on first use, and moves a plain secrets file (Fire Code 0.1.x)
     /// into it.
     pub fn open(paths: &Paths) -> Result<Vault, String> {
         let key_file = paths.root.join("vault.key");
@@ -99,7 +99,7 @@ impl Vault {
             }
         };
         let vault = Vault { key, secrets: paths.secrets_file(), credentials: paths.root.join("credentials.json") };
-        // A plain file from an earlier Sun: sealed now, keys kept.
+        // A plain file from an earlier Fire Code: sealed now, keys kept.
         if let Ok(text) = fs::read_to_string(&vault.secrets) {
             if serde_json::from_str::<Envelope>(&text).is_err() {
                 if let Ok(map) = serde_json::from_str::<BTreeMap<String, String>>(text.trim_start_matches('\u{feff}')) {
@@ -110,7 +110,7 @@ impl Vault {
         Ok(vault)
     }
 
-    /// One field of a saved credential, for Sun's own environment. Never sent to the page.
+    /// One field of a saved credential, for Fire Code's own environment. Never sent to the page.
     pub fn value(&self, id: &str, field: &str) -> Option<String> {
         self.read_secrets().ok()?.get(&pointer(id, field)).cloned()
     }
@@ -382,9 +382,9 @@ impl Vault {
     /// Opens an export file. Nothing is stored: the caller shows what is inside and asks first.
     pub fn open_export(text: &str, passphrase: &str) -> Result<Vec<Portable>, String> {
         let file: ExportFile = serde_json::from_str(text.trim_start_matches('﻿'))
-            .map_err(|_| "This is not a Sun Code credentials file.".to_string())?;
+            .map_err(|_| "This is not a Fire Code credentials file.".to_string())?;
         if file.sun_light_code_credentials != 1 || file.kdf != "pbkdf2-sha256" {
-            return Err("This credentials file comes from a newer Sun Code; update this one first.".into());
+            return Err("This credentials file comes from a newer Fire Code; update this one first.".into());
         }
         if file.rounds < 100_000 {
             return Err("This credentials file is too weakly protected to trust.".into());

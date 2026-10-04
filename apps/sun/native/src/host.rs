@@ -2,7 +2,7 @@
 //!
 //! The job is what makes stopping a codebase *complete*: the host spawns MCP servers, a Python
 //! worker, ripgrep and shell commands, and `child.kill()` reaches none of them (CLAUDE.md §16).
-//! Terminating the job takes the whole tree. It is also created with KILL_ON_JOB_CLOSE, so if Sun
+//! Terminating the job takes the whole tree. It is also created with KILL_ON_JOB_CLOSE, so if Fire Code
 //! itself is killed the OS closes the handle and every process it started goes with it - nothing is
 //! left running behind a window that is gone.
 //!
@@ -28,7 +28,7 @@ use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_I
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// What the host process tells Sun, read from its stdout.
+/// What the host process tells Fire Code, read from its stdout.
 pub enum HostEvent {
     Url { id: String, generation: u64, url: String },
     Notify { id: String, message: String, level: String, report_path: Option<String> },
@@ -88,16 +88,16 @@ pub struct LaunchSpec {
     pub secrets_file: PathBuf,
     pub log_file: PathBuf,
     pub frame_ancestor: String,
-    /// rg.exe shipped beside Sun, so search needs nothing downloaded at install.
+    /// rg.exe shipped beside Fire Code, so search needs nothing downloaded at install.
     pub ripgrep: Option<PathBuf>,
     /// The vault key, written to the host's stdin and nowhere else.
     pub vault_key: String,
     pub credentials_file: PathBuf,
-    /// Reach beyond the codebase (Settings); and the parallel file helper, when it is beside Sun.
+    /// Reach beyond the codebase (Settings); and the parallel file helper, when it is beside Fire Code.
     pub reach_anywhere: bool,
     pub fast_fs: Option<PathBuf>,
-    /// Sun's environment (Settings → Environment): variables, and the whole PATH when folders are
-    /// put in front of it. Applied before Sun's own variables, so neither can replace those.
+    /// Fire Code's environment (Settings → Environment): variables, and the whole PATH when folders are
+    /// put in front of it. Applied before Fire Code's own variables, so neither can replace those.
     pub env: Vec<(String, String)>,
     pub path: Option<String>,
     /// An extra chat: the codebase's first chat runs its schedules, so a job runs once.
@@ -113,7 +113,7 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     fs::create_dir_all(&spec.data_dir).map_err(|e| format!("Could not create {}: {e}", spec.data_dir.display()))?;
     if !spec.host_script.is_file() {
         return Err(format!(
-            "The Light Code host was not found at {}. Reinstall with npm i -g @chosengeneration/sun-code.",
+            "The Light Code host was not found at {}. Reinstall with npm i -g @chosengeneration/fire-code.",
             spec.host_script.display()
         ));
     }
@@ -135,7 +135,7 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         .arg("--print-url")
         .arg("--no-open")
         .arg("--desktop-notify")
-        // Long enough to survive a slow first paint; the link is single-use and never leaves Sun.
+        // Long enough to survive a slow first paint; the link is single-use and never leaves Fire Code.
         .arg("--handoff-seconds")
         .arg("120")
         .arg("--allow-frame-ancestor")

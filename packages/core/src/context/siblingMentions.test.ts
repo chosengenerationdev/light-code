@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { NodeFileSystem } from '../platform/node/filesystem.js'
 import { parseMentions, resolveMentions, siblingMention } from './mentions.js'
 
-/** `@payments-api:src/app.py` - a file in another codebase open in Sun Code. */
+/** `@payments-api:src/app.py` - a file in another codebase open in Fire Code. */
 describe('mentioning another codebase', () => {
   let base: string
   let here: string

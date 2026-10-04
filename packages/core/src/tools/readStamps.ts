@@ -5,7 +5,7 @@ import type { ToolExecutionContext } from './types.js'
 /**
  * "Changed since you read it" - the safeguard that lets several agents share one codebase.
  *
- * Sun Code runs a separate agent per chat, and two of them (or an agent and the person, or
+ * Fire Code runs a separate agent per chat, and two of them (or an agent and the person, or
  * any other program) can edit the same file. `apply_diff` already fails safely when its search text
  * is gone, but `write_to_file` replaces the whole file, so an agent working from an old read would
  * silently put back what somebody else just changed. So every read records the file's modification

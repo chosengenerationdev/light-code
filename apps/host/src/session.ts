@@ -155,7 +155,7 @@ class FileWorkspaceState implements WorkspaceState {
 function createBrowserUi(
   workspaceRoot: string | undefined,
   post: (line: string) => void,
-  /** Sun Code's Rust helper, when present: the `@` search runs on it. */
+  /** Fire Code's Rust helper, when present: the `@` search runs on it. */
   fastFs?: string,
 ): HostUi {
   return {
@@ -208,7 +208,7 @@ function createBrowserUi(
       const searchRoot = root ?? workspaceRoot
       if (searchRoot === undefined) return []
       /*
-       * Sun Code's Rust helper, when it is here: every core, and it honours .gitignore, which the
+       * Fire Code's Rust helper, when it is here: every core, and it honours .gitignore, which the
        * walk below does not - so build output and vendored folders stay out of the picker. The
        * walk is the fallback, for the plain Node host and any helper failure.
        */
@@ -324,34 +324,34 @@ export interface SessionOptions {
   /**
    * Where this user's `config.json` lives, when it is not in their data directory.
    *
-   * For Light Code Sun, which points a codebase at a config that already exists — the VS Code
+   * For Light Code Fire Code, which points a codebase at a config that already exists — the VS Code
    * extension's, say — so its connections and per-project settings apply in place rather than as a
    * copy that drifts. Single-user only; the CLI refuses it with `--server`.
    */
   configFile?: string
   /**
-   * Where secrets live, when not in the data directory. Sun points every codebase at one file so a
+   * Where secrets live, when not in the data directory. Fire Code points every codebase at one file so a
    * key is entered once, which is why `FileSecretStore` re-reads a file another process changed.
    */
   secretsFile?: string
-  /** Encrypts `secretsFile` (Sun Code, handed over on stdin). See `vaultCrypto.ts`. */
+  /** Encrypts `secretsFile` (Fire Code, handed over on stdin). See `vaultCrypto.ts`. */
   secretsKey?: Buffer
   /**
    * Hand the `notify` tool's notifications to whoever started this process, one JSON line each on
-   * stdout prefixed `light-code-notify:`. Light Code Sun shows them as Windows notifications.
+   * stdout prefixed `light-code-notify:`. Light Code Fire Code shows them as Windows notifications.
    */
   desktopNotify?: boolean
-  /** Sun Code: read any drive or share, write anywhere with approval each time. */
+  /** Fire Code: read any drive or share, write anywhere with approval each time. */
   reachAnywhere?: boolean
-  /** Other chats share this codebase (Sun's chat tabs): Rollback undoes only this chat's files. */
+  /** Other chats share this codebase (Fire Code's chat tabs): Rollback undoes only this chat's files. */
   sharedWorkspace?: boolean
-  /** Another process runs this codebase's schedules (Sun's extra chat tabs). */
+  /** Another process runs this codebase's schedules (Fire Code's extra chat tabs). */
   noSchedules?: boolean
-  /** The other codebases open in Sun Code, by mention name. */
+  /** The other codebases open in Fire Code, by mention name. */
   siblings?: { name: string; path: string }[]
   /** The ledger shared by this codebase's chats, and this chat's name in it. */
   changeLedger?: { file: string; chat: string }
-  /** Sun Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
+  /** Fire Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
   logSink: (line: string) => void

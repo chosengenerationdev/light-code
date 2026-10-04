@@ -131,7 +131,7 @@ export default tseslint.config(
   },
   {
     /*
-     * Sun Code's window: plain browser JavaScript inside WebView2, with no bundler. It reaches
+     * Fire Code's window: plain browser JavaScript inside WebView2, with no bundler. It reaches
      * the network not at all - its only channels are window.ipc to the Rust side and postMessage to
      * the chat frames, each addressed to one origin.
      */

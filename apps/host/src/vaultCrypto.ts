@@ -1,10 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 
 /**
- * The encrypted secrets file Sun Code keeps, shared with its Rust side (`native/src/vault.rs`).
+ * The encrypted secrets file Fire Code keeps, shared with its Rust side (`native/src/vault.rs`).
  *
  * AES-256-GCM over the JSON map of secrets, in a small JSON envelope. The key never touches disk in
- * the clear: Sun keeps it protected by Windows (DPAPI, per user - the protection VS Code's own
+ * the clear: Fire Code keeps it protected by Windows (DPAPI, per user - the protection VS Code's own
  * secret storage has) and hands it to each codebase's host on stdin, never in an environment
  * variable, where every command the agent runs would inherit it.
  *
@@ -47,7 +47,7 @@ export function openSecrets(envelope: VaultEnvelope, key: Buffer): Record<string
   return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, string>) : {}
 }
 
-/** The key as Sun sends it: 64 hex characters on one line. */
+/** The key as Fire Code sends it: 64 hex characters on one line. */
 export function parseVaultKey(line: string): Buffer | undefined {
   const hex = line.trim()
   return /^[0-9a-fA-F]{64}$/.test(hex) ? Buffer.from(hex, 'hex') : undefined

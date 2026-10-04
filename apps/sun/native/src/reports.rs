@@ -1,10 +1,10 @@
-//! Agent reports, read for Sun's own Markdown viewer.
+//! Agent reports, read for Fire Code's own Markdown viewer.
 //!
 //! A scheduled run or a `notify` call writes its findings to a report file in that codebase's data
 //! folder, and the notification's "Open report" used to hand it to whatever Windows associates with
-//! `.md` - often Notepad, or nothing at all. Sun shows it itself now.
+//! `.md` - often Notepad, or nothing at all. Fire Code shows it itself now.
 //!
-//! Only files inside Sun's data folder are read, and only text ones: the path arrives in a host's
+//! Only files inside Fire Code's data folder are read, and only text ones: the path arrives in a host's
 //! notification line or a link inside a report, and neither should be able to make the page read
 //! an arbitrary file. Anything else is refused, and the page offers the default app instead.
 
@@ -21,13 +21,13 @@ fn is_report(path: &Path) -> bool {
     )
 }
 
-/// The file, resolved and checked to be a report inside one of `roots`: Sun's data folder, where
+/// The file, resolved and checked to be a report inside one of `roots`: Fire Code's data folder, where
 /// notify writes, and the codebases' own folders, where an agent writes an HTML report.
 pub fn allowed(roots: &[PathBuf], path: &str) -> Result<PathBuf, String> {
     let real = fs::canonicalize(path).map_err(|_| format!("The report {path} was not found."))?;
     let inside = roots.iter().filter_map(|r| fs::canonicalize(r).ok()).any(|base| real.starts_with(&base));
     if !inside || !is_report(&real) {
-        return Err(format!("{path} is not an agent report Sun can show. Open it with its own app instead."));
+        return Err(format!("{path} is not an agent report Fire Code can show. Open it with its own app instead."));
     }
     Ok(real)
 }
@@ -123,18 +123,18 @@ mod tests {
 
     #[test]
     fn reads_reports_inside_sun_and_nothing_else() {
-        let root = std::env::temp_dir().join(format!("sun-code-reports-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("fire-code-reports-{}", std::process::id()));
         let reports = root.join("projects").join("p1").join("reports");
         fs::create_dir_all(&reports).unwrap();
         fs::write(reports.join("nightly.md"), "\u{feff}# Nightly\n\nAll good.").unwrap();
         fs::write(root.join("vault.key"), "secret").unwrap();
-        let outside = std::env::temp_dir().join(format!("sun-code-outside-{}.md", std::process::id()));
+        let outside = std::env::temp_dir().join(format!("fire-code-outside-{}.md", std::process::id()));
         fs::write(&outside, "# not ours").unwrap();
 
         let (_, text) = read(&[root.clone()], &reports.join("nightly.md").to_string_lossy()).unwrap();
         assert!(text.starts_with("# Nightly"));
         assert!(read(&[root.clone()], &root.join("vault.key").to_string_lossy()).is_err(), "not a report");
-        assert!(read(&[root.clone()], &outside.to_string_lossy()).is_err(), "outside Sun's folder");
+        assert!(read(&[root.clone()], &outside.to_string_lossy()).is_err(), "outside Fire Code's folder");
         let sneaky = format!("{}\\..\\..\\..\\..\\{}", reports.display(), outside.file_name().unwrap().to_string_lossy());
         assert!(read(&[root.clone()], &sneaky).is_err(), "climbing out with ..");
 

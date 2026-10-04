@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 /**
  * Code in chat, in diffs and in charts is coloured with VS Code theme variables. Inside VS Code the
  * editor supplies them; here the browser host has to, and it did not: every token fell through to
- * plain text, so code looked unhighlighted in the Node host, Sun Code and the JetBrains plugin
+ * plain text, so code looked unhighlighted in the Node host, Fire Code and the JetBrains plugin
  * while the same build was coloured in VS Code. Reported from real use.
  *
  * Read from the source on purpose: the failure is a variable nobody defined, which no test of the

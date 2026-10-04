@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.137.0
+
+### Patch Changes
+
+- "Share API keys" reaches Fire Code (the new name of Sun Code), and still reaches older versions. The handbook covers Fire Code. No change in behaviour inside VS Code.
+
 ## 0.136.0
 
 ### Minor Changes

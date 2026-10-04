@@ -2,7 +2,7 @@ import { appendFile, readFile } from 'node:fs/promises'
 import { normalizeForComparison } from '../fs/confine.js'
 
 /**
- * Which chat changed which file, and when - shared by every chat on one codebase (Sun Code's chat
+ * Which chat changed which file, and when - shared by every chat on one codebase (Fire Code's chat
  * tabs, each its own process). One JSON object per line, appended: no read-modify-write, so two
  * chats writing at once cannot lose each other's lines, and a torn last line costs one entry.
  *

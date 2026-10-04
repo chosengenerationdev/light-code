@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { FileSecretStore } from './fileSecretStore.js'
 
 /*
- * Light Code Sun runs one host per codebase against one secrets file. Two instances here stand in
+ * Light Code Fire Code runs one host per codebase against one secrets file. Two instances here stand in
  * for two processes: each has its own cache, exactly as two processes would.
  */
 describe('FileSecretStore shared by several processes', () => {
@@ -49,7 +49,7 @@ describe('FileSecretStore shared by several processes', () => {
   })
 })
 
-describe('FileSecretStore encrypted for Sun Code', () => {
+describe('FileSecretStore encrypted for Fire Code', () => {
   let dir: string | undefined
   afterEach(async () => {
     if (dir !== undefined) await fs.rm(dir, { recursive: true, force: true })

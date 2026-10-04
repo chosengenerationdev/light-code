@@ -135,7 +135,7 @@ export interface ServerOptions {
   /** See `SessionOptions.secretsKey`. */
   secretsKey?: Buffer
   /**
-   * Sun Code's list of saved credentials: names and kinds, never values. Offered in every
+   * Fire Code's list of saved credentials: names and kinds, never values. Offered in every
    * secret field's "Use a saved credential" menu, and re-sent when the file changes.
    */
   credentialsFile?: string
@@ -964,7 +964,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   }
 
   /**
-   * The saved credentials a settings field can offer. Read fresh each time: Sun writes the file
+   * The saved credentials a settings field can offer. Read fresh each time: Fire Code writes the file
    * whenever one is added, renamed or removed, and an empty list is the answer to any failure.
    */
   async function readCredentials(): Promise<CredentialSummary[]> {
@@ -988,7 +988,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   }
 
   if (options.credentialsFile !== undefined) {
-    // Polled rather than watched: fs.watch on Windows misses a rename-over, which is how Sun saves.
+    // Polled rather than watched: fs.watch on Windows misses a rename-over, which is how Fire Code saves.
     watchFile(options.credentialsFile, { interval: 1500 }, () => {
       for (const connection of connections.values()) void postCredentials(connection)
     })

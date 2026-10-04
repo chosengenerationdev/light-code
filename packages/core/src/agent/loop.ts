@@ -28,7 +28,8 @@ export interface AgentTurnEvents {
   onReasoningChunk?(text: string): void
   onToolCall(toolCall: ToolCall): void
   onToolResult(toolCall: ToolCall, result: ToolResult): void
-  onDone(): void
+  /** `question` when the turn ended by asking the user something: it is now waiting for them. */
+  onDone(ending?: 'question'): void
   onError(message: string): void
   /** Fired once per task, the first time an edit is about to happen. */
   onCheckpoint?(checkpoint: Checkpoint): void
@@ -657,7 +658,7 @@ export async function runAgentTurn(
     }
 
     if (toolCall.name === 'attempt_completion' || toolCall.name === 'ask_followup_question') {
-      events.onDone()
+      events.onDone(toolCall.name === 'ask_followup_question' ? 'question' : undefined)
       return
     }
 

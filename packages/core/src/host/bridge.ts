@@ -1675,7 +1675,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   const readStamps = new Map<string, string>()
   /** Files this task's edit tools changed, for a per-chat rollback in a shared codebase. */
   const changeLedger = services.changeLedger !== undefined ? new ChangeLedger(services.changeLedger.file, services.changeLedger.chat) : undefined
-  // Each file this chat's tools change also goes to the codebase's shared ledger (Sun's chat tabs).
+  // Each file this chat's tools change also goes to the codebase's shared ledger (Fire Code's chat tabs).
   const changedFiles = new RecordedChanges(changeLedger)
   const denylist = new PathDenylist()
   /** Certificates are re-read every request; without this the same warning would repeat. */
@@ -2167,7 +2167,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** Language-server settings, read with the rest of the config. */
   let cachedLsp: LspSettings = {}
   /**
-   * Diagnostics: the host's own (VS Code), or language servers started here (Node host, Sun,
+   * Diagnostics: the host's own (VS Code), or language servers started here (Node host, Fire Code,
    * PyCharm). Absent otherwise, and then neither the tool nor the after-edit report exists.
    */
   const diagnosticsProvider: DiagnosticsProvider | undefined =
@@ -3162,7 +3162,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * built from this same registry, and a run that could not report would be pointless.
      */
     if (diagnosticsProvider !== undefined) combined.register(getDiagnosticsTool)
-    // Sun Code's parallel file tools, where the host ships the helper.
+    // Fire Code's parallel file tools, where the host ships the helper.
     if (services.fastFs !== undefined) {
       for (const tool of createFastFsTools(services.fastFs)) combined.register(tool)
     }
@@ -4145,7 +4145,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           if (others.length > 0) {
             parts.push(
               [
-                '## Other codebases open in Sun Code',
+                '## Other codebases open in Fire Code',
                 'The user also works on these. You may read their files (use the full paths below with read_file,',
                 'search_files and the file tools); writing there asks the user every time. When the user writes',
                 '`@name:path`, that file is attached from that codebase.',
@@ -4175,7 +4175,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         readStamps,
         changedFiles,
         ...(diagnosticsProvider !== undefined ? { diagnostics: diagnosticsProvider } : {}),
-        // The other codebases in Sun are readable like a configured read root.
+        // The other codebases in Fire Code are readable like a configured read root.
         readRoots: [...cachedReadRoots, ...(services.siblings ?? []).map((s) => s.path)],
         ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
         // Resolved per turn by the host, so an edit applies to the next command rather than
@@ -4570,7 +4570,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             taskCheckpoint = checkpoint
             post({ type: 'checkpointAvailable' })
           },
-          onDone: () => post({ type: 'done' }),
+          onDone: (ending) => post({ type: 'done', ...(ending === 'question' ? { awaitingAnswer: true } : {}) }),
           onError: (message) => post({ type: 'error', message }),
         },
         turnOptions,
@@ -10505,7 +10505,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     try {
       if (services.sharedWorkspace === true) {
         /*
-         * Other chats may be editing this codebase right now (Sun). Restoring the whole workspace would
+         * Other chats may be editing this codebase right now (Fire Code). Restoring the whole workspace would
          * undo their work too, so only the files this chat's edit tools changed go back. Changes made
          * through shell commands cannot be attributed to a chat, and are said not to be undone.
          */

@@ -1,5 +1,11 @@
 # @chosengeneration/light-code
 
+## 0.111.0
+
+### Minor Changes
+
+- A turn that ends with a question to you is reported as waiting for your answer, so Fire Code can mark the codebase. The handbook covers Fire Code (formerly Sun Code) and its waiting indicator.
+
 ## 0.110.0
 
 ### Minor Changes

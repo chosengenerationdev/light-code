@@ -1,7 +1,7 @@
 /**
- * What "reach anywhere" still refuses (Sun Code; `HostServices.fileReach`).
+ * What "reach anywhere" still refuses (Fire Code; `HostServices.fileReach`).
  *
- * Sun lets a codebase's assistant read anywhere - every drive, every share - and write anywhere
+ * Fire Code lets a codebase's assistant read anywhere - every drive, every share - and write anywhere
  * with the user's approval each time. That widening is only safe with a floor under it, so two
  * lists apply to every path *outside* the workspace, on top of the configured deny list
  * (invariant 6), which applies everywhere as before:
@@ -33,7 +33,9 @@ export const SECRET_FOLDERS = [
   '/appdata/local/microsoft/vault/',
   '/appdata/roaming/microsoft/systemcertificates/',
   '/appdata/roaming/mozilla/firefox/profiles/',
-  // Light Code's and Sun's own stores: the vault, its key, per-user secrets.
+  // Light Code's and Fire Code's own stores: the vault, its key, per-user secrets.
+  '/appdata/local/fire-code/',
+  // Its earlier names; a folder the move could not take is still the vault.
   '/appdata/local/sun-code/',
   // Its name until 0.5.0; a folder the move could not take is still the vault.
   '/appdata/local/sun-light-code/',

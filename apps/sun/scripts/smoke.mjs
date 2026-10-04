@@ -1,11 +1,11 @@
-// Installs the packed Sun Code tarball the way a user would and proves it works.
+// Installs the packed Fire Code tarball the way a user would and proves it works.
 //
 //   node apps/sun/scripts/smoke.mjs
 //
 // What it checks, and why each matters:
 // - The manifest has no install scripts and no dependencies. That is the promise that makes the
 //   install work on an office machine; one added later would break it with nothing else failing.
-// - `npm i -g` into an empty prefix gives a working `sun-code` command (a workspace hoists
+// - `npm i -g` into an empty prefix gives a working `fire-code` command (a workspace hoists
 //   and links everything, so only a real install can show a missing file).
 // - The installed exe starts a codebase's agent from the bundled host, and killing the window
 //   kills that agent too - the job object is what keeps closed windows from leaving processes.
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 const sun = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(fs.readFileSync(path.join(sun, 'npm', 'package.json'), 'utf8'))
-const tarball = path.join(sun, `chosengeneration-sun-code-${manifest.version}.tgz`)
+const tarball = path.join(sun, `chosengeneration-fire-code-${manifest.version}.tgz`)
 const fail = (message) => {
   console.error(`✘ ${message}`)
   process.exit(1)
@@ -38,15 +38,15 @@ ok('no install scripts, no dependencies')
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sun-smoke-'))
 const prefix = path.join(work, 'prefix')
 execFileSync('npm', ['install', '-g', '--prefix', JSON.stringify(prefix), '--no-audit', '--no-fund', JSON.stringify(tarball)], { stdio: 'inherit', shell: true })
-const installed = path.join(prefix, 'node_modules', '@chosengeneration', 'sun-code')
-for (const file of ['bin/sun-code.cjs', 'dist/sun-code.exe', 'dist/sun-fs.exe', 'dist/host/light-code.cjs', 'dist/rg.exe', 'dist/source.zip', 'README.md', 'LICENSE']) {
+const installed = path.join(prefix, 'node_modules', '@chosengeneration', 'fire-code')
+for (const file of ['bin/fire-code.cjs', 'dist/fire-code.exe', 'dist/fire-fs.exe', 'dist/host/light-code.cjs', 'dist/rg.exe', 'dist/source.zip', 'README.md', 'LICENSE']) {
   if (!fs.existsSync(path.join(installed, file))) fail(`installed package lacks ${file}`)
 }
 ok('installed with plain npm; every file present')
 
-const printed = execFileSync(JSON.stringify(path.join(prefix, 'sun-code.cmd')), ['--version'], { encoding: 'utf8', shell: true }).trim()
-if (printed !== manifest.version) fail(`sun-code --version printed "${printed}", expected ${manifest.version}`)
-ok(`sun-code --version → ${printed}`)
+const printed = execFileSync(JSON.stringify(path.join(prefix, 'fire-code.cmd')), ['--version'], { encoding: 'utf8', shell: true }).trim()
+if (printed !== manifest.version) fail(`fire-code --version printed "${printed}", expected ${manifest.version}`)
+ok(`fire-code --version → ${printed}`)
 
 // A home of its own with one codebase, opened at launch.
 const home = path.join(work, 'home')
@@ -61,12 +61,12 @@ fs.writeFileSync(
     settings: { lastProject: 'psmoke', startRecent: false, notifications: false },
   }),
 )
-const exe = spawn(path.join(installed, 'dist', 'sun-code.exe'), [], {
+const exe = spawn(path.join(installed, 'dist', 'fire-code.exe'), [], {
   env: {
     ...process.env,
-    SUN_CODE_HOME: home,
-    SUN_CODE_NODE: process.execPath,
-    SUN_CODE_HOST: path.join(installed, 'dist', 'host', 'light-code.cjs'),
+    FIRE_CODE_HOME: home,
+    FIRE_CODE_NODE: process.execPath,
+    FIRE_CODE_HOST: path.join(installed, 'dist', 'host', 'light-code.cjs'),
   },
   stdio: 'ignore',
 })
@@ -93,4 +93,4 @@ if (agents().length > 0) fail('the agent outlived the window - the job object di
 ok('closing the window ended its agents')
 
 fs.rmSync(work, { recursive: true, force: true, maxRetries: 5 })
-console.log('\nSun Code smoke test passed.')
+console.log('\nFire Code smoke test passed.')

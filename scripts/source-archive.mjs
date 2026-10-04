@@ -184,7 +184,7 @@ Other packages, from the same tree:
   (\`gradle buildPlugin\`) **after** the Node host, which it packs inside itself so it has
   the same features and fixes; the zip lands in \`apps/intellij/build/distributions\`.
 
-- Sun Code, the Windows app for several codebases at once: \`apps/sun\`. Needs
+- Fire Code, the Windows app for several codebases at once: \`apps/sun\`. Needs
   Rust 1.86 or newer (\`rustup\`, MSVC toolchain). \`node apps/sun/scripts/build.mjs\` builds the
   Node host, the exe and the npm package, which lands in \`apps/sun\`; it packs the host too.
 

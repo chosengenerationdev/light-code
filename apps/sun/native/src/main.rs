@@ -1,9 +1,9 @@
-//! Sun Code: several codebases, each with its own Light Code agent, in one Windows window.
+//! Fire Code: several codebases, each with its own Light Code agent, in one Windows window.
 //!
 //! The window is a WebView2 page (`ui/`) holding a sidebar and one frame per codebase. Each frame
 //! is the ordinary Light Code browser UI, served by a Light Code Node host this process starts for
 //! that codebase. So every tool and feature is the one the Node host already has, every agent runs
-//! in its own process - truly in parallel, unaffected by which chat is on screen - and Sun itself is
+//! in its own process - truly in parallel, unaffected by which chat is on screen - and Fire Code itself is
 //! only the window, the supervisor and the Windows integration.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -104,8 +104,10 @@ struct Runtime {
     memory: u64,
     /// Something happened here while it was not on screen.
     unread: bool,
-    /// Started by Sun's schedule timer rather than by you: it goes back to sleep soon after the run.
+    /// Started by Fire Code's schedule timer rather than by you: it goes back to sleep soon after the run.
     woke_for_schedule: bool,
+    /// What the agent is waiting for you to do, while it waits: approval, form or question.
+    waiting_for: Option<String>,
 }
 
 impl Runtime {
@@ -121,6 +123,7 @@ impl Runtime {
             memory: 0,
             unread: false,
             woke_for_schedule: false,
+            waiting_for: None,
         }
     }
 }
@@ -143,7 +146,7 @@ struct App {
     import_items: Option<Vec<vault::Portable>>,
     /// Keys found for the JetBrains import, held here until confirmed; only names reach the page.
     jetbrains_keys: Option<Vec<(String, String, String)>>,
-    /// A problem with Sun's environment (a deleted credential) has been said; said again after a save.
+    /// A problem with Fire Code's environment (a deleted credential) has been said; said again after a save.
     env_warned: bool,
     script: ScriptState,
     /// Chats waiting for the startup script before they start.
@@ -167,7 +170,8 @@ enum Command {
     Start { id: String },
     Sleep { id: String },
     Restart { id: String },
-    AgentState { id: String, state: String, finished: bool },
+    /// `reason`, when waiting: approval, form or question.
+    AgentState { id: String, state: String, finished: bool, #[serde(default)] reason: Option<String> },
     Settings { patch: Value },
     KeepAwake { id: String, on: bool },
     Rename { id: String, name: String },
@@ -181,7 +185,7 @@ enum Command {
     OpenExternal { url: String },
     /// The icon drawn in the chosen accent: raw RGBA for the window, a PNG for notifications.
     SetIcon { size: u32, rgba: String, png: String },
-    /// A codebase's own accent, or None to follow Sun's again.
+    /// A codebase's own accent, or None to follow Fire Code's again.
     ProjectAccent { id: String, accent: Option<String> },
     Credentials,
     /// Values travel page -> Rust only, and an empty one means "keep what is stored".
@@ -195,10 +199,10 @@ enum Command {
     /// Keys the IntelliJ / PyCharm plugin's Node host keeps: listed by name, imported on confirm.
     ScanJetBrains,
     ImportJetBrains { indexes: Vec<usize> },
-    /// Sun's environment, validated as a whole: PATH folders and variables.
+    /// Fire Code's environment, validated as a whole: PATH folders and variables.
     #[serde(rename_all = "camelCase")]
     SaveEnvironment { path_prefix: Vec<String>, env: Vec<environment::EnvVar>, #[serde(default)] startup_script: Option<String> },
-    /// A report in Sun's Markdown viewer: from a link inside another report, or the list.
+    /// A report in Fire Code's Markdown viewer: from a link inside another report, or the list.
     OpenReport { path: String },
     /// Every report a codebase's chats have written, newest first.
     Reports { id: String },
@@ -230,10 +234,12 @@ fn main() {
     }
     let _ = std::fs::create_dir_all(&paths.root);
     let mut state = State::load(&paths);
-    if let Some(old) = paths.previous_root() {
-        if state.rebase(&old, &paths.root) {
-            state.save(&paths);
-        }
+    let mut moved = false;
+    for old in paths.previous_roots() {
+        moved |= state.rebase(&old, &paths.root);
+    }
+    if moved {
+        state.save(&paths);
     }
     let vault = Arc::new(vault::Vault::open(&paths).unwrap_or_else(|e| system::fatal(&e)));
 
@@ -245,7 +251,7 @@ fn main() {
     let proxy = event_loop.create_proxy();
 
     let mut builder = WindowBuilder::new()
-        .with_title("Sun Code")
+        .with_title("Fire Code")
         .with_min_inner_size(LogicalSize::new(720.0, 480.0))
         .with_transparent(true)
         .with_visible(false);
@@ -253,7 +259,7 @@ fn main() {
         builder = builder.with_window_icon(Some(icon));
     }
     // Saved bounds are used only while they still land on a connected monitor: a laptop undocked
-    // from the screen Sun was last on must not open a window nobody can see.
+    // from the screen Fire Code was last on must not open a window nobody can see.
     let monitors: Vec<_> = event_loop.available_monitors().collect();
     let on_screen = |b: &state::WindowBounds| {
         monitors.iter().any(|m| {
@@ -292,7 +298,7 @@ fn main() {
         .with_url("sun://localhost/index.html")
         .with_transparent(true)
         .with_devtools(cfg!(debug_assertions))
-        // Reload and friends would rebuild every chat frame; nothing in Sun needs them.
+        // Reload and friends would rebuild every chat frame; nothing in Fire Code needs them.
         .with_browser_accelerator_keys(false)
         .with_default_context_menus(cfg!(debug_assertions))
         .with_custom_protocol("sun".into(), |_id, request| serve(request))
@@ -310,9 +316,9 @@ fn main() {
         .build(&window)
         .unwrap_or_else(|e| {
             system::fatal(&format!(
-                "Sun Code needs the Microsoft Edge WebView2 Runtime, which comes with Windows 11 and is \
+                "Fire Code needs the Microsoft Edge WebView2 Runtime, which comes with Windows 11 and is \
                  installed with Edge on Windows 10. It could not be started ({e}).\n\nInstall it from Microsoft \
-                 (search for \"WebView2 Runtime\"), or ask IT to, then start Sun again."
+                 (search for \"WebView2 Runtime\"), or ask IT to, then start Fire Code again."
             ))
         });
 
@@ -391,7 +397,7 @@ fn main() {
                     app.show_report(path, &webview);
                 }
             }
-            Event::UserEvent(UserEvent::Tick) => app.tick(&webview),
+            Event::UserEvent(UserEvent::Tick) => app.tick(&window, &webview),
             Event::UserEvent(UserEvent::Shared { from, labels }) => {
                 let text = if labels.is_empty() {
                     format!("{from} sent no keys - nothing it holds was set.")
@@ -442,7 +448,7 @@ fn main() {
 }
 
 /// The shell's own files, from inside the exe. Nothing is fetched (invariant 4).
-/// Where reports may be read from: Sun's data folder and every codebase's folder. Kept current
+/// Where reports may be read from: Fire Code's data folder and every codebase's folder. Kept current
 /// as codebases are added and removed; read by the frame that shows HTML reports.
 static REPORT_ROOTS: std::sync::RwLock<Vec<PathBuf>> = std::sync::RwLock::new(Vec::new());
 
@@ -480,7 +486,7 @@ fn serve(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     };
     Response::builder()
         .header(header::CONTENT_TYPE, kind)
-        // Frames only from the hosts Sun started, which listen on loopback; nothing else at all.
+        // Frames only from the hosts Fire Code started, which listen on loopback; nothing else at all.
         .header(
             "Content-Security-Policy",
             "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
@@ -490,7 +496,7 @@ fn serve(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         .unwrap()
 }
 
-/// The title bar and the Mica behind the sidebar follow Sun's theme, so a dark Sun on a light
+/// The title bar and the Mica behind the sidebar follow Fire Code's theme, so a dark Fire Code on a light
 /// Windows is dark all the way to the window frame. "system" hands both back to Windows.
 fn apply_theme(window: &Window, theme: &str) {
     let chosen = match theme {
@@ -556,6 +562,7 @@ impl App {
                     "error": rt.error,
                     "unread": rt.unread,
                     "schedule": rt.woke_for_schedule,
+                    "waiting": rt.waiting_for,
                 }),
             );
         }
@@ -566,7 +573,7 @@ impl App {
     fn push_credentials(&self, webview: &WebView) {
         match self.vault.list() {
             Ok(mut list) => {
-                // A credential feeding a Sun environment variable is in use too: say where.
+                // A credential feeding a Fire Code environment variable is in use too: say where.
                 for item in &mut list {
                     let id = item["id"].as_str().unwrap_or_default().to_string();
                     let users: Vec<Value> = self
@@ -575,7 +582,7 @@ impl App {
                         .env
                         .iter()
                         .filter(|v| v.credential.as_deref().and_then(|c| c.split_once('#')).map(|(i, _)| i == id).unwrap_or(false))
-                        .map(|v| Value::String(format!("Sun environment: {}", v.name)))
+                        .map(|v| Value::String(format!("Fire Code environment: {}", v.name)))
                         .collect();
                     if let (false, Some(used)) = (users.is_empty(), item["usedBy"].as_array_mut()) {
                         used.extend(users);
@@ -596,7 +603,7 @@ impl App {
         let command: Command = match serde_json::from_str(body) {
             Ok(c) => c,
             Err(error) => {
-                send(webview, json!({ "type": "notice", "level": "error", "text": format!("Sun did not understand a request: {error}") }));
+                send(webview, json!({ "type": "notice", "level": "error", "text": format!("Fire Code did not understand a request: {error}") }));
                 return;
             }
         };
@@ -783,7 +790,7 @@ impl App {
                 send(webview, json!({ "type": "unload", "id": id }));
                 send(webview, self.statuses());
             }
-            Command::AgentState { id, state, finished } => self.agent_state(&id, state, finished, webview),
+            Command::AgentState { id, state, finished, reason } => self.agent_state(&id, state, finished, reason, window, webview),
             Command::Settings { patch } => {
                 let mut current = serde_json::to_value(&self.state.settings).unwrap_or(Value::Null);
                 if let (Some(target), Some(changes)) = (current.as_object_mut(), patch.as_object()) {
@@ -890,7 +897,7 @@ impl App {
                     let target = rfd::FileDialog::new()
                         .set_title("Save the credentials file")
                         .set_file_name("credentials.sunkeys")
-                        .add_filter("Sun Code credentials", &["sunkeys"])
+                        .add_filter("Fire Code credentials", &["sunkeys"])
                         .set_parent(window)
                         .save_file();
                     if let Some(target) = target {
@@ -907,7 +914,7 @@ impl App {
             Command::ChooseCredentialImport => {
                 let picked = rfd::FileDialog::new()
                     .set_title("Import credentials")
-                    .add_filter("Sun Code credentials", &["sunkeys"])
+                    .add_filter("Fire Code credentials", &["sunkeys"])
                     .set_parent(window)
                     .pick_file();
                 if let Some(file) = picked {
@@ -1152,7 +1159,7 @@ impl App {
         }
         if !Path::new(&project.path).is_dir() {
             rt.phase = Phase::Failed;
-            rt.error = Some(format!("The folder {} no longer exists. Remove it from Sun, or restore the folder.", project.path));
+            rt.error = Some(format!("The folder {} no longer exists. Remove it from Fire Code, or restore the folder.", project.path));
             send(webview, self.statuses());
             return;
         }
@@ -1265,7 +1272,7 @@ impl App {
                     if let Some(title) = self.state.chat_title(&id) {
                         let proxy = self.proxy.clone();
                         let pid = id.clone();
-                        system::notify(&title, "The agent stopped unexpectedly.", Some("Open Sun to see why and restart it."), &self.icon_file, &[], move |action| {
+                        system::notify(&title, "The agent stopped unexpectedly.", Some("Open Fire Code to see why and restart it."), &self.icon_file, &[], move |action| {
                             let _ = proxy.send_event(UserEvent::Toast { id: pid.clone(), action });
                         });
                     }
@@ -1297,13 +1304,24 @@ impl App {
         }
     }
 
-    fn agent_state(&mut self, id: &str, agent: String, finished: bool, webview: &WebView) {
+    fn agent_state(&mut self, id: &str, agent: String, finished: bool, reason: Option<String>, window: &Window, webview: &WebView) {
         let away = self.active.as_deref() != Some(id) || !self.focused;
         let Some(rt) = self.runtime.get_mut(id) else { return };
         let changed = rt.agent != agent;
         let was_busy = rt.agent == "busy";
         rt.agent = agent.clone();
         rt.last_activity = Instant::now();
+        // Only the three words the page may send; anything else is no reason at all.
+        rt.waiting_for = if agent == "attention" {
+            reason.filter(|r| matches!(r.as_str(), "approval" | "form" | "question"))
+        } else {
+            None
+        };
+        let waiting_for = rt.waiting_for.clone();
+        if changed && agent == "attention" && !self.focused {
+            // The taskbar button flashes until Fire Code is brought forward.
+            window.request_user_attention(Some(tao::window::UserAttentionType::Informational));
+        }
         if was_busy && agent != "busy" {
             // An agent just stopped working: it may have changed files.
             self.refresh_git(Some(state::project_of(id).to_string()));
@@ -1313,7 +1331,12 @@ impl App {
             rt.unread = true;
             if self.state.settings.notifications {
                 if let Some(title) = self.state.chat_title(id) {
-                    let body = if agent == "attention" { "Waiting for your approval." } else { "The agent has finished." };
+                    let body = match (agent.as_str(), waiting_for.as_deref()) {
+                        ("attention", Some("question")) => "Asked you a question and is waiting for your answer.",
+                        ("attention", Some("form")) => "Waiting for you to fill in a form.",
+                        ("attention", _) => "Waiting for your approval.",
+                        _ => "The agent has finished.",
+                    };
                     let proxy = self.proxy.clone();
                     let pid = id.to_string();
                     system::notify(&title, body, None, &self.icon_file, &[], move |action| {
@@ -1323,9 +1346,17 @@ impl App {
             }
         }
         send(webview, self.statuses());
+        self.update_title(window);
     }
 
-    fn tick(&mut self, webview: &WebView) {
+    /// "Fire Code — 2 waiting" in the title bar and taskbar, while any agent is waiting for you.
+    fn update_title(&self, window: &Window) {
+        let waiting = self.runtime.values().filter(|r| r.process.is_some() && r.agent == "attention").count();
+        window.set_title(&if waiting == 0 { "Fire Code".to_string() } else { format!("Fire Code — {waiting} waiting for you") });
+    }
+
+    fn tick(&mut self, window: &Window, webview: &WebView) {
+        self.update_title(window);
         self.ticks += 1;
         for rt in self.runtime.values_mut() {
             rt.memory = rt.process.as_ref().map(|p| p.memory()).unwrap_or(0);
@@ -1389,7 +1420,7 @@ impl App {
         }
     }
 
-    /// A report in Sun's viewer. One Sun cannot show - outside its folder, not text, too large -
+    /// A report in Fire Code's viewer. One Fire Code cannot show - outside its folder, not text, too large -
     /// goes to the default app as before, so "Open report" never does nothing.
     fn show_report(&self, path: &str, webview: &WebView) {
         match reports::read(&report_roots(), path) {
@@ -1497,8 +1528,8 @@ impl App {
         }
     }
 
-    /// Sun's own schedule timer. A codebase holding a schedule no longer has to stay awake all day
-    /// to run it: Sun reads when each is due and starts that codebase's first chat a minute before,
+    /// Fire Code's own schedule timer. A codebase holding a schedule no longer has to stay awake all day
+    /// to run it: Fire Code reads when each is due and starts that codebase's first chat a minute before,
     /// whether it was asleep or never started this session. The host then runs the job exactly as
     /// it always has, including one missed while the PC slept (it is overdue, so due at once).
     fn wake_for_schedules(&mut self, webview: &WebView) {
@@ -1552,7 +1583,7 @@ impl App {
 
     fn export_source(&self, window: &Window, webview: &WebView) {
         let Some(archive) = system::source_archive() else {
-            send(webview, json!({ "type": "notice", "level": "error", "text": "This build carries no source archive. Packaged builds of Sun include one." }));
+            send(webview, json!({ "type": "notice", "level": "error", "text": "This build carries no source archive. Packaged builds of Fire Code include one." }));
             return;
         };
         let target = rfd::FileDialog::new()

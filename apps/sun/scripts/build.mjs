@@ -1,4 +1,4 @@
-// Builds Sun Code and its npm package.
+// Builds Fire Code and its npm package.
 //
 //   node apps/sun/scripts/build.mjs              # host, exe, package, tarball
 //   node apps/sun/scripts/build.mjs --skip-host  # reuse apps/host/dist/cli.cjs as it is
@@ -42,9 +42,9 @@ if (!args.includes('--skip-host')) {
 const host = path.join(repo, 'apps', 'host', 'dist', 'cli.cjs')
 if (!fs.existsSync(host)) throw new Error(`${host} is missing. Build the host first, or drop --skip-host.`)
 
-console.log('▸ building sun-code.exe (release)')
+console.log('▸ building fire-code.exe (release)')
 run('cargo', ['build', '--release'], native)
-const exe = path.join(native, 'target', 'release', 'sun-code.exe')
+const exe = path.join(native, 'target', 'release', 'fire-code.exe')
 
 const ripgrep = [
   path.join(repo, '.ripgrep-cache', 'win32-x64', 'rg.exe'),
@@ -65,18 +65,18 @@ for (const entry of fs.readdirSync(stage)) fs.rmSync(path.join(stage, entry), { 
 fs.mkdirSync(path.join(stage, 'dist', 'host'), { recursive: true })
 fs.cpSync(path.join(sun, 'npm'), stage, { recursive: true })
 fs.copyFileSync(path.join(sun, 'README.md'), path.join(stage, 'README.md'))
-fs.copyFileSync(exe, path.join(stage, 'dist', 'sun-code.exe'))
+fs.copyFileSync(exe, path.join(stage, 'dist', 'fire-code.exe'))
 // The parallel file helper behind find_files, read_many_files, big_file and query_table.
-fs.copyFileSync(path.join(native, 'target', 'release', 'sun-fs.exe'), path.join(stage, 'dist', 'sun-fs.exe'))
+fs.copyFileSync(path.join(native, 'target', 'release', 'fire-fs.exe'), path.join(stage, 'dist', 'fire-fs.exe'))
 fs.copyFileSync(host, path.join(stage, 'dist', 'host', 'light-code.cjs'))
 fs.copyFileSync(ripgrep, path.join(stage, 'dist', 'rg.exe'))
 const archive = writeSourceArchive(repo, path.join(stage, 'dist', 'source.zip'), `sun-${version}`)
 console.log(`  source.zip: ${archive.files} files, ${Math.round(archive.bytes / 1024)} KB`)
 
-for (const old of fs.readdirSync(sun).filter((f) => /^chosengeneration-sun-code-.*\.tgz$/.test(f))) {
+for (const old of fs.readdirSync(sun).filter((f) => /^chosengeneration-fire-code-.*\.tgz$/.test(f))) {
   fs.rmSync(path.join(sun, old))
 }
 run('npm', ['pack', '--pack-destination', sun], stage)
-const tarball = path.join(sun, `chosengeneration-sun-code-${version}.tgz`)
+const tarball = path.join(sun, `chosengeneration-fire-code-${version}.tgz`)
 console.log(`\n✔ ${path.relative(repo, tarball)} (${(fs.statSync(tarball).size / 1024 ** 2).toFixed(1)} MB)`)
 console.log('  Try it: npm i -g ' + tarball)

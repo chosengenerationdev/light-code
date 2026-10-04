@@ -26,7 +26,7 @@ export class FileSecretStore implements SecretStore {
   /**
    * The file's modification time and size when `cache` was read.
    *
-   * Light Code Sun runs one process per codebase and points them all at one secrets file, so a key
+   * Light Code Fire Code runs one process per codebase and points them all at one secrets file, so a key
    * entered in one must reach the others, and one process saving must not write back a stale copy
    * that drops what another just added. So a read checks the stamp and a write re-reads first.
    */
@@ -42,7 +42,7 @@ export class FileSecretStore implements SecretStore {
   private sealedShut = false
 
   /**
-   * `key` encrypts the file (Sun Code; see `vaultCrypto.ts`). Without one it is plain JSON,
+   * `key` encrypts the file (Fire Code; see `vaultCrypto.ts`). Without one it is plain JSON,
    * as it always was. A plain file read with a key is taken as it is and encrypted on the next save,
    * which is how existing secrets move into the vault.
    */
@@ -99,7 +99,7 @@ export class FileSecretStore implements SecretStore {
       const secrets = await this.load()
       if (this.sealedShut) {
         throw new Error(
-          `${this.filePath} is encrypted and this process cannot open it, so nothing was saved - saving would have replaced every key in it. Start this codebase from Sun Code.`,
+          `${this.filePath} is encrypted and this process cannot open it, so nothing was saved - saving would have replaced every key in it. Start this codebase from Fire Code.`,
         )
       }
       mutate(secrets)
@@ -143,6 +143,6 @@ export class FileSecretStore implements SecretStore {
   backendName(): string {
     return this.key === undefined
       ? 'file (owner-only permissions, not an OS keychain)'
-      : 'encrypted file (Windows per-user protection, through Sun Code)'
+      : 'encrypted file (Windows per-user protection, through Fire Code)'
   }
 }

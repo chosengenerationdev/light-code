@@ -1,5 +1,13 @@
-# @chosengeneration/sun-code
+# @chosengeneration/fire-code
 
+## 0.6.0
+
+- **Renamed to Fire Code.** Install `@chosengeneration/fire-code` and run `fire-code`. Codebases, chats and credentials move across from Sun Code (or Sun Light Code) on first start; then `npm uninstall -g @chosengeneration/sun-code`.
+- **See at a glance which codebase is waiting for you**: a "!" on top of its tile, an amber row saying what it needs (your approval, an answer to its question, a form), a marked chat tab, a "2 waiting" button that jumps to each in turn, the count in the title bar, and a flashing taskbar button when Fire Code is in the background.
+- An agent that ends its turn by asking you a question now counts as waiting for you, not finished.
+- Carries Light Code 0.111.0.
+
+## 0.5.3
 ## 0.5.3
 
 - **Refer to other codebases.** Type `@` and the other codebases are listed first; pick one (`payments-api:`) and the picker carries on inside it, or type `@payments-api:src/app.py`. Every agent also knows the other codebases by name and may read them; writing there asks every time.

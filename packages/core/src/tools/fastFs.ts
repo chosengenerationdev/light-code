@@ -7,7 +7,7 @@ import { recordRead } from './readStamps.js'
 import type { Tool, ToolExecutionContext, ToolResult } from './types.js'
 
 /**
- * File tools backed by `sun-fs`, Sun Code's parallel Rust helper (`HostServices.fastFs`).
+ * File tools backed by `fire-fs`, Fire Code's parallel Rust helper (`HostServices.fastFs`).
  *
  * Absent wherever the host has no helper - the VS Code extension, a plain Node host - rather than
  * present and failing. Four only **read**. The fifth, `transfer_files` (copy and move), is the one
@@ -15,7 +15,7 @@ import type { Tool, ToolExecutionContext, ToolResult } from './types.js'
  * plan the helper computes without touching anything - every source, destination, file count, size,
  * and each file that would be replaced.
  *
- * Every path goes through `resolveToolPath` first, so the deny list, the workspace rules and Sun's
+ * Every path goes through `resolveToolPath` first, so the deny list, the workspace rules and Fire Code's
  * "reach anywhere" floor (`fs/reach.ts`) apply exactly as they do to `read_file`; the helper is
  * handed only what already passed. Folders holding credentials are not even walked, and results are
  * filtered again on the way back, because a walk discovers paths nobody named.
@@ -232,7 +232,7 @@ const archiveSchema = z.object({
 })
 type ArchiveParams = z.infer<typeof archiveSchema>
 
-/** The tools, for a host that ships `sun-fs`. */
+/** The tools, for a host that ships `fire-fs`. */
 export function createFastFsTools(exe: string): Tool[] {
   const findTool: Tool<z.infer<typeof findSchema>> = {
     name: 'find_files',

@@ -25,6 +25,6 @@ apps/intellij/.gradle/
 apps/intellij/.intellijPlatform/
 apps/intellij/build/
 
-# Sun Code: Rust build output, and the npm package staging folder.
+# Fire Code: Rust build output, and the npm package staging folder.
 apps/sun/native/target/
 apps/sun/package/

@@ -247,7 +247,7 @@ async function main(): Promise<void> {
   /*
    * Settings and secrets kept somewhere other than the data directory.
    *
-   * For Light Code Sun, which points a codebase at a config that already exists (the VS Code
+   * For Light Code Fire Code, which points a codebase at a config that already exists (the VS Code
    * extension's, say) and shares one secrets file across every codebase it runs. One person's
    * files only: on a shared server every user would be handed the same settings and keys.
    */
@@ -263,7 +263,7 @@ async function main(): Promise<void> {
   const configFile = configFileArg === undefined ? undefined : path.resolve(configFileArg)
   const secretsFile = secretsFileArg === undefined ? undefined : path.resolve(secretsFileArg)
   /*
-   * Sun Code's vault: the key that encrypts the secrets file arrives as the first line on
+   * Fire Code's vault: the key that encrypts the secrets file arrives as the first line on
    * stdin, never as an argument (visible in the process list) or a variable (inherited by every
    * command the agent runs). And the list of saved credentials, for the settings pickers.
    */
@@ -279,7 +279,7 @@ async function main(): Promise<void> {
   const fastFsArg = valueOf(args, '--fast-fs')
   const fastFs = fastFsArg !== undefined && existsSync(fastFsArg) ? path.resolve(fastFsArg) : undefined
   const changeLedgerFile = valueOf(args, '--change-ledger')
-  // Every `--sibling name=folder`: the other codebases open in Sun Code.
+  // Every `--sibling name=folder`: the other codebases open in Fire Code.
   const siblings = args
     .flatMap((arg, i) => (arg === '--sibling' && args[i + 1] !== undefined ? [args[i + 1] as string] : []))
     .map((value) => ({ name: value.slice(0, value.indexOf('=')).trim(), path: value.slice(value.indexOf('=') + 1).trim() }))
@@ -753,7 +753,7 @@ function valueOf(args: string[], flag: string): string | undefined {
  * once shipped a VSIX that could not activate at all (§19). The require is inside a
  * function for the same reason: an import would be hoisted back to the top.
  */
-/** The first line of stdin, which Sun Code writes and then closes. */
+/** The first line of stdin, which Fire Code writes and then closes. */
 function readStdinLine(): Promise<string> {
   return new Promise((resolve) => {
     let text = ''
@@ -773,9 +773,9 @@ function readStdinLine(): Promise<string> {
 
 function resolveRipgrep(): string | undefined {
   /*
-   * A binary the program that started this one ships beside itself. Light Code Sun carries rg.exe
+   * A binary the program that started this one ships beside itself. Light Code Fire Code carries rg.exe
    * in its package rather than depending on `@vscode/ripgrep`, whose install script downloads the
-   * binary from GitHub — the step that fails on an office network, and the reason Sun installs
+   * binary from GitHub — the step that fails on an office network, and the reason Fire Code installs
    * with no scripts at all.
    */
   const bundled = process.env.LIGHT_CODE_RIPGREP
@@ -944,22 +944,22 @@ Usage: light-code [options]
   --secrets-file <file>  Keep secrets in this file instead (not with --server)
   --desktop-notify    Print each notification from the notify tool as a line
                       prefixed light-code-notify: for the program that started
-                      this one (Light Code Sun shows them as Windows notifications)
+                      this one (Light Code Fire Code shows them as Windows notifications)
   --secrets-key-stdin Read the key that encrypts --secrets-file from the first
-                      line of stdin (64 hex characters). Used by Sun Code
+                      line of stdin (64 hex characters). Used by Fire Code
   --reach-anywhere    Let the assistant read any drive or share and write
                       anywhere, asking every time it writes outside the
-                      workspace (not with --server). Used by Sun Code
-  --shared-workspace  Other agents work in this folder too (Sun Code's
+                      workspace (not with --server). Used by Fire Code
+  --shared-workspace  Other agents work in this folder too (Fire Code's
                       chat tabs): Rollback undoes only this chat's files
   --sibling <name>=<folder>  Another codebase the agent may read, mentioned as
-                      @name:path (repeatable; used by Sun Code)
+                      @name:path (repeatable; used by Fire Code)
   --change-ledger <file>  Shared by chats on one codebase: who changed which file,
                       so Rollback asks before undoing another chat's work
   --chat-label <name>  This chat's name in that ledger
   --no-schedules      Leave this codebase's schedules to another process
-                      (Sun Code's extra chat tabs, so a job runs once)
-  --fast-fs <exe>     The sun-fs helper: adds find_files, read_many_files,
+                      (Fire Code's extra chat tabs, so a job runs once)
+  --fast-fs <exe>     The fire-fs helper: adds find_files, read_many_files,
                       big_file and query_table
   --credentials-file <file>  Saved credentials offered in every secret field
                       (names only; values live in the secrets file)

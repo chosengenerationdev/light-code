@@ -381,7 +381,7 @@ export class HttpTransport implements Transport {
    * Every other status is a real refusal and is reported with its reason.
    */
   post(message: unknown): void {
-    // An embedding app's own business (Sun's per-codebase accent) never reaches the server.
+    // An embedding app's own business (Fire Code's per-codebase accent) never reaches the server.
     if (this.outgoingFilter?.(message) === true) return
     if (!this.streamOpen) {
       if (this.queued.length >= MAX_QUEUED) {
@@ -575,7 +575,7 @@ export class HttpTransport implements Transport {
   }
 
   /**
-   * Adjusts each message before anyone sees it. Used when this page runs inside Sun Code,
+   * Adjusts each message before anyone sees it. Used when this page runs inside Fire Code,
    * which sets the theme and accent for every pane: the `settings` message is rewritten on the way
    * in, so the panel and the page agree and nothing is written to the user's config.
    */
