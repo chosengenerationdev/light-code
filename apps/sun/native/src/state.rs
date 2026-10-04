@@ -47,6 +47,9 @@ pub struct Project {
     /// chat is the codebase itself (runtime key = project id); these are `<id>~<chat id>`.
     #[serde(default)]
     pub chats: Vec<Chat>,
+    /// Set when the codebase is folders on a JupyterHub server; `path` is then the local copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hub: Option<crate::hub::HubSettings>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -351,6 +354,7 @@ mod tests {
             last_used: 0,
             accent: None,
             chats: chats.iter().map(|&n| Chat { id: n, name: format!("Chat {n}") }).collect(),
+            hub: None,
         }
     }
 
@@ -418,6 +422,7 @@ mod mention_name_tests {
             last_used: 0,
             accent: None,
             chats: Vec::new(),
+            hub: None,
         }
     }
 

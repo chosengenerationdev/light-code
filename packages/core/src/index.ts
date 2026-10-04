@@ -818,3 +818,4 @@ export { LspManager, describeDiagnostics, type DiagnosticsProvider, type Languag
 export type { LspDiagnostic } from './lsp/client.js'
 export { LSP_LANGUAGES } from './lsp/catalog.js'
 export { isSecretPath, isSystemPath } from './fs/reach.js'
+export { parseJupyterHubSpec, jupyterHubSpecSchema, localFolderNames, type JupyterHubSpec } from './jupyter/spec.js'

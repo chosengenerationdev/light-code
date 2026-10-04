@@ -1,4 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
+import type { JupyterHubSpec } from '@light-code/core'
 import { CredentialPointerStore, replaceFile, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -355,6 +356,8 @@ export interface SessionOptions {
   mirrorRoot?: string
   /** This codebase's own @name in Fire Code. */
   mentionName?: string
+  /** The workspace is a copy of JupyterHub folders (Fire Code). */
+  jupyterHub?: JupyterHubSpec
   /** Fire Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
@@ -505,6 +508,7 @@ export async function createSession(
     ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
     ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
     ...(options.mentionName !== undefined ? { mentionName: options.mentionName } : {}),
+    ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
     ...(options.desktopNotify === true
       ? {
           desktopNotify: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => {

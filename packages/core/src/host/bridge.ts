@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { listSkillImages, skillImageDataUri, SKILL_IMAGE_DIR } from '../skills/images.js'
 import { listSkillFiles } from '../skills/files.js'
+import { createHubRuntime, hubGuidance, withoutMissingImports } from '../jupyter/runtime.js'
+import { createHubTools, describePull } from '../jupyter/tools.js'
 import {
   applyImport,
   buildExport,
@@ -2173,11 +2175,62 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * Diagnostics: the host's own (VS Code), or language servers started here (Node host, Fire Code,
    * PyCharm). Absent otherwise, and then neither the tool nor the after-edit report exists.
    */
-  const diagnosticsProvider: DiagnosticsProvider | undefined =
+  const anyDiagnostics: DiagnosticsProvider | undefined =
     services.diagnostics ??
     (services.languageServers === true && workspaceRoot !== undefined
       ? new LspManager(workspaceRoot, () => cachedLsp, storageDir, services.logSink)
       : undefined)
+
+  /*
+   * A JupyterHub codebase (`jupyter/`): the workspace is a copy of hub folders. Built once, with the
+   * token read from the secret store on every call and TLS from the one resolver (§10), so a
+   * replaced token or certificate applies at once.
+   */
+  const hub =
+    services.jupyterHub !== undefined && workspaceRoot !== undefined
+      ? createHubRuntime({
+          spec: services.jupyterHub,
+          root: workspaceRoot,
+          http: httpClient,
+          token: () => secrets.get(services.jupyterHub?.tokenRef ?? ''),
+          tls: async () => {
+            const { config } = await configManager.load()
+            const spec = services.jupyterHub
+            return resolveConnectionTls({
+              ...(config.tls !== undefined ? { global: config.tls } : {}),
+              connection: {
+                ...(spec?.caFile !== undefined ? { caFile: spec.caFile } : {}),
+                ...(spec?.rejectUnauthorized !== undefined ? { rejectUnauthorized: spec.rejectUnauthorized } : {}),
+              },
+              ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+              ...(config.tls?.passphraseRef !== undefined ? { passphrase: await secrets.get(config.tls.passphraseRef) } : {}),
+              onPaths: (paths) => {
+                void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(() => undefined)
+              },
+            })
+          },
+        })
+      : undefined
+  // A hub copy cannot see the hub's libraries, so "import could not be resolved" is always wrong there.
+  const diagnosticsProvider: DiagnosticsProvider | undefined =
+    hub !== undefined && anyDiagnostics !== undefined ? withoutMissingImports(anyDiagnostics) : anyDiagnostics
+  let hubSyncTimer: ReturnType<typeof setInterval> | undefined
+  let hubSyncStartup: ReturnType<typeof setTimeout> | undefined
+  /** Fetches what changed on the hub now and every few minutes; never replaces a local change. */
+  function startHubSync(): void {
+    if (hub === undefined) return
+    const run = (): void => {
+      hub.mirror
+        .pull()
+        .then((result) => {
+          const changed = result.fetched.length + result.removed.length + result.conflicts.length
+          if (changed > 0 || result.failed.length > 0) logger.info('JupyterHub sync', describePull(result))
+        })
+        .catch((error: unknown) => logger.warn('JupyterHub sync failed', String(error)))
+    }
+    hubSyncStartup = setTimeout(run, 1_000)
+    hubSyncTimer = setInterval(run, (hub.spec.syncMinutes ?? 5) * 60_000)
+  }
 
   /**
    * Paths approved for this session only.
@@ -3169,6 +3222,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (services.fastFs !== undefined) {
       for (const tool of createFastFsTools(services.fastFs)) combined.register(tool)
     }
+    if (hub !== undefined) {
+      for (const tool of createHubTools(hub)) combined.register(tool)
+    }
     combined.register(
       createNotifyTool({
         notify: (message, level, details, reportFile) => {
@@ -4144,6 +4200,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             parts.push(activeMode.guidance)
           }
           if (scheduledGuidance !== undefined) parts.push(scheduledGuidance)
+          if (hub !== undefined) parts.push(hubGuidance(hub))
           const others = services.siblings ?? []
           if (others.length > 0) {
             parts.push(
@@ -4178,6 +4235,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         readStamps,
         changedFiles,
         ...(diagnosticsProvider !== undefined ? { diagnostics: diagnosticsProvider } : {}),
+        // A JupyterHub codebase saves every approved edit to the hub as it lands.
+        ...(hub !== undefined
+          ? {
+              afterEdit: async (realPath: string) => {
+                const saved = await hub.mirror.push(realPath, activeAbortController?.signal)
+                return saved.saved ? `JupyterHub: ${saved.message}.` : `JupyterHub: NOT saved to the hub - ${saved.message}`
+              },
+            }
+          : {}),
         // The other codebases in Fire Code are readable like a configured read root.
         readRoots: [...cachedReadRoots, ...(services.siblings ?? []).map((s) => s.path)],
         ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
@@ -13095,6 +13161,7 @@ ${contents}
   // Same lifetime, same reason: bucket folders are brought down while this bridge is alive.
   startMirrorSync()
   startApprovalWatch()
+  startHubSync()
 
   return {
     /**
@@ -13167,6 +13234,10 @@ ${contents}
       if (mirrorSyncTimer !== undefined) clearInterval(mirrorSyncTimer)
       if (mirrorSyncStartup !== undefined) clearTimeout(mirrorSyncStartup)
       if (approvalWatch !== undefined) clearInterval(approvalWatch)
+      // Nothing left running on the hub: the kernel is shut down with the session.
+      if (hubSyncTimer !== undefined) clearInterval(hubSyncTimer)
+      if (hubSyncStartup !== undefined) clearTimeout(hubSyncStartup)
+      void hub?.kernel.dispose()
       // Nothing may outlive the bridge, least of all something that spends money.
       stopKeepAlive()
       unsubscribe()

@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.141.0
+
+### Minor Changes
+
+- Shared code for Fire Code's JupyterHub codebases; nothing changes inside VS Code. The handbook has a JupyterHub topic.
+
 ## 0.140.0
 
 ### Minor Changes

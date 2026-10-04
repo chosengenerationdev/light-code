@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import { watchFile } from 'node:fs'
-import type { CredentialSummary } from '@light-code/core'
+import type { CredentialSummary, JupyterHubSpec } from '@light-code/core'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import {
@@ -134,6 +134,8 @@ export interface ServerOptions {
   mirrorRoot?: string
   /** See `SessionOptions.mentionName`. */
   mentionName?: string
+  /** See `SessionOptions.jupyterHub`. */
+  jupyterHub?: JupyterHubSpec
   /** See `SessionOptions.fastFs`. */
   fastFs?: string
   /** See `SessionOptions.secretsKey`. */
@@ -479,6 +481,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
       ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
       ...(options.mentionName !== undefined ? { mentionName: options.mentionName } : {}),
+      ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
       ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
       ripgrepPath: options.ripgrepPath,
       logSink: log,

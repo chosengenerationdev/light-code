@@ -11,6 +11,7 @@
 mod configs;
 mod environment;
 mod git;
+mod hub;
 mod reports;
 mod host;
 mod state;
@@ -165,6 +166,9 @@ enum Command {
     PickConfig,
     Sources,
     Add { path: String, name: String, mode: ConfigMode, source: Option<String> },
+    /// A codebase that is folders on a JupyterHub server.
+    AddHub { name: String, hub: hub::HubInput, mode: ConfigMode, source: Option<String> },
+    UpdateHub { id: String, hub: hub::HubInput },
     Remove { id: String },
     Select { id: String },
     Start { id: String },
@@ -546,6 +550,11 @@ impl App {
                         "chats": p.chats,
                         "hasWorkspaceConfig": configs::has_workspace_config(&p.path),
                         "missing": !Path::new(&p.path).is_dir(),
+                        // Never the token: which credential holds it, by name.
+                        "hub": p.hub.as_ref().map(|h| json!({
+                            "url": h.url, "user": h.user, "server": h.server, "folders": h.folders, "kernel": h.kernel,
+                            "credential": h.credential, "credentialLabel": h.credential.as_ref().and_then(|c| self.vault.label_of(c)),
+                        })),
                     })
                 })
                 .collect(),
@@ -771,6 +780,8 @@ impl App {
                 );
             }
             Command::Add { path, name, mode, source } => self.add(path, name, mode, source, webview),
+            Command::AddHub { name, hub, mode, source } => self.add_hub(name, hub, mode, source, webview),
+            Command::UpdateHub { id, hub } => self.update_hub(&id, hub, webview),
             Command::Remove { id } => {
                 for key in self.state.chat_keys(&id) {
                     self.runtime.remove(&key);
@@ -1113,11 +1124,96 @@ impl App {
             last_used: state::now_millis(),
             accent: None,
             chats: Vec::new(),
+            hub: None,
         });
         self.state.save(&self.paths);
         self.push_projects(webview);
         send(webview, json!({ "type": "addResult", "ok": true, "id": id }));
         self.select(&id, webview);
+    }
+
+    /// The credential a hub codebase's token lives in: the one chosen, or a typed token saved as
+    /// "JupyterHub <user>@<host>" (replacing that credential's value when it already exists).
+    fn hub_credential(&self, input: &hub::HubInput, settings: &hub::HubSettings, keep: Option<String>) -> Result<String, String> {
+        if let Some(token) = input.token.as_ref().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+            let label = hub::credential_label(settings);
+            let mut values = BTreeMap::new();
+            values.insert("value".to_string(), token);
+            return self.vault.save(self.vault.find_label(&label), &label, "secret", Some("JupyterHub API token".into()), &values);
+        }
+        if let Some(id) = input.credential.as_ref().filter(|c| !c.is_empty()) {
+            return Ok(id.clone());
+        }
+        keep.ok_or_else(|| "Paste a JupyterHub token, or choose a saved credential that holds one.".to_string())
+    }
+
+    fn add_hub(&mut self, name: String, input: hub::HubInput, mode: ConfigMode, source: Option<String>, webview: &WebView) {
+        let fail = |text: String| send(webview, json!({ "type": "addResult", "ok": false, "text": text }));
+        let mut settings = match hub::validate(&input) {
+            Ok(s) => s,
+            Err(text) => return fail(text),
+        };
+        let id = state::new_id();
+        settings.credential = match self.hub_credential(&input, &settings, None) {
+            Ok(c) => Some(c),
+            Err(text) => return fail(text),
+        };
+        let (config_file, config_source) = match self.resolve_config(&id, mode, source.as_deref()) {
+            Ok(r) => r,
+            Err(text) => return fail(text),
+        };
+        // The local copy lives in Fire Code's own data, one folder per codebase.
+        let local = self.paths.root.join("hub").join(&id);
+        if let Err(e) = std::fs::create_dir_all(&local) {
+            return fail(format!("Could not create {}: {e}", local.display()));
+        }
+        let name = if name.trim().is_empty() {
+            settings.folders.first().and_then(|f| f.rsplit('/').next()).filter(|f| !f.is_empty()).unwrap_or(&settings.user).to_string()
+        } else {
+            name.trim().to_string()
+        };
+        self.state.projects.push(Project {
+            id: id.clone(),
+            name,
+            path: local.to_string_lossy().to_string(),
+            config_mode: mode,
+            config_file,
+            config_source,
+            keep_awake: false,
+            last_used: state::now_millis(),
+            accent: None,
+            chats: Vec::new(),
+            hub: Some(settings),
+        });
+        self.state.save(&self.paths);
+        self.push_projects(webview);
+        send(webview, json!({ "type": "addResult", "ok": true, "id": id }));
+        self.select(&id, webview);
+    }
+
+    fn update_hub(&mut self, id: &str, input: hub::HubInput, webview: &WebView) {
+        let Some(previous) = self.state.project(id).and_then(|p| p.hub.clone()) else { return };
+        let result = hub::validate(&input).and_then(|mut settings| {
+            settings.credential = Some(self.hub_credential(&input, &settings, previous.credential.clone())?);
+            Ok(settings)
+        });
+        match result {
+            Ok(settings) => {
+                if let Some(p) = self.state.project_mut(id) {
+                    p.hub = Some(settings);
+                }
+                self.state.save(&self.paths);
+                self.push_projects(webview);
+                send(webview, json!({ "type": "notice", "level": "info", "text": "JupyterHub settings saved. The agent restarts with them." }));
+                for key in self.state.chat_keys(id) {
+                    if self.runtime.get(&key).map(|r| r.process.is_some()).unwrap_or(false) {
+                        self.stop(&key, Phase::Stopped);
+                        self.start(&key, webview);
+                    }
+                }
+            }
+            Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
+        }
     }
 
     fn select(&mut self, id: &str, webview: &WebView) {
@@ -1204,6 +1300,24 @@ impl App {
             no_schedules: state::chat_of(id).is_some(),
             change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
             mirror_dir: self.paths.root.join("mirrors"),
+            jupyter_hub: match &project.hub {
+                Some(settings) => {
+                    let file = self.paths.project_dir(state::project_of(id)).join("jupyterhub.json");
+                    let pointed = settings
+                        .credential
+                        .as_ref()
+                        .map(|c| self.vault.point(&hub::token_slot(&project.id), c, "value"))
+                        .unwrap_or(Ok(()));
+                    match pointed.and_then(|()| hub::write_spec(&file, settings, &project.id)) {
+                        Ok(()) => Some(file),
+                        Err(text) => {
+                            send(webview, json!({ "type": "notice", "level": "error", "text": format!("JupyterHub settings for {}: {text}", project.name) }));
+                            None
+                        }
+                    }
+                }
+                None => None,
+            },
             mention_name: state::mention_names(&self.state.projects)
                 .into_iter()
                 .find(|(pid, _)| *pid == project.id)

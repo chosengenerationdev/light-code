@@ -103,7 +103,7 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 > Light Code makes no network connection the user has not configured. It ships with zero
 > default endpoints, no telemetry, no update checks, and no remote assets. The only hosts
 > it contacts are the model gateway, MCP servers, and — each only when the user configures and
-> switches it on — the vector store and embedding endpoint, S3 buckets, and Confluence, Jira and Bitbucket sites
+> switches it on — the vector store and embedding endpoint, S3 buckets, JupyterHub servers (Fire Code), and Confluence, Jira and Bitbucket sites
 > named in config. Code that Light Code executes on the user's
 > instruction — shell commands, Python tools, MCP servers — is outside this boundary and
 > governed by the user's environment.
@@ -2347,6 +2347,46 @@ shortcuts. **Verified by running it** with three chats on one codebase.
   empty picker was reported as @ search being broken.
 - **Build only what changed** (user, 2026-10-03): a package is rebuilt and bumped only when its
   contents changed. A change in core or ui reaches all four, because each bundles or packs them.
+
+## 12ab. JupyterHub folders as a codebase (Fire Code 0.8.0)
+
+Asked for: add a folder from JupyterHub with its token, let the agent explore, create and modify the
+scripts there, search fast across folders - and, the decisive detail, *some libraries exist only on
+the hub*. `packages/core/src/jupyter/`.
+
+- **A local copy, kept in step - not remote file tools.** The hub has no search API, and a search that
+  downloads every file is no search. The copy (Fire Code: `<data>/hub/<id>`) is the workspace, so the
+  ordinary tools - diffs, approvals, read-before-edit, rollback, the Rust search - apply unchanged.
+  `HubMirror` keeps a manifest of the hub timestamp and local hash at the last agreement, and **never
+  overwrites either side's change**: a save is refused when the hub's timestamp moved (the edit stays
+  here, `hub_sync` "hub_version"/"use_hub_version" resolve it); a fetch skips a local edit and reports
+  a conflict; a hub deletion removes the local file only when unchanged. A folder that could not be
+  listed must not read as "everything was deleted" - its entries are marked seen.
+- **Every edit is saved as it lands**: `ToolExecutionContext.afterEdit`, called from
+  `diagnosticsAfterEdit` (both edit tools go through it), result appended to the edit's output.
+- **Code runs on the hub** (`hub_run`: Python in one kernel kept for the session, a script run from its
+  own folder after being saved, or a shell command via subprocess; `hub_inspect`: signature, docs,
+  members, source, installed packages). Both `command` group: the preview is the literal code (for a
+  script, the script), so exact-match "always allow" works. Model text reaches the kernel only as JSON
+  literals inside generated code, and `hub_inspect` refuses a name that is not a dotted path.
+- **Kernel protocol, found by running a real Jupyter Server 2.21 + ipykernel 7.4** (31 checks, scratch
+  test, never shipped): start kernels with `path: ''` or they start in the server process's folder,
+  not the file root; send `stop_on_error: false` (we serialise runs ourselves) or a request queued
+  behind an erroring one is aborted; after an interrupt, wait for idle before answering, or the next
+  run lands in a kernel still finishing; a kernel that ignores the interrupt for 15 s is replaced and
+  the result says the state is gone (on Windows `time.sleep` is not interruptible - Linux hubs are).
+- **One egress point still**: `HttpClient.openWebSocket` (undici's WebSocket, same TLS agents and
+  proxy routing); the token goes in `Authorization: token`, never a URL. Retried once only for GET.
+- **The connection is a host flag, never config** (`--jupyter-hub <file>`, `HostServices.jupyterHub`):
+  it names a host and a credential, invariant 5's threat. Fire Code writes the file at launch with
+  `tokenRef` = `jupyterhub:<id>:token`, pointed (`vault.point`) at the credential holding the token.
+  Folders that contain one another are refused in both Rust and TypeScript.
+- Local diagnostics hide "import could not be resolved" for these codebases (`withoutMissingImports`):
+  the hub's libraries are invisible here, so that message is always wrong there.
+- **Not done**: local deletions are not pushed; edits made outside the agent need `hub_sync` push;
+  no notebook (.ipynb) cell editing beyond the file's JSON. **Not verified against a real JupyterHub**
+  (a real Jupyter Server at `/user/<name>/` stands in for one); hub-specific behaviour such as a
+  stopped server's 424/503 or a culled kernel is handled from the documentation.
 
 ## 13. Python interop and skills (phase 9)
 

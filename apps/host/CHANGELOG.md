@@ -1,5 +1,13 @@
 # @chosengeneration/light-code
 
+## 0.114.0
+
+### Minor Changes
+
+- `--jupyter-hub <file>`: the workspace is a copy of folders on a JupyterHub server. It is kept in step (edits saved back, never over a newer change on the hub), and `hub_run`, `hub_inspect` and `hub_sync` run code and look up libraries on the hub. Fire Code writes the file; the token is read from the secret store.
+- The network client can open a WebSocket (a Jupyter kernel needs one) through the same certificates and proxy as everything else.
+- The handbook has a JupyterHub topic.
+
 ## 0.113.0
 
 ### Minor Changes

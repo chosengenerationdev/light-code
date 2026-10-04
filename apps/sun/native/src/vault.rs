@@ -444,6 +444,24 @@ impl Vault {
     }
 
     /// Whether a credential with this name already exists here - an import replaces its value.
+    /// The id of the credential with this name, if there is one.
+    pub fn find_label(&self, label: &str) -> Option<String> {
+        self.read_credentials().credentials.into_iter().find(|c| c.label.eq_ignore_ascii_case(label)).map(|c| c.id)
+    }
+
+    /// The name of a credential, for saying which one a setting uses.
+    pub fn label_of(&self, id: &str) -> Option<String> {
+        self.read_credentials().credentials.into_iter().find(|c| c.id == id).map(|c| c.label)
+    }
+
+    /// Points a secret slot at a credential's field, so the host reads the credential through it.
+    pub fn point(&self, slot: &str, id: &str, field: &str) -> Result<(), String> {
+        let target = pointer(id, field);
+        self.update_secrets(|map| {
+            map.insert(slot.to_string(), target);
+        })
+    }
+
     pub fn has_label(&self, label: &str) -> bool {
         self.read_credentials().credentials.iter().any(|c| c.label.eq_ignore_ascii_case(label))
     }

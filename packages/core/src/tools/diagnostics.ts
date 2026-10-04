@@ -41,6 +41,20 @@ export const getDiagnosticsTool: Tool<z.infer<typeof schema>> = {
  * a missing or slow server adds nothing rather than failing an edit that already happened.
  */
 export async function diagnosticsAfterEdit(context: ToolExecutionContext, realPath: string, shown: string): Promise<string> {
+  // A JupyterHub codebase saves the edit to the hub first; what happened belongs in the result.
+  let saved = ''
+  if (context.afterEdit !== undefined) {
+    try {
+      const note = await context.afterEdit(realPath)
+      if (note !== undefined) saved = `\n\n${note}`
+    } catch (error) {
+      saved = `\n\nJupyterHub: NOT saved to the hub - ${error instanceof Error ? error.message : String(error)}. The edit is kept here; hub_sync "push" retries.`
+    }
+  }
+  return saved + (await languageDiagnostics(context, realPath, shown))
+}
+
+async function languageDiagnostics(context: ToolExecutionContext, realPath: string, shown: string): Promise<string> {
   if (context.diagnostics === undefined) return ''
   try {
     const result = await context.diagnostics.diagnose(realPath)

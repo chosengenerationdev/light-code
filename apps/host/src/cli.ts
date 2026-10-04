@@ -31,7 +31,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
-import { checkConnectionFile, describeProxyEnvironment, JUPYTER_CONNECTION_ENV } from '@light-code/core'
+import { checkConnectionFile, describeProxyEnvironment, JUPYTER_CONNECTION_ENV, parseJupyterHubSpec, type JupyterHubSpec } from '@light-code/core'
 import type { IdentityProvider } from './identity.js'
 import { PythonToolIdentity, resolveIdentity } from './identityTool.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
@@ -281,6 +281,19 @@ async function main(): Promise<void> {
   const changeLedgerFile = valueOf(args, '--change-ledger')
   const mirrorDir = valueOf(args, '--mirror-dir')
   const mentionName = valueOf(args, '--mention-name')
+  // A codebase that is JupyterHub folders: its connection, written by Fire Code (never a workspace file).
+  const jupyterHubFile = valueOf(args, '--jupyter-hub')
+  let jupyterHub: JupyterHubSpec | undefined
+  if (jupyterHubFile !== undefined) {
+    try {
+      jupyterHub = parseJupyterHubSpec(await fs.readFile(jupyterHubFile, 'utf8'))
+    } catch (error) {
+      process.stderr.write(`light-code: --jupyter-hub ${jupyterHubFile}: ${error instanceof Error ? error.message : String(error)}
+`)
+      process.exitCode = 1
+      return
+    }
+  }
   // Every `--sibling name=folder`: the other codebases open in Fire Code.
   const siblings = args
     .flatMap((arg, i) => (arg === '--sibling' && args[i + 1] !== undefined ? [args[i + 1] as string] : []))
@@ -412,6 +425,7 @@ async function main(): Promise<void> {
     ...(siblings.length > 0 ? { siblings } : {}),
     ...(mirrorDir !== undefined ? { mirrorRoot: path.resolve(mirrorDir) } : {}),
     ...(mentionName !== undefined && mentionName.length > 0 ? { mentionName } : {}),
+    ...(jupyterHub !== undefined ? { jupyterHub } : {}),
     ...(changeLedgerFile !== undefined ? { changeLedger: { file: changeLedgerFile, chat: valueOf(args, '--chat-label') ?? 'another chat' } } : {}),
     /*
      * Decoded once, at startup.
@@ -697,6 +711,7 @@ const KNOWN_FLAGS = new Set([
   '--chat-label',
   '--mirror-dir',
   '--mention-name',
+  '--jupyter-hub',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -964,6 +979,8 @@ Usage: light-code [options]
                       so Rollback asks before undoing another chat's work
   --chat-label <name>  This chat's name in that ledger
   --mention-name <name>  This codebase's own @name, so @name:path works here too
+  --jupyter-hub <file>  The workspace is a copy of folders on a JupyterHub server:
+                      keep it in step and run code there (written by Fire Code)
   --mirror-dir <dir>  Keep copies of bucket folders here, shared with other
                       hosts on this machine (Fire Code), so a tool approved
                       once is approved for every codebase

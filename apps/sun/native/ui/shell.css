@@ -2039,3 +2039,34 @@ input[type='password']:focus {
   color: var(--text);
   font-family: var(--mono);
 }
+
+/* A hint under a field in a dialog. */
+.field-hint {
+  margin: 4px 0 2px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.modal textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Room under the "On this computer / On JupyterHub" switch, and between a token switch and its field. */
+.modal .body > .segmented:first-child {
+  margin-bottom: 16px;
+}
+
+.modal .body .segmented.small + input,
+.modal .body .segmented.small + select,
+.modal .body .segmented.small + .field-hint {
+  margin-top: 8px;
+}

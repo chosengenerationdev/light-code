@@ -106,6 +106,8 @@ pub struct LaunchSpec {
     pub siblings: Vec<(String, String)>,
     /// Shared by the codebase's chats: who changed which file, for rollback. And this chat's name.
     pub change_ledger: PathBuf,
+    /// The JupyterHub settings file, for a codebase that is hub folders.
+    pub jupyter_hub: Option<PathBuf>,
     /// One folder for every codebase's copies of bucket folders, so a tool approved once is approved
     /// in every codebase (the approval lives in the copied folder).
     pub mirror_dir: PathBuf,
@@ -161,6 +163,9 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         command.arg("--no-schedules");
     }
     command.arg("--mirror-dir").arg(&spec.mirror_dir);
+    if let Some(file) = &spec.jupyter_hub {
+        command.arg("--jupyter-hub").arg(file);
+    }
     command.arg("--mention-name").arg(&spec.mention_name);
     command.arg("--change-ledger").arg(&spec.change_ledger).arg("--chat-label").arg(&spec.chat_label);
     for (name, path) in &spec.siblings {

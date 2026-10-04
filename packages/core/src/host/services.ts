@@ -4,6 +4,7 @@ import type { HttpClient } from '../platform/http.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Transport } from '../platform/transport.js'
 import type { DebugSessionSnapshot } from '../tools/debugSession.js'
+import type { JupyterHubSpec } from '../jupyter/spec.js'
 
 /**
  * Everything the chat bridge needs from its host.
@@ -196,6 +197,11 @@ export interface HostServices {
    * does in every other one. Used for mentions only - it is not another codebase.
    */
   mentionName?: string
+  /**
+   * This codebase is folders on a JupyterHub server (Fire Code, host `--jupyter-hub`): the workspace
+   * is a local copy kept in step with them, and `hub_run`, `hub_inspect` and `hub_sync` exist.
+   */
+  jupyterHub?: JupyterHubSpec
   /**
    * Shared by every chat on this codebase (Fire Code): which chat changed which file, so a rollback
    * can ask before undoing another chat's work. `chat` is how the user knows this one.

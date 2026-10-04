@@ -176,7 +176,7 @@ const HANDLERS = {
   credentials(m) {
     model.credentials = m.credentials
     model.pipe = m.pipe
-    if (openModal?.kind === 'credentials' || openModal?.kind === 'environment') openModal.refresh()
+    if (['credentials', 'environment', 'add', 'hub'].includes(openModal?.kind)) openModal.refresh?.()
   },
   report(m) {
     if (openModal?.kind === 'report') openModal.show(m)
@@ -513,6 +513,16 @@ const WAITING_WORDS = {
 const waitingBadge = (count) =>
   el('span', { class: 'waiting-badge', title: 'Waiting for you', text: count > 1 ? String(count) : '!' })
 
+const hostOf = (url) => {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+/** Where a codebase lives: a folder on this computer, or folders on JupyterHub. */
+const whereIs = (project) => (project.hub ? `JupyterHub · ${project.hub.user}@${hostOf(project.hub.url)}` : shortPath(project.path))
+
 /** What the row says under the name: the agent's state when it has one, otherwise where it lives. */
 const describe = (project) => {
   const s = projectStatus(project)
@@ -526,7 +536,7 @@ const describe = (project) => {
   }
   if (s.schedule && s.phase === 'running') return ['Woken to run a schedule — sleeps again after', 'busy']
   if (s.phase === 'running' && s.agent === 'busy') return [s.working > 1 ? `${s.working} chats working…` : 'Working…', 'busy']
-  return [s.chats > 1 ? `${s.chats} chats · ${shortPath(project.path)}` : shortPath(project.path), '']
+  return [s.chats > 1 ? `${s.chats} chats · ${whereIs(project)}` : whereIs(project), '']
 }
 
 const dotClass = (id) => {
@@ -1242,6 +1252,7 @@ function showMenu(project, x, y) {
     item('pin', 'Keep awake', () => send('keepAwake', { id: project.id, on: !project.keepAwake }), { checked: project.keepAwake }),
     el('hr'),
     item('settings', 'Settings source…', () => openConfigChooser(project)),
+    project.hub ? item('link', 'JupyterHub settings…', () => openHubSettings(project)) : null,
     item('rename', 'Rename', () => startRename(project)),
     item('log', 'Reports…', () => openReportList(project)),
     item('log', 'View agent log', () => send('openLog', { id: current })),
@@ -1403,9 +1414,144 @@ function configChooser(state, rerender) {
   return parts
 }
 
+/** A draft of JupyterHub settings, from a codebase's or empty. */
+function hubDraft(hub) {
+  return {
+    url: hub?.url ?? '',
+    user: hub?.user ?? '',
+    server: hub?.server ?? '',
+    folders: (hub?.folders ?? []).map((f) => (f === '' ? '/' : f)).join('\n'),
+    kernel: hub?.kernel ?? '',
+    token: '',
+    credential: hub?.credential ?? '',
+    tokenMode: hub?.credential ? 'keep' : 'paste',
+    credentialLabel: hub?.credentialLabel,
+  }
+}
+
+/** What is sent for a draft; the token only when one was typed, and only to Fire Code itself. */
+function hubPayload(draft) {
+  return {
+    url: draft.url.trim(),
+    user: draft.user.trim(),
+    server: draft.server.trim() || null,
+    folders: draft.folders.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0),
+    kernel: draft.kernel.trim() || null,
+    token: draft.tokenMode === 'paste' ? draft.token.trim() || null : null,
+    credential: draft.tokenMode === 'saved' ? draft.credential || null : null,
+  }
+}
+
+const hubReady = (draft) =>
+  /^https?:\/\/\S+/.test(draft.url.trim()) &&
+  draft.user.trim().length > 0 &&
+  draft.folders.trim().length > 0 &&
+  (draft.tokenMode === 'keep' || (draft.tokenMode === 'paste' ? draft.token.trim().length > 0 : draft.credential.length > 0))
+
+function hubFields(draft, render) {
+  const field = (key, label, placeholder, hint, type = 'text') => {
+    const input = el(type === 'area' ? 'textarea' : 'input', {
+      ...(type === 'area' ? { rows: '4' } : { type }),
+      placeholder,
+      spellcheck: 'false',
+      autocomplete: 'off',
+      'aria-label': label,
+    })
+    input.value = draft[key]
+    input.addEventListener('input', () => {
+      draft[key] = input.value
+      render.soft?.()
+    })
+    return [el('label', { class: 'field-label', text: label }), input, hint ? el('div', { class: 'field-hint', text: hint }) : null]
+  }
+  const secrets = (model.credentials ?? []).filter((c) => c.kind !== 'login')
+  const tokenModes = [
+    ...(draft.credentialLabel || draft.tokenMode === 'keep' ? [['keep', 'Keep current']] : []),
+    ['paste', 'Paste a token'],
+    ['saved', 'Saved credential'],
+  ]
+  let tokenField
+  if (draft.tokenMode === 'paste') {
+    const input = el('input', { type: 'password', placeholder: 'From the hub: Token page (…/hub/token)', autocomplete: 'off', 'aria-label': 'JupyterHub token' })
+    input.value = draft.token
+    input.addEventListener('input', () => {
+      draft.token = input.value
+      render.soft?.()
+    })
+    tokenField = input
+  } else if (draft.tokenMode === 'saved') {
+    if (secrets.length === 0) {
+      tokenField = el('div', { class: 'field-hint', text: 'No saved credentials yet — paste the token instead, and it is saved as one.' })
+    } else {
+      const select = el('select', { 'aria-label': 'Credential holding the token', class: 'env-select' },
+        el('option', { value: '', text: 'Choose…', selected: draft.credential === '' }),
+        ...secrets.map((c) => el('option', { value: c.id, text: c.label, title: c.label, selected: c.id === draft.credential })),
+      )
+      select.addEventListener('change', () => {
+        draft.credential = select.value
+        render.soft?.()
+      })
+      tokenField = select
+    }
+  } else {
+    tokenField = el('div', { class: 'field-hint', text: `Using ${draft.credentialLabel ?? 'the saved token'}. Replace it in Credentials, or paste a new one here.` })
+  }
+  return [
+    el('div', { class: 'note', html: `${svg(ICONS.info)}<span>Fire Code keeps a copy of these folders on this computer so search is fast. Your agent's edits are saved back to the hub, never over a newer change made there, and code runs <b>on the hub</b>, where its libraries are.</span>` }),
+    ...field('url', 'Hub address', 'https://jupyter.example.com', null),
+    ...field('user', 'Your JupyterHub user name', 'e.g. ann', null),
+    ...field('folders', 'Folders on your hub server', 'projects/risk\nshared/reports', 'One per line, from your home folder on the hub. Write / for all of it.', 'area'),
+    el('label', { class: 'field-label', text: 'API token' }),
+    el('div', { class: 'segmented small' },
+      ...tokenModes.map(([mode, label]) =>
+        el('button', { class: draft.tokenMode === mode ? 'on' : '', text: label, onclick: () => { draft.tokenMode = mode; render() } }),
+      ),
+    ),
+    tokenField,
+    el('div', { class: 'field-hint', text: 'Kept encrypted in Credentials and only ever sent to this hub. Never shown again.' }),
+    ...field('server', 'Named server (optional)', 'Leave empty for your default server', null),
+    ...field('kernel', 'Kernel (optional)', 'e.g. python3 — empty uses the hub\'s default', null),
+  ]
+}
+
+function openHubSettings(project) {
+  showModal('hub', (scrim, modal) => {
+    const draft = hubDraft(project.hub)
+    const card = el('div', { class: 'modal' })
+    scrim.append(card)
+    let save
+    const render = () => {
+      // A redraw (choosing settings, switching the token field) keeps the place being read.
+      const scrolled = card.querySelector('.body')?.scrollTop ?? 0
+      save = el('button', {
+        class: 'primary',
+        text: 'Save and restart agent',
+        disabled: !hubReady(draft),
+        onclick: () => {
+          send('updateHub', { id: project.id, hub: hubPayload(draft) })
+          closeModal()
+        },
+      })
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: `JupyterHub — ${project.name}` }), el('p', { class: 'sub', text: 'Where these folders are, and how to reach them.' })),
+        el('div', { class: 'body' }, ...hubFields(draft, render)),
+        el('footer', {}, el('span', { class: 'spacer' }), el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }), save),
+      )
+      const body = card.querySelector('.body')
+      if (body) body.scrollTop = scrolled
+    }
+    render.soft = () => {
+      if (save) save.disabled = !hubReady(draft)
+    }
+    modal.refresh = render
+    render()
+    send('credentials')
+  })
+}
+
 function openAdd() {
   showModal('add', (scrim, modal) => {
-    const state = { folder: undefined, name: '', mode: 'new', source: undefined, sources: [], recent: [], loading: true, busy: false }
+    const state = { folder: undefined, name: '', mode: 'new', source: undefined, sources: [], recent: [], loading: true, busy: false, where: 'local', hub: hubDraft() }
     const card = el('div', { class: 'modal' })
     scrim.append(card)
     const render = () => {
@@ -1459,10 +1605,31 @@ function openAdd() {
               ...configChooser(state, render),
             ]
 
-      const ready = state.folder !== undefined && (state.mode === 'new' || state.source !== undefined) && !state.busy
+      // A redraw (choosing settings, switching the token field) keeps the place being read.
+      const scrolled = card.querySelector('.body')?.scrollTop ?? 0
+      const onHub = state.where === 'hub'
+      const settingsReady = state.mode === 'new' || state.source !== undefined
+      const ready = (onHub ? hubReady(state.hub) : state.folder !== undefined) && settingsReady && !state.busy
+      const nameInput = el('input', { type: 'text', value: state.name, placeholder: 'Shown in the sidebar (optional)' })
+      nameInput.addEventListener('input', () => (state.name = nameInput.value))
+      const hubPart = [
+        ...hubFields(state.hub, render),
+        el('label', { class: 'field-label', text: 'Name' }),
+        nameInput,
+        el('label', { class: 'field-label', text: 'Light Code settings' }),
+        ...configChooser(state, render),
+      ]
       card.replaceChildren(
         el('header', {}, el('h2', { text: 'Add a codebase' }), el('p', { class: 'sub', text: 'It gets its own Light Code agent, running beside the others.' })),
-        el('div', { class: 'body' }, ...folderPart),
+        el(
+          'div',
+          { class: 'body' },
+          el('div', { class: 'segmented' },
+            el('button', { class: onHub ? '' : 'on', text: 'On this computer', onclick: () => { state.where = 'local'; render() } }),
+            el('button', { class: onHub ? 'on' : '', text: 'On JupyterHub', onclick: () => { state.where = 'hub'; render() } }),
+          ),
+          ...(onHub ? hubPart : folderPart),
+        ),
         el(
           'footer',
           {},
@@ -1475,7 +1642,8 @@ function openAdd() {
             onclick: () => {
               state.busy = true
               render()
-              send('add', { path: state.folder, name: state.name, mode: state.mode, source: state.mode === 'new' ? null : state.source })
+              if (state.where === 'hub') send('addHub', { name: state.name, hub: hubPayload(state.hub), mode: state.mode, source: state.mode === 'new' ? null : state.source })
+              else send('add', { path: state.folder, name: state.name, mode: state.mode, source: state.mode === 'new' ? null : state.source })
               setTimeout(() => {
                 state.busy = false
                 if (openModal === modal) render()
@@ -1484,7 +1652,15 @@ function openAdd() {
           }),
         ),
       )
+      const body = card.querySelector('.body')
+      if (body) body.scrollTop = scrolled
     }
+    // Typing in the hub form only re-checks the button, so the box being typed in keeps its focus.
+    render.soft = () => {
+      const button = card.querySelector('footer .primary')
+      if (button) button.disabled = !(hubReady(state.hub) && (state.mode === 'new' || state.source !== undefined) && !state.busy)
+    }
+    modal.refresh = render
     modal.onFolder = (m) => {
       if (m.existingId) {
         closeModal()
@@ -1514,6 +1690,7 @@ function openAdd() {
     }
     render()
     send('sources')
+    send('credentials')
   })
 }
 

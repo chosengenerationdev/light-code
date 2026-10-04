@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { Agent, ProxyAgent, fetch as undiciFetch, type Dispatcher } from 'undici'
+import { Agent, ProxyAgent, WebSocket, fetch as undiciFetch, type Dispatcher } from 'undici'
 import { describeProxyEnvironment, proxyForUrl } from './proxy.js'
 import { buildConnectOptions } from './tls.js'
 
@@ -61,6 +61,21 @@ export interface HttpResponse {
  */
 export interface HttpClient {
   request(url: string, options?: HttpRequestOptions): Promise<HttpResponse>
+  /**
+   * A WebSocket through the same TLS material and proxy routing as `request` - a Jupyter kernel
+   * speaks only over one. Optional, so test fakes and hosts without it simply lack the feature.
+   */
+  openWebSocket?(url: string, options?: { headers?: Record<string, string>; tls?: TlsOptions }): WebSocketConnection
+}
+
+/** The few things a caller needs from a WebSocket: text frames in and out, and its end. */
+export interface WebSocketConnection {
+  /** Resolves once connected; rejects with the reason it could not be. */
+  readonly opened: Promise<void>
+  send(text: string): void
+  close(): void
+  onMessage(listener: (text: string) => void): void
+  onClose(listener: (reason: string) => void): void
 }
 
 /**
@@ -178,6 +193,53 @@ export class FetchHttpClient implements HttpClient {
     this.proxyAgents.clear()
   }
 
+  openWebSocket(url: string, options: { headers?: Record<string, string>; tls?: TlsOptions } = {}): WebSocketConnection {
+    let target: URL | undefined
+    try {
+      // The proxy rules are written for http(s); a ws(s) URL goes the way its http twin would.
+      target = new URL(url.replace(/^ws/i, 'http'))
+    } catch {
+      // Left to the WebSocket to reject.
+    }
+    const proxy = target === undefined ? undefined : this.proxyFor(target, options.tls)
+    const dispatcher = (proxy ?? this.agentFor(options.tls ?? {})) as unknown as Dispatcher
+    const socket = new WebSocket(url, { dispatcher, ...(options.headers !== undefined ? { headers: options.headers } : {}) })
+    const messages: ((text: string) => void)[] = []
+    const closes: ((reason: string) => void)[] = []
+    let closed = false
+    const finish = (reason: string): void => {
+      if (closed) return
+      closed = true
+      for (const listener of closes) listener(reason)
+    }
+    const opened = new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve())
+      socket.addEventListener('error', (event) => {
+        const detail = (event as { error?: unknown }).error
+        const reason = detail instanceof Error ? describeCause(detail) : 'the connection failed'
+        reject(new Error(reason))
+        finish(reason)
+      })
+    })
+    // Rejected only for whoever awaits it; an unawaited rejection must not end the process.
+    opened.catch(() => undefined)
+    socket.addEventListener('message', (event) => {
+      const data = (event as { data: unknown }).data
+      if (typeof data === 'string') for (const listener of messages) listener(data)
+    })
+    socket.addEventListener('close', (event) => {
+      const { code, reason } = event as unknown as { code: number; reason: string }
+      finish(reason.length > 0 ? reason : `closed (${String(code)})`)
+    })
+    return {
+      opened,
+      send: (text) => socket.send(text),
+      close: () => socket.close(),
+      onMessage: (listener) => messages.push(listener),
+      onClose: (listener) => closes.push(listener),
+    }
+  }
+
   async request(url: string, options: HttpRequestOptions = {}): Promise<HttpResponse> {
     const init: Parameters<typeof undiciFetch>[1] = {}
     if (options.method !== undefined) init.method = options.method
@@ -214,4 +276,15 @@ export class FetchHttpClient implements HttpClient {
       body: response.body as ReadableStream<Uint8Array> | null,
     }
   }
+}
+
+/** undici hides the real reason on `.cause`, sometimes twice over; the innermost message says most. */
+function describeCause(error: Error): string {
+  let current: unknown = error
+  let message = error.message
+  for (let depth = 0; depth < 4 && current instanceof Error; depth++) {
+    if (current.message.length > 0) message = current.message
+    current = (current as { cause?: unknown }).cause
+  }
+  return message
 }

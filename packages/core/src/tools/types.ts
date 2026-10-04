@@ -48,6 +48,11 @@ export interface ToolExecutionContext {
   readStamps?: Map<string, string>
   /** Files this chat's edit tools changed, so Rollback can undo only those when chats share a codebase. */
   changedFiles?: Set<string>
+  /**
+   * Called after an edit tool wrote a file, with what to tell the model about it - a JupyterHub
+   * codebase saves the file to the hub here (`jupyter/mirror.ts`). Absent everywhere else.
+   */
+  afterEdit?: (realPath: string) => Promise<string | undefined>
   /** Language-server diagnostics, where the host has them (`lsp/manager.ts`; VS Code's own in the extension). */
   diagnostics?: DiagnosticsProvider
   /**

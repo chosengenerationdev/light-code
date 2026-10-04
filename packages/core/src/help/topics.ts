@@ -834,6 +834,47 @@ desktops of the same person; importing the file is how a second machine is set u
 `,
   },
   {
+    id: 'jupyterhub',
+    title: 'JupyterHub',
+    keywords: [
+      'jupyterhub', 'jupyter hub', 'jupyter', 'hub', 'notebook server', 'kernel', 'hub token', 'api token',
+      'hub_run', 'hub_inspect', 'hub_sync', 'run on the hub', 'hub libraries', 'library only on the hub',
+      'remote folder', 'remote code', 'not saved to the hub', 'changed on the hub', 'conflict', 'merge',
+    ],
+    body: `
+**Add codebase → On JupyterHub** (Fire Code): the hub's address, your hub user name, the folders on
+your hub server (one per line, from your home folder; / for all of it), and an API token - create one
+on the hub's Token page (\`<hub>/hub/token\`). The token is saved encrypted in Credentials as
+"JupyterHub <user>@<host>" and only ever sent to that hub, in a header. Optional: a named server and
+a kernel (e.g. python3). Right-click the codebase → JupyterHub settings… changes them later.
+Your hub server must be running; if it is not, the agent says so - start it from the hub's home page.
+
+**How it works**: Fire Code keeps a copy of the folders on this computer, so reading and searching
+are as fast as for any local codebase (and the Rust search tools apply). Changes on the hub are
+fetched when the agent starts and every 5 minutes; \`hub_sync\` "pull" fetches now. Every edit the
+agent makes - approved with a diff, as always - is **saved straight back to the hub**, and the edit's
+result says so. Nothing is ever overwritten that somebody changed: an edit to a file that changed on
+the hub meanwhile is NOT saved (it is kept here; compare with \`hub_sync\` "hub_version" and choose
+how to merge, or take theirs with "use_hub_version"), and fetching never replaces a local edit.
+A file deleted on the hub is removed here only if unchanged here. Notebook checkpoints, \`__pycache__\`,
+\`.git\` and hidden files are not copied; files over 20 MB are listed but not copied.
+
+**Code runs on the hub**, where its libraries are: \`hub_run\` runs Python in a kernel kept for the
+session (variables persist), a script from the copy (saved to the hub first, run from its own folder,
+with arguments), or a shell command on the hub server. Every run asks first and shows the code - for
+a script, the script itself; "Always allow" works for an identical command. Files a run writes on the
+hub are fetched afterwards. Stop or a time limit interrupts the kernel; a kernel that ignores the
+interrupt is replaced, and the result says earlier variables are gone. \`hub_inspect\` looks up a
+library that exists only on the hub - signature, docs, members and (with source) its code - or lists
+the hub's installed packages; it asks first because importing runs the module's code.
+The local language server cannot see hub-only libraries, so "import could not be resolved" is not
+reported for these codebases. Commands run with execute_command run on this computer, not the hub.
+
+**Not done for you**: a file deleted here is not deleted on the hub (\`hub_sync\` "status" lists it);
+edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push".
+`,
+  },
+  {
     id: 'fire-code',
     title: 'Fire Code: several codebases in one Windows window',
     keywords: [

@@ -1,5 +1,12 @@
 # @chosengeneration/fire-code
 
+## 0.8.0
+
+- **JupyterHub folders as a codebase.** Add codebase → **On JupyterHub**: the hub address, your user name, the folders, and an API token (kept encrypted in Credentials, only ever sent to that hub). Fire Code keeps a copy here so reading and searching are fast; every edit the agent makes is saved back to the hub, and never over a change made there meanwhile - that edit is kept here and reported instead. Changes on the hub are fetched every few minutes.
+- **Code runs on the hub**, where its libraries are: `hub_run` runs Python in a kernel kept for the session, a script from its own folder, or a shell command; `hub_inspect` looks up a library that exists only on the hub. Every run asks first and shows the code.
+- Right-click a hub codebase → **JupyterHub settings…** to change the address, folders, kernel or token.
+- Carries Light Code 0.114.0.
+
 ## 0.7.1
 
 - **A codebase's own @ name works in its own chats** (`@tyj:src/main.rs` in tyj's chat). Before, only other codebases' names did, so the picker stayed empty.
