@@ -1,5 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
-import type { JupyterHubSpec } from '@light-code/core'
+import type { CredentialSummary, JupyterHubSpec } from '@light-code/core'
 import { CredentialPointerStore, replaceFile, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -358,6 +358,10 @@ export interface SessionOptions {
   mentionName?: string
   /** The workspace is a copy of JupyterHub folders (Fire Code). */
   jupyterHub?: JupyterHubSpec
+  /** Python tool code approved anywhere on this machine (Fire Code). */
+  machineApprovalsFile?: string
+  /** Fire Code's saved credentials, by name, for `light_code.credential`. */
+  savedCredentials?: () => Promise<readonly CredentialSummary[]>
   /** Fire Code's parallel Rust file helper; adds find_files, read_many_files, big_file, query_table. */
   fastFs?: string
   ripgrepPath: () => string | undefined
@@ -509,6 +513,8 @@ export async function createSession(
     ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
     ...(options.mentionName !== undefined ? { mentionName: options.mentionName } : {}),
     ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
+    ...(options.machineApprovalsFile !== undefined ? { machineApprovalsFile: options.machineApprovalsFile } : {}),
+    ...(options.savedCredentials !== undefined ? { savedCredentials: options.savedCredentials } : {}),
     ...(options.desktopNotify === true
       ? {
           desktopNotify: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => {

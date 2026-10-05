@@ -219,6 +219,15 @@ impl Paths {
     pub fn secrets_file(&self) -> PathBuf {
         self.root.join("secrets.json")
     }
+    /// Where a JupyterHub codebase's local copy lives: beside Fire Code's data folder, not inside it.
+    ///
+    /// Inside was the first version (0.8.0), and it was wrong: the whole data folder is on the
+    /// credential floor (`fs/reach.ts`) because it holds the vault, so the Rust file tools and the
+    /// fast search refused to look at a hub codebase's own files.
+    pub fn hub_copy(&self, project_id: &str) -> PathBuf {
+        let name = self.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "fire-code".into());
+        self.root.with_file_name(format!("{name}-hub")).join(project_id)
+    }
     /// A codebase's data folder; an extra chat keeps its history in a folder of its own inside it.
     pub fn project_dir(&self, key: &str) -> PathBuf {
         let base = self.root.join("projects").join(project_of(key));

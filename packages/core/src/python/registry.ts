@@ -5,6 +5,7 @@ import path from 'node:path'
 import { normalizeForComparison } from '../fs/confine.js'
 import type { Logger } from '../logging/logger.js'
 import { replaceFile } from '../platform/node/replaceFile.js'
+import type { MachineApprovals } from './machineApprovals.js'
 import type { PythonWorker, WorkerToolDescription } from './worker.js'
 
 /**
@@ -62,6 +63,8 @@ export type ToolLoadIssue =
 
 export interface LoadedRegistry {
   tools: RegisteredTool[]
+  /** Tools approved here just now because the identical code was approved in another codebase. */
+  approvedElsewhere?: string[]
   /**
    * Surfaced rather than logged. A refused tool is either an attack or a mistake, and both
    * need saying out loud — silently offering fewer tools than the user expects is the one
@@ -135,10 +138,32 @@ export async function loadRegistry(
   logger: Logger,
   /** `name -> hash` the user declined. See `declinedTools` in the config schema. */
   declined?: Record<string, string> | undefined,
+  /** Code approved elsewhere on this machine (Fire Code), by hash. See `machineApprovals.ts`. */
+  trusted?: MachineApprovals | undefined,
 ): Promise<LoadedRegistry> {
   const registry = await readRegistryFile(toolsDir)
   const tools: RegisteredTool[] = []
   const issues: ToolLoadIssue[] = []
+  const approvedElsewhere: string[] = []
+
+  /*
+   * These exact bytes were approved in another codebase on this machine: approve them here too, the
+   * same way the button would - loaded in the worker first, so broken code is never pinned (§13).
+   * Anything that fails falls back to the ordinary "waiting for approval".
+   */
+  const adoptApproval = async (name: string, filePath: string, source: string, hash: string): Promise<boolean> => {
+    if (trusted === undefined || worker === undefined || !(await trusted.has(hash))) return false
+    try {
+      const described = await worker.describe(name, filePath)
+      await approveTool(toolsDir, name, source, described)
+      tools.push({ name, description: described.description, schema: described.schema, hash, filePath, sourceDir: toolsDir })
+      approvedElsewhere.push(name)
+      return true
+    } catch (error) {
+      logger.debug(`could not adopt the machine approval of "${name}"`, String(error))
+      return false
+    }
+  }
 
   let entries: string[]
   try {
@@ -178,10 +203,11 @@ export async function loadRegistry(
 
     const approved = registry.tools[name]
     if (approved === undefined) {
-      issues.push({ kind: 'unapproved', name, filePath })
+      if (!(await adoptApproval(name, filePath, source, actual))) issues.push({ kind: 'unapproved', name, filePath })
       continue
     }
     if (actual !== approved.hash) {
+      if (await adoptApproval(name, filePath, source, actual)) continue
       // Loudly refused, never quietly reloaded. This is the case the pin exists for.
       issues.push({ kind: 'hash-mismatch', name, filePath, expected: approved.hash, actual })
       logger.warn(`python tool "${name}" changed since it was approved; refusing to load it`)
@@ -212,7 +238,7 @@ export async function loadRegistry(
     }
   }
 
-  return { tools, issues }
+  return { tools, issues, ...(approvedElsewhere.length > 0 ? { approvedElsewhere } : {}) }
 }
 
 /** Records an approval: the hash here is the source the user was actually shown. */
@@ -310,6 +336,7 @@ export async function loadRegistries(
   worker: PythonWorker | undefined,
   logger: Logger,
   declined?: Record<string, string> | undefined,
+  trusted?: MachineApprovals | undefined,
 ): Promise<LoadedRegistry> {
   /*
    * Deduplicated **case-insensitively on Windows** (§16).
@@ -331,11 +358,13 @@ export async function loadRegistries(
 
   const tools: RegisteredTool[] = []
   const issues: ToolLoadIssue[] = []
+  const approvedElsewhere: string[] = []
   const claimed = new Map<string, RegisteredTool>()
 
   for (const dir of unique) {
-    const loaded = await loadRegistry(dir, worker, logger, declined)
+    const loaded = await loadRegistry(dir, worker, logger, declined, trusted)
     issues.push(...loaded.issues)
+    approvedElsewhere.push(...(loaded.approvedElsewhere ?? []))
     for (const tool of loaded.tools) {
       const winner = claimed.get(tool.name)
       if (winner !== undefined) {
@@ -399,7 +428,17 @@ export async function loadRegistries(
   // Sorted so the prompt's tool block has a stable order regardless of how the folders are
   // arranged — the same cache reasoning as everything else at the front of the prompt (§12).
   tools.sort((a, b) => a.name.localeCompare(b.name))
-  return { tools, issues: reported }
+  /*
+   * Every tool that loaded is approved code on this machine: recorded, so another codebase holding
+   * the identical file adopts the approval instead of asking again. Recording here rather than at
+   * each approve button means no approval path can forget to.
+   */
+  if (trusted !== undefined && tools.length > 0) {
+    await trusted.add(tools.map((tool) => ({ hash: tool.hash, name: tool.name }))).catch((error: unknown) => {
+      logger.debug('could not record machine approvals', String(error))
+    })
+  }
+  return { tools, issues: reported, ...(approvedElsewhere.length > 0 ? { approvedElsewhere } : {}) }
 }
 
 /** True only when both files can be read and hold the same bytes; any doubt keeps the issue. */

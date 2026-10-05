@@ -75,65 +75,78 @@ def call_tool(name: str, **arguments: Any) -> Any:
             "a tool calling itself, or two calling each other"
         )
 
+    _CALL_DEPTH += 1
+    try:
+        return _ask_host({"method": "call_tool", "name": name, "arguments": arguments}, name)
+    finally:
+        _CALL_DEPTH -= 1
+
+
+def credential(name: str) -> Any:
+    """A saved credential from Fire Code's credential manager, by its name.
+
+    Returns the value as a string, or ``{"username": ..., "password": ...}`` for a login.
+
+    Only credentials this tool declares are given, in a module-level list::
+
+        __credentials__ = ["Corp LDAP", "Jira token"]
+
+    That line is part of the code you approved, so adding a credential means approving the tool
+    again. Nothing is put in the environment, and any value handed out is blanked from what the
+    tool returns before the model sees it. Raises ToolError with the reason when refused.
+    """
+    return _ask_host({"method": "credential", "name": name}, f"credential {name!r}")
+
+
+def _ask_host(payload: dict, name: str) -> Any:
+    """Sends one request up to the host and waits for its answer, serving nested requests."""
     global _CALL_SEQ
     _CALL_SEQ += 1
     # A counter, not ``id()``: CPython reuses an address the moment the object is collected, so
     # two calls in a row could be handed the same token.
     token = f"cb{_CALL_SEQ}"
-    _CALL_DEPTH += 1
-    try:
-        _respond(
-            {
-                "callback": token,
-                "method": "call_tool",
-                "name": name,
-                "arguments": arguments,
-                "caller": _CURRENT_TOOL,
-            }
+    _respond({"callback": token, "caller": _CURRENT_TOOL, **payload})
+    # Read until the answer to *this* call arrives. Anything else on the stream would be a
+    # protocol error rather than something to skip, so it is reported rather than ignored.
+    while True:
+        line = _REAL_STDIN.readline()
+        if not line:
+            raise ToolError("the host closed the connection while waiting for " + name)
+        line = line.strip()
+        if not line:
+            continue
+        frame = json.loads(line)
+
+        if frame.get("callback") == token:
+            if frame.get("ok"):
+                return frame.get("value")
+            raise ToolError(frame.get("error") or f"{name} failed")
+
+        # An ordinary request, arriving while this tool is blocked.
+        #
+        # It happens for real: the tool this one called is *another Python tool*, so the host
+        # sends it down the same pipe while we are still waiting. Skipping it would deadlock —
+        # the host waits for a reply that nobody is reading for — and treating it as an
+        # out-of-order answer, which the first version did, fails every nested call between
+        # two Python tools. So it is served here and the wait resumes.
+        if "method" in frame:
+            request_id = frame.get("id")
+            try:
+                _respond({"id": request_id, "ok": True, "value": _handle(frame)})
+            except Exception as error:  # noqa: BLE001 - every failure goes back as a result
+                _respond(
+                    {
+                        "id": request_id,
+                        "ok": False,
+                        "error": f"{type(error).__name__}: {error}",
+                        "traceback": traceback.format_exc(),
+                    }
+                )
+            continue
+
+        raise ToolError(
+            "unexpected frame while waiting for " + name + "; this is a bug in Light Code"
         )
-        # Read until the answer to *this* call arrives. Anything else on the stream would be a
-        # protocol error rather than something to skip, so it is reported rather than ignored.
-        while True:
-            line = _REAL_STDIN.readline()
-            if not line:
-                raise ToolError("the host closed the connection while waiting for " + name)
-            line = line.strip()
-            if not line:
-                continue
-            frame = json.loads(line)
-
-            if frame.get("callback") == token:
-                if frame.get("ok"):
-                    return frame.get("value")
-                raise ToolError(frame.get("error") or f"{name} failed")
-
-            # An ordinary request, arriving while this tool is blocked.
-            #
-            # It happens for real: the tool this one called is *another Python tool*, so the host
-            # sends it down the same pipe while we are still waiting. Skipping it would deadlock —
-            # the host waits for a reply that nobody is reading for — and treating it as an
-            # out-of-order answer, which the first version did, fails every nested call between
-            # two Python tools. So it is served here and the wait resumes.
-            if "method" in frame:
-                request_id = frame.get("id")
-                try:
-                    _respond({"id": request_id, "ok": True, "value": _handle(frame)})
-                except Exception as error:  # noqa: BLE001 - every failure goes back as a result
-                    _respond(
-                        {
-                            "id": request_id,
-                            "ok": False,
-                            "error": f"{type(error).__name__}: {error}",
-                            "traceback": traceback.format_exc(),
-                        }
-                    )
-                continue
-
-            raise ToolError(
-                "unexpected frame while waiting for " + name + "; this is a bug in Light Code"
-            )
-    finally:
-        _CALL_DEPTH -= 1
 
 
 def _install_helper_module() -> None:
@@ -147,6 +160,7 @@ def _install_helper_module() -> None:
         return
     module = types.ModuleType("light_code")
     module.call_tool = call_tool  # type: ignore[attr-defined]
+    module.credential = credential  # type: ignore[attr-defined]
     module.ToolError = ToolError  # type: ignore[attr-defined]
     sys.modules["light_code"] = module
 
@@ -275,6 +289,10 @@ def _kernel_preamble() -> str:
         "a Jupyter kernel: the callback channel belongs to the Light Code worker, and the "
         "kernel has no route back to the host.')\n"
         "    _lc_helper.call_tool = _lc_no_call\n"
+        "    def _lc_no_credential(*_a, **_k):\n"
+        "        raise _LcToolError('credential() is not available to a tool running inside a "
+        "Jupyter kernel: the request would have no route back to the host.')\n"
+        "    _lc_helper.credential = _lc_no_credential\n"
         "    _lc_helper.ToolError = _LcToolError\n"
         "    _lc_sys.modules['light_code'] = _lc_helper\n"
     )

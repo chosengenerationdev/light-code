@@ -72,6 +72,9 @@ describe('reach anywhere', () => {
     expect(isSecretPath('C:\\Users\\a\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data')).toBe(true)
     expect(isSecretPath('\\\\server\\share\\certs\\client.pfx')).toBe(true)
     expect(isSecretPath('C:\\Users\\a\\AppData\\Local\\fire-code\\vault.key')).toBe(true)
+    // A JupyterHub codebase's copy sits beside the data folder, where the file tools may look -
+    // inside it (0.8.0) the Rust search and file tools refused the codebase's own files.
+    expect(isSecretPath('C:\\Users\\a\\AppData\\Local\\fire-code-hub\\p1\\pricing\\model.py')).toBe(false)
     expect(isSecretPath('\\\\server\\finance\\q3\\report.xlsx')).toBe(false)
     expect(isSystemPath('C:\\Windows\\System32\\drivers\\etc\\hosts')).toBe(true)
     expect(isSystemPath('C:\\Program Files (x86)\\App\\x.ini')).toBe(true)

@@ -5,6 +5,7 @@ import type { SecretStore } from '../platform/secrets.js'
 import type { Transport } from '../platform/transport.js'
 import type { DebugSessionSnapshot } from '../tools/debugSession.js'
 import type { JupyterHubSpec } from '../jupyter/spec.js'
+import type { CredentialSummary } from '../secrets/credentials.js'
 
 /**
  * Everything the chat bridge needs from its host.
@@ -202,6 +203,16 @@ export interface HostServices {
    * is a local copy kept in step with them, and `hub_run`, `hub_inspect` and `hub_sync` exist.
    */
   jupyterHub?: JupyterHubSpec
+  /**
+   * Fire Code's saved credentials (names and kinds, never values), so a Python tool can read one it
+   * declares with `light_code.credential`. Absent wherever there is no credential manager.
+   */
+  savedCredentials?: () => Promise<readonly CredentialSummary[]>
+  /**
+   * A file of Python tool code approved anywhere on this machine (Fire Code), so the identical tool
+   * in another codebase is not reviewed again. See `python/machineApprovals.ts`.
+   */
+  machineApprovalsFile?: string
   /**
    * Shared by every chat on this codebase (Fire Code): which chat changed which file, so a rollback
    * can ask before undoing another chat's work. `chat` is how the user knows this one.

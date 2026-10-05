@@ -1,5 +1,12 @@
 # @chosengeneration/fire-code
 
+## 0.9.0
+
+- **Approve a Python tool once for every codebase.** Approving records the tool's exact code for this machine; every codebase holding the identical file approves it too, within seconds, with a note saying so - wherever the copies live. A changed byte still asks; a decline stays a decline.
+- **Python tools can read saved credentials safely.** A tool declares what it needs, `__credentials__ = ["Corp LDAP"]`, and reads it with `light_code.credential("Corp LDAP")`. Only declared credentials are given, only to the approved tool, and any value handed out shows as [REDACTED] in what reaches the model. The approval card and diff say "Reads saved credentials: ..." (Fire Code; elsewhere use a secret variable).
+- **Fix: JupyterHub copies moved out of Fire Code's protected data folder** (to `fire-code-hub` beside it). Inside it, the fast Rust search and file tools refused the codebase's own files. Copies made by 0.8.0 are moved on the next start.
+- Carries Light Code 0.115.0.
+
 ## 0.8.0
 
 - **JupyterHub folders as a codebase.** Add codebase → **On JupyterHub**: the hub address, your user name, the folders, and an API token (kept encrypted in Credentials, only ever sent to that hub). Fire Code keeps a copy here so reading and searching are fast; every edit the agent makes is saved back to the hub, and never over a change made there meanwhile - that edit is kept here and reported instead. Changes on the hub are fetched every few minutes.

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { declaredCredentials } from './declaredCredentials.js'
 import path from 'node:path'
 import { z } from 'zod'
 import { confine } from '../fs/confine.js'
@@ -292,12 +293,18 @@ function makeWriteTool(
        * hashed, so it is what has to be reviewed (invariant 8) — and where it came from is part
        * of the judgement, since source a second model wrote is not source this conversation did.
        */
+      // Where it came from, and - said plainly, not left to be spotted - which saved credentials it reads.
+      const reads = declaredCredentials(source)
+      const notes = [
+        ...(producedBy !== undefined ? [`Written by ${producedBy}`] : []),
+        ...(reads.length > 0 ? [`Reads saved credentials: ${reads.join(', ')}`] : []),
+      ]
       return {
         kind: 'diff',
         path: filePath,
         before,
         after: source,
-        ...(producedBy !== undefined ? { note: `Written by ${producedBy}` } : {}),
+        ...(notes.length > 0 ? { note: notes.join(' · ') } : {}),
       }
     },
 
@@ -475,7 +482,11 @@ export function createCreatePythonTool(context: PythonToolContext): Tool<CreateP
       'Only other Python tools and MCP tools can be reached that way — running commands, editing ' +
       'files and creating tools are deliberately out of reach from inside a tool body. The user ' +
       'approves each nested call as they would any other, so use it for composing work rather ' +
-      'than for slipping past a prompt.',
+      'than for slipping past a prompt. ' +
+      'Passwords and tokens are never written into a tool: in Fire Code, declare the saved credentials ' +
+      'it needs at module level, `__credentials__ = ["Corp LDAP"]`, and read one with ' +
+      '`light_code.credential("Corp LDAP")` (a string, or {"username", "password"} for a login). ' +
+      'Never print or return a credential.',
   })
 }
 
@@ -674,8 +685,15 @@ export function adaptPythonTool(
     /** From the tool's own header, for searches scoped to a project or author. */
     project?: string | undefined
     author?: string | undefined
+    /**
+     * Blanks saved-credential values this session handed to Python tools, before the result
+     * reaches the model - a tool that prints or returns the password it was given must not put it
+     * into the conversation.
+     */
+    redact?: ((text: string) => string) | undefined
   },
 ): Tool<Record<string, unknown>> {
+  const clean = context.redact ?? ((text: string) => text)
   const missing = context.missingPackages ?? []
   /*
    * Said in the description, so the model knows *before* calling — which is when it can still
@@ -718,7 +736,7 @@ export function adaptPythonTool(
         const printed = call.stdout.trim()
         const value =
           typeof call.result === 'string' ? call.result : JSON.stringify(call.result, null, 2)
-        return { content: printed.length > 0 ? `${value}\n\n--- stdout ---\n${printed}` : value }
+        return { content: clean(printed.length > 0 ? `${value}\n\n--- stdout ---\n${printed}` : value) }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         const traceback = (error as { traceback?: string }).traceback
@@ -731,7 +749,7 @@ export function adaptPythonTool(
             : context.canInstall === true
               ? `\n\nThe module "${module}" is not installed in the tools' Python environment. Ask the user whether to install the package that provides it (install_python_packages), then call this tool again.`
               : `\n\nThe module "${module}" is not installed in the tools' Python environment, and Light Code cannot install into it. Tell the user which package to install.`
-        return { content: text + advice, isError: true }
+        return { content: clean(text + advice), isError: true }
       }
     },
   }

@@ -283,13 +283,14 @@ async function main(): Promise<void> {
   const mentionName = valueOf(args, '--mention-name')
   // A codebase that is JupyterHub folders: its connection, written by Fire Code (never a workspace file).
   const jupyterHubFile = valueOf(args, '--jupyter-hub')
+  // Python tool code approved anywhere on this machine (Fire Code), shared by every codebase.
+  const approvedToolsFile = valueOf(args, '--approved-tools')
   let jupyterHub: JupyterHubSpec | undefined
   if (jupyterHubFile !== undefined) {
     try {
       jupyterHub = parseJupyterHubSpec(await fs.readFile(jupyterHubFile, 'utf8'))
     } catch (error) {
-      process.stderr.write(`light-code: --jupyter-hub ${jupyterHubFile}: ${error instanceof Error ? error.message : String(error)}
-`)
+      process.stderr.write(`light-code: --jupyter-hub ${jupyterHubFile}: ${error instanceof Error ? error.message : String(error)}\n`)
       process.exitCode = 1
       return
     }
@@ -426,6 +427,7 @@ async function main(): Promise<void> {
     ...(mirrorDir !== undefined ? { mirrorRoot: path.resolve(mirrorDir) } : {}),
     ...(mentionName !== undefined && mentionName.length > 0 ? { mentionName } : {}),
     ...(jupyterHub !== undefined ? { jupyterHub } : {}),
+    ...(approvedToolsFile !== undefined ? { machineApprovalsFile: path.resolve(approvedToolsFile) } : {}),
     ...(changeLedgerFile !== undefined ? { changeLedger: { file: changeLedgerFile, chat: valueOf(args, '--chat-label') ?? 'another chat' } } : {}),
     /*
      * Decoded once, at startup.
@@ -712,6 +714,7 @@ const KNOWN_FLAGS = new Set([
   '--mirror-dir',
   '--mention-name',
   '--jupyter-hub',
+  '--approved-tools',
   '--no-open',
   '--no-token',
   '--public-url',
@@ -981,6 +984,9 @@ Usage: light-code [options]
   --mention-name <name>  This codebase's own @name, so @name:path works here too
   --jupyter-hub <file>  The workspace is a copy of folders on a JupyterHub server:
                       keep it in step and run code there (written by Fire Code)
+  --approved-tools <file>  Python tool code approved on this machine, shared by
+                      every host given the same file: identical tools are
+                      reviewed once (Fire Code)
   --mirror-dir <dir>  Keep copies of bucket folders here, shared with other
                       hosts on this machine (Fire Code), so a tool approved
                       once is approved for every codebase

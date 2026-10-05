@@ -218,3 +218,5 @@ export {
   type CredentialChoice,
   type CredentialSummary,
 } from './secrets/credentials.js'
+
+export { declaredCredentials } from './python/declaredCredentials.js'

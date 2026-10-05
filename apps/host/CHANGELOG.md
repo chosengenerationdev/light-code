@@ -1,5 +1,12 @@
 # @chosengeneration/light-code
 
+## 0.115.0
+
+### Minor Changes
+
+- `--approved-tools <file>`: Python tool code approved on this machine, shared by every host given the same file, so identical tools are reviewed once (Fire Code).
+- **Python tools can read saved credentials safely.** A tool declares what it needs, `__credentials__ = ["Corp LDAP"]`, and reads it with `light_code.credential("Corp LDAP")`. Only declared credentials are given, only to the approved tool, and any value handed out shows as [REDACTED] in what reaches the model. The approval card and diff say "Reads saved credentials: ..." (Fire Code; elsewhere use a secret variable).
+
 ## 0.114.0
 
 ### Minor Changes

@@ -238,6 +238,7 @@ describe('finding the right topic', () => {
       ['how do I refer to a file in another codebase', 'fire-code'],
       ['how do I know which codebase is waiting for me', 'fire-code'],
       ['how do I work on my jupyterhub folders', 'jupyterhub'],
+      ['how can a python tool read a password from credentials', 'python-tools'],
       ['my edit was not saved to the hub', 'jupyterhub'],
       ['run a script that needs a library only on the hub', 'jupyterhub'],
       ['what is the short name of a codebase for @', 'fire-code'],

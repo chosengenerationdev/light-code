@@ -9,6 +9,9 @@ import fs from 'node:fs/promises'
 import { listSkillImages, skillImageDataUri, SKILL_IMAGE_DIR } from '../skills/images.js'
 import { listSkillFiles } from '../skills/files.js'
 import { createHubRuntime, hubGuidance, withoutMissingImports } from '../jupyter/runtime.js'
+import { FileMachineApprovals } from '../python/machineApprovals.js'
+import { readToolCredential } from '../python/toolCredentials.js'
+import type { CredentialSummary } from '../secrets/credentials.js'
 import { createHubTools, describePull } from '../jupyter/tools.js'
 import {
   applyImport,
@@ -517,6 +520,8 @@ export interface ChatBridge {
 
 export function wireChatBridge(services: HostServices): ChatBridge {
   const { transport, secrets, ui, workspaceRoot, storageDir } = services
+  const machineApprovals =
+    services.machineApprovalsFile !== undefined ? new FileMachineApprovals(services.machineApprovalsFile) : undefined
   // Where bucket folders are copied: shared by every codebase in Fire Code, so a tool approved once
   // is approved everywhere on this machine (approval lives in the folder's .registry.json).
   const mirrorRoot = services.mirrorRoot ?? storageDir
@@ -561,10 +566,29 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * turns it on — §13 requires the feature not to exist until someone enables it, and an
    * inert object is easier to reason about than a conditionally-undefined one.
    */
-  const python = new PythonManager({
+  const python: PythonManager = new PythonManager({
     workspaceRoot,
     storageDir,
     logger,
+    // Fire Code: one review per tool's code on this machine, however many codebases hold it.
+    ...(services.machineApprovalsFile !== undefined ? { machineApprovals: machineApprovals } : {}),
+    onApprovedElsewhere: (names) =>
+      ui.showInfo(
+        `Approved here too, because the identical code was already approved in another codebase: ${names.map((n) => `py__${n}`).join(', ')}.`,
+      ),
+    // Fire Code: a tool reads a saved credential it declares (`python/toolCredentials.ts`).
+    ...(services.savedCredentials !== undefined
+      ? {
+          readCredential: (name: string, caller: string): Promise<string | { username: string; password: string }> =>
+            readToolCredential({
+              name,
+              caller,
+              findTool: (tool: string): { filePath: string; hash: string } | undefined => python.findTool(tool),
+              credentials: services.savedCredentials as () => Promise<readonly CredentialSummary[]>,
+              secrets,
+            }),
+        }
+      : {}),
     // Read at spawn, never held: a variable the user declared secret has its value fetched when
     // a child is about to start, so rotating it reaches the next worker with nothing to clear.
     secrets,
@@ -7796,6 +7820,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (userTurnRunning || runningScheduleId !== undefined) return
     if (!python.status().issues.some((issue) => issue.recoverable)) return
     let changed = false
+    // Fire Code's machine-wide list: an approval in another codebase lands here as a new stamp.
+    if (machineApprovals !== undefined) {
+      const stamp = await machineApprovals.stamp()
+      if (approvalStamps.has('machine') && approvalStamps.get('machine') !== stamp) changed = true
+      approvalStamps.set('machine', stamp)
+    }
     for (const dir of python.toolDirectories()) {
       const file = path.join(dir, REGISTRY_FILE)
       const stamp = await fs.stat(file).then(

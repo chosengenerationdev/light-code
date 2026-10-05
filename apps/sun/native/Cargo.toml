@@ -1,6 +1,6 @@
 [package]
 name = "fire-code"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Fire Code: several codebases, each with its own Light Code agent, in one Windows window"

@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from 'react'
 
+import { declaredCredentials } from '@light-code/core/browser'
 import { tokenize, TOKEN_COLORS } from './highlight.js'
 import { colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from './theme.js'
 
@@ -275,6 +276,14 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
               >
                 {tool.filePath}
               </div>
+              {fetched?.source !== undefined && declaredCredentials(fetched.source).length > 0 && (
+                // Said in words as well as being in the source: a tool that reads passwords is the one
+                // part of a review nobody should have to find by reading every line.
+                <div style={{ fontSize: 11, marginTop: 4 }} role="note">
+                  🔑 Reads saved credentials:{' '}
+                  <b>{declaredCredentials(fetched.source).join(', ')}</b> — given only to this tool, never shown to the model.
+                </div>
+              )}
               {(props.missingPackages?.[tool.name]?.length ?? 0) > 0 && (
                 <div style={{ fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span>

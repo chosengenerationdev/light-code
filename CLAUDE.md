@@ -2388,6 +2388,26 @@ the hub*. `packages/core/src/jupyter/`.
   (a real Jupyter Server at `/user/<name>/` stands in for one); hub-specific behaviour such as a
   stopped server's 424/503 or a culled kernel is handled from the documentation.
 
+## 12ac. Python tools: approved once per machine, and saved credentials (Fire Code 0.9.0)
+
+- **One review per tool's code, however many codebases hold it.** Approval was always of exact bytes
+  (`hashSource`); it was per folder only because each folder has its own `.registry.json`.
+  `python/machineApprovals.ts` keeps the approved hashes in one file (`--approved-tools`, Fire Code's
+  `approved-tools.json`, inside the data folder no tool may touch). `loadRegistries` records every
+  loaded tool's hash there - so no approve button can forget - and adopts the approval for an
+  unapproved or changed file whose exact hash is listed, after loading it in the worker (broken code
+  is never pinned). Declines win. The bridge's approval watch also polls the list's mtime.
+- **`light_code.credential(name)`** rides the worker's existing callback channel (`_ask_host`, shared
+  with `call_tool`). `python/toolCredentials.ts` decides: the caller must be a loaded tool whose file
+  still hashes to its approval, the name must be in its module-level `__credentials__` (part of the
+  approved bytes, so a new credential means a new review), and the credential must exist in Fire
+  Code's list (`HostServices.savedCredentials`, names only). `PythonManager` remembers every value
+  handed out and `adaptPythonTool` blanks them from result, stdout and traceback. Not an environment
+  variable on purpose: those reach every tool and command. The approval card and the create/update
+  diff state "Reads saved credentials: ..." (`declaredCredentials`, browser-safe).
+- **Fix: hub copies moved to `<data>-hub/<id>`.** `fs/reach.ts` floors the whole Fire Code data
+  folder, so a copy inside it was invisible to the Rust search and file tools.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

@@ -1,4 +1,6 @@
 import { checkCollector } from '../dataset/checkCollector.js'
+import type { MachineApprovals } from './machineApprovals.js'
+import { redact } from '../logging/redact.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Logger } from '../logging/logger.js'
@@ -173,6 +175,18 @@ export interface PythonManagerOptions {
    */
   sessionEnv?: () => Record<string, string>
   /**
+   * Code approved anywhere on this machine (Fire Code), so identical tools in other codebases are
+   * not reviewed again. See `machineApprovals.ts`. Absent everywhere else.
+   */
+  machineApprovals?: MachineApprovals | undefined
+  /** Told which tools were approved here because the identical code was approved elsewhere. */
+  onApprovedElsewhere?: ((names: string[]) => void) | undefined
+  /**
+   * Hands a Python tool one of the saved credentials it declared (`light_code.credential`).
+   * Supplied by the host, which owns the rules; absent where there is no credential manager.
+   */
+  readCredential?: ((name: string, caller: string) => Promise<unknown>) | undefined
+  /**
    * Reads the values of variables the user declared as secrets, at spawn time.
    *
    * Optional so a host without one simply has no secret-valued variables rather than failing to
@@ -214,6 +228,22 @@ export class PythonManager {
   private extraToolDirs: string[] = []
   /** `name -> hash` the user declined. See `declinedTools` in the config schema. */
   private declinedTools: Record<string, string> = {}
+  /** Saved-credential values handed to tools this session, blanked from every tool result. */
+  private readonly revealed = new Set<string>()
+
+  /** The credential reader, wrapped so every value it hands out is remembered for blanking. */
+  private readCredential(): ((name: string, caller: string) => Promise<unknown>) | undefined {
+    if (this.options.readCredential === undefined) return undefined
+    return async (name: string, caller: string): Promise<unknown> => {
+      const value = await this.options.readCredential?.(name, caller)
+      for (const part of typeof value === 'string' ? [value] : Object.values((value ?? {}) as Record<string, unknown>)) {
+        // Very short values would blank ordinary words, and are not worth hiding as secrets.
+        if (typeof part === 'string' && part.length >= 4) this.revealed.add(part)
+      }
+      return value
+    }
+  }
+
   private venvPath = ''
   private venvSource: PythonStatus['venvSource'] = 'none'
   private venvIsUvManaged = false
@@ -415,6 +445,7 @@ export class PythonManager {
          * file growing an opinion about which tools a tool may call.
          */
         ...(this.options.callTool !== undefined ? { callTool: this.options.callTool } : {}),
+        ...(this.readCredential() !== undefined ? { readCredential: this.readCredential() } : {}),
       })
       await this.refresh()
       this.ready = true
@@ -489,7 +520,9 @@ export class PythonManager {
       this.worker,
       this.options.logger,
       this.declinedTools,
+      this.options.machineApprovals,
     )
+    if (loaded.approvedElsewhere !== undefined) this.options.onApprovedElsewhere?.(loaded.approvedElsewhere)
     this.registered = loaded.tools
     this.issues = loaded.issues
     this.missingPackages = await this.checkPackages()
@@ -635,6 +668,7 @@ export class PythonManager {
         canInstall: this.toolContext()?.installDeps !== undefined,
         project: this.labels.get(tool.name)?.project,
         author: this.labels.get(tool.name)?.author,
+        redact: (text: string) => redact(text, [...this.revealed]),
       }),
     ) as unknown as Tool<never>[]
   }
@@ -736,6 +770,7 @@ export class PythonManager {
          * file growing an opinion about which tools a tool may call.
          */
         ...(this.options.callTool !== undefined ? { callTool: this.options.callTool } : {}),
+        ...(this.readCredential() !== undefined ? { readCredential: this.readCredential() } : {}),
       })
       await this.refresh()
       this.ready = true

@@ -242,6 +242,18 @@ fn main() {
     for old in paths.previous_roots() {
         moved |= state.rebase(&old, &paths.root);
     }
+    // Hub copies made by 0.8.0 sat inside the data folder, where the file tools may not look.
+    for project in state.projects.iter_mut().filter(|p| p.hub.is_some()) {
+        let old = std::path::PathBuf::from(&project.path);
+        if old.starts_with(paths.root.join("hub")) {
+            let new = paths.hub_copy(&project.id);
+            let _ = std::fs::create_dir_all(new.parent().unwrap_or(&new));
+            if !new.exists() && std::fs::rename(&old, &new).is_ok() || new.exists() {
+                project.path = new.to_string_lossy().to_string();
+                moved = true;
+            }
+        }
+    }
     if moved {
         state.save(&paths);
     }
@@ -1163,7 +1175,7 @@ impl App {
             Err(text) => return fail(text),
         };
         // The local copy lives in Fire Code's own data, one folder per codebase.
-        let local = self.paths.root.join("hub").join(&id);
+        let local = self.paths.hub_copy(&id);
         if let Err(e) = std::fs::create_dir_all(&local) {
             return fail(format!("Could not create {}: {e}", local.display()));
         }
@@ -1300,6 +1312,7 @@ impl App {
             no_schedules: state::chat_of(id).is_some(),
             change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
             mirror_dir: self.paths.root.join("mirrors"),
+            approved_tools: self.paths.root.join("approved-tools.json"),
             jupyter_hub: match &project.hub {
                 Some(settings) => {
                     let file = self.paths.project_dir(state::project_of(id)).join("jupyterhub.json");

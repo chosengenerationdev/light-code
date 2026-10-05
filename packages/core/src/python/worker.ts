@@ -60,6 +60,8 @@ export interface PythonWorkerOptions {
   callTool?:
     | ((name: string, args: Record<string, unknown>, caller: string) => Promise<unknown>)
     | undefined
+  /** Answers `light_code.credential(name)`; absent where there is no credential manager. */
+  readCredential?: ((name: string, caller: string) => Promise<unknown>) | undefined
   /** Per-call budget. A tool that hangs must not hang the turn. */
   timeoutMs?: number
 }
@@ -148,7 +150,8 @@ export class PythonWorker {
      * the tool is still running, blocked on this reply.
      */
     if (typeof frame.callback === 'string') {
-      void this.serveCallback(frame.callback, frame.name, frame.arguments, frame.caller)
+      if (frame.method === 'credential') void this.serveCredential(frame.callback, frame.name, frame.caller)
+      else void this.serveCallback(frame.callback, frame.name, frame.arguments, frame.caller)
       return
     }
 
@@ -213,6 +216,39 @@ export class PythonWorker {
         typeof caller === 'string' ? caller : 'a Python tool',
       )
       reply({ ok: true, value })
+    } catch (error) {
+      reply({ ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /**
+   * A saved credential for the tool that asked. The rules - is it declared, does it exist - are the
+   * host's (`options.readCredential`); this only carries the answer.
+   */
+  private async serveCredential(token: string, name: unknown, caller: unknown): Promise<void> {
+    const reply = (payload: Record<string, unknown>): void => {
+      try {
+        this.child?.stdin?.write(`${JSON.stringify({ callback: token, ...payload })}
+`)
+      } catch {
+        this.options.logger.debug('python worker: could not answer a credential request')
+      }
+    }
+    if (this.options.readCredential === undefined) {
+      reply({
+        ok: false,
+        error:
+          'Saved credentials are a Fire Code feature. Elsewhere, give the tool a secret variable in ' +
+          'Settings → Python → Variables and read it from os.environ.',
+      })
+      return
+    }
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      reply({ ok: false, error: 'credential() needs the name of a saved credential.' })
+      return
+    }
+    try {
+      reply({ ok: true, value: await this.options.readCredential(name, typeof caller === 'string' ? caller : '') })
     } catch (error) {
       reply({ ok: false, error: error instanceof Error ? error.message : String(error) })
     }

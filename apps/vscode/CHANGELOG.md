@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.142.0
+
+### Minor Changes
+
+- The Python tool approval shows which saved credentials a tool reads, and the tool-writing guidance says never to put a password in a tool. Saved credentials themselves are a Fire Code feature.
+
 ## 0.141.0
 
 ### Minor Changes

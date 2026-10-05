@@ -302,7 +302,8 @@ git is the main defence.
     title: 'Python tools written by the assistant',
     keywords: [
       'python', 'tool', 'uv', 'venv', 'dependencies', 'pip', 'dynamic', 'registry', 'missing package',
-      'install package', 'module not found', 'library', 'approve tool',
+      'install package', 'module not found', 'library', 'approve tool', 'credential in a tool',
+      'password in a python tool', 'read credential', '__credentials__',
     ],
     body: `
 **Settings → Python.** Off by default — set config:python.dynamicTools to \`on\`. This is the
@@ -355,6 +356,15 @@ changes.
 
 **Provider API keys are never passed into the Python environment.** The environment is an
 allow-list, not an inheritance.
+
+**Saved credentials (Fire Code)**: a tool reads one of Fire Code's saved credentials with
+\`light_code.credential("Corp LDAP")\` - a string, or \`{"username", "password"}\` for a login - but only one
+it declares at module level: \`__credentials__ = ["Corp LDAP"]\`. That line is part of the code you
+approve (the approval card and the diff both say "Reads saved credentials: ..."), so asking for
+another credential means approving the tool again. Nothing goes into the environment, and any value
+handed out is replaced by [REDACTED] in what the tool returns or prints before the model sees it.
+Reviewing the code is still what stops a tool sending a credential somewhere it should not.
+Outside Fire Code, use a secret variable (config:python.env) instead.
 
 A created tool becomes callable on your **next** message, not later in the same turn — tool
 definitions have to stay stable for a whole turn or the prompt cache is thrown away.
@@ -919,9 +929,10 @@ already point at what was shared. A codebase with its own (New) settings picks t
 credential". A username and password for the same connection arrive as one login, offered as
 "— username" and "— password". Hover a long name in any dropdown to see it in full.
 
-**Python tools from a bucket are reviewed once for all codebases**: every codebase and chat in Fire Code
-uses one copy of each bucket folder, and the approval is kept with it - approve in one codebase and the
-others stop asking within a few seconds. (The first time after updating, they ask once more.)
+**Python tools are reviewed once for all codebases**: approving a tool records its exact code for this
+machine, so every other codebase holding the identical file approves it too, within a few seconds and
+with a note saying so - whether the copies come from a bucket, a shared folder or each project's own
+.lightcode/tools. A changed byte is a different tool and asks again; a declined tool stays declined.
 
 **Several chats per codebase**: the tabs above the chat. + (or Ctrl+T, or right-click → New chat) opens
 another chat on the same codebase — its own agent, working at the same time, with the same settings and
