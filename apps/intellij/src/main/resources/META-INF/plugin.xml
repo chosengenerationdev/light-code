@@ -24,6 +24,7 @@
   -->
   <change-notes><![CDATA[
     <ul>
+      <li>Light Code 0.116.0: Fire Code's fast file tools are introduced to the agent (no change in the IDE).</li>
       <li>Light Code 0.115.0: Python tools reading saved credentials safely; identical tools approved once (Fire Code).</li>
       <li>Light Code 0.114.0: JupyterHub codebases for Fire Code (no change in the IDE).</li>
       <li>Light Code 0.113.0: the @ picker says when nothing matches.</li>

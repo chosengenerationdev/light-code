@@ -272,6 +272,7 @@ import {
   type DocEntryKind,
   createNotifyTool,
   createFastFsTools,
+  fastFsGuidance,
   getDiagnosticsTool,
   LspManager,
   type DiagnosticsProvider,
@@ -4225,6 +4226,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           }
           if (scheduledGuidance !== undefined) parts.push(scheduledGuidance)
           if (hub !== undefined) parts.push(hubGuidance(hub))
+          // Registered is not enough: a model reaches for read_file and the shell unless told (`fastFsGuidance`).
+          if (services.fastFs !== undefined) parts.push(fastFsGuidance())
           const others = services.siblings ?? []
           if (others.length > 0) {
             parts.push(

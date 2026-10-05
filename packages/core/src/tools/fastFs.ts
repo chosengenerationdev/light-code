@@ -543,3 +543,27 @@ export function createFastFsTools(exe: string): Tool[] {
 
   return [findTool, readManyTool, bigFileTool, tableTool, transferTool, archiveTool] as unknown as Tool[]
 }
+
+/**
+ * What the model is told when these tools exist (Fire Code), every turn.
+ *
+ * Reported: "light code doesn't seem to know about the rust tools given to it by default, I had to
+ * remind it". They were registered and advertised all along - but a model reaches for the tools it
+ * has seen most (read_file, search_files) and, in Auto mode, for the shell commands its own guidance
+ * recommends. A tool's description is read when choosing between tools that look relevant; this says
+ * up front which job each one is for, and that it wins over the shell for that job.
+ */
+export function fastFsGuidance(): string {
+  return [
+    '## Fast file tools (prefer these - they run on every core)',
+    'This workspace has Rust-backed file tools. Use them instead of shell commands (dir /s, type, findstr, grep, cat,',
+    'copy, move, tar) and instead of reading files one at a time, whenever the job matches:',
+    '- find_files: find files by name or pattern, list a large folder tree, sizes and counts (summary), duplicates.',
+    '- read_many_files: read several files in one call instead of read_file after read_file.',
+    '- big_file: any file over a few MB, logs especially - inspect (lines, size), read a line range, tail, or search it',
+    '  with a regex. Never read_file or type a big log.',
+    '- query_table: CSV or Excel - filter, group, count and sum rows without writing Python or opening Excel.',
+    '- transfer_files: copy or move files and folders (always asks first). archive_files: create, extract or list a .zip.',
+    'search_files is still right for searching code across the workspace; read_file before editing a file, as always.',
+  ].join('\n')
+}

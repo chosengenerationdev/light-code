@@ -1,5 +1,11 @@
 # light-code-vscode
 
+## 0.143.0
+
+### Patch Changes
+
+- Shared code for Fire Code's fast file tools; nothing changes inside VS Code.
+
 ## 0.142.0
 
 ### Minor Changes

@@ -2408,6 +2408,11 @@ the hub*. `packages/core/src/jupyter/`.
 - **Fix: hub copies moved to `<data>-hub/<id>`.** `fs/reach.ts` floors the whole Fire Code data
   folder, so a copy inside it was invisible to the Rust search and file tools.
 
+- **Registered is not enough** (0.9.1, reported: the agent ignored the Rust tools until reminded).
+  `fastFsGuidance()` is a standing prompt section whenever `services.fastFs` is set, saying which job
+  each tool is for and that it beats the shell - Auto mode's own guidance recommends `type`/`findstr`.
+  `tools/fastFsGuidance.test.ts` fails if a fast tool is added without being named there.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

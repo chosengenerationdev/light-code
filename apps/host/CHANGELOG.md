@@ -1,5 +1,11 @@
 # @chosengeneration/light-code
 
+## 0.116.0
+
+### Patch Changes
+
+- **The agent now uses the fast Rust file tools without being reminded.** They were always available, but nothing said when to prefer them, so the agent read big logs with read_file and listed folders with shell commands. The instructions now say which job each one is for (finding files, reading several at once, big logs, CSV/Excel, copy/move, zip), in Auto mode too. (with `--fast-fs`.)
+
 ## 0.115.0
 
 ### Minor Changes
