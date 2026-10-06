@@ -8,14 +8,16 @@ import {
   type DragEvent,
   type ReactElement,
 } from 'react'
-import { AttachIcon, CrossIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
+import { AddFileIcon, AttachIcon, CrossIcon, ExpertIcon, SendIcon, StopIcon } from './icons.js'
 import {
   activeMentionQuery,
   activeRoleQuery,
+  addMentions,
   insertMention as insertMentionInto,
   splitMentions,
 } from './mentions.js'
 import { PlanProgress } from './PlanProgress.js'
+import type { StageFile } from './stagedFiles.js'
 import { Select } from './Select.js'
 import {
   badgeStyle,
@@ -71,6 +73,15 @@ export interface ComposerProps {
   searchConnections: { id: string; label: string }[]
   activeSearchId: string | undefined
   onSelectSearch: (id: string | undefined) => void
+  /**
+   * Hands a file the panel cannot read (too big, PDF, Office, an Outlook message) to the host,
+   * which saves it to a temporary folder and reads it. Absent in tests; such files are then refused.
+   */
+  stageFile?: StageFile | undefined
+  /** The editor's file list ("Add files to context"); absent where there is no editor. */
+  onPickFiles?: (() => void) | undefined
+  /** Files to add as mentions, from the picker or the editor's menu; `nonce` makes a repeat land. */
+  addedFiles?: { paths: string[]; nonce: number } | undefined
 }
 
 /** Beyond this the request usually fails on the provider side, so refuse it here instead. */
@@ -84,39 +95,65 @@ export interface TextAttachment {
   text: string
 }
 
-/** Above this a file belongs in the workspace, where `read_file` can page through it. */
+/** The last `addedFiles` applied, kept outside the component because the box is remounted. */
+let lastAddedNonce: number | undefined
+
+/** Above this a text file is read by the host rather than pasted whole into the message. */
 const MAX_TEXT_BYTES = 512 * 1024
+
+/**
+ * What the host will take in one message: base64 adds a third, and the Node host refuses a
+ * request body over 32 MB.
+ */
+const MAX_STAGED_BYTES = 20 * 1024 * 1024
+
+/** Formats only the host can read; never decoded in the panel. */
+const HOST_READ_FORMAT = /\.(pdf|docx|xlsx|xlsm|msg)$/i
+
+/** Bare base64 of a file, chunked: spreading megabytes into String.fromCharCode overflows the stack. */
+async function toBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  }
+  return btoa(binary)
+}
 
 /** A NUL says the file is not text; sending its bytes as characters would be noise. */
 function looksBinary(text: string): boolean {
   return text.includes('\u0000')
 }
 
-async function toTextAttachment(file: File): Promise<TextAttachment | { error: string }> {
-  if (file.size > MAX_TEXT_BYTES) {
+/**
+ * A small text file is pasted as it is; anything else - big, binary, PDF, Office, an Outlook
+ * message dragged out of Outlook - is handed to the host to save and read. Reported: refusing
+ * those and asking the person to save the file and say where "defeats the purpose of easy usage".
+ */
+async function toTextAttachment(file: File, stageFile: StageFile | undefined): Promise<TextAttachment | { error: string }> {
+  const name = file.name || 'attachment'
+  if (file.size <= MAX_TEXT_BYTES && !HOST_READ_FORMAT.test(name)) {
+    const text = await file.text()
+    if (!looksBinary(text)) return { name, text }
+  }
+  if (stageFile === undefined) {
+    return { error: `${name} cannot be read here. Put it in the workspace and ask me to read it.` }
+  }
+  if (file.size > MAX_STAGED_BYTES) {
     return {
-      error: `${file.name} is too large to attach (${Math.round(file.size / 1024)}KB). Put it in the workspace and ask me to read it — read_file can page through any size.`,
+      error: `${name} is ${(file.size / 1024 / 1024).toFixed(0)} MB - over the 20 MB a dropped file can be. Ask me to read it from where it is saved instead.`,
     }
   }
-  const text = await file.text()
-  if (looksBinary(text)) {
-    return { error: `${file.name} is not a text file, so there is nothing readable to attach.` }
-  }
-  return { name: file.name || 'attachment', text }
+  const staged = await stageFile(name, await toBase64(file))
+  if ('error' in staged) return staged
+  return { name: staged.name, text: `(saved at ${staged.path})\n${staged.text}` }
 }
 
 async function toAttachment(file: File): Promise<ImageAttachmentInput | undefined> {
   if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) return undefined
   if (file.size > MAX_IMAGE_BYTES) return undefined
 
-  const buffer = await file.arrayBuffer()
-  let binary = ''
-  const bytes = new Uint8Array(buffer)
-  // Chunked: spreading a multi-megabyte array into String.fromCharCode overflows the stack.
-  for (let i = 0; i < bytes.length; i += 8192) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
-  }
-  return { mediaType: file.type, data: btoa(binary), name: file.name || 'pasted image' }
+  return { mediaType: file.type, data: await toBase64(file), name: file.name || 'pasted image' }
 }
 
 /** How the message text is laid out. */
@@ -140,8 +177,34 @@ function firstPlanLine(plan: string): string {
   return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line
 }
 
+/*
+ * The draft outlives the composer. Reported: type something, switch away (Settings, History, another
+ * view) and come back, and it was gone - the box is unmounted with the view. Kept in this page's own
+ * storage, so it also survives the webview being rebuilt. Best effort: storage can be unavailable,
+ * and then the draft simply is not kept.
+ */
+const DRAFT_KEY = 'light-code:composer-draft'
+
+function readDraft(): string {
+  try {
+    return window.localStorage.getItem(DRAFT_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function keepDraft(text: string): void {
+  try {
+    if (text.length > 0) window.localStorage.setItem(DRAFT_KEY, text)
+    else window.localStorage.removeItem(DRAFT_KEY)
+  } catch {
+    // Nowhere to keep it; typing still works.
+  }
+}
+
 export function Composer(props: ComposerProps): ReactElement {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(readDraft)
+  useEffect(() => keepDraft(text), [text])
   const [roleQuery, setRoleQuery] = useState<string | undefined>(undefined)
   const [planOpen, setPlanOpen] = useState(false)
   const [progressOpen, setProgressOpen] = useState(false)
@@ -151,6 +214,24 @@ export function Composer(props: ComposerProps): ReactElement {
   const [mentionQuery, setMentionQuery] = useState<string | undefined>(undefined)
   const [highlighted, setHighlighted] = useState(0)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  /** Files being read by the host; sending waits for them so none is silently left out. */
+  const [reading, setReading] = useState<string[]>([])
+
+  // A new object per addition (with its nonce), so the same files added twice still land.
+  useEffect(() => {
+    if (props.addedFiles === undefined || props.addedFiles.paths.length === 0) return
+    // The box is remounted whenever the chat view returns; files already added must not come back.
+    if (props.addedFiles.nonce === lastAddedNonce) return
+    lastAddedNonce = props.addedFiles.nonce
+    const paths = props.addedFiles.paths
+    setText((previous) => addMentions(previous, paths))
+    requestAnimationFrame(() => {
+      const box = textareaRef.current
+      if (box === null) return
+      box.focus()
+      box.setSelectionRange(box.value.length, box.value.length)
+    })
+  }, [props.addedFiles])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   /** Grows the box to fit the text, capped, so the send button never drifts out of line. */
@@ -159,6 +240,10 @@ export function Composer(props: ComposerProps): ReactElement {
     element.style.height = `${Math.min(element.scrollHeight, 200)}px`
   }
   const fileInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (textareaRef.current !== null && text.length > 0) resize(textareaRef.current)
+    // Only on mount: afterwards the input handler sizes it as the user types.
+  }, [])
 
   const showingMentions = mentionQuery !== undefined && props.mentionCandidates.length > 0
   // An empty picker looks exactly like a broken one, so a search that found nothing says so.
@@ -219,15 +304,25 @@ export function Composer(props: ComposerProps): ReactElement {
     const problems: string[] = []
 
     for (const file of Array.from(files)) {
-      if (SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+      if (SUPPORTED_IMAGE_TYPES.includes(file.type) && file.size <= MAX_IMAGE_BYTES) {
         const image = await toAttachment(file)
-        if (image === undefined) problems.push(`${file.name} is larger than 5MB.`)
-        else acceptedImages.push(image)
-        continue
+        if (image !== undefined) {
+          acceptedImages.push(image)
+          continue
+        }
       }
-      const result = await toTextAttachment(file)
-      if ('error' in result) problems.push(result.error)
-      else acceptedTexts.push(result)
+      const label = file.name || 'attachment'
+      setReading((previous) => [...previous, label])
+      try {
+        const result = await toTextAttachment(file, props.stageFile)
+        if ('error' in result) problems.push(result.error)
+        else acceptedTexts.push(result)
+      } finally {
+        setReading((previous) => {
+          const at = previous.indexOf(label)
+          return at === -1 ? previous : [...previous.slice(0, at), ...previous.slice(at + 1)]
+        })
+      }
     }
 
     if (acceptedImages.length > 0) setImages((previous) => [...previous, ...acceptedImages])
@@ -278,6 +373,7 @@ export function Composer(props: ComposerProps): ReactElement {
 
   const submit = (): void => {
     const trimmed = text.trim()
+    if (reading.length > 0) return
     if (trimmed.length === 0 && images.length === 0 && texts.length === 0) return
 
     /*
@@ -304,7 +400,7 @@ export function Composer(props: ComposerProps): ReactElement {
 
   // Sending mid-turn queues rather than being refused. Waiting for a long turn to finish
   // before you can even type the follow-up is the thing this exists to fix.
-  const canSend = text.trim().length > 0 || images.length > 0 || texts.length > 0
+  const canSend = reading.length === 0 && (text.trim().length > 0 || images.length > 0 || texts.length > 0)
 
   /** Paths the message refers to, with the `@` and any quoting taken off for display. */
   const mentionedFiles = splitMentions(text)
@@ -629,6 +725,12 @@ export function Composer(props: ComposerProps): ReactElement {
         </div>
       )}
 
+      {reading.length > 0 && (
+        <div style={{ padding: '4px 10px 0', fontSize: 11, color: colors.muted }}>
+          Reading {reading.join(', ')}…
+        </div>
+      )}
+
       {notice !== undefined && (
         <div style={{ padding: '4px 10px 0', fontSize: 11, color: colors.error }}>{notice}</div>
       )}
@@ -761,6 +863,17 @@ export function Composer(props: ComposerProps): ReactElement {
         >
           <AttachIcon />
         </button>
+        {props.onPickFiles !== undefined && (
+          <button
+            type="button"
+            title="Add files to context - pick from the workspace; open files are listed first and the current one is ticked"
+            aria-label="Add files to context"
+            style={iconButtonStyle('secondary', false)}
+            onClick={props.onPickFiles}
+          >
+            <AddFileIcon />
+          </button>
+        )}
 
         {props.isStreaming ? (
           <button

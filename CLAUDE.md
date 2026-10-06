@@ -2413,6 +2413,38 @@ the hub*. `packages/core/src/jupyter/`.
   each tool is for and that it beats the shell - Auto mode's own guidance recommends `type`/`findstr`.
   `tools/fastFsGuidance.test.ts` fails if a fast tool is added without being named there.
 
+## 12ad. Reported fixes, Fire Code 0.10.0
+
+- **Drafts**: the composer keeps its text in localStorage (`light-code:composer-draft`), because the box
+  is unmounted with the chat view. Per page, so per Fire Code chat while it runs.
+- **Context overflow**: compaction ran only from an estimate against the known window, so a gateway
+  with a smaller real limit refused for ever. `isContextOverflow` (deliberately loose) now triggers a
+  forced compaction (keepRecent 4) and one retry per turn; failing that, a message says what to do.
+  "Compact now" (`compactConversation`) does it on request, never mid-turn.
+- **`excel_calculate`**: Range/Worksheet.Calculate, Application.Calculate/CalculateFull(Rebuild).
+  `edit` group (changes what cells show, may run VBA UDFs). No SendKeys - pinned by test.
+- **Fire Code git**: `git.rs` lists changed files and ahead/behind from the same porcelain call;
+  `commit_and_push` (add -A, commit, push or push -u origin) and `pull` (--ff-only) run with
+  GIT_TERMINAL_PROMPT=0 off the UI thread. "Write with agent" travels shell -> pane postMessage
+  (`ask: commitMessage`) -> `suggestCommitMessage` -> one completion over `git diff HEAD` (redacted,
+  cut at 24k) -> back to the dialog. Text the person reads and edits; nothing is committed by it.
+- **Dropped files** (`documents/dropped.ts`, `stageAttachment`/`attachmentStaged`): anything the panel
+  cannot paste (over 512 KB, binary, pdf/docx/xlsx/msg) goes to the host as base64 (cap 20 MB - the
+  Node host refuses bodies over 32 MB), is saved under `<tmp>/light-code-drops/<session>` with
+  `wx` (never replaced), read with `extractDocument`, cut at 60k chars with its path. A dropped
+  `.msg` has its by-value attachments (`3701` stream, now on `MsgAttachment.data`) saved and read.
+  The drops folder and `<tmp>/light-code-mail` are read roots, so read_file follows the path unasked.
+  Not the workspace: a dropped file is not part of the project.
+- **Add files to context** (VS Code only): `HostUi.pickContextFiles` (QuickPick, multi-select,
+  current file ticked, open tabs first, then `findFiles('**/*')` capped at 5000) -> `addContextFiles`
+  -> the composer prepends `@` mentions (`addMentions`, skips ones present). Mentions, not a new
+  channel, so confinement and the deny list are the ones `@` already uses. `picksFiles` capability
+  hides the button where `pickContextFiles` is absent (browser, Fire Code, JetBrains). Command
+  `lightCode.addToContext` on explorer/editor menus posts the same message via `postWhenLive`.
+  The composer remembers the last nonce module-wide: it remounts with the view, and must not re-add.
+- **Code blocks**: `colors.codeBlockBackground` = `--lc-code-block-background` falling back to the
+  VS Code input colour; only the browser page sets it, so VS Code is unchanged.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

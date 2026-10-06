@@ -171,6 +171,76 @@ export function createExcelEvaluateTool(options: OfficeToolOptions): Tool<z.infe
   }
 }
 
+const calculateSchema = z.object({
+  workbook: workbookField,
+  sheet: z.string().optional().describe('Sheet to recalculate, or the one holding range. Omit for the active sheet.'),
+  range: z.string().optional().describe('Cells to recalculate on their own, e.g. "B2:D40".'),
+  scope: z
+    .enum(['range', 'sheet', 'workbook', 'all'])
+    .optional()
+    .describe('range: just those cells. sheet: like Shift+F9. workbook: every sheet in it. all: like F9, every open workbook. Default: range when one is given, else sheet.'),
+  full: z.boolean().optional().describe('With scope all: recalculate every formula, not only the ones Excel thinks changed (Ctrl+Alt+F9).'),
+  rebuild: z.boolean().optional().describe('With scope all: also rebuild the dependency tree first (Ctrl+Alt+Shift+F9). Slow on big workbooks.'),
+  select: z.boolean().optional().describe('Also select the range (or sheet) in Excel, so the user sees which cells were meant.'),
+})
+
+/**
+ * Recalculates, the way Shift+F9, F9 and Ctrl+Alt+F9 do. Reported as the agent being unable to
+ * "select the range and press Shift+F9": no keystrokes are needed - the Calculate methods are the
+ * same act - and a workbook left in manual calculation mode is where stale values come from.
+ *
+ * `edit`, not `read`: it changes what cells show and may run functions written in VBA.
+ */
+export function createExcelCalculateTool(options: OfficeToolOptions): Tool<z.infer<typeof calculateSchema>> {
+  const what = (params: z.infer<typeof calculateSchema>): string => {
+    const scope = params.scope ?? (params.range !== undefined ? 'range' : 'sheet')
+    const where = params.range !== undefined ? `${params.sheet ?? 'the active sheet'}!${params.range}` : (params.sheet ?? 'the active sheet')
+    const action =
+      scope === 'range' ? `Recalculate ${where}`
+      : scope === 'sheet' ? `Recalculate ${where} (Shift+F9)`
+      : scope === 'workbook' ? `Recalculate every sheet in ${params.workbook ?? 'the active workbook'}`
+      : params.rebuild === true ? 'Rebuild dependencies and recalculate every open workbook (Ctrl+Alt+Shift+F9)'
+      : params.full === true ? 'Recalculate every formula in every open workbook (Ctrl+Alt+F9)'
+      : 'Recalculate every open workbook (F9)'
+    return `${action}${params.select === true ? ', and select it so it is visible' : ''}.`
+  }
+  return {
+    name: 'excel_calculate',
+    group: 'edit',
+    description:
+      'Recalculate formulas in an open workbook: a range on its own, a sheet (Shift+F9), a workbook, or everything ' +
+      'open (F9; full for Ctrl+Alt+F9). Use it when values look stale - especially when calculation is set to manual, ' +
+      'which the result reports. Returns what a small range shows afterwards. Can also select the range for the user.',
+    parametersSchema: calculateSchema,
+    async preview(params) {
+      return { kind: 'text', text: what(params) }
+    },
+    async execute(params): Promise<ToolResult> {
+      try {
+        const result = await options.bridge.request<{
+          sheet: string
+          scope: string
+          range: string | null
+          mode: string
+          pending: boolean
+          cells: { address: string; text: string }[]
+        }>({ op: 'excel.calculate', ...params })
+        const lines = [
+          `Recalculated (${result.scope}) on ${result.sheet}${result.range !== null ? `, ${result.range}` : ''}.`,
+          `Calculation mode: ${result.mode}${result.mode === 'manual' ? ' - formulas only update when recalculated like this, or when the user presses F9.' : '.'}`,
+        ]
+        if (result.pending) lines.push('Excel is still calculating; values may change for a moment yet.')
+        if (result.cells.length > 0) {
+          lines.push('', 'Cells now show:', ...result.cells.map((cell) => `${cell.address}: ${cell.text.length > 0 ? cell.text : '(empty)'}`))
+        }
+        return { content: lines.join('\n') }
+      } catch (error) {
+        return { content: message(error), isError: true }
+      }
+    },
+  }
+}
+
 const checkMacroSchema = z.object({
   workbook: workbookField,
   module: z.string().min(1).describe('Module name from excel_list_macros.'),

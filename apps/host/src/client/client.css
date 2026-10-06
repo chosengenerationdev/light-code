@@ -22,6 +22,8 @@
   --vscode-widget-border: #d4d4d4;
   --vscode-panel-border: #d4d4d4;
   --vscode-input-background: #ffffff;
+  /* Code blocks in replies: tinted, so they stand off the page as they do in VS Code. */
+  --lc-code-block-background: #eef4fb;
   --vscode-input-foreground: #1f1f1f;
   --vscode-input-border: #cecece;
   --vscode-button-background: #005fb8;
@@ -75,6 +77,7 @@
     --vscode-widget-border: #313131;
     --vscode-panel-border: #2b2b2b;
     --vscode-input-background: #313131;
+    --lc-code-block-background: #1c2633;
     --vscode-input-foreground: #cccccc;
     --vscode-input-border: #3c3c3c;
     --vscode-button-background: #0078d4;
@@ -116,6 +119,7 @@
     --vscode-widget-border: #313131;
     --vscode-panel-border: #2b2b2b;
     --vscode-input-background: #313131;
+    --lc-code-block-background: #1c2633;
     --vscode-input-foreground: #cccccc;
     --vscode-input-border: #3c3c3c;
     --vscode-button-background: #0078d4;

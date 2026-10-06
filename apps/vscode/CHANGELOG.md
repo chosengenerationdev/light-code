@@ -1,5 +1,16 @@
 # light-code-vscode
 
+## 0.144.0
+
+### Minor Changes
+
+- **Add files to context, as in Copilot.** A button beside the clip lists the workspace - open files first, the current one ticked - and adds the ticked ones as `@` mentions. **Add to Light Code chat** on the Explorer, editor tab and editor menus does the same for what you right-clicked.
+- **Drop any file or Outlook email into the chat.** Big logs, PDF, Word, Excel and messages dragged out of Outlook (up to 20 MB) used to be refused with "too large - save it and tell me where"; they are now saved to a temporary folder and read, an email's own attachments included. A long one is cut with its path, and the assistant reads the rest without asking.
+- **`outlook_read_email` reads the attachments** - PDF, Word, Excel, attached emails and text; pictures are shown to a model that can see.
+- **What you type is kept** when you switch away (Settings, History) and come back, and when the page reloads.
+- **Compaction when the token limit is reached.** If the model refuses the conversation as too long, older messages are summarised at once and the request is sent again; if it still cannot fit, the message says what to do. A **Compact now** button under the token bar does it on request.
+- **Excel recalculation** (`excel_calculate`): a range, a sheet (Shift+F9), a workbook or everything open (F9, Ctrl+Alt+F9). Reports manual calculation mode and what the cells now show; can select the range.
+
 ## 0.143.0
 
 ### Patch Changes

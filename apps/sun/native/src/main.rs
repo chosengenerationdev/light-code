@@ -61,6 +61,8 @@ enum UserEvent {
     ScriptDone(Result<environment::ScriptEnv, String>),
     /// `git status` counts for some codebases, worked out off the UI thread.
     Git(Vec<(String, Option<git::GitCounts>)>),
+    /// A commit-and-push or pull finished: which codebase, whether it worked, and what to say.
+    GitDone { id: String, ok: bool, text: String },
 }
 
 /// Where the startup script is. Agents asked to start while it runs wait for it, so none starts
@@ -183,6 +185,9 @@ enum Command {
     ChangeConfig { id: String, mode: ConfigMode, source: Option<String> },
     OpenVsCode { id: String },
     OpenExplorer { id: String },
+    /// The codebase's own buttons: commit everything with this message and push; or pull.
+    GitCommitPush { id: String, message: String },
+    GitPull { id: String },
     OpenLog { id: String },
     OpenDataFolder,
     ExportSource,
@@ -428,6 +433,11 @@ fn main() {
                 send(&webview, json!({ "type": "select", "id": id }));
             }
             Event::UserEvent(UserEvent::ScriptDone(result)) => app.script_done(result, &webview),
+            Event::UserEvent(UserEvent::GitDone { id, ok, text }) => {
+                let name = app.state.project(&id).map(|p| p.name.clone()).unwrap_or_default();
+                send(&webview, json!({ "type": "gitDone", "id": id, "ok": ok, "text": format!("{name}: {text}") }));
+                app.refresh_git(Some(id));
+            }
             Event::UserEvent(UserEvent::Git(results)) => {
                 for (id, counts) in results {
                     match counts {
@@ -893,6 +903,8 @@ impl App {
                     }
                 }
             }
+            Command::GitCommitPush { id, message } => self.git_action(&id, Some(message)),
+            Command::GitPull { id } => self.git_action(&id, None),
             Command::OpenExplorer { id } => {
                 if let Some(p) = self.state.project(&id) {
                     system::open_in_explorer(&p.path);
@@ -1596,6 +1608,26 @@ impl App {
             let results = folders.into_iter().map(|(id, path)| (id, git::status(&path))).collect();
             busy.store(false, Ordering::SeqCst);
             let _ = proxy.send_event(UserEvent::Git(results));
+        });
+    }
+
+    /// Commit and push (with a message) or pull, for a codebase's own buttons. In the background:
+    /// a push can take as long as the network does, and the window must not stop answering.
+    fn git_action(&self, id: &str, message: Option<String>) {
+        let Some(project) = self.state.project(id) else { return };
+        let folder = project.path.clone();
+        let id = state::project_of(id).to_string();
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let result = match message {
+                Some(message) => git::commit_and_push(&folder, &message),
+                None => git::pull(&folder),
+            };
+            let (ok, text) = match result {
+                Ok(text) => (true, text),
+                Err(text) => (false, text),
+            };
+            let _ = proxy.send_event(UserEvent::GitDone { id, ok, text });
         });
     }
 

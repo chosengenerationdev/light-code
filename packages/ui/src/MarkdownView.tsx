@@ -88,7 +88,7 @@ function CodeBlock(props: { text: string; language?: string | undefined }): Reac
         margin: '6px 0',
         border: `1px solid ${colors.border}`,
         borderRadius: 8,
-        background: colors.inputBackground,
+        background: colors.codeBlockBackground,
       }}
     >
       <div

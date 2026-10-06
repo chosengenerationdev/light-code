@@ -108,6 +108,19 @@ export function buildSummaryPrompt(messages: readonly ChatMessage[]): string {
 
 const SUMMARY_PREFIX = '[Earlier in this session — summarised to save context]\n'
 
+/**
+ * Whether a provider's error means the conversation is too long for the model.
+ *
+ * Every provider and gateway words it differently, and none gives a code the others share. Matched
+ * loosely on purpose: compacting after a false match costs one summary request; missing a real one
+ * leaves the user stuck with a chat that can never send again.
+ */
+export function isContextOverflow(error: string): boolean {
+  return /context.{0,20}(length|window|limit)|maximum context|too many tokens|prompt is too long|input is too long|request too large|reduce the length|exceeds? (the )?(maximum|max|token)|token limit|tokens? exceed|context_length_exceeded|string_above_max_length/i.test(
+    error,
+  )
+}
+
 /** Recognises a summary this module produced, so repeated compaction stays idempotent. */
 export function isSummaryMessage(message: ChatMessage): boolean {
   return message.role === 'user' && message.content.startsWith(SUMMARY_PREFIX)

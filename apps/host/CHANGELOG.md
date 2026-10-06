@@ -1,5 +1,16 @@
 # @chosengeneration/light-code
 
+## 0.117.0
+
+### Minor Changes
+
+- **Drop any file or Outlook email into the chat.** Big logs, PDF, Word, Excel and messages dragged out of Outlook (up to 20 MB) used to be refused with "too large - save it and tell me where"; they are now saved to a temporary folder and read, an email's own attachments included. A long one is cut with its path, and the assistant reads the rest without asking.
+- **`outlook_read_email` reads the attachments** - PDF, Word, Excel, attached emails and text; pictures are shown to a model that can see.
+- **What you type is kept** when you switch away (Settings, History) and come back, and when the page reloads.
+- **Compaction when the token limit is reached.** If the model refuses the conversation as too long, older messages are summarised at once and the request is sent again; if it still cannot fit, the message says what to do. A **Compact now** button under the token bar does it on request.
+- **Excel recalculation** (`excel_calculate`): a range, a sheet (Shift+F9), a workbook or everything open (F9, Ctrl+Alt+F9). Reports manual calculation mode and what the cells now show; can select the range.
+- Code blocks in replies have a tinted background in the browser page.
+
 ## 0.116.0
 
 ### Patch Changes

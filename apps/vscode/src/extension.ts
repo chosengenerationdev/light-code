@@ -107,6 +107,28 @@ export function activate(context: vscode.ExtensionContext): void {
    * re-reading long after the first day. The command id is qualified with the extension id
    * because `openWalkthrough` takes the fully-qualified category.
    */
+  /*
+   * "Add to Light Code chat" from the Explorer, an editor tab or the editor itself - Copilot's
+   * "Add file to chat". Several selected files arrive as the second argument. Sent as mentions,
+   * so the same confinement and deny list apply as to a typed `@`.
+   */
+  const addToContextCommand = vscode.commands.registerCommand(
+    'lightCode.addToContext',
+    async (clicked?: unknown, selected?: unknown): Promise<void> => {
+      const uris = (Array.isArray(selected) && selected.length > 0 ? selected : [clicked ?? vscode.window.activeTextEditor?.document.uri])
+        .filter((each): each is vscode.Uri => each instanceof vscode.Uri && each.scheme === 'file')
+      if (uris.length === 0) return
+      await vscode.commands.executeCommand('workbench.view.extension.lightCode')
+      transport.postWhenLive({
+        type: 'addContextFiles',
+        paths: uris.map((uri) => {
+          const relative = vscode.workspace.asRelativePath(uri, false)
+          return relative === uri.fsPath ? uri.fsPath : relative
+        }),
+      })
+    },
+  )
+
   const walkthroughCommand = vscode.commands.registerCommand('lightCode.openWalkthrough', () => {
     void vscode.commands.executeCommand(
       'workbench.action.openWalkthrough',
@@ -173,7 +195,7 @@ export function activate(context: vscode.ExtensionContext): void {
     shareKeysWithSun(context, configManager),
   )
 
-  context.subscriptions.push(viewDisposable, openCommand, walkthroughCommand, settingsCommand, shareCommand, {
+  context.subscriptions.push(viewDisposable, openCommand, addToContextCommand, walkthroughCommand, settingsCommand, shareCommand, {
     dispose: () => {
       clearInterval(poll)
       bridge?.dispose()

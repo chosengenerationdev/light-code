@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.143.0",
+  "version": "0.144.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -50,6 +50,11 @@
       {
         "command": "lightCode.openPanel",
         "title": "Light Code: Open Panel"
+      },
+      {
+        "command": "lightCode.addToContext",
+        "title": "Add to Light Code chat",
+        "category": "Light Code"
       },
       {
         "command": "lightCode.openWalkthrough",
@@ -351,6 +356,28 @@
         {
           "command": "lightCode.openSettings",
           "when": "false"
+        },
+        {
+          "command": "lightCode.addToContext",
+          "when": "editorIsOpen"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "lightCode.addToContext",
+          "group": "lightCode@1"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "lightCode.addToContext",
+          "group": "lightCode@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "lightCode.addToContext",
+          "group": "lightCode@1"
         }
       ]
     }

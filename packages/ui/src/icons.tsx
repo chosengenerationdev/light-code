@@ -507,3 +507,15 @@ export function ProjectIcon({ size = 16 }: IconProps): ReactElement {
     </svg>
   )
 }
+
+/** A page with a plus: add files from the editor to the message. */
+export function AddFileIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8.5 1.5 H4 a1.5 1.5 0 0 0 -1.5 1.5 v10 A1.5 1.5 0 0 0 4 14.5 h4" />
+      <path d="M8.5 1.5 L12.5 5.5 V8" />
+      <path d="M8.5 1.5 V5.5 H12.5" />
+      <path d="M12 10 v5 M9.5 12.5 h5" />
+    </svg>
+  )
+}

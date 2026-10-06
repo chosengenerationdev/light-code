@@ -49,6 +49,8 @@ const ICONS = {
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   up: '<path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7"/>',
+  push: '<circle cx="8" cy="11" r="2.25"/><path d="M8 8.75V2.5M5.5 5 8 2.5 10.5 5"/>',
+  pull: '<path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10"/>',
   alert: '<path d="M8 1.75 14.5 13.5h-13z"/><path d="M8 6.25v3.5M8 11.6v.01"/>',
 }
 
@@ -184,6 +186,10 @@ const HANDLERS = {
   },
   reports(m) {
     if (openModal?.kind === 'reportList') openModal.list(m.reports)
+  },
+  gitDone(m) {
+    notice(m.text, m.ok ? 'info' : 'error')
+    if (openModal?.kind === 'commit' && openModal.projectId === m.id) openModal.onGitDone(m.ok)
   },
   git(m) {
     const before = JSON.stringify(model.git ?? {})
@@ -602,6 +608,7 @@ function renderList() {
         el('span', { class: 'item-text' }, el('span', { class: 'item-name', text: p.name }), el('span', { class: `item-sub ${tone}`, text: sub })),
         s.unread && !here ? el('span', { class: 'unread', title: 'Something happened here' }) : null,
         gitBadge(p),
+        gitButtons(p),
         s.phase === 'sleeping' ? el('span', { class: 'moon', html: svg(ICONS.moon), title: 'Sleeping' }) : null,
         p.keepAwake ? el('span', { class: 'pin', html: svg(ICONS.pin), title: 'Kept awake' }) : null,
       )
@@ -626,11 +633,129 @@ function gitBadge(project) {
   ].filter(([n]) => n > 0)
   if (parts.length === 0) return null
   const words = parts.map(([n, , , word]) => `${n} ${word}`).join(', ')
+  const total = g.added + g.modified + g.deleted
+  const listed = (g.files ?? []).join('\n')
+  const more = total > (g.files ?? []).length ? `\n… and ${total - g.files.length} more` : ''
   return el(
     'span',
-    { class: 'git', title: `${words}${g.branch ? ` — on ${g.branch}` : ''}\nfrom git status, not yet committed` },
+    { class: 'git', title: `${words}${g.branch ? ` — on ${g.branch}` : ''}, not yet committed\n\n${listed}${more}` },
     ...parts.map(([n, cls, sign]) => el('span', { class: cls, text: `${sign}${n}` })),
   )
+}
+
+/**
+ * Commit and push, and pull - on the row of a codebase git manages. Small and quiet: shown on hover
+ * and on the selected row, so a list of codebases does not become a list of buttons.
+ */
+function gitButtons(project) {
+  const g = model.git?.[project.id]
+  if (g === undefined) return null
+  const changed = g.added + g.modified + g.deleted > 0
+  const stop = (fn) => (e) => {
+    e.stopPropagation()
+    fn()
+  }
+  return el(
+    'span',
+    { class: 'git-actions' },
+    changed || g.ahead > 0
+      ? el('button', {
+          class: 'icon-btn tiny',
+          title: changed ? 'Commit and push…' : `Push ${g.ahead} waiting commit${g.ahead === 1 ? '' : 's'}`,
+          'aria-label': 'Commit and push',
+          html: svg(ICONS.push),
+          onclick: stop(() => openCommit(project)),
+        })
+      : null,
+    g.upstream
+      ? el('button', {
+          class: 'icon-btn tiny',
+          title: `Pull the latest changes${g.behind > 0 ? ` (${g.behind} waiting)` : ''} — fast-forward only, never a merge`,
+          'aria-label': 'Pull latest changes',
+          html: svg(ICONS.pull),
+          onclick: stop(() => {
+            notice(`Pulling ${project.name}…`)
+            send('gitPull', { id: project.id })
+          }),
+        })
+      : null,
+  )
+}
+
+/**
+ * The commit dialog: what will be committed, a message, and an agent to write one. The message the
+ * agent suggests is only filled in - nothing is committed until Commit and push is pressed.
+ */
+function openCommit(project) {
+  showModal('commit', (scrim, modal) => {
+    const g = model.git?.[project.id] ?? { files: [], added: 0, modified: 0, deleted: 0, ahead: 0 }
+    const state = { message: '', busy: false, writing: false }
+    const card = el('div', { class: 'modal', style: 'width: min(620px, calc(100vw - 48px))' })
+    scrim.append(card)
+    const box = el('textarea', { rows: '6', placeholder: 'What changed, and why', spellcheck: 'true', 'aria-label': 'Commit message' })
+    box.addEventListener('input', () => {
+      state.message = box.value
+      button.disabled = state.busy || state.message.trim().length === 0
+    })
+    const write = el('button', {
+      class: 'secondary',
+      text: 'Write with agent',
+      title: "Ask this codebase's agent to write a message from the changes. You can edit it before committing.",
+      onclick: () => {
+        const frame = $(`.pane[data-id="${project.id}"] iframe`)
+        const url = model.urls[project.id]
+        if (frame?.contentWindow == null || url === undefined) return notice('Open the codebase first - its agent writes the message.', 'error')
+        state.writing = true
+        write.disabled = true
+        write.textContent = 'Writing…'
+        frame.contentWindow.postMessage({ source: 'sun', ask: 'commitMessage' }, new URL(url).origin)
+      },
+    })
+    const button = el('button', {
+      class: 'primary',
+      text: 'Commit and push',
+      disabled: true,
+      onclick: () => {
+        state.busy = true
+        button.disabled = true
+        button.textContent = 'Pushing…'
+        send('gitCommitPush', { id: project.id, message: state.message })
+      },
+    })
+    const total = g.added + g.modified + g.deleted
+    card.append(
+      el('header', {}, el('h2', { text: `Commit and push — ${project.name}` }), el('p', { class: 'sub', text: `${total} changed file${total === 1 ? '' : 's'}${g.branch ? ` on ${g.branch}` : ''}${g.ahead > 0 ? `, ${g.ahead} commit${g.ahead === 1 ? '' : 's'} waiting to push` : ''}. Everything changed is committed.` })),
+      el(
+        'div',
+        { class: 'body' },
+        el('pre', { class: 'commit-files', text: (g.files ?? []).join('\n') + (total > (g.files ?? []).length ? `\n… and ${total - g.files.length} more` : '') }),
+        el('label', { class: 'field-label', text: 'Message' }),
+        box,
+        el('div', { class: 'commit-tools' }, write),
+      ),
+      el('footer', {}, el('span', { class: 'spacer' }), el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }), button),
+    )
+    modal.projectId = project.id
+    modal.onCommitMessage = (text, error) => {
+      write.disabled = false
+      write.textContent = 'Write with agent'
+      if (typeof text === 'string' && text.trim().length > 0) {
+        box.value = text.trim()
+        state.message = box.value
+        button.disabled = state.busy
+        box.focus()
+      } else notice(error || 'The agent could not write a message.', 'error')
+    }
+    modal.onGitDone = (ok) => {
+      if (ok) closeModal()
+      else {
+        state.busy = false
+        button.textContent = 'Commit and push'
+        button.disabled = state.message.trim().length === 0
+      }
+    }
+    requestAnimationFrame(() => box.focus())
+  })
 }
 
 /**
@@ -868,6 +993,10 @@ window.addEventListener('message', (event) => {
   // An accent picked in that codebase's own Appearance tab, or null to follow Fire Code's again.
   if (data.accent === null || validHex(data.accent)) send('projectAccent', { id: project.id, accent: data.accent })
   if (data.ready === true) sendAppearance(frame)
+  // A commit message the codebase's agent wrote, for the commit dialog to fill in.
+  if ('commitMessage' in data && openModal?.kind === 'commit' && openModal.projectId === project.id) {
+    openModal.onCommitMessage(typeof data.commitMessage === 'string' ? data.commitMessage.slice(0, 5000) : undefined, typeof data.error === 'string' ? data.error : undefined)
+  }
 })
 
 // ─── Reports: Fire Code's Markdown viewer ──────────────────────────────────────────

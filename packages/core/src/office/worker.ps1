@@ -1671,6 +1671,66 @@ function Invoke-ExcelRunMacro {
 # `Application.Evaluate` computes a formula in the workbook's own context - the same names, the
 # same sheets - and returns the answer without a cell being touched. It is the "what would this
 # give" question, which during an investigation is asked far more often than "change this".
+<#
+  Recalculation - what Shift+F9 (this sheet), F9 (everything open) and Ctrl+Alt+F9 (full) do by hand.
+
+  Reported: the agent could not "select the range and press Shift+F9". It needs no keystrokes: the
+  Calculate methods are the same act. A range can be recalculated on its own, which is what a
+  workbook in manual calculation mode most often needs. The selection is only moved when asked, so
+  the user can see which cells were meant; otherwise nothing visible changes but the values.
+#>
+function Invoke-ExcelCalculate {
+    param($Request)
+
+    $app = Get-OfficeApp -ProgId 'Excel.Application' -AttachOnly $true
+    $wb = Get-Workbook -App $app -Name $Request.workbook
+    $sheet = Get-Worksheet -Workbook $wb -Name $Request.sheet
+    $range = $null
+    if (-not [string]::IsNullOrWhiteSpace([string]$Request.range)) { $range = $sheet.Range([string]$Request.range) }
+
+    $scope = [string]$Request.scope
+    if ([string]::IsNullOrWhiteSpace($scope)) { $scope = if ($null -ne $range) { 'range' } else { 'sheet' } }
+
+    switch ($scope) {
+        'range' {
+            if ($null -eq $range) { throw 'Name the range to recalculate, e.g. B2:D40.' }
+            $range.Calculate() | Out-Null
+        }
+        'sheet' { $sheet.Calculate() | Out-Null }
+        'workbook' { foreach ($ws in $wb.Worksheets) { $ws.Calculate() | Out-Null } }
+        'all' {
+            if ($Request.rebuild -eq $true) { $app.CalculateFullRebuild() | Out-Null }
+            elseif ($Request.full -eq $true) { $app.CalculateFull() | Out-Null }
+            else { $app.Calculate() | Out-Null }
+        }
+        default { throw "Unknown scope '$scope'. Use range, sheet, workbook or all." }
+    }
+
+    if ($Request.select -eq $true) {
+        $sheet.Activate() | Out-Null
+        if ($null -ne $range) { $range.Select() | Out-Null }
+    }
+
+    # What the cells now show, for a small range - the reason anybody recalculates.
+    $cells = @()
+    if ($null -ne $range -and $range.Count -le 100) {
+        foreach ($cell in $range.Cells) {
+            $cells += @{ address = [string]$cell.Address($false, $false); text = [string]$cell.Text }
+        }
+    }
+
+    $mode = switch ([int]$app.Calculation) { -4105 { 'automatic' } -4135 { 'manual' } 2 { 'automatic except tables' } default { 'unknown' } }
+    return @{
+        workbook = $wb.Name
+        sheet    = $sheet.Name
+        scope    = $scope
+        range    = if ($null -ne $range) { [string]$range.Address($false, $false) } else { $null }
+        mode     = $mode
+        pending  = ([int]$app.CalculationState -ne 0)
+        cells    = $cells
+    }
+}
+
 function Invoke-ExcelEvaluate {
     param($Request)
 
@@ -2461,6 +2521,47 @@ function Invoke-OutlookRead {
     $attachments = @()
     foreach ($attachment in $item.Attachments) { $attachments += $attachment.FileName }
 
+    <#
+      Attachments saved for reading, when asked: ordinary files (by value, type 1) and attached
+      emails (type 5, saved as .msg). Linked and OLE attachments have no file to save. Inline
+      pictures that are only part of the body's layout (a signature logo) are skipped - they carry
+      a content id and are shown by the body already. Capped, so one large attachment cannot fill
+      the disk or take minutes: the caller reports what was skipped and why.
+    #>
+    $saved = @()
+    if (-not [string]::IsNullOrWhiteSpace([string]$Request.saveDir)) {
+        New-Item -ItemType Directory -Force -Path $Request.saveDir | Out-Null
+        $total = 0
+        $index = 0
+        foreach ($attachment in $item.Attachments) {
+            $index += 1
+            $name = [string]$attachment.FileName
+            $size = 0
+            try { $size = [int64]$attachment.Size } catch { }
+            $kind = [int]$attachment.Type
+            $entry = @{ name = $name; size = $size; path = $null; skipped = $null }
+            $inline = $false
+            try { $inline = -not [string]::IsNullOrEmpty([string]$attachment.PropertyAccessor.GetProperty('http://schemas.microsoft.com/mapi/proptag/0x3712001F')) } catch { }
+            if ($kind -ne 1 -and $kind -ne 5) { $entry.skipped = 'a link or embedded object, not a file' }
+            elseif ($inline -and $name -match '\.(png|jpe?g|gif|bmp)$') { $entry.skipped = 'a picture inside the message body' }
+            elseif ($size -gt 25MB) { $entry.skipped = 'larger than 25 MB' }
+            elseif ($total + $size -gt 60MB) { $entry.skipped = 'over the 60 MB limit for one message' }
+            else {
+                $safe = ($name -replace '[\\/:*?"<>|]', '_')
+                if ($kind -eq 5 -and $safe -notmatch '\.msg$') { $safe = "$safe.msg" }
+                $target = Join-Path $Request.saveDir ("{0}-{1}" -f $index, $safe)
+                try {
+                    $attachment.SaveAsFile($target)
+                    $entry.path = $target
+                    $total += $size
+                } catch {
+                    $entry.skipped = "could not be saved: $($_.Exception.Message)"
+                }
+            }
+            $saved += $entry
+        }
+    }
+
     # The HTML body as well as the plain one.
     #
     # `Body` is the plain-text rendering and it discards every bit of formatting - which in
@@ -2481,6 +2582,7 @@ function Invoke-OutlookRead {
         received    = $item.ReceivedTime.ToString('s')
         body        = $item.Body
         attachments = $attachments
+        saved       = $saved
     }
 }
 
@@ -2503,6 +2605,7 @@ function Invoke-Request {
         'excel.writeMacro'      { return Invoke-ExcelWriteMacro -Request $Request }
         'excel.runMacro'        { return Invoke-ExcelRunMacro -Request $Request }
         'excel.evaluate'        { return Invoke-ExcelEvaluate -Request $Request }
+        'excel.calculate'       { return Invoke-ExcelCalculate -Request $Request }
         'outlook.folders'       { return Invoke-OutlookFolders -Request $Request }
         'outlook.validateFolder' { return Invoke-OutlookValidateFolder -Request $Request }
         'outlook.harvest'       { return Invoke-OutlookHarvest -Request $Request }

@@ -10,6 +10,9 @@ import { listSkillImages, skillImageDataUri, SKILL_IMAGE_DIR } from '../skills/i
 import { listSkillFiles } from '../skills/files.js'
 import { createHubRuntime, hubGuidance, withoutMissingImports } from '../jupyter/runtime.js'
 import { FileMachineApprovals } from '../python/machineApprovals.js'
+import { redact } from '../logging/redact.js'
+import { compactHistory, isSummaryMessage } from '../context/compact.js'
+import { repairUnansweredToolCalls } from '../agent/repairHistory.js'
 import { readToolCredential } from '../python/toolCredentials.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
 import { createHubTools, describePull } from '../jupyter/tools.js'
@@ -23,6 +26,11 @@ import {
 } from '../config/share.js'
 import os from 'node:os'
 import path from 'node:path'
+import {
+  droppedFilesRoot as droppedFilesRootDir,
+  mailAttachmentsRoot as mailAttachmentsRootDir,
+  stageDroppedFile,
+} from '../documents/dropped.js'
 
 import { buildAutoGuidance } from '../modes/autoGuidance.js'
 import { describeMigration, planMigration, runMigration } from '../migrate/folders.js'
@@ -124,6 +132,7 @@ import { createOutlookDraftTool } from '../tools/outlookDraft.js'
 import {
   createExcelCheckMacroTool,
   createExcelEvaluateTool,
+  createExcelCalculateTool,
   createExcelRunMacroTool,
 } from '../tools/officeVba.js'
 import { timeoutForTool, timeoutTargetFor } from '../tools/timeouts.js'
@@ -555,6 +564,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // Refreshed whenever config is loaded (once per turn). Read synchronously by the spill
   // path, which cannot await a keychain lookup in the middle of writing a tool result.
   let cachedSecretValues: readonly string[] = []
+  const droppedFilesRoot = droppedFilesRootDir()
+  const mailAttachmentsRoot = mailAttachmentsRootDir()
+  // One folder per session, so two windows dropping files of the same name never meet.
+  const droppedFilesDir = path.join(droppedFilesRoot, randomUUID().slice(0, 8))
   const truncationStore = new RecordingTruncationStore(
     new DiskTruncationStore(path.join(storageDir, 'tool-results'), () => cachedSecretValues),
   )
@@ -2958,6 +2971,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * telling the UI to render its own. Two ways of saying the same thing would eventually
    * disagree, and the failure is a button that does nothing.
    */
+  /**
+   * A picked file as a mention: workspace-relative with forward slashes, which is how the `@`
+   * picker writes them and what the resolver confines; a file outside stays absolute.
+   */
+  function contextMentionPath(file: string): string {
+    if (workspaceRoot === undefined) return file
+    const relative = path.relative(workspaceRoot, file)
+    return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative)
+      ? relative.split(path.sep).join('/')
+      : file
+  }
+
   function hostCapabilities(): {
     nativeGuide: boolean
     guideMediaBase?: string
@@ -2965,10 +2990,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     choosesTheme: boolean
     offersOffice: boolean
     exportsSource: boolean
+    picksFiles: boolean
   } {
     return {
       nativeGuide: ui.openWalkthrough !== undefined,
       exportsSource: services.sourceArchive !== undefined,
+      picksFiles: ui.pickContextFiles !== undefined,
       /*
        * Whether this host has a theme of its own to follow.
        *
@@ -3518,6 +3545,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createExcelSheetsTool(officeOptions))
         combined.register(createExcelCheckMacroTool(officeOptions))
         combined.register(createExcelEvaluateTool(officeOptions))
+        combined.register(createExcelCalculateTool(officeOptions))
         combined.register(createExcelRunMacroTool(officeOptions))
       }
       if (cachedOffice.outlook === true) {
@@ -4272,7 +4300,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             }
           : {}),
         // The other codebases in Fire Code are readable like a configured read root.
-        readRoots: [...cachedReadRoots, ...(services.siblings ?? []).map((s) => s.path)],
+        // Dropped files and saved mail attachments live in temporary folders the message names;
+        // read_file must reach them without asking, or the rest of a cut-off file is out of reach.
+        readRoots: [
+          ...cachedReadRoots,
+          ...(services.siblings ?? []).map((s) => s.path),
+          droppedFilesRoot,
+          mailAttachmentsRoot,
+        ],
         ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
         // Resolved per turn by the host, so an edit applies to the next command rather than
         // needing a new session. Absent in the extension, where there is nothing to resolve.
@@ -5162,6 +5197,93 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } catch (error) {
       logger.warn('mention lookup failed', String(error))
       post({ type: 'mentionCandidates', query, paths: [] })
+    }
+  }
+
+  /**
+   * Compact now, from the token bar: the older part of the conversation is summarised by the chat's
+   * model and the recent messages kept as they are - what happens by itself near the limit, on
+   * request. The saved transcript keeps everything (Phase 6b). Not mid-reply: the turn is reading
+   * the same history.
+   */
+  async function handleCompactConversation(): Promise<void> {
+    if (userTurnRunning || runningScheduleId !== undefined) {
+      post({ type: 'error', message: 'Wait for the current reply to finish, then compact.' })
+      return
+    }
+    const config = await loadSettings()
+    const profile = resolveActiveProfile(config)
+    const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+    const result = await compactHistory(repairUnansweredToolCalls(conversation.toModelMessages()), provider, { keepRecent: 4 })
+    const summary = result.compacted ? result.messages.find(isSummaryMessage) : undefined
+    if (summary === undefined) {
+      post({
+        type: 'error',
+        message: 'Nothing to compact: the conversation is already short, or the summary would not have been any smaller.',
+      })
+      return
+    }
+    conversation.applyCompaction(summary, conversation.compactedCount() + result.summarisedCount)
+    post({ type: 'compacted', summarisedCount: result.summarisedCount })
+    await persistActiveTask()
+  }
+
+  /**
+   * A commit message for what has changed, written by the chat's model - for Fire Code's commit
+   * dialog, where the person reads it, edits it and presses Commit. Nothing is run, written or
+   * committed here, which is why it asks no approval: git is only read, with no optional locks.
+   */
+  async function handleSuggestCommitMessage(): Promise<void> {
+    try {
+      if (workspaceRoot === undefined) throw new Error('No folder is open.')
+      const git = (args: string[]): Promise<{ ok: boolean; out: string }> =>
+        new Promise((resolve) => {
+          const child = spawn('git', ['--no-optional-locks', '-C', workspaceRoot, ...args], {
+            env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+            windowsHide: true,
+          })
+          let out = ''
+          child.stdout.on('data', (chunk: Buffer) => {
+            if (out.length < 200_000) out += chunk.toString('utf8')
+          })
+          const timer = setTimeout(() => child.kill(), 20_000)
+          child.on('error', () => resolve({ ok: false, out: '' }))
+          child.on('close', (code) => {
+            clearTimeout(timer)
+            resolve({ ok: code === 0, out })
+          })
+        })
+      const status = await git(['status', '--short', '--untracked-files=normal'])
+      if (!status.ok) throw new Error('This folder is not a git repository, or git could not be run.')
+      if (status.out.trim().length === 0) throw new Error('Nothing has changed, so there is nothing to describe.')
+      let diff = await git(['diff', 'HEAD', '--no-color', '--no-ext-diff', '--stat', '--patch'])
+      // A repository with no commits yet has no HEAD to compare with.
+      if (!diff.ok) diff = await git(['diff', '--no-color', '--no-ext-diff', '--stat', '--patch'])
+      const shown = diff.out.length > 24_000 ? `${diff.out.slice(0, 24_000)}\n... (diff cut here)` : diff.out
+
+      const config = await loadSettings()
+      const profile = resolveActiveProfile(config)
+      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+      let text = ''
+      for await (const chunk of provider.streamChat([
+        {
+          role: 'system',
+          content:
+            'Write a git commit message for the changes below. First line: a summary under 72 characters, ' +
+            'in the imperative mood ("Add ...", "Fix ..."). Then, if it helps, a blank line and a short body ' +
+            'saying what changed and why, wrapped at 72 characters. Reply with the message only - no quotes, ' +
+            'no code fences, no commentary.',
+        },
+        { role: 'user', content: `Changed files (git status):\n${status.out}\n\nDiff:\n${redact(shown, cachedSecretValues)}` },
+      ])) {
+        if (chunk.type === 'text') text += chunk.text
+        if (chunk.type === 'error') throw new Error(chunk.error)
+      }
+      const message = text.trim().replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
+      if (message.length === 0) throw new Error('The model replied with nothing.')
+      post({ type: 'commitMessageSuggestion', text: message })
+    } catch (error) {
+      post({ type: 'commitMessageSuggestion', error: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -11556,6 +11678,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           userTurnRunning = false
         }
       })()
+    } else if (message.type === 'compactConversation') {
+      reportFailure('handleCompactConversation', handleCompactConversation())
+    } else if (message.type === 'pickContextFiles') {
+      void (async () => {
+        const picked = await ui.pickContextFiles?.()
+        if (picked === undefined || picked.length === 0) return
+        post({ type: 'addContextFiles', paths: picked.map((file) => contextMentionPath(file)) })
+      })()
+    } else if (message.type === 'stageAttachment') {
+      const { id, name, data } = message
+      void (async () => {
+        try {
+          const staged = await stageDroppedFile(droppedFilesDir, name, Buffer.from(data, 'base64'))
+          post({ type: 'attachmentStaged', id, name: staged.name, path: staged.path, text: staged.text })
+        } catch (error) {
+          post({ type: 'attachmentStaged', id, name, error: error instanceof Error ? error.message : String(error) })
+        }
+      })()
+    } else if (message.type === 'suggestCommitMessage') {
+      reportFailure('handleSuggestCommitMessage', handleSuggestCommitMessage())
     } else if (message.type === 'requestMentionCandidates') {
       reportFailure('handleMentionCandidates', handleMentionCandidates(message.query))
     } else if (message.type === 'reactToMessage') {

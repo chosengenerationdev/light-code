@@ -13,6 +13,12 @@ export const colors = {
   muted: 'var(--vscode-descriptionForeground)',
   border: 'var(--vscode-widget-border, var(--vscode-panel-border))',
   inputBackground: 'var(--vscode-input-background)',
+  /**
+   * Code blocks in replies. Inside VS Code this is the input colour of your theme, as it always was;
+   * the browser page (Fire Code, the Node host, JetBrains) sets its own soft blue tint, because its
+   * input colour is the page colour and the blocks vanished into it.
+   */
+  codeBlockBackground: 'var(--lc-code-block-background, var(--vscode-input-background))',
   inputForeground: 'var(--vscode-input-foreground)',
   inputBorder: 'var(--vscode-input-border, var(--vscode-widget-border))',
   buttonBackground: 'var(--vscode-button-background)',

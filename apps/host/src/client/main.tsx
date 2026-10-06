@@ -95,8 +95,9 @@ const transport = new HttpTransport((text, level) => {
  * Tells Light Code Fire Code, when this page is one of its panes, what the agent is doing.
  *
  * Fire Code shows a dot per codebase — working, waiting for you, finished — and only puts an idle
- * codebase to sleep. It cannot see inside the frame, so the page says. Only a state word crosses:
- * never text, never a path. Sent to the embedding origin alone, which the CSP's `frame-ancestors`
+ * codebase to sleep. It cannot see inside the frame, so the page says. Only a state word crosses -
+ * never conversation text, never a path - except the one text Fire Code asks for: a commit message
+ * for its commit dialog, which the person reads and edits there. Sent to the embedding origin alone, which the CSP's `frame-ancestors`
  * has already restricted to what the operator allowed.
  */
 const embedder = ((): string | undefined => {
@@ -180,8 +181,14 @@ if (embedder !== undefined) {
   })
   window.addEventListener('message', (event) => {
     if (event.origin !== embedder || event.source !== window.parent) return
-    const data = event.data as { source?: string; appearance?: { theme?: unknown; accent?: unknown; own?: unknown } } | null
-    if (data?.source !== 'sun' || data.appearance === undefined) return
+    const data = event.data as { source?: string; ask?: unknown; appearance?: { theme?: unknown; accent?: unknown; own?: unknown } } | null
+    if (data?.source !== 'sun') return
+    // Fire Code's commit dialog asks this codebase's agent for a message; the answer goes back below.
+    if (data.ask === 'commitMessage') {
+      transport.post({ type: 'suggestCommitMessage' })
+      return
+    }
+    if (data.appearance === undefined) return
     const { theme, accent } = data.appearance
     if ((theme !== 'system' && theme !== 'light' && theme !== 'dark') || typeof accent !== 'string') return
     if (!/^#[0-9a-f]{6}$/i.test(accent)) return
@@ -197,6 +204,12 @@ const BUSY_MESSAGES = new Set(['textChunk', 'reasoningChunk', 'toolCall', 'toolR
 
 transport.onMessage((message) => {
   const incoming = message as { type?: string; theme?: string }
+  // A commit message the agent wrote, for Fire Code's commit dialog - text the person asked for and
+  // will read before committing, sent only to the embedding window.
+  if (incoming.type === 'commitMessageSuggestion' && embedder !== undefined) {
+    const answer = message as { text?: string; error?: string }
+    window.parent.postMessage({ source: 'light-code', commitMessage: answer.text ?? null, ...(answer.error !== undefined ? { error: answer.error } : {}) }, embedder)
+  }
   if (incoming.type !== undefined) {
     if (BUSY_MESSAGES.has(incoming.type)) reportState('busy')
     else if (incoming.type === 'approvalRequest') reportState('attention', false, 'approval')

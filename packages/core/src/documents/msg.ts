@@ -47,6 +47,8 @@ const TAG = {
   deliveryTime: '0e06',
   attachLongFilename: '3707',
   attachFilename: '3704',
+  /** PR_ATTACH_DATA_BIN: the attached file's bytes, for an ordinary by-value attachment. */
+  attachData: '3701',
   attachSize: '0e20',
   recipientName: '3001',
   recipientEmail: '39fe',
@@ -57,6 +59,11 @@ const TAG = {
 export interface MsgAttachment {
   name: string
   size?: number | undefined
+  /**
+   * The file itself, when it is stored by value. Absent for an attached email (a nested
+   * storage, not a stream) and for links - the caller says those were not read.
+   */
+  data?: Buffer | undefined
 }
 
 export interface MsgRecipient {
@@ -183,7 +190,11 @@ export function parseMsg(buffer: Buffer): ParsedMsg {
         readString(file, properties, TAG.attachFilename)
       // An attachment with no name at all is usually an inline image; it is still an
       // attachment and saying "1 unnamed" beats leaving it out of the count.
-      attachments.push({ name: name !== undefined && name.length > 0 ? name : '(unnamed)' })
+      const dataEntry = properties.get(TAG.attachData + TYPE_BINARY)
+      attachments.push({
+        name: name !== undefined && name.length > 0 ? name : '(unnamed)',
+        ...(dataEntry !== undefined ? { data: file.read(dataEntry) } : {}),
+      })
       continue
     }
 

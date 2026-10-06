@@ -43,6 +43,21 @@ export function activeRoleQuery(text: string, caret: number): string | undefined
   return /^[a-z0-9-]*$/.test(token) ? token : undefined
 }
 
+/**
+ * Puts `@` mentions for `paths` at the front of the message, skipping any already mentioned, so
+ * the question being typed stays at the end where the caret is.
+ */
+export function addMentions(text: string, paths: string[]): string {
+  const present = new Set(
+    splitMentions(text)
+      .filter((segment) => segment.isMention)
+      .map((segment) => segment.text.replace(/^@"?|"$/g, '')),
+  )
+  const fresh = [...new Set(paths)].filter((each) => !present.has(each)).map(renderMention)
+  if (fresh.length === 0) return text
+  return `${fresh.join(' ')} ${text.replace(/^\s+/, '')}`
+}
+
 /** Paths containing spaces are quoted, so the resolver reads them as a single target. */
 export function renderMention(candidatePath: string): string {
   return candidatePath.includes(' ') ? `@"${candidatePath}"` : `@${candidatePath}`

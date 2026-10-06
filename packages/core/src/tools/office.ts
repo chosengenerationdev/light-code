@@ -1,4 +1,9 @@
+import { createHash } from 'node:crypto'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
+import { mailAttachmentsRoot } from '../documents/dropped.js'
+import { documentKindFor, extractDocument } from '../documents/extract.js'
 
 import type { OfficeBridge } from '../office/bridge.js'
 import { annotateHtmlBody } from '../office/mailFormat.js'
@@ -1390,14 +1395,78 @@ export function createOutlookSearchTool(options: OfficeToolOptions): Tool<z.infe
   }
 }
 
-export function createOutlookReadTool(options: OfficeToolOptions): Tool<{ entryId: string }> {
+const readEmailSchema = z.object({
+  entryId: z.string().min(1).describe('The id from outlook_search.'),
+  attachments: z
+    .boolean()
+    .optional()
+    .describe('Also read the attachments (default true): their text for PDF, Word, Excel, HTML, attached emails and text files; pictures are shown to the model when it can see.'),
+})
+
+/** Text-like attachments read as they are; anything not listed and not a known document is only named. */
+const TEXT_ATTACHMENT = /\.(txt|csv|tsv|log|json|xml|md|sql|ya?ml|ini|cfg|conf|py|js|ts|java|cs|sh|ps1|bat|cmd|r|properties)$/i
+const IMAGE_ATTACHMENT: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif' }
+const ATTACHMENT_TEXT_CAP = 30_000
+
+/**
+ * Reads what an email carries, not just its name. Reported: "when an email is read, it should be
+ * able to read its attachments too" - the list of file names was all there was, and the model then
+ * asked the user to save each one and say where. Saved to a temporary folder (never the workspace),
+ * read with the same extractors `read_file` uses, and capped per attachment.
+ */
+async function readAttachments(
+  saved: { name: string; size: number; path: string | null; skipped: string | null }[],
+): Promise<{ text: string; images: NonNullable<ToolResult['images']> }> {
+  const parts: string[] = []
+  const images: NonNullable<ToolResult['images']> = []
+  for (const attachment of saved) {
+    if (attachment.path === null) {
+      parts.push(`--- Attachment: ${attachment.name} (not read: ${attachment.skipped ?? 'not saved'}) ---`)
+      continue
+    }
+    const lower = attachment.name.toLowerCase()
+    const extension = lower.slice(lower.lastIndexOf('.'))
+    try {
+      const bytes = await fs.readFile(attachment.path)
+      const media = IMAGE_ATTACHMENT[extension]
+      if (media !== undefined) {
+        if (bytes.length <= 4 * 1024 * 1024) images.push({ label: attachment.name, mediaType: media, data: bytes.toString('base64') })
+        parts.push(`--- Attachment: ${attachment.name} (a picture${bytes.length <= 4 * 1024 * 1024 ? ', shown below' : ', too large to show'}) ---`)
+        continue
+      }
+      const kind = documentKindFor(attachment.path)
+      if (kind === 'text' && !TEXT_ATTACHMENT.test(lower)) {
+        parts.push(`--- Attachment: ${attachment.name} (${formatSize(bytes.length)}; not a format Light Code reads - saved at ${attachment.path}) ---`)
+        continue
+      }
+      const extracted = extractDocument(attachment.path, bytes)
+      const text = extracted.text.length > ATTACHMENT_TEXT_CAP ? `${extracted.text.slice(0, ATTACHMENT_TEXT_CAP)}\n… (cut here; the whole file is at ${attachment.path})` : extracted.text
+      parts.push(`--- Attachment: ${attachment.name} (${extracted.kind}, ${formatSize(bytes.length)}) ---`, text)
+    } catch (error) {
+      parts.push(`--- Attachment: ${attachment.name} (could not be read: ${error instanceof Error ? error.message : String(error)}) ---`)
+    }
+  }
+  return { text: parts.join('\n'), images }
+}
+
+function formatSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
+
+export function createOutlookReadTool(options: OfficeToolOptions): Tool<z.infer<typeof readEmailSchema>> {
   return {
     name: 'outlook_read_email',
     group: 'read',
-    description: 'Read one message in full, by the id returned from outlook_search.',
-    parametersSchema: z.object({ entryId: z.string().min(1).describe('The id from outlook_search.') }),
+    description:
+      'Read one message in full, by the id returned from outlook_search - including the text of its attachments ' +
+      '(PDF, Word, Excel, attached emails, text and CSV) and any pictures. Pass attachments: false to skip them.',
+    parametersSchema: readEmailSchema,
     async execute(params): Promise<ToolResult> {
       try {
+        const readAttached = params.attachments !== false
+        const saveDir = readAttached
+          ? path.join(mailAttachmentsRoot(), createHash('sha256').update(params.entryId).digest('hex').slice(0, 16))
+          : undefined
         const result = await options.bridge.request<{
           subject: string
           from: string
@@ -1408,7 +1477,9 @@ export function createOutlookReadTool(options: OfficeToolOptions): Tool<{ entryI
           body: string
           html: string | null
           attachments: string[]
-        }>({ op: 'outlook.read', ...params })
+          saved?: { name: string; size: number; path: string | null; skipped: string | null }[]
+        }>({ op: 'outlook.read', entryId: params.entryId, ...(saveDir !== undefined ? { saveDir } : {}) })
+        const attached = readAttached && (result.saved ?? []).length > 0 ? await readAttachments(result.saved ?? []) : undefined
 
         /*
          * The formatted body wins when there is one.
@@ -1440,7 +1511,9 @@ export function createOutlookReadTool(options: OfficeToolOptions): Tool<{ entryI
             // Falls back to the plain body when there is no HTML, which is what a plain-text
             // sender produces — and losing the message to gain formatting would be absurd.
             annotated === undefined || annotated.text.length === 0 ? result.body : annotated.text,
+            ...(attached !== undefined ? ['', attached.text] : []),
           ].join('\n'),
+          ...(attached !== undefined && attached.images.length > 0 ? { images: attached.images } : {}),
         }
       } catch (error) {
         return { content: message(error), isError: true }

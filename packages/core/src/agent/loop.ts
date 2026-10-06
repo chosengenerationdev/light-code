@@ -3,7 +3,7 @@ import { requiresApproval, type ApprovalGate } from '../approval/types.js'
 import { repairUnansweredToolCalls } from './repairHistory.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
 import { computeBreakdown, type TokenBreakdown } from '../context/budget.js'
-import { compactHistory, isSummaryMessage, shouldCompact, type CompactionOptions } from '../context/compact.js'
+import { compactHistory, isContextOverflow, isSummaryMessage, shouldCompact, type CompactionOptions } from '../context/compact.js'
 import { dropSupersededReads } from '../context/supersede.js'
 import { dropEvictedDocs } from '../context/evict.js'
 import { CODE_MODE } from '../modes/builtin.js'
@@ -507,6 +507,8 @@ export async function runAgentTurn(
   // prompt, so the model is never told it exists (§8).
   const tools = toToolDefinitions(toolsForMode(toolRegistry, mode))
   let checkpointTaken = false
+  // One forced compaction per turn when the provider says the conversation is too long.
+  let compactedForOverflow = false
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const streamOptions: ChatStreamOptions = { tools }
@@ -534,6 +536,39 @@ export async function runAgentTurn(
       } else if (chunk.type === 'done') {
         break
       }
+    }
+
+    /*
+     * Reported: "provide a way to compact when the token limit is reached". Compaction normally runs
+     * from an estimate against the model's known window - and a gateway alias with an unknown or
+     * smaller window, or an estimate that undercounts, means the provider refuses first. That used
+     * to end the chat for good: every retry sent the same too-long history. Now the refusal itself
+     * triggers compaction, once, and the same request is sent again.
+     */
+    if (
+      streamError !== undefined &&
+      assistantText.length === 0 &&
+      toolCall === undefined &&
+      !compactedForOverflow &&
+      options.compactionEnabled !== false &&
+      isContextOverflow(streamError)
+    ) {
+      compactedForOverflow = true
+      const messages = repairUnansweredToolCalls(conversation.toModelMessages())
+      const result = await compactHistory(messages, provider, { ...(options.compaction ?? {}), keepRecent: 4 })
+      const summary = result.compacted ? result.messages.find(isSummaryMessage) : undefined
+      if (summary !== undefined) {
+        conversation.applyCompaction(summary, conversation.compactedCount() + result.summarisedCount)
+        events.onCompacted?.(result.summarisedCount)
+        iteration -= 1
+        continue
+      }
+      events.onError(
+        `${streamError}\n\nThe conversation is longer than this model accepts, and it could not be shortened enough ` +
+          '(the most recent messages, or one very large tool result, are too big on their own). Start a new chat with +, ' +
+          'or choose a model with a larger context window.',
+      )
+      return
     }
 
     if (streamError !== undefined) {

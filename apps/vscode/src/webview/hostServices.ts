@@ -84,6 +84,47 @@ export function createVSCodeHostServices(
       return uris?.[0]?.fsPath
     },
 
+    /**
+     * Copilot's "Add context": the editor's own list, multi-select. Open files first with the
+     * current one ticked - what somebody means most of the time - then every workspace file from
+     * the editor's index, which honours files.exclude. Capped so a huge repository stays quick.
+     */
+    async pickContextFiles() {
+      const active = vscode.window.activeTextEditor?.document.uri
+      const open = vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .map((tab) => (tab.input instanceof vscode.TabInputText ? tab.input.uri : undefined))
+        .filter((uri): uri is vscode.Uri => uri !== undefined && uri.scheme === 'file')
+      const seen = new Set<string>()
+      const items: (vscode.QuickPickItem & { fsPath: string })[] = []
+      const add = (uri: vscode.Uri, detail: string | undefined, picked: boolean): void => {
+        const key = process.platform === 'win32' ? uri.fsPath.toLowerCase() : uri.fsPath
+        if (seen.has(key)) return
+        seen.add(key)
+        const relative = vscode.workspace.asRelativePath(uri, false)
+        const slash = relative.lastIndexOf('/')
+        items.push({
+          label: slash === -1 ? relative : relative.slice(slash + 1),
+          description: slash === -1 ? '' : relative.slice(0, slash),
+          ...(detail !== undefined ? { detail } : {}),
+          picked,
+          fsPath: uri.fsPath,
+        })
+      }
+      if (active !== undefined && active.scheme === 'file') add(active, 'Current file', true)
+      for (const uri of open) add(uri, 'Open', false)
+      const all = await vscode.workspace.findFiles('**/*', undefined, 5000)
+      all.sort((a, b) => a.fsPath.localeCompare(b.fsPath))
+      for (const uri of all) add(uri, undefined, false)
+      const chosen = await vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        matchOnDescription: true,
+        title: 'Add files to the Light Code message',
+        placeHolder: 'Type to filter; tick the files to include',
+      })
+      return chosen?.map((item) => item.fsPath)
+    },
+
     async showSaveDialog(options) {
       const uri = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.file(options.defaultName),

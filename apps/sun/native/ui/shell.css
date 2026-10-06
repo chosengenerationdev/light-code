@@ -2070,3 +2070,43 @@ input[type='password']:focus {
 .modal .body .segmented.small + .field-hint {
   margin-top: 8px;
 }
+
+/* Commit and push, pull: on a git codebase's row, shown on hover and on the selected row. */
+.git-actions {
+  display: none;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.item:hover .git-actions,
+.item.active .git-actions {
+  display: inline-flex;
+}
+
+.icon-btn.tiny {
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+}
+
+.icon-btn.tiny svg {
+  width: 14px;
+  height: 14px;
+}
+
+.commit-files {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font: 12px/1.5 var(--mono);
+  white-space: pre;
+}
+
+.commit-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}

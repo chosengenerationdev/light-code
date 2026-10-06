@@ -482,12 +482,18 @@ editing, commands and MCP never touch it.
       'draft', 'attachment', 'compose',
       'write an email', 'send an email', 'write a mail', 'draft an email',
       'outlook busy', 'outlook is busy', 'outlook slow', 'old emails', 'old mail', 'archive',
-      'search outlook', 'outlook not responding',
+      'search outlook', 'outlook not responding', 'recalculate', 'shift f9', 'f9', 'calculate',
+      'manual calculation', 'stale values',
     ],
     body: `
 **Settings → Tools** for the switches, **Settings → Outlook** for the mail index. Both off by
 default, both **user-scope only** (config:office), and **Windows only** — they attach over COM to
 an application on your desktop.
+
+**Recalculating** (\`excel_calculate\`): a range on its own, a sheet (as Shift+F9), a workbook, or
+every open workbook (F9; full for Ctrl+Alt+F9). It reports whether calculation is set to manual -
+the usual reason values look stale - and what a small range shows afterwards, and can select the
+range so you see it. It asks first, like other changes to a workbook.
 
 **They attach; they do not launch.** The question people have is about the workbook in front of
 them, with unsaved edits, so answering it by starting a second invisible copy would be worse than
@@ -508,8 +514,9 @@ separately approved tool.
 the project reads as empty rather than blocked, so the tools say which setting to turn on.
 
 **A saved \`.msg\` file** is read with \`read_document\`, on any platform and with no Outlook
-running - subject, from, to, cc, sent time and attachment names above the body. The attachments
-themselves are not included; save one out of Outlook to read it.
+running - subject, from, to, cc, sent time and attachment names above the body. **Drag the email
+into the chat instead** and its attachments are read as well. \`outlook_read_email\` also reads a
+message's attachments (PDF, Word, Excel, attached emails, text; pictures are shown).
 
 **Outlook.** List folders, search, read a message, and open one on screen. Mail formatting is
 preserved as annotations — in an alerting mailbox the red line often *is* the message, and the
@@ -977,8 +984,13 @@ and "2 waiting" appears beside the Codebases heading (each click opens the next 
 them, the taskbar button flashes when Fire Code is in the background, and a notification says which.
 
 **What changed, at a glance**: a codebase managed by git shows **+new ~modified −deleted** on its sidebar
-row (only the non-zero ones; hover for the branch). Refreshed every 30 seconds, when you open it, and when
-an agent finishes. It never takes git's lock, so it cannot get in the way of your own git commands.
+row (only the non-zero ones; hover for the branch and the changed file names). Refreshed every 30 seconds,
+when you open it, and when an agent finishes. It never takes git's lock, so it cannot get in the way of
+your own git commands. Hover the row for two buttons: **Commit and push…** opens a dialog listing what
+changed, with a message box and **Write with agent** (the codebase's model drafts a message from the
+diff; you edit it; nothing is committed until you press Commit and push) - everything changed is
+committed, and a new branch is pushed to origin and tracked. **Pull** brings in the remote's changes,
+fast-forward only: when your branch and the remote have both moved, nothing is pulled and it says so.
 
 **Exporting credentials**: tick the ones to export (nothing is ticked to begin with; filter by label).
 
@@ -1139,7 +1151,10 @@ called at all.
     title: 'Context, token cost and long tasks',
     keywords: [
       'context', 'token', 'window', 'truncate', 'compact', 'cost', 'cache', 'steps', 'iterations',
-      'limit', 'continue',
+      'limit', 'continue', 'context length exceeded', 'too long', 'token limit', 'compact now',
+      'lost what i typed', 'draft', 'drag and drop', 'drop a file', 'dropped', 'attach a file',
+      'file is too large', 'drag an email', 'add files to context', 'add file to chat', 'copilot',
+      'select files', 'current file',
     ],
     body: `
 The token bar under the composer shows where the window is going — system prompt, tool
@@ -1156,7 +1171,23 @@ lost; it is just not all in the window at once.
 
 **Past a threshold the oldest turns are summarised**, keeping the last few verbatim, and never in
 the middle of a tool call. The stored transcript keeps everything; only what is sent to the model
-is compacted.
+is compacted. **Compact now** under the token bar does it on request (highlighted near the limit).
+**When the model refuses the conversation as too long** - a gateway's real limit can be smaller than
+the size Light Code knows - it is compacted at once and the request sent again; if even that cannot
+fit, the message says to start a new chat (+) or pick a model with a larger window.
+
+**What you type is kept** if you switch away - Settings, History, another view - and come back.
+
+**Drop any file into the chat**, or attach it with the clip: a picture goes to the model as a picture;
+a small text file is pasted in; anything else - a big log, a PDF, Word, Excel, an **email dragged out
+of Outlook** (up to 20 MB) - is saved to a temporary folder and read for you, and an email's own
+attachments are read too. A long one is cut, with the saved path, and the assistant reads the rest
+with read_file without asking. Nothing is saved into your project.
+
+**Choosing files for the message, as in Copilot** (VS Code): the page-with-a-plus button beside the
+clip lists the workspace - open files first, the current one ticked - and adds what you tick as
+\`@\` mentions. Or right-click files in the Explorer, an editor tab or the editor and choose **Add to
+Light Code chat**. Typing \`@\` does the same from the keyboard, everywhere.
 
 **The step cap** (config:maxIterations, default 25) counts tool calls since you last said
 something. If it trips, nothing is lost: send another message and it carries on with the full

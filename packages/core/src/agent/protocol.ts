@@ -537,6 +537,17 @@ export type UiToHostMessage =
   | { type: 'sendMessage'; text: string; images?: ImageAttachmentInput[]; replyTo?: MessageQuote }
   /** Ask the host to resolve `@` mentions for autocomplete as the user types. */
   | { type: 'requestMentionCandidates'; query: string }
+  /** Fire Code's commit dialog: write a commit message for what has changed in the workspace. */
+  | { type: 'suggestCommitMessage' }
+  /** The token bar's Compact now: summarise older messages to free context. */
+  | { type: 'compactConversation' }
+  /** The composer's "Add files to context": ask the editor for a multi-select file list. */
+  | { type: 'pickContextFiles' }
+  /**
+   * A dropped or attached file the panel cannot read itself (too big, or not text: PDF, Office,
+   * an Outlook message). `data` is base64. Answered with `attachmentStaged` carrying the same id.
+   */
+  | { type: 'stageAttachment'; id: string; name: string; data: string }
   | { type: 'cancel' }
   /**
    * Typed while a turn was running. Folded in at the next safe point in the loop.
@@ -1361,6 +1372,8 @@ export type HostToUiMessage =
       nativeGuide: boolean
       /** The host ships its own source as a zip; the header offers to save it. */
       exportsSource?: boolean
+      /** The host is an editor with a file list to pick from; the composer offers "Add files". */
+      picksFiles?: boolean
       /** True where the host has no theme of its own, so the user picks one. */
       choosesTheme?: boolean
       /**
@@ -1545,6 +1558,15 @@ export type HostToUiMessage =
   | { type: 'queuedMessageConsumed'; text: string }
   /** Workspace-relative paths matching an `@` query, for composer autocomplete. */
   | { type: 'mentionCandidates'; query: string; paths: string[] }
+  /** The message, or why there is none. Only a suggestion: the person edits it and commits. */
+  | { type: 'commitMessageSuggestion'; text?: string; error?: string }
+  /**
+   * Files to add to the message being written, as `@` mentions - from the picker, or from the
+   * editor's "Add to Light Code chat" menu. Workspace-relative where possible.
+   */
+  | { type: 'addContextFiles'; paths: string[] }
+  /** The host's reading of a staged file: its text for the message, and where it was saved. */
+  | { type: 'attachmentStaged'; id: string; name: string; path?: string; text?: string; error?: string }
   /** Whether the active model accepts images, from the capability table (§9). */
   | { type: 'capabilities'; supportsVision: boolean; supportsTools: boolean; contextWindow: number }
   /** Configured OpenSearch connections, and which one is live for this session. */

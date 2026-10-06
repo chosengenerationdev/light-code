@@ -1,5 +1,17 @@
 # @chosengeneration/fire-code
 
+## 0.10.0
+
+- **Commit and push, and pull, from a codebase's row** (hover it). The commit dialog lists what changed and has **Write with agent**: the codebase's model drafts a message from the diff, you edit it, and nothing is committed until you press the button. Pull is fast-forward only and says so when the branches have diverged.
+- **Hover the git counts to see the changed file names.**
+- **Code blocks in replies** have a tinted background, as in VS Code, instead of disappearing into the page.
+- **Drop any file or Outlook email into the chat.** Big logs, PDF, Word, Excel and messages dragged out of Outlook (up to 20 MB) used to be refused with "too large - save it and tell me where"; they are now saved to a temporary folder and read, an email's own attachments included. A long one is cut with its path, and the assistant reads the rest without asking.
+- **`outlook_read_email` reads the attachments** - PDF, Word, Excel, attached emails and text; pictures are shown to a model that can see.
+- **What you type is kept** when you switch away (Settings, History) and come back, and when the page reloads.
+- **Compaction when the token limit is reached.** If the model refuses the conversation as too long, older messages are summarised at once and the request is sent again; if it still cannot fit, the message says what to do. A **Compact now** button under the token bar does it on request.
+- **Excel recalculation** (`excel_calculate`): a range, a sheet (Shift+F9), a workbook or everything open (F9, Ctrl+Alt+F9). Reports manual calculation mode and what the cells now show; can select the range.
+- Carries Light Code 0.117.0.
+
 ## 0.9.1
 
 - **The agent now uses the fast Rust file tools without being reminded.** They were always available, but nothing said when to prefer them, so the agent read big logs with read_file and listed folders with shell commands. The instructions now say which job each one is for (finding files, reading several at once, big logs, CSV/Excel, copy/move, zip), in Auto mode too.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeMentionQuery, insertMention, renderMention } from './mentions.js'
+import { activeMentionQuery, addMentions, insertMention, renderMention } from './mentions.js'
 
 /**
  * Shared by the composer and the schedule editor, which is why it is worth testing directly:
@@ -65,5 +65,19 @@ describe('insertMention', () => {
 
   it('does nothing when there is no mention to replace', () => {
     expect(insertMention('no mention here', 5, 'src/app.ts')).toBeUndefined()
+  })
+})
+
+describe('addMentions', () => {
+  // "Add files to context" and the editor's "Add to Light Code chat" both land here.
+  it('puts picked files in front of what is being typed', () => {
+    expect(addMentions('explain this', ['src/app.ts', 'docs/My Notes.md'])).toBe(
+      '@src/app.ts @"docs/My Notes.md" explain this',
+    )
+  })
+
+  it('does not add a file that is already mentioned', () => {
+    expect(addMentions('@src/app.ts explain', ['src/app.ts'])).toBe('@src/app.ts explain')
+    expect(addMentions('@"docs/My Notes.md" x', ['docs/My Notes.md', 'b.ts'])).toBe('@b.ts @"docs/My Notes.md" x')
   })
 })

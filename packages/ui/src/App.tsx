@@ -49,6 +49,7 @@ import {
   type SessionVariable,
 } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { stageFileWith } from './stagedFiles.js'
 import { Chat } from './Chat.js'
 import { ExpertBudget } from './ExpertBudget.js'
 import type { PendingApproval } from './approval/ApprovalPrompt.js'
@@ -134,6 +135,8 @@ export function App(props: AppProps): ReactElement {
   const [guide, setGuide] = useState<{ native: boolean; mediaBase?: string }>({ native: true })
   /** Whether this host ships its own source as a zip — the VS Code extension does. */
   const [exportsSource, setExportsSource] = useState(false)
+  const [picksFiles, setPicksFiles] = useState(false)
+  const [addedFiles, setAddedFiles] = useState<{ paths: string[]; nonce: number } | undefined>(undefined)
   /*
    * Undefined until a host answers `requestVariables`. The VS Code bridge does not handle that
    * message, so the tab never appears there — the capability announces itself rather than being
@@ -574,6 +577,10 @@ export function App(props: AppProps): ReactElement {
         const { type: _type, ...approval } = message
         void _type
         setPendingApproval(approval)
+      } else if (message.type === 'addContextFiles') {
+        // From the picker or the editor's "Add to Light Code chat": back to the chat to see them.
+        setAddedFiles({ paths: message.paths, nonce: Date.now() })
+        setView('chat')
       } else if (message.type === 'openSettings') {
         /*
          * The walkthrough asking to be shown a tab. It arrives as a normal host message so
@@ -622,6 +629,7 @@ export function App(props: AppProps): ReactElement {
         })
         setToolTimeoutSeconds(message.toolTimeoutSeconds)
         setExportsSource(message.exportsSource === true)
+        setPicksFiles(message.picksFiles === true)
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -1170,6 +1178,8 @@ export function App(props: AppProps): ReactElement {
    * the latest question may replace the list. Otherwise a slow, stale answer wins.
    */
   const latestMentionQuery = useRef<string | undefined>(undefined)
+  // One per panel: it listens only while a file is being read.
+  const [stageFile] = useState(() => stageFileWith(props.transport))
   const queryMentions = (query: string): void => {
     latestMentionQuery.current = query
     props.transport.post({ type: 'requestMentionCandidates', query } satisfies UiToHostMessage)
@@ -2617,6 +2627,12 @@ export function App(props: AppProps): ReactElement {
             onAlwaysAllow={alwaysAllow}
             onRollback={rollback}
             usage={usage}
+            onCompact={() => props.transport.post({ type: 'compactConversation' } satisfies UiToHostMessage)}
+            stageFile={stageFile}
+            onPickFiles={
+              picksFiles ? () => props.transport.post({ type: 'pickContextFiles' } satisfies UiToHostMessage) : undefined
+            }
+            addedFiles={addedFiles}
             expertSpend={expertSpend}
             supportsVision={supportsVision}
             mentionCandidates={mentionCandidates}

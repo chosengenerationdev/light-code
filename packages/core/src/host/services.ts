@@ -88,6 +88,12 @@ export interface HostUi {
    */
   openFile?(filePath: string): Promise<void>
   showOpenDialog(options: OpenDialogOptions): Promise<string | undefined>
+  /**
+   * The editor's own multi-select list of files - open ones first, the current file ticked - for
+   * the composer's "Add files to context". Absolute paths; undefined when cancelled. Absent where
+   * there is no editor (the browser, Fire Code), and the button is then not shown.
+   */
+  pickContextFiles?(): Promise<string[] | undefined>
   showSaveDialog(options: {
     defaultName: string
     extensions?: string[] | undefined

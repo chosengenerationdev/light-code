@@ -4,6 +4,10 @@ import { colors, fontFamily } from './theme.js'
 
 export interface TokenBarProps {
   usage: ContextUsage | undefined
+  /** Compact now - summarise older messages. Absent hides the button. */
+  onCompact?: (() => void) | undefined
+  /** A reply is running; compacting waits for it. */
+  busy?: boolean | undefined
 }
 
 const SEGMENTS = [
@@ -65,6 +69,29 @@ export function TokenBar(props: TokenBarProps): ReactElement | null {
           <span style={{ marginLeft: 'auto' }}>cache {Math.round(usage.cacheHitRate * 100)}%</span>
         )}
       </button>
+      {props.onCompact !== undefined && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+          <button
+            type="button"
+            disabled={props.busy === true}
+            onClick={() => props.onCompact?.()}
+            title="Summarise the older part of this conversation to free context. The full transcript stays saved."
+            style={{
+              background: nearLimit ? colors.accent : 'transparent',
+              color: nearLimit ? colors.accentContrast : colors.muted,
+              border: `1px solid ${nearLimit ? colors.accent : colors.border}`,
+              borderRadius: 4,
+              padding: '1px 8px',
+              fontFamily,
+              fontSize: 11,
+              cursor: props.busy === true ? 'default' : 'pointer',
+              opacity: props.busy === true ? 0.6 : 1,
+            }}
+          >
+            Compact now
+          </button>
+        </div>
+      )}
 
       {/* Proportional bar. Rendered even when collapsed — it is the whole point at a glance. */}
       <div style={{ display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 4, background: colors.border }}>

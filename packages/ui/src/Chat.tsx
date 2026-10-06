@@ -13,6 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 
 import { ApprovalPrompt, type PendingApproval } from './approval/ApprovalPrompt.js'
 import { FormPrompt, type FormFieldValue, type PendingForm } from './FormPrompt.js'
 import { Composer } from './Composer.js'
+import type { StageFile } from './stagedFiles.js'
 import { MessageList, type DisplayMessage } from './MessageList.js'
 import { FeedbackBanner, type MessageFeedback } from './MessageActions.js'
 import type { MessageQuote } from '@light-code/core/browser'
@@ -72,6 +73,12 @@ export interface ChatProps {
   onAlwaysAllow: (id: string, scope: 'tool' | 'command' | 'folder') => void
   onRollback: () => void
   usage: ContextUsage | undefined
+  /** The token bar's Compact now. */
+  onCompact?: (() => void) | undefined
+  /** Hands a file the panel cannot read to the host. */
+  stageFile?: StageFile | undefined
+  onPickFiles?: (() => void) | undefined
+  addedFiles?: { paths: string[]; nonce: number } | undefined
   expertSpend: {
     usd: number
     consultations: number
@@ -303,7 +310,7 @@ export function Chat(props: ChatProps): ReactElement {
       )}
       {props.pendingTools !== undefined && <PendingToolApprovals {...props.pendingTools} />}
       <ExpertSpend {...props.expertSpend} />
-      <TokenBar usage={props.usage} />
+      <TokenBar usage={props.usage} onCompact={props.onCompact} busy={props.isStreaming} />
       <FeedbackBanner
         replyTo={props.replyTo}
         onClearReply={() => props.onClearReply?.()}
@@ -331,6 +338,9 @@ export function Chat(props: ChatProps): ReactElement {
         searchConnections={props.searchConnections}
         activeSearchId={props.activeSearchId}
         onSelectSearch={props.onSelectSearch}
+        stageFile={props.stageFile}
+        onPickFiles={props.onPickFiles}
+        addedFiles={props.addedFiles}
       />
     </div>
   )
