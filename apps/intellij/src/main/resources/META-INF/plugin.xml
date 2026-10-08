@@ -8,6 +8,7 @@
   <description><![CDATA[
     A minimal agentic coding assistant, for working inside an organisation.
     <ul>
+      <li>Light Code 0.118.0: compaction only when you ask (or switch it on), your own messages kept word for word, hung replies and dropped connections retried.</li>
       <li>Your own gateway: mutual TLS, client certificates, OAuth client-credentials, header auth.</li>
       <li>An agent team — expert, programmer, reviewer, tester, librarian — each backed by a
           different model, consulting each other.</li>

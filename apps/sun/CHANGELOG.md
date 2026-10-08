@@ -1,5 +1,17 @@
 # @chosengeneration/fire-code
 
+## 0.11.0
+
+- **Git for JupyterHub codebases.** The repository is on the hub, so the change counts, **Commit and push**, **Pull** and **Write with agent** now run git there, through the codebase's agent (while its chat is running). Commit saves your local edits to the hub first; pull is fast-forward only and copies the changes here afterwards. The agent can run any other git command with `hub_run`.
+- **Browse a hub from any codebase.** `hub_browse` lists folders, finds files and reads them anywhere your hub user can see, read only - in the hub codebase beyond its added folders, and in every other codebase for each hub codebase, by its @name, without a second token.
+- **`hub_run` works.** On the Node host the WebSocket a kernel needs was dropped on the way, so every hub run failed with "This host cannot open the WebSocket a kernel needs".
+- **A chat woken from sleep opens at its newest message**, not its first.
+- **Compaction follows the model actually deployed.** A self-hosted model's real window (vLLM's `max_model_len`, or the number in its "maximum context length" refusal) is learned and used; a window set on the profile still wins.
+- **Long chats keep their context.** A model Light Code did not recognise (most gateway aliases, and newer families such as Claude 5, GPT-5, Gemini 3, DeepSeek V3) was treated as a 32k window, so history was summarised after a few steps and only the last dozen messages survived. History is now compacted **only when you say so** - **Compact now** under the token bar, or tick **Compact automatically** beside it - and then only against a window Light Code actually knows. Summaries keep about a third of the window verbatim, and **your own messages word for word**, every time.
+- **A reply that hangs is retried.** A request that sends nothing at all for 5 minutes is stopped and sent again, instead of showing "thinking" for ever.
+- **Connection problems are retried by themselves.** A dropped connection, a gateway error (5xx), rate limiting (429) or overload is retried up to 3 times, waiting a little longer each time, and the chat says "Retrying in Ns". A rejected key, bad request or certificate problem is never retried. Both numbers are in Settings → Approvals → "Unresponsive or failing model".
+- Carries Light Code 0.118.0.
+
 ## 0.10.0
 
 - **Commit and push, and pull, from a codebase's row** (hover it). The commit dialog lists what changed and has **Write with agent**: the codebase's model drafts a message from the diff, you edit it, and nothing is committed until you press the button. Pull is fast-forward only and says so when the branches have diverged.

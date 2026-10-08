@@ -16,6 +16,19 @@ import { repairUnansweredToolCalls } from '../agent/repairHistory.js'
 import { readToolCredential } from '../python/toolCredentials.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
 import { createHubTools, describePull } from '../jupyter/tools.js'
+import { hubGitCommitPush, hubGitDiff, hubGitPull, hubGitStatus } from '../jupyter/hubGit.js'
+import { createHubBrowseTool, type BrowsableHub } from '../jupyter/browse.js'
+import { JupyterClient } from '../jupyter/client.js'
+import type { JupyterHubSpec } from '../jupyter/spec.js'
+
+/** A URL's host, for a label; the text itself when it is not a URL. */
+function hostLabel(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
 import {
   applyImport,
   buildExport,
@@ -332,7 +345,10 @@ import {
   resolveActiveProfile,
   resolveMentions,
   resolveModelCapabilities,
+  withReportedWindow,
   runAgentTurn,
+  DEFAULT_RETRIES,
+  DEFAULT_STALL_SECONDS,
   testConnection,
   toTranscript,
   validateProviderForm,
@@ -2120,6 +2136,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   const commandToolset = (): CommandToolset => (probedTools ??= detectCommandTools())
   /** Mirrors config so the loop and the settings message agree without re-reading. */
   let cachedMaxIterations = 25
+  let cachedAutoCompact = false
+  let cachedStallSeconds = DEFAULT_STALL_SECONDS
+  let cachedRetries = DEFAULT_RETRIES
   // Mirrors packages/ui's DEFAULT_ACCENT. Duplicated rather than imported because core
   // must not depend on the UI package; the UI is authoritative and this is only the value
   // sent before the user has chosen one.
@@ -2224,6 +2243,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * token read from the secret store on every call and TLS from the one resolver (§10), so a
    * replaced token or certificate applies at once.
    */
+  /*
+   * TLS for a hub connection, from the one resolver (§10). Shared by this codebase's own hub and by
+   * the hubs `hub_browse` reaches beside it.
+   */
+  const hubTls = async (spec: JupyterHubSpec | undefined): Promise<TlsOptions | undefined> => {
+    const { config } = await configManager.load()
+    return resolveConnectionTls({
+      ...(config.tls !== undefined ? { global: config.tls } : {}),
+      connection: {
+        ...(spec?.caFile !== undefined ? { caFile: spec.caFile } : {}),
+        ...(spec?.rejectUnauthorized !== undefined ? { rejectUnauthorized: spec.rejectUnauthorized } : {}),
+      },
+      ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+      ...(config.tls?.passphraseRef !== undefined ? { passphrase: await secrets.get(config.tls.passphraseRef) } : {}),
+      onPaths: (paths) => {
+        void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(() => undefined)
+      },
+    })
+  }
   const hub =
     services.jupyterHub !== undefined && workspaceRoot !== undefined
       ? createHubRuntime({
@@ -2231,24 +2269,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           root: workspaceRoot,
           http: httpClient,
           token: () => secrets.get(services.jupyterHub?.tokenRef ?? ''),
-          tls: async () => {
-            const { config } = await configManager.load()
-            const spec = services.jupyterHub
-            return resolveConnectionTls({
-              ...(config.tls !== undefined ? { global: config.tls } : {}),
-              connection: {
-                ...(spec?.caFile !== undefined ? { caFile: spec.caFile } : {}),
-                ...(spec?.rejectUnauthorized !== undefined ? { rejectUnauthorized: spec.rejectUnauthorized } : {}),
-              },
-              ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
-              ...(config.tls?.passphraseRef !== undefined ? { passphrase: await secrets.get(config.tls.passphraseRef) } : {}),
-              onPaths: (paths) => {
-                void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(() => undefined)
-              },
-            })
-          },
+          tls: () => hubTls(services.jupyterHub),
         })
       : undefined
+  /** Every hub `hub_browse` may look around: this codebase's own, then those of the codebases beside it. */
+  const browsableHubs: BrowsableHub[] = [
+    ...(hub !== undefined ? [{ name: 'this', label: `${hub.label}, this codebase's hub`, client: hub.client }] : []),
+    ...(services.siblingHubs ?? []).map(({ name, spec }) => ({
+      name,
+      label: `${name}'s hub (${spec.user}@${hostLabel(spec.url)})`,
+      client: new JupyterClient(httpClient, spec, () => secrets.get(spec.tokenRef), () => hubTls(spec)),
+    })),
+  ]
   // A hub copy cannot see the hub's libraries, so "import could not be resolved" is always wrong there.
   const diagnosticsProvider: DiagnosticsProvider | undefined =
     hub !== undefined && anyDiagnostics !== undefined ? withoutMissingImports(anyDiagnostics) : anyDiagnostics
@@ -2732,6 +2764,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     )
     cachedModeId = config.modeId
     cachedMaxIterations = config.maxIterations ?? 25
+    cachedAutoCompact = config.autoCompact === true
+    cachedStallSeconds = config.connection?.stallSeconds ?? DEFAULT_STALL_SECONDS
+    cachedRetries = config.connection?.retries ?? DEFAULT_RETRIES
     cachedAccentColor = config.ui?.accentColor ?? '#22C55E'
     cachedTheme = config.ui?.theme
     cachedToolTimeoutSeconds = config.tools?.timeoutSeconds
@@ -2879,6 +2914,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       modeId: findMode(cachedModeId).id,
       approvals,
       maxIterations: cachedMaxIterations,
+      autoCompact: cachedAutoCompact,
+      stallSeconds: cachedStallSeconds,
+      retries: cachedRetries,
       accentColor: cachedAccentColor,
       expertColor: cachedExpertColor,
       ...(cachedTheme === undefined ? {} : { theme: cachedTheme }),
@@ -3277,6 +3315,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (hub !== undefined) {
       for (const tool of createHubTools(hub)) combined.register(tool)
     }
+    const hubBrowse = createHubBrowseTool(browsableHubs)
+    if (hubBrowse !== undefined) combined.register(hubBrowse)
     combined.register(
       createNotifyTool({
         notify: (message, level, details, reportFile) => {
@@ -4065,7 +4105,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         authStrategyFor(config, profile),
         logger,
       )
-      const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
+      const capabilities = withReportedWindow(
+        resolveModelCapabilities(profile.model, profile.modelCapabilities),
+        await reportedWindowFor(config, profile),
+        profile.modelCapabilities,
+      )
       const expertCliInfo = await resolveExpert(config)
       const search = await resolveSearch(config)
       const embedder = await resolveEmbedder(config)
@@ -4385,10 +4429,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // loop — swapping them mid-turn would break the prompt cache prefix (§12).
         mode: activeMode,
         contextWindow: capabilities.contextWindow,
+        // A guessed window must not drive compaction - see `contextWindowKnown`.
+        contextWindowKnown: capabilities.contextWindowKnown !== false,
         // So images a tool returns (a Confluence page's pictures) reach a model that can see them.
         supportsVision: capabilities.supportsVision,
         // CLAUDE.md §5 has called this configurable since Phase 0; until now it was not.
         maxIterations: cachedMaxIterations,
+        /*
+         * Off unless switched on: compaction loses detail, and when is the user's call. A scheduled
+         * run always may, because nobody is there to press "Compact now" and a run that stops at
+         * the limit overnight reports nothing useful in the morning.
+         */
+        autoCompact: cachedAutoCompact || schedule !== undefined,
+        stallSeconds: cachedStallSeconds,
+        retries: cachedRetries,
         drainQueuedMessages: () => {
           /*
            * Reactions given while the turn runs are delivered here, at the next step — the
@@ -4572,6 +4626,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             post({ type: 'contextUsage', usage: { ...breakdown, supersededCount, compactedCount } })
           },
           onCompacted: (summarisedCount) => post({ type: 'compacted', summarisedCount }),
+          onContextWindowLearned: (tokens) => {
+            if (profile.modelCapabilities?.contextWindow !== undefined) return
+            reportedWindows.set(`${profile.baseUrl}|${profile.model}`, tokens)
+            logger.info(`the model's server reports a context window of ${String(tokens)} tokens`)
+            void postCapabilities()
+          },
           onNudgedToContinue: () => {
             // Logged, not shown. The transcript already reads correctly — the preamble, then the
             // tool call it should have made — and a banner between them would explain a seam the
@@ -4587,6 +4647,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             post({ type: 'queuedMessageConsumed', text })
             // The assistant text that follows belongs to a new step.
             cumulativeText = ''
+          },
+          onRetry: (info) => {
+            logger.warn(`model request retry ${String(info.retry)}/${String(info.maxRetries)}: ${info.reason}`)
+            // The next attempt writes its answer from the start; keeping these would show it twice.
+            cumulativeText = ''
+            cumulativeReasoning = ''
+            post({
+              type: 'streamRetry',
+              retry: info.retry,
+              maxRetries: info.maxRetries,
+              delaySeconds: Math.round(info.delayMs / 1000),
+              reason: info.reason,
+            })
           },
           onTextChunk: (chunk) => {
             cumulativeText += chunk
@@ -5233,9 +5306,35 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * dialog, where the person reads it, edits it and presses Commit. Nothing is run, written or
    * committed here, which is why it asks no approval: git is only read, with no optional locks.
    */
+  /*
+   * Fire Code's git buttons for a JupyterHub codebase. Not while a turn runs: the kernel is the
+   * turn's too, and a commit queued behind a long `hub_run` would look like the button doing nothing.
+   * Status is quietly skipped then, since the sidebar asks again shortly.
+   */
+  async function handleHubGit(op: 'status' | 'commit' | 'pull', message: string | undefined): Promise<void> {
+    if (hub === undefined) {
+      post({ type: 'hubGitResult', op, ok: false, text: 'This codebase is not on a JupyterHub.' })
+      return
+    }
+    if (userTurnRunning || runningScheduleId !== undefined) {
+      if (op !== 'status') post({ type: 'hubGitResult', op, ok: false, text: 'Wait for the current reply to finish - git on the hub uses the same kernel.' })
+      return
+    }
+    try {
+      const result =
+        op === 'status' ? await hubGitStatus(hub) : op === 'pull' ? await hubGitPull(hub) : await hubGitCommitPush(hub, message ?? '')
+      post({ type: 'hubGitResult', op, ok: result.ok, text: redact(result.text, cachedSecretValues), ...('counts' in result && result.counts !== undefined ? { counts: result.counts } : {}) })
+    } catch (error) {
+      post({ type: 'hubGitResult', op, ok: false, text: redact(error instanceof Error ? error.message : String(error), cachedSecretValues) })
+    }
+  }
+
   async function handleSuggestCommitMessage(): Promise<void> {
     try {
       if (workspaceRoot === undefined) throw new Error('No folder is open.')
+      // A hub codebase's repository is on the hub; this copy has none.
+      const fromHub = hub === undefined ? undefined : await hubGitDiff(hub)
+      if (typeof fromHub === 'string') throw new Error(fromHub)
       const git = (args: string[]): Promise<{ ok: boolean; out: string }> =>
         new Promise((resolve) => {
           const child = spawn('git', ['--no-optional-locks', '-C', workspaceRoot, ...args], {
@@ -5253,10 +5352,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             resolve({ ok: code === 0, out })
           })
         })
-      const status = await git(['status', '--short', '--untracked-files=normal'])
+      const status = fromHub !== undefined ? { ok: true, out: fromHub.status } : await git(['status', '--short', '--untracked-files=normal'])
       if (!status.ok) throw new Error('This folder is not a git repository, or git could not be run.')
       if (status.out.trim().length === 0) throw new Error('Nothing has changed, so there is nothing to describe.')
-      let diff = await git(['diff', 'HEAD', '--no-color', '--no-ext-diff', '--stat', '--patch'])
+      let diff = fromHub !== undefined ? { ok: true, out: fromHub.diff } : await git(['diff', 'HEAD', '--no-color', '--no-ext-diff', '--stat', '--patch'])
       // A repository with no commits yet has no HEAD to compare with.
       if (!diff.ok) diff = await git(['diff', '--no-color', '--no-ext-diff', '--stat', '--patch'])
       const shown = diff.out.length > 24_000 ? `${diff.out.slice(0, 24_000)}\n... (diff cut here)` : diff.out
@@ -10480,12 +10579,53 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /*
+   * The context window the model's own server reports, per base URL and model id.
+   *
+   * Asked for directly: compaction should follow the model actually deployed - a self-hosted Qwen's
+   * window is whatever its server was started with, which no table can know. Learned two ways: from
+   * the `/models` reply (vLLM's `max_model_len` and friends), asked once per session and bounded at
+   * ten seconds; and from the server's own refusal of an over-long request, which states the number.
+   * A window set on the profile still wins over both.
+   */
+  const reportedWindows = new Map<string, number>()
+  const windowProbes = new Map<string, Promise<void>>()
+  function rememberWindows(baseUrl: string, windows: Record<string, number> | undefined): void {
+    for (const [id, tokens] of Object.entries(windows ?? {})) reportedWindows.set(`${baseUrl}|${id}`, tokens)
+  }
+  async function reportedWindowFor(config: LightCodeConfig, profile: ProviderProfile): Promise<number | undefined> {
+    if (profile.modelCapabilities?.contextWindow !== undefined) return undefined
+    const key = `${profile.baseUrl}|${profile.model}`
+    if (!reportedWindows.has(key) && !windowProbes.has(key)) {
+      windowProbes.set(
+        key,
+        (async () => {
+          const controller = new AbortController()
+          const timer = setTimeout(() => controller.abort(), 10_000)
+          try {
+            rememberWindows(profile.baseUrl, (await listModels(httpClient, profile, authStrategyFor(config, profile), controller.signal)).windows)
+          } catch {
+            // A gateway with no catalogue is normal; the table and the refusal path remain.
+          } finally {
+            clearTimeout(timer)
+          }
+        })(),
+      )
+    }
+    await windowProbes.get(key)
+    return reportedWindows.get(key)
+  }
+
   /** Tells the composer whether to offer image attachment for the active model (§9). */
   async function postCapabilities(): Promise<void> {
     try {
       const { config } = await configManager.load()
       const profile = resolveActiveProfile(config)
-      const capabilities = resolveModelCapabilities(profile.model, profile.modelCapabilities)
+      const capabilities = withReportedWindow(
+        resolveModelCapabilities(profile.model, profile.modelCapabilities),
+        await reportedWindowFor(config, profile),
+        profile.modelCapabilities,
+      )
       post({
         type: 'capabilities',
         supportsVision: capabilities.supportsVision,
@@ -10506,6 +10646,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       const strategy = authStrategyFor(config, built.profile)
       const result = await listModels(httpClient, built.profile, strategy)
+      rememberWindows(built.profile.baseUrl, result.windows)
       post({
         type: 'models',
         models: result.ids,
@@ -11696,6 +11837,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           post({ type: 'attachmentStaged', id, name, error: error instanceof Error ? error.message : String(error) })
         }
       })()
+    } else if (message.type === 'hubGit') {
+      reportFailure('handleHubGit', handleHubGit(message.op, message.message))
     } else if (message.type === 'suggestCommitMessage') {
       reportFailure('handleSuggestCommitMessage', handleSuggestCommitMessage())
     } else if (message.type === 'requestMentionCandidates') {
@@ -11756,6 +11899,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('startNewTask', startNewTask())
     } else if (message.type === 'setMode') {
       reportFailure('handleSetMode', handleSetMode(message.modeId))
+    } else if (message.type === 'setConnectionRetry') {
+      void configManager
+        .save('user', { connection: { stallSeconds: message.stallSeconds, retries: message.retries } })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
+    } else if (message.type === 'setAutoCompact') {
+      void configManager
+        .save('user', { autoCompact: message.value })
+        .then(() => postSettings())
+        .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'setMaxIterations') {
       void configManager
         .save('user', { maxIterations: message.value })

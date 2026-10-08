@@ -358,6 +358,8 @@ export interface SessionOptions {
   mentionName?: string
   /** The workspace is a copy of JupyterHub folders (Fire Code). */
   jupyterHub?: JupyterHubSpec
+  /** The JupyterHub codebases beside this one, for read-only `hub_browse` (Fire Code). */
+  siblingHubs?: { name: string; spec: JupyterHubSpec }[]
   /** Python tool code approved anywhere on this machine (Fire Code). */
   machineApprovalsFile?: string
   /** Fire Code's saved credentials, by name, for `light_code.credential`. */
@@ -513,6 +515,7 @@ export async function createSession(
     ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
     ...(options.mentionName !== undefined ? { mentionName: options.mentionName } : {}),
     ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
+    ...(options.siblingHubs !== undefined ? { siblingHubs: options.siblingHubs } : {}),
     ...(options.machineApprovalsFile !== undefined ? { machineApprovalsFile: options.machineApprovalsFile } : {}),
     ...(options.savedCredentials !== undefined ? { savedCredentials: options.savedCredentials } : {}),
     ...(options.desktopNotify === true

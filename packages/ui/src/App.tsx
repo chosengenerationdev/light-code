@@ -167,6 +167,8 @@ export function App(props: AppProps): ReactElement {
   const [modeId, setModeId] = useState<string>(DEFAULT_MODE_ID)
   const [approvals, setApprovals] = useState<WorkspaceApprovals>({})
   const [maxIterations, setMaxIterations] = useState(25)
+  const [autoCompact, setAutoCompact] = useState(false)
+  const [connectionRetry, setConnectionRetry] = useState({ stallSeconds: 300, retries: 3 })
   const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT)
   const [readRoots, setReadRoots] = useState<string[]>([])
   /** The user's own command rules — global, unlike `approvals`. */
@@ -636,6 +638,8 @@ export function App(props: AppProps): ReactElement {
         })
         setApprovals(message.approvals)
         setMaxIterations(message.maxIterations)
+        setAutoCompact(message.autoCompact === true)
+        setConnectionRetry({ stallSeconds: message.stallSeconds, retries: message.retries })
         setAccentColor(message.accentColor)
         setReadRoots(message.readRoots)
         setCommandRules(message.commandRules)
@@ -686,6 +690,22 @@ export function App(props: AppProps): ReactElement {
         setTestRunning(false)
       } else if (message.type === 'contextUsage') {
         setUsage(message.usage)
+      } else if (message.type === 'streamRetry') {
+        /*
+         * The failed attempt's partial answer and thinking are dropped - the retry writes them again
+         * from the start - and a line says what happened, so a pause is never mistaken for a hang.
+         */
+        setMessages((prev) => [
+          ...prev.filter(
+            (m) =>
+              !((m.kind === 'reasoning' || (m.kind === 'text' && m.role === 'assistant')) && m.pending === true),
+          ),
+          {
+            kind: 'text',
+            role: 'assistant',
+            content: `[${(message.reason.split('\n')[0] ?? 'The request failed').slice(0, 200).replace(/\.$/, '')}. Retrying in ${String(message.delaySeconds)}s (retry ${String(message.retry)} of ${String(message.maxRetries)}).]`,
+          },
+        ])
       } else if (message.type === 'compacted') {
         // Say so rather than letting detail vanish silently mid-session.
         setMessages((prev) => [
@@ -1989,6 +2009,11 @@ export function App(props: AppProps): ReactElement {
             onSetMaxIterations={(value) =>
               props.transport.post({ type: 'setMaxIterations', value } satisfies UiToHostMessage)
             }
+            stallSeconds={connectionRetry.stallSeconds}
+            retries={connectionRetry.retries}
+            onSetConnectionRetry={(stallSeconds, retries) =>
+              props.transport.post({ type: 'setConnectionRetry', stallSeconds, retries } satisfies UiToHostMessage)
+            }
             mcpServers={mcpServers}
             mcpJson={mcpJson}
             mcpWarnings={mcpWarnings}
@@ -2628,6 +2653,11 @@ export function App(props: AppProps): ReactElement {
             onRollback={rollback}
             usage={usage}
             onCompact={() => props.transport.post({ type: 'compactConversation' } satisfies UiToHostMessage)}
+            autoCompact={autoCompact}
+            onSetAutoCompact={(value) => {
+              setAutoCompact(value)
+              props.transport.post({ type: 'setAutoCompact', value } satisfies UiToHostMessage)
+            }}
             stageFile={stageFile}
             onPickFiles={
               picksFiles ? () => props.transport.post({ type: 'pickContextFiles' } satisfies UiToHostMessage) : undefined

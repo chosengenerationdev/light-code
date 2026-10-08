@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatProvider } from '../providers/types.js'
+import { CONTINUE_PROMPT } from '../agent/unfinished.js'
 import { estimateTokens } from './budget.js'
 
 /**
@@ -16,6 +17,12 @@ export interface CompactionOptions {
   triggerFraction?: number
   /** Keep at least this many recent messages verbatim. */
   keepRecent?: number
+  /**
+   * Also keep as many recent messages as fit in this many tokens, when that is more than
+   * `keepRecent`. A flat count kept twelve messages whatever the window, so a 200k model was
+   * summarised down to a handful of steps.
+   */
+  keepRecentTokens?: number
   /** Never compact below this many messages — there is nothing worth summarising. */
   minimumToCompact?: number
 }
@@ -78,6 +85,9 @@ export function buildSummaryPrompt(messages: readonly ChatMessage[]): string {
   const transcript = messages
     .map((message) => {
       if (message.role === 'tool') return `[tool result] ${message.content}`
+      // A previous summary is re-summarised from its notes; its verbatim requests are carried
+      // forward separately, so they are not paraphrased a second time.
+      if (isSummaryMessage(message)) return `[earlier summary] ${splitSummary(message.content).notes}`
       if (message.role === 'assistant') {
         const calls = (message.toolCalls ?? []).map((call) => `${call.name}(${call.arguments})`).join(', ')
         return `[assistant] ${message.content}${calls.length > 0 ? ` -> ${calls}` : ''}`
@@ -107,6 +117,73 @@ export function buildSummaryPrompt(messages: readonly ChatMessage[]): string {
 }
 
 const SUMMARY_PREFIX = '[Earlier in this session — summarised to save context]\n'
+const USER_HEADER = '\n\n[What the user said in that part, verbatim, oldest first]\n'
+const USER_SEPARATOR = '\n---\n'
+/** Per request, and in all. The user's words are small next to tool output, and worth the room. */
+const USER_MESSAGE_LIMIT = 2_000
+const USER_TOTAL_LIMIT = 16_000
+const OMITTED = /^\(\d+ earlier messages? omitted/
+
+/**
+ * Reported: "Light Code is missing a lot of context from the chat history". A summary paraphrases
+ * what was asked, and a request paraphrased twice - compaction runs again later and summarises the
+ * summary - is how "use the v2 endpoint, not v1" becomes "update the endpoint". The user's own
+ * messages are short and are the part a person notices going missing, so they survive every
+ * compaction word for word (clipped only when very long), newest kept when the total is too large.
+ */
+function splitSummary(content: string): { notes: string; userMessages: string[] } {
+  const body = content.startsWith(SUMMARY_PREFIX) ? content.slice(SUMMARY_PREFIX.length) : content
+  const at = body.indexOf(USER_HEADER)
+  if (at < 0) return { notes: body, userMessages: [] }
+  return {
+    notes: body.slice(0, at),
+    userMessages: body
+      .slice(at + USER_HEADER.length)
+      .split(USER_SEPARATOR)
+      .filter((entry) => entry.trim().length > 0 && !OMITTED.test(entry)),
+  }
+}
+
+function userMessagesOf(messages: readonly ChatMessage[]): string[] {
+  const out: string[] = []
+  for (const message of messages) {
+    if (message.role !== 'user') continue
+    if (isSummaryMessage(message)) {
+      out.push(...splitSummary(message.content).userMessages)
+      continue
+    }
+    const text = message.content.trim()
+    // The loop's own nudge is user-role but nobody typed it.
+    if (text.length === 0 || text === CONTINUE_PROMPT) continue
+    out.push(text.length > USER_MESSAGE_LIMIT ? `${text.slice(0, USER_MESSAGE_LIMIT)} …[clipped]` : text)
+  }
+  return out
+}
+
+function renderUserMessages(all: readonly string[]): string {
+  if (all.length === 0) return ''
+  const kept: string[] = []
+  let size = 0
+  for (let index = all.length - 1; index >= 0; index -= 1) {
+    const entry = all[index] as string
+    if (size + entry.length > USER_TOTAL_LIMIT && kept.length > 0) break
+    kept.unshift(entry)
+    size += entry.length + USER_SEPARATOR.length
+  }
+  const omitted = all.length - kept.length
+  const lead = omitted > 0 ? [`(${String(omitted)} earlier message${omitted === 1 ? '' : 's'} omitted for length)`] : []
+  return `${USER_HEADER}${[...lead, ...kept].join(USER_SEPARATOR)}`
+}
+
+/** The earliest index whose tail still fits in `budget` tokens. */
+function tailStartWithin(messages: readonly ChatMessage[], budget: number): number {
+  let used = 0
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    used += estimateTokens((messages[index] as ChatMessage).content)
+    if (used > budget) return index + 1
+  }
+  return 0
+}
 
 /**
  * Whether a provider's error means the conversation is too long for the model.
@@ -159,7 +236,11 @@ export async function compactHistory(
   const rest = messages.filter((message) => message.role !== 'system')
   if (rest.length <= keepRecent) return unchanged
 
-  const boundary = findSafeBoundary(rest, rest.length - keepRecent)
+  let preferred = rest.length - keepRecent
+  if (options.keepRecentTokens !== undefined && options.keepRecentTokens > 0) {
+    preferred = Math.min(preferred, tailStartWithin(rest, options.keepRecentTokens))
+  }
+  const boundary = findSafeBoundary(rest, preferred)
   if (boundary <= 0) return unchanged
 
   const toSummarise = rest.slice(0, boundary)
@@ -179,7 +260,8 @@ export async function compactHistory(
 
   // The summary enters as a user message rather than a system one: a second system message
   // is rejected outright by Anthropic and Gemini, both of which take exactly one.
-  const summaryMessage: ChatMessage = { role: 'user', content: `${SUMMARY_PREFIX}${summary.trim()}` }
+  const verbatim = renderUserMessages(userMessagesOf(toSummarise))
+  const summaryMessage: ChatMessage = { role: 'user', content: `${SUMMARY_PREFIX}${summary.trim()}${verbatim}` }
 
   // Refuse a summary that saved nothing — a model can happily return more text than it was
   // given, and compacting into something larger is strictly worse.

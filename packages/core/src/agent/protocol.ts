@@ -1,3 +1,4 @@
+import type { HubGitCounts } from '../jupyter/hubGit.js'
 import type { MessageQuote, Reaction } from './feedback.js'
 import type { CheckpointView } from './checkpoints.js'
 import type { FormField } from '../tools/askUserForm.js'
@@ -539,6 +540,8 @@ export type UiToHostMessage =
   | { type: 'requestMentionCandidates'; query: string }
   /** Fire Code's commit dialog: write a commit message for what has changed in the workspace. */
   | { type: 'suggestCommitMessage' }
+  /** Fire Code's git panel, for a JupyterHub codebase: the repository is on the hub, so git runs there. */
+  | { type: 'hubGit'; op: 'status' | 'commit' | 'pull'; message?: string }
   /** The token bar's Compact now: summarise older messages to free context. */
   | { type: 'compactConversation' }
   /** The composer's "Add files to context": ask the editor for a multi-select file list. */
@@ -614,6 +617,8 @@ export type UiToHostMessage =
   | { type: 'setMode'; modeId: string }
   | { type: 'setAutoApprove'; group: ApprovableGroup; enabled: boolean }
   | { type: 'setMaxIterations'; value: number }
+  | { type: 'setAutoCompact'; value: boolean }
+  | { type: 'setConnectionRetry'; stallSeconds: number; retries: number }
   /** Folders tools may read outside the workspace. Replaces the whole list. */
   | { type: 'setReadRoots'; roots: string[] }
   /**
@@ -1309,12 +1314,20 @@ export type HostToUiMessage =
   | { type: 'lsp'; provider: 'host' | 'servers' | 'none'; settings: LspSettings; languages: LanguageServerStatus[] }
   | { type: 'checkpointAvailable' }
   | { type: 'rolledBack' }
+  /** A model request failed or went silent and is being sent again; what it had streamed is void. */
+  | { type: 'streamRetry'; retry: number; maxRetries: number; delaySeconds: number; reason: string }
   /** Current mode plus this workspace's approval settings, for the Approvals/Modes UI. */
   | {
       type: 'settings'
       modeId: string
       approvals: WorkspaceApprovals
       maxIterations: number
+      /** Whether history is compacted by itself near the limit. Off unless the user turned it on. */
+      autoCompact: boolean
+      /** Seconds of silence before a model request is retried; 0 = never. */
+      stallSeconds: number
+      /** Retries for a failed or stalled model request. */
+      retries: number
       accentColor: string
       /** The browser theme choice. Absent where the host has its own, as VS Code does. */
       theme?: 'system' | 'light' | 'dark'
@@ -1560,6 +1573,7 @@ export type HostToUiMessage =
   | { type: 'mentionCandidates'; query: string; paths: string[] }
   /** The message, or why there is none. Only a suggestion: the person edits it and commits. */
   | { type: 'commitMessageSuggestion'; text?: string; error?: string }
+  | { type: 'hubGitResult'; op: 'status' | 'commit' | 'pull'; ok: boolean; text: string; counts?: HubGitCounts }
   /**
    * Files to add to the message being written, as `@` mentions - from the picker, or from the
    * editor's "Add to Light Code chat" menu. Workspace-relative where possible.

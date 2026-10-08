@@ -210,6 +210,12 @@ export interface HostServices {
    */
   jupyterHub?: JupyterHubSpec
   /**
+   * The JupyterHub codebases beside this one (Fire Code, host `--sibling-hub name=file`), by @name,
+   * for `hub_browse`: read-only looking around those hubs from any codebase. Their tokens are named
+   * by secret slot, as in `jupyterHub`, and resolved from the one secret store Fire Code shares.
+   */
+  siblingHubs?: { name: string; spec: JupyterHubSpec }[]
+  /**
    * Fire Code's saved credentials (names and kinds, never values), so a Python tool can read one it
    * declares with `light_code.credential`. Absent wherever there is no credential manager.
    */

@@ -295,6 +295,23 @@ async function main(): Promise<void> {
       return
     }
   }
+  /*
+   * Every `--sibling-hub name=file`: the JupyterHub codebases beside this one, for `hub_browse`. A file
+   * that cannot be read costs that one hub, never the launch - the codebase itself is unaffected.
+   */
+  const siblingHubs: { name: string; spec: JupyterHubSpec }[] = []
+  for (const entry of valuesOf(args, '--sibling-hub')) {
+    const at = entry.indexOf('=')
+    if (at <= 0) continue
+    const name = entry.slice(0, at)
+    const file = entry.slice(at + 1)
+    try {
+      siblingHubs.push({ name, spec: parseJupyterHubSpec(await fs.readFile(file, 'utf8')) })
+    } catch (error) {
+      process.stderr.write(`light-code: --sibling-hub ${name}: ${error instanceof Error ? error.message : String(error)}
+`)
+    }
+  }
   // Every `--sibling name=folder`: the other codebases open in Fire Code.
   const siblings = args
     .flatMap((arg, i) => (arg === '--sibling' && args[i + 1] !== undefined ? [args[i + 1] as string] : []))
@@ -427,6 +444,7 @@ async function main(): Promise<void> {
     ...(mirrorDir !== undefined ? { mirrorRoot: path.resolve(mirrorDir) } : {}),
     ...(mentionName !== undefined && mentionName.length > 0 ? { mentionName } : {}),
     ...(jupyterHub !== undefined ? { jupyterHub } : {}),
+    ...(siblingHubs.length > 0 ? { siblingHubs } : {}),
     ...(approvedToolsFile !== undefined ? { machineApprovalsFile: path.resolve(approvedToolsFile) } : {}),
     ...(changeLedgerFile !== undefined ? { changeLedger: { file: changeLedgerFile, chat: valueOf(args, '--chat-label') ?? 'another chat' } } : {}),
     /*
@@ -714,6 +732,7 @@ const KNOWN_FLAGS = new Set([
   '--mirror-dir',
   '--mention-name',
   '--jupyter-hub',
+  '--sibling-hub',
   '--approved-tools',
   '--no-open',
   '--no-token',
@@ -984,6 +1003,8 @@ Usage: light-code [options]
   --mention-name <name>  This codebase's own @name, so @name:path works here too
   --jupyter-hub <file>  The workspace is a copy of folders on a JupyterHub server:
                       keep it in step and run code there (written by Fire Code)
+  --sibling-hub <name=file>  Another codebase's JupyterHub connection, for
+                      read-only hub_browse from this one (repeatable; Fire Code)
   --approved-tools <file>  Python tool code approved on this machine, shared by
                       every host given the same file: identical tools are
                       reviewed once (Fire Code)

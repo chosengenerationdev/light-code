@@ -104,6 +104,9 @@ pub struct LaunchSpec {
     pub no_schedules: bool,
     /// The other codebases, by mention name: readable, and `@name:path` in the composer.
     pub siblings: Vec<(String, String)>,
+    /// The other codebases that are JupyterHub folders, by mention name, with their settings files:
+    /// browsable read-only from this one (`hub_browse`), with the token named by its slot only.
+    pub sibling_hubs: Vec<(String, PathBuf)>,
     /// Shared by the codebase's chats: who changed which file, for rollback. And this chat's name.
     pub change_ledger: PathBuf,
     /// The JupyterHub settings file, for a codebase that is hub folders.
@@ -173,6 +176,9 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     command.arg("--change-ledger").arg(&spec.change_ledger).arg("--chat-label").arg(&spec.chat_label);
     for (name, path) in &spec.siblings {
         command.arg("--sibling").arg(format!("{name}={path}"));
+    }
+    for (name, file) in &spec.sibling_hubs {
+        command.arg("--sibling-hub").arg(format!("{name}={}", file.display()));
     }
     if let Some(helper) = &spec.fast_fs {
         command.arg("--fast-fs").arg(helper);

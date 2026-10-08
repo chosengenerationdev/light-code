@@ -71,6 +71,8 @@ const model = {
   hasSource: false,
   dataFolder: '',
   totalMemory: 0,
+  /** Git counts for JupyterHub codebases, reported by their own host: the repository is on the hub. */
+  hubGit: {},
 }
 
 window.__sun = {
@@ -619,12 +621,33 @@ function renderList() {
 }
 
 /**
+ * A hub codebase's repository is on the hub, so its counts and actions come from its own host, which
+ * runs git there; everything else is Fire Code's own git, run here.
+ */
+const gitOf = (project) => (project.hub ? model.hubGit[project.id] : model.git?.[project.id])
+
+/** Asks a codebase's first chat to run git on its hub. False when that chat is not running. */
+function askHubGit(project, op, message) {
+  const frame = $(`.pane[data-id="${project.id}"] iframe`)
+  const url = model.urls[project.id]
+  if (frame?.contentWindow == null || url === undefined) return false
+  frame.contentWindow.postMessage({ source: 'sun', ask: 'hubGit', op, ...(message !== undefined ? { message } : {}) }, new URL(url).origin)
+  return true
+}
+
+/** Hub counts go stale like any others; asked again now and then, for the hub codebases that are running. */
+function refreshHubGit() {
+  for (const project of model.projects) if (project.hub) askHubGit(project, 'status')
+}
+setInterval(refreshHubGit, 60_000)
+
+/**
  * What git says has changed: +new ~modified −deleted, only the kinds that are non-zero. Nothing
  * at all for a clean repository or a folder git does not manage - a badge with nothing to say is
  * noise on every row.
  */
 function gitBadge(project) {
-  const g = model.git?.[project.id]
+  const g = gitOf(project)
   if (g === undefined) return null
   const parts = [
     [g.added, 'add', '+', 'new'],
@@ -648,7 +671,7 @@ function gitBadge(project) {
  * and on the selected row, so a list of codebases does not become a list of buttons.
  */
 function gitButtons(project) {
-  const g = model.git?.[project.id]
+  const g = gitOf(project)
   if (g === undefined) return null
   const changed = g.added + g.modified + g.deleted > 0
   const stop = (fn) => (e) => {
@@ -674,6 +697,11 @@ function gitButtons(project) {
           'aria-label': 'Pull latest changes',
           html: svg(ICONS.pull),
           onclick: stop(() => {
+            if (project.hub) {
+              if (!askHubGit(project, 'pull')) return notice('Open the codebase first - git runs on the hub through its agent.', 'error')
+              notice(`Pulling ${project.name} on the hub…`)
+              return
+            }
             notice(`Pulling ${project.name}…`)
             send('gitPull', { id: project.id })
           }),
@@ -688,7 +716,7 @@ function gitButtons(project) {
  */
 function openCommit(project) {
   showModal('commit', (scrim, modal) => {
-    const g = model.git?.[project.id] ?? { files: [], added: 0, modified: 0, deleted: 0, ahead: 0 }
+    const g = gitOf(project) ?? { files: [], added: 0, modified: 0, deleted: 0, ahead: 0 }
     const state = { message: '', busy: false, writing: false }
     const card = el('div', { class: 'modal', style: 'width: min(620px, calc(100vw - 48px))' })
     scrim.append(card)
@@ -719,7 +747,11 @@ function openCommit(project) {
         state.busy = true
         button.disabled = true
         button.textContent = 'Pushing…'
-        send('gitCommitPush', { id: project.id, message: state.message })
+        if (!project.hub) return send('gitCommitPush', { id: project.id, message: state.message })
+        if (!askHubGit(project, 'commit', state.message)) {
+          notice('Open the codebase first - git runs on the hub through its agent.', 'error')
+          modal.onGitDone(false)
+        }
       },
     })
     const total = g.added + g.modified + g.deleted
@@ -992,7 +1024,24 @@ window.addEventListener('message', (event) => {
   if (typeof data.shortcut === 'string') shortcut(data.shortcut)
   // An accent picked in that codebase's own Appearance tab, or null to follow Fire Code's again.
   if (data.accent === null || validHex(data.accent)) send('projectAccent', { id: project.id, accent: data.accent })
-  if (data.ready === true) sendAppearance(frame)
+  if (data.ready === true) {
+    sendAppearance(frame)
+    // The counts for a hub codebase arrive only from its host, so ask as soon as it is up.
+    if (project.hub && key === project.id) askHubGit(project, 'status')
+  }
+  // Git run on the hub: counts for the sidebar, or how a commit or pull went.
+  if (data.hubGit !== null && typeof data.hubGit === 'object' && project.hub) {
+    const result = data.hubGit
+    if (result.op === 'status') {
+      const before = JSON.stringify(model.hubGit[project.id] ?? null)
+      if (result.ok === true && result.counts !== null && typeof result.counts === 'object') model.hubGit[project.id] = result.counts
+      else delete model.hubGit[project.id]
+      if (JSON.stringify(model.hubGit[project.id] ?? null) !== before && !busyEditing()) renderList()
+    } else {
+      HANDLERS.gitDone({ id: project.id, ok: result.ok === true, text: typeof result.text === 'string' ? result.text.slice(0, 2000) : '' })
+      askHubGit(project, 'status')
+    }
+  }
   // A commit message the codebase's agent wrote, for the commit dialog to fill in.
   if ('commitMessage' in data && openModal?.kind === 'commit' && openModal.projectId === project.id) {
     openModal.onCommitMessage(typeof data.commitMessage === 'string' ? data.commitMessage.slice(0, 5000) : undefined, typeof data.error === 'string' ? data.error : undefined)

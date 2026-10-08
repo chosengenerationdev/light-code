@@ -5,7 +5,7 @@ export type { Terminal, TerminalProcess, TerminalRunOptions } from './platform/t
 export type { SecretStore } from './platform/secrets.js'
 export type { ConfigStore, ConfigScope } from './platform/config.js'
 export type { Transport } from './platform/transport.js'
-export type { HttpClient, HttpRequestOptions, HttpResponse } from './platform/http.js'
+export type { HttpClient, HttpRequestOptions, HttpResponse, WebSocketConnection } from './platform/http.js'
 export { FetchHttpClient, type FetchHttpClientOptions } from './platform/http.js'
 export {
   bypassesProxy,
@@ -160,6 +160,9 @@ export {
   listModels,
   lookupModelCapabilities,
   resolveModelCapabilities,
+  withReportedWindow,
+  contextWindowFromError,
+  extractContextWindows,
   type ModelCapabilities,
   type ModelCapabilityOverrides,
   type ListModelsResult,
@@ -653,7 +656,8 @@ export {
   type DocEntryKind,
 } from './rag/toolDocs.js'
 export type { Mode } from './modes/types.js'
-export { runAgentTurn, type AgentTurnEvents, type RunAgentTurnOptions } from './agent/loop.js'
+export { runAgentTurn, DEFAULT_RETRIES, DEFAULT_STALL_SECONDS, type AgentTurnEvents, type RetryInfo, type RunAgentTurnOptions } from './agent/loop.js'
+export { isTransientError } from './agent/transient.js'
 export {
   DiskTruncationStore,
   RecordingTruncationStore,

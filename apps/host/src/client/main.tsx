@@ -181,11 +181,26 @@ if (embedder !== undefined) {
   })
   window.addEventListener('message', (event) => {
     if (event.origin !== embedder || event.source !== window.parent) return
-    const data = event.data as { source?: string; ask?: unknown; appearance?: { theme?: unknown; accent?: unknown; own?: unknown } } | null
+    const data = event.data as {
+      source?: string
+      ask?: unknown
+      op?: unknown
+      message?: unknown
+      appearance?: { theme?: unknown; accent?: unknown; own?: unknown }
+    } | null
     if (data?.source !== 'sun') return
     // Fire Code's commit dialog asks this codebase's agent for a message; the answer goes back below.
     if (data.ask === 'commitMessage') {
       transport.post({ type: 'suggestCommitMessage' })
+      return
+    }
+    // Fire Code's git buttons for a JupyterHub codebase: git runs on the hub, through this host.
+    if (data.ask === 'hubGit' && (data.op === 'status' || data.op === 'commit' || data.op === 'pull')) {
+      transport.post({
+        type: 'hubGit',
+        op: data.op,
+        ...(typeof data.message === 'string' ? { message: data.message.slice(0, 5000) } : {}),
+      })
       return
     }
     if (data.appearance === undefined) return
@@ -209,6 +224,11 @@ transport.onMessage((message) => {
   if (incoming.type === 'commitMessageSuggestion' && embedder !== undefined) {
     const answer = message as { text?: string; error?: string }
     window.parent.postMessage({ source: 'light-code', commitMessage: answer.text ?? null, ...(answer.error !== undefined ? { error: answer.error } : {}) }, embedder)
+  }
+  // Git on the hub, for Fire Code's sidebar and commit dialog - counts and a sentence, to the embedder only.
+  if (incoming.type === 'hubGitResult' && embedder !== undefined) {
+    const result = message as { op: string; ok: boolean; text: string; counts?: unknown }
+    window.parent.postMessage({ source: 'light-code', hubGit: { op: result.op, ok: result.ok, text: result.text, counts: result.counts ?? null } }, embedder)
   }
   if (incoming.type !== undefined) {
     if (BUSY_MESSAGES.has(incoming.type)) reportState('busy')

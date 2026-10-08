@@ -250,8 +250,8 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
   {
     id: 'workspace',
     label: 'Workspace behaviour',
-    description: 'Mode, step cap, folders tools may read, and folders hidden from the @ picker.',
-    keys: ['modeId', 'maxIterations', 'filesystem'],
+    description: 'Mode, step cap, automatic compaction, retries, folders tools may read, and folders hidden from the @ picker.',
+    keys: ['modeId', 'maxIterations', 'autoCompact', 'connection', 'filesystem'],
     machineSpecific: true,
   },
   {

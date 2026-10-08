@@ -1,5 +1,15 @@
 # light-code-vscode
 
+## 0.145.0
+
+### Minor Changes
+
+- **Long chats keep their context.** A model Light Code did not recognise (most gateway aliases, and newer families such as Claude 5, GPT-5, Gemini 3, DeepSeek V3) was treated as a 32k window, so history was summarised after a few steps and only the last dozen messages survived. History is now compacted **only when you say so** - **Compact now** under the token bar, or tick **Compact automatically** beside it - and then only against a window Light Code actually knows. Summaries keep about a third of the window verbatim, and **your own messages word for word**, every time.
+- **A reply that hangs is retried.** A request that sends nothing at all for 5 minutes is stopped and sent again, instead of showing "thinking" for ever.
+- **Connection problems are retried by themselves.** A dropped connection, a gateway error (5xx), rate limiting (429) or overload is retried up to 3 times, waiting a little longer each time, and the chat says "Retrying in Ns". A rejected key, bad request or certificate problem is never retried. Both numbers are in Settings → Approvals → "Unresponsive or failing model".
+- **The chat opens at its newest message** even when the whole transcript arrives at once.
+- **Compaction follows the model actually deployed.** A self-hosted model's real window (vLLM's `max_model_len` on `/models`, or the number in its "maximum context length" refusal) is learned and used; a window set on the profile still wins.
+
 ## 0.144.0
 
 ### Minor Changes

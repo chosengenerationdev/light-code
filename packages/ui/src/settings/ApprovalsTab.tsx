@@ -23,6 +23,80 @@ export interface ApprovalsTabProps {
   modeId?: string | undefined
   /** The resolved shell, reported by the host. */
   shell?: CommandRulesSectionProps['shell']
+  /** Seconds of silence before a model request is retried (0 = never), and how many retries. */
+  stallSeconds?: number
+  retries?: number
+  onSetConnectionRetry?: (stallSeconds: number, retries: number) => void
+}
+
+/**
+ * When a model request is given up on and sent again. Lives beside the step cap because both
+ * answer "how long does it keep going before it stops and tells me".
+ */
+function ConnectionRetrySection(props: {
+  stallSeconds: number
+  retries: number
+  onSave: (stallSeconds: number, retries: number) => void
+}): ReactElement {
+  const [minutes, setMinutes] = useState(String(props.stallSeconds / 60))
+  const [retries, setRetries] = useState(String(props.retries))
+  useEffect(() => setMinutes(String(props.stallSeconds / 60)), [props.stallSeconds])
+  useEffect(() => setRetries(String(props.retries)), [props.retries])
+  const parsedMinutes = Number.parseFloat(minutes)
+  const parsedRetries = Number.parseInt(retries, 10)
+  const seconds = Math.round(parsedMinutes * 60)
+  const valid =
+    Number.isFinite(parsedMinutes) && seconds >= 0 && seconds <= 86_400 &&
+    Number.isFinite(parsedRetries) && parsedRetries >= 0 && parsedRetries <= 10
+  const changed = seconds !== props.stallSeconds || parsedRetries !== props.retries
+  return (
+    <div>
+      <label htmlFor="lc-stall" style={labelStyle()}>
+        Give up on a silent reply after (minutes)
+      </label>
+      <input
+        id="lc-stall"
+        type="number"
+        min={0}
+        step={1}
+        value={minutes}
+        onChange={(event) => setMinutes(event.target.value)}
+        style={{ ...textFieldStyle(), width: 110, flex: 'none' }}
+      />
+      <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4, marginBottom: 10 }}>
+        A request that sends nothing at all for this long — no text, no thinking — is stopped and sent again. A
+        connection dropped without being closed otherwise waits for ever looking like thinking. 0 never gives up.
+      </span>
+      <label htmlFor="lc-retries" style={labelStyle()}>
+        Retries when the connection fails
+      </label>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          id="lc-retries"
+          type="number"
+          min={0}
+          max={10}
+          value={retries}
+          onChange={(event) => setRetries(event.target.value)}
+          style={{ ...textFieldStyle(), width: 110, flex: 'none' }}
+        />
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          disabled={!valid || !changed}
+          onClick={() => props.onSave(seconds, parsedRetries)}
+        >
+          Save
+        </button>
+        {!valid && <span style={{ fontSize: 11, color: colors.error }}>Minutes 0–1440, retries 0–10.</span>}
+      </div>
+      <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 4 }}>
+        A dropped connection, a gateway error (5xx), rate limiting (429) or overload is retried after a few seconds,
+        waiting a little longer each time. A rejected key, a bad request or a certificate problem is never retried —
+        it would fail the same way again.
+      </span>
+    </div>
+  )
 }
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
@@ -195,6 +269,20 @@ export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
       </div>
 
       </Panel>
+
+      {props.onSetConnectionRetry !== undefined && (
+        <Panel
+          id="approvals.connection"
+          title="Unresponsive or failing model"
+          summary={`${String(props.retries ?? 3)} retries`}
+        >
+          <ConnectionRetrySection
+            stallSeconds={props.stallSeconds ?? 300}
+            retries={props.retries ?? 3}
+            onSave={props.onSetConnectionRetry}
+          />
+        </Panel>
+      )}
 
     </div>
   )

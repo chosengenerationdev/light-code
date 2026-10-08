@@ -136,6 +136,8 @@ export interface ServerOptions {
   mentionName?: string
   /** See `SessionOptions.jupyterHub`. */
   jupyterHub?: JupyterHubSpec
+  /** See `SessionOptions.siblingHubs`. */
+  siblingHubs?: { name: string; spec: JupyterHubSpec }[]
   /** See `SessionOptions.machineApprovalsFile`. */
   machineApprovalsFile?: string
   /** See `SessionOptions.fastFs`. */
@@ -484,6 +486,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
       ...(options.mentionName !== undefined ? { mentionName: options.mentionName } : {}),
       ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
+      ...(options.siblingHubs !== undefined ? { siblingHubs: options.siblingHubs } : {}),
       ...(options.machineApprovalsFile !== undefined ? { machineApprovalsFile: options.machineApprovalsFile } : {}),
       // Fire Code's saved credentials, for Python tools that declare one (names only; values stay in the vault).
       ...(options.credentialsFile !== undefined ? { savedCredentials: readCredentials } : {}),

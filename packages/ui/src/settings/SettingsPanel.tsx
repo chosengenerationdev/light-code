@@ -57,6 +57,9 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onRevokeCommand: (command: string) => void
   maxIterations: number
   onSetMaxIterations: (value: number) => void
+  stallSeconds?: number
+  retries?: number
+  onSetConnectionRetry?: (stallSeconds: number, retries: number) => void
   readRoots: string[]
   onSetReadRoots: (roots: string[]) => void
   /** The user's own command rules. Global, unlike `approvals`. */
@@ -382,6 +385,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRevokeCommand={props.onRevokeCommand}
             maxIterations={props.maxIterations}
             onSetMaxIterations={props.onSetMaxIterations}
+            {...(props.stallSeconds !== undefined ? { stallSeconds: props.stallSeconds } : {})}
+            {...(props.retries !== undefined ? { retries: props.retries } : {})}
+            {...(props.onSetConnectionRetry !== undefined ? { onSetConnectionRetry: props.onSetConnectionRetry } : {})}
             readRoots={props.readRoots}
             onSetReadRoots={props.onSetReadRoots}
             commandRules={props.commandRules}

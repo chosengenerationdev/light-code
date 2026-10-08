@@ -190,6 +190,10 @@ const PERSONAL_SETTINGS = new Set([
   'setAccentColor',
   'setExpertColor',
   'setMaxIterations',
+  // Whether *this user's* chats compact by themselves - their own conversations, nobody else's.
+  'setAutoCompact',
+  // How patiently *this user's* requests are retried.
+  'setConnectionRetry',
   'setTaskExpertLimits',
   /*
    * Reading what this project has chosen for itself. A read, and about the user's own view.

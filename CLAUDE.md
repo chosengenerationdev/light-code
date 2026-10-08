@@ -2445,6 +2445,71 @@ the hub*. `packages/core/src/jupyter/`.
 - **Code blocks**: `colors.codeBlockBackground` = `--lc-code-block-background` falling back to the
   VS Code input colour; only the browser page sets it, so VS Code is unchanged.
 
+## 12ae. Lost context, hung replies, retries, and git on the hub (2026-10-08)
+
+Reported together: "light code is missing a lot of context from the chat history"; a prompt "stays in
+thinking even for 2656 seconds"; "something to retry if we face API connectivity issues"; and in Fire
+Code, `hub_run` always failing and a woken chat opening at its first message.
+
+- **Lost context was compaction against a guessed window.** Every id the model table did not know - a
+  gateway alias, anything newer than the table - got the conservative 32k, so history was summarised a
+  few steps in and only twelve messages survived verbatim, on models ten times that size. Three fixes:
+  `ModelCapabilities.contextWindowKnown` (a window from the table or an override, never the default),
+  and **proactive compaction only on a known window** - a guess now feeds the token bar alone, and the
+  provider's own refusal is the signal; the table gained Claude/GPT-5/Gemini 3/DeepSeek V3/Kimi/GLM
+  families with bare `claude`/`gemini`/`deepseek` catch-alls; and `compactHistory` keeps the recent
+  tail by `keepRecentTokens` (35% of the window) as well as by count, and carries **the user's own
+  messages verbatim** inside every summary, through re-compaction (`splitSummary`), clipped per message
+  and capped in total, newest kept. The loop's own continue-nudge is excluded - nobody typed it.
+- **Automatic compaction is a switch, off by default** (`autoCompact`, asked for directly: "give a
+  switch if user want auto compact, else let user do it manually"). The checkbox sits beside Compact
+  now. Off, a provider refusing an over-long conversation says to press Compact now instead of
+  compacting. **A scheduled run always may**: nobody is there to press the button.
+- **A hung reply was a read that never returned.** `consumeStream` in `agent/loop.ts` gives each request
+  its own abort signal (chained to the turn's) and races every chunk against a watchdog
+  (`connection.stallSeconds`, default 300, 0 = off) - raced rather than trusting the adapter to notice
+  the abort, because the failure is exactly a read that does not come back. Any chunk counts, reasoning
+  included, so a model visibly thinking is never cut off.
+- **Retries** (`agent/transient.ts`, `connection.retries`, default 3): dropped connections, 5xx, 429,
+  529/overload and stalls, with growing jittered waits (2s to 25s). **Never** 400/401/403/404, a
+  certificate fault or an over-long conversation - each fails identically and a retry only delays the
+  message saying what to fix (a 401 retry is also a lockout risk). Not after a tool call has been
+  produced. `onRetry` tells the bridge to clear the partial text and reasoning, and the panel shows
+  "Retrying in Ns"; the retry writes its answer from the start.
+- **`hub_run` failed on the Node host, and so in Fire Code, because `withHeadersDeadline` returned
+  `{ request }` alone** - `openWebSocket` was dropped by rebuilding the client field by field, the bug
+  shape §19 keeps recording. Passed through now; `httpDeadline.test.ts` pins it.
+- **A woken chat opened at the top** because "follow new content" measured distance from the bottom
+  *after* rendering, and a woken chat gets its whole transcript in one render. `Chat.tsx` now keeps
+  "was at the bottom" from scroll events and also follows growth no message announces (ResizeObserver
+  on the content and the container).
+- **Git on the hub** (asked for: "fire code should be able to run git commands in hub"). The repository
+  is on the hub, not in the local copy, so Fire Code's sidebar counts and Commit and push / Pull go
+  shell -> pane (`ask: 'hubGit'`) -> host `hubGit` -> `jupyter/hubGit.ts`, which runs git in the hub
+  kernel with **argument lists, never a shell** (a commit message is user- or model-typed and reaches
+  git only as a JSON literal), saves local edits to the hub before committing, and fetches after a
+  pull. "Write with agent" reads the hub's diff. Refused mid-turn: the kernel is the turn's too. Only
+  while that codebase's chat runs - there is no host to ask otherwise.
+- **The window is learned from the server, not only the table** (asked for: "i am using qwen3.8-27b in
+  office, auto compact should be according to it"). A self-hosted model's limit is its server's
+  `--max-model-len`, which no table knows. `extractContextWindows` reads `max_model_len` /
+  `context_length` / `inputTokenLimit` from `/models` (probed once per session, 10s cap) and
+  `contextWindowFromError` reads the number out of an overflow refusal; the bridge remembers both per
+  base URL and model, and an explicit profile window still wins (`withReportedWindow`).
+- **`hub_browse`** (`jupyter/browse.ts`): list / find / read anywhere the hub user can see, read only
+  by construction (no write path exists in it), bounded walks. Offered in a hub codebase for its own
+  hub and, in Fire Code, in every other codebase for each hub codebase (`--sibling-hub name=file`):
+  Fire Code's secrets file is shared, so the token slot resolves from any codebase and the token is
+  still never in a file or a URL. Editing stays in the hub codebase, where diffs, conflicts and
+  rollback apply.
+- **Python on Windows writes CRLF in text mode.** Scripted edits turned a dozen LF files CRLF and broke
+  every test that slices `bridge.ts` on `'
+  }
+'`. Edit in binary mode, or with the Edit tool.
+
+**Not verified against a live hub or gateway**: hub git against fakes and generated code only; the
+retry and stall paths against scripted providers.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into

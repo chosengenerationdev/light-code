@@ -34,6 +34,13 @@ export const HEADERS_DEADLINE_MS = 45_000
  */
 export function withHeadersDeadline(inner: HttpClient, budgetMs = HEADERS_DEADLINE_MS): HttpClient {
   return {
+    /*
+     * Passed through, never dropped. This wrapper used to return `request` alone, so every hub
+     * kernel run on the Node host (and so in Fire Code) failed with "cannot open the WebSocket a
+     * kernel needs" while every other hub call worked - a capability lost by rebuilding an object
+     * field by field. A WebSocket has its own open handshake and no headers deadline is needed.
+     */
+    ...(inner.openWebSocket !== undefined ? { openWebSocket: inner.openWebSocket.bind(inner) } : {}),
     async request(url: string, options: HttpRequestOptions = {}): Promise<HttpResponse> {
       const deadline = new AbortController()
       const expire = setTimeout(() => deadline.abort(), budgetMs)

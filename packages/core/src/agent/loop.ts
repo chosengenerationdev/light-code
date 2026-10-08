@@ -10,11 +10,13 @@ import { CODE_MODE } from '../modes/builtin.js'
 import { toolsForMode } from '../modes/resolve.js'
 import type { Mode } from '../modes/types.js'
 import type { ChatProvider, ChatStreamOptions, ImageAttachment, ToolCall } from '../providers/types.js'
+import { contextWindowFromError } from '../providers/models.js'
 import { takeWhy, toToolDefinitions } from '../tools/registry.js'
 import { CALL_TOOL_NAME, callToolParamsSchema } from '../tools/callTool.js'
 import type { Tool, ToolExecutionContext, ToolPreview, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { Conversation } from './messages.js'
 import { truncateToolResult, type TruncationStore } from './truncate.js'
+import { isTransientError, retryDelayMs, waitUnlessAborted } from './transient.js'
 
 export interface AgentTurnEvents {
   onTextChunk(text: string): void
@@ -46,6 +48,23 @@ export interface AgentTurnEvents {
    * the model or the prompt is at fault and the log is where that becomes visible.
    */
   onNudgedToContinue?(): void
+  /**
+   * A request failed in a way worth trying again, and will be sent again after `delayMs`. Whatever
+   * this attempt had already streamed is void: the next one starts its answer from the beginning,
+   * so a live view should clear it rather than show the start of the reply twice.
+   */
+  onRetry?(info: RetryInfo): void
+  /** The provider's refusal stated the model's real context window; the host remembers it. */
+  onContextWindowLearned?(tokens: number): void
+}
+
+export interface RetryInfo {
+  /** Which retry this is, from 1. */
+  retry: number
+  maxRetries: number
+  delayMs: number
+  /** What went wrong, in the provider's words or the stall watchdog's. */
+  reason: string
 }
 
 export interface RunAgentTurnOptions {
@@ -73,10 +92,42 @@ export interface RunAgentTurnOptions {
    * token breakdown both need it; omitted disables both rather than guessing a size.
    */
   contextWindow?: number
+  /**
+   * False when `contextWindow` is the conservative guess for a model the table does not know.
+   *
+   * Reported: "Light Code is missing a lot of context from the chat history". Every unrecognised
+   * id - a gateway alias, any model newer than the table - was compacted against a 32k guess, so
+   * history was summarised a few steps in and only the last dozen messages survived verbatim, on
+   * models with windows ten times that size. A guessed window now only feeds the token bar; the
+   * history is shortened when the provider itself says it is too long (the overflow path below),
+   * which is the one signal that is never a guess. Omitted means known.
+   */
+  contextWindowKnown?: boolean
   /** Overrides for when compaction triggers and how much stays verbatim. */
   compaction?: CompactionOptions
   /** Set false to disable compaction entirely for this turn. */
   compactionEnabled?: boolean
+  /**
+   * Whether the loop may compact *by itself* - near the limit, or when the provider refuses an
+   * over-long conversation. False leaves it to the user ("Compact now"), which is what the bridge
+   * passes unless `autoCompact` is switched on. Omitted means yes, for callers that predate it.
+   */
+  autoCompact?: boolean
+  /**
+   * Seconds a model request may go without sending anything at all - text, reasoning, a tool call,
+   * even its response headers - before it is treated as stalled, stopped and sent again. 0 turns
+   * the watchdog off.
+   *
+   * Reported: a prompt "stays in thinking even for 2656 seconds". A connection a gateway or proxy
+   * dropped without closing never errors and never ends, so the loop waited on it for ever with the
+   * spinner saying "working". A model that is genuinely thinking streams reasoning, or at least
+   * keep-alives, long before this.
+   */
+  stallSeconds?: number
+  /** How many times a failed or stalled request is sent again before the error is shown. */
+  retries?: number
+  /** The wait before retry `n` (from 1). For tests; the default grows from 2s to 25s. */
+  retryDelayMs?: (retry: number) => number
   /** Images attached to this user message. */
   images?: ImageAttachment[]
   /**
@@ -101,6 +152,95 @@ export interface RunAgentTurnOptions {
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
+/** Five minutes of complete silence. Generous: a reasoning model streams its thinking, or pings. */
+export const DEFAULT_STALL_SECONDS = 300
+export const DEFAULT_RETRIES = 3
+
+function stallDescription(seconds: number): string {
+  const label = seconds >= 120 && seconds % 60 === 0 ? `${String(seconds / 60)} minutes` : `${String(seconds)} seconds`
+  return `The model sent nothing for ${label}`
+}
+
+interface StreamOutcome {
+  text: string
+  toolCall?: ToolCall
+  error?: string
+  /** The watchdog stopped it: nothing arrived for `stallSeconds`. */
+  stalled: boolean
+}
+
+/**
+ * Reads one streamed response, live, with a watchdog on silence.
+ *
+ * The request gets its own abort signal, chained to the turn's, so a stall can stop *this*
+ * request without cancelling the turn. The wait for each chunk is raced against the watchdog
+ * rather than trusting the adapter to notice the abort, because the failure being fixed is exactly
+ * a read that never returns.
+ */
+async function consumeStream(
+  provider: ChatProvider,
+  messages: Parameters<ChatProvider['streamChat']>[0],
+  streamOptions: ChatStreamOptions,
+  stallSeconds: number,
+  events: AgentTurnEvents,
+): Promise<StreamOutcome> {
+  const controller = new AbortController()
+  const outer = streamOptions.signal
+  const forward = (): void => controller.abort()
+  if (outer?.aborted === true) controller.abort()
+  else outer?.addEventListener('abort', forward, { once: true })
+
+  const iterator = provider.streamChat(messages, { ...streamOptions, signal: controller.signal })[Symbol.asyncIterator]()
+  const outcome: StreamOutcome = { text: '', stalled: false }
+  let finished = false
+  try {
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const next = iterator.next()
+      const step =
+        stallSeconds > 0
+          ? await Promise.race([
+              next,
+              new Promise<'stalled'>((resolve) => {
+                timer = setTimeout(() => resolve('stalled'), stallSeconds * 1000)
+              }),
+            ])
+          : await next
+      clearTimeout(timer)
+      if (step === 'stalled') {
+        outcome.stalled = true
+        controller.abort()
+        // Not awaited: the read it would wait behind is the one that never returns.
+        next.catch(() => undefined)
+        void iterator.return?.(undefined).catch(() => undefined)
+        finished = true
+        break
+      }
+      if (step.done === true) {
+        finished = true
+        break
+      }
+      const chunk = step.value
+      if (chunk.type === 'text') {
+        outcome.text += chunk.text
+        events.onTextChunk(chunk.text)
+      } else if (chunk.type === 'reasoning') {
+        events.onReasoningChunk?.(chunk.text)
+      } else if (chunk.type === 'toolCall') {
+        // "One tool call per assistant message" (CLAUDE.md §5) — ignore extras defensively.
+        if (outcome.toolCall === undefined) outcome.toolCall = chunk.toolCall
+      } else if (chunk.type === 'error') {
+        outcome.error = chunk.error
+      } else if (chunk.type === 'done') {
+        break
+      }
+    }
+  } finally {
+    outer?.removeEventListener('abort', forward)
+    if (!finished) await iterator.return?.(undefined).catch(() => undefined)
+  }
+  return outcome
+}
 /**
  * Tool calls that report rather than act, and so do not consume the step budget.
  *
@@ -156,10 +296,19 @@ async function prepareModelMessages(
    */
   let messages = repairUnansweredToolCalls(conversation.toModelMessages())
 
-  if (options.compactionEnabled !== false && contextWindow > 0) {
+  if (
+    options.compactionEnabled !== false &&
+    options.autoCompact !== false &&
+    contextWindow > 0 &&
+    options.contextWindowKnown !== false
+  ) {
     const estimated = computeBreakdown(messages, tools, contextWindow).total
     if (shouldCompact(messages, estimated, contextWindow, options.compaction ?? {})) {
-      const result = await compactHistory(messages, provider, options.compaction ?? {})
+      const result = await compactHistory(messages, provider, {
+        // Keep recent history by size as well as by count, so a long window keeps a long tail.
+        keepRecentTokens: Math.floor(contextWindow * 0.35),
+        ...(options.compaction ?? {}),
+      })
       if (result.compacted) {
         const summary = result.messages.find(isSummaryMessage)
         if (summary !== undefined) {
@@ -518,24 +667,39 @@ export async function runAgentTurn(
     // record (§12, and the Phase 6b rule that compaction must not destroy stored history).
     const modelMessages = await prepareModelMessages(conversation, provider, tools, options, events)
 
-    let assistantText = ''
-    let toolCall: ToolCall | undefined
-    let streamError: string | undefined
+    /*
+     * One request, sent again when it fails in a way a second attempt usually gets past - a dropped
+     * connection, a 502 from a restarting gateway, an overload, or a stream that went silent. See
+     * `transient.ts` for what counts. Only while nothing has been decided: a completed tool call is
+     * kept, never re-requested. Text already shown is cleared through `onRetry`, because the next
+     * attempt writes the answer again from the start.
+     */
+    const stallSeconds = options.stallSeconds ?? DEFAULT_STALL_SECONDS
+    const maxRetries = Math.max(0, options.retries ?? DEFAULT_RETRIES)
+    // A function, not a captured boolean: the turn can be cancelled during the wait below.
+    const cancelled = (): boolean => options.signal?.aborted === true
+    let outcome: StreamOutcome
+    for (let retry = 0; ; retry++) {
+      outcome = await consumeStream(provider, modelMessages, streamOptions, stallSeconds, events)
+      if (cancelled() || outcome.toolCall !== undefined || retry >= maxRetries) break
+      const failure = outcome.stalled ? stallDescription(stallSeconds) : outcome.error
+      if (failure === undefined || (!outcome.stalled && !isTransientError(failure))) break
+      const delayMs = (options.retryDelayMs ?? retryDelayMs)(retry + 1)
+      events.onRetry?.({ retry: retry + 1, maxRetries, delayMs, reason: failure })
+      await waitUnlessAborted(delayMs, options.signal)
+      if (cancelled()) break
+    }
 
-    for await (const chunk of provider.streamChat(modelMessages, streamOptions)) {
-      if (chunk.type === 'text') {
-        assistantText += chunk.text
-        events.onTextChunk(chunk.text)
-      } else if (chunk.type === 'reasoning') {
-        events.onReasoningChunk?.(chunk.text)
-      } else if (chunk.type === 'toolCall') {
-        // "One tool call per assistant message" (CLAUDE.md §5) — ignore extras defensively.
-        if (toolCall === undefined) toolCall = chunk.toolCall
-      } else if (chunk.type === 'error') {
-        streamError = chunk.error
-      } else if (chunk.type === 'done') {
-        break
-      }
+    const assistantText = outcome.text
+    const toolCall: ToolCall | undefined = outcome.toolCall
+    let streamError: string | undefined = outcome.error
+    if (outcome.stalled && !cancelled()) {
+      streamError =
+        `${stallDescription(stallSeconds)}, so the request was stopped` +
+        (maxRetries > 0 ? ` (tried ${String(maxRetries + 1)} times)` : '') +
+        '. The gateway may be overloaded, or the connection dropped without saying so. Send your message ' +
+        'again to retry. If this model genuinely thinks for longer than that without streaming anything, raise ' +
+        '"Give up on a silent reply after" in Settings → Approvals.'
     }
 
     /*
@@ -545,6 +709,35 @@ export async function runAgentTurn(
      * to end the chat for good: every retry sent the same too-long history. Now the refusal itself
      * triggers compaction, once, and the same request is sent again.
      */
+    /*
+     * A refusal that names the real window is the one fact about it that is never a guess - a
+     * self-hosted model's limit is whatever its server was started with. Remembered by the host, and
+     * used for the rest of this turn.
+     */
+    const statedWindow = streamError !== undefined && isContextOverflow(streamError) ? contextWindowFromError(streamError) : undefined
+    if (statedWindow !== undefined && statedWindow !== options.contextWindow) {
+      options.contextWindow = statedWindow
+      options.contextWindowKnown = true
+      events.onContextWindowLearned?.(statedWindow)
+    }
+
+    if (
+      streamError !== undefined &&
+      assistantText.length === 0 &&
+      toolCall === undefined &&
+      options.autoCompact === false &&
+      isContextOverflow(streamError)
+    ) {
+      events.onError(
+        `${streamError}
+
+The conversation is longer than this model accepts. Press **Compact now** under the ` +
+          'token bar to summarise the older part (the saved transcript keeps everything), then send again - or ' +
+          'tick "Compact automatically" there to have this done for you. Starting a new chat with + also works.',
+      )
+      return
+    }
+
     if (
       streamError !== undefined &&
       assistantText.length === 0 &&

@@ -9,6 +9,12 @@ export interface ModelCapabilities {
   supportsTools: boolean
   /** True when these values came from the table rather than the conservative default. */
   known: boolean
+  /**
+   * True only when the *window* itself came from the table or an override - not merely some other
+   * field. Compaction acts on this alone: summarising history against a guessed window is how
+   * every unrecognised gateway alias came to lose its conversation after a few steps.
+   */
+  contextWindowKnown?: boolean
 }
 
 /**
@@ -19,6 +25,9 @@ export interface ModelCapabilities {
  * Ordered longest-key-first at lookup time so `gpt-4o-mini` wins over `gpt-4o`.
  */
 const MODEL_TABLE: Record<string, Omit<ModelCapabilities, 'known'>> = {
+  // Newer families first in the file; lookup order is by key length, not position.
+  'gpt-5': { contextWindow: 400_000, supportsVision: true, supportsTools: true },
+  'gpt-oss': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
   'gpt-4o-mini': { contextWindow: 128_000, supportsVision: true, supportsTools: true },
   'gpt-4o': { contextWindow: 128_000, supportsVision: true, supportsTools: true },
   'gpt-4.1-mini': { contextWindow: 1_047_576, supportsVision: true, supportsTools: true },
@@ -29,16 +38,26 @@ const MODEL_TABLE: Record<string, Omit<ModelCapabilities, 'known'>> = {
   o3: { contextWindow: 200_000, supportsVision: true, supportsTools: true },
   'o4-mini': { contextWindow: 200_000, supportsVision: true, supportsTools: true },
 
+  // A bare `claude` catches releases newer than this table (Opus/Sonnet/Haiku 4.x and 5,
+  // Fable): every Claude model since 3 has had at least a 200k window.
+  claude: { contextWindow: 200_000, supportsVision: true, supportsTools: true },
   'claude-opus-4': { contextWindow: 200_000, supportsVision: true, supportsTools: true },
   'claude-sonnet-4': { contextWindow: 200_000, supportsVision: true, supportsTools: true },
   'claude-3-7-sonnet': { contextWindow: 200_000, supportsVision: true, supportsTools: true },
   'claude-3-5-sonnet': { contextWindow: 200_000, supportsVision: true, supportsTools: true },
   'claude-3-5-haiku': { contextWindow: 200_000, supportsVision: true, supportsTools: true },
 
+  gemini: { contextWindow: 1_048_576, supportsVision: true, supportsTools: true },
   'gemini-2.5-pro': { contextWindow: 1_048_576, supportsVision: true, supportsTools: true },
   'gemini-2.5-flash': { contextWindow: 1_048_576, supportsVision: true, supportsTools: true },
   'gemini-2.0-flash': { contextWindow: 1_048_576, supportsVision: true, supportsTools: true },
 
+  'deepseek-v3': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  'deepseek-r1': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  deepseek: { contextWindow: 65_536, supportsVision: false, supportsTools: true },
+  'kimi-k2': { contextWindow: 262_144, supportsVision: false, supportsTools: true },
+  'glm-4': { contextWindow: 131_072, supportsVision: false, supportsTools: true },
+  'llama-4': { contextWindow: 1_000_000, supportsVision: true, supportsTools: true },
   'deepseek-reasoner': { contextWindow: 65_536, supportsVision: false, supportsTools: false },
   'deepseek-chat': { contextWindow: 65_536, supportsVision: false, supportsTools: true },
 
@@ -96,10 +115,10 @@ export function lookupModelCapabilities(modelId: string): ModelCapabilities {
   const normalized = modelId.toLowerCase()
   for (const key of TABLE_KEYS_BY_SPECIFICITY) {
     if (normalized.includes(key)) {
-      return { ...(MODEL_TABLE[key] as Omit<ModelCapabilities, 'known'>), known: true }
+      return { ...(MODEL_TABLE[key] as Omit<ModelCapabilities, 'known'>), known: true, contextWindowKnown: true }
     }
   }
-  return { ...CONSERVATIVE_DEFAULT, known: false }
+  return { ...CONSERVATIVE_DEFAULT, known: false, contextWindowKnown: false }
 }
 
 /** Optional fields are explicitly `| undefined`: these come from a zod `.optional()` schema. */
@@ -121,6 +140,7 @@ export function resolveModelCapabilities(
     supportsVision: overrides.supportsVision ?? base.supportsVision,
     supportsTools: overrides.supportsTools ?? base.supportsTools,
     known: base.known || Object.values(overrides).some((value) => value !== undefined),
+    contextWindowKnown: base.contextWindowKnown === true || overrides.contextWindow !== undefined,
   }
 }
 
@@ -132,6 +152,68 @@ export interface ListModelsResult {
    * beside a still-usable free-text field, not an error that blocks anything.
    */
   warning?: string
+  /**
+   * The context window each model reports, where the server says. vLLM, SGLang, LM Studio,
+   * OpenRouter and Gemini all do under one name or another; most gateways do not.
+   */
+  windows?: Record<string, number>
+}
+
+/** The field names servers use for a model's context window, in the order trusted. */
+const WINDOW_FIELDS = ['max_model_len', 'context_length', 'context_window', 'max_context_length', 'inputTokenLimit', 'max_input_tokens'] as const
+
+/** Model id -> the window its server reports. Ids are matched exactly, as `extractModelIds` lists them. */
+export function extractContextWindows(payload: unknown): Record<string, number> {
+  const container = payload as { data?: unknown; models?: unknown } | null
+  const list = Array.isArray(container?.data) ? container.data : Array.isArray(container?.models) ? container.models : []
+  const windows: Record<string, number> = {}
+  for (const entry of list) {
+    const record = entry as Record<string, unknown> | null
+    if (record === null || typeof record !== 'object') continue
+    const id = typeof record.id === 'string' ? record.id : typeof record.name === 'string' ? record.name.replace(/^models\//, '') : undefined
+    if (id === undefined) continue
+    for (const field of WINDOW_FIELDS) {
+      const value = record[field]
+      if (typeof value === 'number' && Number.isInteger(value) && value >= 1_024) {
+        windows[id] = value
+        break
+      }
+    }
+  }
+  return windows
+}
+
+/**
+ * The real window, read out of a provider's refusal of an over-long request.
+ *
+ * Asked for directly: compaction should follow the model actually deployed. A self-hosted model's
+ * window is whatever its server was started with, which no table can know - but the server says so
+ * the first time it refuses ("This model's maximum context length is 32768 tokens"), and that number
+ * is the one fact about the window that is never a guess.
+ */
+export function contextWindowFromError(error: string): number | undefined {
+  const patterns = [
+    /maximum context length is (\d+)/i,
+    /context (?:length|window|size) (?:is|of) (\d+)/i,
+    /available context size \((\d+) tokens?\)/i,
+    /> ?(\d+) (?:tokens? )?maximum/i,
+    /max(?:imum)?_?(?:model_?len|context_?length|tokens)\s*[=:]\s*(\d+)/i,
+  ]
+  for (const pattern of patterns) {
+    const value = Number(pattern.exec(error)?.[1])
+    if (Number.isInteger(value) && value >= 1_024 && value <= 100_000_000) return value
+  }
+  return undefined
+}
+
+/** Capabilities with a window the server reported. An explicit profile override still wins. */
+export function withReportedWindow(
+  capabilities: ModelCapabilities,
+  reported: number | undefined,
+  overrides: ModelCapabilityOverrides | undefined,
+): ModelCapabilities {
+  if (reported === undefined || overrides?.contextWindow !== undefined) return capabilities
+  return { ...capabilities, contextWindow: reported, contextWindowKnown: true }
 }
 
 function extractModelIds(payload: unknown): string[] {
@@ -193,11 +275,13 @@ export async function listModels(
       return { ids: [], warning: `${url} returned HTTP ${response.status}. Type the model id instead.` }
     }
 
-    const ids = extractModelIds(await response.json())
+    const payload: unknown = await response.json()
+    const ids = extractModelIds(payload)
     if (ids.length === 0) {
       return { ids: [], warning: `${url} returned no models. Type the model id instead.` }
     }
-    return { ids }
+    const windows = extractContextWindows(payload)
+    return { ids, ...(Object.keys(windows).length > 0 ? { windows } : {}) }
   } catch (error) {
     return { ids: [], warning: `Could not reach ${url}: ${describeTlsError(error)}` }
   }

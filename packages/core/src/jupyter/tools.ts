@@ -1,3 +1,4 @@
+import type { JupyterClient } from './client.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
@@ -18,6 +19,8 @@ import type { JupyterHubSpec } from './spec.js'
 
 export interface HubRuntime {
   spec: JupyterHubSpec
+  /** The REST client, for `hub_browse` - which looks beyond the copied folders. */
+  client: JupyterClient
   mirror: HubMirror
   kernel: KernelSession
   /** Where the hub is, for messages. */

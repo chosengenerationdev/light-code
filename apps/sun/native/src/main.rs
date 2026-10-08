@@ -1352,6 +1352,27 @@ impl App {
                 Some(chat) => project.chats.iter().find(|c| c.id.to_string() == chat).map(|c| c.name.clone()).unwrap_or_else(|| format!("Chat {chat}")),
                 None => "Chat 1".to_string(),
             },
+            // Each other hub codebase's settings, written and its token slot pointed exactly as its own
+            // launch does, so this codebase can browse that hub. A failure costs that one hub only.
+            sibling_hubs: {
+                let names = state::mention_names(&self.state.projects);
+                self.state
+                    .projects
+                    .iter()
+                    .zip(names)
+                    .filter(|(p, _)| p.id != project.id)
+                    .filter_map(|(p, (_, name))| {
+                        let settings = p.hub.as_ref()?;
+                        let file = self.paths.project_dir(&p.id).join("jupyterhub.json");
+                        if let Some(credential) = &settings.credential {
+                            self.vault.point(&hub::token_slot(&p.id), credential, "value").ok()?;
+                        }
+                        let _ = std::fs::create_dir_all(self.paths.project_dir(&p.id));
+                        hub::write_spec(&file, settings, &p.id).ok()?;
+                        Some((name, file))
+                    })
+                    .collect()
+            },
             siblings: {
                 let names = state::mention_names(&self.state.projects);
                 self.state

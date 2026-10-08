@@ -75,6 +75,8 @@ export interface ChatProps {
   usage: ContextUsage | undefined
   /** The token bar's Compact now. */
   onCompact?: (() => void) | undefined
+  autoCompact?: boolean | undefined
+  onSetAutoCompact?: ((value: boolean) => void) | undefined
   /** Hands a file the panel cannot read to the host. */
   stageFile?: StageFile | undefined
   onPickFiles?: (() => void) | undefined
@@ -114,6 +116,17 @@ export interface ChatProps {
 
 export function Chat(props: ChatProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  /*
+   * Whether the reader was at the bottom *before* the latest change, kept from scroll events.
+   *
+   * Reported from Fire Code: a chat woken from sleep opened at its first message. The follow rule
+   * used to measure the distance from the bottom *after* rendering - and a woken chat receives its
+   * whole transcript in one message, so an empty container that was at the bottom became one that
+   * was screens away, and the rule concluded the reader had scrolled up. Asking where they were
+   * before the content arrived is the question the rule always meant.
+   */
+  const atBottomRef = useRef(true)
   const [promptOutOfView, setPromptOutOfView] = useState(false)
 
   /*
@@ -132,6 +145,7 @@ export function Chat(props: ChatProps): ReactElement {
   useLayoutEffect(() => {
     const root = scrollRef.current
     if (root === null) return
+    atBottomRef.current = true
     root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
   }, [props.conversationKey])
 
@@ -142,14 +156,34 @@ export function Chat(props: ChatProps): ReactElement {
    * streams in is the behaviour every chat window gets wrong once. The threshold is generous
    * because a reply can add a line between two frames.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = scrollRef.current
     if (root === null) return
-    const distanceFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight
-    if (distanceFromBottom <= FOLLOW_THRESHOLD_PX) {
-      root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
-    }
+    if (atBottomRef.current) root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
   }, [props.messages, props.pendingApproval, props.pendingForm])
+
+  /*
+   * And follow growth no message announces: code highlighted after it rendered, a picture that
+   * loaded, the pane itself being resized - Fire Code lays out a hidden chat at a different size
+   * from the one it is shown at. Absent where the platform lacks ResizeObserver (tests).
+   */
+  useEffect(() => {
+    const root = scrollRef.current
+    const content = contentRef.current
+    if (root === null || content === null || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (atBottomRef.current) root.scrollTo({ top: root.scrollHeight, behavior: 'auto' })
+    })
+    observer.observe(content)
+    observer.observe(root)
+    return () => observer.disconnect()
+  }, [])
+
+  const onScroll = (): void => {
+    const root = scrollRef.current
+    if (root === null) return
+    atBottomRef.current = root.scrollHeight - root.scrollTop - root.clientHeight <= FOLLOW_THRESHOLD_PX
+  }
 
   /** The newest thing the user asked, for the pin. */
   const latestPrompt = (() => {
@@ -255,7 +289,9 @@ export function Chat(props: ChatProps): ReactElement {
         ref={scrollRef}
         className="lc-scroll"
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollBehavior: 'smooth' }}
+        onScroll={onScroll}
       >
+        <div ref={contentRef}>
         <MessageList messages={props.messages} error={props.error} feedback={props.feedback} />
         {workingLabel !== undefined && (
           <WorkingIndicator
@@ -278,6 +314,7 @@ export function Chat(props: ChatProps): ReactElement {
             onDismiss={props.onDismissForm}
           />
         )}
+        </div>
       </div>
       {props.canRollback && (
         <div
@@ -310,7 +347,13 @@ export function Chat(props: ChatProps): ReactElement {
       )}
       {props.pendingTools !== undefined && <PendingToolApprovals {...props.pendingTools} />}
       <ExpertSpend {...props.expertSpend} />
-      <TokenBar usage={props.usage} onCompact={props.onCompact} busy={props.isStreaming} />
+      <TokenBar
+        usage={props.usage}
+        onCompact={props.onCompact}
+        busy={props.isStreaming}
+        autoCompact={props.autoCompact}
+        onSetAutoCompact={props.onSetAutoCompact}
+      />
       <FeedbackBanner
         replyTo={props.replyTo}
         onClearReply={() => props.onClearReply?.()}

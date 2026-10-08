@@ -1314,6 +1314,26 @@ export const configSchema = z
      */
     maxIterations: z.number().int().min(1).max(500),
     /**
+     * Summarise older history by itself as the context window fills. Off unless set to true.
+     *
+     * Asked for directly, after a report that the assistant was "missing a lot of context from the
+     * chat history": compaction is lossy, and deciding when to lose detail belongs to the person
+     * whose conversation it is. With it off, "Compact now" under the token bar does it on request,
+     * and a provider refusing an over-long conversation says so and points there.
+     */
+    autoCompact: z.boolean(),
+    /**
+     * Model requests that fail or go silent. `stallSeconds`: how long a request may send nothing at
+     * all before it is stopped and sent again (0 = never; default 300). `retries`: how many times a
+     * dropped connection, 5xx, 429/529 or stall is retried before the error is shown (default 3).
+     */
+    connection: z
+      .object({
+        stallSeconds: z.number().int().min(0).max(86_400),
+        retries: z.number().int().min(0).max(10),
+      })
+      .partial(),
+    /**
      * Appearance. Cosmetic only, and deliberately **not** on invariant 5's user-scope-only
      * list: the worst a hostile workspace achieves by setting it is an ugly panel, which is
      * not a threat, and a project wanting its own accent is a reasonable thing to commit.

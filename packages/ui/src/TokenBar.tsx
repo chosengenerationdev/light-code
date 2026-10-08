@@ -8,6 +8,9 @@ export interface TokenBarProps {
   onCompact?: (() => void) | undefined
   /** A reply is running; compacting waits for it. */
   busy?: boolean | undefined
+  /** Whether history is compacted by itself near the limit. Absent hides the switch. */
+  autoCompact?: boolean | undefined
+  onSetAutoCompact?: ((value: boolean) => void) | undefined
 }
 
 const SEGMENTS = [
@@ -70,7 +73,21 @@ export function TokenBar(props: TokenBarProps): ReactElement | null {
         )}
       </button>
       {props.onCompact !== undefined && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          {props.onSetAutoCompact !== undefined && (
+            <label
+              title="Off: older messages are only summarised when you press Compact now. On: they are summarised by themselves as the window fills."
+              style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.muted, cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={props.autoCompact === true}
+                onChange={(event) => props.onSetAutoCompact?.(event.target.checked)}
+                style={{ margin: 0 }}
+              />
+              Compact automatically
+            </label>
+          )}
           <button
             type="button"
             disabled={props.busy === true}

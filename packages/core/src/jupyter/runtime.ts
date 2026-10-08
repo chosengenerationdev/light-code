@@ -24,6 +24,7 @@ export function createHubRuntime(options: {
   }
   return {
     spec: options.spec,
+    client,
     mirror: new HubMirror(client, options.spec, options.root),
     kernel: new KernelSession(client, options.spec.kernel),
     label: `JupyterHub ${host} (${options.spec.user})`,
@@ -42,6 +43,8 @@ export function hubGuidance(runtime: HubRuntime): string {
     'Some libraries exist ONLY on the hub. Run scripts, tests and Python there with hub_run, never with execute_command;',
     'look up a hub library\'s API with hub_inspect rather than guessing. The local language server cannot see those',
     'libraries, so "import could not be resolved" is not reported here - it says nothing about the hub.',
+    'The git repository is on the hub too, not in this copy: run git there with hub_run shell (cwd = the folder),',
+    'and after anything that changes files (pull, checkout, merge) use hub_sync "pull" to bring them here.',
   ].join('\n')
 }
 

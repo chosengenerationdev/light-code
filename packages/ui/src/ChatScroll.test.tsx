@@ -162,10 +162,28 @@ describe('following a reply as it arrives', () => {
     const element = transcript()
     // 1000 - 100 - 400 = 500 from the bottom, far past the threshold.
     const { scrolls } = giveGeometry(element, 100)
+    // A person scrolling always fires this; where they ended up is read from it.
+    act(() => element.dispatchEvent(new Event('scroll')))
 
     act(() => root.render(<Chat {...props({ messages: messages(8) })} />))
 
     expect(scrolls).toEqual([])
+  })
+
+  /*
+   * Reported from Fire Code: a chat woken from sleep opened at its first message. Its whole
+   * transcript arrives in one render, so measuring *after* it said "far from the bottom" about a
+   * reader who had been at the bottom of an empty chat. Where they were before is what counts.
+   */
+  it('follows a transcript that arrives all at once into an empty chat', () => {
+    act(() => root.render(<Chat {...props({})} />))
+    const element = transcript()
+    // After the transcript lands it is 600px from the bottom - but nobody scrolled anywhere.
+    const { scrolls } = giveGeometry(element, 0)
+
+    act(() => root.render(<Chat {...props({ messages: messages(40) })} />))
+
+    expect(lastTop(scrolls)).toBe(1000)
   })
 
   /** A reply can add a line between frames, so "at the bottom" cannot mean exactly zero. */

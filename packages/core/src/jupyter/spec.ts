@@ -9,7 +9,7 @@ import { z } from 'zod'
  * is a secret-store slot (`tokenRef`), never a literal.
  */
 export const jupyterHubSpecSchema = z.object({
-  /** The hub's address, e.g. `https://hub.example.com` (a path prefix such as `/jupyter` is kept). */
+  /** The hub's address, e.g. `https://<your hub>` (a path prefix such as `/jupyter` is kept). */
   url: z.string().url(),
   /** The hub user whose server holds the folders. */
   user: z.string().min(1),

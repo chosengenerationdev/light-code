@@ -164,6 +164,14 @@ describe('finding the right topic', () => {
      */
     const cases: [string, string][] = [
       ['how do I run something every morning', 'schedules'],
+      ['it seems to be missing context from earlier in the chat', 'context'],
+      ['turn off auto compact', 'context'],
+      ['the reply is stuck thinking for a long time', 'context'],
+      ['does it retry when the connection drops', 'context'],
+      ['commit and push from jupyterhub', 'jupyterhub'],
+      ['run git commands on the hub', 'jupyterhub'],
+      ['look at files on jupyterhub outside the added folders', 'jupyterhub'],
+      ['auto compact for my self hosted qwen model', 'context'],
       // The project, bucket, package and search-scope work, asked the way people ask.
       ['how do I set the project name', 'project'],
       ['my python tool needs a package that is not installed', 'python-tools'],

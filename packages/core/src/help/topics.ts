@@ -857,6 +857,8 @@ desktops of the same person; importing the file is how a second machine is set u
       'jupyterhub', 'jupyter hub', 'jupyter', 'hub', 'notebook server', 'kernel', 'hub token', 'api token',
       'hub_run', 'hub_inspect', 'hub_sync', 'run on the hub', 'hub libraries', 'library only on the hub',
       'remote folder', 'remote code', 'not saved to the hub', 'changed on the hub', 'conflict', 'merge',
+      'git on the hub', 'commit on the hub', 'push from the hub', 'hub git', 'outside the folder',
+      'hub_browse', 'browse the hub', 'other codebase hub', 'files on the hub',
     ],
     body: `
 **Add codebase → On JupyterHub** (Fire Code): the hub's address, your hub user name, the folders on
@@ -886,6 +888,17 @@ library that exists only on the hub - signature, docs, members and (with source)
 the hub's installed packages; it asks first because importing runs the module's code.
 The local language server cannot see hub-only libraries, so "import could not be resolved" is not
 reported for these codebases. Commands run with execute_command run on this computer, not the hub.
+
+**Git runs on the hub too**: the repository, its remote and its credentials are there, not in the
+copy. Fire Code's sidebar counts and its Commit and push / Pull buttons work for a hub codebase while
+its chat is running - local edits are saved to the hub first, then git commits and pushes there
+(fast-forward-only pulls, fetched here afterwards); "Write with agent" describes the hub's diff. The
+agent runs any other git command with \`hub_run\` shell, approved like any command.
+**Outside the added folders**: \`hub_browse\` lists folders, finds files by name and reads text files
+anywhere your hub user can see - read only, nothing copied or changed. It is offered in the hub
+codebase for its own hub, and in **every other Fire Code codebase** for each hub codebase, named by
+its @name - so a local codebase can look at the hub's files without its own token. Only the added
+folders are copied here and searched with the fast tools; editing stays in the hub codebase.
 
 **Not done for you**: a file deleted here is not deleted on the hub (\`hub_sync\` "status" lists it);
 edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push".
@@ -1152,7 +1165,8 @@ called at all.
     keywords: [
       'context', 'token', 'window', 'truncate', 'compact', 'cost', 'cache', 'steps', 'iterations',
       'limit', 'continue', 'context length exceeded', 'too long', 'token limit', 'compact now',
-      'lost what i typed', 'draft', 'drag and drop', 'drop a file', 'dropped', 'attach a file',
+      'lost what i typed', 'draft', 'missing context', 'forgot', 'forgets', 'auto compact', 'compact automatically',
+      'retry', 'retries', 'stuck thinking', 'thinking forever', 'hangs', 'connection dropped', 'timeout', '502', '429', 'drag and drop', 'drop a file', 'dropped', 'attach a file',
       'file is too large', 'drag an email', 'add files to context', 'add file to chat', 'copilot',
       'select files', 'current file',
     ],
@@ -1169,12 +1183,26 @@ lost; it is just not all in the window at once.
 **Superseded reads are dropped** — if a file was read three times, only the latest matters. Repeated
 *commands* are not dropped, because running the tests twice gives two real answers.
 
-**Past a threshold the oldest turns are summarised**, keeping the last few verbatim, and never in
-the middle of a tool call. The stored transcript keeps everything; only what is sent to the model
-is compacted. **Compact now** under the token bar does it on request (highlighted near the limit).
-**When the model refuses the conversation as too long** - a gateway's real limit can be smaller than
-the size Light Code knows - it is compacted at once and the request sent again; if even that cannot
-fit, the message says to start a new chat (+) or pick a model with a larger window.
+**History is compacted only when you say so.** **Compact now** under the token bar summarises the
+older part (highlighted near the limit); the stored transcript keeps everything, only what is sent to
+the model is shortened, and never in the middle of a tool call. Your own messages are kept **word for
+word** inside the summary, every time, so what you asked for is never paraphrased away.
+Tick **Compact automatically** beside the button (config:autoCompact) to have it done near the limit,
+keeping roughly the last third of the window verbatim - and only for a model whose window Light Code
+knows: from the table, from the model's own server (a self-hosted vLLM or SGLang reports its real
+limit on /models, and every server states it when it refuses a request as too long - Light Code
+remembers that number), or from the window you set under the profile's capabilities, which wins.
+For a model none of these covers it waits for the model to refuse instead of guessing. **When the model refuses the conversation as too long**: with
+automatic compaction on it is compacted and sent again; with it off the message says to press Compact
+now. Scheduled runs always compact by themselves - nobody is there to press the button.
+
+**A reply that hangs or a connection that drops is retried by itself.** A request that sends nothing
+at all - no text, no thinking - for 5 minutes is stopped and sent again, and a dropped connection, a
+gateway error (5xx), rate limiting (429) or overload (529) is retried after a few seconds, waiting
+longer each time, up to 3 times; the chat shows "Retrying in Ns" while it waits. A rejected key, a bad
+request or a certificate problem is never retried. Both numbers are in Settings → Approvals →
+"Unresponsive or failing model" (config:connection.stallSeconds, 0 = never give up;
+config:connection.retries).
 
 **What you type is kept** if you switch away - Settings, History, another view - and come back.
 
