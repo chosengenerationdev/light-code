@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { z } from 'zod'
 import { isSecretPath, SECRET_FOLDERS } from '../fs/reach.js'
+import { jsonRecords } from '../agent/truncate.js'
 import { formatBytes } from './largeFile.js'
 import { resolveToolPath } from './paths.js'
 import { recordRead } from './readStamps.js'
@@ -10,7 +11,8 @@ import type { Tool, ToolExecutionContext, ToolResult } from './types.js'
  * File tools backed by `fire-fs`, Fire Code's parallel Rust helper (`HostServices.fastFs`).
  *
  * Absent wherever the host has no helper - the VS Code extension, a plain Node host - rather than
- * present and failing. Four only **read**. The fifth, `transfer_files` (copy and move), is the one
+ * present and failing. Five only **read** - `query_sqlite` among them, which never creates a database
+ * and never locks one (`apps/sun/native/src/sqlite_read.rs` says how). The fifth, `transfer_files` (copy and move), is the one
  * write here: it is in `ALWAYS_ASK_TOOLS`, never available to a schedule, and its approval is the
  * plan the helper computes without touching anything - every source, destination, file count, size,
  * and each file that would be replaced.
@@ -85,6 +87,24 @@ const toMs = (value: string | undefined): number | undefined => {
   return Number.isNaN(ms) ? undefined : ms
 }
 
+const grepSchema = z.object({
+  pattern: z.string().min(1).describe('A regular expression (or plain text with literal: true). Case-insensitive unless it has a capital letter.'),
+  roots: z.array(z.string().min(1)).min(1).max(20).describe('Folders or files to search: workspace-relative, absolute, another drive, or shares like \\\\server\\share\\folder - several at once.'),
+  literal: z.boolean().optional().describe('Search for the text exactly as written, not as a regular expression.'),
+  caseSensitive: z.boolean().optional(),
+  wholeWord: z.boolean().optional(),
+  names: z.array(z.string()).optional().describe('Only files whose names match these patterns (* and ?), e.g. ["*.log", "*.py"].'),
+  extensions: z.array(z.string()).optional().describe('e.g. ["py", "sql"].'),
+  modifiedAfter: dateSchema,
+  modifiedBefore: dateSchema,
+  context: z.number().int().min(0).max(10).optional().describe('Lines before and after each match.'),
+  filesOnly: z.boolean().optional().describe('List the matching files with a count each, not the lines.'),
+  includeHidden: z.boolean().optional(),
+  respectGitignore: z.boolean().optional().describe('Skip what .gitignore excludes (default true).'),
+  maxPerFile: z.number().int().min(1).max(1000).optional().describe('Matches shown per file (default 50).'),
+  limit: z.number().int().min(1).max(5000).optional().describe('Matches in all (default 300).'),
+})
+
 const findSchema = z.object({
   action: z.enum(['find', 'summary', 'duplicates']).default('find').describe(
     'find: list matching files (newest first). summary: totals, sizes by type, largest and newest files. duplicates: identical files, by content.',
@@ -153,6 +173,89 @@ const tableSchema = z.object({
   sort: z.array(z.object({ column: z.string(), desc: z.boolean().optional() })).optional().describe('By result column name, e.g. "sum(amount)".'),
   offset: z.number().int().min(0).optional().describe('Page through results.'),
   limit: z.number().int().min(1).max(500).optional().describe('Rows to return (default 50).'),
+})
+
+const sqliteSchema = z.object({
+  action: z.enum(['schema', 'query', 'scan', 'search']).describe(
+    'schema: tables, views, columns, indexes and row counts - start here. query: one read-only SQL statement (SELECT/WITH/EXPLAIN). ' +
+      'scan: one table filtered, grouped (count/sum/avg/min/max/distinct), sorted and paged, split across every CPU core - for big tables. ' +
+      'search: find text in any column of any table.',
+  ),
+  path: z.string().min(1).describe('The SQLite database file (.db, .sqlite, .sqlite3, ...). It must exist - nothing is ever created.'),
+  sql: z.string().optional().describe('query: the statement. Only reading statements run.'),
+  params: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().describe('query: values for ? placeholders.'),
+  table: z.string().optional().describe('scan: the table or view.'),
+  columns: z.array(z.string()).optional().describe('scan: columns to return, without grouping (default all).'),
+  filters: tableSchema.shape.filters,
+  groupBy: z.array(z.string()).optional().describe('scan: group by these columns.'),
+  aggregates: tableSchema.shape.aggregates,
+  sort: z.array(z.object({ column: z.string(), desc: z.boolean().optional() })).optional().describe('scan: by column, or by result column such as "sum(amount)" when grouping.'),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(5000).optional().describe('Rows to return (query default 200, scan 50, search 100).'),
+  text: z.string().optional().describe('search: the text to find, case-insensitive.'),
+  tables: z.array(z.string()).optional().describe('search: only these tables.'),
+  counts: z.boolean().optional().describe('schema: count rows in every table (default true).'),
+})
+
+const dataframeSchema = z.object({
+  action: z.enum(['describe', 'sql']).describe(
+    'describe: each source\'s columns, their types, empty counts and first rows - start here. sql: query the sources ' +
+      '(joins, GROUP BY, window functions, CASE...) and optionally pivot the result.',
+  ),
+  sources: z
+    .array(
+      z.object({
+        name: z.string().describe('The table name to use in SQL, e.g. trades (letters, digits, _).'),
+        path: z
+          .string()
+          .optional()
+          .describe('A .csv/.tsv/.txt or other delimited file, an Excel workbook (.xlsx, .xlsm, .xlsb, .xls, .ods), a .json/.jsonl file of records, or with `sqlite` the database file.'),
+        result: z
+          .string()
+          .optional()
+          .describe('The handle of a truncated tool result holding JSON records (from its "Output truncated" note): read in full from where it was saved, never retyped.'),
+        rows: z
+          .array(z.record(z.string(), z.unknown()))
+          .max(100_000)
+          .optional()
+          .describe('Records you already have - results from another tool, an API response - as a list of objects; every key becomes a column.'),
+        sqlite: z
+          .object({
+            table: z.string().optional().describe('A whole table.'),
+            sql: z.string().optional().describe('Or one read-only query, e.g. to filter before joining.'),
+          })
+          .optional()
+          .describe('Read from the SQLite database at `path` (never created, never locked).'),
+        clipboard: z.boolean().optional().describe('Read what the user copied (e.g. cells copied in Excel) instead of a file.'),
+        sheet: z.string().optional().describe('Workbook sheet (default: the first).'),
+        delimiter: z.string().optional().describe('Delimited text: the separator (detected when omitted; "tab" for tab).'),
+        header: z.boolean().optional().describe('First row holds the column names (default true).'),
+        skipRows: z.number().int().min(0).optional().describe('Rows to skip before the header, e.g. a title block.'),
+      }),
+    )
+    .min(1)
+    .max(20),
+  steps: z
+    .array(z.object({ name: z.string(), sql: z.string() }))
+    .max(20)
+    .optional()
+    .describe(
+      'sql: named intermediate results, run in order before `sql`; each becomes a table the later steps and `sql` can ' +
+        'join and alias like a source (e.g. totals per owner, then join people). Use these instead of WITH ... AS when ' +
+        'the result needs an alias - an aliased WITH step is not supported.',
+    ),
+  sql: z.string().optional().describe('sql: a SELECT over the source names. Quote odd column names with "double quotes".'),
+  pivot: z
+    .object({
+      index: z.array(z.string()).optional().describe('Columns that stay as rows.'),
+      columns: z.string().describe('The column whose values become new columns.'),
+      values: z.string().describe('The column aggregated into each cell.'),
+      agg: z.enum(['sum', 'count', 'avg', 'min', 'max', 'first', 'last']).optional().describe('Default sum.'),
+    })
+    .optional()
+    .describe('sql: turn the result (or the first source, without sql) wide.'),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(5000).optional().describe('Rows to return (default 50).'),
 })
 
 const transferSchema = z.object({
@@ -233,7 +336,150 @@ const archiveSchema = z.object({
 type ArchiveParams = z.infer<typeof archiveSchema>
 
 /** The tools, for a host that ships `fire-fs`. */
-export function createFastFsTools(exe: string): Tool[] {
+/** The helper's search answer as text: path:line: text, context indented, then what was not read. */
+export function formatGrepAnswer(answer: HelperAnswer, allowed: ReadonlySet<string>): string {
+  type Hit = { line: number; text: string; before?: string[]; after?: string[] }
+  const files = ((answer.files as { path: string; matches: number; hits: Hit[] }[]) ?? []).filter((f) => allowed.has(f.path))
+  const out: string[] = []
+  for (const file of files) {
+    if (file.hits.length === 0) {
+      out.push(`${file.path}: ${String(file.matches)} match${file.matches === 1 ? '' : 'es'}`)
+      continue
+    }
+    out.push(`${file.path} (${String(file.matches)} match${file.matches === 1 ? '' : 'es'})`)
+    for (const hit of file.hits) {
+      for (const [i, line] of (hit.before ?? []).entries()) out.push(`  ${String(hit.line - (hit.before ?? []).length + i)}-  ${line}`)
+      out.push(`  ${String(hit.line)}:  ${hit.text}`)
+      for (const [i, line] of (hit.after ?? []).entries()) out.push(`  ${String(hit.line + 1 + i)}-  ${line}`)
+    }
+    if (file.hits.length < file.matches) out.push(`  ... ${String(file.matches - file.hits.length)} more in this file`)
+  }
+  const unreadable = (answer.unreadablePaths as string[] | undefined) ?? []
+  const summary =
+    `${String(answer.matchedFiles)} file(s) matched of ${String(answer.searchedFiles)} searched, ${String(answer.elapsedMs)} ms.` +
+    (Number(answer.skippedBinary) > 0 ? ` ${String(answer.skippedBinary)} binary file(s) skipped.` : '') +
+    (Number(answer.skippedLarge) > 0 ? ` ${String(answer.skippedLarge)} file(s) over 50 MB skipped - use big_file for those.` : '') +
+    (answer.limitReached === true ? ' The match limit was reached; more exist - narrow the pattern or raise limit.' : '') +
+    (answer.timedOut === true ? ' Stopped at the time limit, so this is partial.' : '')
+  return [
+    files.length === 0 ? 'No matches.' : out.join('\n'),
+    '',
+    summary,
+    ...(Number(answer.unreadable) > 0
+      ? [`${String(answer.unreadable)} file(s) or folder(s) could not be read:`, ...unreadable.map((u) => `  ${u}`)]
+      : []),
+  ].join('\n')
+}
+
+/** The helper's SQLite answer as text for the model. Exported for tests. */
+export function formatSqliteAnswer(params: { action: string; text?: string | undefined }, answer: HelperAnswer): string {
+  const notes: string[] = []
+  if (answer.consistent === false) {
+    notes.push(
+      'WARNING: the database was being written while this was read and stayed busy through several retries - these ' +
+        'results may mix data from before and after a change. Run it again if it matters.',
+    )
+  }
+  notes.push(`Access: ${String(answer.access)}.`)
+  const cell = (v: unknown): string =>
+    v === null || v === undefined ? 'NULL' : typeof v === 'number' ? String(Math.round(v * 1e6) / 1e6) : String(v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+  const grid = (columns: string[], rows: unknown[][]): string =>
+    [`| ${columns.join(' | ')} |`, `|${columns.map(() => ' --- ').join('|')}|`, ...rows.map((row) => `| ${row.map(cell).join(' | ')} |`)].join('\n')
+  let body: string
+  if (params.action === 'schema') {
+    const tables =
+      (answer.tables as { name: string; kind: string; rows: number | null; columns: { name: string; type: string; primaryKey: boolean }[]; indexes: { name: string }[] }[]) ?? []
+    body =
+      tables.length === 0
+        ? 'The database has no tables.'
+        : tables
+            .map(
+              (t) =>
+                `${t.kind === 'view' ? 'VIEW' : 'TABLE'} ${t.name}${typeof t.rows === 'number' ? ` (${String(t.rows)} rows)` : ''}\n  ` +
+                t.columns.map((c) => `${c.name}${c.type.length > 0 ? ` ${c.type}` : ''}${c.primaryKey ? ' PK' : ''}`).join(', ') +
+                (t.indexes.length > 0 ? `\n  indexes: ${t.indexes.map((i) => i.name).join(', ')}` : ''),
+            )
+            .join('\n')
+    notes.push(`Journal mode: ${String(answer.journalMode)}.`)
+  } else if (params.action === 'search') {
+    const hits = (answer.hits as { table: string; rowid: unknown; column: string; value: string }[]) ?? []
+    body =
+      hits.length === 0
+        ? `"${params.text ?? ''}" was not found.`
+        : hits.map((h) => `${h.table}${h.rowid !== null ? ` rowid ${String(h.rowid)}` : ''} . ${h.column}: ${h.value}`).join('\n') +
+          `\n\n${String(answer.matchedRows)} matching rows in ${String(answer.tables)} tables searched; ${String(hits.length)} hits shown.`
+  } else {
+    const columns = (answer.columns as string[]) ?? []
+    const rows = (answer.rows as unknown[][]) ?? []
+    body = rows.length === 0 ? 'No rows.' : grid(columns, rows)
+    if (params.action === 'scan') {
+      const offset = (answer.offset as number) ?? 0
+      body +=
+        `\n\nRows ${String(offset + 1)}-${String(offset + rows.length)} of ${String(answer.resultRows)} result rows; ${String(answer.matchedRows)} table rows matched.` +
+        (answer.more === true ? ` More: offset ${String(offset + rows.length)}.` : '') +
+        ` Read in ${String(answer.ranges)} parallel ranges, ${String(answer.ms)} ms.`
+    } else if (answer.more === true) {
+      body += `\n\nMore rows exist; ${String(rows.length)} shown. Raise limit, add a WHERE, or use scan for paging.`
+    }
+  }
+  return `${body}\n\n${notes.join(' ')}`
+}
+
+/** The helper operation each tool needs, so a host offers only what the installed helper answers. */
+export const FAST_FS_TOOL_OPS: Readonly<Record<string, string>> = {
+  find_files: 'find',
+  grep_files: 'search',
+  read_many_files: 'readMany',
+  big_file: 'inspect',
+  query_table: 'table',
+  query_sqlite: 'sqlite',
+  dataframe: 'dataframe',
+  transfer_files: 'transfer',
+  archive_files: 'archive',
+}
+
+/** `ops` is what the helper reported (`fastFsCapabilities`); without it every tool is offered. */
+/** The helper's dataframe answer as text for the model. Exported for tests. */
+export function formatDataframeAnswer(action: string, answer: HelperAnswer): string {
+  const cell = (v: unknown): string =>
+    v === null || v === undefined ? '' : typeof v === 'number' ? String(Math.round(v * 1e6) / 1e6) : String(v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+  const grid = (columns: string[], rows: unknown[][]): string =>
+    [`| ${columns.join(' | ')} |`, `|${columns.map(() => ' --- ').join('|')}|`, ...rows.map((row) => `| ${row.map(cell).join(' | ')} |`)].join('\n')
+  type Col = { name: string; type: string; nulls: number }
+  const notes = (answer.notes as string[] | undefined) ?? []
+  const parts: string[] = []
+  if (action === 'describe') {
+    for (const t of (answer.tables as { name: string; rows: number; columns: Col[]; head: unknown[][] }[]) ?? []) {
+      parts.push(`${t.name}: ${String(t.rows)} rows`)
+      parts.push(t.columns.map((c) => `  ${c.name}: ${c.type}${c.nulls > 0 ? ` (${String(c.nulls)} empty)` : ''}`).join('\n'))
+      if (t.head.length > 0) parts.push(grid(t.columns.map((c) => c.name), t.head))
+      parts.push('')
+    }
+  } else {
+    const columns = (answer.columns as Col[]) ?? []
+    const rows = (answer.rows as unknown[][]) ?? []
+    const offset = (answer.offset as number) ?? 0
+    parts.push(rows.length === 0 ? 'No rows.' : grid(columns.map((c) => c.name), rows))
+    parts.push(
+      `\nRows ${String(offset + 1)}-${String(offset + rows.length)} of ${String(answer.resultRows)}` +
+        (answer.more === true ? `; more at offset ${String(offset + rows.length)}` : '') +
+        `. Types: ${columns.map((c) => `${c.name} ${c.type}`).join(', ')}. ${String(answer.ms)} ms.`,
+    )
+  }
+  if (notes.length > 0) parts.push(`\nNotes:\n${notes.map((n) => `- ${n}`).join('\n')}`)
+  return parts.join('\n')
+}
+
+export interface FastFsOptions {
+  /** The full text of a truncated tool result, by handle - `dataframe`'s `result` source. */
+  readResult?: (handle: string) => Promise<string | undefined>
+}
+
+export function createFastFsTools(exe: string, ops?: ReadonlySet<string>, options: FastFsOptions = {}): Tool[] {
+  return allFastFsTools(exe, options).filter((tool) => ops === undefined || ops.has(FAST_FS_TOOL_OPS[tool.name] ?? tool.name))
+}
+
+function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
   const findTool: Tool<z.infer<typeof findSchema>> = {
     name: 'find_files',
     group: 'read',
@@ -274,7 +520,9 @@ export function createFastFsTools(exe: string): Tool[] {
       if (answer.ok !== true) return { content: answer.error ?? 'The search failed.', isError: true }
       const scanned = `Looked at ${String(answer.scanned)} entries in ${String(answer.elapsedMs)} ms` +
         (answer.timedOut === true ? ' — stopped at the time limit, so this is partial; narrow the folders or filters' : '') +
-        (typeof answer.unreadable === 'number' && answer.unreadable > 0 ? `; ${String(answer.unreadable)} could not be read` : '') + '.'
+        (typeof answer.unreadable === 'number' && answer.unreadable > 0
+          ? `; ${String(answer.unreadable)} could not be read:\n${((answer.unreadablePaths as string[] | undefined) ?? []).map((u) => `  ${u}`).join('\n')}`
+          : '.')
       if (params.action === 'find') {
         const matches = (answer.matches as { path: string; size: number; modified: number; directory: boolean }[]) ?? []
         const keep = await allowedResults(context, matches.map((m) => m.path))
@@ -415,6 +663,105 @@ export function createFastFsTools(exe: string): Tool[] {
     },
   }
 
+  const grepTool: Tool<z.infer<typeof grepSchema>> = {
+    name: 'grep_files',
+    group: 'read',
+    description:
+      'Search the contents of files for text or a regular expression across several folders, drives and network ' +
+      'shares at once, on every CPU core - filtered by file name, extension and date first. Reads UTF-16 files too, ' +
+      'and names every file or folder it could not read and why. Use for searching outside the workspace or across ' +
+      'many roots; search_files is fine inside the workspace.',
+    parametersSchema: grepSchema,
+    async execute(params, context): Promise<ToolResult> {
+      const roots: string[] = []
+      for (const root of params.roots) {
+        const r = await readable(context, root)
+        if (!r.ok) return { content: r.message, isError: true }
+        roots.push(r.path)
+      }
+      const answer = await runHelper(
+        exe,
+        {
+          op: 'search',
+          roots,
+          skip: SECRET_FOLDERS,
+          pattern: params.pattern,
+          literal: params.literal,
+          caseSensitive: params.caseSensitive,
+          wholeWord: params.wholeWord,
+          names: params.names,
+          extensions: params.extensions,
+          modifiedAfter: toMs(params.modifiedAfter),
+          modifiedBefore: toMs(params.modifiedBefore),
+          context: params.context,
+          filesOnly: params.filesOnly,
+          includeHidden: params.includeHidden,
+          gitignore: params.respectGitignore ?? true,
+          maxPerFile: params.maxPerFile,
+          limit: params.limit,
+        },
+        context.signal,
+      )
+      if (answer.ok !== true) return { content: answer.error ?? 'The search failed.', isError: true }
+      return { content: formatGrepAnswer(answer, await allowedResults(context, ((answer.files as { path: string }[]) ?? []).map((f) => f.path))) }
+    },
+  }
+
+  const sqliteTool: Tool<z.infer<typeof sqliteSchema>> = {
+    name: 'query_sqlite',
+    group: 'read',
+    description:
+      'Read a SQLite database without creating it and without blocking the program that uses it: schema (tables, ' +
+      'columns, indexes, row counts), query (one read-only SQL statement), scan (filter/group/sort a big table on ' +
+      'every CPU core), search (text anywhere in the database). Use instead of python or a sqlite3 shell. A missing ' +
+      'file is reported, never created; writes are refused.',
+    parametersSchema: sqliteSchema,
+    async execute(params, context): Promise<ToolResult> {
+      const r = await readable(context, params.path)
+      if (!r.ok) return { content: r.message, isError: true, path: params.path }
+      const answer = await runHelper(exe, { op: 'sqlite', ...params, path: r.path }, context.signal)
+      if (answer.ok !== true) return { content: answer.error ?? 'The SQLite read failed.', isError: true, path: params.path }
+      return { content: formatSqliteAnswer(params, answer), path: params.path }
+    },
+  }
+
+  const dataframeTool: Tool<z.infer<typeof dataframeSchema>> = {
+    name: 'dataframe',
+    group: 'read',
+    description:
+      'Data analysis with Polars (Rust, every CPU core) over CSV/delimited files, Excel sheets, the clipboard, JSON ' +
+      'files, SQLite tables or queries, and records you already have (`rows`: e.g. results from another tool) - name each ' +
+      'source and query them together with SQL: joins across sources, GROUP BY, window functions - and pivot. ' +
+      'Reading is forgiving: every value is kept, and a column becomes numbers or dates only when all of it converts ' +
+      '(the answer says which columns stayed text and why). Use instead of writing pandas or opening Excel.',
+    parametersSchema: dataframeSchema,
+    async execute(params, context): Promise<ToolResult> {
+      const sources = []
+      for (const source of params.sources) {
+        if (source.path !== undefined) {
+          const r = await readable(context, source.path)
+          if (!r.ok) return { content: r.message, isError: true, path: source.path }
+          sources.push({ ...source, path: r.path })
+        } else if (source.result !== undefined) {
+          // Read from where the loop saved it, so a large payload never passes back through the model.
+          const saved = options.readResult === undefined ? undefined : await options.readResult(source.result)
+          if (saved === undefined) return { content: `No saved tool result has the handle "${source.result}".`, isError: true }
+          const records = jsonRecords(saved)
+          if (records === undefined) return { content: `The tool result "${source.result}" is not a list of JSON records, so it cannot be a table.`, isError: true }
+          // `result` is dropped on the way (undefined is not serialised); the helper only sees rows.
+          sources.push({ ...source, result: undefined, rows: records })
+        } else if (source.clipboard === true || source.rows !== undefined) {
+          sources.push(source)
+        } else {
+          return { content: `Source "${source.name}" needs a path, rows, a saved tool result, or clipboard: true.`, isError: true }
+        }
+      }
+      const answer = await runHelper(exe, { op: 'dataframe', ...params, sources }, context.signal)
+      if (answer.ok !== true) return { content: answer.error ?? 'The dataframe operation failed.', isError: true }
+      return { content: formatDataframeAnswer(params.action, answer) }
+    },
+  }
+
   const transferTool: Tool<TransferParams> = {
     name: 'transfer_files',
     group: 'edit',
@@ -541,7 +888,7 @@ export function createFastFsTools(exe: string): Tool[] {
     },
   }
 
-  return [findTool, readManyTool, bigFileTool, tableTool, transferTool, archiveTool] as unknown as Tool[]
+  return [findTool, grepTool, readManyTool, bigFileTool, tableTool, sqliteTool, dataframeTool, transferTool, archiveTool] as unknown as Tool[]
 }
 
 /**
@@ -553,17 +900,24 @@ export function createFastFsTools(exe: string): Tool[] {
  * recommends. A tool's description is read when choosing between tools that look relevant; this says
  * up front which job each one is for, and that it wins over the shell for that job.
  */
-export function fastFsGuidance(): string {
+export function fastFsGuidance(ops?: ReadonlySet<string>): string {
+  const offered = (name: string): boolean => ops === undefined || ops.has(FAST_FS_TOOL_OPS[name] ?? name)
+  const entries: [string, string][] = [
+    ['find_files', '- find_files: find files by name or pattern, list a large folder tree, sizes and counts (summary), duplicates.'],
+    ['grep_files', '- grep_files: search file contents across several folders, drives or shares at once (regex or text,\n  with context); it also names anything it could not read. search_files is fine inside the workspace.'],
+    ['read_many_files', '- read_many_files: read several files in one call instead of read_file after read_file.'],
+    ['big_file', '- big_file: any file over a few MB, logs especially - inspect (lines, size), read a line range, tail, or search it\n  with a regex. Never read_file or type a big log.'],
+    ['query_table', '- query_table: CSV or Excel - filter, group, count and sum rows without writing Python or opening Excel.'],
+    ['query_sqlite', '- query_sqlite: a SQLite database - schema, read-only SQL, parallel filter/group of big tables, text search.\n  It never creates the file and never locks it; use it instead of python sqlite3 or the sqlite3 shell.'],
+    ['dataframe', '- dataframe: data analysis with SQL over CSV, Excel, the clipboard, JSON, SQLite and records you already\n  have (rows) - join data from different sources, group, pivot. Forgiving with messy data. Use instead of pandas.'],
+    ['transfer_files', '- transfer_files: copy or move files and folders (always asks first).'],
+    ['archive_files', '- archive_files: create, extract or list a .zip.'],
+  ]
   return [
     '## Fast file tools (prefer these - they run on every core)',
     'This workspace has Rust-backed file tools. Use them instead of shell commands (dir /s, type, findstr, grep, cat,',
     'copy, move, tar) and instead of reading files one at a time, whenever the job matches:',
-    '- find_files: find files by name or pattern, list a large folder tree, sizes and counts (summary), duplicates.',
-    '- read_many_files: read several files in one call instead of read_file after read_file.',
-    '- big_file: any file over a few MB, logs especially - inspect (lines, size), read a line range, tail, or search it',
-    '  with a regex. Never read_file or type a big log.',
-    '- query_table: CSV or Excel - filter, group, count and sum rows without writing Python or opening Excel.',
-    '- transfer_files: copy or move files and folders (always asks first). archive_files: create, extract or list a .zip.',
+    ...entries.filter(([name]) => offered(name)).map(([, line]) => line),
     'search_files is still right for searching code across the workspace; read_file before editing a file, as always.',
   ].join('\n')
 }

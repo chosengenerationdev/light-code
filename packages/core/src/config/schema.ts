@@ -75,6 +75,13 @@ export const pythonConfigSchema = z
      */
     interpreterPath: z.string(),
     /**
+     * Folders holding the user's own Python libraries and the DLLs behind them (the quants' pricing
+     * modules), used by `python_library` when a request names none. Added to `sys.path` and to the
+     * DLL search path of the library workers. User-scope only with the rest of `python`: a folder
+     * here is code that gets loaded and run.
+     */
+    libraryFolders: z.array(z.string()),
+    /**
      * A running Jupyter kernel to execute tools **inside**, named by its connection file.
      *
      * Set so a notebook can drive Light Code and have its tools see the session's own state —
@@ -1003,6 +1010,30 @@ const atlassianConnectionShape = {
   rejectUnauthorized: z.boolean(),
 }
 
+/**
+ * Where usage events go. `folder` is a path every member can reach; `s3` names an S3 connection
+ * (`s3.connections[].id`); `vector` names a configured vector store (`vectorStores` key).
+ */
+export const usageStoreSchema = z.object({
+  kind: z.enum(['folder', 's3', 'vector']),
+  path: z.string().optional(),
+  connectionId: z.string().optional(),
+  prefix: z.string().optional(),
+  storeId: z.string().optional(),
+  collection: z.string().optional(),
+})
+export type UsageStoreConfig = z.infer<typeof usageStoreSchema>
+
+export const usageConfigSchema = z.object({
+  /** False stops collection on this machine. Absent means automatic: on whenever a store is available. */
+  enabled: z.boolean().optional(),
+  /** Absent means automatic - see `usage/auto.ts` for the order stores are tried in. */
+  store: usageStoreSchema.optional(),
+  /** The tool that answers "who is this user" (name, team, ...), when the name alone does not find it. */
+  userInfoTool: z.string().optional(),
+})
+export type UsageConfig = z.infer<typeof usageConfigSchema>
+
 export const configSchema = z
   .object({
     profiles: z.array(providerProfileSchema),
@@ -1020,6 +1051,20 @@ export const configSchema = z
     project: projectConfigSchema,
     /** User-scope only: a workspace able to add a trusted root could enable interception. */
     tls: globalTlsSchema,
+    /**
+     * The proxy `http_request` goes through (Settings → Network). URLs with any username kept and the
+     * password removed: the password lives in secret storage (`proxy:http:password`,
+     * `proxy:https:password`) and is put back only when a request is made (§15). `http` is for http://
+     * targets and `https` for https:// ones - the *target's* scheme, as HTTP_PROXY/HTTPS_PROXY mean it.
+     * User-scope only (invariant 5): a repository able to set it could read the traffic.
+     */
+    proxy: z.object({ http: z.string(), https: z.string(), noProxy: z.string() }).partial(),
+    /**
+     * The usage dashboard's collection (Settings → Usage). Automatic: on whenever a shared store is
+     * available (`usage/auto.ts`), never local-only, off with `enabled: false`. User-scope only
+     * (invariant 5): a repository able to set it could send everybody's usage somewhere of its choosing.
+     */
+    usage: usageConfigSchema,
     expert: expertConfigSchema,
     agents: agentsConfigSchema,
     /**
@@ -1058,6 +1103,8 @@ export const configSchema = z
       .object({
         excel: z.boolean(),
         outlook: z.boolean(),
+        /** `teams_open_chat`: a chat opened with a message typed in, for the user to send. */
+        teams: z.boolean(),
       })
       .partial(),
     /**

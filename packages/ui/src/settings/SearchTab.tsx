@@ -677,7 +677,7 @@ Usually blank — the CA in Settings → Network already covers this cluster. An
                   type="button"
                   style={secondaryButtonStyle()}
                   disabled={props.sync?.running === true}
-                  title={`Copy this workspace's index from ${connection.label} into the active store`}
+                  title={props.sync?.running === true ? 'A copy is already running.' : `Copy this workspace's index from ${connection.label} into the active store`}
                   onClick={() => props.onSyncFrom(connection.id)}
                 >
                   From {connection.label}

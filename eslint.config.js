@@ -95,6 +95,8 @@ export default tseslint.config(
        * reaches the server, which reading the SDK could only suggest. Ingress only.
        */
       'packages/core/src/mcp/httpHeaders.test.ts',
+      // A local server for the negotiate transport to talk to; the tool itself never imports node:http.
+      'packages/core/src/tools/http.test.ts',
     ],
     rules: { 'no-restricted-imports': 'off' },
   },
@@ -126,6 +128,7 @@ export default tseslint.config(
       'apps/host/src/streamResume.test.ts',
       'apps/host/src/resyncOnAttach.test.ts',
       'apps/host/src/choosesTheme.test.ts',
+      'apps/host/src/localTabs.test.ts',
     ],
     rules: { 'no-restricted-globals': 'off' },
   },

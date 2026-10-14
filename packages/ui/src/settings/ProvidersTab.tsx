@@ -14,6 +14,8 @@ export interface ProvidersTabProps {
   pickedPath?: { purpose: string; path: string } | undefined
   profiles: ProfileSummary[]
   activeProfileId: string | undefined
+  /** GitHub Copilot can be reached through VS Code here, so its preset is offered. */
+  hostModels?: boolean
   onSave: (input: ProfileInput) => void
   onDuplicate: (id: string) => void
   onDelete: (id: string) => void
@@ -121,6 +123,7 @@ export function ProvidersTab(props: ProvidersTabProps): ReactElement {
         onCancel={() => setEditing({ mode: 'closed' })}
         onRequestModels={props.onRequestModels}
         onTestConnection={props.onTestConnection}
+        hostModels={props.hostModels === true}
         models={props.models}
         {...(props.modelsWarning !== undefined ? { modelsWarning: props.modelsWarning } : {})}
         modelsLoading={props.modelsLoading}

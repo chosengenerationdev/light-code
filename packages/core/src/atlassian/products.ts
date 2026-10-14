@@ -13,6 +13,12 @@ export interface AtlassianDefaultField {
   label: string
   placeholder: string
   hint: string
+  /**
+   * Part of signing in, so the panel shows it beside the credential and before it: a username placed
+   * after the password and marked optional read as "there is no username" (reported for AutoSys).
+   * `required` drops the "(optional)" mark.
+   */
+  signIn?: 'required' | 'optional'
 }
 
 export interface AtlassianProductInfo {
@@ -103,6 +109,7 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
       {
         key: 'username',
         label: 'Jenkins user id',
+        signIn: 'optional',
         placeholder: 'e.g. jsmith',
         hint:
           'Sent with the token. Single sign-on users have one too: sign in to Jenkins and click your name — it is the last part of the address, /user/<id>. Create the token at <your Jenkins>/me/security → API Token → Add new Token, and copy it straight away: Jenkins shows it only once. Leave this empty only if your Jenkins takes an SSO access token as a Bearer token instead.',
@@ -129,6 +136,7 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
       {
         key: 'username',
         label: 'Username',
+        signIn: 'required',
         placeholder: 'e.g. jsmith',
         hint: 'The AutoSys web services user. Sent with the password as HTTP Basic.',
       },

@@ -14,6 +14,7 @@ import {
   textFieldStyle,
 } from '../theme.js'
 import { Panel } from './Panel.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export type DatasetStatus = DatasetConfig & {
   records: number
@@ -338,7 +339,7 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
           <button
             type="button"
             style={primaryButtonStyle(!valid)}
-            disabled={!valid}
+            {...disabledWhen([!valid, 'Give the dataset a name and a tool name first.'])}
             onClick={() => props.onSave({ ...editing, name: editing.name.trim(), toolName: editing.toolName.trim() })}
           >
             Save
@@ -467,7 +468,7 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
                     <button
                       type="button"
                       style={secondaryButtonStyle()}
-                      disabled={dataset.busy === true}
+                      {...disabledWhen([dataset.busy === true, 'Wait - this dataset is syncing.'])}
                       onClick={() => props.onSync(dataset.id)}
                     >
                       {dataset.busy === true ? 'Syncing…' : 'Sync now'}
@@ -475,8 +476,7 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
                     <button
                       type="button"
                       style={secondaryButtonStyle()}
-                      disabled={dataset.busy === true}
-                      title="Throws everything away and runs the collector again from scratch"
+                      {...disabledWhen([dataset.busy === true, 'Wait - this dataset is syncing.'], { enabledTitle: 'Throws everything away and runs the collector again from scratch' })}
                       onClick={() => props.onClear(dataset.id, true)}
                     >
                       Rebuild
@@ -493,7 +493,7 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
                        * Clearing also resets the sync watermark and puts the failure away, and
                        * both of those are worth doing whether or not any records exist.
                        */
-                      disabled={dataset.busy === true}
+                      {...disabledWhen([dataset.busy === true, 'Wait - this dataset is syncing.'])}
                       onClick={() => setConfirming({ id: dataset.id, action: 'clear' })}
                     >
                       Clear
@@ -504,7 +504,7 @@ export function CustomDataTab(props: CustomDataTabProps): ReactElement {
                     <button
                       type="button"
                       style={secondaryButtonStyle()}
-                      disabled={dataset.busy === true}
+                      {...disabledWhen([dataset.busy === true, 'Wait - this dataset is syncing.'])}
                       onClick={() => setConfirming({ id: dataset.id, action: 'delete' })}
                     >
                       Delete

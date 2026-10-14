@@ -68,9 +68,9 @@ Light Code is a minimal agentic coding assistant: a chat panel, a small set of t
 approval gate in front of everything that acts. It ships with **no default endpoints** — a fresh
 install contacts nothing until a provider is configured.
 
-**Settings** is the gear icon in the chat header. It has these tabs: Providers, Approvals, MCP,
-Search, Agents, Schedules, Python, Tools, Outlook, Custom data, Skills, Network, Review,
-Variables, Appearance.
+**Settings** is the gear icon in the chat header. It has these tabs: Providers, Project, Approvals,
+MCP, Search, Agents, Schedules, Python, Tools, DevOps, Outlook, Custom data, Skills, Usage, Network and
+Appearance - plus Review and Variables on a shared server (\`light-code --server\`) only.
 
 **Everything the panel writes goes into one JSON file**, and that file can be hand-edited — the UI
 and the loader share one schema, so a bad hand-edit and a bad save fail identically.
@@ -197,7 +197,8 @@ Folders you always want readable go in config:filesystem.readRoots.
     ],
     body: `
 **Settings → Providers.** Several named profiles, switchable from the composer. Three wire
-formats: OpenAI-compatible, Anthropic Messages, and Gemini. Presets prefill a base URL and wire
+formats: OpenAI-compatible, Anthropic Messages, and Gemini - plus **GitHub Copilot from VS Code**
+(see the GitHub Copilot topic). Presets prefill a base URL and wire
 format; every field stays editable and no endpoint is hardcoded.
 
 The profile list is config:profiles and the active one config:activeProfileId. Both are user-scope
@@ -233,6 +234,40 @@ diagnosis.
 
 **Behind a proxy?** Settings → Network reports what the environment says. A corporate root CA that
 your proxy presents goes in the same place; adding one does not cost you the public roots.
+`,
+  },
+  {
+    id: 'github-copilot',
+    title: 'GitHub Copilot as the model',
+    keywords: [
+      'copilot', 'github copilot', 'github', 'use copilot', 'copilot model', 'reuse copilot', 'vs code models',
+      'language model api', 'copilot in fire code', 'copilot subscription', 'premium requests',
+    ],
+    body: `
+If GitHub Copilot is signed in to in VS Code, Light Code can use it as its model. **Settings → Providers
+→ Add → Preset: GitHub Copilot (from VS Code)**, then pick a model from the list - the models your
+Copilot plan offers (GPT, Claude, Gemini and others, as your organisation's Copilot policy allows).
+There is no key, URL or certificate to enter.
+
+**How it works:** through VS Code's own Language Model API. VS Code makes every request with Copilot's
+sign-in; Light Code never sees a GitHub token. The **first request asks in VS Code** whether Light Code
+may use Copilot - choose Allow. If it was refused, "Manage Language Model Access" in VS Code's Accounts
+menu changes it. Requests count against your Copilot plan (including premium requests), and Copilot's
+own limits apply: each model's input limit is read from VS Code, and context is compacted to it.
+
+**In Fire Code, the Light Code host and the JetBrains plugin** (on the same machine): the same preset,
+but those apps are not VS Code, so their requests are relayed through a **VS Code window that is open
+with the Light Code extension** (0.161.0 or later). Close every VS Code window and Copilot profiles there
+say so. The relay is a local pipe that only your Windows account can use: each window writes a random
+token into your own profile folder, and every request must carry it. Not on a shared server
+(\`--server\`).
+
+**Needs** a VS Code recent enough for tool calling with language models (roughly 1.95 or later); on an
+older VS Code the preset is not offered. Pictures are passed only where VS Code supports it.
+
+**Not done, deliberately:** reading Copilot's token and calling GitHub directly. That is an unofficial
+interface, against GitHub's terms for other clients, and the kind of thing a managed machine raises an
+alert about.
 `,
   },
   {
@@ -431,7 +466,7 @@ configured per workspace when credentials may not.
     title: 'Indexing and semantic search',
     keywords: [
       'search', 'index', 'embedding', 'vector', 'opensearch', 'qdrant', 'chroma', 'rag',
-      'codebase', 'team', 'dispatcher',
+      'codebase', 'team', 'dispatcher', 'tool definitions', 'context window', 'prompt size', 'not listed', 'offload',
     ],
     body: `
 **Settings → Search.** Opt-in and **off by default**, and it is the largest egress in the product:
@@ -469,6 +504,21 @@ them with \`search_docs\` — so the prompt does not grow with the size of your 
 is a prompt-size control and **not** a security control: a hidden tool is still callable. Use
 modes and the approval gate to withhold a capability.
 
+**With a search index, the built-in integrations move there too.** When the dispatcher is on and a
+documentation index is configured (a vector store and an embedding model), the Excel, Outlook,
+Confluence, Jira, Bitbucket, Jenkins, AutoSys, JupyterHub, S3, API, data and Python tools leave the
+prompt: their full instructions live in the index, and the prompt keeps a short list naming every one
+of them, telling the assistant to call \`search_docs\` before using one or planning a job in that area.
+With everything switched on that is roughly 38,000 tokens of tool definitions down to about 11,000 on
+every request. **Without an index nothing changes** - every tool stays listed in full, because finding
+a tool by name alone is not reliable enough to hide it. The file, edit, command and Rust file tools are
+always listed, because nearly every conversation uses them.
+
+**Switching over is automatic.** The message after you configure an index already uses the lighter
+prompt, and the tool documentation is indexed in the background within seconds - so that first message
+finds tools by name, and later ones by meaning. Switching on another integration later (Jira, Excel, ...)
+is picked up the same way. Nothing to press; the Search tab's Index button forces a full rebuild.
+
 **If a switch here breaks nothing when it fails, that is deliberate.** With the backend down,
 \`search_docs\` falls back to matching names, the search tools are simply not offered, and chat,
 editing, commands and MCP never touch it.
@@ -476,7 +526,7 @@ editing, commands and MCP never touch it.
   },
   {
     id: 'office',
-    title: 'Excel and Outlook on Windows',
+    title: 'Excel, Outlook and Teams on Windows',
     keywords: [
       'excel', 'outlook', 'spreadsheet', 'workbook', 'email', 'mail', 'macro', 'vba', 'com',
       'draft', 'attachment', 'compose',
@@ -484,11 +534,25 @@ editing, commands and MCP never touch it.
       'outlook busy', 'outlook is busy', 'outlook slow', 'old emails', 'old mail', 'archive',
       'search outlook', 'outlook not responding', 'recalculate', 'shift f9', 'f9', 'calculate',
       'manual calculation', 'stale values',
+      'teams', 'microsoft teams', 'message a colleague', 'tell a team member', 'chat',
     ],
     body: `
 **Settings → Tools** for the switches, **Settings → Outlook** for the mail index. Both off by
 default, both **user-scope only** (config:office), and **Windows only** — they attach over COM to
 an application on your desktop.
+
+**Teams** (its own switch in the same panel, config:office.teams): \`teams_open_chat\` opens a Teams
+chat with colleagues, named by email, with a message already typed in - say, a pull request and its
+link. It uses Teams' own \`msteams:\` link, handled by the Teams desktop app under your account (no
+Graph API; new Teams has no automation interface). Long messages do not fit in a link; a title and a
+link do.
+
+**Sending**: ask it to message, tell or inform someone and it sends - it asks to open the chat *and
+press Enter*, and the approval says so in capitals. Ask for a draft instead and it only types the message. Enter is pressed only once a Teams window has been in front,
+unchanged, for 2.5 seconds, and is still in front at that instant - a keypress goes to whatever window
+has focus, and Enter in a terminal runs what is typed there. If Teams does not come to the front within
+20 seconds, or you click elsewhere, nothing is pressed and it says the message was not sent. A keypress
+cannot confirm delivery, so glance at the chat if it matters.
 
 **Recalculating** (\`excel_calculate\`): a range on its own, a sheet (as Shift+F9), a workbook, or
 every open workbook (F9; full for Ctrl+Alt+F9). It reports whether calculation is set to manual -
@@ -700,7 +764,8 @@ Whether any of it succeeds is still decided by your AutoSys permissions.
     title: 'Bitbucket pull requests',
     keywords: [
       'bitbucket', 'pull request', 'pr', 'review', 'diff', 'branch', 'repository', 'repo',
-      'open a pull request', 'comment on pr', 'file on branch', 'stash',
+      'open a pull request', 'comment on pr', 'file on branch', 'stash', 'merge', 'merge pull request',
+      'tag', 'release tag', 'create tag',
     ],
     body: `
 **Settings → DevOps → Bitbucket**: the site address, a personal access token, and optionally a
@@ -709,13 +774,48 @@ on; **user-scope only** (config:bitbucket).
 
 Bitbucket **Data Center / Server** only; Cloud is not supported.
 
-**Four tools.** \`bitbucket_pull_requests\` lists them, \`bitbucket_read_pull_request\` reads one with
+**Five tools.** \`bitbucket_pull_requests\` lists them, \`bitbucket_read_pull_request\` reads one with
 reviewers, every comment (with its file and line) and the diff, \`bitbucket_read_file\` reads a file
-at any branch, tag or commit, and \`bitbucket_write_pull_request\` opens a pull request or comments on
-one. Every write asks first, showing the literal text.
+at any branch, tag or commit, \`bitbucket_write_pull_request\` opens a pull request or comments on
+one, and \`bitbucket_merge_pull_request\` merges one and can then tag the merge (e.g. \`v1.4.0\` on
+master). Every write asks first, showing the literal text.
 
-**It cannot approve, merge or decline — deliberately.** Those are a reviewer's decisions about
-somebody's work, made under your name; commenting is what the assistant contributes to a review.
+**Merging only after a person has approved.** The merge is refused unless a reviewer has approved,
+nobody has marked it "needs work", there are no conflicts, and Bitbucket's own merge checks pass; the
+refusal says which. Checked again at the moment of merging. If the merge succeeds and the tag does not
+(say the tag already exists), it says so - the merge is not undone. Neither runs in a schedule.
+
+**It cannot approve or decline — deliberately.** Those are a reviewer's decisions about somebody's
+work, made under your name; commenting is what the assistant contributes to a review. To tell the
+reviewer about a new pull request, it can open a Teams chat for you to send (see the Office topic).
+
+**Behind single sign-on (SAML).** Everything goes through Bitbucket's REST API, which accepts the
+personal access token; files are read with its \`browse\` resource a page of lines at a time. Earlier
+versions read files from the web \`/raw/\` address, which a SAML site sends to the login page
+whatever the token - so pull requests worked and files did not. If a call still comes back as "a web
+page instead of data", the site address is going through the login portal: use the server's own
+address. Granting the token more permission does not help with this; it is not a permission problem.
+`,
+  },
+  {
+    id: 'commit-message',
+    title: 'Writing a commit message',
+    keywords: [
+      'commit message', 'write commit message', 'source control', 'git commit', 'commit', 'scm',
+      'describe my changes', 'light code button',
+    ],
+    body: `
+**VS Code**: the Light Code button (its brackets-and-diamond mark) on the **Source Control** title bar (or the command "Write commit
+message with Light Code") has the active model describe your changes and puts the message in the
+commit box. When anything is staged, it describes what is staged - that is what VS Code will commit;
+otherwise every change. You read and edit it, and commit yourself: nothing is committed for you. A
+message you had already typed is only replaced after you agree. It uses VS Code's built-in Git
+extension, so that has to be enabled.
+
+**Fire Code**: **Write with agent** in the Commit and push dialog does the same from the codebase's own
+model, describing everything changed (that dialog commits everything).
+
+The diff is sent to the model with known secrets redacted, cut at 24,000 characters.
 `,
   },
   {
@@ -772,6 +872,267 @@ config:embedder or config:retrieval are left alone). "Move indexes to the projec
 existing indexes to the new names inside the cluster — nothing is embedded again — and labels each
 document with the project. The old indexes are left in place to remove when convenient. Indexing
 the codebase also copies the old index across by itself if it finds one.
+`,
+  },
+  {
+    id: 'http-api',
+    title: 'Calling REST APIs, and their proxy',
+    keywords: [
+      'http', 'rest', 'rest api', 'api', 'call an api', 'try the api', 'get request', 'post request', 'endpoint',
+      'negotiate', 'kerberos', 'ntlm', 'windows authentication', 'apigee', '202', 'accepted', 'poll',
+      'client certificate', 'ca certificate', 'curl', 'proxy', 'http proxy', 'https proxy', 'proxy password',
+      'proxy username', 'no proxy',
+    ],
+    body: `
+\`http_request\` calls a REST API with GET or POST - give it the API's documentation and it can try the API.
+
+**Only hosts you named.** The host must appear in something *you* wrote in this chat - typed, or in a
+document you attached or @-mentioned. A host it read in a tool result does not count, so a web page or
+file cannot send it somewhere else. Named the domain but not the exact host? It asks you to confirm.
+**Every request asks first**, showing the method, URL, headers and body.
+
+**Credentials**: never paste a token into the chat. Save it as a secret and write \`\${secret:NAME}\` in a
+header (e.g. \`Authorization: Bearer \${secret:orders-token}\`); the approval shows the name, not the value.
+**Negotiate** (Kerberos/NTLM as your Windows login): ask for "negotiate" - it goes through Windows' own
+HTTP stack, trusts the Windows certificate store, and takes a client certificate only as a .pfx.
+**Apigee or another gateway**: name a provider profile ("use the Gateway profile's auth") and its token,
+refreshing and certificates are used. **Certificates**: Settings → Network's global CA and machine
+certificate always apply; a request may add a CA file, a client cert + key, or a .pfx.
+
+**202 Accepted** is polled - the Location it names, or the same request - waiting Retry-After or a growing
+interval, for up to two minutes by default (ask for longer). Headers work on every request.
+
+**Proxy** (Settings → Network → Proxy for API calls): an HTTP proxy (for http:// APIs) and an HTTPS proxy
+(for https:// APIs) - usually the same one - and hosts to reach directly. Write the login into the address,
+\`http://user:password@proxy.corp:8080\`: the password is moved into secret storage and the box keeps only
+the user name; leave the password out when saving again to keep it. Used by \`http_request\` only, on both
+transports - with negotiate, when no proxy is set, Windows' own proxy settings apply. A proxy never applies
+to localhost or 127.0.0.1. A refused address is reported on the panel.
+`,
+  },
+  {
+    id: 'python-library',
+    title: 'Pricing and other Python libraries, in parallel',
+    keywords: [
+      'pricing library', 'pricing', 'quant', 'quants', 'dll', 'dlls', 'pyd', 'library', 'python library', 'gil',
+      'parallel', 'process pool', 'many calls', 'batch', 'import my library', 'library folders',
+    ],
+    body: `
+\`python_library\` uses a Python library installed or kept in a folder - the quants' pricing modules whose DLLs
+sit beside them: **list** its functions, **describe** one (signature and documentation), and **call** one -
+once, or thousands of times at once.
+
+**Parallel without the GIL.** Calls run in a pool of Python *processes* (Fire Code's Rust helper), each its
+own interpreter with its own GIL, each importing the library once and taking calls from a shared queue -
+so 8 workers really run 8 prices at the same moment, whatever the library does with the GIL, without
+changing it. Results come back in the order asked. A call that hangs past its timeout is stopped and its
+worker restarted; one failing call does not fail the rest.
+
+**Where the DLLs are**: tell it the folder ("the pricing library is in C:\\quant\\bin"), or save it once
+in **Settings → Python → Library folders**. It is added to Python's path and to Windows' DLL search path.
+If the library will not import and no folder was given, it asks you - it never searches drives. Which
+Python: the tools' own, Settings → Python's interpreter, the first on PATH, or one you name.
+
+**Results**: numbers and strings come back as themselves; a list of lists shows as a table (like the range
+an Excel array formula fills); numpy arrays and pandas frames are converted. Every call asks first - the
+library's code runs on this machine as you. Needs Fire Code's helper (Fire Code, or VS Code with Fire
+Code installed).
+`,
+  },
+  {
+    id: 'dataframe',
+    title: 'Data analysis: dataframes over CSV, Excel and the clipboard',
+    keywords: [
+      'dataframe', 'polars', 'pandas', 'analyse data', 'analyze data', 'data analysis', 'pivot', 'group by',
+      'join', 'clipboard', 'copied cells', 'csv', 'excel data', 'aggregate', 'window function',
+      'combine data', 'join data from different sources', 'json records', 'join sqlite',
+    ],
+    body: `
+\`dataframe\` reads CSV/TSV/delimited text, Excel sheets and **the clipboard** (cells copied in Excel) with
+Polars, in Rust on every core: **describe** shows each source's columns, types, empty counts and first rows;
+**sql** queries them - joins across several files, GROUP BY, window functions, CASE - and can **pivot**
+the result (index columns, a column whose values become columns, a value column and sum/count/avg/min/
+max/first/last). Each source gets a name you query it by.
+
+**Joining data from different places.** Besides files and the clipboard, a source can be a **SQLite**
+table or read-only query (the same never-create, never-lock reader as \`query_sqlite\`), a **JSON** file of
+records (a list, a wrapper like \`{"results": [...]}\`, or one object per line), or **records the assistant
+already has** - results from Jira, an API call, a mail search - passed straight in as a list of objects.
+So "join the open Jira issues with the owners spreadsheet and the trade counts in our SQLite database" is
+one query. Every key becomes a column, records of different shapes line up, nested values stay as JSON.
+When a tool's output was too large to show in full, its note gives a handle, and that saved output can be a
+source **by handle**: the records go straight from where they were saved into the table, never retyped.
+
+**The assistant writes the joins itself** - inner, left, several tables at once - in SQL. For a join built
+in stages ("totals per owner, then add each owner's team"), it uses **steps**: named intermediate results,
+each a query, usable by the later steps and the final query like any source table.
+
+**Forgiving, without losing data.** Every value is read as text first, so nothing is dropped; a column
+becomes numbers, true/false, dates or date-times only when *every* value converts. Empty markers (NA,
+N/A, null, -, #N/A, ...) count as empty; thousands separators and "(1,234.50)" negatives are understood;
+ragged rows, odd bytes, duplicate or blank headers and Excel error cells are tolerated. A column with stray
+values stays text and the answer says which values, so a total is never quietly wrong. A pivot cell with no
+data is empty, not 0. Needs Fire Code's helper (Fire Code, or VS Code with Fire Code installed).
+`,
+  },
+  {
+    id: 'usage-dashboard',
+    title: 'Usage dashboard: most used skills, contributors, unused and duplicate skills and tools',
+    keywords: [
+      'usage', 'dashboard', 'usage dashboard', 'team dashboard', 'most used skill', 'most used skills', 'used the most', 'used most',
+      'who contributes', 'contributors', 'leaderboard', 'unused skills', 'unused tools', 'delete unused',
+      'duplicate skill', 'duplicate tool', 'statistics', 'stats', 'metrics', 'analytics', 'usage statistics',
+      'where are statistics stored', 'user details', 'whoami', 'by team', 'user info tool', 'get_user_info',
+      'employee lookup', 'create whoami', 'leaderboard', 'company directory', 'active directory',
+      'who wrote the most skills', 'most contributions', 'usage_stats', 'custom metrics', 'usage data',
+    ],
+    body: `
+**Settings → Usage** shows which skills and tools are used, by whom, who writes them, and what needs
+attention - for **Me** or the whole **Team**, over the last 24 hours, 7 days, 30 days, 90 days, a year,
+or a **custom** date range. Every figure is compared with the previous period of the same length.
+
+**Collection is automatic** wherever the team already shares a store: an **OpenSearch** connection
+first, then **any other vector store** (Qdrant, Chroma - from Settings → Search, in a collection named
+\`light-code-usage\`), then a **team S3 bucket** (one a skills or tools folder syncs or publishes to,
+under \`usage/\`). Nothing is asked: the first time a session sees such a store, collection starts.
+With none of those configured nothing is collected and the tab only explains why. In the tab's
+"Collection and storage" panel you can instead choose a **shared folder** (a network share everybody can
+write to), a particular bucket or store, or tick **Stop collecting on this machine**. Choosing a store
+by hand writes a test entry first, so one that cannot be written is refused with the reason. The
+settings travel in Settings → Export as **Usage dashboard** (config:usage, config:usage.store,
+config:usage.enabled, config:usage.userInfoTool); a repository cannot set them.
+
+**The first time, past conversations are imported** - the saved chats on this machine are read for the
+tools they called and the skills they read, so the dashboard has history from day one. With Fire Code
+installed its Rust helper does this (and reads a shared folder) in parallel; otherwise it is done in
+Node. It runs once per install.
+
+**People instead of login names.** On a Windows machine on a company domain, names come from the
+**company directory** first - display name, email, department (shown as the team), title and office -
+read as you (Windows' own sign-in, nothing to configure). In the background only **you** are looked up;
+every author named on a skill or tool and every colleague in the numbers are looked up when the dashboard
+is opened. The Rust helper reads the directory through Windows' own LDAP client - Fire Code's, or the one
+the Windows VS Code package carries. **PowerShell is never used for it**: that way raised a security alert
+on a managed machine. With no helper (a plain Node host without Fire Code, or not Windows) the directory
+is simply not used. Only searches, only those fields, only while usage is collected; answers are kept for
+30 days. Off a domain, or for someone the directory does not list, the
+**second way** is used: if a tool that looks users up is available - an MCP or Python tool named like
+\`whoami\`, \`user_info\` or \`employee_lookup\`, the one named in the panel, or failing those a
+**skill** named like \`who-am-i\` or \`user-info\` that describes how - the assistant does it once
+(approved as usual) and records the result with \`record_user_profile\`. The dashboard then shows names and
+a **By team** table. It asks again after 30 days. Settings → Usage says whether the directory is reachable.
+
+**Ask the assistant for any other metric.** The same data is a tool, \`usage_stats\`: \`summary\` (the
+dashboard in words), \`events\` (every use as a row - time, person, name, team, skill or tool, author,
+project, failed, duration - filtered by range, person, team, kind or name), \`inventory\` (installed
+skills and tools with author, version and dates) and \`people\` (who each user is). For a metric the page
+does not draw - "which skills does Rates use that FX never touches", "failed tool calls per project per
+week" - the assistant takes the rows into \`dataframe\` and answers it in SQL. It reads exactly what the
+dashboard reads, so the numbers agree.
+
+**The leaderboard** ranks authors three ways: **Most written** (skills and tools they wrote), **Most
+impact** (uses of their work × people it reached, in the range) and **Most active this period** (skills
+and tools they added or updated in the range - a label at version 1 is new, a later one an update).
+Authorship comes from the \`author\` label on a skill or the \`__author__\` line in a tool; unlabelled
+ones count for nobody and are listed under Needs attention.
+
+**Which tools count as a user-info tool.** The name is matched by its words between underscores, so the
+\`py__\` (Python) or \`<server>__\` (MCP) prefix does not matter: \`py__whoami\`, \`py__get_user_info\`,
+\`py__user_info\`, \`py__employee_lookup\`, \`hr__whoami\` are all found. The words are whoami, who_am_i,
+current_user, user_info, user_details, user_profile, my_profile, employee (with _info, _details, _lookup,
+_profile), get_user, lookup_user, find_user, people_lookup and identity. A name that does not split into
+one of them - \`py__getuserinfo\`, \`py__staff_record\` - is not found; type it in Settings → Usage →
+"Tool that looks up who a user is" (with or without \`py__\`), which also makes it the only one used.
+
+**Having the assistant create one.** Ask in the chat, for example: "Create a Python tool called whoami
+that looks up the current user in our directory and returns displayName, email, team, department, title
+and location." You approve its source like any Python tool, and it runs only after that. Name it
+\`whoami\` (or another of the words above) so nothing needs configuring, and return those six field
+names - \`record_user_profile\` keeps only them. If the directory needs a login, declare it in the tool
+with \`__credentials__ = ['directory']\` and read it with \`light_code.credential('directory')\` rather
+than writing it into the file. If looking people up is not obvious, write a skill first ("how to find
+a person in our directory": the endpoint or library, and which field is the team) - the assistant reads
+it when building the tool, and colleagues' assistants can build the same one. A tools folder that
+publishes to the team bucket shares it: each person approves it once, and every machine then records its
+own user.
+
+**In a shared folder the statistics are plain files**: one JSON Lines file per person, per day, per
+install (\`<folder>\\<user>\\2026-10-10__<install>.jsonl\`, one event per line) and one small JSON file
+per person in \`_profiles\`. No database and no locks: each file is written whole and swapped in, so
+readers never see half of one. **Each month is rolled up**: three days after a month ends, each machine
+merges its own day files for it into one month file (\`2026-09__<install>.jsonl\`), reads it back to
+check every event is there, and only then deletes those day files - so a year is about a dozen files per
+person and machine rather than a few hundred. Only a machine's own files are ever merged or deleted. In a
+bucket the layout is the same under \`usage/\`; in OpenSearch, Qdrant or Chroma each file is one document
+(its text the events, its vector a placeholder - nothing is searched by meaning there).
+
+**What is collected**: the skill or tool name, who, when, the project, the author named on the skill or
+tool, whether a tool call failed and how long it took. Never arguments, file contents or results. A
+skill counts as used when it is read with \`read_file\` or its file is copied with \`use_skill_file\`.
+Events are queued on this machine (\`usage\\queue\` in Light Code's storage, one file per day per
+window) and sent about a minute after the last one, and when the tab opens. Several windows or chats at
+once are safe: each writes only its own files, a day is sent again whenever any of its files grew, and
+whoever sends a day checks afterwards that nothing changed meanwhile - so nothing is lost or counted
+twice, with no locks to get stuck.
+
+**On the dashboard**: totals with trends; activity over time; most used skills and tools with
+sparklines, people, failures and average time; rising skills; top contributors (skills and tools
+written, how often their work is used, how many people it reached); who uses Light Code; a weekday and
+hour heat map; **your contribution**; **unused** skills and tools (unused by *anybody* in the range,
+marked *stale* when not updated for a year); and new or updated ones.
+
+**Needs attention** lists problems: the same name with different content in two folders (only the first
+is used), identical content under two names, near-identical names, skills without a description,
+skills and tools without an author, Python tools not loaded, tools that fail often, and skills
+colleagues use that are not installed here. A copy of the same file in a bucket mirror is *not* a
+problem - that is how sharing works.
+
+**Acting on it**: Open any skill or tool, and **Delete** one that lives in this project's own folder (two
+clicks; the second names it). A shared or bucket copy belongs to everybody and is only opened here -
+delete those from Settings → Skills or Python.
+`,
+  },
+  {
+    id: 'rust-tools',
+    title: 'The fast Rust tools, and where they are available',
+    keywords: [
+      'rust', 'rust tools', 'fast tools', 'fire code tools', 'fire-fs', 'helper', 'what tools', 'which tools',
+      'available tools', 'big file', 'huge log', 'find files', 'grep', 'grep files', 'search contents', 'search shares', 'read many files', 'query table', 'sqlite',
+      'dataframe', 'python library', 'copy files', 'move files', 'zip', 'vs code rust', 'tools in vs code',
+      'bundled helper', 'without fire code',
+    ],
+    body: `
+A Rust helper (\`fire-fs.exe\`) runs file and data work on every CPU core. Fire Code ships the full one;
+the Windows VS Code package carries a slim one with every tool below except \`dataframe\`. Its tools:
+
+- \`find_files\` - find files by name, type, size or date across drives and shares; summarise a folder; find
+  duplicate files by content.
+- \`grep_files\` - search file contents (text or a regular expression, with context lines) across several
+  folders, drives or shares at once, filtered by name, extension and date; reads UTF-16 files, and lists every
+  file or folder it could not read with Windows' own reason - useful when a share says access is denied.
+  \`search_files\` (ripgrep) is still the one for searching inside the workspace.
+- \`read_many_files\` - up to 50 files (or line windows) in one call.
+- \`big_file\` - a file of any size, logs especially: inspect (lines, columns), read a window, tail, or search
+  with a regular expression and context lines.
+- \`query_table\` - filter, group and total one CSV or Excel sheet.
+- \`dataframe\` - SQL over CSV, Excel and the clipboard: joins, grouping, window functions, pivot; forgiving
+  with messy data (see the dataframe topic).
+- \`query_sqlite\` - read a SQLite database without creating it or locking it.
+- \`python_library\` - call a Python library's functions many times in parallel processes (pricing DLLs).
+- \`transfer_files\` / \`archive_files\` - copy or move, and zip/unzip, showing the plan before anything changes.
+
+**Where they are available**
+- **Fire Code**: always.
+- **VS Code on Windows**: always - every tool but \`dataframe\`, from the helper bundled with the
+  extension. With Fire Code installed on the same machine, its full helper is used instead and
+  \`dataframe\` is there too. Nothing to configure; reload the VS Code window after installing or
+  updating Fire Code.
+- **\`light-code\` run on its own (Node host)**: when Fire Code is installed on the same machine.
+- **Not**: on a shared server (\`--server\`), on a platform other than Windows, or in the Node host
+  without Fire Code. There the built-in tools (read_file, search_files, list_files) do the work.
+
+To see whether they are on right now, look at the tool list in Settings → Tools, or ask "which tools do
+you have?" - the assistant answers from the tools it was actually given.
 `,
   },
   {
@@ -913,6 +1274,7 @@ edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push
       'sidebar', 'sleep', 'idle', 'switch project', 'credentials', 'saved credential',
       'share keys', 'share api keys', 'pycharm', 'intellij keys', 'shared drive', 'network drive',
       'big log', 'large log', 'big csv', 'large csv', 'huge file', 'find files', 'duplicate files',
+      'sqlite', 'sqlite database', 'sqlite db', 'read a database', 'query a database', 'locking',
       'several chats', 'two chats', 'parallel chats', 'parallel agents', 'chat tabs', 'new chat tab',
       'two agents same codebase', 'same codebase at once', 'same codebase', 'second chat',
       'environment variable', 'environment variables', 'startup script', 'setenv', 'add to path',
@@ -956,7 +1318,8 @@ with a note saying so - whether the copies come from a bucket, a shared folder o
 
 **Several chats per codebase**: the tabs above the chat. + (or Ctrl+T, or right-click → New chat) opens
 another chat on the same codebase — its own agent, working at the same time, with the same settings and
-keys. Double-click a tab to rename it; × or Ctrl+W closes it (its history is kept). Two safeguards make
+keys. To rename a chat - the first one too - double-click its tab, or right-click it → Rename chat; the
+name shows on the tab and in notifications. × or Ctrl+W closes a chat (its history is kept). Two safeguards make
 this safe: an edit is refused when the file changed since that chat read it (another chat, you, or any
 program edited it) — the agent re-reads and edits what is there now; and **Rollback undoes only the files
 that chat changed**, never another chat's work. If another chat also changed one of those files since,
@@ -1005,6 +1368,10 @@ diff; you edit it; nothing is committed until you press Commit and push) - every
 committed, and a new branch is pushed to origin and tracked. **Pull** brings in the remote's changes,
 fast-forward only: when your branch and the remote have both moved, nothing is pulled and it says so.
 
+**No Review or Variables tab**: those belong to a shared server (\`light-code --server\`), and a chat's
+settings on your own machine leave them out. Environment variables for agents go in Fire Code's
+Settings → Environment.
+
 **Exporting credentials**: tick the ones to export (nothing is ticked to begin with; filter by label).
 
 **Keyboard**: Ctrl+K switch, Ctrl+1–9 jump, Ctrl+Tab next, Ctrl+T new chat, Ctrl+W close chat, Ctrl+B
@@ -1028,12 +1395,30 @@ Clicking wakes it with the chat intact. Right-click → Keep awake exempts one.
 asks, shows the diff, and says Rollback cannot undo it. Keys, passwords, browser logins, Light Code's
 own vault and Windows/program folders stay off-limits whatever the setting.
 
+**DFS shares** (\`\\\\company\\dfs\\...\`) are used exactly as written - also through a drive letter mapped onto
+one. Before 0.153.0 Light Code followed DFS to the server behind it and opened that path directly, which
+can be refused even when the DFS path works for you; a plain NAS share was never affected.
+
 **Parallel file tools** (Rust, every CPU core), for big jobs: \`find_files\` (find by name, type, size or
 date across drives and shares; summarise a folder; find duplicate files), \`read_many_files\` (up to 50
 at once), \`big_file\` (inspect, read any window, tail, or search a huge log with context) and
 \`query_table\` (filter, group and total a CSV or Excel sheet of millions of rows, a page at a time).
 All read-only. Ask in plain words — "summarise the errors in this 2 GB log", "total sales by region in
 this spreadsheet".
+
+**In VS Code too**: when Fire Code is installed on the machine, the Light Code extension (and \`light-code\`
+run on its own) finds Fire Code's Rust helper and offers these tools as well - nothing extra to install,
+and the extension stays small. Fire Code records where its helper is each time it starts; an older Fire
+Code offers only the tools it has. Reload the VS Code window after installing or updating Fire Code.
+
+**SQLite databases** (\`query_sqlite\`): the schema with row counts, any read-only SQL, a big table
+filtered, grouped and sorted across every core, or a piece of text found in any column of any table.
+**It never creates a database** - a mistyped path is reported, not turned into a new empty file - and
+writes are refused. **It never blocks the program that owns the database**: a classic database is opened
+without taking any lock (and checked before and after for a write that landed mid-read, retried, or
+flagged as possibly inconsistent); a WAL database with recent changes is read as a WAL reader, which
+never blocks a writer. Parallel ranges pay off on heavy work - grouping by several columns, text across
+every column - by two to three times on 8 cores; a light filtered count is limited by reading the file.
 
 **Not in Fire Code**: reading a VS Code debug session, and editor file pickers — paths are typed. Fire Code's
 Settings → Export source code saves the whole repository as a zip that builds offline.
@@ -1435,8 +1820,13 @@ walkthrough, whose steps link straight into the tab each one is about. On the No
       'eperm', 'ebusy', 'could not save', 'permission denied saving', 'operation not permitted',
       // Settings saved in one window and missing in another: a window runs the version it started with.
       'another window', 'other window', 'second window', 'not reflecting', 'not showing',
+      'greyed out', 'grayed out', 'disabled', 'cannot click', 'not clickable',
     ],
     body: `
+**A button is greyed out.** Hover over it: every control that can be disabled says why in its
+tooltip - nothing changed since the last save, a field still empty, a reply still running, a
+feature switched off elsewhere - and usually what to do about it.
+
 **"EPERM" (or EBUSY) naming config.json when saving.** On Windows a file cannot be replaced while
 another program has it open — another VS Code window loading the same settings, antivirus checking
 the write that just happened, or OneDrive syncing the folder. Saves retry for a few seconds, which

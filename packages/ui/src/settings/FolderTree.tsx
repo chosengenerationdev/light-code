@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactElement } from 'react'
 import { colors, textFieldStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface MailFolderNode {
   name: string
@@ -250,7 +251,7 @@ export function FolderTree(props: FolderTreeProps): ReactElement {
               <input
                 type="checkbox"
                 checked={ticked || covered !== undefined}
-                disabled={covered !== undefined}
+                {...disabledWhen([covered !== undefined, `Included already, because ${covered ?? ''} is ticked. Untick that folder to choose here.`])}
                 onChange={() => toggle(folder.path)}
               />
               <span style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>

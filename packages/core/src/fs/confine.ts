@@ -90,9 +90,55 @@ const UNRESOLVABLE_CODES = new Set([
   'EACCES',
 ])
 
+/** `\\host\share\rest` (or `\\?\UNC\host\share\rest`) split up, lower-cased; undefined if not UNC. */
+function uncParts(p: string): { host: string; share: string } | undefined {
+  const plain = p.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/\//g, '\\')
+  const match = /^\\\\([^\\]+)\\([^\\]+)/.exec(plain)
+  return match === null ? undefined : { host: (match[1] ?? '').toLowerCase(), share: (match[2] ?? '').toLowerCase() }
+}
+
+/** Whether a drive letter is a mapped network drive: its root resolves to a UNC path. Asked once per drive. */
+const networkDrives = new Map<string, Promise<boolean>>()
+function isNetworkDrive(p: string): Promise<boolean> {
+  const drive = /^([a-z]):/i.exec(p)?.[1]?.toLowerCase()
+  if (process.platform !== 'win32' || drive === undefined) return Promise.resolve(false)
+  let known = networkDrives.get(drive)
+  if (known === undefined) {
+    known = fs.realpath(`${drive}:\\`).then((real) => uncParts(real) !== undefined, () => false)
+    networkDrives.set(drive, known)
+  }
+  return known
+}
+
+/**
+ * A network path whose resolution lands on a *different server or share* is kept as written.
+ *
+ * Reported from real use: a DFS share was "access denied" while a plain NAS share worked, for a user who
+ * owns the share. A DFS path is a referral - `\\corp\dfs\team\x` is served by, say, `\\fs01\team$\x` - and
+ * `realpath` answers with the target. Every tool then opened the target directly, which DFS
+ * permissions, a hidden `$` share or the server's own name can refuse while the namespace path works;
+ * a NAS share has no referral, which is why it was unaffected. A mapped drive letter onto DFS resolves
+ * the same way.
+ *
+ * Symlink containment is unchanged where it matters: a local path (a link in the workspace pointing at a
+ * share) and a link within the same share are still judged by where they land. Only a hop that the
+ * network itself made - to another server or share - is not followed, and the deny list and the
+ * credential floor still see the path.
+ */
+async function asWrittenWhenRedirected(requested: string, real: string): Promise<string> {
+  const target = uncParts(real)
+  if (target === undefined) return real
+  const asked = uncParts(requested)
+  if (asked !== undefined) {
+    return asked.host === target.host && asked.share === target.share ? real : path.resolve(requested)
+  }
+  // A drive letter that resolved to UNC: a mapped network drive, kept as the letter the user gave.
+  return (await isNetworkDrive(requested)) ? path.resolve(requested) : real
+}
+
 async function realpathAllowingMissing(target: string): Promise<string> {
   try {
-    return await fs.realpath(target)
+    return await asWrittenWhenRedirected(target, await fs.realpath(target))
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? ''
     if (!UNRESOLVABLE_CODES.has(code)) throw error
@@ -137,7 +183,8 @@ export async function confineToAny(requestedPath: string, roots: readonly string
   for (const root of roots) {
     let realRoot: string
     try {
-      realRoot = await fs.realpath(root)
+      // Kept as written on the same terms as the target, or a DFS root would contain nothing given as DFS.
+      realRoot = await asWrittenWhenRedirected(root, await fs.realpath(root))
     } catch {
       // A configured share that is not mounted right now is skipped rather than fatal — the
       // other roots still work, and the path simply will not match this one.
@@ -150,4 +197,4 @@ export async function confineToAny(requestedPath: string, roots: readonly string
   throw new PathConfinementError(requestedPath, roots[0] ?? '')
 }
 
-export { realpathAllowingMissing, normalizeForComparison }
+export { realpathAllowingMissing, normalizeForComparison, asWrittenWhenRedirected }

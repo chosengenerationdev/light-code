@@ -114,6 +114,23 @@ pub fn fast_fs() -> Option<PathBuf> {
     helper.is_file().then_some(helper)
 }
 
+/// Writes `helper.json` in the data folder: where this install's fire-fs.exe is, and its version.
+///
+/// The Light Code VS Code extension and a plain Node host read it to use the Rust tools when Fire Code
+/// is installed, rather than shipping their own copy (asked for: "if fire-code is installed, light
+/// code uses the tools of fire-code by default"). npm's global folder differs between machines, so the
+/// one thing that knows where the helper is says so. Rewritten on every start, so an update or a move
+/// is picked up; written atomically, because the extension may read it at any moment.
+pub fn record_helper(data_dir: &std::path::Path) {
+    let Some(helper) = fast_fs() else { return };
+    let record = serde_json::json!({ "fireFs": helper, "version": env!("CARGO_PKG_VERSION") });
+    let target = data_dir.join("helper.json");
+    let temp = data_dir.join("helper.json.tmp");
+    if std::fs::write(&temp, record.to_string()).is_ok() {
+        let _ = std::fs::rename(&temp, &target);
+    }
+}
+
 /// rg.exe packed beside the exe by the build.
 pub fn bundled_ripgrep() -> Option<PathBuf> {
     let rg = std::env::current_exe().ok()?.parent()?.join("rg.exe");

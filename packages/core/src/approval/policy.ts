@@ -89,6 +89,10 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   'autosys_send_event',
   'autosys_apply_jil',
   'bitbucket_write_pull_request',
+  // Merges into a shared branch (and may tag it) under the user's name; only after a reviewer approved.
+  'bitbucket_merge_pull_request',
+  // Opens a chat on the user's screen with a message for a colleague; the preview is the literal text.
+  'teams_open_chat',
   // Changes a workbook somebody has open and has not saved, with no undo this product owns.
   'excel_write_range',
   /*

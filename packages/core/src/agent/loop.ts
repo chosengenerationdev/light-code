@@ -841,7 +841,7 @@ The conversation is longer than this model accepts. Press **Compact now** under 
     const pictures = result.images ?? []
     const capped =
       options.truncationStore !== undefined
-        ? (await truncateToolResult(result.content, options.truncationStore)).content
+        ? (await truncateToolResult(result.content, options.truncationStore, undefined, { dataframe: toolRegistry.get('dataframe') !== undefined })).content
         : result.content
     /*
      * Said in the result when the pictures cannot be shown, so the model does not describe an

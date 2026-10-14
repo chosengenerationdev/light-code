@@ -40,6 +40,10 @@ const ALLOWED_HOSTS = new Map([
   ['api.anthropic.com', 'provider preset'],
   ['generativelanguage.googleapis.com', 'provider preset (Gemini)'],
 
+  // --- Example text. The proxy field's placeholder and the handbook's example address
+  // (http://user:password@proxy.corp:8080); a made-up host, never contacted.
+  ['proxy.corp', 'placeholder in the proxy field and the handbook'],
+
   // --- Inside a dependency, never contacted.
   //
   // undici's Cache API builds a `new Request("https://a")` as a throwaway object and immediately
@@ -143,7 +147,9 @@ const problems = []
 
 function hostsIn(text) {
   const hosts = new Set()
-  for (const match of text.matchAll(/https?:\/\/([A-Za-z0-9._:-]+)/g)) {
+  // An optional `user:password@` is skipped, so the proxy example `http://user:password@proxy.corp:8080`
+  // is checked as the host `proxy.corp` rather than read as a host called `user`.
+  for (const match of text.matchAll(/https?:\/\/(?:[A-Za-z0-9._~%!$&'()*+,;=-]+(?::[^@\s/'"`]*)?@)?([A-Za-z0-9._:-]+)/g)) {
     // Strip a port so `127.0.0.1:8080` matches the loopback entry.
     hosts.add((match[1] ?? '').split(':')[0].toLowerCase())
   }

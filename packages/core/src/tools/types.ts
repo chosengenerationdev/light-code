@@ -98,6 +98,12 @@ export interface ToolExecutionContext {
    */
   hasNewUserInput?: () => boolean
   /**
+   * Everything the user has written in this conversation - typed messages, and the documents they
+   * attached or mentioned in them - and never a tool's output. `http_request` may only call a host
+   * found here: the user's own words are the one thing an injected instruction cannot write.
+   */
+  userText?: () => string
+  /**
    * Shows the user a form and waits for it.
    *
    * Absent means nobody is there to fill one in — an unattended scheduled run — and

@@ -15,7 +15,9 @@ import type { LanguageServerStatus, LspSettings } from '../lsp/manager.js'
 import type { PythonStatus } from '../python/manager.js'
 import type { McpServerConfig, McpServerState, McpToolPermission } from '../mcp/types.js'
 import type { ApprovalDecision } from '../approval/types.js'
-import type { CommandRules, VectorStoreKind } from '../config/schema.js'
+import type { CommandRules, UsageStoreConfig, VectorStoreKind } from '../config/schema.js'
+import type { UsageDashboard, UsageScope } from '../usage/dashboard.js'
+import type { UsageProfile } from '../usage/store.js'
 import type { JuniorAssessment } from '../expert/assessment.js'
 import type { WireFormat } from '../providers/types.js'
 import type { ToolGroup, ToolPreview } from '../tools/types.js'
@@ -204,10 +206,22 @@ export interface NetworkSettingsInput {
   passphrase?: string | undefined
 }
 
+/** The http_request proxy as the panel sees it: addresses without passwords, and whether one is stored. */
+export interface ProxySummary {
+  http?: string | undefined
+  https?: string | undefined
+  noProxy?: string | undefined
+  httpHasPassword: boolean
+  httpsHasPassword: boolean
+}
+
 export interface NetworkSettingsSummary {
   certDir?: string | undefined
   tls: ConnectionTlsInput
   hasPassphrase: boolean
+  proxy?: ProxySummary
+  /** Why the last proxy save was refused. */
+  proxyError?: string
   /** Reported so the UI can say where relative filenames will resolve to. */
   workspaceRoot?: string | undefined
 }
@@ -378,6 +392,8 @@ export interface SearchConnectionSummary {
 export interface PythonSettings {
   /** A Python to borrow when there is no uv. Distinct from `venvPath`, which names one to manage. */
   interpreterPath?: string
+  /** Folders of the user's own libraries and their DLLs, for `python_library`. */
+  libraryFolders?: string[]
   dynamicTools: 'off' | 'on'
   uvPath?: string
   toolsDir?: string
@@ -845,8 +861,8 @@ export type UiToHostMessage =
   /** Removes every per-project override, so this project follows the defaults again. */
   | { type: 'clearProjectSettings' }
   | { type: 'requestProjectSettings' }
-  /** Excel and Outlook, off by default. Windows only. */
-  | { type: 'setOffice'; excel: boolean; outlook: boolean }
+  /** Excel, Outlook and Teams, off by default. Windows only. */
+  | { type: 'setOffice'; excel: boolean; outlook: boolean; teams?: boolean }
   | { type: 'requestAtlassian' }
   /**
    * `token` is write-only (invariant 7): absent or blank keeps what is stored, and clearing it is
@@ -1056,6 +1072,8 @@ export type UiToHostMessage =
        * nothing is installed into it.
        */
       interpreterPath?: string
+      /** Folders of the user's own libraries and DLLs. Empty clears them. */
+      libraryFolders?: string[]
       timeoutSeconds?: number
       indexUrl?: string
       offline?: boolean
@@ -1070,7 +1088,19 @@ export type UiToHostMessage =
       env?: { name: string; value?: string; secret: boolean }[]
     }
   | { type: 'requestNetwork' }
+  /** The usage dashboard for a range; also pushes what this machine has not sent yet. */
+  | { type: 'requestUsage'; scope: UsageScope; from: number; to: number; timezoneOffsetMinutes?: number }
+  /**
+   * Collection settings. `store` absent means automatic (`usage/auto.ts`); `stopped` switches collection
+   * off on this machine; `userInfoTool` names the tool that answers "who is this user". Validated host-side.
+   */
+  | { type: 'saveUsageSettings'; stopped: boolean; store?: UsageStoreConfig; userInfoTool?: string }
   | { type: 'saveNetwork'; settings: NetworkSettingsInput }
+  /**
+   * The http_request proxy. Each URL may carry user:password; the host moves the password into secret
+   * storage. A URL with a username and no password keeps the stored password; empty clears that proxy.
+   */
+  | { type: 'saveProxy'; http: string; https: string; noProxy: string }
   | { type: 'requestExpert' }
   | {
       type: 'setAgentRole'
@@ -1188,7 +1218,17 @@ export type HostToUiMessage =
    * `postMessage` delivery isn't guaranteed — sending cumulative state makes each
    * message self-correcting, so one dropped message doesn't corrupt everything after it.
    */
-  | { type: 'textChunk'; text: string; expertInformed?: boolean; informedBy?: string }
+  | {
+      type: 'textChunk'
+      text: string
+      expertInformed?: boolean
+      informedBy?: string
+      /**
+       * Starts a new bubble instead of updating the one streaming. Set for a control tool's
+       * result that follows text the model already wrote, which it must not overwrite.
+       */
+      separate?: boolean
+    }
   /** Cumulative reasoning for the current step, same self-correcting rule as `textChunk`. */
   | { type: 'reasoningChunk'; text: string }
   | { type: 'toolCall'; toolCall: ToolCallSummary; expertInformed?: boolean; informedBy?: string }
@@ -1387,6 +1427,8 @@ export type HostToUiMessage =
       exportsSource?: boolean
       /** The host is an editor with a file list to pick from; the composer offers "Add files". */
       picksFiles?: boolean
+      /** GitHub Copilot is reachable through VS Code here, so the Copilot preset is offered. */
+      hostModels?: boolean
       /** True where the host has no theme of its own, so the user picks one. */
       choosesTheme?: boolean
       /**
@@ -1466,7 +1508,7 @@ export type HostToUiMessage =
        * `supported` is the platform answer: on anything but Windows the toggles are shown
        * disabled with the reason, rather than offered and then failing.
        */
-      office: { supported: boolean; excel: boolean; outlook: boolean }
+      office: { supported: boolean; excel: boolean; outlook: boolean; teams?: boolean }
       tools: ToolCatalogueEntry[]
       /** True when the dispatcher is on, so the view can explain why some are hidden. */
       dispatcher: boolean
@@ -1485,7 +1527,7 @@ export type HostToUiMessage =
        * list looking armed while nothing was checking them. A last-checked time is the one
        * piece of evidence that distinguishes "not due yet" from "not running".
        */
-      scheduler: { running: boolean; lastTickAt?: number }
+      scheduler: SchedulerStatus
     }
   /** Result of a hand-run query. `text` is what the model would have been given. */
   /**
@@ -1600,6 +1642,43 @@ export type HostToUiMessage =
   /** The save reached disk. The form stays open until this arrives, so a failure keeps the typed values. */
   | { type: 'searchConnectionSaved'; id: string }
   | { type: 'network'; settings: NetworkSettingsSummary }
+  | {
+      type: 'usage'
+      settings: {
+        /** Whether this machine is collecting now. */
+        collecting: boolean
+        /** Switched off here with `usage.enabled: false`. */
+        stopped: boolean
+        /** The store chosen by hand; absent when automatic. */
+        store?: UsageStoreConfig
+        /** The store in use and why - automatic or chosen. Absent when nothing suitable is configured. */
+        effective?: { store: UsageStoreConfig; automatic: boolean; reason: string }
+        userInfoTool?: string
+        /** Tools that look like they answer "who is this user". */
+        userInfoCandidates: string[]
+        /** Skills that describe how to look a user up - used when no tool exists. */
+        userInfoSkills: string[]
+        /** The company directory, the primary source of names: reachable, how many people it has named, and how. */
+        directory: { available: boolean; reason?: string; people: number; via?: string }
+        /** This user's details as last recorded, if any. */
+        profile?: UsageProfile
+        /** The one-time import of existing conversations, once it has run. */
+        backfill?: { tasks: number; events: number; via: 'rust' | 'node'; at: number }
+      }
+      /** The stores this machine could use, from what is already configured. */
+      options: {
+        s3: { id: string; label: string; bucket: string; readOnly?: boolean }[]
+        vectorStores: { id: string; label: string; kind: VectorStoreKind }[]
+      }
+      /** Where the numbers came from, in words. */
+      storeLabel?: string
+      /** Why the store could not be used or written; the dashboard is drawn from what could be read. */
+      storeProblem?: string
+      dashboard?: UsageDashboard
+      /** A refused save, said on the panel rather than in the chat. */
+      saveError?: string
+      saved?: boolean
+    }
   | {
       type: 'python'
       /** Resolved reality: which interpreter is in use, which tools loaded, what was refused. */
@@ -2169,4 +2248,16 @@ export interface ProjectStampMessage {
   done?: { written: number; uploaded: number; failed: string[] }
   note?: string
   error?: string
+}
+
+/**
+ * The schedule timer as the Schedules tab shows it. `elsewhere` is a host started with
+ * `runsSchedules: false` - a Fire Code chat after the first - whose schedules are run by
+ * another process: not running here is correct there, and saying "nothing will fire" sent
+ * somebody to press Restart, which started a second timer the flag exists to prevent.
+ */
+export interface SchedulerStatus {
+  running: boolean
+  lastTickAt?: number
+  elsewhere?: boolean
 }

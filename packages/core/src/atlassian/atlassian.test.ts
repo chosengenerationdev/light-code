@@ -7,9 +7,11 @@ import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/h
 import type { ToolExecutionContext } from '../tools/types.js'
 import {
   BitbucketClient,
+  createBitbucketMergePullRequestTool,
   createBitbucketReadFileTool,
   createBitbucketWritePullRequestTool,
   encodeRepoPath,
+  isSafeTagName,
 } from './bitbucket.js'
 import { createJiraSearchTool, createJiraWriteIssueTool, findTransition, JiraClient } from './jira.js'
 import { ATLASSIAN_PRODUCTS } from './products.js'
@@ -130,7 +132,9 @@ describe('Jira', () => {
 
 describe('Bitbucket', () => {
   it('reads a file at a ref, and never lets a path climb out of the repository', async () => {
-    const { http, calls } = fakeSite({ 'GET /projects/PLAT/repos/api/raw/src/app.py': { text: 'print(1)\nprint(2)' } })
+    const { http, calls } = fakeSite({
+      'GET /rest/api/1.0/projects/PLAT/repos/api/browse/src/app.py': { json: { lines: [{ text: 'print(1)' }, { text: 'print(2)' }], isLastPage: true } },
+    })
     const tool = createBitbucketReadFileTool({
       client: async () => new BitbucketClient(http, { baseUrl: 'https://git.test', token: 't' }),
       defaultProject: 'PLAT',
@@ -143,6 +147,45 @@ describe('Bitbucket', () => {
     expect(() => encodeRepoPath('../../admin')).toThrow(/not a file path/)
     const escaped = await tool.execute({ path: 'a/../../x' }, NO_CONTEXT)
     expect(escaped.isError).toBe(true)
+  })
+
+  it('reads through the REST API, never the web /raw URL that single sign-on redirects', async () => {
+    // Behind SAML, /projects/../raw/.. is answered with the identity provider's login page.
+    const calls: string[] = []
+    const http: HttpClient = {
+      async request(url) {
+        calls.push(url)
+        const start = Number(new URL(url).searchParams.get('start'))
+        const text = JSON.stringify(
+          start === 0
+            ? { lines: [{ text: 'a' }, { text: 'b' }], isLastPage: false, nextPageStart: 2 }
+            : { lines: [{ text: 'c' }], isLastPage: true },
+        )
+        return { status: 200, headers: {}, text: async () => text, json: async <T>() => JSON.parse(text) as T, body: null }
+      },
+    }
+    const client = new BitbucketClient(http, { baseUrl: 'https://git.test', token: 't' })
+    expect(await client.file({ project: 'PLAT', repo: 'api' }, 'src/app.py', undefined)).toBe('a\nb\nc')
+    expect(calls).toHaveLength(2)
+    for (const url of calls) {
+      expect(new URL(url).pathname.startsWith('/rest/api/1.0/projects/PLAT/repos/api/browse/')).toBe(true)
+    }
+  })
+
+  it('says a folder is a folder, and names a login page as single sign-on', async () => {
+    const folder = fakeSite({
+      'GET /rest/api/1.0/projects/PLAT/repos/api/browse/src': {
+        json: { children: { values: [{ path: { toString: 'app.py' }, type: 'FILE' }, { path: { toString: 'lib' }, type: 'DIRECTORY' }] } },
+      },
+    })
+    const client = new BitbucketClient(folder.http, { baseUrl: 'https://git.test', token: 't' })
+    await expect(client.file({ project: 'PLAT', repo: 'api' }, 'src', undefined)).rejects.toThrow(/folder.*app\.py, lib\//)
+
+    const sso = fakeSite({
+      'GET /rest/api/1.0/projects/PLAT/repos/api/browse/x.py': { text: '<!DOCTYPE html><html><form action="https://idp.test/saml">' },
+    })
+    const behindLogin = new BitbucketClient(sso.http, { baseUrl: 'https://git.test', token: 't' })
+    await expect(behindLogin.file({ project: 'PLAT', repo: 'api' }, 'x.py', undefined)).rejects.toThrow(/single sign-on/)
   })
 
   it('refuses a project or repository that could reshape the request path', async () => {
@@ -175,10 +218,95 @@ describe('Bitbucket', () => {
   })
 
   /** Approving is the person's decision about somebody's work; commenting is the assistant's contribution. */
-  it('has no way to approve, merge or decline', () => {
-    const tool = createBitbucketWritePullRequestTool({ client: async () => ({}) as BitbucketClient })
-    const fields = Object.keys((tool.parametersSchema as unknown as { shape: Record<string, unknown> }).shape)
-    expect(fields.some((field) => /approve|merge|decline/i.test(field))).toBe(false)
+  it('has no way to approve or decline, and merges only through its own tool', () => {
+    const write = createBitbucketWritePullRequestTool({ client: async () => ({}) as BitbucketClient })
+    const writeFields = Object.keys((write.parametersSchema as unknown as { shape: Record<string, unknown> }).shape)
+    expect(writeFields.some((field) => /approve|merge|decline/i.test(field))).toBe(false)
+    const merge = createBitbucketMergePullRequestTool({ client: async () => ({}) as BitbucketClient })
+    const mergeFields = Object.keys((merge.parametersSchema as unknown as { shape: Record<string, unknown> }).shape)
+    expect(mergeFields.some((field) => /approve|decline/i.test(field))).toBe(false)
+  })
+
+  const PR_PATH = '/rest/api/1.0/projects/PLAT/repos/api/pull-requests/12'
+  const openPr = (reviewers: { status: string }[]) => ({
+    id: 12,
+    title: 'Add retry',
+    state: 'OPEN',
+    version: 7,
+    fromRef: { displayId: 'feature/retry' },
+    toRef: { displayId: 'master', id: 'refs/heads/master' },
+    reviewers: reviewers.map((reviewer, index) => ({ user: { displayName: `Reviewer ${String(index)}` }, ...reviewer })),
+  })
+  const mergeTool = (http: HttpClient) =>
+    createBitbucketMergePullRequestTool({
+      client: async () => new BitbucketClient(http, { baseUrl: 'https://git.test', token: 't' }),
+      defaultProject: 'PLAT',
+      defaultRepo: 'api',
+    })
+
+  it('refuses to merge until a reviewer has approved, and never merges one marked needs-work', async () => {
+    for (const reviewers of [[], [{ status: 'UNAPPROVED' }], [{ status: 'APPROVED' }, { status: 'NEEDS_WORK' }]]) {
+      const { http, calls } = fakeSite({
+        [`GET ${PR_PATH}`]: { json: openPr(reviewers) },
+        [`GET ${PR_PATH}/merge`]: { json: { canMerge: true, conflicted: false, vetoes: [] } },
+        [`POST ${PR_PATH}/merge`]: { json: {} },
+      })
+      const result = await mergeTool(http).execute({ id: 12 }, NO_CONTEXT)
+      expect(result.isError).toBe(true)
+      expect(result.content).toMatch(/^Not merged/)
+      expect(calls.some((call) => call.options.method === 'POST')).toBe(false)
+    }
+  })
+
+  it("refuses when Bitbucket's own merge checks say no, naming them", async () => {
+    const { http } = fakeSite({
+      [`GET ${PR_PATH}`]: { json: openPr([{ status: 'APPROVED' }]) },
+      [`GET ${PR_PATH}/merge`]: { json: { canMerge: false, vetoes: [{ summaryMessage: 'Requires 2 approvals' }] } },
+    })
+    const preview = await mergeTool(http).preview?.({ id: 12 }, NO_CONTEXT)
+    expect(JSON.stringify(preview)).toContain('WILL BE REFUSED')
+    const result = await mergeTool(http).execute({ id: 12 }, NO_CONTEXT)
+    expect(result.content).toContain('Requires 2 approvals')
+  })
+
+  it('merges an approved pull request at the version it checked, then tags the merge commit', async () => {
+    const { http, calls } = fakeSite({
+      [`GET ${PR_PATH}`]: { json: openPr([{ status: 'APPROVED' }]) },
+      [`GET ${PR_PATH}/merge`]: { json: { canMerge: true, vetoes: [] } },
+      [`POST ${PR_PATH}/merge`]: { json: { properties: { mergeCommit: { id: 'abc123def4567890' } } } },
+      // An older server: the core API has no tags resource, the git API does.
+      'POST /rest/git/1.0/projects/PLAT/repos/api/tags': { json: {} },
+    })
+    const result = await mergeTool(http).execute({ id: 12, tag: 'v1.4.0', tagMessage: 'Release 1.4.0' }, NO_CONTEXT)
+    expect(result.isError).toBeUndefined()
+    expect(result.content).toContain('Merged #12')
+    expect(result.content).toContain('Tagged v1.4.0 on master')
+    const merge = calls.find((call) => call.options.method === 'POST' && call.url.includes('/merge'))
+    expect(new URL(merge!.url).searchParams.get('version')).toBe('7')
+    const tag = calls.find((call) => call.url.includes('/rest/git/1.0/'))
+    expect(JSON.parse(String(tag!.options.body))).toMatchObject({ name: 'v1.4.0', startPoint: 'abc123def4567890', type: 'ANNOTATED' })
+  })
+
+  it('reports a failed tag as that alone - the merge already happened', async () => {
+    const { http } = fakeSite({
+      [`GET ${PR_PATH}`]: { json: openPr([{ status: 'APPROVED' }]) },
+      [`GET ${PR_PATH}/merge`]: { json: { canMerge: true } },
+      [`POST ${PR_PATH}/merge`]: { json: {} },
+      'POST /rest/api/1.0/projects/PLAT/repos/api/tags': { status: 409, json: { errors: [{ message: 'Tag v1 already exists' }] } },
+    })
+    const result = await mergeTool(http).execute({ id: 12, tag: 'v1' }, NO_CONTEXT)
+    expect(result.content).toContain('Merged #12')
+    expect(result.content).toContain('merge succeeded, but tag v1 was not created')
+    expect(result.content).toContain('already exists')
+  })
+
+  it('refuses a tag name that is not a git ref name before merging anything', async () => {
+    for (const bad of ['../x', '-v1', 'v1.lock', 'a b', 'v1/', '.hidden']) expect(isSafeTagName(bad)).toBe(false)
+    for (const good of ['v1.4.0', 'release/2026-10', 'V_1-rc.2']) expect(isSafeTagName(good)).toBe(true)
+    const { http, calls } = fakeSite({})
+    const result = await mergeTool(http).execute({ id: 12, tag: '../evil' }, NO_CONTEXT)
+    expect(result.isError).toBe(true)
+    expect(calls).toHaveLength(0)
   })
 })
 
@@ -186,6 +314,7 @@ describe('the rules around them', () => {
   it('always asks before writing to Jira or Bitbucket', () => {
     expect(ALWAYS_ASK_TOOLS.has('jira_write_issue')).toBe(true)
     expect(ALWAYS_ASK_TOOLS.has('bitbucket_write_pull_request')).toBe(true)
+    expect(ALWAYS_ASK_TOOLS.has('bitbucket_merge_pull_request')).toBe(true)
   })
 
   it('cannot be set by a workspace', () => {

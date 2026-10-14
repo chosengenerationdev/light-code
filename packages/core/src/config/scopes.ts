@@ -12,6 +12,11 @@ export const USER_SCOPE_ONLY_KEYS = [
   // Names where inference goes, exactly as the other two do.
   'programmingProfileId',
   'certDir',
+  // Where http_request traffic goes. A repository able to set it could route your API calls - and their
+  // credentials - through a proxy of its choosing.
+  'proxy',
+  // Where everybody's usage events are written. A repository able to set it could collect them.
+  'usage',
   // Reads the user's mail and their open workbooks. A repository must never switch it on.
   'office',
   // Names language-server programs to run when a file is edited.

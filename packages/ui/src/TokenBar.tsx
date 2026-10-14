@@ -92,7 +92,7 @@ export function TokenBar(props: TokenBarProps): ReactElement | null {
             type="button"
             disabled={props.busy === true}
             onClick={() => props.onCompact?.()}
-            title="Summarise the older part of this conversation to free context. The full transcript stays saved."
+            title={props.busy === true ? 'Not while a reply is running - compacting would change the conversation under it.' : 'Summarise the older part of this conversation to free context. The full transcript stays saved.'}
             style={{
               background: nearLimit ? colors.accent : 'transparent',
               color: nearLimit ? colors.accentContrast : colors.muted,

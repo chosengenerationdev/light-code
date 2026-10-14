@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs'
 import * as path from 'node:path'
 import * as vscode from 'vscode'
-import { Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
+import { findFireCodeHelper, Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { createVSCodeDiagnostics } from '../platform/diagnostics.js'
 import { readDebugSession, startTrackingDebugSessions } from '../platform/debugSession.js'
+import { vscodeLanguageModels } from '../platform/languageModels.js'
 import { createRipgrepResolver } from '../platform/ripgrep.js'
 import { VSCodeSecretStore } from '../platform/secrets.js'
 import { WebviewTransport } from '../platform/transport.js'
@@ -185,6 +187,26 @@ export function createVSCodeHostServices(
      ripgrepPath: createRipgrepResolver(context.extensionPath, logger, { appRoot: vscode.env.appRoot }),
     logSink,
     readDebugSession,
+    /*
+     * The Rust helper. Fire Code's, when it is installed, because it is the full one (`dataframe` too);
+     * otherwise the slim one this Windows package carries (esbuild.mjs), which has every other tool and
+     * the company-directory lookup through Windows' own LDAP client. Found once, when the window starts.
+     */
+    ...(() => {
+      const fireCode = findFireCodeHelper()
+      if (fireCode !== undefined) {
+        logger.info(`Using Fire Code's Rust helper: ${fireCode}`)
+        return { fastFs: fireCode }
+      }
+      const bundled = path.join(context.extensionPath, 'dist', 'bin', 'fire-fs.exe')
+      if (process.platform === 'win32' && existsSync(bundled)) {
+        logger.info(`Using the bundled Rust helper: ${bundled}`)
+        return { fastFs: bundled }
+      }
+      return {}
+    })(),
+    // GitHub Copilot as signed in to here, for a profile using the Copilot preset (providers/hostModels.ts).
+    ...(vscodeLanguageModels() !== undefined ? { languageModels: vscodeLanguageModels()! } : {}),
     // Built into dist/ by esbuild.mjs; the header offers to save it (scripts/source-archive.mjs).
     sourceArchive: {
       path: path.join(context.extensionPath, 'dist', 'source.zip'),

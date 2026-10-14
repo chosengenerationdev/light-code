@@ -9,6 +9,7 @@ import {
   secondaryButtonStyle,
   textFieldStyle,
 } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 /**
  * S3 buckets, and pointing a folder of one at skills or Python tools.
@@ -331,7 +332,7 @@ export function S3Section(props: S3SectionProps): ReactElement {
                 <button
                   type="button"
                   style={primaryButtonStyle(editing.label.trim() === '' || editing.bucket.trim() === '')}
-                  disabled={editing.label.trim() === '' || editing.bucket.trim() === ''}
+                  {...disabledWhen([editing.label.trim() === '', 'Give the connection a name.'], [editing.bucket.trim() === '', 'Enter the bucket name.'])}
                   onClick={() => {
                     props.onSaveConnection(
                       {
@@ -453,7 +454,7 @@ export function S3Section(props: S3SectionProps): ReactElement {
                 >
                   <input
                     type="checkbox"
-                    disabled={isReadOnly(row.connectionId)}
+                    {...disabledWhen([isReadOnly(row.connectionId), 'This connection is read-only, so nothing can be published to it.'])}
                     checked={row.publish === true && !isReadOnly(row.connectionId)}
                     onChange={(event) =>
                       setRows(
@@ -498,7 +499,7 @@ export function S3Section(props: S3SectionProps): ReactElement {
               <button
                 type="button"
                 style={primaryButtonStyle(!dirty)}
-                disabled={!dirty}
+                {...disabledWhen([!dirty, 'Nothing has changed since the last save.'])}
                 onClick={() => props.onSaveMirrors(rows)}
               >
                 {dirty ? 'Save folders' : 'Saved'}

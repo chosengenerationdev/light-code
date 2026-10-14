@@ -1,6 +1,7 @@
 import type { TestConnectionStep } from '@light-code/core/browser'
 import { type ReactElement } from 'react'
 import { colors, fontFamily, secondaryButtonStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface TestConnectionPanelProps {
   running: boolean
@@ -33,7 +34,7 @@ function markerFor(status: TestConnectionStep['status']): { glyph: string; color
 export function TestConnectionPanel(props: TestConnectionPanelProps): ReactElement {
   return (
     <div style={{ marginBottom: 16, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
-      <button type="button" style={secondaryButtonStyle()} onClick={props.onRun} disabled={props.running}>
+      <button type="button" style={secondaryButtonStyle()} onClick={props.onRun} {...disabledWhen([props.running, 'The test is already running.'])}>
         {props.running ? 'Testing…' : 'Test Connection'}
       </button>
 

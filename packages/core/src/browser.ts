@@ -57,6 +57,9 @@ export { providerPresets, type ProviderPreset } from './providers/presets.js'
 /* Pure formatting over a measured figure, so it is safe in the browser bundle. */
 export { describePricing, type ExpertPricing } from './expert/pricing.js'
 export type { ExpertSavings, SavingsWindow } from './expert/savings.js'
+export type { UsageDashboard, UsageScope, RankedItem, Problem as UsageProblem, UnusedItem, Contributor, Person as UsagePerson } from './usage/dashboard.js'
+export type { UsageStoreConfig } from './config/schema.js'
+export type { UsageProfile } from './usage/store.js'
 /*
  * The guided tour's content. Pure strings, which is what makes it safe here — and the reason it
  * lives in core at all is that two hosts render it: VS Code as `contributes.walkthroughs`, the
@@ -160,7 +163,7 @@ export type { SearchLogEntry, SearchLogSource } from './rag/searchLog.js'
 export type { Schedule, ScheduleTrigger, Schedules, ScheduleRun } from './schedule/types.js'
 export { riskyGroupsIn } from './schedule/types.js'
 export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedule/timing.js'
-export type { ScheduleToolInfo } from './agent/protocol.js'
+export type { ScheduleToolInfo, SchedulerStatus } from './agent/protocol.js'
 export type { IndexRenamesMessage, ProjectMessage, ProjectStampEntry, ProjectStampMessage } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'
 

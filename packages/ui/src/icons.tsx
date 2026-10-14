@@ -493,6 +493,19 @@ export function DatabaseIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+/** Bars with a trend line: Settings → Usage. */
+export function ChartIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2 14h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <rect x="3" y="9" width="2" height="4" rx="0.5" fill="currentColor" />
+      <rect x="7" y="6.5" width="2" height="6.5" rx="0.5" fill="currentColor" />
+      <rect x="11" y="4" width="2" height="9" rx="0.5" fill="currentColor" />
+      <path d="M3 6.5L7.5 3.5 10 5l3.5-3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** A folder with a name tag: Settings → Project. */
 export function ProjectIcon({ size = 16 }: IconProps): ReactElement {
   return (

@@ -19,6 +19,11 @@ export const providerPresets: readonly ProviderPreset[] = [
   { id: 'deepseek', label: 'DeepSeek', wireFormat: 'openai', baseUrl: 'https://api.deepseek.com/v1' },
   { id: 'anthropic', label: 'Anthropic', wireFormat: 'anthropic', baseUrl: 'https://api.anthropic.com/v1' },
   { id: 'gemini', label: 'Google Gemini', wireFormat: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
+  /*
+   * GitHub Copilot as it is already signed in to in VS Code. Offered only where the host can reach it
+   * (`hostModels` in the settings message); the base URL is a label, never fetched.
+   */
+  { id: 'copilot', label: 'GitHub Copilot (from VS Code)', wireFormat: 'vscode-lm', baseUrl: 'vscode://language-models' },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', wireFormat: 'openai', baseUrl: '' },
   { id: 'custom-anthropic', label: 'Custom (Anthropic-compatible)', wireFormat: 'anthropic', baseUrl: '' },
   { id: 'custom-gemini', label: 'Custom (Gemini-compatible)', wireFormat: 'gemini', baseUrl: '' },

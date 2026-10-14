@@ -1,4 +1,4 @@
-import type { Schedule, ScheduleTrigger, ScheduleToolInfo } from '@light-code/core/browser'
+import type { Schedule, SchedulerStatus, ScheduleTrigger, ScheduleToolInfo } from '@light-code/core/browser'
 import { describeNextRun, describeTrigger, riskyGroupsIn } from '@light-code/core/browser'
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { ChevronIcon, CopyIcon, PauseIcon, PlayIcon, TrashIcon } from '../icons.js'
@@ -15,6 +15,7 @@ import {
   secondaryButtonStyle,
   textFieldStyle,
 } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -56,7 +57,7 @@ export interface SchedulesTabProps {
    */
   onOpenReport: (reportPath: string) => void
   /** Whether the timer is alive, and when it last checked. */
-  scheduler?: { running: boolean; lastTickAt?: number } | undefined
+  scheduler?: SchedulerStatus | undefined
   onRestartScheduler: () => void
   /** Omitting the id clears every schedule's runs. */
   onClearRuns: (id?: string) => void
@@ -149,12 +150,14 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
           padding: '6px 8px',
           borderRadius: 6,
           fontSize: 11,
-          border: `1px solid ${props.scheduler?.running === false ? colors.error : colors.border}`,
-          color: props.scheduler?.running === false ? colors.error : colors.muted,
+          border: `1px solid ${props.scheduler?.running === false && props.scheduler.elsewhere !== true ? colors.error : colors.border}`,
+          color: props.scheduler?.running === false && props.scheduler.elsewhere !== true ? colors.error : colors.muted,
         }}
       >
         <span>
-          {props.scheduler?.running === false
+          {props.scheduler?.elsewhere === true
+            ? "Schedules run in this codebase's first chat, so a job never runs twice. Open that chat to see them run."
+            : props.scheduler?.running === false
             ? 'The scheduler is not running — nothing will fire.'
             : `Scheduler running${
                 props.scheduler?.lastTickAt === undefined
@@ -162,14 +165,16 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
                   : `, last checked ${new Date(props.scheduler.lastTickAt).toLocaleTimeString()}`
               }`}
         </span>
-        <button
-          type="button"
-          style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
-          title="Stop and start the timer. Safe at any time; a run already in progress is unaffected."
-          onClick={props.onRestartScheduler}
-        >
-          Restart
-        </button>
+        {props.scheduler?.elsewhere !== true && (
+          <button
+            type="button"
+            style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px', marginLeft: 'auto' }}
+            title="Stop and start the timer. Safe at any time; a run already in progress is unaffected."
+            onClick={props.onRestartScheduler}
+          >
+            Restart
+          </button>
+        )}
       </div>
 
       <Panel
@@ -207,9 +212,8 @@ export function SchedulesTab(props: SchedulesTabProps): ReactElement {
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                   <button
                     type="button"
-                    title={props.runningId === schedule.id ? 'Running now' : 'Run now'}
+                    {...disabledWhen([props.runningId === schedule.id, 'Running now - wait for it to finish.'], { enabledTitle: 'Run now' })}
                     aria-label="Run now"
-                    disabled={props.runningId === schedule.id}
                     style={iconButtonStyle('ghost', props.runningId === schedule.id)}
                     onClick={() => props.onRunNow(schedule.id)}
                   >
@@ -995,7 +999,7 @@ function ScheduleEditor(props: {
         <button
           type="button"
           style={primaryButtonStyle(!valid)}
-          disabled={!valid}
+          {...disabledWhen([draft.name.trim().length === 0, 'Give the schedule a name.'], [draft.prompt.trim().length === 0, 'Write the prompt it should run.'])}
           onClick={() => props.onSave({ ...draft, name: draft.name.trim(), prompt: draft.prompt.trim() })}
         >
           Save

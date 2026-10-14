@@ -236,3 +236,4 @@ describe('a path whose resolution is refused by permissions', () => {
     await expect(confine(target, root)).rejects.toThrow(/EIO/)
   })
 })
+

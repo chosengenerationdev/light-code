@@ -16,6 +16,7 @@
  */
 
 import fs from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -84,6 +85,25 @@ try {
     fs.existsSync(flat) || fs.existsSync(perPlatform),
     universalCount > 0 ? `universal build, ${universalCount} platforms` : 'platform-specific build',
   )
+
+  // The slim Rust helper (directory lookup without PowerShell, fast file tools). Windows packages only.
+  if (process.platform === 'win32') {
+    const helper = path.join(binDir, 'fire-fs.exe')
+    let ops = []
+    if (fs.existsSync(helper)) {
+      const answer = spawnSync(helper, [], { input: JSON.stringify({ op: 'capabilities' }), encoding: 'utf8', timeout: 10000 })
+      try {
+        ops = JSON.parse(answer.stdout).ops ?? []
+      } catch {
+        ops = []
+      }
+    }
+    check(
+      'the slim Rust helper is bundled, answers, and leaves out dataframe',
+      ops.includes('directory') && ops.includes('find') && !ops.includes('dataframe'),
+      fs.existsSync(helper) ? `${(fs.statSync(helper).size / 1048576).toFixed(1)} MB, ${ops.length} operations` : 'missing',
+    )
+  }
 
   // Stub `vscode` before loading. The extension host injects it; Node does not have it.
   const noop = () => undefined

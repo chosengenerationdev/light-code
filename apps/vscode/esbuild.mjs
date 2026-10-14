@@ -79,6 +79,33 @@ async function copyRipgrepBinary() {
   console.log(`[esbuild] ripgrep for ${target} -> ${destination}`)
 }
 
+/**
+ * The slim Rust helper (`fire-fs.exe` built without Polars) for Windows packages. It gives the extension
+ * the fast file, table, SQLite and usage tools, and the company-directory lookup through Windows' own
+ * LDAP client - the PowerShell lookup it replaces raised a security alert on a managed machine.
+ * When Fire Code is installed its full helper (which also has `dataframe`) is used instead.
+ *
+ * Built from apps/sun/native with `pnpm --filter light-code-vscode build:helper`; never fetched.
+ * An x64 binary also serves win32-arm64, which runs it under emulation.
+ */
+const SLIM_HELPER = path.join('..', 'sun', 'native', 'target', 'slim', 'release', 'fire-fs.exe')
+
+function copyRustHelper() {
+  if (!(target === 'universal' || target.startsWith('win32'))) return
+  if (!fs.existsSync(SLIM_HELPER)) {
+    console.warn(
+      `[esbuild] no slim Rust helper at ${SLIM_HELPER}; a VSIX built now has no Rust tools or directory
+` +
+        '          lookup unless Fire Code is installed. Run `pnpm build:helper` in apps/vscode first.',
+    )
+    return
+  }
+  const destination = path.join('dist', 'bin', 'fire-fs.exe')
+  fs.mkdirSync(path.dirname(destination), { recursive: true })
+  fs.copyFileSync(SLIM_HELPER, destination)
+  console.log(`[esbuild] slim Rust helper -> ${destination} (${(fs.statSync(destination).size / 1048576).toFixed(1)} MB)`)
+}
+
 function locateRipgrepBinary(platformTarget, executable) {
   const candidates = [
     // Fetched by scripts/fetch-ripgrep.mjs for cross-platform packaging.
@@ -144,6 +171,7 @@ if (watch) {
   await Promise.all(contexts.map((ctx) => ctx.rebuild()))
   await Promise.all(contexts.map((ctx) => ctx.dispose()))
   await copyRipgrepBinary()
+  copyRustHelper()
   syncReadme()
   writeSource()
 }

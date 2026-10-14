@@ -12,6 +12,7 @@ import {
 } from '../theme.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { Panel } from './Panel.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -425,7 +426,7 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
                 <button
                   type="button"
                   style={secondaryButtonStyle()}
-                  disabled={role.promptIsDefault}
+                  {...disabledWhen([role.promptIsDefault, 'This role already uses the built-in instructions.'])}
                   onClick={() => {
                     props.onSetPrompt(role.role, undefined)
                     setEditing(undefined)
@@ -575,7 +576,7 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
             <button
               type="button"
               style={primaryButtonStyle(newRole.name.trim().length === 0)}
-              disabled={newRole.name.trim().length === 0}
+              {...disabledWhen([newRole.name.trim().length === 0, 'Give the role a name first.'])}
               onClick={() => {
                 props.onSaveCustomRole({ ...newRole, id: newRole.id.trim().toLowerCase() })
                 setAdding(false)
@@ -720,7 +721,7 @@ export function AgentsTab(props: AgentsTabProps): ReactElement {
               <button
                 type="button"
                 style={secondaryButtonStyle()}
-                disabled={props.teamGuidanceIsDefault}
+                {...disabledWhen([props.teamGuidanceIsDefault, 'The team already uses the built-in guidance.'])}
                 onClick={() => {
                   setGuidance(props.defaultTeamGuidance)
                   props.onSetTeamGuidance(undefined)

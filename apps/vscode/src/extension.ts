@@ -1,10 +1,12 @@
 import * as vscode from 'vscode'
-import { ConfigManager, Logger, isDue, wireChatBridge, type ChatBridge, type Schedule } from '@light-code/core'
+import { ConfigManager, Logger, isDue, startLmRelay, wireChatBridge, type ChatBridge, type Schedule } from '@light-code/core'
+import { vscodeLanguageModels } from './platform/languageModels.js'
 import { VSCodeConfigStore } from './platform/config.js'
 import { WebviewTransport } from './platform/transport.js'
 import { ChatViewProvider } from './webview/chatViewProvider.js'
 import { createVSCodeHostServices } from './webview/hostServices.js'
 import { shareKeysWithSun } from './shareWithSun.js'
+import { registerCommitMessageCommand } from './commitMessage.js'
 
 /** How often the host looks in on the scheduler. Frequent enough to revive it within a minute. */
 const SCHEDULE_POLL_MS = 30_000
@@ -129,6 +131,8 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   )
 
+  const commitMessageCommand = registerCommitMessageCommand(ensureBridge)
+
   const walkthroughCommand = vscode.commands.registerCommand('lightCode.openWalkthrough', () => {
     void vscode.commands.executeCommand(
       'workbench.action.openWalkthrough',
@@ -195,10 +199,19 @@ export function activate(context: vscode.ExtensionContext): void {
     shareKeysWithSun(context, configManager),
   )
 
-  context.subscriptions.push(viewDisposable, openCommand, addToContextCommand, walkthroughCommand, settingsCommand, shareCommand, {
+  /*
+   * GitHub Copilot for Fire Code, the Light Code host and the JetBrains plugin on this machine: they have
+   * no `vscode.lm`, so they reach this window's (platform/node/lmRelay.ts - a pipe only this user's
+   * token opens). Nothing is spawned and nothing is contacted until one of them asks.
+   */
+  const models = vscodeLanguageModels()
+  const relay = models !== undefined ? startLmRelay(models, { log: (line) => outputChannel.appendLine(`[info] ${line}`) }) : undefined
+
+  context.subscriptions.push(viewDisposable, openCommand, addToContextCommand, commitMessageCommand, walkthroughCommand, settingsCommand, shareCommand, {
     dispose: () => {
       clearInterval(poll)
       bridge?.dispose()
+      relay?.dispose()
     },
   })
 }

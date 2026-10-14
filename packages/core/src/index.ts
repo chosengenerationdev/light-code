@@ -178,6 +178,18 @@ export { AnthropicProvider, toAnthropicMessages } from './providers/anthropic.js
 export { GeminiProvider, toGeminiContents } from './providers/gemini.js'
 export { createChatProvider } from './providers/factory.js'
 export {
+  HOST_MODELS_BASE_URL,
+  HostModelProvider,
+  listHostModels,
+  NO_HOST_MODELS,
+  testHostModels,
+  type HostLanguageModels,
+  type HostModelInfo,
+  type HostModelRequest,
+} from './providers/hostModels.js'
+export { toPortableParameters } from './providers/schema.js'
+export { createRelayLanguageModels, defaultRelayDir, NO_VSCODE_WINDOW, startLmRelay } from './platform/node/lmRelay.js'
+export {
   toOpenAITools,
   toAnthropicTools,
   toGeminiTools,
@@ -691,6 +703,7 @@ export type { HostServices, HostUi, OpenDialogOptions, WorkspaceState } from './
 export { NodeFileSystem } from './platform/node/filesystem.js'
 export { NodeTerminal } from './platform/node/terminal.js'
 export { JsonTaskStore } from './platform/node/taskStore.js'
+export { findFireCodeHelper, fastFsCapabilities } from './platform/node/fireHelper.js'
 
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'
 export { deriveTitle } from './history/titles.js'
@@ -699,6 +712,7 @@ export {
   formatToolArguments,
   toolCallReason,
   CONTROL_TOOLS,
+  repeatsStreamedText,
   chartFromToolCall,
   diagramFromToolCall,
   consultationFromToolCall,
@@ -823,3 +837,7 @@ export type { LspDiagnostic } from './lsp/client.js'
 export { LSP_LANGUAGES } from './lsp/catalog.js'
 export { isSecretPath, isSystemPath } from './fs/reach.js'
 export { parseJupyterHubSpec, jupyterHubSpecSchema, localFolderNames, type JupyterHubSpec } from './jupyter/spec.js'
+export { UsageLog, usageDay, usageInstanceId, parseUsageLines, type UsageEvent } from './usage/events.js'
+export { FolderShardStore, S3ShardStore, VectorShardStore, type UsageShardStore } from './usage/store.js'
+export { pushUsage } from './usage/push.js'
+export { computeDashboard, type UsageDashboard, type InventoryItem } from './usage/dashboard.js'

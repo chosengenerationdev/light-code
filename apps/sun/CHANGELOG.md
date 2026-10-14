@@ -1,5 +1,120 @@
 # @chosengeneration/fire-code
 
+## 0.31.0
+
+- **A renamed first chat keeps its name.** The name was saved, but the list of codebases sent to the window left that one field out, so the tab still said "Chat 1". Names given to any chat now show at once and come back after a restart. A test now fails if a saved codebase field is not sent to the window.
+
+## 0.30.0
+
+- **Fire Code: double-click rename works**, for every chat including the first. Selecting a tab moved focus into the chat a moment later, which closed the rename box before anything was typed. Right-click a tab for Rename chat, New chat, View agent log and Close chat.
+- Every greyed-out button in Fire Code's window, and in its chats, says why when hovered.
+- **DevOps → AutoSys reads as username and password.** The username box now comes before the password and is no longer marked optional; the password field, its placeholder, the panel summary and the Remove button all say "password" instead of "token".
+
+## 0.29.0
+
+- **Rename any chat, the first one included.** Double-click a chat tab, or right-click it → **Rename chat**. "Chat 1" could not be renamed before, and renaming the others was only by a double-click nothing on screen mentioned. The name shows on the tab, in the window's title and in notifications. Right-clicking a tab also offers New chat, View agent log and Close chat.
+
+## 0.28.0
+
+- **GitHub Copilot as a provider.** If Copilot is signed in to in VS Code, choose the **GitHub Copilot (from VS Code)** preset in Settings → Providers and pick one of the models your Copilot plan offers - no key, URL or certificate. It goes through VS Code's own Language Model API: VS Code makes each request with Copilot's sign-in, Light Code never sees a token, and the first request asks in VS Code whether Light Code may use Copilot. Requests count against your Copilot plan. Fire Code, the Light Code host and the JetBrains plugin on the same machine use it through an open VS Code window with the Light Code extension, over a local pipe only your Windows account can use.
+
+## 0.27.0
+
+- **A second chat no longer says the scheduler is stopped.** Only a codebase's first chat runs its schedules, so a job never runs twice; the others said "The scheduler is not running — nothing will fire" and offered a Restart that started a second timer. They now say the first chat runs them, and offer no Restart.
+- **The company-directory lookup no longer uses PowerShell.** It ran `powershell -EncodedCommand` with an Active Directory search, which raised a security alert on a managed machine; machines doing the same lookup through the Rust helper raised none. It now goes only through the Rust helper (Windows' own LDAP client), and with no helper it is simply not used. In the background only you are looked up; authors and colleagues are looked up when the usage dashboard is opened.
+- The helper's `dataframe` operation (Polars) is now a build feature, on in Fire Code; the VS Code extension carries the helper built without it.
+
+## 0.26.0
+
+- **Monthly roll-up of usage statistics.** Three days after a month ends, each machine merges its own day files for that month into one month file, reads it back to check every event is there, and only then deletes those day files - so a year is about a dozen files per person and machine instead of a few hundred, and dashboards over long ranges stay fast on S3 and vector stores. Only a machine's own files are touched; nothing is ever counted twice, even mid-way; a late day for a finished month still counts. Fire Code's helper reads month files and skips their leftover days the same way.
+
+## 0.25.0
+
+- **`usage_stats`: the usage data as a tool.** Ask the assistant for any metric the dashboard does not draw - it reads the same data (summary, every use as a row, installed skills and tools, who people are) and works it out with `dataframe`.
+- **Usage collection is safe with several windows or chats open at once.** Each session now writes only its own queue files, a day is sent again whenever any of its files grew, and whoever sends a day checks afterwards that nothing changed meanwhile - so no event is lost, none is counted twice, and the one-time import of past chats cannot run twice. No locks, so nothing can be left stuck by a window that closed. The older queue file is moved over automatically.
+
+## 0.24.0
+
+- **People on the usage dashboard come from the company directory.** On a domain-joined Windows machine, display name, email, department (the team), title and office are read in the background for you, every author of a skill or tool, and every colleague in the numbers - by Fire Code's Rust helper when it is installed, otherwise a fixed PowerShell script; search only, as the signed-in user. Off a domain, a user-info tool or a skill describing the lookup is used instead.
+- **Leaderboard.** Rank authors by most written, most impact (uses × people reached) or most active this period (skills and tools added or updated in the range), with a This period column.
+- The helper gained a `directory` operation (wldap32, read only).
+
+## 0.23.1
+
+- **Help: user-info tools for the usage dashboard.** `light_code_help` now says which tool names are found automatically (the `py__` or MCP prefix does not matter - `py__whoami`, `py__get_user_info`, `py__employee_lookup` are; `py__getuserinfo` is not and has to be named in Settings → Usage), and how to have the assistant create a `whoami` tool: the six fields to return, credentials through `__credentials__`, and a skill to teach it the directory.
+
+## 0.23.0
+
+- **The usage dashboard collects by itself.** Wherever the team already shares a store - an OpenSearch connection first, then any other vector store, then a team S3 bucket - collection starts without being switched on (Settings → Usage can pick a shared folder instead, or stop it on one machine). The first time, conversations already saved on the machine are imported so the dashboard has history from day one - by Fire Code's Rust helper when it is installed. If a tool that looks users up is available (whoami, user_info, employee_lookup, ...), the assistant calls it once and records your name and team, so the dashboard shows people and a By-team table instead of login names. The helper gained a `usage` operation: shared-folder shards written atomically and read in parallel, and the import of saved conversations.
+
+## 0.22.0
+
+- **Usage dashboard (Settings → Usage).** Which skills and tools are used most, by whom, who writes them, and what has gone unused - for you or the whole team, over 24 hours to a year or any date range, each figure compared with the previous period. It lists problems (the same name with different content, identical skills under two names, near-identical names, failing tools, tools not loaded, skills colleagues use that are missing here) and lets you open or delete unused skills and tools from this project's folder. Collection is off until you choose a shared folder, S3 bucket or vector store the team can reach; only names and times are recorded, never arguments or files.
+
+## 0.21.0
+
+- **Large tool results become tables, and joins can be built in steps.** When a tool returns more JSON records than fit in the reply, `dataframe` reads them by the handle in the truncation note - nothing is retyped. `steps` names intermediate results (totals per owner, then join the owners' teams) that later queries can join and alias like any source.
+
+## 0.20.0
+
+- **Join data from anywhere with `dataframe`.** A source can now be a SQLite table or read-only query, a JSON file of records, or records the assistant already has (results from Jira, an API call, a mail search) passed straight in - and joined in one SQL query with CSV, Excel and clipboard data.
+
+## 0.19.0
+
+- **Search file contents across folders and shares** (`grep_files`, Fire Code's Rust helper): text or a regular expression with context lines, several folders, drives or shares in one search, filtered by file name, extension and date; reads UTF-16 files, and lists every file or folder it could not read with Windows' reason.
+- **DFS shares work.** A DFS path was followed to the server behind it and opened there, which can be refused even when the DFS path works for you (a NAS share was never affected). DFS paths, and drive letters mapped onto DFS, are now used exactly as written.
+
+## 0.18.1
+
+- **Switching to the lighter prompt is fully automatic.** Adding a search index, or switching on another integration later, now indexes the tool documentation in the background within seconds; before, it waited for an unrelated change, and the hidden tools were found only by name meanwhile.
+
+## 0.18.0
+
+- - **Much less context used by tool descriptions when a search index is configured.** The Excel, Outlook, Confluence, Jira, Bitbucket, Jenkins, AutoSys, JupyterHub, S3, API, data and Python tools now keep their full instructions in the documentation index instead of every request: the prompt lists them by name and tells the assistant to look them up with `search_docs` before using them or planning a job. With everything switched on that is about 38,000 tokens of tool definitions down to about 11,000 per request. Without a search index nothing changes.
+
+## 0.17.0
+
+- **Proxy for API calls** (Settings → Network): an HTTP and an HTTPS proxy for `http_request`, written with the login in the address (`http://user:password@proxy:8080`) - the password goes into secret storage, never into settings - plus hosts to reach directly. Works for ordinary and negotiate (Kerberos/NTLM) requests.
+- Light Code's help now knows the fast Rust tools and where they are available (Fire Code, or VS Code with Fire Code installed), and lists the settings tabs as they are now.
+
+## 0.16.0
+
+- **Call REST APIs** (`http_request`): GET and POST with headers, to hosts you name in the chat - give it an API's documentation and it can try the API. Kerberos/NTLM negotiate as your Windows login, a provider profile's auth (an Apigee gateway token), CA and client certificates, and 202 Accepted polled until done. Credentials go in as `${secret:NAME}`, never pasted; every request asks first.
+- **Use Python libraries in parallel** (`python_library`): list, describe and call the functions of a library kept in a folder with its DLLs (pricing libraries, say) - thousands of calls at once across worker processes, each with its own interpreter, so the GIL does not serialise them. Tell it the folder, or save it in Settings → Python → Library folders; without one it asks. Lists of lists come back as tables.
+- **Data analysis** (`dataframe`): Polars SQL over CSV, Excel sheets and the clipboard - joins across files, grouping, window functions and pivot - with forgiving reading that never drops a value: a column becomes numbers or dates only when all of it converts, and the answer says which columns stayed text and why.
+- **VS Code uses Fire Code's Rust tools when Fire Code is installed**: big files, tables, SQLite, dataframes and the Python library pool, with nothing extra in the extension.
+- Fire Code now records where its Rust helper is, so Light Code in VS Code can use it.
+
+## 0.15.0
+
+- **Read SQLite databases fast, safely.** A new `query_sqlite` tool (Fire Code's Rust helper) shows a database's tables and row counts, runs read-only SQL, filters and groups big tables on every CPU core, and finds text anywhere in the database. It never creates a database - a wrong path is reported, not turned into an empty file - refuses writes, and never blocks the application that owns the database: classic databases are read without taking any lock (and checked for writes that landed mid-read), and WAL databases as a WAL reader, which never blocks a writer.
+
+## 0.14.1
+
+- **Asking it to message someone in Teams now sends the message.** "Message Ravi about the PR" opens the chat and presses Enter (after you approve, with the same safety checks); only asking for a draft leaves Send to you.
+
+## 0.14.0
+
+- **No Review or Variables tab on your own machine.** Both belong to a shared server (`--server`); a local run, which is every Fire Code chat, no longer shows them.
+- **Teams can send, when you say so.** Ask for the message to be sent and `teams_open_chat` presses Enter in Teams for you - only once a Teams window has been in front and steady for a couple of seconds, and still is at that moment. Otherwise nothing is pressed and it tells you the message was not sent. The approval says plainly that it will send.
+
+## 0.13.0
+
+- **Merge an approved Bitbucket pull request, and tag it.** `bitbucket_merge_pull_request` merges a pull request once a reviewer has approved it - refused while nobody has, anyone marked it needs-work, it has conflicts or Bitbucket's merge checks say no - and can then create a tag on the merge (e.g. `v1.4.0` on master). Always asks first; never runs in a schedule. It still cannot approve or decline.
+- **Tell a colleague in Teams.** `teams_open_chat` (Settings → Tools, off by default) opens a Teams chat with the people you name, the message already typed in - such as the new pull request's link. You press Send; it cannot send by itself. Uses the Teams app installed here and your own account, no Graph API.
+
+## 0.12.1
+
+- Light Code's help now describes VS Code's commit-message button by its own icon rather than as a sparkle.
+
+## 0.12.0
+
+- **Bitbucket files can be read behind single sign-on.** Reading a file sent the request to Bitbucket's web `/raw/` address, which a SAML site answers with its login page whatever the token, so pull requests could be listed and files could not. Files are now read through the REST API, like everything else. A login page where data was expected is now reported as single sign-on, naming what to check.
+
+## 0.11.1
+
+- **A formatted answer no longer collapses into a paragraph as the reply ends.** When the assistant wrote its answer and then finished with a short summary, the summary replaced the answer on screen. Both now show, the summary below; a summary that only repeats the answer is shown once.
+
 ## 0.11.0
 
 - **Git for JupyterHub codebases.** The repository is on the hub, so the change counts, **Commit and push**, **Pull** and **Write with agent** now run git there, through the codebase's agent (while its chat is running). Commit saves your local edits to the hub first; pull is fast-forward only and copies the changes here afterwards. The agent can run any other git command with `hub_run`.

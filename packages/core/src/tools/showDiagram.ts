@@ -26,28 +26,14 @@ export function createShowDiagramTool(): Tool<DiagramSpec> {
   return {
     name: 'show_diagram',
     group: 'always',
+    // Short on purpose: advertised in every request, and the field descriptions carry the details
+    // (tones, icons, text size, legend, direction). It was ~1,600 tokens with the schema.
     description:
-      'Draw a technical diagram for the user: a flow chart, an architecture sketch, a sequence ' +
-      'of steps, a state machine. Give `nodes` (each with an `id` and a `label`) and `edges` ' +
-      'between those ids — the layout is worked out for you, so do not attempt coordinates. ' +
-      'Use it when a structure is easier seen than described: how a request travels, what calls ' +
-      'what, where a decision branches, what happens on failure. ' +
-      'Shapes carry the usual meanings — `round` for a start or end, `diamond` for a decision, ' +
-      '`cylinder` for a store, and the default box for a step. Put the condition on the edge ' +
-      '(`label: "yes"`, `label: "on timeout"`) rather than inventing a node for it, and use ' +
-      '`style: "dashed"` for anything conditional, asynchronous or secondary. ' +
-      'Tone colours a box by meaning — success, danger, warning, info, accent, muted — and `icon` ' +
-      'puts a glyph in its corner. `emphasis: "bold"` for the box the diagram is really about, ' +
-      '`font: "mono"` where the label *is* an identifier (a path, a function, a table). ' +
-      '`textSize` is small, normal, large or xlarge, on a node for one box or on the diagram for ' +
-      'all of them — use it when the user asks for bigger or smaller text, which they may well ' +
-      'do; the box grows with the text so nothing is cut off. ' +
-      'A `legend` explains what a colour or a shape stands for *in this diagram*, which is worth ' +
-      'giving whenever the meaning is not obvious from the labels. ' +
-      '`direction: "right"` suits a pipeline; the default runs downwards and suits most flows. ' +
-      'Loops are fine — an edge pointing back is drawn round the outside. ' +
-      'Keep it to the boxes that earn their place: a diagram of forty is a wall, not an ' +
-      'explanation, and the limit is a refusal rather than a truncation.',
+      'Draw a technical diagram: a flow, an architecture, a sequence of steps, a state machine. Give ' +
+      '`nodes` (`id`, `label`) and `edges` between ids; layout is automatic, never give coordinates. ' +
+      'Shapes: `round` start/end, `diamond` decision, `cylinder` store, box for a step. Put conditions ' +
+      'on edges (`label: "on timeout"`), `style: "dashed"` for conditional or async. Keep to the boxes ' +
+      'that matter - forty is a wall, and the limit refuses rather than truncates.',
     parametersSchema: diagramSpecSchema,
 
     async execute(params): Promise<ToolResult> {

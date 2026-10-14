@@ -1,6 +1,6 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
 import { CUSTOM_ROLE_LIMIT, composeUserText, skillAliases, type MessageQuote, type Reaction } from '@light-code/core/browser'
-import type { CredentialSummary } from '@light-code/core/browser'
+import type { CredentialSummary, SchedulerStatus } from '@light-code/core/browser'
 import type { LanguageServersState } from './settings/LanguageServersSection.js'
 import type { S3Mirror } from './settings/S3Section.js'
 import type {
@@ -136,6 +136,7 @@ export function App(props: AppProps): ReactElement {
   /** Whether this host ships its own source as a zip — the VS Code extension does. */
   const [exportsSource, setExportsSource] = useState(false)
   const [picksFiles, setPicksFiles] = useState(false)
+  const [hostModels, setHostModels] = useState(false)
   const [addedFiles, setAddedFiles] = useState<{ paths: string[]; nonce: number } | undefined>(undefined)
   /*
    * Undefined until a host answers `requestVariables`. The VS Code bridge does not handle that
@@ -479,7 +480,7 @@ export function App(props: AppProps): ReactElement {
   const [toolCatalogue, setToolCatalogue] = useState<{
     tools: ToolCatalogueEntry[]
     dispatcher: boolean
-    office: { supported: boolean; excel: boolean; outlook: boolean }
+    office: { supported: boolean; excel: boolean; outlook: boolean; teams?: boolean }
   }>({
     tools: [],
     dispatcher: false,
@@ -487,9 +488,7 @@ export function App(props: AppProps): ReactElement {
     // on a machine that cannot honour them.
     office: { supported: false, excel: false, outlook: false },
   })
-  const [schedulerState, setSchedulerState] = useState<
-    { running: boolean; lastTickAt?: number } | undefined
-  >(undefined)
+  const [schedulerState, setSchedulerState] = useState<SchedulerStatus | undefined>(undefined)
   const [runningScheduleId, setRunningScheduleId] = useState<string | undefined>(undefined)
   const [skillExtraDirs, setSkillExtraDirs] = useState<string[]>([])
   // What the user typed, not the resolved absolute path — the field must round-trip a
@@ -517,6 +516,8 @@ export function App(props: AppProps): ReactElement {
             // what made every reply read "informed by expert" whoever had answered.
             ...(message.informedBy !== undefined ? { informedBy: message.informedBy } : {}),
           }
+          // `separate`: a control tool's answer after text the model wrote — keep that text.
+          if (message.separate === true) return [...finalizePendingMessage(prev), updated]
           if (last?.kind === 'text' && last.role === 'assistant' && last.pending) {
             return [...prev.slice(0, -1), updated]
           }
@@ -632,6 +633,7 @@ export function App(props: AppProps): ReactElement {
         setToolTimeoutSeconds(message.toolTimeoutSeconds)
         setExportsSource(message.exportsSource === true)
         setPicksFiles(message.picksFiles === true)
+        setHostModels(message.hostModels === true)
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -1734,7 +1736,7 @@ export function App(props: AppProps): ReactElement {
             <button
               type="button"
               aria-label="New task"
-              title="New task"
+              title={isStreaming ? 'A reply is running. Stop it before starting a new task.' : 'New task'}
               style={iconButtonStyle('ghost', isStreaming)}
               disabled={isStreaming}
               onClick={newTask}
@@ -1866,6 +1868,7 @@ export function App(props: AppProps): ReactElement {
           <CredentialsContext.Provider value={credentials}>
           <SettingsPanel
             {...(requestedTab !== undefined ? { requestedTab } : {})}
+            transport={props.transport}
             profiles={profiles}
             activeProfileId={activeProfileId}
             onSave={saveProfile}
@@ -1990,6 +1993,7 @@ export function App(props: AppProps): ReactElement {
               props.transport.post({ type: 'setExpertColor', value } satisfies UiToHostMessage)
             }}
             offersOffice={offersOffice}
+            hostModels={hostModels}
             {...(themeChoice.choosesTheme ? { choosesTheme: true } : {})}
             {...(appearanceFrom !== undefined
               ? {
@@ -2402,15 +2406,16 @@ export function App(props: AppProps): ReactElement {
               lsp,
               onSaveLsp: (settings) => props.transport.post({ type: 'saveLsp', settings } satisfies UiToHostMessage),
               onRefreshLsp: () => props.transport.post({ type: 'requestLsp' } satisfies UiToHostMessage),
-              onSetOffice: (excel, outlook) => {
+              onSetOffice: (excel, outlook, teams) => {
                 setToolCatalogue((current) => ({
                   ...current,
-                  office: { ...current.office, excel, outlook },
+                  office: { ...current.office, excel, outlook, teams },
                 }))
                 props.transport.post({
                   type: 'setOffice',
                   excel,
                   outlook,
+                  teams,
                 } satisfies UiToHostMessage)
               },
             }}
@@ -2511,6 +2516,7 @@ export function App(props: AppProps): ReactElement {
                   toolsDir: settings.toolsDir,
                   venvPath: settings.venvPath,
                   interpreterPath: settings.interpreterPath,
+                  libraryFolders: settings.libraryFolders,
                   timeoutSeconds: settings.timeoutSeconds,
                   indexUrl: settings.indexUrl,
                   offline: settings.offline,
@@ -2523,6 +2529,7 @@ export function App(props: AppProps): ReactElement {
               ...(network !== undefined ? { settings: network } : { settings: undefined }),
               onSave: (settings) =>
                 props.transport.post({ type: 'saveNetwork', settings } satisfies UiToHostMessage),
+              onSaveProxy: (proxy) => props.transport.post({ type: 'saveProxy', ...proxy } satisfies UiToHostMessage),
             }}
           />
           </CredentialsContext.Provider>

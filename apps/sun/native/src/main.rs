@@ -242,6 +242,7 @@ fn main() {
         return;
     }
     let _ = std::fs::create_dir_all(&paths.root);
+    system::record_helper(&paths.root);
     let mut state = State::load(&paths);
     let mut moved = false;
     for old in paths.previous_roots() {
@@ -570,6 +571,8 @@ impl App {
                         "keepAwake": p.keep_awake,
                         "accent": p.accent,
                         "chats": p.chats,
+                        // The first chat's name once renamed. Missing here, a rename was saved and never shown.
+                        "firstChatName": p.first_chat_name,
                         "hasWorkspaceConfig": configs::has_workspace_config(&p.path),
                         "missing": !Path::new(&p.path).is_dir(),
                         // Never the token: which credential holds it, by name.
@@ -1053,11 +1056,22 @@ impl App {
                 send(webview, self.statuses());
             }
             Command::RenameChat { id, name } => {
-                let name = name.trim().to_string();
-                let chat = state::chat_of(&id).and_then(|c| c.parse::<u32>().ok());
-                if let (false, Some(chat)) = (name.is_empty(), chat) {
-                    if let Some(c) = self.state.project_mut(&id).and_then(|p| p.chats.iter_mut().find(|c| c.id == chat)) {
-                        c.name = name;
+                // Any chat, the first included - it is the codebase's own id, and its name is kept on the
+                // codebase. Kept short: it is a tab label, and a notification title.
+                let name: String = name.trim().chars().filter(|c| !c.is_control()).take(60).collect();
+                if !name.is_empty() {
+                    match state::chat_of(&id).map(|c| c.parse::<u32>().ok()) {
+                        None => {
+                            if let Some(p) = self.state.project_mut(&id) {
+                                p.first_chat_name = Some(name);
+                            }
+                        }
+                        Some(Some(chat)) => {
+                            if let Some(c) = self.state.project_mut(&id).and_then(|p| p.chats.iter_mut().find(|c| c.id == chat)) {
+                                c.name = name;
+                            }
+                        }
+                        Some(None) => {}
                     }
                     self.state.save(&self.paths);
                     self.push_projects(webview);
@@ -1148,6 +1162,7 @@ impl App {
             last_used: state::now_millis(),
             accent: None,
             chats: Vec::new(),
+            first_chat_name: None,
             hub: None,
         });
         self.state.save(&self.paths);
@@ -1207,6 +1222,7 @@ impl App {
             last_used: state::now_millis(),
             accent: None,
             chats: Vec::new(),
+            first_chat_name: None,
             hub: Some(settings),
         });
         self.state.save(&self.paths);
@@ -1350,7 +1366,7 @@ impl App {
                 .unwrap_or_default(),
             chat_label: match state::chat_of(id) {
                 Some(chat) => project.chats.iter().find(|c| c.id.to_string() == chat).map(|c| c.name.clone()).unwrap_or_else(|| format!("Chat {chat}")),
-                None => "Chat 1".to_string(),
+                None => project.first_chat_name.clone().unwrap_or_else(|| "Chat 1".to_string()),
             },
             // Each other hub codebase's settings, written and its token slot pointed exactly as its own
             // launch does, so this codebase can browse that hub. A failure costs that one hub only.
@@ -1817,6 +1833,33 @@ impl App {
 #[cfg(test)]
 mod command_tests {
     use super::*;
+
+    /// The page sees a codebase only through `project_views`, which is written out field by field - so a
+    /// field added to `Project` reaches the page only if it is added there too. `first_chat_name` was not:
+    /// renaming the first chat was saved and never shown. Every saved field must be sent, or listed here.
+    #[test]
+    fn every_saved_codebase_field_reaches_the_page() {
+        let main = include_str!("main.rs");
+        let start = main.find("fn project_views").unwrap();
+        let body = &main[start..start + main[start..].find("fn push_projects").unwrap()];
+        let state = include_str!("state.rs");
+        let s = state.find("pub struct Project {").unwrap();
+        let fields = &state[s..s + state[s..].find("\n}").unwrap()];
+        // Not for the page: when it was last opened is Rust's own bookkeeping.
+        let not_sent = ["last_used"];
+        for line in fields.lines().map(str::trim).filter(|l| l.starts_with("pub ") && !l.contains("struct ")) {
+            let name = line.trim_start_matches("pub ").split(':').next().unwrap();
+            if not_sent.contains(&name) {
+                continue;
+            }
+            let camel: String = name
+                .split('_')
+                .enumerate()
+                .map(|(i, part)| if i == 0 { part.to_string() } else { part[..1].to_uppercase() + &part[1..] })
+                .collect();
+            assert!(body.contains(&format!("\"{camel}\"")), "Project.{name} is saved but never sent to the page as \"{camel}\"");
+        }
+    }
 
     /// The page sends camelCase; a struct variant's fields are not renamed by the enum's own
     /// `rename_all`, so each multi-word variant carries its own. A mismatch is a save that does nothing.

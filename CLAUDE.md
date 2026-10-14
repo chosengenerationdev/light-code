@@ -61,7 +61,13 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 1. **`packages/core` never imports `vscode`.** Enforced by `no-restricted-imports`.
 2. **All outbound network traffic goes through the single `HttpClient` in core.**
    `fetch`, `axios`, `undici`, and `node:http`/`node:https` are banned everywhere else.
-   Enforced by `no-restricted-imports`.
+   Enforced by `no-restricted-imports`. **One recorded exception (0.150.0):** `http_request` with
+   `auth: negotiate` goes through Windows PowerShell's .NET HttpClient (`platform/node/negotiateHttp.ts`),
+   because Kerberos/NTLM needs SSPI, which Node does not have. **Second recorded exception (0.158.0, asked
+   for by the user):** the usage dashboard reads the *company directory* (who a login name is) with Windows'
+   own LDAP client - the Rust helper's `directory.rs` (wldap32), **never PowerShell since 0.161.0** -
+   bound as the signed-in user to this machine's own domain, search only, eight fields, only while usage
+   collection is on. Nothing else may follow either out (§12af, §12ag).
 3. **No default endpoints.** A fresh install contacts nothing. Every URL is user-supplied.
 4. **No telemetry, no update checks, no remote assets.** All webview assets are bundled
    locally. CI fails if built output contains an absolute external URL.
@@ -103,8 +109,9 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
 > Light Code makes no network connection the user has not configured. It ships with zero
 > default endpoints, no telemetry, no update checks, and no remote assets. The only hosts
 > it contacts are the model gateway, MCP servers, and — each only when the user configures and
-> switches it on — the vector store and embedding endpoint, S3 buckets, JupyterHub servers (Fire Code), and Confluence, Jira and Bitbucket sites
-> named in config. Code that Light Code executes on the user's
+> switches it on — the vector store and embedding endpoint, S3 buckets, the shared usage store (a folder, bucket or vector store), JupyterHub servers (Fire Code), and Confluence, Jira and Bitbucket sites
+> named in config — plus, through `http_request`, hosts the user names in the conversation, each request
+> approved. Code that Light Code executes on the user's
 > instruction — shell commands, Python tools, MCP servers — is outside this boundary and
 > governed by the user's environment.
 
@@ -408,6 +415,39 @@ Three wire adapters, one interface:
 - **OpenAI-compatible** — DeepSeek is a preset over this (base URL + label).
 - **Anthropic Messages** — built in Phase 7.
 - **Gemini `generateContent`** — built in Phase 7.
+- **`vscode-lm` — GitHub Copilot from VS Code** (0.162.0), which is not a wire of ours at all; see below.
+
+### GitHub Copilot through VS Code (0.162.0)
+
+Asked for: "if it is already configured in VS Code, user should be able to re-use it easily for light
+code or fire code". `providers/hostModels.ts` holds the reasoning; the shape:
+
+- **VS Code's Language Model API, never Copilot's token.** `vscode.lm` makes the request with Copilot's
+  own sign-in after a one-time consent prompt; Light Code sees no token and opens no connection, so
+  invariants 2 and 3 are untouched (the egress is VS Code's). Reading Copilot's GitHub token and calling
+  GitHub's Copilot servers directly was **refused**: unofficial, against GitHub's terms for other clients,
+  and the shape of thing a managed machine alerts on. Do not add it.
+- **One interface, plain JSON.** `HostLanguageModels` (`listModels`, `chat` yielding `StreamChunk`s) over
+  our own `ChatMessage`s; `HostServices.languageModels` supplies it and `createChatProvider` takes it as a
+  last argument. Model lists, the reported window (Copilot's `maxInputTokens`) and Test Connection route
+  through `listModelsFor`/`testHostModels` in the bridge. The profile stores `baseUrl:
+  vscode://language-models`, a label the schema accepts and nothing ever fetches.
+- **VS Code side** (`apps/vscode/src/platform/languageModels.ts`): the API is declared locally and found
+  at run time - **the 1.84 floor is not raised for it**; without tool calling (about 1.95) the preset is
+  simply not offered. No system role exists, so the system prompt is the first user message,
+  byte-identical every turn; neighbours of one role are merged. Tool schemas go through
+  `toPortableParameters` (Gemini's strict pruning), because the model behind Copilot is the user's choice.
+- **Fire Code, the Node host and JetBrains reach it through a relay** (`platform/node/lmRelay.ts`, the
+  user's choice over "VS Code only"), so it works only while a VS Code window with the extension is
+  open, and says exactly that otherwise. Every window serves a random pipe and writes `{pipe, token}` to
+  `%LOCALAPPDATA%\light-code\lm-relay\<pid>.json`; a request without that token gets nothing, compared in
+  constant time - so another Windows user cannot use it whatever the pipe's ACL. Same-user processes can,
+  as with everything here (§3). A dead window's file is removed when a client fails to connect. Not on
+  `--server`: one person's Copilot would answer every user.
+- The preset is offered only where `hostCapabilities().hostModels` is true; the form then hides the URL,
+  key, auth and thinking fields, and fetches the model list at once. `lmRelay.test.ts` drives the real pipe.
+- **Not verified against a live Copilot** - the conversion is tested against fake part classes and the
+  relay against a fake model; the consent prompt and real tool calling are the first things to check.
 
 `providers/factory.ts` picks the adapter from `profile.wireFormat`. Because auth is a
 separate axis, that is a one-line switch and mutual TLS composes with Anthropic exactly as
@@ -956,7 +996,20 @@ directly, and opt-in: `office.excel` and `office.outlook`, both off, in Settings
   - **Deleting the last sheet is refused here rather than left to Excel.** Excel refuses too — in a
     dialog, which with alerts suppressed means the call does nothing and reports success.
 
-  **Not verified against real Excel.** The worker half is pinned by reading `worker.ps1`, as
+  - **A DFS path is used as written** (0.153.0, reported: DFS share "access denied" for its owner while a
+  NAS share worked). `realpath` answers a DFS path with the target server's, and every tool - the Rust
+  helper too, which is handed the same path - opened that target directly. `asWrittenWhenRedirected` in
+  `fs/confine.ts` keeps the written path when resolution lands on a *different UNC server or share*, or
+  when a mapped network drive letter resolved to UNC; roots are compared the same way. A local path and
+  a hop within one share are still followed, so a workspace symlink is judged by where it lands.
+  `confineDfs.test.ts` drives the shipped function with the path pairs Windows produces; **not verified
+  against a real DFS namespace**.
+- **`grep_files`** (fire-fs `search`, 0.153.0): content search across several roots or shares at once,
+  name/extension/date filters first, UTF-16 decoded, and **every unreadable path with Windows' reason**
+  (`WalkOutcome.error_samples`, also in `find_files`) - a count alone hid what was denied. Advertised,
+  not offloaded: search is core. `search_files` (ripgrep) stays the workspace search.
+
+**Not verified against real Excel.** The worker half is pinned by reading `worker.ps1`, as
   `officeTrace.test.ts` does, and the tool half by a fake bridge. Creating, saving and deleting a
   sheet against a live Excel is the first thing to check.
 
@@ -1828,11 +1881,49 @@ panel**. Settings → Atlassian replaces Settings → Tools → Confluence.
   field change, and says in advance when a requested status move does not exist from the current
   status. A comment or move that fails *after* the fields were saved is reported part by part, not
   as a failure of the whole — the edit happened.
-- **Bitbucket: four tools, and no approve, merge or decline.** Those are a reviewer's decision
+- **Bitbucket: five tools, and no approve or decline.** Those are a reviewer's decision
   about somebody's work, under the user's name; an assistant able to approve would make the review
-  a formality. Commenting is its contribution. `atlassian.test.ts` asserts the schema has no such
-  field. Project and repo are checked as path segments and file paths refuse `..`, because both
+  a formality. Commenting is its contribution. `atlassian.test.ts` asserts neither schema has such a
+  field. **Merge was in this list until 0.147.0, and was reversed by the user** ("once it is approved,
+  merge to master and tag"). `bitbucket_merge_pull_request` keeps the reasoning true by carrying out a
+  review rather than replacing it: `mergeRefusal` requires an APPROVED reviewer, no NEEDS_WORK, no
+  conflicts and Bitbucket's own `canMerge`, re-checked in `execute` and sent with the checked
+  `version` (a changed PR is a 409). `command` group, in `ALWAYS_ASK_TOOLS` and
+  `NEVER_AVAILABLE_TO_SCHEDULES`. A failed tag after a successful merge is reported as that alone.
+  Tags try `/rest/api/1.0/.../tags` then `/rest/git/1.0/.../tags` (older servers); `isSafeTagName`
+  checks git's ref rules since the name is model-supplied. **Approve and decline stay out.**
+  Project and repo are checked as path segments and file paths refuse `..`, because both
   arrive from the model and are interpolated into a URL carrying the token.
+- **Bitbucket files are read through REST `browse`, never the web `/raw/` URL** (0.146.0, reported:
+  pull requests listed fine, files went to a SAML SSO page, more token permission changed nothing).
+  A PAT is accepted on `/rest/` only; behind SAML every web URL is redirected to the identity
+  provider and the redirect is followed. `AtlassianRest.json` now names an HTML body as a single
+  sign-on login page rather than failing in `JSON.parse`. **Keep every Atlassian call under `/rest/`.**
+- **Teams messages are opened, never sent** (`office/teams.ts`, `teams_open_chat`, `office.teams`).
+  Asked for with Graph ruled out. Nothing local can send: new Teams has no automation interface and
+  synthesised keystrokes can land in the wrong window. The `msteams:/l/chat/0/0?users=&message=` link,
+  handed to `explorer.exe` as an argument (no shell), opens the installed client with the compose box
+  filled, under the user's own account; they press Send. Light Code opens no connection. In
+  `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES`; links over ~2000 characters are refused.
+  **`send: true` presses Enter** (asked for directly after being told the risks; same release). Never a
+  blind keystroke: `enterScript` (fixed PowerShell, no model text, `-EncodedCommand`) waits up to 20s
+  for an `ms-teams`/`teams` window to be foreground and unchanged for 2.5s, re-checks the same window
+  immediately before `keybd_event(VK_RETURN)`, and otherwise presses nothing and reports NOT sent. The
+  preview says AND SEND IT. Verified against real PowerShell 5.1 in dry mode (it saw `code` in front
+  and refused). `SendKeys` stays banned by test. It cannot confirm delivery and says so.
+  **Sending is the default reading of "message X"** (the user, next day: "it should just send it"). The
+  description tells the model `send: true` whenever asked to message/tell/inform someone, and to omit
+  it only for a draft. The approval prompt is unchanged and still says AND SEND IT.
+- **Review and Variables tabs are server-only** (0.121.0, reported from Fire Code: "lot of tabs I don't
+  use"). The host answers `requestReviews`/`requestVariables` only when `roles.shared`; the panel shows
+  a tab once answered, so a local run (Fire Code always, `light-code` without `--server`) has neither,
+  like the VS Code extension. Saved user variables still apply; Fire Code's Environment replaces them.
+  `localTabs.test.ts` drives a running server.
+- **"Write commit message" on VS Code's Source Control title bar** (`apps/vscode/src/commitMessage.ts`)
+  carries Light Code's own mark in light and dark variants (`resources/commit-message-*.svg`), never `$(sparkle)` - that is Copilot's, and the user asked for ours to be told apart. It calls `ChatBridge.writeCommitMessage`, the same function Fire Code's "Write with agent" uses, so the
+  two cannot describe a change differently. VS Code commits what is staged when anything is, so that is
+  what it describes (`preferStaged`); Fire Code adds everything, so it describes everything. Reached
+  through the built-in git extension's API; a message already typed is replaced only on confirmation.
 - `jira` and `bitbucket` are **user-scope only** (invariant 5) and both writers are in
   `ALWAYS_ASK_TOOLS`. The share section became **Atlassian**, covering all three blocks and naming
   each token as a credential the importer must enter.
@@ -2234,7 +2325,14 @@ The runtime key is the codebase id for the first chat and `<id>~<n>` for the oth
 resolves either, so most of Fire Code needed no change. Extra chats are saved on the project; each keeps its
 history in `projects/<id>/chats/<n>`; config, secrets and the vault key are the codebase's. The
 sidebar rolls a codebase's chats up (liveliest phase, most urgent agent state); notifications name the
-chat. Closing a chat keeps its folder. Ctrl+T / Ctrl+W are forwarded from the pane like Fire Code's other
+chat. Closing a chat keeps its folder. **Every chat can be renamed** (Fire Code 0.29.0): double-click or
+right-click a tab. The first chat is the codebase's own id and has no `chats` entry, so its name lives in
+`Project.first_chat_name` (absent = "Chat 1", so older state files load unchanged); it could not be renamed
+before, and the other chats' double-click was mentioned nowhere on screen. **The double-click never worked
+either** (reported, 0.30.0): each click re-selected the tab, and selecting moves focus into the chat on the
+next frame, so the rename box lost focus - which saves and closes it - before anything was typed. Clicking the
+active tab does nothing now, the tabs are not redrawn while a rename is open, and a blur in its first 300 ms
+is taken back. Found by driving the real `shell.js` in jsdom, old and new, with a click-click-dblclick. Ctrl+T / Ctrl+W are forwarded from the pane like Fire Code's other
 shortcuts. **Verified by running it** with three chats on one codebase.
 
 
@@ -2510,6 +2608,223 @@ Code, `hub_run` always failing and a woken chat opening at its first message.
 **Not verified against a live hub or gateway**: hub git against fakes and generated code only; the
 retry and stall paths against scripted providers.
 
+## 12af. Analysis, APIs and the quants' libraries (0.150.0, Fire Code 0.16.0)
+
+Asked for together, with the user's decisions recorded here because each one shaped the design.
+
+- **The Windows VSIX carries a slim Rust helper; Fire Code's full one wins when installed** (0.161.0, partly
+  reversing "use Fire Code's, this way we avoid big packages"). The reason: the PowerShell directory lookup
+  raised a security alert on a managed machine without Fire Code, while machines using the Rust helper for
+  the same lookup raised none - the evidence was the process, not the LDAP query. Polars is a Cargo feature
+  (`dataframe`, default on) and ~40 MB of the 45 MB helper; `pnpm build:helper` in apps/vscode builds
+  `fire-fs` with `--no-default-features` into `apps/sun/native/target/slim` (5.6 MB), `esbuild.mjs` copies
+  it to `dist/bin/fire-fs.exe` for win32 and universal targets, and the VSIX smoke test asks it for
+  `capabilities` (must have `directory`, must not have `dataframe`). `hostServices.ts` prefers Fire Code's
+  helper, else the bundled one. The plain Node host still uses only Fire Code's.
+  Originally: VS Code uses Fire Code's Rust helper when Fire Code is installed.
+  Fire Code writes `<data>/helper.json` (`system::record_helper`) on every start; `findFireCodeHelper`
+  (`platform/node/fireHelper.ts`) reads it, then tries npm's default global folder. The bridge asks the
+  helper's `capabilities` once and offers only tools whose operation it has (`FAST_FS_TOOL_OPS`), so an
+  older Fire Code never offers a tool it would fail. The plain Node host does the same, except `--server`.
+  The built-in tools were deliberately **not** replaced: search already runs on ripgrep, read/write are
+  disk-bound, and the edit path is the most tested code here.
+- **`python_library`** (`tools/pythonLibrary.ts`, `pypool.rs`, `pypool_worker.py`): the user's concern was
+  the GIL. N Python *processes*, each importing the library once, fed from a shared queue by Rust; results
+  in order; a call past `timeoutSec` kills and restarts its worker. The worker's answers go to a dup of
+  fd 1, and fd 1 itself is pointed at stderr, so a library printing from C cannot corrupt the stream.
+  Environment from `PythonManager.libraryLaunch` via `childEnv(entries)` - still the one owner
+  (`env.test.ts`). Folders from the request or `python.libraryFolders`; a failed import tells the model
+  to **ask** for the folder, never search. `command` group: it runs the library's code.
+  Lists of lists render as tables (`renderValue`) - asked for, since pricing functions return grids.
+- **`http_request`** (`tools/http.ts`). A change to the boundary, fenced three ways: the host must appear
+  in `ToolExecutionContext.userText` (user messages incl. attachments, never tool output or the
+  tool-image labels); every request asks (`command`); credentials only as `${secret:NAME}`, shown by name.
+  A 202 `Location` is held to the same host rule. Provider-profile auth reuses the profile's strategy
+  (Apigee token, refresh, one 401 retry). Negotiate is the invariant-2 exception above; it trusts the
+  Windows store and takes a client certificate only as .pfx, and says so rather than ignoring a CA file.
+  **The user chose "hosts I name in the chat" over a settings allowlist** - keep it that way.
+  **Proxy (0.151.0):** Settings → Network → "Proxy for API calls", `proxy.{http,https,noProxy}`, user-scope
+  only. Typed as `http://user:password@host:port` (asked for); `splitProxyLogin` moves the password to
+  `proxy:<kind>:password` and config keeps the URL with the user name only; saving again without a
+  password keeps it unless the user changed. Applies to `http_request` only, both transports
+  (`HttpRequestOptions.proxy` → undici ProxyAgent with Proxy-Authorization; negotiate → .NET WebProxy +
+  NetworkCredential, which answers a 407 challenge). Both verified against a real authenticating proxy.
+  **.NET never proxies a loopback address** - test with a made-up host the proxy resolves. A refused save
+  comes back as `proxyError` on the panel, never in the chat.
+- **`dataframe`** (`dataframe.rs`, Polars SQL). **Forgiving reading was an explicit requirement** and is
+  done without `ignore_errors`, which silently nulls what it cannot parse: every cell is text first, and a
+  column takes a type only when every non-empty value converts; otherwise it stays text and a note names
+  examples. Pivot is generated SQL (conditional aggregation), and an empty combination is NULL, not
+  Polars' 0-sum. **Sources (0.154.0)**: besides files and the clipboard, `rows` (records the agent already
+  has - another tool's results - every key a column, first-seen order, nested values as JSON text),
+  `sqlite` (`sqlite_read::read_text_rows`: the same never-create/never-lock opening, read-only check,
+  1M-row cap) and `.json`/`.jsonl` files (a list, a `data`/`items`/`results`/... wrapper, or JSON Lines).
+  All arrive as text and take the same forgiving typing, so a REAL column of whole numbers reads as int.
+  **`result` (0.155.0)**: a truncated tool result's handle; `jsonRecords` (agent/truncate.ts, shared with
+  the truncation notice, which names the handle when dataframe exists) reads the spilled file into `rows`,
+  so a large payload never round-trips through the model. **`steps`**: named queries registered as tables
+  before `sql` - because Polars 0.49 SQL cannot alias a WITH step (`FROM cte p` fails: "no table or struct
+  column named 'p'"); plain, left and subquery-alias joins work. That error now carries the hint.
+  **Version pins, all for Rust 1.86:** `polars =0.49` (0.52+ uses let-chains, 0.55 pulls
+  sysinfo 0.39 = Rust 1.95), `psm 0.1.25` in the lock (0.1.26+ pulls `ar_archive_writer` 0.5, let-chains).
+  Re-check these before touching the toolchain.
+  **Release profile is thin LTO, 16 codegen units since 0.16.0**: full LTO with Polars took 45 minutes.
+- **Integration tools move into the documentation index when one exists** (0.152.0, `tools/offload.ts`).
+  Measured: ~38,800 tokens of tool definitions per request with everything on. With the dispatcher on
+  **and** `docs` retrieval in use, every tool in `OFFLOAD_FAMILIES` (Excel, Outlook/mail, Confluence, Jira,
+  Bitbucket, Jenkins, AutoSys, hub, S3, http/Teams, data, Python, search indexes, rare skill/schedule
+  tools) is re-registered `dispatchOnly`, and `offloadedCatalogue` puts every hidden tool's *name* in the
+  prompt with "call `search_docs` before using one or planning a job in that area". ~11,300 after.
+  **Without an index nothing changes** - the user's rule, because a name match is not reliable enough to
+  hide a tool behind. The indexer always includes offloadable tools (`registry.isDispatchOnly || isOffloadable`):
+  they are hidden exactly when the index is in use, so an index without them would send the agent to look
+  up documentation that is not there. `search_docs` still falls back to a lexical match over the live
+  registry if the index is empty. **Every offloading turn schedules `scheduleDocsReindex`** (0.152.1): nothing
+  else reindexed when an index was first configured or a feature was switched on, so hidden tools were
+  found only by name until an unrelated trigger. Debounced, background, and free when the fingerprint
+  matches. `offload.test.ts` holds the always-advertised block under 12,000 tokens
+  with everything on, and fails if an `excel_`/`jira_`/... tool is added outside a family.
+- **The handbook has a `rust-tools` topic** listing every helper tool and where it is available (Fire
+  Code; VS Code / plain Node host when Fire Code is installed; never `--server`). The `overview` tab list
+  is checked against the real tabs by hand - keep it current when a tab is added or becomes server-only.
+
+## 12ag. The usage dashboard (Settings → Usage, 0.156.0)
+
+Asked for: a team and personal dashboard of which skills are used most and who contributes skills and
+tools, over relative or custom ranges, with actions (delete unused) and problems (duplicates), stored in
+OpenSearch, S3, Qdrant or a shared path at the user's choice. And, from the same conversation: **collect
+only when a suitable shared store is configured**, and **no dashboard without collection**.
+
+- **Events are names and times, never arguments** (`usage/events.ts`): who, when, project, skill or tool
+  name, the author on its label, failed or not, duration. A skill is "used" when `read_file` reads its
+  file or `use_skill_file` copies one; `always` skills are not counted (they are in every prompt).
+  `recordUsage` is called from the bridge's `onToolResult`; `call_tool` counts as the tool dispatched to.
+  `usageWiring.test.ts` reads `bridge.ts` and fails if the pushes ever carry arguments.
+- **Not telemetry, and why that holds**: written only to the user's own configured folder, bucket or
+  vector store (automatic since 0.157.0 - see below) - invariant 4 is about contacting anybody else.
+  `usage` is **user-scope only** (a repository could otherwise collect everybody's usage) and **shared**
+  (section "Usage dashboard": the team must all point at one store).
+- **One shard per person, day and install** (`usage/store.ts`): a whole day rewritten each push, so a
+  push is idempotent and a half-finished one is repaired by the next; per install because several windows
+  (or Fire Code chats) of one person each keep their own local queue and would overwrite each other's day.
+  Folder `<root>/<user>/<day>__<instance>.jsonl`; S3 `<prefix>usage/...` (no deletes - `s3/remove.ts`
+  stays the only destructive caller); vector stores one document per shard with a 2-d token vector, read
+  back with `scan`. The local `usage-events.jsonl` is a queue, pruned 14 days after a push; a changed store
+  resets the mark so the new store is refilled. A save writes a test shard before it is kept.
+- **`computeDashboard` is pure** (`usage/dashboard.ts`), so every number is pinned from fixtures:
+  totals vs the previous period of equal length, timeline (hour/day/week/month by span), weekday×hour heat
+  map in the viewer's zone, ranked skills/tools with sparklines, rising skills, people, contributors
+  (inventory authors plus `a` on events, so colleagues' work counts), your impact, unused, recent, problems.
+  **"Unused" is judged on the whole team's events whatever the scope** - "unused by me" is not a reason to
+  delete. **An identical copy in a bucket mirror is not a duplicate** (§12r); same name/different content,
+  same content/different names and near-identical names are.
+- **The tab is self-contained** (`settings/UsageTab.tsx`, the `stagedFiles` pattern): it posts and listens
+  on the transport itself rather than threading a dashboard through App's props. Delete reuses
+  `deleteSkillFile`/`deletePythonTool`, which already refuse anything outside the writable folder, and
+  takes two clicks; shared and bucket copies are only opened. On the shared Node host `saveUsageSettings`
+  is admin-only by the `save*` rule.
+- **Not verified against a live shared folder, bucket or cluster** - against a temp folder, a fake S3 and a
+  fake vector writer.
+
+### Automatic, backfilled, and about people (0.157.0)
+
+Three follow-ups the user asked for in the same conversation, each reversing something above:
+
+- **Collection starts by itself** ("should not wait for user to enable it") wherever a store exists:
+  OpenSearch first, then any vector store, then a writable team bucket (`usage/auto.ts`, the user's own
+  order for the first two). `usage.store` still wins; `usage.enabled: false` is now an *opt-out*. A folder
+  is never guessed. This is still not telemetry: the stores are ones the user configured for the team.
+  `cachedUsageChoice` is recomputed on every `loadSettings`; the first push is scheduled 15s after a
+  session first sees a store.
+- **The initial statistics come from saved conversations** (`usage/backfill.ts`, `usage_store.rs`
+  `backfill`), once per install (`usage-backfill.json`), tasks last saved before it ran, calls spread
+  between a task's created and updated times; no failures (a transcript does not record them). Fire Code's
+  helper does it in parallel, and reads/writes shared-folder shards (`usage` op: `write`, `writeProfile`,
+  `read` with every unreadable file named); Node otherwise, same layout. **The helper never does S3 or
+  vector stores** - network stays in the one HttpClient (invariant 2). The Rust test fixture and
+  `automatic.test.ts`'s are the same task, so the two implementations cannot drift unseen.
+- **Profiles** (`usage/profileTool.ts`): the host never calls a user-info tool itself - that would run an
+  MCP or Python tool with no approval. The prompt asks the *agent* to call it once (named by
+  `usage.userInfoTool`, else found by name: `whoami`, `user_info`, `employee_lookup`...), then
+  `record_user_profile` (`edit`, preview shows the literal fields and destination; "never guess a field").
+  Only while collecting and while nothing was recorded in 30 days, so the prompt section is absent on
+  every other turn. Profiles are `_profiles/<user>.json` beside the shards; the dashboard shows names and
+  a By-team table.
+
+### The company directory first, and a leaderboard (0.158.0)
+
+Asked for: the built-in Windows lookup as the *primary* source of who people are, a skill or Python tool
+as the secondary, authors enriched in the background, Rust when Fire Code is there; and the leaderboard
+changes offered earlier.
+
+- **No PowerShell, ever, and only the signed-in user in the background** (0.161.0). The PowerShell
+  fallback (`-EncodedCommand`, DirectorySearcher) raised a security alert on a managed machine; it is
+  deleted, and `directory.test.ts` fails if `directory.ts` spawns anything. With no helper the directory is
+  unused. After a push only this user is looked up; authors and colleagues only when the dashboard opens -
+  batched lookups for everyone, unasked, read as enumeration to a domain's monitoring.
+- **`usage/directory.ts` / `directory.rs`**: one search per twenty names,
+  `(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=)(userPrincipalName=)(mail=)(displayName=)))`,
+  names RFC 4515-escaped (both implementations, same tests), PowerShell names on stdin and the script
+  ASCII and fixed (a test pins that it has no write verbs). Not on a domain - this development machine -
+  answers `available: false` with Windows' reason; **a real domain's answer has never been seen** and is
+  simulated in `directory.test.ts` in the script's exact output shape.
+- **Background** (`enrichFromDirectory`): after every push and when the dashboard opens (bounded to 8s),
+  for this user, every author label and everyone in the events; cached in `usage-directory.json` (found
+  30 days, not listed 7, unreachable 1). This user's entry becomes their profile in the store, which is
+  what keeps the agent from being asked. Directory fields win; a tool-recorded profile fills gaps.
+- **The agent prompt is now the fallback**: only after the directory has answered for this user
+  (`directoryChecked`), and a skill named like a lookup (`who-am-i`, `user-info`) qualifies when no tool
+  does - the agent reads and follows it with its own tools. A skill cannot authorise `http_request` to a
+  host (only the user's own words can), which is why the directory and Python tools matter more.
+- **Leaderboard**: `Contributor.added`/`updated` (labels dated in range: version 1 is new) and `impact`
+  (uses × people reached); the panel ranks by written, impact or this period (`rankContributors`).
+  Profiles are looked up exact then lower-case, because the directory is asked in lower case.
+
+### Several sessions on one storage folder, without locks (0.159.0)
+
+Asked: will several sessions race? Several VS Code windows share one storage folder, so in 0.156-0.158
+they did - a shared queue file rewritten by clean-up while another window appended (lost events), a
+time-based "pushed through" mark one window could move past another's event (lost), and the past-chat
+import started twice (duplicated). Asked to fix it "in a robust way that will work for sure", so nothing
+relies on a lock that a crashed window could leave held:
+
+- **Each session appends only to its own files**: `usage/queue/<day>__<session>.jsonl`. No file has two
+  writers. The import writes fixed names (`<day>__backfill.jsonl`), replaced not appended; 0.157's single
+  file is moved to `<day>__legacy.jsonl` by deterministic names, safe if two windows do it together.
+- **A day is pushed by its signature** (its files' names and sizes), recorded in `usage/pushed.json`,
+  written whole and merged. A changed day is pushed again; a lost update to the record only re-pushes.
+- **Every pusher checks its own write** (`pushUsage`): signature before reading, write, signature after.
+  Unchanged: recorded. Changed: written again next round **whatever the record says** - the bug
+  `concurrency.test.ts` found was a late, older write landing over a session that had already recorded the
+  day, and the record alone left the older version in the store. Still changing after every round: recorded
+  as *not* pushed. A session's first push re-writes the last two days, repairing a write a closed window
+  never checked.
+- **Clean-up deletes whole files** of days older than 14 days whose signature is the one pushed - never a
+  rewrite. The import's cut-off is claimed with an atomic `wx` create, so every session computes the same
+  events. Profile and directory-cache files are written whole (random temp names - the process id
+  collided when one session wrote a day twice, the other bug the tests found); the directory cache is
+  merged before writing.
+- **`usage_stats`** (`usage/statsTool.ts`, asked for: "tools to access this statistics data, so that user can
+  ask agent to provide more customized metrics"): summary / events / inventory / people. It and the
+  dashboard read through one loader, `gatherUsage` in the bridge, so they cannot disagree. Events come back
+  as JSON records, so a large answer carries the truncation note's `dataframe` `result` handle and custom
+  metrics are SQL over rows nobody retyped. Advertised when collecting (not dispatch-only - a usage
+  question does not look like a reason to search for a tool), offloaded with its own family when an
+  index exists. Read group.
+- **Monthly roll-up** (`usage/rollup.ts`, 0.160.0, approved by the user *including deletion*): this
+  **reverses** "nothing automatic deletes from a shared store" for one case only - an install's own usage
+  day shards, after a month shard holding them was written **and read back complete**. Months roll up three
+  days after they end and only when the install's queue has nothing unsent for them; once a day per session.
+  Readers skip an install's day shards for a month once its month shard exists (`selectShards`; Rust
+  `usage_store.rs` the same), so the gap between write and delete, or a roll-up that stopped half-way,
+  counts nothing twice. A late day of a rolled month replaces that day inside the month (`pushUsage`,
+  `usage/rolled.json`). **Days are read before the month**: the test of two sessions rolling up at once
+  caught the other order writing an empty month over a good one. `S3ShardStore.removeShard` is the second
+  caller of `S3Client.remove`; vector stores use `deleteByPaths`. `rollup.test.ts` runs every promise on
+  all three kinds of store.
+- `concurrency.test.ts` runs three sessions against one folder at once, holds a write to land last, and
+  forces endless races; it was run repeatedly to be sure it is not passing by luck.
+
 ## 13. Python interop and skills (phase 9)
 
 Two distinct mechanisms. **Do not share an implementation** — a skill is text injected into
@@ -2721,7 +3036,8 @@ decision that never reaches its owner is invisible to every test of the owner.
 the honest answer to "how do I remove this skill" had been "in the AWS console". Four rules hold
 it, and none is incidental:
 
-- **`S3Client.remove` is the only destructive call in `s3/`, and `remove.ts` is its only caller.**
+- **`S3Client.remove` is the only destructive call in `s3/`, and `remove.ts` is its only caller** - with one
+  later exception, the usage roll-up deleting an install's own day shards after verifying their month (§12ag).
   Everything else is GET and PUT, which is what made it structurally impossible to lose a
   colleague's file. That property is gone, so what replaces it is that nothing *automatic* can
   reach the call: no sync, no refresh, no reconcile. A person presses a button.
@@ -3163,7 +3479,9 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   then runs the job as it always has, overdue included. Kept awake while a run's claim file exists or
   another run is within ten minutes; otherwise back to sleep two idle minutes after a schedule wake.
   Extra chats get `--no-schedules` (`HostServices.runsSchedules: false`), because every chat is its
-  own host and each ran the same job. **Verified live**: woken before due, ran on time, slept again.
+  own host and each ran the same job. **Their Schedules tab says so** (`SchedulerStatus.elsewhere`, 0.161.0):
+  it used to say "not running - nothing will fire", and its Restart started a timer there, overriding the
+  flag - reported as "the scheduler was stopped and started after a restart". Restart is a no-op there now. **Verified live**: woken before due, ran on time, slept again.
 - **Install copies files and nothing else.** No install scripts, no dependencies: the reason Electron
   fails at the office is its postinstall download. The package carries the exe, the host built from
   the same commit, rg.exe (`LIGHT_CODE_RIPGREP`, so `@vscode/ripgrep`'s GitHub download is never
@@ -3192,6 +3510,24 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   are filtered again. Measured: a 100 MB, 2-million-line log inspected in 0.37 s and searched in 0.24 s;
   1 million CSV rows filtered, grouped and summed in 1.0 s (process start included).
   `ignore` is pinned to 0.4.23: later releases use let-chains while still claiming an older Rust.
+- **SQLite in `fire-fs`** (`src/sqlite_read.rs`, op `sqlite`, tool `query_sqlite`; Fire Code 0.15.0). Asked for
+  with two hard rules, both enforced structurally. **Never creates**: the file must exist and start with
+  SQLite's signature (a zero-byte file is refused - SQLite would treat it as an empty database), it is
+  opened by URI with `mode=ro` and never `SQLITE_OPEN_CREATE`, and `SQLITE_LIMIT_ATTACHED` is 0 so ATTACH
+  cannot open or create a second file. `temp_store=MEMORY` so nothing is written anywhere.
+  **Never blocks**: a rollback-journal database is opened `immutable=1` (no locks at all), guarded by a
+  fingerprint (header change counter, size, mtime, hot-journal magic) before and after - retried, then
+  returned `consistent: false`, never silently. A WAL database with WAL data must be a normal read-only WAL
+  reader (immutable ignores the WAL and would miss commits); WAL readers never block writers.
+  `a_reader_here_never_stops_a_writer_committing` uses a writer with a zero busy timeout, and fails when
+  `immutable=1` is removed - checked. **No mmap**: on Windows a mapped file cannot be truncated, so a
+  vacuum by the owning application would fail.
+  Parallel: rowid ranges (4 per core), each on its own connection, filtering and grouping in SQLite and
+  merging in Rust. Three things cost the first version its speed, each measured on 5M rows: SQLite's
+  global memory-statistics mutex (`SQLITE_CONFIG_MEMSTATUS` 0 + `MULTITHREAD`, set once before init),
+  per-range temp B-trees in temp *files* (`temp_store=MEMORY`), and computing every aggregate slot when
+  only `sum` was asked. Result: 2.3-3.3x on heavy work (multi-column groups, text across every column),
+  ~1.1x on a light filtered count, which is bound by reading the file. `rusqlite` 0.40 `bundled`.
 - **Several chats per codebase** (0.4.0): tabs, each its own host on the same folder and settings,
   with stale-read refusal and per-file rollback - §12z.
 - **Not in Fire Code**: the debug-session tool and editor pickers, exactly as in the Node host.
@@ -3380,6 +3716,12 @@ Primary development platform. These are silent-failure sources, not preferences.
 - Prefer fewer, more general tools over many narrow ones — it directly reduces context cost
   and improves selection accuracy.
 - New platform-specific behaviour goes behind an interface (§4), not inline.
+- **A control that can be disabled says why on hover** (asked for by the user, 0.163.0). In
+  `packages/ui` write `{...disabledWhen([condition, 'reason'], …, { enabledTitle })}`
+  (`disabledWhen.ts`), one sentence per condition, first that holds wins;
+  `disabledReasons.test.ts` reads every `.tsx` and fails on a `disabled={…}` element with no `title`.
+  Fire Code's `shell.js` uses `why(node, reason | undefined)`, which remembers the control's own title.
+  A reason names what to do where it can ("Save a team pool name first (step 1)"), not just "disabled".
 - **Every change updates Light Code's own help and, when settings change, export/import.** The
   handbook (`help/topics.ts`) is what `light_code_help` repeats to users as fact, so a feature it does
   not describe — or describes as it used to be — is answered wrongly. Add the questions people would

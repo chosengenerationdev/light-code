@@ -49,11 +49,19 @@ import { buildAutoGuidance } from '../modes/autoGuidance.js'
 import { describeMigration, planMigration, runMigration } from '../migrate/folders.js'
 import { defaultPythonToolsDir, REGISTRY_FILE } from '../python/registry.js'
 import { detectCommandTools, resolveShell, type CommandToolset } from '../platform/node/shell.js'
+import { fastFsCapabilities } from '../platform/node/fireHelper.js'
+import { splitProxyLogin } from '../platform/proxy.js'
+import { createPythonLibraryTool } from '../tools/pythonLibrary.js'
+import { isOffloadable, offloadedCatalogue } from '../tools/offload.js'
+import { createHttpTool } from '../tools/http.js'
+import { negotiateRequest } from '../platform/node/negotiateHttp.js'
+import { CONTINUE_PROMPT } from '../agent/unfinished.js'
 import { searchMentions, type MentionIndex } from '../context/mentionSearch.js'
 import { siblingMention } from '../context/mentions.js'
 import { ChangeLedger, RecordedChanges } from '../checkpoints/changeLedger.js'
 import { pruneEvents, summariseSavings, type ExpertEvent } from '../expert/savings.js'
 import { OfficeBridge, officeSupported } from '../office/bridge.js'
+import { createTeamsOpenChatTool } from '../office/teams.js'
 import { buildTeamGuidance, DEFAULT_TEAM_GUIDANCE } from '../agents/guidance.js'
 import { describeDirectedRoles, findDirectedRoles } from '../agents/direct.js'
 import { PLAN_LIMIT } from '../agent/plan.js'
@@ -110,6 +118,7 @@ import {
   createBitbucketPullRequestsTool,
   createBitbucketReadFileTool,
   createBitbucketReadPullRequestTool,
+  createBitbucketMergePullRequestTool,
   createBitbucketWritePullRequestTool,
 } from '../atlassian/bitbucket.js'
 import { createJenkinsTools, JenkinsClient } from '../atlassian/jenkins.js'
@@ -202,6 +211,7 @@ import {
   attachMentions,
   buildSystemPrompt,
   CONTROL_TOOLS,
+  repeatsStreamedText,
   chartFromToolCall,
   diagramFromToolCall,
   consultationFromToolCall,
@@ -334,6 +344,9 @@ import {
   findMode,
   AUTO_MODE,
   listModels,
+  listHostModels,
+  testHostModels,
+  type ListModelsResult,
   mcpServersSchema,
   venvPythonCandidates,
   VENV_DIR_NAMES,
@@ -394,6 +407,20 @@ import { copyBookkeeping, copyIndex, hasDocuments, planIndexRenames, type IndexR
 import { walkFiles } from '../tools/nativeSearch.js'
 import { NodeTerminal } from '../platform/node/terminal.js'
 import { JsonTaskStore } from '../platform/node/taskStore.js'
+import { UsageLog, usageDay, usageInstanceId, writeFileAtomically, type UsageEvent } from '../usage/events.js'
+import type { ToolCall } from '../providers/types.js'
+import type { ToolResult } from '../tools/types.js'
+import { FolderShardStore, S3ShardStore, VectorShardStore, cleanProfile, shardSegment, type UsageHelper, type UsageProfile, type UsageShardStore } from '../usage/store.js'
+import { pushUsage } from '../usage/push.js'
+import { rollUpMonths } from '../usage/rollup.js'
+import { computeDashboard, type InventoryItem, type UsageScope } from '../usage/dashboard.js'
+import { chooseUsageStore, usageCollectionOn, type UsageStoreChoice } from '../usage/auto.js'
+import { backfillFromTasks, backfillOnce } from '../usage/backfill.js'
+import { createUsageStatsTool, type UsageData } from '../usage/statsTool.js'
+import { RECORD_USER_PROFILE, createRecordUserProfileTool, userInfoSkillCandidates, userInfoToolCandidates, userProfileGuidance } from '../usage/profileTool.js'
+import { lookupDirectory, profileFromPerson, type DirectoryPerson } from '../usage/directory.js'
+import { runFastFs } from '../tools/fastFs.js'
+import type { UsageConfig, UsageStoreConfig } from '../config/schema.js'
 
 /**
  * Secret keys are namespaced by profile so deleting a profile reliably deletes everything
@@ -541,6 +568,12 @@ export interface ChatBridge {
   schedulerHealth: () => { running: boolean; lastTickAt?: number; runningScheduleId?: string }
   /** Restarts the timer. Safe at any time; idempotent while it is healthy. */
   restartScheduler: () => void
+  /**
+   * A commit message for the repository at `repositoryRoot` (default: the workspace), describing
+   * what is staged when anything is and every change otherwise. Text for a person to read and
+   * edit - nothing is committed by it. Rejects with a sentence saying why when it cannot.
+   */
+  writeCommitMessage: (repositoryRoot?: string) => Promise<string>
   dispose: () => void
 }
 
@@ -552,6 +585,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   // is approved everywhere on this machine (approval lives in the folder's .registry.json).
   const mirrorRoot = services.mirrorRoot ?? storageDir
   const logger = new Logger({ level: 'debug', sink: services.logSink })
+  /*
+   * What the Rust helper answers, asked once. A host may be pointed at an installed Fire Code older than
+   * this build (the extension uses Fire Code's helper when it finds one), and a tool whose operation the
+   * helper lacks would only fail. Until the answer arrives every tool is offered.
+   */
+  let fastFsOps: ReadonlySet<string> | undefined
+  if (services.fastFs !== undefined) {
+    void fastFsCapabilities(services.fastFs).then((answer) => {
+      fastFsOps = answer?.ops ?? new Set()
+      logger.info(`Rust helper ${services.fastFs ?? ''}: ${answer === undefined ? 'did not answer; its tools are off' : `version ${answer.version ?? 'unknown'}, ${String(answer.ops.size)} operations`}`)
+    })
+  }
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
   const configManager = new ConfigManager(services.configStore, services.workspaceRoot)
@@ -795,6 +840,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * config each turn, so every writer reads the same answer — see `sharing/attribution.ts`.
    */
   let cachedAttribution: { author?: string | undefined; project?: string | undefined } = {}
+  /** The usage dashboard's settings and the store collection uses (automatic or chosen). */
+  let cachedUsage: UsageConfig | undefined
+  let cachedUsageChoice: UsageStoreChoice | undefined
+  let usageKicked = false
+  /** This session has re-written its recent days once; see `pushUsage`'s `recheck`. */
+  let usageRechecked = false
+  /** When this session last rolled finished months up; see `rollUpMonths`. */
+  let usageLastRollUp = 0
+  /** Whether this user's details were recorded in the last 30 days; see `profileFresh`. */
+  let cachedProfileFresh: boolean | undefined
+  /** The company directory has been asked about this user (found, not listed, or unreachable). */
+  let directoryChecked = false
+  /** Every tool name the last turn's registry held, for finding a user-info tool. */
+  let lastToolNames: string[] | undefined
   /** The default search scope from Settings -> Project; see `sharing/scope.ts`. */
   let cachedSearchScope: 'project' | 'author' | 'all' = 'project'
   /** The same for Python tools, reported so the tab can say where each landed. */
@@ -2617,7 +2676,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let cachedKeepAlive = false
   let cachedProgrammingProfileId: string | undefined
   /** Mirrors config, because the registry is built synchronously and cannot await a load. */
-  let cachedOffice: { excel?: boolean | undefined; outlook?: boolean | undefined } = {}
+  let cachedOffice: { excel?: boolean | undefined; outlook?: boolean | undefined; teams?: boolean | undefined } = {}
   /** The Atlassian blocks as last loaded, so the tool registry can decide without a file read. */
   let cachedConfluence: LightCodeConfig['confluence'] = undefined
   let cachedJira: LightCodeConfig['jira'] = undefined
@@ -2811,6 +2870,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
     cachedAttribution = { author: indexOwner(config), project: projectName(config, workspaceRoot) }
+    cachedUsage = config.usage
+    cachedUsageChoice = chooseUsageStore(config, cachedS3.targets)
+    /*
+     * Automatic means it starts without being asked: the first time a session sees a usable store,
+     * the one-time import of past conversations and the first push run shortly after, not when the
+     * first tool happens to be called.
+     */
+    if (!usageKicked && usageCollectionOn(config, cachedUsageChoice)) {
+      usageKicked = true
+      setTimeout(() => void pushUsageNow(), 15_000).unref?.()
+    }
+    // Known before the prompt is built, which cannot wait on a file.
+    if (usageCollectionOn(config, cachedUsageChoice)) await profileFresh().catch(() => false)
     cachedSearchScope = config.project?.searchScope ?? 'project'
     localSkillsDir =
       (config.skills?.dir !== undefined ? resolveSkillDir(config.skills.dir) : undefined) ??
@@ -3029,8 +3101,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     offersOffice: boolean
     exportsSource: boolean
     picksFiles: boolean
+    hostModels: boolean
   } {
     return {
+      // The GitHub Copilot preset, offered only where VS Code's models can be reached.
+      hostModels: services.languageModels !== undefined,
       nativeGuide: ui.openWalkthrough !== undefined,
       exportsSource: services.sourceArchive !== undefined,
       picksFiles: ui.pickContextFiles !== undefined,
@@ -3161,6 +3236,47 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * `Tool`s by this point, so mode filtering and the approval gate apply to them with
    * no special-casing.
    */
+  /*
+   * `http_request`: REST calls to hosts the user named (tools/http.ts has the reasoning). TLS goes through
+   * the one resolver (§10: no fifth place for a CA), an Apigee token comes from a provider profile's own
+   * strategy, and negotiate goes through Windows' HTTP stack where there is one.
+   */
+  const httpTool = createHttpTool({
+    http: httpClient,
+    secret: (name) => secrets.get(name),
+    tls: async (files) => {
+      const config = (await configManager.load()).config
+      const passphraseRef = files.passphraseSecret ?? config.tls?.passphraseRef
+      return resolveConnectionTls({
+        ...(config.tls !== undefined ? { global: config.tls } : {}),
+        connection: {
+          ...(files.caFile !== undefined ? { caFile: files.caFile } : {}),
+          ...(files.certFile !== undefined ? { certFile: files.certFile } : {}),
+          ...(files.keyFile !== undefined ? { keyFile: files.keyFile } : {}),
+          ...(files.pfxFile !== undefined ? { pfxFile: files.pfxFile } : {}),
+        },
+        ...(config.certDir !== undefined ? { certDir: config.certDir } : {}),
+        ...(passphraseRef !== undefined ? { passphrase: await secrets.get(passphraseRef) } : {}),
+        // A key file used for a request is as readable as any other configured one: deny it to the read tools.
+        onPaths: (paths) => {
+          void Promise.all(paths.map((certPath) => denylist.add(certPath))).catch(() => undefined)
+        },
+      })
+    },
+    profileAuth: async (nameOrId) => {
+      const config = (await configManager.load()).config
+      const profiles = config.profiles ?? []
+      const profile =
+        profiles.find((p) => p.id === nameOrId) ?? profiles.find((p) => p.label.toLowerCase() === nameOrId.toLowerCase())
+      if (profile === undefined) {
+        return { problem: `No provider profile is called "${nameOrId}". Profiles: ${profiles.map((p) => p.label).join(', ') || 'none'}.` }
+      }
+      return createAuthStrategy(profile.auth, buildAuthContext(config, profile))
+    },
+    ...(process.platform === 'win32' ? { negotiate: negotiateRequest } : {}),
+    proxy: () => httpToolProxy(),
+  })
+
   function currentToolRegistry(
     expert?: { cli: ClaudeCliInfo; model?: string },
     search?: { client: OpenSearchClient; store: VectorStoreConfig; indexes: string[] },
@@ -3308,9 +3424,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * built from this same registry, and a run that could not report would be pointless.
      */
     if (diagnosticsProvider !== undefined) combined.register(getDiagnosticsTool)
+    combined.register(httpTool)
+    // Only while collecting: there is nowhere to record the details otherwise.
+    if (usageCollecting()) combined.register(recordUserProfileTool, { dispatchOnly: dispatcher })
+    // The statistics themselves, for metrics the dashboard does not draw - only where there are any.
+    // Advertised, not dispatch-only: "which skills do we use most" does not look like a reason to go searching
+    // for a tool. With a documentation index it is offloaded like any family (tools/offload.ts).
+    if (usageCollecting()) combined.register(usageStatsTool)
     // Fire Code's parallel file tools, where the host ships the helper.
     if (services.fastFs !== undefined) {
-      for (const tool of createFastFsTools(services.fastFs)) combined.register(tool)
+      for (const tool of createFastFsTools(services.fastFs, fastFsOps, { readResult: (handle) => truncationStore.read(handle, 0, Number.MAX_SAFE_INTEGER) }))
+        combined.register(tool)
+      // The quants' libraries in a pool of Python processes (no GIL between them); needs the helper's pool.
+      if (fastFsOps === undefined || fastFsOps.has('pypool')) {
+        combined.register(
+          createPythonLibraryTool({
+            exe: services.fastFs,
+            launch: (requested) => python.libraryLaunch(requested),
+            savedFolders: () => python.savedLibraryFolders(),
+          }),
+        )
+      }
     }
     if (hub !== undefined) {
       for (const tool of createHubTools(hub)) combined.register(tool)
@@ -3626,6 +3760,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         combined.register(createOutlookDraftTool(officeOptions))
       }
     }
+    // Teams needs no helper process: it hands a link to the installed client. Same switch block and
+    // the same Windows-desktop rule as Excel and Outlook (absent on a shared server).
+    if (officeAvailable() && cachedOffice.teams === true) combined.register(createTeamsOpenChatTool())
 
     /*
      * Debug-session reading, offered only when the host has one to give — the Node host and the
@@ -3688,6 +3825,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       combined.register(createBitbucketReadPullRequestTool(bitbucketOptions))
       combined.register(createBitbucketReadFileTool(bitbucketOptions))
       combined.register(createBitbucketWritePullRequestTool(bitbucketOptions))
+      combined.register(createBitbucketMergePullRequestTool(bitbucketOptions))
     }
 
     /*
@@ -3699,6 +3837,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       { dispatchOnly: dispatcher },
     )
 
+    /*
+     * With a documentation index, the integration tools leave the prompt too (tools/offload.ts): their
+     * full documentation is in the index, and the prompt names them in `offloadedCatalogue`. Without
+     * one they stay advertised exactly as before - the user's rule - because a name match alone is not
+     * a reliable way to find a tool.
+     */
+    if (dispatcher && docs !== undefined) {
+      for (const tool of combined.list()) if (isOffloadable(tool.name)) combined.register(tool, { dispatchOnly: true })
+    }
     const hasHiddenTools = dispatcher && combined.dispatchOnlyList().length > 0
     const hasHiddenSkills = hideSkills && skills.length > 0
     if (hasHiddenTools) {
@@ -3798,6 +3945,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     // Captured for `consultAgent`, which is outside this closure. See the declaration.
     agentBriefingTools = () => combined.list()
+    lastToolNames = combined.list().map((tool) => tool.name)
     return combined
   }
 
@@ -4104,6 +4252,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         httpClient,
         authStrategyFor(config, profile),
         logger,
+        services.languageModels,
       )
       const capabilities = withReportedWindow(
         resolveModelCapabilities(profile.model, profile.modelCapabilities),
@@ -4299,7 +4448,37 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           if (scheduledGuidance !== undefined) parts.push(scheduledGuidance)
           if (hub !== undefined) parts.push(hubGuidance(hub))
           // Registered is not enough: a model reaches for read_file and the shell unless told (`fastFsGuidance`).
-          if (services.fastFs !== undefined) parts.push(fastFsGuidance())
+          if (services.fastFs !== undefined) parts.push(fastFsGuidance(fastFsOps))
+          /*
+           * Who the user is, for the usage dashboard - asked of a user-info tool the user already has,
+           * once, while nothing recent is recorded. Absent on every other turn, so it costs nothing then.
+           */
+          if (schedule === undefined && usageCollecting() && cachedProfileFresh === false && directoryChecked) {
+            const candidates = userInfoCandidates(config)
+            const skillCandidates = candidates.length > 0 ? [] : userInfoSkillCandidates(skills)
+            if (candidates.length > 0 || skillCandidates.length > 0) {
+              parts.push(userProfileGuidance(cachedAttribution.author ?? 'unknown', candidates, skillCandidates))
+            }
+          }
+          /*
+           * What the documentation index holds instead of the prompt (tools/offload.ts). Exactly when
+           * the turn's registry offloads - dispatcher on and an index serving search_docs - and never
+           * for a scheduled run, whose granted tools are advertised directly.
+           */
+          if (schedule === undefined && dispatcherEnabled(config.retrieval) && search !== undefined && embedder !== undefined && docsIndex !== undefined) {
+            const everything = currentToolRegistry(undefined, undefined, undefined, undefined, true)
+            const offloaded = everything.list().filter((tool) => isOffloadable(tool.name))
+            const otherHidden = everything.dispatchOnlyList().filter((tool) => !isOffloadable(tool.name)).length
+            const catalogue = offloadedCatalogue(offloaded, otherHidden)
+            if (catalogue !== undefined) parts.push(catalogue)
+            /*
+             * Keep the index holding what this prompt tells the agent to look up. Nothing else reindexes
+             * when an index is first configured or a feature (Jira, Excel, ...) is switched on, so without
+             * this the hidden tools were found only by the name match until some unrelated trigger.
+             * Background and debounced; the fingerprint makes the usual case free.
+             */
+            scheduleDocsReindex('keeping the tool documentation current')
+          }
           const others = services.siblings ?? []
           if (others.length > 0) {
             parts.push(
@@ -4366,6 +4545,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(schedule === undefined ? { requestForm } : {}),
         // So `wait` ends the moment the user types or reacts, rather than after its full time.
         hasNewUserInput: () => queuedMessages.length > 0 || pendingReactions.size > 0,
+        // What the user has said, for `http_request`'s host rule. Not the images a tool returned (labelled
+        // user messages nobody typed) and not the loop's own nudge to continue.
+        userText: () =>
+          conversation
+            .toArray()
+            .filter((message) => message.role === 'user' && !message.content.startsWith('[Images returned by ') && message.content !== CONTINUE_PROMPT)
+            .map((message) => message.content)
+            .join('\n'),
         signal: activeAbortController.signal,
         /*
           * Supplied by the host, not imported by core: the binary is platform-specific and
@@ -4514,6 +4701,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // guaranteed, and this makes each message self-correcting rather than letting
       // one dropped delta permanently corrupt everything streamed after it.
       let cumulativeText = ''
+      // What the model wrote before calling a control tool, kept so its result can be told apart.
+      let textBeforeControlTool = ''
       let cumulativeReasoning = ''
       // Sticky once the expert has been consulted, matching how a restored transcript is
       // derived — so the live view and a reopened task mark the same work.
@@ -4674,6 +4863,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             post({ type: 'reasoningChunk', text: cumulativeReasoning })
           },
           onToolCall: (toolCall) => {
+            noteToolStarted(toolCall)
+            textBeforeControlTool = CONTROL_TOOLS.has(toolCall.name) ? cumulativeText : ''
             // Each tool call starts a fresh assistant text block in the transcript.
             cumulativeText = ''
             cumulativeReasoning = ''
@@ -4720,11 +4911,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             })
           },
           onToolResult: (toolCall, result) => {
+            recordUsage(toolCall, result)
             // The control tools aren't work being done — they're the model addressing the
             // user. Their content is the answer, so render it as a message rather than
             // something the user has to expand a collapsed block to read.
             if (CONTROL_TOOLS.has(toolCall.name)) {
-              post({ type: 'textChunk', text: result.content })
+              /*
+               * Its own bubble, never a replacement for the text streamed before the call. Sent as
+               * a plain textChunk it overwrote that text — a formatted answer collapsing into the
+               * tool's one-paragraph summary as the turn ended — while the saved transcript kept
+               * both, so a reload showed something else again.
+               */
+              const streamed = textBeforeControlTool
+              textBeforeControlTool = ''
+              if (repeatsStreamedText(streamed, result.content)) return
+              post({ type: 'textChunk', text: result.content, ...(streamed.trim().length > 0 ? { separate: true } : {}) })
               return
             }
             const diagram = diagramFromToolCall(toolCall.name, toolCall.arguments)
@@ -5286,7 +5487,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     const config = await loadSettings()
     const profile = resolveActiveProfile(config)
-    const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
+    const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger, services.languageModels)
     const result = await compactHistory(repairUnansweredToolCalls(conversation.toModelMessages()), provider, { keepRecent: 4 })
     const summary = result.compacted ? result.messages.find(isSummaryMessage) : undefined
     if (summary === undefined) {
@@ -5331,59 +5532,79 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   async function handleSuggestCommitMessage(): Promise<void> {
     try {
-      if (workspaceRoot === undefined) throw new Error('No folder is open.')
-      // A hub codebase's repository is on the hub; this copy has none.
-      const fromHub = hub === undefined ? undefined : await hubGitDiff(hub)
-      if (typeof fromHub === 'string') throw new Error(fromHub)
-      const git = (args: string[]): Promise<{ ok: boolean; out: string }> =>
-        new Promise((resolve) => {
-          const child = spawn('git', ['--no-optional-locks', '-C', workspaceRoot, ...args], {
-            env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-            windowsHide: true,
-          })
-          let out = ''
-          child.stdout.on('data', (chunk: Buffer) => {
-            if (out.length < 200_000) out += chunk.toString('utf8')
-          })
-          const timer = setTimeout(() => child.kill(), 20_000)
-          child.on('error', () => resolve({ ok: false, out: '' }))
-          child.on('close', (code) => {
-            clearTimeout(timer)
-            resolve({ ok: code === 0, out })
-          })
-        })
-      const status = fromHub !== undefined ? { ok: true, out: fromHub.status } : await git(['status', '--short', '--untracked-files=normal'])
-      if (!status.ok) throw new Error('This folder is not a git repository, or git could not be run.')
-      if (status.out.trim().length === 0) throw new Error('Nothing has changed, so there is nothing to describe.')
-      let diff = fromHub !== undefined ? { ok: true, out: fromHub.diff } : await git(['diff', 'HEAD', '--no-color', '--no-ext-diff', '--stat', '--patch'])
-      // A repository with no commits yet has no HEAD to compare with.
-      if (!diff.ok) diff = await git(['diff', '--no-color', '--no-ext-diff', '--stat', '--patch'])
-      const shown = diff.out.length > 24_000 ? `${diff.out.slice(0, 24_000)}\n... (diff cut here)` : diff.out
-
-      const config = await loadSettings()
-      const profile = resolveActiveProfile(config)
-      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger)
-      let text = ''
-      for await (const chunk of provider.streamChat([
-        {
-          role: 'system',
-          content:
-            'Write a git commit message for the changes below. First line: a summary under 72 characters, ' +
-            'in the imperative mood ("Add ...", "Fix ..."). Then, if it helps, a blank line and a short body ' +
-            'saying what changed and why, wrapped at 72 characters. Reply with the message only - no quotes, ' +
-            'no code fences, no commentary.',
-        },
-        { role: 'user', content: `Changed files (git status):\n${status.out}\n\nDiff:\n${redact(shown, cachedSecretValues)}` },
-      ])) {
-        if (chunk.type === 'text') text += chunk.text
-        if (chunk.type === 'error') throw new Error(chunk.error)
-      }
-      const message = text.trim().replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
-      if (message.length === 0) throw new Error('The model replied with nothing.')
-      post({ type: 'commitMessageSuggestion', text: message })
+      post({ type: 'commitMessageSuggestion', text: await writeCommitMessage(workspaceRoot) })
     } catch (error) {
       post({ type: 'commitMessageSuggestion', error: error instanceof Error ? error.message : String(error) })
     }
+  }
+
+  /**
+   * A commit message for the changes in `root`, written by the active model. Fire Code's dialog and
+   * VS Code's Source Control button both come here, so the two cannot describe a change differently.
+   *
+   * `preferStaged` is VS Code's commit: it commits what is staged when anything is, so that is what
+   * is described. Fire Code adds everything first, so it describes everything.
+   */
+  async function writeCommitMessage(root: string | undefined, options: { preferStaged?: boolean } = {}): Promise<string> {
+    if (root === undefined) throw new Error('No folder is open.')
+    // A hub codebase's repository is on the hub; this copy has none.
+    const fromHub = hub === undefined || root !== workspaceRoot ? undefined : await hubGitDiff(hub)
+    if (typeof fromHub === 'string') throw new Error(fromHub)
+    const git = (args: string[]): Promise<{ ok: boolean; out: string }> =>
+      new Promise((resolve) => {
+        const child = spawn('git', ['--no-optional-locks', '-C', root, ...args], {
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+          windowsHide: true,
+        })
+        let out = ''
+        child.stdout.on('data', (chunk: Buffer) => {
+          if (out.length < 200_000) out += chunk.toString('utf8')
+        })
+        const timer = setTimeout(() => child.kill(), 20_000)
+        child.on('error', () => resolve({ ok: false, out: '' }))
+        child.on('close', (code) => {
+          clearTimeout(timer)
+          resolve({ ok: code === 0, out })
+        })
+      })
+    const status = fromHub !== undefined ? { ok: true, out: fromHub.status } : await git(['status', '--short', '--untracked-files=normal'])
+    if (!status.ok) throw new Error('This folder is not a git repository, or git could not be run.')
+    if (status.out.trim().length === 0) throw new Error('Nothing has changed, so there is nothing to describe.')
+    const staged =
+      fromHub === undefined && options.preferStaged === true
+        ? await git(['diff', '--cached', '--no-color', '--no-ext-diff', '--stat', '--patch'])
+        : undefined
+    let diff =
+      fromHub !== undefined
+        ? { ok: true, out: fromHub.diff }
+        : staged !== undefined && staged.ok && staged.out.trim().length > 0
+          ? staged
+          : await git(['diff', 'HEAD', '--no-color', '--no-ext-diff', '--stat', '--patch'])
+    // A repository with no commits yet has no HEAD to compare with.
+    if (!diff.ok) diff = await git(['diff', '--no-color', '--no-ext-diff', '--stat', '--patch'])
+    const shown = diff.out.length > 24_000 ? `${diff.out.slice(0, 24_000)}\n... (diff cut here)` : diff.out
+
+    const config = await loadSettings()
+    const profile = resolveActiveProfile(config)
+    const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger, services.languageModels)
+    let text = ''
+    for await (const chunk of provider.streamChat([
+      {
+        role: 'system',
+        content:
+          'Write a git commit message for the changes below. First line: a summary under 72 characters, ' +
+          'in the imperative mood ("Add ...", "Fix ..."). Then, if it helps, a blank line and a short body ' +
+          'saying what changed and why, wrapped at 72 characters. Reply with the message only - no quotes, ' +
+          'no code fences, no commentary.',
+      },
+      { role: 'user', content: `Changed files (git status):\n${status.out}\n\nDiff:\n${redact(shown, cachedSecretValues)}` },
+    ])) {
+      if (chunk.type === 'text') text += chunk.text
+      if (chunk.type === 'error') throw new Error(chunk.error)
+    }
+    const message = text.trim().replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
+    if (message.length === 0) throw new Error('The model replied with nothing.')
+    return message
   }
 
   /** Every codebase a mention can name: this one by its own name (Fire Code), then the others. */
@@ -6031,6 +6252,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       httpClient,
       authStrategyFor(config, profile),
       logger,
+      services.languageModels,
     )
     let text = ''
     for await (const chunk of provider.streamChat([
@@ -6095,6 +6317,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         httpClient,
         authStrategyFor(config, profile),
         logger,
+        services.languageModels,
       )
 
       const results: ProbeResult[] = []
@@ -8839,7 +9062,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       options.report?.('Reading the catalogue')
       const registry = currentToolRegistry(undefined, undefined, undefined, undefined, true)
-      const all = buildDocCorpus({ dispatchOnlyTools: registry.dispatchOnlyList(), skills })
+      /*
+       * The offloadable built-ins are indexed whether or not they are hidden right now: they are hidden
+       * exactly when this index is in use, and an index built without them would have the prompt send
+       * the agent to look up tools the index does not contain.
+       */
+      const all = buildDocCorpus({
+        dispatchOnlyTools: registry.list().filter((tool) => registry.isDispatchOnly(tool.name) || isOffloadable(tool.name)),
+        skills,
+      })
       const wanted = options.kind
       const entries = wanted === undefined ? all : all.filter((entry) => entry.kind === wanted)
 
@@ -10027,6 +10258,641 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // The usage dashboard (Settings -> Usage). See `usage/events.ts` for what is collected, and
+  // `usage/auto.ts` for why it starts by itself wherever the team already shares a store.
+  // ---------------------------------------------------------------------------------------------
+
+  const usageLog = new UsageLog(storageDir)
+  const usageInstance = usageInstanceId(storageDir)
+  const usageProfileFile = path.join(storageDir, 'usage-profile.json')
+  /** 0.157's record of the import, in the storage folder itself; 0.158 keeps it in `usage/`. */
+  const legacyBackfillFile = path.join(storageDir, 'usage-backfill.json')
+  const usageDir = path.join(storageDir, 'usage')
+  const toolStartedAt = new Map<string, number>()
+  let usagePushTimer: ReturnType<typeof setTimeout> | undefined
+  let usagePushing: Promise<void> | undefined
+  let usageLastProblem: string | undefined
+
+  /** The store collection uses now, automatic or chosen - recomputed by every `loadSettings`. */
+  function usageChoice(config: LightCodeConfig): UsageStoreChoice | undefined {
+    return chooseUsageStore(config, cachedS3.targets)
+  }
+
+  function usageCollecting(): boolean {
+    return cachedUsageChoice !== undefined && cachedUsage?.enabled !== false
+  }
+
+  /** Fire Code's helper for the shared-folder store, when it is installed and knows the operation. */
+  function usageHelper(): UsageHelper | undefined {
+    const exe = services.fastFs
+    if (exe === undefined || (fastFsOps !== undefined && !fastFsOps.has('usage'))) return undefined
+    return (request) => runFastFs(exe, request)
+  }
+
+  /** The skill a `read_file` path names, compared the way Windows compares paths. */
+  function skillAtPath(requested: string): Skill | undefined {
+    const absolute = path.isAbsolute(requested) ? requested : workspaceRoot === undefined ? undefined : path.resolve(workspaceRoot, requested)
+    if (absolute === undefined) return undefined
+    return skills.find((skill) => samePath(skill.filePath, absolute))
+  }
+
+  function noteToolStarted(toolCall: ToolCall): void {
+    if (usageCollecting()) toolStartedAt.set(toolCall.id, Date.now())
+  }
+
+  /**
+   * One event per tool call, plus one per skill it read or copied. Names, times and outcome only:
+   * arguments are inspected to *find* the skill and are never stored.
+   */
+  function recordUsage(toolCall: ToolCall, result: ToolResult): void {
+    const started = toolStartedAt.get(toolCall.id)
+    toolStartedAt.delete(toolCall.id)
+    if (!usageCollecting() || CONTROL_TOOLS.has(toolCall.name)) return
+    let name = toolCall.name
+    let args: Record<string, unknown> = {}
+    try {
+      const parsed: unknown = JSON.parse(toolCall.arguments)
+      if (parsed !== null && typeof parsed === 'object') args = parsed as Record<string, unknown>
+    } catch {
+      // Unparseable arguments still count as a call of the tool.
+    }
+    // A call through the dispatcher is a use of the tool it dispatched to.
+    if (name === 'call_tool' && typeof args['name'] === 'string') {
+      name = args['name']
+      const inner = args['arguments']
+      args = inner !== null && typeof inner === 'object' ? (inner as Record<string, unknown>) : {}
+    }
+    const user = cachedAttribution.author ?? 'unknown'
+    const project = cachedAttribution.project
+    const now = Date.now()
+    const base = { t: now, u: user, ...(project !== undefined ? { p: project } : {}) }
+    const events: UsageEvent[] = []
+    const toolAuthor = name.startsWith('py__') ? python.status().tools.find((tool) => tool.name === name.slice(4))?.author : undefined
+    events.push({
+      ...base,
+      k: 'tool',
+      n: name,
+      ...(toolAuthor !== undefined ? { a: toolAuthor } : {}),
+      ...(result.isError === true ? { ok: false as const } : {}),
+      ...(started !== undefined ? { d: now - started } : {}),
+    })
+    let skill: Skill | undefined
+    if (name === 'read_file' && typeof args['path'] === 'string') skill = skillAtPath(args['path'])
+    if (name === 'use_skill_file' && typeof args['skill'] === 'string') {
+      const wanted = args['skill']
+      skill = skills.find((each) => each.name === wanted)
+    }
+    if (skill !== undefined && result.isError !== true) {
+      events.push({ ...base, k: 'skill', n: skill.name, ...(skill.author !== undefined ? { a: skill.author } : {}) })
+    }
+    void Promise.all(events.map((event) => usageLog.append(event)))
+      .then(() => scheduleUsagePush())
+      .catch((error: unknown) => logger.warn(`usage: could not record: ${String(error)}`))
+  }
+
+  /** A minute after the last event, so a busy turn sends one batch rather than one per call. */
+  function scheduleUsagePush(): void {
+    if (usagePushTimer !== undefined) clearTimeout(usagePushTimer)
+    usagePushTimer = setTimeout(() => {
+      usagePushTimer = undefined
+      void pushUsageNow()
+    }, 60_000)
+    usagePushTimer.unref?.()
+  }
+
+  function usageTargetName(store: UsageStoreConfig): string {
+    return JSON.stringify([store.kind, store.path ?? '', store.connectionId ?? '', store.prefix ?? '', store.storeId ?? '', store.collection ?? ''])
+  }
+
+  /** A store config made usable, or why it cannot be - in words for the panel. */
+  async function openUsageStore(config: LightCodeConfig, chosen: UsageStoreConfig | undefined): Promise<{ store: UsageShardStore; target: string } | { problem: string }> {
+    if (chosen === undefined) return { problem: 'No shared store is configured - no OpenSearch or other vector store, and no team S3 bucket.' }
+    const target = usageTargetName(chosen)
+    if (chosen.kind === 'folder') {
+      const folder = chosen.path?.trim()
+      if (folder === undefined || folder.length === 0) return { problem: 'The shared folder has no path.' }
+      if (!path.isAbsolute(folder)) return { problem: `"${folder}" is not an absolute path. Use the full path of a folder everybody can reach, such as a network share.` }
+      const helper = usageHelper()
+      return { store: new FolderShardStore(folder, ...(helper !== undefined ? [helper] : [])), target }
+    }
+    if (chosen.kind === 's3') {
+      const s3 = targetById(cachedS3, chosen.connectionId)
+      if (s3 === undefined) {
+        const problem = cachedS3.problems.find((entry) => entry.label === chosen.connectionId)?.problem
+        return { problem: `The S3 connection "${chosen.connectionId ?? ''}" is not usable${problem !== undefined ? `: ${problem}` : '. Check Settings → Skills → S3.'}` }
+      }
+      if (s3.readOnly === true) return { problem: `The S3 connection "${s3.label}" is read-only, so usage cannot be written to it.` }
+      const prefix = [s3.prefix ?? '', chosen.prefix ?? ''].map((part) => part.trim().replace(/^\/+|\/+$/g, '')).filter((part) => part.length > 0).join('/')
+      return { store: new S3ShardStore(s3.client, s3.bucket, prefix), target }
+    }
+    const id = chosen.storeId
+    const vector = id === undefined ? undefined : config.vectorStores?.[id]
+    if (id === undefined || vector === undefined) return { problem: `The vector store "${id ?? ''}" is not configured any more. Choose another in Settings → Usage.` }
+    const writer = createVectorIndexWriter(httpClient, vector, await vectorStoreConnectionFor(vector, id))
+    const collection = (chosen.collection?.trim() ?? '') || 'light-code-usage'
+    return { store: new VectorShardStore(writer, collection.toLowerCase(), vector.label), target }
+  }
+
+  async function resolveUsageStore(config: LightCodeConfig): Promise<{ store: UsageShardStore; target: string } | { problem: string }> {
+    return openUsageStore(config, usageChoice(config)?.store)
+  }
+
+  async function readUsageBackfill(): Promise<{ tasks: number; events: number; via: 'rust' | 'node'; at: number } | undefined> {
+    try {
+      const text = await fs.readFile(path.join(usageDir, 'backfill.json'), 'utf8').catch(() => fs.readFile(legacyBackfillFile, 'utf8'))
+      const saved = JSON.parse(text) as { tasks?: unknown; events?: unknown; via?: unknown; at?: unknown }
+      if (typeof saved.at !== 'number') return undefined
+      return { tasks: Number(saved.tasks ?? 0), events: Number(saved.events ?? 0), via: saved.via === 'rust' ? 'rust' : 'node', at: saved.at }
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * The initial statistics, once per storage folder: usage recovered from the conversations already
+   * saved here (`usage/backfill.ts`), through Fire Code's Rust helper when it is installed. Safe with
+   * several windows starting at once - see `backfillOnce`.
+   */
+  async function backfillUsageOnce(): Promise<void> {
+    const outcome = await backfillOnce({
+      usageDir,
+      log: usageLog,
+      legacyDoneFile: legacyBackfillFile,
+      run: async (before) => {
+        const status = python.status()
+        return backfillFromTasks(
+          path.join(storageDir, 'tasks'),
+          {
+            user: cachedAttribution.author ?? 'unknown',
+            project: cachedAttribution.project,
+            workspaceRoot,
+            skills: skills.map((skill) => ({ name: skill.name, filePath: skill.filePath, author: skill.author })),
+            toolAuthors: Object.fromEntries(status.tools.filter((tool) => tool.author !== undefined).map((tool) => [tool.name, tool.author!])),
+            skip: [...CONTROL_TOOLS],
+            before,
+          },
+          usageHelper(),
+        )
+      },
+    })
+    if (outcome.ran) logger.info(`usage: imported ${String(outcome.events ?? 0)} events from ${String(outcome.tasks ?? 0)} saved conversations (${outcome.via ?? 'node'})`)
+  }
+
+  /** Sends what the store has not seen. One at a time, so a slow store never gets two writers. */
+  async function pushUsageNow(): Promise<void> {
+    if (usagePushing !== undefined) return usagePushing
+    usagePushing = (async () => {
+      const config = await loadSettings()
+      if (!usageCollectionOn(config, usageChoice(config))) return
+      const resolved = await resolveUsageStore(config)
+      if ('problem' in resolved) {
+        usageLastProblem = resolved.problem
+        return
+      }
+      try {
+        // A 0.156/0.157 single queue file becomes per-day files first; safe if two windows do it at once.
+        await usageLog.migrateLegacy().catch((error: unknown) => logger.warn(`usage: could not move the old queue: ${String(error)}`))
+        await backfillUsageOnce().catch((error: unknown) => logger.warn(`usage: could not import past conversations: ${String(error)}`))
+        await pushUsage({
+          log: usageLog,
+          store: resolved.store,
+          target: resolved.target,
+          instance: usageInstance,
+          // This session's first push re-writes the last two days: see `pushUsage`'s `recheck`.
+          ...(usageRechecked ? {} : { recheck: [usageDay(Date.now()), usageDay(Date.now() - 86_400_000)] }),
+        })
+        usageRechecked = true
+        // Once a day per session: this install's finished months become one shard each (usage/rollup.ts).
+        if (Date.now() - usageLastRollUp > 86_400_000) {
+          usageLastRollUp = Date.now()
+          const rolled = await rollUpMonths({ log: usageLog, store: resolved.store, target: resolved.target, instance: usageInstance })
+          for (const problem of rolled.problems) logger.warn(`usage: roll-up: ${problem}`)
+          if (rolled.months > 0) logger.info(`usage: rolled up ${String(rolled.months)} month(s), removing ${String(rolled.removed)} day files`)
+        }
+        usageLastProblem = undefined
+        /*
+         * Only the signed-in user, in the background. Everybody else is looked up when somebody opens the
+         * dashboard: a stream of batched lookups for every author and colleague, unasked, reads as account
+         * enumeration to a domain's security monitoring.
+         */
+        void enrichFromDirectory([])
+        // The local files are a queue: a day is kept a fortnight once pushed as it is, so a store pointed
+        // elsewhere can be refilled. Whole files only - see `UsageLog`.
+        await usageLog.prune(resolved.target, 14)
+      } catch (error) {
+        usageLastProblem = `Could not write to ${resolved.store.label}: ${error instanceof Error ? error.message : String(error)}`
+        logger.warn(`usage: ${usageLastProblem}`)
+      }
+    })().finally(() => {
+      usagePushing = undefined
+    })
+    return usagePushing
+  }
+
+  async function readLocalProfile(): Promise<UsageProfile | undefined> {
+    try {
+      const saved = JSON.parse(await fs.readFile(usageProfileFile, 'utf8')) as { user?: unknown; profile?: unknown }
+      return saved.user === (cachedAttribution.author ?? 'unknown') ? cleanProfile(saved.profile) : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Recorded by `record_user_profile`: kept here so the prompt stops asking, and sent to the store. */
+  async function saveUsageProfile(profile: UsageProfile): Promise<void> {
+    const user = cachedAttribution.author ?? 'unknown'
+    await writeFileAtomically(usageProfileFile, JSON.stringify({ user, profile }))
+    cachedProfileFresh = true
+    const config = await loadSettings()
+    const resolved = await resolveUsageStore(config)
+    if ('problem' in resolved) throw new Error(resolved.problem)
+    await resolved.store.putProfile(user, profile)
+  }
+
+  /** Whether this user's details were recorded in the last 30 days - otherwise the agent is asked to look them up. */
+  async function profileFresh(): Promise<boolean> {
+    if (cachedProfileFresh !== undefined) return cachedProfileFresh
+    const profile = await readLocalProfile()
+    const updated = profile?.updated !== undefined ? Date.parse(profile.updated) : NaN
+    cachedProfileFresh = Number.isFinite(updated) && Date.now() - updated < 30 * 86_400_000
+    return cachedProfileFresh
+  }
+
+  const recordUserProfileTool = createRecordUserProfileTool({
+    user: () => cachedAttribution.author ?? 'unknown',
+    destination: () => {
+      if (!usageCollecting() || cachedUsageChoice === undefined) return undefined
+      const store = cachedUsageChoice.store
+      return store.kind === 'folder' ? `the shared folder ${store.path ?? ''}` : store.kind === 's3' ? `the S3 connection ${store.connectionId ?? ''}` : `the vector store ${store.storeId ?? ''}`
+    },
+    save: saveUsageProfile,
+  })
+
+  /** Stable across label edits: the bytes that matter, without the version and date lines a save rewrites. */
+  async function contentHash(file: string): Promise<string | undefined> {
+    try {
+      const text = (await fs.readFile(file, 'utf8')).replace(/\r\n/g, '\n')
+      const meaningful = text
+        .split('\n')
+        .filter((line) => !/^(author|project|version|updated)\s*:/i.test(line) && !/^__(author|project|version|updated)__\s*=/.test(line))
+        .join('\n')
+        .trim()
+      return createHash('sha256').update(meaningful).digest('hex').slice(0, 16)
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Every skill and Python tool this machine can see, with where it lives and whether it may be deleted from here. */
+  async function usageInventory(): Promise<InventoryItem[]> {
+    await refreshSkills().catch(() => undefined)
+    const items: InventoryItem[] = []
+    const where = (sourceDir: string | undefined, writable: string | undefined): string => {
+      if (sourceDir !== undefined && samePath(sourceDir, writable)) return 'this project'
+      const bucket = bucketFor(sourceDir)
+      return bucket !== undefined ? `bucket ${bucket.label}` : 'shared folder'
+    }
+    for (const skill of skills) {
+      const hash = await contentHash(skill.filePath)
+      items.push({
+        kind: 'skill',
+        name: skill.name,
+        filePath: skill.filePath,
+        description: skill.description,
+        ...(skill.author !== undefined ? { author: skill.author } : {}),
+        ...(skill.project !== undefined ? { project: skill.project } : {}),
+        ...(skill.updated !== undefined ? { updated: skill.updated } : {}),
+        ...(skill.version !== undefined ? { version: skill.version } : {}),
+        deletable: skill.sourceDir !== undefined && samePath(skill.sourceDir, skillsDir),
+        location: where(skill.sourceDir, skillsDir),
+        ...(hash !== undefined ? { contentHash: hash } : {}),
+      })
+    }
+    /*
+     * Skills that lost a name collision to an earlier folder are absent from `skills` - and they are
+     * exactly the duplicates worth reporting, so each folder is read on its own as well.
+     */
+    for (const dir of skillSearchPath().slice(1)) {
+      const loaded = await loadSkills([dir]).catch(() => ({ skills: [] as Skill[] }))
+      for (const skill of loaded.skills) {
+        if (items.some((item) => item.kind === 'skill' && samePath(item.filePath, skill.filePath))) continue
+        const hash = await contentHash(skill.filePath)
+        items.push({
+          kind: 'skill',
+          name: skill.name,
+          filePath: skill.filePath,
+          description: skill.description,
+          ...(skill.author !== undefined ? { author: skill.author } : {}),
+          ...(skill.updated !== undefined ? { updated: skill.updated } : {}),
+          deletable: false,
+          location: where(dir, skillsDir),
+          ...(hash !== undefined ? { contentHash: hash } : {}),
+        })
+      }
+    }
+    const status = python.status()
+    for (const tool of status.tools) {
+      const hash = await contentHash(tool.filePath)
+      items.push({
+        kind: 'tool',
+        name: tool.name,
+        filePath: tool.filePath,
+        description: tool.description,
+        ...(tool.author !== undefined ? { author: tool.author } : {}),
+        ...(tool.project !== undefined ? { project: tool.project } : {}),
+        ...(tool.updated !== undefined ? { updated: tool.updated } : {}),
+        ...(tool.version !== undefined ? { version: tool.version } : {}),
+        deletable: samePath(tool.sourceDir, status.toolsDir),
+        location: where(tool.sourceDir, status.toolsDir),
+        ...(hash !== undefined ? { contentHash: hash } : {}),
+      })
+    }
+    for (const issue of status.issues) {
+      if (issue.kind === 'shadowed' || issue.kind === 'declined') continue
+      if (items.some((item) => item.kind === 'tool' && samePath(item.filePath, issue.filePath))) continue
+      items.push({
+        kind: 'tool',
+        name: issue.name,
+        filePath: issue.filePath,
+        deletable: samePath(path.dirname(issue.filePath), status.toolsDir),
+        location: where(path.dirname(issue.filePath), status.toolsDir),
+        issue: issue.kind === 'unapproved' ? 'waiting for approval' : issue.kind === 'hash-mismatch' ? 'changed since approval' : issue.detail.split('\n')[0] ?? 'not loaded',
+      })
+    }
+    return items
+  }
+
+
+  // --- The company directory: who a login name is (primary; a skill or Python tool is second) --------
+
+  const usageDirectoryFile = path.join(storageDir, 'usage-directory.json')
+  interface DirectoryCache {
+    unavailable?: { at: number; reason: string; via: string }
+    people: Record<string, { at: number; person?: DirectoryPerson }>
+    via?: string
+  }
+  let directoryRunning: Promise<void> | undefined
+
+  async function readDirectoryCache(): Promise<DirectoryCache> {
+    try {
+      const saved = JSON.parse(await fs.readFile(usageDirectoryFile, 'utf8')) as DirectoryCache
+      return { ...saved, people: saved.people ?? {} }
+    } catch {
+      return { people: {} }
+    }
+  }
+
+  /** Fire Code's helper, when it is installed and knows the operation; otherwise PowerShell does it. */
+  function directoryHelper(): UsageHelper | undefined {
+    const exe = services.fastFs
+    if (exe === undefined || (fastFsOps !== undefined && !fastFsOps.has('directory'))) return undefined
+    return (request) => runFastFs(exe, request)
+  }
+
+  /**
+   * Looks up this user plus the names given - after a push only this user; when the dashboard opens,
+   * every author on a skill or tool and every colleague in the events - and remembers the answers (found for 30 days, not listed for 7,
+   * an unreachable directory for a day), so it is asked about each name rarely. This user's own entry
+   * becomes their profile in the shared store, which is what stops the agent being asked to find it.
+   */
+  async function enrichFromDirectory(names: readonly string[]): Promise<void> {
+    if (directoryRunning !== undefined) return directoryRunning
+    directoryRunning = (async () => {
+      const now = Date.now()
+      const DAY = 86_400_000
+      const me = cachedAttribution.author ?? 'unknown'
+      const cache = await readDirectoryCache()
+      if (process.platform !== 'win32' || (cache.unavailable !== undefined && now - cache.unavailable.at < DAY)) {
+        directoryChecked = true
+        return
+      }
+      const wanted = [...new Set([me, ...names].map((name) => name.trim()).filter((name) => name.length > 0 && name !== 'unknown' && name !== '_check'))]
+        .filter((name) => {
+          const known = cache.people[name.toLowerCase()]
+          return known === undefined || now - known.at > (known.person !== undefined ? 30 * DAY : 7 * DAY)
+        })
+        .slice(0, 300)
+      if (wanted.length === 0) {
+        directoryChecked = true
+        return
+      }
+      const answer = await lookupDirectory(wanted, { helper: directoryHelper() })
+      if (!answer.available) {
+        cache.unavailable = { at: now, reason: answer.reason, via: answer.via }
+      } else {
+        delete cache.unavailable
+        cache.via = answer.via
+        for (const name of wanted) {
+          const person = answer.people[name]
+          cache.people[name.toLowerCase()] = { at: now, ...(person !== undefined ? { person } : {}) }
+        }
+      }
+      /*
+       * Merged with what is on disk now, then written whole: another session may have looked up other
+       * names meanwhile, and a lost entry would only mean asking again, but a torn file would mean
+       * asking about everybody.
+       */
+      const latest = await readDirectoryCache()
+      const merged: DirectoryCache = { ...latest, ...cache, people: { ...latest.people, ...cache.people } }
+      if (cache.unavailable === undefined) delete merged.unavailable
+      await writeFileAtomically(usageDirectoryFile, JSON.stringify(merged))
+      directoryChecked = true
+      const mine = answer.available ? answer.people[me] : undefined
+      if (mine !== undefined) {
+        await saveUsageProfile({ ...profileFromPerson(mine), updated: new Date().toISOString() }).catch((error: unknown) =>
+          logger.warn(`usage: could not record this user's directory entry: ${String(error)}`),
+        )
+      }
+      logger.info(`usage: company directory ${answer.available ? `answered for ${String(Object.keys(answer.people).length)} of ${String(wanted.length)} names` : `unavailable: ${answer.reason}`} (${answer.via})`)
+    })()
+      .catch((error: unknown) => {
+        directoryChecked = true
+        logger.warn(`usage: directory lookup failed: ${String(error)}`)
+      })
+      .finally(() => {
+        directoryRunning = undefined
+      })
+    return directoryRunning
+  }
+
+  /** Directory answers as dashboard profiles, keyed the way the dashboard looks them up. */
+  function directoryProfiles(cache: DirectoryCache): Record<string, UsageProfile> {
+    const profiles: Record<string, UsageProfile> = {}
+    for (const [name, known] of Object.entries(cache.people)) if (known.person !== undefined) profiles[shardSegment(name)] = profileFromPerson(known.person)
+    return profiles
+  }
+
+  /** Every name worth knowing: authors of what is installed and everyone in the given events. */
+  function namesToEnrich(events: readonly UsageEvent[]): string[] {
+    const names = new Set<string>()
+    for (const skill of skills) if (skill.author !== undefined) names.add(skill.author)
+    for (const tool of python.status().tools) if (tool.author !== undefined) names.add(tool.author)
+    for (const event of events) {
+      names.add(event.u)
+      if (event.a !== undefined) names.add(event.a)
+    }
+    return [...names]
+  }
+
+  /** Tool names that look like they answer "who is this user", for the panel and the prompt. */
+  function userInfoCandidates(config: LightCodeConfig): string[] {
+    const names = (lastToolNames ?? []).filter((name) => name !== RECORD_USER_PROFILE)
+    return userInfoToolCandidates(names, config.usage?.userInfoTool)
+  }
+
+  async function usageSettings(config: LightCodeConfig): Promise<Extract<HostToUiMessage, { type: 'usage' }>['settings']> {
+    const choice = usageChoice(config)
+    const profile = await readLocalProfile()
+    const backfill = await readUsageBackfill()
+    return {
+      collecting: usageCollectionOn(config, choice),
+      stopped: config.usage?.enabled === false,
+      ...(config.usage?.store !== undefined ? { store: config.usage.store } : {}),
+      ...(choice !== undefined ? { effective: choice } : {}),
+      ...(config.usage?.userInfoTool !== undefined ? { userInfoTool: config.usage.userInfoTool } : {}),
+      userInfoCandidates: userInfoCandidates(config),
+      userInfoSkills: userInfoSkillCandidates(skills).map((skill) => skill.name),
+      directory: await (async () => {
+        const cache = await readDirectoryCache()
+        if (process.platform !== 'win32') return { available: false, reason: 'Not Windows - the company directory is read through Windows.', people: 0 }
+        if (cache.unavailable !== undefined) return { available: false, reason: cache.unavailable.reason, people: 0, ...(cache.via !== undefined ? { via: cache.via } : {}) }
+        return { available: true, people: Object.values(cache.people).filter((known) => known.person !== undefined).length, ...(cache.via !== undefined ? { via: cache.via } : {}) }
+      })(),
+      ...(profile !== undefined && Object.keys(profile).length > 0 ? { profile } : {}),
+      ...(backfill !== undefined ? { backfill } : {}),
+    }
+  }
+
+  function usageOptions(config: LightCodeConfig): Extract<HostToUiMessage, { type: 'usage' }>['options'] {
+    return {
+      s3: cachedS3.targets.map((target) => ({
+        id: target.id,
+        label: target.label,
+        bucket: target.bucket,
+        ...(target.readOnly === true ? { readOnly: true } : {}),
+      })),
+      vectorStores: Object.entries(config.vectorStores ?? {}).map(([id, store]) => ({ id, label: store.label, kind: store.kind })),
+    }
+  }
+
+  /**
+   * Everything the dashboard and `usage_stats` read, in one place so the two cannot disagree: this
+   * machine's queue pushed first, then the events of `[from, to]` and the period before it, everyone's
+   * profiles - the company directory first, what a user's own tool recorded filling its gaps.
+   */
+  async function gatherUsage(from: number, to: number): Promise<UsageData | { problem: string }> {
+    const config = await loadSettings()
+    if (!usageCollectionOn(config, usageChoice(config))) return { problem: 'usage is not being collected - no shared store is configured, or it is stopped on this machine (Settings → Usage).' }
+    const resolved = await resolveUsageStore(config)
+    if ('problem' in resolved) return { problem: resolved.problem }
+    await pushUsageNow()
+    const span = Math.max(3_600_000, to - from)
+    // The previous period too, for the comparisons.
+    const fromDay = new Date(from - span).toISOString().slice(0, 10)
+    const toDay = new Date(to).toISOString().slice(0, 10)
+    let events: UsageEvent[] = []
+    let profiles: Record<string, UsageProfile> = {}
+    let storeProblem = usageLastProblem
+    try {
+      events = await resolved.store.read(fromDay, toDay)
+      profiles = await resolved.store.readProfiles()
+      const unreadable = resolved.store.lastProblems ?? []
+      if (unreadable.length > 0) {
+        storeProblem = `${String(unreadable.length)} file${unreadable.length === 1 ? '' : 's'} could not be read, so the numbers may be low: ${unreadable.slice(0, 3).join('; ')}`
+      }
+    } catch (error) {
+      storeProblem = `Could not read ${resolved.store.label}: ${error instanceof Error ? error.message : String(error)}`
+    }
+    // The push just ran, so the store holds this machine's days too. Only when the store could not be read
+    // at all is this machine's own queue shown - said in `storeProblem`, never mixed with a partial read.
+    if (storeProblem !== undefined && storeProblem.startsWith('Could not read') && events.length === 0) events = await usageLog.all()
+    const local = await readLocalProfile()
+    const me = cachedAttribution.author ?? 'unknown'
+    if (local !== undefined && profiles[shardSegment(me)] === undefined) profiles[shardSegment(me)] = local
+    // Names nobody has looked up yet: asked now, but nothing waits more than a few seconds.
+    await Promise.race([enrichFromDirectory(namesToEnrich(events)), new Promise((resolve) => setTimeout(resolve, 8000))])
+    // The directory is the primary source; what a user's own tool or skill recorded fills its gaps.
+    for (const [key, fromDirectory] of Object.entries(directoryProfiles(await readDirectoryCache()))) {
+      profiles[key] = { ...profiles[key], ...fromDirectory }
+    }
+    return { events, profiles, storeLabel: resolved.store.label, ...(storeProblem !== undefined ? { storeProblem } : {}) }
+  }
+
+  const usageStatsTool = createUsageStatsTool({
+    gather: gatherUsage,
+    inventory: usageInventory,
+    me: () => cachedAttribution.author ?? 'unknown',
+  })
+
+  async function handleRequestUsage(message: Extract<UiToHostMessage, { type: 'requestUsage' }>): Promise<void> {
+    const config = await loadSettings()
+    const settings = await usageSettings(config)
+    const options = usageOptions(config)
+    // No collection, no dashboard: the panel shows the setup instead.
+    if (!settings.collecting) {
+      post({ type: 'usage', settings, options })
+      return
+    }
+    const data = await gatherUsage(message.from, message.to)
+    if ('problem' in data) {
+      post({ type: 'usage', settings, options, storeProblem: data.problem })
+      return
+    }
+    const { events, profiles, storeProblem } = data
+    const me = cachedAttribution.author ?? 'unknown'
+    const dashboard = computeDashboard({
+      events,
+      inventory: await usageInventory(),
+      scope: message.scope satisfies UsageScope,
+      me,
+      from: message.from,
+      to: message.to,
+      profiles,
+      ...(message.timezoneOffsetMinutes !== undefined ? { timezoneOffsetMinutes: message.timezoneOffsetMinutes } : {}),
+    })
+    post({
+      type: 'usage',
+      settings,
+      options,
+      storeLabel: data.storeLabel,
+      ...(storeProblem !== undefined ? { storeProblem } : {}),
+      dashboard,
+    })
+  }
+
+  async function handleSaveUsageSettings(message: Extract<UiToHostMessage, { type: 'saveUsageSettings' }>): Promise<void> {
+    const config = await loadSettings()
+    const refuse = async (saveError: string): Promise<void> => post({ type: 'usage', settings: await usageSettings(config), options: usageOptions(config), saveError })
+    const store = message.store
+    // A store chosen by hand is proved by writing, not assumed: one that cannot be written would
+    // collect into a queue nobody empties. An automatic one is checked the same way on its first push.
+    if (store !== undefined && !message.stopped) {
+      const trial = await openUsageStore(config, store)
+      if ('problem' in trial) {
+        await refuse(trial.problem)
+        return
+      }
+      try {
+        await trial.store.put({ user: '_check', day: new Date().toISOString().slice(0, 10), instance: usageInstance }, [])
+      } catch (error) {
+        await refuse(`Could not write to ${trial.store.label}: ${error instanceof Error ? error.message : String(error)}`)
+        return
+      }
+    }
+    const userInfoTool = message.userInfoTool?.trim()
+    await configManager.save('user', {
+      usage: {
+        ...(message.stopped ? { enabled: false } : {}),
+        ...(store !== undefined ? { store } : {}),
+        ...(userInfoTool !== undefined && userInfoTool.length > 0 ? { userInfoTool } : {}),
+      },
+    })
+    const saved = await loadSettings()
+    post({ type: 'usage', settings: await usageSettings(saved), options: usageOptions(saved), saved: true })
+    if (usageCollecting()) void pushUsageNow()
+  }
+
   async function postPython(): Promise<void> {
     const saved =
       (await configManager.load().then(
@@ -10042,6 +10908,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(saved.toolsDir !== undefined ? { toolsDir: saved.toolsDir } : {}),
         ...(saved.venvPath !== undefined ? { venvPath: saved.venvPath } : {}),
         ...(saved.interpreterPath !== undefined ? { interpreterPath: saved.interpreterPath } : {}),
+        ...(saved.libraryFolders !== undefined ? { libraryFolders: saved.libraryFolders } : {}),
         // Sent so nothing the form cannot edit is invisible *and* silently rewritten.
         ...(saved.extraIndexUrls !== undefined ? { extraIndexUrls: saved.extraIndexUrls } : {}),
         ...(saved.indexUrl !== undefined ? { indexUrl: saved.indexUrl } : {}),
@@ -10175,6 +11042,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             ? input.interpreterPath.trim().length > 0
               ? { interpreterPath: input.interpreterPath.trim() }
               : { interpreterPath: undefined }
+            : {}),
+          ...(input.libraryFolders !== undefined
+            ? input.libraryFolders.some((folder) => folder.trim().length > 0)
+              ? { libraryFolders: input.libraryFolders.map((folder) => folder.trim()).filter((folder) => folder.length > 0) }
+              : { libraryFolders: undefined }
             : {}),
           ...(input.timeoutSeconds !== undefined ? { timeoutSeconds: input.timeoutSeconds } : {}),
           ...(input.indexUrl !== undefined
@@ -10360,7 +11232,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         post({ type: 'embedderModels', models: [], warning: 'That profile no longer exists.' })
         return
       }
-      const result = await listModels(httpClient, profile, authStrategyFor(config, profile))
+      const result = await listModelsFor(config, profile)
       post({
         type: 'embedderModels',
         models: result.ids,
@@ -10380,7 +11252,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   /** One SecretStorage key for the global key passphrase — there is only ever one. */
   const GLOBAL_PASSPHRASE_REF = 'tls:global:passphrase'
 
-  async function postNetwork(): Promise<void> {
+  /** `proxyError`: why the last proxy save was refused, shown on the panel rather than in the chat. */
+  async function postNetwork(proxyError?: string): Promise<void> {
     const { config } = await configManager.load()
     // `passphraseRef` is dropped rather than sent: it is a pointer at a secret, and the UI
     // only ever needs to know whether one exists (invariant 7).
@@ -10395,8 +11268,79 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // actually holds the passphrase.
         hasPassphrase: (await secrets.get(GLOBAL_PASSPHRASE_REF)) !== undefined,
         ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+        proxy: {
+          ...(config.proxy?.http !== undefined ? { http: config.proxy.http } : {}),
+          ...(config.proxy?.https !== undefined ? { https: config.proxy.https } : {}),
+          ...(config.proxy?.noProxy !== undefined ? { noProxy: config.proxy.noProxy } : {}),
+          // Booleans only: a proxy password never crosses the bridge (invariant 7).
+          httpHasPassword: (await secrets.get(proxyPasswordRef('http'))) !== undefined,
+          httpsHasPassword: (await secrets.get(proxyPasswordRef('https'))) !== undefined,
+        },
+        ...(proxyError !== undefined ? { proxyError } : {}),
       },
     })
+  }
+
+  /** Where a proxy's password is kept: never in config (§15), which holds the URL without it. */
+  function proxyPasswordRef(kind: 'http' | 'https'): string {
+    return `proxy:${kind}:password`
+  }
+
+  /*
+   * Saves the http_request proxy. People write the URL with the login in it (http://user:pass@host:8080),
+   * so that is what the box takes; the password is lifted into secret storage and the URL saved without
+   * it. A URL with a username but no password keeps the stored password - so re-saving the form, which
+   * never shows the password, does not wipe it - unless the username changed, since a password belongs
+   * to its user.
+   */
+  async function handleSaveProxy(input: { http: string; https: string; noProxy: string }): Promise<void> {
+    try {
+      const { config } = await configManager.load()
+      const next: { http?: string; https?: string; noProxy?: string } = {}
+      for (const kind of ['http', 'https'] as const) {
+        const raw = input[kind].trim()
+        const ref = proxyPasswordRef(kind)
+        if (raw.length === 0) {
+          await secrets.delete(ref)
+          continue
+        }
+        const split = splitProxyLogin(raw, `${kind.toUpperCase()} proxy`)
+        const previousUser = (() => {
+          try {
+            const before = config.proxy?.[kind]
+            return before === undefined ? undefined : splitProxyLogin(before).user
+          } catch {
+            return undefined
+          }
+        })()
+        if (split.password !== undefined) await secrets.set(ref, split.password)
+        else if (split.user === undefined || split.user !== previousUser) await secrets.delete(ref)
+        next[kind] = split.url
+      }
+      if (input.noProxy.trim().length > 0) next.noProxy = input.noProxy.trim()
+      await configManager.save('user', { proxy: Object.keys(next).length > 0 ? next : undefined })
+      await postNetwork()
+    } catch (error) {
+      await postNetwork(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /** The proxy for http_request with passwords put back, or undefined when none is configured. */
+  async function httpToolProxy(): Promise<{ http?: string; https?: string; noProxy?: string } | undefined> {
+    const proxy = (await configManager.load()).config.proxy
+    if (proxy === undefined || (proxy.http === undefined && proxy.https === undefined)) return undefined
+    const withPassword = async (kind: 'http' | 'https'): Promise<string | undefined> => {
+      const value = proxy[kind]
+      if (value === undefined) return undefined
+      const password = await secrets.get(proxyPasswordRef(kind))
+      if (password === undefined) return value
+      const url = new URL(value)
+      url.password = encodeURIComponent(password)
+      return url.toString().replace(/\/$/, '')
+    }
+    const http = await withPassword('http')
+    const https = await withPassword('https')
+    return { ...(http !== undefined ? { http } : {}), ...(https !== undefined ? { https } : {}), ...(proxy.noProxy !== undefined ? { noProxy: proxy.noProxy } : {}) }
   }
 
   /** The language servers panel: settings, and each language's server and state. */
@@ -10593,6 +11537,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   function rememberWindows(baseUrl: string, windows: Record<string, number> | undefined): void {
     for (const [id, tokens] of Object.entries(windows ?? {})) reportedWindows.set(`${baseUrl}|${id}`, tokens)
   }
+  /** The model catalogue for a profile: what VS Code offers for a Copilot profile, the gateway's otherwise. */
+  async function listModelsFor(config: LightCodeConfig, profile: ProviderProfile, signal?: AbortSignal): Promise<ListModelsResult> {
+    if (profile.wireFormat === 'vscode-lm') return listHostModels(services.languageModels, signal)
+    return listModels(httpClient, profile, authStrategyFor(config, profile), signal)
+  }
+
   async function reportedWindowFor(config: LightCodeConfig, profile: ProviderProfile): Promise<number | undefined> {
     if (profile.modelCapabilities?.contextWindow !== undefined) return undefined
     const key = `${profile.baseUrl}|${profile.model}`
@@ -10603,7 +11553,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           const controller = new AbortController()
           const timer = setTimeout(() => controller.abort(), 10_000)
           try {
-            rememberWindows(profile.baseUrl, (await listModels(httpClient, profile, authStrategyFor(config, profile), controller.signal)).windows)
+            rememberWindows(profile.baseUrl, (await listModelsFor(config, profile, controller.signal)).windows)
           } catch {
             // A gateway with no catalogue is normal; the table and the refusal path remain.
           } finally {
@@ -10644,8 +11594,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (built === undefined) return
 
       const { config } = await configManager.load()
-      const strategy = authStrategyFor(config, built.profile)
-      const result = await listModels(httpClient, built.profile, strategy)
+      const result = await listModelsFor(config, built.profile)
       rememberWindows(built.profile.baseUrl, result.windows)
       post({
         type: 'models',
@@ -10668,11 +11617,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (built === undefined) return
 
       const { config } = await configManager.load()
-      const result = await testConnection(
-        built.profile,
-        buildAuthContext(config, built.profile),
-        httpClient,
-      )
+      const result =
+        built.profile.wireFormat === 'vscode-lm'
+          ? await testHostModels(services.languageModels, built.profile.model)
+          : await testConnection(built.profile, buildAuthContext(config, built.profile), httpClient)
       post({ type: 'testConnectionResult', ok: result.ok, steps: result.steps })
     } catch (error) {
       post({
@@ -11100,6 +12048,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       httpClient,
       authStrategyFor(config, profile),
       logger,
+      services.languageModels,
     )
 
     /*
@@ -11224,6 +12173,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         httpClient,
         authStrategyFor(config, profile),
         logger,
+        services.languageModels,
       )
       let text = ''
       for await (const chunk of provider.streamChat(
@@ -12116,7 +13066,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .load()
         .then(async () => {
           await configManager.save('user', {
-            office: { excel: message.excel, outlook: message.outlook },
+            // A window that predates the Teams switch sends no `teams`; that must not switch it off.
+            office: { excel: message.excel, outlook: message.outlook, teams: message.teams ?? cachedOffice.teams === true },
           })
           await loadSettings()
           await postTools()
@@ -12336,7 +13287,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleClearAssessment', handleClearAssessment(message.model, message.profileLabel))
     } else if (message.type === 'restartScheduler') {
       restartScheduleTimer()
-      logger.info('schedule timer restarted by the user')
+      if (services.runsSchedules !== false) logger.info('schedule timer restarted by the user')
       reportFailure('postSchedules', postSchedules())
     } else if (message.type === 'deleteScheduleRun') {
       reportFailure('handleDeleteScheduleRun', handleDeleteScheduleRun(message.id, message.at))
@@ -12370,6 +13321,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('postPython', configurePythonFromSettings().then(postPython))
     } else if (message.type === 'setPython') {
       reportFailure('handleSetPython', handleSetPython(message))
+    } else if (message.type === 'requestUsage') {
+      reportFailure('handleRequestUsage', handleRequestUsage(message))
+    } else if (message.type === 'saveUsageSettings') {
+      reportFailure('handleSaveUsageSettings', handleSaveUsageSettings(message))
     } else if (message.type === 'requestNetwork') {
       reportFailure('postNetwork', postNetwork())
     } else if (message.type === 'requestLsp') {
@@ -12385,6 +13340,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )
     } else if (message.type === 'saveNetwork') {
       reportFailure('handleSaveNetwork', handleSaveNetwork(message.settings))
+    } else if (message.type === 'saveProxy') {
+      reportFailure('handleSaveProxy', handleSaveProxy(message))
     } else if (message.type === 'requestExpert') {
       reportFailure('postExpert', postExpert())
     } else if (message.type === 'setPlan') {
@@ -12880,6 +13837,7 @@ ${contents}
         supported: officeAvailable(),
         excel: cachedOffice.excel === true,
         outlook: cachedOffice.outlook === true,
+        teams: cachedOffice.teams === true,
       },
       tools: registry
         .list()
@@ -12934,6 +13892,7 @@ ${contents}
       scheduler: {
         running: scheduleTimer !== undefined,
         ...(lastScheduleTickAt === undefined ? {} : { lastTickAt: lastScheduleTickAt }),
+        ...(services.runsSchedules === false ? { elsewhere: true } : {}),
       },
     })
   }
@@ -13388,6 +14347,8 @@ ${contents}
    */
   /** Stops and starts, unconditionally. The manual button and the watchdog share this. */
   function restartScheduleTimer(): void {
+    // Another process runs this codebase's schedules; a timer here would run every job twice.
+    if (services.runsSchedules === false) return
     if (scheduleTimer !== undefined) {
       clearInterval(scheduleTimer)
       scheduleTimer = undefined
@@ -13507,6 +14468,7 @@ ${contents}
     restartScheduler: () => {
       restartScheduleTimer()
     },
+    writeCommitMessage: (repositoryRoot) => writeCommitMessage(repositoryRoot ?? workspaceRoot, { preferStaged: true }),
     resync: () => {
       void (async () => {
         try {

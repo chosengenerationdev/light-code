@@ -8,6 +8,7 @@ import { Panel } from './Panel.js'
 export interface NetworkTabProps {
   settings: NetworkSettingsSummary | undefined
   onSave: (settings: NetworkSettingsInput) => void
+  onSaveProxy: (proxy: { http: string; https: string; noProxy: string }) => void
   onBrowse: (request: BrowseRequest) => void
   pickedPath: { purpose: string; path: string } | undefined
 }
@@ -44,6 +45,74 @@ function Field(props: {
       />
       {props.hint !== undefined && <div style={hint}>{props.hint}</div>}
     </div>
+  )
+}
+
+/**
+ * The proxy `http_request` goes through. Its own panel and its own Save: the TLS Save sends TLS only, so
+ * neither can wipe the other. The boxes take the URL as people write it, login included; the host moves
+ * the password into secret storage, and the box comes back showing the user name only.
+ */
+function ProxyPanel(props: { settings: NetworkSettingsSummary | undefined; onSave: NetworkTabProps['onSaveProxy'] }): ReactElement {
+  const proxy = props.settings?.proxy
+  const [http, setHttp] = useState('')
+  const [https, setHttps] = useState('')
+  const [noProxy, setNoProxy] = useState('')
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    setHttp(proxy?.http ?? '')
+    setHttps(proxy?.https ?? '')
+    setNoProxy(proxy?.noProxy ?? '')
+  }, [proxy?.http, proxy?.https, proxy?.noProxy])
+  const stored = (has: boolean | undefined, value: string): string | undefined =>
+    has === true && value.trim().length > 0 && !/:[^/@]*@/.test(value.replace(/^https?:\/\//, '')) ? 'Password stored - leave it out of the address to keep it.' : undefined
+  const field = (id: string, label: string, value: string, set: (v: string) => void, placeholder: string, note?: string): ReactElement => (
+    <div style={{ marginBottom: 12 }}>
+      <label htmlFor={id} style={{ display: 'block', fontFamily, fontSize: 12, marginBottom: 4 }}>
+        {label}
+      </label>
+      <input
+        id={id}
+        value={value}
+        placeholder={placeholder}
+        spellCheck={false}
+        onChange={(event) => {
+          set(event.target.value)
+          setSaved(false)
+        }}
+        style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'var(--vscode-editor-font-family, monospace)', fontSize: 12, padding: '4px 6px', background: colors.inputBackground, color: colors.inputForeground, border: `1px solid ${colors.inputBorder}`, borderRadius: 2 }}
+      />
+      {note !== undefined && <div style={{ ...hint, marginTop: 2, marginBottom: 0 }}>{note}</div>}
+    </div>
+  )
+  return (
+    <Panel id="network.proxy" title="Proxy for API calls" summary={proxy?.http !== undefined || proxy?.https !== undefined ? 'Set' : 'None'}>
+      <p style={{ ...hint, marginTop: 0 }}>
+        Used by <code>http_request</code> (the assistant calling an API). Write the login into the address, e.g.{' '}
+        <code>http://user:password@proxy.corp:8080</code> - the password is moved into secret storage and never written to
+        settings. HTTP is for http:// APIs and HTTPS for https:// ones; both are usually the same proxy.
+      </p>
+      {field('net-proxy-http', 'HTTP proxy', http, setHttp, 'http://user:password@proxy.corp:8080', stored(proxy?.httpHasPassword, http))}
+      {field('net-proxy-https', 'HTTPS proxy', https, setHttps, 'http://user:password@proxy.corp:8080', stored(proxy?.httpsHasPassword, https))}
+      {field('net-proxy-none', 'No proxy for', noProxy, setNoProxy, '.corp.internal, localhost, 10.0.0.0', 'Comma-separated hosts or domains reached directly.')}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          type="button"
+          style={primaryButtonStyle(false)}
+          onClick={() => {
+            props.onSave({ http, https, noProxy })
+            setSaved(true)
+          }}
+        >
+          Save proxy
+        </button>
+        {props.settings?.proxyError !== undefined ? (
+          <span style={{ fontSize: 12, color: colors.error }}>{props.settings.proxyError}</span>
+        ) : (
+          saved && <span style={{ fontSize: 12, color: colors.muted }}>Saved.</span>
+        )}
+      </div>
+    </Panel>
   )
 }
 
@@ -218,6 +287,10 @@ export function NetworkTab(props: NetworkTabProps): ReactElement {
           Save
         </button>
         {saved && <span style={{ fontSize: 12, color: colors.muted }}>Saved.</span>}
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <ProxyPanel settings={settings} onSave={props.onSaveProxy} />
       </div>
     </div>
   )

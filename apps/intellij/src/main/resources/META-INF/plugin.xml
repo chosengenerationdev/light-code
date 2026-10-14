@@ -8,6 +8,28 @@
   <description><![CDATA[
     A minimal agentic coding assistant, for working inside an organisation.
     <ul>
+      <li>Light Code 0.136.0: every greyed-out button says why when hovered; AutoSys asks for username and password plainly.</li>
+      <li>Light Code 0.135.0: GitHub Copilot as a provider, through an open VS Code window with Light Code.</li>
+      <li>Light Code 0.134.0: the company-directory lookup no longer uses PowerShell; a second Fire Code chat no longer reports its scheduler as stopped.</li>
+      <li>Light Code 0.133.0: monthly roll-up of usage statistics.</li>
+      <li>Light Code 0.132.0: usage collection safe with several sessions at once; usage_stats tool for custom metrics.</li>
+      <li>Light Code 0.131.0: names from the company directory; leaderboard by written, impact or this period.</li>
+      <li>Light Code 0.130.1: help explains user-info tools for the usage dashboard.</li>
+      <li>Light Code 0.130.0: usage collected automatically, past chats imported, people shown by name and team.</li>
+      <li>Light Code 0.129.0: usage dashboard - most used skills, contributors, unused and duplicate skills and tools.</li>
+      <li>Light Code 0.128.0: large tool results read straight into dataframe; joins built in steps.</li>
+      <li>Light Code 0.127.0: dataframe joins SQLite, JSON and records from other tools.</li>
+      <li>Light Code 0.126.0: DFS shares used as written; content search across shares (Fire Code helper).</li>
+      <li>Light Code 0.125.1: the switch to the lighter prompt indexes tool documentation automatically.</li>
+      <li>Light Code 0.125.0: far less context used by tool descriptions when a search index is configured.</li>
+      <li>Light Code 0.124.0: a proxy (with login) for API calls; help knows the Rust tools.</li>
+      <li>Light Code 0.123.0: REST API calls (negotiate, Apigee, certificates), Python libraries in parallel, dataframe analysis.</li>
+      <li>Light Code 0.122.0: groundwork for Fire Code's SQLite reader.</li>
+      <li>Light Code 0.121.1: asking it to message someone in Teams sends the message.</li>
+      <li>Light Code 0.121.0: Teams can send a message when you ask; no server-only tabs on your own machine.</li>
+      <li>Light Code 0.120.0: merge an approved Bitbucket pull request and tag it; open a Teams chat with a message typed in for you to send.</li>
+      <li>Light Code 0.119.0: Bitbucket files can be read on sites behind single sign-on.</li>
+      <li>Light Code 0.118.1: a formatted answer no longer collapses into a paragraph as the reply ends.</li>
       <li>Light Code 0.118.0: compaction only when you ask (or switch it on), your own messages kept word for word, hung replies and dropped connections retried.</li>
       <li>Your own gateway: mutual TLS, client certificates, OAuth client-credentials, header auth.</li>
       <li>An agent team — expert, programmer, reviewer, tester, librarian — each backed by a

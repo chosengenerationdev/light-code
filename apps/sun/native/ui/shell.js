@@ -23,6 +23,18 @@ const el = (tag, props = {}, ...children) => {
   for (const child of children.flat()) if (child !== undefined && child !== null && child !== false) node.append(child)
   return node
 }
+/**
+ * Disables a control and says why when hovered; `reason` undefined enables it again with its own title.
+ * Asked for: a greyed control should tell you why. Its own title is remembered on first use.
+ */
+function why(node, reason) {
+  if (node.dataset.enabledTitle === undefined) node.dataset.enabledTitle = node.getAttribute('title') ?? ''
+  node.disabled = reason !== undefined
+  if (reason !== undefined) node.title = reason
+  else if (node.dataset.enabledTitle !== '') node.title = node.dataset.enabledTitle
+  else node.removeAttribute('title')
+  return node
+}
 const COG = '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'
 const svg = (paths, extra = '') =>
   paths === 'cog' ? `<svg viewBox="0 0 24 24" class="cog" ${extra}>${COG}</svg>` :
@@ -397,7 +409,7 @@ const projectOf = (key) => key.split('~')[0]
 const chatKeys = (p) => [p.id, ...(p.chats ?? []).map((c) => `${p.id}~${c.id}`)]
 const chatName = (key) => {
   const p = model.projects.find((x) => x.id === projectOf(key))
-  if (!key.includes('~')) return 'Chat 1'
+  if (!key.includes('~')) return p?.firstChatName ?? 'Chat 1'
   return p?.chats?.find((c) => `${p.id}~${c.id}` === key)?.name ?? 'Chat'
 }
 const PHASE_RANK = ['stopped', 'sleeping', 'failed', 'starting', 'running']
@@ -439,7 +451,11 @@ function openProject(id) {
 
 const tabs = $('#tabs')
 
+/** The chat whose tab is being renamed: the tabs are not redrawn under the box while it is open. */
+let renamingChat
+
 function renderTabs() {
+  if (renamingChat !== undefined) return
   const key = model.active
   const p = key === undefined ? undefined : model.projects.find((x) => x.id === projectOf(key))
   tabs.hidden = p === undefined
@@ -454,12 +470,24 @@ function renderTabs() {
           class: `tab${k === key ? ' active' : ''}${s.phase === 'running' && s.agent === 'attention' ? ' waiting' : ''}`,
           role: 'tab',
           'aria-selected': String(k === key),
-          title: k.includes('~') ? 'Double-click to rename · middle-click to close' : 'The first chat',
-          onclick: () => select(k),
+          title: k.includes('~')
+            ? 'Double-click or right-click to rename · middle-click to close'
+            : "The first chat, which runs this codebase's schedules · double-click or right-click to rename",
+          'data-key': k,
+          /*
+           * Clicking the tab already open does nothing. It used to select it again, and selecting moves
+           * focus into the chat on the next frame - so the second click of a double-click took focus
+           * away from the rename box it had just opened, and the rename ended before anything was typed.
+           */
+          onclick: () => k !== model.active && select(k),
           onauxclick: (e) => {
             if (e.button === 1 && k.includes('~')) closeChat(k)
           },
-          ondblclick: () => k.includes('~') && renameChat(k, tab),
+          ondblclick: () => renameChat(k, tab),
+          oncontextmenu: (e) => {
+            e.preventDefault()
+            showChatMenu(p, k, tab, e.clientX, e.clientY)
+          },
         },
         el('span', { class: `dot ${dotClass(k)}` }),
         el('span', { class: 'tab-name', text: chatName(k) }),
@@ -494,21 +522,73 @@ function closeChat(key) {
   send('closeChat', { id: key })
 }
 
+/** Right-click on a chat tab: what can be done to that one chat. */
+function showChatMenu(project, key, tab, x, y) {
+  closeMenu()
+  const item = (icon, label, action, danger = false) =>
+    el(
+      'button',
+      {
+        class: danger ? 'danger' : '',
+        onclick: () => {
+          closeMenu()
+          action()
+        },
+      },
+      el('span', { html: svg(ICONS[icon]) }),
+      label,
+    )
+  const menu = el(
+    'div',
+    { class: 'menu', role: 'menu' },
+    item('rename', 'Rename chat', () => renameChat(key, tab)),
+    item('plus', 'New chat', () => send('newChat', { id: project.id })),
+    item('log', 'View agent log', () => send('openLog', { id: key })),
+    key.includes('~') ? el('hr') : null,
+    key.includes('~') ? item('remove', 'Close chat', () => closeChat(key), true) : null,
+  )
+  document.body.append(menu)
+  const box = menu.getBoundingClientRect()
+  menu.style.left = `${Math.min(x, innerWidth - box.width - 8)}px`
+  menu.style.top = `${Math.min(y, innerHeight - box.height - 8)}px`
+  setTimeout(() => document.addEventListener('pointerdown', (e) => !menu.contains(e.target) && closeMenu(), { once: true }))
+}
+
 function renameChat(key, tab) {
-  const name = $('.tab-name', tab)
-  const input = el('input', { class: 'tab-rename', value: chatName(key) })
+  // By key, not by the node passed in: a redraw between the two clicks replaces every tab.
+  const current = tabs.querySelector(`.tab[data-key="${CSS.escape(key)}"]`) ?? tab
+  const name = $('.tab-name', current)
+  if (name === null || renamingChat !== undefined) return
+  renamingChat = key
+  const input = el('input', { class: 'tab-rename', value: chatName(key), maxlength: '60', 'aria-label': 'Chat name' })
   name.replaceWith(input)
   input.focus()
   input.select()
+  // Enter, then the blur that redrawing the tabs causes, would otherwise save twice.
+  let finished = false
   const done = (save) => {
-    if (save && input.value.trim() !== '') send('renameChat', { id: key, name: input.value.trim() })
+    if (finished) return
+    finished = true
+    renamingChat = undefined
+    if (save && input.value.trim() !== '' && input.value.trim() !== chatName(key)) send('renameChat', { id: key, name: input.value.trim() })
     renderTabs()
   }
+  // The box sits inside the tab's button: its clicks and keys must not reach the button.
+  input.addEventListener('click', (e) => e.stopPropagation())
+  input.addEventListener('dblclick', (e) => e.stopPropagation())
   input.addEventListener('keydown', (e) => {
+    e.stopPropagation()
     if (e.key === 'Enter') done(true)
     if (e.key === 'Escape') done(false)
   })
-  input.addEventListener('blur', () => done(true))
+  input.addEventListener('keyup', (e) => e.stopPropagation())
+  // Focus taken in the first moments (a chat pane claiming it as it is selected) is taken back, not
+  // read as "finished" - that is how the rename used to close before anything was typed.
+  const opened = Date.now()
+  input.addEventListener('blur', () => {
+    if (!finished && Date.now() - opened < 300) requestAnimationFrame(() => input.focus())
+    else done(true)
+  })
 }
 
 const WAITING_WORDS = {
@@ -723,7 +803,7 @@ function openCommit(project) {
     const box = el('textarea', { rows: '6', placeholder: 'What changed, and why', spellcheck: 'true', 'aria-label': 'Commit message' })
     box.addEventListener('input', () => {
       state.message = box.value
-      button.disabled = state.busy || state.message.trim().length === 0
+      why(button, state.busy ? 'Committing and pushing - wait for it to finish.' : state.message.trim().length === 0 ? 'Write a commit message first.' : undefined)
     })
     const write = el('button', {
       class: 'secondary',
@@ -734,7 +814,7 @@ function openCommit(project) {
         const url = model.urls[project.id]
         if (frame?.contentWindow == null || url === undefined) return notice('Open the codebase first - its agent writes the message.', 'error')
         state.writing = true
-        write.disabled = true
+        why(write, 'The agent is writing a message.')
         write.textContent = 'Writing…'
         frame.contentWindow.postMessage({ source: 'sun', ask: 'commitMessage' }, new URL(url).origin)
       },
@@ -742,10 +822,9 @@ function openCommit(project) {
     const button = el('button', {
       class: 'primary',
       text: 'Commit and push',
-      disabled: true,
       onclick: () => {
         state.busy = true
-        button.disabled = true
+        why(button, 'Committing and pushing - wait for it to finish.')
         button.textContent = 'Pushing…'
         if (!project.hub) return send('gitCommitPush', { id: project.id, message: state.message })
         if (!askHubGit(project, 'commit', state.message)) {
@@ -754,6 +833,7 @@ function openCommit(project) {
         }
       },
     })
+    why(button, 'Write a commit message first.')
     const total = g.added + g.modified + g.deleted
     card.append(
       el('header', {}, el('h2', { text: `Commit and push — ${project.name}` }), el('p', { class: 'sub', text: `${total} changed file${total === 1 ? '' : 's'}${g.branch ? ` on ${g.branch}` : ''}${g.ahead > 0 ? `, ${g.ahead} commit${g.ahead === 1 ? '' : 's'} waiting to push` : ''}. Everything changed is committed.` })),
@@ -769,12 +849,12 @@ function openCommit(project) {
     )
     modal.projectId = project.id
     modal.onCommitMessage = (text, error) => {
-      write.disabled = false
+      why(write, undefined)
       write.textContent = 'Write with agent'
       if (typeof text === 'string' && text.trim().length > 0) {
         box.value = text.trim()
         state.message = box.value
-        button.disabled = state.busy
+        why(button, state.busy ? 'Committing and pushing - wait for it to finish.' : undefined)
         box.focus()
       } else notice(error || 'The agent could not write a message.', 'error')
     }
@@ -783,7 +863,7 @@ function openCommit(project) {
       else {
         state.busy = false
         button.textContent = 'Commit and push'
-        button.disabled = state.message.trim().length === 0
+        why(button, state.message.trim().length === 0 ? 'Write a commit message first.' : undefined)
       }
     }
     requestAnimationFrame(() => box.focus())
@@ -918,7 +998,7 @@ function renderPanes() {
     if (url !== undefined && s.phase === 'running') {
       if (frame === null) {
         frame = el('iframe', {
-          title: `Light Code — ${project.name}${key.includes('~') ? ` — ${chatName(key)}` : ''}`,
+          title: `Light Code — ${project.name}${key.includes('~') || project.firstChatName ? ` — ${chatName(key)}` : ''}`,
           allow: 'clipboard-read; clipboard-write',
           src: url,
         })
@@ -1246,7 +1326,7 @@ function renderMarkdown(text, base) {
         if (task) {
           content[0] = content[0].slice(task[0].length)
           li.classList.add('md-task')
-          li.append(el('input', { type: 'checkbox', disabled: true, checked: task[1] !== ' ' }))
+          li.append(el('input', { type: 'checkbox', disabled: true, title: 'A checklist in the report - shown as written, not something to tick here.', checked: task[1] !== ' ' }))
         }
         const inner = renderMarkdown(content.join('\n'), base)
         // A one-paragraph item reads as text, not as a paragraph with margins.
@@ -1620,11 +1700,19 @@ function hubPayload(draft) {
   }
 }
 
-const hubReady = (draft) =>
-  /^https?:\/\/\S+/.test(draft.url.trim()) &&
-  draft.user.trim().length > 0 &&
-  draft.folders.trim().length > 0 &&
-  (draft.tokenMode === 'keep' || (draft.tokenMode === 'paste' ? draft.token.trim().length > 0 : draft.credential.length > 0))
+/** What the hub form still needs, in words for the button's tooltip; undefined when it is complete. */
+const hubMissing = (draft) =>
+  !/^https?:\/\/\S+/.test(draft.url.trim())
+    ? 'Enter the hub address, starting with https://.'
+    : draft.user.trim().length === 0
+      ? 'Enter your hub user name.'
+      : draft.folders.trim().length === 0
+        ? 'Enter at least one folder.'
+        : draft.tokenMode === 'keep' || (draft.tokenMode === 'paste' ? draft.token.trim().length > 0 : draft.credential.length > 0)
+          ? undefined
+          : draft.tokenMode === 'paste'
+            ? 'Paste the hub token.'
+            : 'Choose the saved credential holding the hub token.'
 
 function hubFields(draft, render) {
   const field = (key, label, placeholder, hint, type = 'text') => {
@@ -1701,15 +1789,14 @@ function openHubSettings(project) {
     const render = () => {
       // A redraw (choosing settings, switching the token field) keeps the place being read.
       const scrolled = card.querySelector('.body')?.scrollTop ?? 0
-      save = el('button', {
+      save = why(el('button', {
         class: 'primary',
         text: 'Save and restart agent',
-        disabled: !hubReady(draft),
         onclick: () => {
           send('updateHub', { id: project.id, hub: hubPayload(draft) })
           closeModal()
         },
-      })
+      }), hubMissing(draft))
       card.replaceChildren(
         el('header', {}, el('h2', { text: `JupyterHub — ${project.name}` }), el('p', { class: 'sub', text: 'Where these folders are, and how to reach them.' })),
         el('div', { class: 'body' }, ...hubFields(draft, render)),
@@ -1719,7 +1806,7 @@ function openHubSettings(project) {
       if (body) body.scrollTop = scrolled
     }
     render.soft = () => {
-      if (save) save.disabled = !hubReady(draft)
+      if (save) why(save, hubMissing(draft))
     }
     modal.refresh = render
     render()
@@ -1787,7 +1874,16 @@ function openAdd() {
       const scrolled = card.querySelector('.body')?.scrollTop ?? 0
       const onHub = state.where === 'hub'
       const settingsReady = state.mode === 'new' || state.source !== undefined
-      const ready = (onHub ? hubReady(state.hub) : state.folder !== undefined) && settingsReady && !state.busy
+      const addBlocked = () =>
+        state.busy
+          ? 'Adding - wait a moment.'
+          : onHub
+            ? hubMissing(state.hub) ?? (settingsReady ? undefined : 'Choose which settings file to link or copy.')
+            : state.folder === undefined
+              ? 'Choose the folder first.'
+              : settingsReady
+                ? undefined
+                : 'Choose which settings file to link or copy.'
       const nameInput = el('input', { type: 'text', value: state.name, placeholder: 'Shown in the sidebar (optional)' })
       nameInput.addEventListener('input', () => (state.name = nameInput.value))
       const hubPart = [
@@ -1813,10 +1909,9 @@ function openAdd() {
           {},
           el('span', { class: 'spacer' }),
           el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }),
-          el('button', {
+          why(el('button', {
             class: 'primary',
             text: state.busy ? 'Adding…' : 'Add codebase',
-            disabled: !ready,
             onclick: () => {
               state.busy = true
               render()
@@ -1827,7 +1922,7 @@ function openAdd() {
                 if (openModal === modal) render()
               }, 4000)
             },
-          }),
+          }), addBlocked()),
         ),
       )
       const body = card.querySelector('.body')
@@ -1836,7 +1931,10 @@ function openAdd() {
     // Typing in the hub form only re-checks the button, so the box being typed in keeps its focus.
     render.soft = () => {
       const button = card.querySelector('footer .primary')
-      if (button) button.disabled = !(hubReady(state.hub) && (state.mode === 'new' || state.source !== undefined) && !state.busy)
+      if (button)
+        why(button, state.busy
+          ? 'Adding - wait a moment.'
+          : hubMissing(state.hub) ?? (state.mode === 'new' || state.source !== undefined ? undefined : 'Choose which settings file to link or copy.'))
     }
     modal.refresh = render
     modal.onFolder = (m) => {
@@ -1891,15 +1989,14 @@ function openConfigChooser(project) {
           {},
           el('span', { class: 'spacer' }),
           el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }),
-          el('button', {
+          why(el('button', {
             class: 'primary',
             text: 'Apply and restart agent',
-            disabled: state.mode !== 'new' && state.source === undefined,
             onclick: () => {
               send('changeConfig', { id: project.id, mode: state.mode, source: state.mode === 'new' ? null : state.source })
               closeModal()
             },
-          }),
+          }), state.mode !== 'new' && state.source === undefined ? 'Choose which settings file to link or copy.' : undefined),
         ),
       )
     }
@@ -2098,8 +2195,8 @@ function openEnvironment() {
           : [{ value: `${c.id}#value`, label: c.label }],
       )
 
-    const iconButton = (title, icon, onclick, disabled = false) =>
-      el('button', { class: 'icon-btn small', title, 'aria-label': title, html: svg(ICONS[icon]), disabled, onclick })
+    const iconButton = (title, icon, onclick, disabledBecause) =>
+      why(el('button', { class: 'icon-btn small', title, 'aria-label': title, html: svg(ICONS[icon]), onclick }), disabledBecause)
 
     const folderRows = () =>
       draft.folders.map((folder, index) => {
@@ -2116,7 +2213,7 @@ function openEnvironment() {
           iconButton('Move up', 'up', () => {
             ;[draft.folders[index - 1], draft.folders[index]] = [draft.folders[index], draft.folders[index - 1]]
             render()
-          }, index === 0),
+          }, index === 0 ? 'Already first on the PATH.' : undefined),
           iconButton('Remove', 'close', () => {
             draft.folders.splice(index, 1)
             render()
@@ -2173,7 +2270,8 @@ function openEnvironment() {
       input.addEventListener('input', () => (draft.script = input.value))
       return el('div', { class: 'env-row' }, input,
         el('button', { class: 'secondary', text: 'Browse…', onclick: () => send('pickScript') }),
-        el('button', { class: 'secondary', text: 'Run now', disabled: (model.settings.startupScript ?? '') === '' || model.scriptStatus?.state === 'running', title: 'Runs the saved script again', onclick: () => send('runScript') }),
+        why(el('button', { class: 'secondary', text: 'Run now', title: 'Runs the saved script again', onclick: () => send('runScript') }),
+          (model.settings.startupScript ?? '') === '' ? 'Save a startup script first.' : model.scriptStatus?.state === 'running' ? 'The script is running now.' : undefined),
       )
     }
 
@@ -2337,15 +2435,14 @@ function openCredentials() {
             'div',
             { class: 'segmented' },
             ...kinds.map(([value, text]) =>
-              el('button', {
+              why(el('button', {
                 class: draft.kind === value ? 'on' : '',
                 text,
-                disabled: !isNew && draft.kind !== value,
                 onclick: () => {
                   draft.kind = value
                   renderBody()
                 },
-              }),
+              }), !isNew && draft.kind !== value ? 'The kind of a saved credential cannot change. Add a new one instead.' : undefined),
             ),
           ),
           ...fieldsFor(draft.kind).flatMap(([field, text]) => {
@@ -2515,7 +2612,7 @@ function openCredentials() {
       })
       const update = () => {
         count.textContent = `${chosen.size} of ${credentials.length} chosen`
-        go.disabled = chosen.size === 0
+        why(go, chosen.size === 0 ? 'Tick at least one credential to export.' : undefined)
         go.textContent = chosen.size === 0 ? 'Export…' : `Export ${chosen.size}…`
       }
       filter.addEventListener('input', () => {

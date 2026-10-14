@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import { useState } from 'react'
 
 import { colors, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 /**
  * Bringing skills or Python tools in from a folder that used to hold them.
@@ -86,7 +87,7 @@ export function MigrateFolder(props: MigrateFolderProps): ReactElement {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={value.trim().length === 0}
+          {...disabledWhen([value.trim().length === 0, 'Enter the folder to copy from.'])}
           onClick={() => props.onMigrate(value.trim())}
         >
           Copy here

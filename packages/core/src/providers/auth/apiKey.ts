@@ -14,7 +14,9 @@ export function defaultApiKeyHeader(wireFormat: WireFormat): { name: string; pre
       return { name: 'x-api-key', prefix: '' }
     case 'gemini':
       return { name: 'x-goog-api-key', prefix: '' }
+    // A Copilot profile (vscode-lm) has no key of ours; VS Code signs the request. Only a fallback.
     case 'openai':
+    case 'vscode-lm':
       return { name: 'Authorization', prefix: 'Bearer ' }
   }
 }

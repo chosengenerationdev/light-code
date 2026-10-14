@@ -44,8 +44,8 @@ function render(
   props: {
     tools?: ToolCatalogueEntry[]
     dispatcher?: boolean
-    office?: { supported: boolean; excel: boolean; outlook: boolean }
-    onSetOffice?: (excel: boolean, outlook: boolean) => void
+    office?: { supported: boolean; excel: boolean; outlook: boolean; teams?: boolean }
+    onSetOffice?: (excel: boolean, outlook: boolean, teams: boolean) => void
     toolTimeoutSeconds?: number
     onSetToolTimeout?: (seconds?: number) => void
     onSetToolTimeoutFor?: (name: string, seconds?: number) => void
@@ -171,6 +171,15 @@ describe('the Excel and Outlook toggles', () => {
     const excel = container.querySelector<HTMLInputElement>('input[type="checkbox"]')
     act(() => excel?.click())
     expect(calls).toEqual([[true, true]])
+  })
+
+  it('switch Teams on without touching Excel or Outlook', () => {
+    const calls: [boolean, boolean, boolean][] = []
+    render({ office: { supported: true, excel: true, outlook: false }, onSetOffice: (e, o, t) => calls.push([e, o, t]) })
+    const boxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+    const teams = boxes.find((box) => box.closest('label')?.textContent?.startsWith('Teams') === true)
+    act(() => teams?.click())
+    expect(calls).toEqual([[true, false, true]])
   })
 
   /** Hiding them off Windows would leave someone wondering where the feature went. */

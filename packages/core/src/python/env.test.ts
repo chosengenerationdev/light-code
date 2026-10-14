@@ -118,7 +118,7 @@ describe('the single owner of a Python child environment', () => {
   })
 
   it('builds that one place out of the user declaration as well as the session variables', () => {
-    const at = manager.indexOf('private async childEnv()')
+    const at = manager.indexOf('private async childEnv(')
     expect(at).toBeGreaterThan(-1)
     const body = manager.slice(at, at + 600)
     expect(body).toContain('resolvePythonEnv')

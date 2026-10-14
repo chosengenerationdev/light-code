@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Schedule, ScheduleToolInfo } from '@light-code/core/browser'
+import type { Schedule, SchedulerStatus, ScheduleToolInfo } from '@light-code/core/browser'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -261,5 +261,51 @@ describe('the schedule tool picker', () => {
     openEditor()
     type('Filter by name', 'zzz-nothing-matches')
     expect(container.textContent).toContain('No tool matches')
+  })
+})
+
+describe('the scheduler status line', () => {
+  function renderWith(scheduler: SchedulerStatus): void {
+    act(() =>
+      root.render(
+        <SchedulesTab
+          schedules={[]}
+          tools={TOOLS}
+          skills={SKILLS}
+          scheduler={scheduler}
+          onSave={() => {}}
+          onDelete={() => {}}
+          onToggle={() => {}}
+          onRunNow={() => {}}
+          mentionCandidates={[]}
+          onQueryMentions={() => {}}
+          onOpenRun={() => {}}
+          onOpenReport={() => {}}
+          onRestartScheduler={() => {}}
+          onClearRuns={() => {}}
+          onDeleteRun={() => {}}
+          onDuplicate={() => {}}
+        />,
+      ),
+    )
+  }
+  const restart = (): Element | undefined =>
+    [...container.querySelectorAll('button')].find((b) => b.textContent === 'Restart')
+
+  it('says a dead timer is dead, and offers Restart', () => {
+    renderWith({ running: false })
+    expect(container.textContent).toContain('nothing will fire')
+    expect(restart()).toBeDefined()
+  })
+
+  /*
+   * Reported from Fire Code: a second chat said "not running", Restart started a timer there, and
+   * the job then had two schedulers. Not running is correct in a chat whose first chat runs them.
+   */
+  it('does not call a chat whose schedules run elsewhere stopped, and offers no Restart', () => {
+    renderWith({ running: false, elsewhere: true })
+    expect(container.textContent).not.toContain('nothing will fire')
+    expect(container.textContent).toContain('first chat')
+    expect(restart()).toBeUndefined()
   })
 })

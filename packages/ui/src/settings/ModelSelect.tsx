@@ -2,6 +2,7 @@ import { resolveModelCapabilities, type ModelCapabilityInput } from '@light-code
 import { type ReactElement } from 'react'
 import { Select } from '../Select.js'
 import { colors, fieldErrorStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface ModelSelectProps {
   value: string
@@ -51,7 +52,7 @@ export function ModelSelect(props: ModelSelectProps): ReactElement {
           onChange={(event) => props.onChange(event.target.value)}
           style={textFieldStyle()}
         />
-        <button type="button" style={secondaryButtonStyle()} onClick={props.onRefresh} disabled={props.loading}>
+        <button type="button" style={secondaryButtonStyle()} onClick={props.onRefresh} {...disabledWhen([props.loading, 'The model list is loading.'])}>
           {props.loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>

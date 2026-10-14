@@ -260,6 +260,9 @@ export class PythonManager {
    * changed variable would apply at the next window rather than the next call.
    */
   private envEntries: PythonEnvEntry[] = []
+  private libraryEnvEntries: PythonEnvEntry[] = []
+  private configuredInterpreter: string | undefined
+  private libraryFolders: string[] = []
   /** The Jupyter kernel tools run in, when this session was given one. See `jupyter.ts`. */
   private jupyterConnectionFile: string | undefined
   private envFingerprint = ''
@@ -280,6 +283,8 @@ export class PythonManager {
     venvPath?: string | undefined
     /** A Python to use directly, when there is no uv and no virtualenv. */
     interpreterPath?: string | undefined
+    /** Folders holding the user's own libraries and their DLLs, for `python_library`. */
+    libraryFolders?: readonly string[] | undefined
     timeoutSeconds?: number | undefined
     /** The global tool timeout, used when Python has no limit of its own. */
     defaultTimeoutSeconds?: number | undefined
@@ -302,6 +307,11 @@ export class PythonManager {
      */
     jupyterConnectionFile?: string | undefined
   }): Promise<void> {
+    // Kept whether or not dynamic tools are on: `python_library` runs the user's own libraries with
+    // the same interpreter choice and the same declared variables, and needs neither tool nor worker.
+    this.configuredInterpreter = config.interpreterPath
+    this.libraryFolders = [...(config.libraryFolders ?? [])]
+    this.libraryEnvEntries = pythonEnvEntries(config.env)
     const enabled = config.dynamicTools === 'on'
     if (!enabled) {
       if (this.enabled) await this.dispose()
@@ -841,9 +851,9 @@ export class PythonManager {
    * them, and it is also why the whole `python` block is user-scope only: the names that can be
    * set include `PATH`, so a repository able to write here could choose which interpreter ran.
    */
-  private async childEnv(): Promise<NodeJS.ProcessEnv> {
-    const resolved = await resolvePythonEnv(this.envEntries, this.options.secrets)
-    this.missingEnv = resolved.missing
+  private async childEnv(entries: PythonEnvEntry[] = this.envEntries): Promise<NodeJS.ProcessEnv> {
+    const resolved = await resolvePythonEnv(entries, this.options.secrets)
+    if (entries === this.envEntries) this.missingEnv = resolved.missing
     return minimalPythonEnv({
       ...(this.options.sessionEnv?.() ?? {}),
       /*
@@ -862,6 +872,32 @@ export class PythonManager {
         : {}),
       ...resolved.env,
     })
+  }
+
+  /**
+   * The interpreter and environment for `python_library`'s process pool.
+   *
+   * The environment is built by `minimalPythonEnv` here, like every other Python child (env.test.ts
+   * insists on one owner): the allowlist plus `python.env`, never a provider's key. The interpreter is,
+   * in order: one the user named for this call, the tools' own when it is running, the configured
+   * `python.interpreterPath`, then the first Python on PATH.
+   */
+  /** The library folders saved in Settings → Python, used when a request names none. */
+  savedLibraryFolders(): readonly string[] {
+    return this.libraryFolders
+  }
+
+  async libraryLaunch(requested?: string): Promise<{ interpreter: string; env: NodeJS.ProcessEnv } | { problem: string }> {
+    const env = await this.childEnv(this.libraryEnvEntries)
+    if (requested !== undefined && requested.trim().length > 0) return { interpreter: requested.trim(), env }
+    if (this.ready && this.interpreter.length > 0) return { interpreter: this.interpreter, env }
+    const bare = await detectBareInterpreter(this.configuredInterpreter)
+    if (bare !== undefined) return { interpreter: bare.path, env }
+    return {
+      problem:
+        'No Python was found to run the library with. Set Settings → Python → interpreter, put Python on PATH, ' +
+        'or name the interpreter (the one the libraries are installed for) in the request.',
+    }
   }
 
   async dispose(): Promise<void> {

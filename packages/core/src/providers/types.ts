@@ -1,8 +1,12 @@
 import { z } from 'zod'
 import type { TlsOptions } from '../platform/http.js'
 
-/** All three wire formats from Phase 7. Auth is a separate axis (§10), not implied by this. */
-export const wireFormatSchema = z.enum(['openai', 'anthropic', 'gemini'])
+/**
+ * The three wire formats from Phase 7, plus `vscode-lm`: models the host provides - GitHub Copilot
+ * through VS Code's Language Model API (`providers/hostModels.ts`). That one has no wire of ours at
+ * all; VS Code makes the request. Auth is a separate axis (§10), not implied by this.
+ */
+export const wireFormatSchema = z.enum(['openai', 'anthropic', 'gemini', 'vscode-lm'])
 export type WireFormat = z.infer<typeof wireFormatSchema>
 
 /**

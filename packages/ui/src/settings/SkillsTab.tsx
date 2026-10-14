@@ -9,6 +9,7 @@ import { S3Section, type S3SectionProps } from './S3Section.js'
 import { DismissableProblems } from './DismissableProblems.js'
 import { CheckIcon } from '../icons.js'
 import { Panel } from './Panel.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -269,7 +270,7 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={!unsaved || aliasError !== undefined}
+          {...disabledWhen([aliasError !== undefined, 'Fix the name shown above first.'], [!unsaved, 'Nothing has changed since the last save.'])}
           onClick={() => props.onSaveAliases(parseAliases(alias))}
         >
           {unsaved ? '1. Save these names' : '1. Names saved'}
@@ -277,8 +278,7 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         <button
           type="button"
           style={primaryButtonStyle(aliases.length === 0)}
-          disabled={aliases.length === 0 || props.publishing === true}
-          title={aliases.length === 0 ? 'Save the name first' : 'Embeds your skills and writes them to the shared collection'}
+          {...disabledWhen([aliases.length === 0, 'Save a team pool name first (step 1).'], [props.publishing === true, 'Sending is already running.'], { enabledTitle: 'Embeds your skills and writes them to the shared collection' })}
           onClick={props.onPublish}
         >
           {props.publishing === true ? 'Sending…' : '2. Send my skills to the team'}
@@ -314,7 +314,7 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
             <button
               type="button"
               style={secondaryButtonStyle()}
-              disabled={aliases.length === 0 || props.publishing === true}
+              {...disabledWhen([aliases.length === 0, 'Save a team pool name first (step 1).'], [props.publishing === true, 'Sending is already running.'])}
               onClick={() => setConfirmingClear(true)}
             >
               Remove mine from the pool
@@ -365,7 +365,7 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
           <button
             type="button"
             style={secondaryButtonStyle()}
-            disabled={aliases.length === 0 || props.statusLoading === true}
+            {...disabledWhen([aliases.length === 0, 'Save a team pool name first (step 1).'], [props.statusLoading === true, 'Checking already.'])}
             onClick={props.onRefreshStatus}
           >
             {props.statusLoading === true ? 'Checking…' : 'Check status'}
@@ -535,15 +535,14 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
 
       <Panel id="skills.index" title="Index and search" summary={props.indexing ? 'Reindexing…' : props.indexResult}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-        <button type="button" style={secondaryButtonStyle()} disabled={props.indexing} onClick={props.onReindex}>
+        <button type="button" style={secondaryButtonStyle()} {...disabledWhen([props.indexing, 'Reindexing already.'])} onClick={props.onReindex}>
           {props.indexing ? 'Reindexing…' : 'Reindex skills'}
         </button>
         {/* Scoped to skills: the collection is shared with tool documentation. */}
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={props.indexing}
-          title="Removes skill entries from the documentation index. Tools are left alone."
+          {...disabledWhen([props.indexing, 'Reindexing - wait for it to finish.'], { enabledTitle: 'Removes skill entries from the documentation index. Tools are left alone.' })}
           onClick={props.onClearIndex}
         >
           Clear skill entries

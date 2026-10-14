@@ -94,7 +94,12 @@ Minimalism is the point, not a stage it will grow out of:
 
 - No browser automation. If you want it, configure a Chrome DevTools MCP server yourself.
 - No OCR, and no attempt to guess at a PDF it cannot decode.
-- No telemetry, no update checks, no remote assets, no analytics of any kind.
+- No telemetry, no update checks, no remote assets, no analytics sent to anyone. The usage
+  dashboard (Settings → Usage) collects only into a store your team already configured - an
+  OpenSearch or other vector store, a team S3 bucket, or a shared folder you choose - and writes
+  only there: names and times, never your arguments or files. It can be stopped per machine.
+  To show people by name it reads the company directory (Windows' own sign-in, search only) on a
+  domain-joined Windows machine.
 - No cloud account, no sign-in, no hosted component.
 
 ---
@@ -141,7 +146,7 @@ Read this before using it anywhere sensitive.
 > endpoints, no telemetry, no update checks, and no remote assets. The only hosts it
 > contacts are the model gateway, the MCP servers, and — if you enable indexing — the vector
 > store and embedding endpoint named in your config. Each other integration you switch on (S3,
-> Confluence, Jira, Bitbucket, Jenkins, AutoSys, a JupyterHub codebase in Fire Code) contacts
+> Confluence, Jira, Bitbucket, Jenkins, AutoSys, the usage dashboard's shared store, a JupyterHub codebase in Fire Code) contacts
 > only the address you gave it.
 
 **Indexing is the largest egress in the product.** Enabling it sends the contents of your

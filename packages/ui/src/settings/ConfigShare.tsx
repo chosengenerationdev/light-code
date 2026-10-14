@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 
 import { colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 /**
  * Choosing what a config export carries, and seeing what an import will bring.
@@ -105,7 +106,7 @@ export function ConfigShare(props: ConfigShareProps): ReactElement {
             <input
               type="checkbox"
               checked={selected.includes(section.id)}
-              disabled={!section.present}
+              {...disabledWhen([!section.present, exporting ? 'Nothing of this kind is set up here, so there is nothing to export.' : 'The file holds nothing of this kind.'])}
               onChange={() => toggle(section.id)}
               style={{ marginTop: 2 }}
             />
@@ -155,7 +156,7 @@ export function ConfigShare(props: ConfigShareProps): ReactElement {
         <button
           type="button"
           style={primaryButtonStyle(chosen.length === 0)}
-          disabled={chosen.length === 0}
+          {...disabledWhen([chosen.length === 0, 'Tick at least one section first.'])}
           onClick={() => props.onConfirm(selected)}
         >
           {exporting ? `Export ${String(chosen.length)} section(s)` : `Import ${String(chosen.length)} section(s)`}

@@ -18,6 +18,17 @@ export const CONTROL_TOOLS: ReadonlySet<string> = new Set([
   'ask_followup_question',
 ])
 
+/**
+ * Whether a control tool's result only repeats the text streamed in the same message.
+ *
+ * Models often write the answer out and then pass it again to `attempt_completion`. Shown twice
+ * it reads as a glitch, so the repeat is dropped — by the live path and the transcript alike,
+ * which is why this is one function rather than a comparison in each.
+ */
+export function repeatsStreamedText(streamed: string, result: string): boolean {
+  return streamed.trim().length > 0 && streamed.trim() === result.trim()
+}
+
 /*
  * `show_chart` is deliberately NOT in CONTROL_TOOLS.
  *
@@ -126,7 +137,9 @@ export function toTranscript(messages: readonly ChatMessage[]): TranscriptEntry[
 
       if (CONTROL_TOOLS.has(toolCall.name)) {
         // The control tool's result *is* the message to the user.
-        if (result !== undefined) entries.push({ kind: 'text', role: 'assistant', content: result })
+        if (result !== undefined && !repeatsStreamedText(message.content, result)) {
+          entries.push({ kind: 'text', role: 'assistant', content: result })
+        }
         continue
       }
 

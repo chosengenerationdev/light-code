@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import type { ProbeTarget } from '@light-code/core/browser'
 
 import { colors, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface IndexProbeProps {
   target: ProbeTarget
@@ -49,7 +50,7 @@ export function IndexProbe(props: IndexProbeProps): ReactElement {
           }}
           style={{ ...textFieldStyle(), flex: 1 }}
         />
-        <button type="button" style={secondaryButtonStyle()} disabled={props.running} onClick={run}>
+        <button type="button" style={secondaryButtonStyle()} {...disabledWhen([props.running, 'A search is already running.'])} onClick={run}>
           {props.running ? 'Searching…' : 'Search'}
         </button>
         {/*

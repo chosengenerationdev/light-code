@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { TrashIcon } from '../icons.js'
 import { badgeStyle, colors, fontFamily, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -164,7 +165,7 @@ function VariableList(props: {
                 aria-label="Variable name"
                 value={entry.name}
                 spellCheck={false}
-                disabled={!props.editable}
+                {...disabledWhen([!props.editable, 'Only an administrator can change these.'])}
                 placeholder="NAME"
                 onChange={(event) => change(index, { name: event.target.value })}
                 style={{ ...textFieldStyle(), width: 170, fontFamily: monospace, ...(badName ? { borderColor: colors.error } : {}) }}
@@ -174,7 +175,7 @@ function VariableList(props: {
                 aria-label="Variable value"
                 value={entry.value}
                 spellCheck={false}
-                disabled={!props.editable}
+                {...disabledWhen([!props.editable, 'Only an administrator can change these.'])}
                 placeholder="value"
                 onChange={(event) => change(index, { value: event.target.value })}
                 style={{ ...textFieldStyle(), flex: 1, minWidth: 140, fontFamily: monospace }}
@@ -232,7 +233,7 @@ function VariableList(props: {
           <button
             type="button"
             style={primaryButtonStyle(!dirty || invalid.length > 0 || blank)}
-            disabled={!dirty || invalid.length > 0 || blank}
+            {...disabledWhen([blank, 'Every row needs a name - remove empty rows.'], [invalid.length > 0, 'Fix the names shown in red: letters, digits and _ only, not starting with a digit.'], [!dirty, 'Nothing has changed since the last save.'])}
             onClick={() => {
               props.onSave(draft.map((entry) => ({ ...entry, name: entry.name.trim() })))
               setDirty(false)
@@ -283,7 +284,7 @@ function AdminIds(props: { ids: string[]; onSave: (ids: string[]) => void }): Re
       <button
         type="button"
         style={{ ...primaryButtonStyle(!dirty), marginTop: 8 }}
-        disabled={!dirty}
+        {...disabledWhen([!dirty, 'Nothing has changed since the last save.'])}
         onClick={() => {
           props.onSave(
             text

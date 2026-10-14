@@ -33,6 +33,7 @@ export interface PythonTabProps {
     toolsDir: string
     venvPath: string
     interpreterPath: string
+    libraryFolders: string[]
     timeoutSeconds: number
     indexUrl: string
     offline: boolean
@@ -107,6 +108,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   const [confirming, setConfirming] = useState<string | undefined>(undefined)
   const [venvPath, setVenvPath] = useState('')
   const [interpreterPath, setInterpreterPath] = useState('')
+  const [libraryFolders, setLibraryFolders] = useState('')
   const [enabled, setEnabled] = useState(false)
   const [uvPath, setUvPath] = useState('')
   const [toolsDir, setToolsDir] = useState('')
@@ -141,6 +143,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
     setToolsDir(saved.toolsDir ?? '')
     setVenvPath(saved.venvPath ?? '')
     setInterpreterPath(saved.interpreterPath ?? '')
+    setLibraryFolders((saved.libraryFolders ?? []).join('\n'))
     setIndexUrl(saved.indexUrl ?? '')
     setOffline(saved.offline === true)
     setEnvVars((saved.env ?? []).map(toRow))
@@ -294,6 +297,25 @@ export function PythonTab(props: PythonTabProps): ReactElement {
             onBrowse={props.onBrowse}
             onChange={setInterpreterPath}
           />
+
+          <div style={{ marginBottom: 10 }}>
+            <label htmlFor="lc-py-libraries" style={labelStyle()}>
+              Library folders
+            </label>
+            <textarea
+              id="lc-py-libraries"
+              value={libraryFolders}
+              rows={3}
+              placeholder={'One folder per line, e.g. C:\\quant\\pricing\\bin'}
+              onChange={(event) => setLibraryFolders(event.target.value)}
+              style={{ ...textFieldStyle(), width: '100%', fontFamily: monospace, resize: 'vertical' }}
+            />
+            <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>
+              Folders holding your own Python libraries and the DLLs behind them (pricing libraries, say). The assistant
+              uses them with <code>python_library</code> when you do not name a folder: added to the module path and the
+              DLL search path, and every call still asks first. Works in Fire Code, and in VS Code when Fire Code is installed.
+            </div>
+          </div>
 
           {props.programming !== undefined && props.programming.profiles.length > 0 && (
             <div style={{ marginBottom: 10 }}>
@@ -551,6 +573,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               toolsDir: toolsDir.trim(),
               venvPath: venvPath.trim(),
               interpreterPath: interpreterPath.trim(),
+              libraryFolders: libraryFolders.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0),
               timeoutSeconds: Number.isFinite(parsed) ? parsed : 30,
               indexUrl: indexUrl.trim(),
               offline,

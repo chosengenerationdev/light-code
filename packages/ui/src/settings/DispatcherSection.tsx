@@ -1,5 +1,6 @@
 import { type ReactElement } from 'react'
 import { colors, fontFamily, labelStyle, secondaryButtonStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface DispatcherSectionProps {
   enabled: boolean
@@ -98,7 +99,7 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
         <input
           type="checkbox"
           checked={props.skills && props.enabled}
-          disabled={!props.enabled}
+          {...disabledWhen([!props.enabled, 'Finding skills by search needs tool search, above, switched on.'])}
           onChange={(event) => props.onToggleSkills(event.target.checked)}
           style={{ marginTop: 2 }}
         />
@@ -122,7 +123,9 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
           style={secondaryButtonStyle()}
           disabled={props.indexing || !props.retrievalReady}
           title={
-            props.retrievalReady
+            props.indexing
+              ? 'Indexing - wait for it to finish.'
+              : props.retrievalReady
               ? 'Embed the tool and skill documentation so search_docs can match by meaning'
               : 'Needs a search connection and an embedding model. Without them search_docs still works, matching names and descriptions.'
           }
@@ -138,7 +141,7 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
           type="button"
           style={secondaryButtonStyle()}
           disabled={props.indexing || !props.retrievalReady}
-          title="Reindex tool documentation only, leaving skills untouched"
+          title={props.indexing ? 'Indexing - wait for it to finish.' : !props.retrievalReady ? 'Needs a search connection and an embedding model, under Search.' : 'Reindex tool documentation only, leaving skills untouched'}
           onClick={() => props.onIndexDocs('tool')}
         >
           Tools only
@@ -147,7 +150,7 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
           type="button"
           style={secondaryButtonStyle()}
           disabled={props.indexing || !props.retrievalReady}
-          title="Reindex skills only, leaving tool documentation untouched"
+          title={props.indexing ? 'Indexing - wait for it to finish.' : !props.retrievalReady ? 'Needs a search connection and an embedding model, under Search.' : 'Reindex skills only, leaving tool documentation untouched'}
           onClick={() => props.onIndexDocs('skill')}
         >
           Skills only
@@ -161,7 +164,7 @@ export function DispatcherSection(props: DispatcherSectionProps): ReactElement {
           type="button"
           style={secondaryButtonStyle()}
           disabled={props.indexing || !props.retrievalReady}
-          title="Remove every indexed tool and skill document. search_docs falls back to matching names and descriptions until you index again."
+          title={props.indexing ? 'Indexing - wait for it to finish.' : !props.retrievalReady ? 'Needs a search connection and an embedding model, under Search.' : 'Remove every indexed tool and skill document. search_docs falls back to matching names and descriptions until you index again.'}
           onClick={props.onClearDocsIndex}
         >
           Clear index

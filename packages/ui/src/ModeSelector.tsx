@@ -22,7 +22,7 @@ export function ModeSelector(props: ModeSelectorProps): ReactElement {
       value={mode.id}
       // Switching mid-turn would change the tool set underneath a running loop.
       disabled={props.disabled}
-      title={mode.description}
+      title={props.disabled ? 'The mode cannot change while a reply is running: it would swap the tools under it. Wait for it to finish, or press Stop.' : mode.description}
       ariaLabel="Mode"
       onChange={props.onChange}
       options={BUILTIN_MODES.map((option) => ({

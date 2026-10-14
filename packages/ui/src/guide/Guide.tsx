@@ -2,6 +2,7 @@ import { GUIDE_STEPS, type GuideStep } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { MarkdownView } from '../MarkdownView.js'
 import { colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface GuideProps {
   /** Takes the reader to a settings tab — the whole reason this is a tour rather than a page. */
@@ -129,7 +130,7 @@ export function Guide(props: GuideProps): ReactElement {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={isFirst}
+          {...disabledWhen([isFirst, 'This is the first page.'])}
           onClick={() => setIndex((current) => Math.max(0, current - 1))}
         >
           Back

@@ -1,6 +1,7 @@
 import type { DiagnosticsProvider } from '../lsp/manager.js'
 import type { ConfigStore } from '../platform/config.js'
 import type { HttpClient } from '../platform/http.js'
+import type { HostLanguageModels } from '../providers/hostModels.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Transport } from '../platform/transport.js'
 import type { DebugSessionSnapshot } from '../tools/debugSession.js'
@@ -241,6 +242,12 @@ export interface HostServices {
   languageServers?: boolean
   /** Path to `fire-fs`, the parallel Rust file helper; its four tools are registered only when set. */
   fastFs?: string
+  /**
+   * GitHub Copilot (and any other model VS Code offers) for a `vscode-lm` profile: VS Code's own
+   * Language Model API in the extension, the relay to a running VS Code window elsewhere on Windows.
+   * Absent means the Copilot preset is not offered.
+   */
+  languageModels?: HostLanguageModels
   desktopNotify?: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => void
   secrets: SecretStore
   configStore: ConfigStore

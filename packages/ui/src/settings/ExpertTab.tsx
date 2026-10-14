@@ -18,6 +18,7 @@ import {
 import { PathField, type BrowseRequest } from './PathField.js'
 import { ScopeBadge } from './ScopeBadge.js'
 import { Panel } from './Panel.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 /** Sentinel for the free-text escape hatch, kept out of the value space. */
 const CUSTOM = '__custom__'
@@ -322,7 +323,7 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           <button
             type="button"
             style={secondaryButtonStyle()}
-            disabled={props.expert?.available !== true || props.expert.measuringStep !== undefined}
+            {...disabledWhen([props.expert?.available !== true, 'The Claude command line was not found, so there is nothing to measure.'], [props.expert?.measuringStep !== undefined, 'A measurement is already running.'])}
             onClick={props.onMeasureCost}
           >
             {props.expert?.measuringStep !== undefined
@@ -391,7 +392,7 @@ export function ExpertTab(props: ExpertTabProps): ReactElement {
           <input
             type="checkbox"
             checked={props.expert?.keepAlive === true}
-            disabled={props.expert?.available !== true}
+            {...disabledWhen([props.expert?.available !== true, 'The Claude command line was not found, so there is no session to keep alive.'])}
             onChange={(event) => props.onSetKeepAlive(event.target.checked)}
             style={{ marginTop: 2 }}
           />

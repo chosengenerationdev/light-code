@@ -163,3 +163,27 @@ export function describeProxyEnvironment(env: NodeJS.ProcessEnv = process.env): 
   }
   return parts.length > 0 ? parts.join(', ') : undefined
 }
+
+/**
+ * A proxy address as typed (`http://user:password@proxy:8080`, or a bare `proxy:8080`), split for
+ * storage: the address with the user name kept and the password removed, and the password on its own
+ * for secret storage (§15). Throws a sentence for something that is not an http(s) address.
+ */
+export function splitProxyLogin(raw: string, label = 'proxy'): { url: string; user?: string; password?: string } {
+  let url: URL
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim()) ? raw.trim() : `http://${raw.trim()}`)
+  } catch {
+    throw new Error(`The ${label} "${raw}" is not an address. Write it like http://user:password@proxy.corp:8080.`)
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`The ${label} must be an http:// or https:// address, not ${url.protocol}`)
+  }
+  const user = decodeURIComponent(url.username)
+  const password = decodeURIComponent(url.password)
+  return {
+    url: `${url.protocol}//${url.username.length > 0 ? `${url.username}@` : ''}${url.host}`,
+    ...(user.length > 0 ? { user } : {}),
+    ...(password.length > 0 ? { password } : {}),
+  }
+}

@@ -28,6 +28,7 @@ import {
   secondaryButtonStyle,
   textFieldStyle,
 } from './theme.js'
+import { disabledWhen } from './disabledWhen.js'
 
 export interface ComposerProps {
   isStreaming: boolean
@@ -889,10 +890,9 @@ export function Composer(props: ComposerProps): ReactElement {
           <button
             type="button"
             className="lc-btn-accent"
-            title="Send"
+            {...disabledWhen([reading.length > 0, 'An attachment is still being read.'], [!canSend, 'Type a message or attach something first.'], { enabledTitle: 'Send' })}
             aria-label="Send"
             style={iconButtonStyle('primary', !canSend)}
-            disabled={!canSend}
             onClick={submit}
           >
             <SendIcon />
@@ -1039,7 +1039,7 @@ export function Composer(props: ComposerProps): ReactElement {
             <Select
               compact
               ariaLabel="Provider profile"
-              title="Which provider answers the next message"
+              title={props.isStreaming ? 'A reply is running. Wait for it to finish, or press Stop. The choice applies from the next message.' : 'Which provider answers the next message'}
               value={props.activeProfileId ?? ''}
               disabled={props.isStreaming}
               onChange={props.onSelectProfile}
@@ -1055,7 +1055,7 @@ export function Composer(props: ComposerProps): ReactElement {
             <Select
               compact
               ariaLabel="OpenSearch connection"
-              title="Which cluster this conversation may search. Change it between messages."
+              title={props.isStreaming ? 'A reply is running. Wait for it to finish, or press Stop. The choice applies from the next message.' : 'Which cluster this conversation may search. Change it between messages.'}
               value={props.activeSearchId ?? ''}
               disabled={props.isStreaming}
               onChange={(value) => props.onSelectSearch(value.length > 0 ? value : undefined)}

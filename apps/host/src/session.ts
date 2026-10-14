@@ -1,6 +1,6 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
 import type { CredentialSummary, JupyterHubSpec } from '@light-code/core'
-import { CredentialPointerStore, replaceFile, runFastFs } from '@light-code/core'
+import { CredentialPointerStore, createRelayLanguageModels, replaceFile, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -508,6 +508,12 @@ export async function createSession(
     // One person's own machine only: on a shared server the account reaching everywhere is the service's.
     ...(options.reachAnywhere === true && options.shared !== true ? { fileReach: 'anywhere' as const } : {}),
     ...(options.fastFs !== undefined ? { fastFs: options.fastFs } : {}),
+    /*
+     * GitHub Copilot through a VS Code window on this machine (platform/node/lmRelay.ts). One person's
+     * own machine only: on a shared server it would be whoever runs VS Code there spending their Copilot
+     * on every user's requests.
+     */
+    ...(options.shared !== true ? { languageModels: createRelayLanguageModels() } : {}),
     ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
     ...(options.noSchedules === true ? { runsSchedules: false } : {}),
     ...(options.siblings !== undefined && options.siblings.length > 0 ? { siblings: options.siblings } : {}),

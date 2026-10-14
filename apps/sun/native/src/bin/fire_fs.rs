@@ -10,7 +10,20 @@
 //!
 //! Operations: find, summary, duplicates (folders); readMany (several files at once); inspect,
 //! lines, tail, grep (one big text file); table (CSV, TSV or Excel queried without loading it all
-//! into the model).
+//! into the model); sqlite (a SQLite database read in parallel, never created, never locked - see
+//! `sqlite_read.rs`).
+
+#[path = "../sqlite_read.rs"]
+mod sqlite_read;
+#[path = "../pypool.rs"]
+mod pypool;
+#[cfg(feature = "dataframe")]
+#[path = "../dataframe.rs"]
+mod dataframe;
+#[path = "../usage_store.rs"]
+mod usage_store;
+#[path = "../directory.rs"]
+mod directory;
 
 use rayon::prelude::*;
 use serde_json::{json, Map, Value};
@@ -33,6 +46,13 @@ fn main() {
     let _ = writeln!(out, "{answer}");
 }
 
+/// Every operation `run` answers. A host asks with `capabilities` and offers only matching tools.
+#[cfg(feature = "dataframe")]
+const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "dataframe", "search", "usage", "directory", "capabilities"];
+/// The slim helper bundled with the VS Code extension: everything but Polars.
+#[cfg(not(feature = "dataframe"))]
+const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "search", "usage", "directory", "capabilities"];
+
 fn run(r: &Value) -> Result<Value, String> {
     match r.get("op").and_then(Value::as_str).unwrap_or("") {
         "find" => find(r),
@@ -47,6 +67,15 @@ fn run(r: &Value) -> Result<Value, String> {
         "transfer" => transfer(r),
         "archive" => archive(r),
         "names" => names(r),
+        "sqlite" => sqlite_read::run(r),
+        "search" => search_text(r),
+        "pypool" => pypool::run(r),
+        #[cfg(feature = "dataframe")]
+        "dataframe" => dataframe::run(r),
+        "usage" => usage_store::run(r),
+        "directory" => directory::run(r),
+        // What this helper can do, so a host built for a newer helper offers only the tools it has.
+        "capabilities" => Ok(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION"), "ops": OPS })),
         other => Err(format!("Unknown operation \"{other}\".")),
     }
 }
@@ -156,7 +185,20 @@ struct Entry {
 struct WalkOutcome {
     scanned: usize,
     errors: usize,
+    /// The first few paths that could not be read, with Windows' own reason - "Access is denied", a share
+    /// that would not resolve. A count alone hid exactly what someone needs to fix.
+    error_samples: Vec<String>,
     timed_out: bool,
+}
+
+const ERROR_SAMPLES: usize = 20;
+
+fn note_error(samples: &Mutex<Vec<String>>, text: String) {
+    if let Ok(mut list) = samples.lock() {
+        if list.len() < ERROR_SAMPLES {
+            list.push(text);
+        }
+    }
 }
 
 /// Walks every root on every core, handing each entry to `visit`, which returns false to stop.
@@ -171,6 +213,7 @@ fn walk(r: &Value, visit: &(dyn Fn(Entry) -> bool + Sync)) -> Result<WalkOutcome
     let started = Instant::now();
     let scanned = AtomicUsize::new(0);
     let errors = AtomicUsize::new(0);
+    let error_samples = Mutex::new(Vec::new());
     let stop = AtomicBool::new(false);
     let timed_out = AtomicBool::new(false);
     let mut builder = ignore::WalkBuilder::new(&roots[0]);
@@ -202,8 +245,9 @@ fn walk(r: &Value, visit: &(dyn Fn(Entry) -> bool + Sync)) -> Result<WalkOutcome
             }
             let entry = match result {
                 Ok(e) => e,
-                Err(_) => {
+                Err(e) => {
                     errors.fetch_add(1, Ordering::Relaxed);
+                    note_error(&error_samples, e.to_string());
                     return ignore::WalkState::Continue;
                 }
             };
@@ -232,11 +276,145 @@ fn walk(r: &Value, visit: &(dyn Fn(Entry) -> bool + Sync)) -> Result<WalkOutcome
             ignore::WalkState::Continue
         })
     });
+    // A root that cannot be opened at all yields no entry and so no error from the walker; say so.
+    for root in &roots {
+        if let Err(e) = std::fs::metadata(root) {
+            let already = error_samples.lock().map(|l| l.iter().any(|x| x.starts_with(root.as_str()))).unwrap_or(false);
+            if !already {
+                errors.fetch_add(1, Ordering::Relaxed);
+                note_error(&error_samples, format!("{root}: {e}"));
+            }
+        }
+    }
     Ok(WalkOutcome {
         scanned: scanned.load(Ordering::Relaxed),
         errors: errors.load(Ordering::Relaxed),
+        error_samples: error_samples.into_inner().unwrap_or_default(),
         timed_out: timed_out.load(Ordering::Relaxed),
     })
+}
+
+// ─── Searching file contents ────────────────────────────────────────────────
+
+/// One file's matches: each a 1-based line number, the line, and context lines around it.
+struct FileHits {
+    path: String,
+    hits: Vec<Value>,
+    total: usize,
+}
+
+/// A grep across folders and shares: every root walked on every core, each file read once and searched
+/// line by line. `search_files` (ripgrep) covers the workspace; this one takes several roots at once,
+/// filters by name, extension, size and date before reading anything, reads UTF-16 (Windows logs and
+/// exports), and names every path it could not read and why - a count alone hid what was denied.
+fn search_text(r: &Value) -> Result<Value, String> {
+    let started = Instant::now();
+    let pattern = s(r, "pattern").filter(|p| !p.is_empty()).ok_or("Give a `pattern` to search for.")?;
+    let literal = b(r, "literal");
+    // Smart case, as ripgrep does it: case-insensitive unless the pattern itself has a capital.
+    let case_sensitive = r.get("caseSensitive").and_then(Value::as_bool).unwrap_or_else(|| pattern.chars().any(char::is_uppercase));
+    let body = if literal { regex::escape(pattern) } else { pattern.to_string() };
+    let body = if b(r, "wholeWord") { format!(r"\b(?:{body})\b") } else { body };
+    let re = regex::RegexBuilder::new(&body)
+        .case_insensitive(!case_sensitive)
+        .size_limit(50 << 20)
+        .build()
+        .map_err(|e| format!("Not a valid regular expression: {e}. Set literal: true to search for the text as written."))?;
+    let context = u(r, "context", 0).min(10) as usize;
+    let per_file = u(r, "maxPerFile", 50).clamp(1, 1000) as usize;
+    let limit = u(r, "limit", 300).clamp(1, 5000) as usize;
+    let max_file = u(r, "maxFileSize", 50 << 20);
+    let files_only = b(r, "filesOnly");
+    let mut filter = Filter::from(r);
+    filter.dirs = false;
+
+    let found = AtomicUsize::new(0);
+    let searched = AtomicUsize::new(0);
+    let skipped_large = AtomicUsize::new(0);
+    let skipped_binary = AtomicUsize::new(0);
+    let read_errors = Mutex::new(Vec::<String>::new());
+    let read_error_count = AtomicUsize::new(0);
+    let results = Mutex::new(Vec::<FileHits>::new());
+
+    let outcome = walk(r, &|e: Entry| {
+        if e.is_dir || !filter.accepts(&e.path, false, e.size, e.modified) {
+            return true;
+        }
+        if found.load(Ordering::Relaxed) >= limit {
+            return false;
+        }
+        if e.size > max_file {
+            skipped_large.fetch_add(1, Ordering::Relaxed);
+            return true;
+        }
+        let bytes = match std::fs::read(&e.path) {
+            Ok(b) => b,
+            Err(err) => {
+                read_error_count.fetch_add(1, Ordering::Relaxed);
+                note_error(&read_errors, format!("{}: {err}", e.path.display()));
+                return true;
+            }
+        };
+        searched.fetch_add(1, Ordering::Relaxed);
+        let Some(text) = decode(&bytes) else {
+            skipped_binary.fetch_add(1, Ordering::Relaxed);
+            return true;
+        };
+        let lines: Vec<&str> = text.lines().collect();
+        let mut hits = Vec::new();
+        let mut total = 0usize;
+        for (i, line) in lines.iter().enumerate() {
+            if !re.is_match(line) {
+                continue;
+            }
+            total += 1;
+            if files_only || hits.len() >= per_file {
+                continue;
+            }
+            if found.fetch_add(1, Ordering::Relaxed) >= limit {
+                break;
+            }
+            let clip = |t: &str| -> String { if t.chars().count() > 400 { format!("{}...", t.chars().take(400).collect::<String>()) } else { t.to_string() } };
+            let mut hit = json!({ "line": i + 1, "text": clip(line) });
+            if context > 0 {
+                let from = i.saturating_sub(context);
+                let to = (i + context).min(lines.len().saturating_sub(1));
+                hit["before"] = json!(lines[from..i].iter().map(|l| clip(l)).collect::<Vec<_>>());
+                hit["after"] = json!(lines[i + 1..=to].iter().map(|l| clip(l)).collect::<Vec<_>>());
+            }
+            hits.push(hit);
+        }
+        if total > 0 {
+            if files_only {
+                found.fetch_add(1, Ordering::Relaxed);
+            }
+            results.lock().unwrap().push(FileHits { path: e.path.to_string_lossy().to_string(), hits, total });
+        }
+        found.load(Ordering::Relaxed) < limit
+    })?;
+
+    let mut files = results.into_inner().unwrap();
+    files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    let mut unreadable = outcome.error_samples;
+    for sample in read_errors.into_inner().unwrap_or_default() {
+        if unreadable.len() < ERROR_SAMPLES {
+            unreadable.push(sample);
+        }
+    }
+    Ok(json!({
+        "ok": true,
+        "files": files.iter().map(|f| json!({ "path": f.path, "matches": f.total, "hits": f.hits })).collect::<Vec<_>>(),
+        "matchedFiles": files.len(),
+        "searchedFiles": searched.load(Ordering::Relaxed),
+        "scanned": outcome.scanned,
+        "skippedLarge": skipped_large.load(Ordering::Relaxed),
+        "skippedBinary": skipped_binary.load(Ordering::Relaxed),
+        "unreadable": outcome.errors + read_error_count.load(Ordering::Relaxed),
+        "unreadablePaths": unreadable,
+        "limitReached": found.load(Ordering::Relaxed) >= limit,
+        "timedOut": outcome.timed_out,
+        "elapsedMs": started.elapsed().as_millis() as u64,
+    }))
 }
 
 fn entry_json(e: &Entry) -> Value {
@@ -268,6 +446,7 @@ fn find(r: &Value) -> Result<Value, String> {
         "limitReached": list.len() >= limit,
         "timedOut": outcome.timed_out,
         "unreadable": outcome.errors,
+        "unreadablePaths": outcome.error_samples,
         "elapsedMs": started.elapsed().as_millis() as u64,
     }))
 }
@@ -331,6 +510,7 @@ fn summary(r: &Value) -> Result<Value, String> {
         "scanned": outcome.scanned,
         "timedOut": outcome.timed_out,
         "unreadable": outcome.errors,
+        "unreadablePaths": outcome.error_samples,
         "elapsedMs": started.elapsed().as_millis() as u64,
     }))
 }

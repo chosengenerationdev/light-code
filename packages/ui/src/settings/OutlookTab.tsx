@@ -7,6 +7,7 @@ import { IndexingProgress, type IndexingProgressState } from './IndexingProgress
 import { Select } from '../Select.js'
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface MailStatusState {
   enabled: boolean
@@ -203,7 +204,7 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
             walking a mailbox is a server round trip per folder on Exchange and the tree changes
             every few weeks at most. This is for when it has genuinely changed.
           */}
-          <button type="button" style={secondaryButtonStyle()} disabled={props.tree.loading} onClick={props.onRefreshFolders}>
+          <button type="button" style={secondaryButtonStyle()} {...disabledWhen([props.tree.loading, 'The mailbox is being scanned.'])} onClick={props.onRefreshFolders}>
             {props.tree.loading ? 'Scanning…' : 'Rescan mailbox'}
           </button>
           {props.tree.scannedAt !== undefined && (
@@ -299,14 +300,13 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
           <button type="button" style={primaryButtonStyle(false)} onClick={save}>
             Save
           </button>
-          <button type="button" style={secondaryButtonStyle()} disabled={status.busy === true || !enabled} onClick={props.onSyncNow}>
+          <button type="button" style={secondaryButtonStyle()} {...disabledWhen([status.busy === true, 'Wait - the mailbox is being synced.'], [!enabled, 'Tick "Keep mail indexed automatically" above and save first.'])} onClick={props.onSyncNow}>
             Sync now
           </button>
           <button
             type="button"
             style={secondaryButtonStyle()}
-            disabled={status.busy === true || status.indexed === 0}
-            title={`Remove indexed mail older than ${retentionMonths} months`}
+            {...disabledWhen([status.busy === true, 'Wait - the mailbox is being synced.'], [status.indexed === 0, 'Nothing is indexed yet.'], { enabledTitle: `Remove indexed mail older than ${retentionMonths} months` })}
             onClick={props.onPrune}
           >
             Remove older than {retentionMonths}m
@@ -348,8 +348,7 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
               <button
                 type="button"
                 style={secondaryButtonStyle()}
-                disabled={status.busy === true || !enabled}
-                title="Clears the index and collects everything again. A large mailbox fills in over several passes."
+                {...disabledWhen([status.busy === true, 'Wait - the mailbox is being synced.'], [!enabled, 'Tick "Keep mail indexed automatically" above and save first.'], { enabledTitle: 'Clears the index and collects everything again. A large mailbox fills in over several passes.' })}
                 onClick={() => setConfirming('reindex')}
               >
                 Reindex everything
@@ -357,8 +356,7 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
               <button
                 type="button"
                 style={secondaryButtonStyle()}
-                disabled={status.busy === true || status.indexed === 0}
-                title="Removes every indexed message and its vectors"
+                {...disabledWhen([status.busy === true, 'Wait - the mailbox is being synced.'], [status.indexed === 0, 'Nothing is indexed yet.'], { enabledTitle: 'Removes every indexed message and its vectors' })}
                 onClick={() => setConfirming('clear')}
               >
                 Clear index
@@ -389,8 +387,7 @@ export function OutlookTab(props: OutlookTabProps): ReactElement {
           <button
             type="button"
             style={secondaryButtonStyle()}
-            disabled={status.busy === true}
-            title="Fetches this window again and replaces what is stored, even where it is already indexed"
+            {...disabledWhen([status.busy === true, 'Wait - the mailbox is being synced.'], { enabledTitle: 'Fetches this window again and replaces what is stored, even where it is already indexed' })}
             onClick={() => props.onRefreshDays(Math.max(1, Math.min(365, Number(refreshDays) || 7)))}
           >
             Refresh that window

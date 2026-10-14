@@ -7,6 +7,7 @@ import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textF
 import { Panel } from './Panel.js'
 import { LanguageServersSection, type LanguageServersState } from './LanguageServersSection.js'
 import type { LspSettings } from '@light-code/core/browser'
+import { disabledWhen } from '../disabledWhen.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -40,8 +41,8 @@ export interface ToolsTabProps {
   /** True when tool schemas are being kept out of the prompt. */
   dispatcher: boolean
   /** Excel and Outlook on this machine: whether they can be reached, and whether they are on. */
-  office: { supported: boolean; excel: boolean; outlook: boolean }
-  onSetOffice: (excel: boolean, outlook: boolean) => void
+  office: { supported: boolean; excel: boolean; outlook: boolean; teams?: boolean }
+  onSetOffice: (excel: boolean, outlook: boolean, teams: boolean) => void
   /**
    * How long any one tool call may take, in seconds, when nothing more specific applies.
    *
@@ -175,7 +176,7 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
                 mistake as the alias button that only worked once something else had been saved.
                 This codebase already settled that question for the Office toggles.
               */
-              disabled={!props.docsIndex.enabled || props.docsIndex.indexing || !props.docsIndex.retrievalReady}
+              {...disabledWhen([!props.docsIndex.enabled, 'Looking tools up on demand is switched off under Search, so there is nothing to index.'], [props.docsIndex.indexing, 'Indexing already.'], [!props.docsIndex.retrievalReady, 'No embedding model is set under Search, so tools are matched by name and there is nothing to index.'])}
               onClick={props.onIndexDocs}
             >
               {props.docsIndex.indexing ? 'Indexing…' : 'Reindex tool documentation'}
@@ -187,8 +188,7 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
             <button
               type="button"
               style={secondaryButtonStyle()}
-              disabled={!props.docsIndex.enabled || props.docsIndex.indexing}
-              title="Removes tool entries from the documentation index. Skills are left alone."
+              {...disabledWhen([!props.docsIndex.enabled, 'Looking tools up on demand is switched off under Search, so there is nothing to index.'], [props.docsIndex.indexing, 'Indexing - wait for it to finish.'], { enabledTitle: 'Removes tool entries from the documentation index. Skills are left alone.' })}
               onClick={props.onClearDocs}
             >
               Clear tool entries
@@ -363,17 +363,18 @@ export function ToolsTab(props: ToolsTabProps): ReactElement {
  * reason answers the question in place.
  */
 function OfficeSection(props: {
-  office: { supported: boolean; excel: boolean; outlook: boolean }
-  onSet: (excel: boolean, outlook: boolean) => void
+  office: { supported: boolean; excel: boolean; outlook: boolean; teams?: boolean }
+  onSet: (excel: boolean, outlook: boolean, teams: boolean) => void
 }): ReactElement {
   const { office } = props
+  const teams = office.teams === true
   const summary = !office.supported
     ? 'Windows only'
-    : [office.excel ? 'Excel' : undefined, office.outlook ? 'Outlook' : undefined]
+    : [office.excel ? 'Excel' : undefined, office.outlook ? 'Outlook' : undefined, teams ? 'Teams' : undefined]
         .filter((part) => part !== undefined)
         .join(' + ') || 'Off'
   return (
-    <Panel id="tools.office" title="Excel and Outlook" summary={summary}>
+    <Panel id="tools.office" title="Excel, Outlook and Teams" summary={summary}>
       <div style={{ opacity: office.supported ? 1 : 0.6 }}>
       <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
         {office.supported
@@ -387,8 +388,8 @@ function OfficeSection(props: {
         <input
           type="checkbox"
           checked={office.excel}
-          disabled={!office.supported}
-          onChange={(event) => props.onSet(event.target.checked, office.outlook)}
+          {...disabledWhen([!office.supported, 'Excel, Outlook and Teams are reached only on Windows, from a Light Code running on your own desktop.'])}
+          onChange={(event) => props.onSet(event.target.checked, office.outlook, teams)}
           style={{ marginTop: 2 }}
         />
         <span>
@@ -405,8 +406,8 @@ function OfficeSection(props: {
         <input
           type="checkbox"
           checked={office.outlook}
-          disabled={!office.supported}
-          onChange={(event) => props.onSet(office.excel, event.target.checked)}
+          {...disabledWhen([!office.supported, 'Excel, Outlook and Teams are reached only on Windows, from a Light Code running on your own desktop.'])}
+          onChange={(event) => props.onSet(office.excel, event.target.checked, teams)}
           style={{ marginTop: 2 }}
         />
         <span>
@@ -415,6 +416,24 @@ function OfficeSection(props: {
             Search and read mail from the Outlook installed here. <strong>Read-only</strong> —
             nothing can send, reply, delete or move a message. Message text becomes part of the
             conversation, so it goes to your model provider like anything else you paste in.
+          </span>
+        </span>
+      </label>
+
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 6, cursor: office.supported ? 'pointer' : 'not-allowed' }}>
+        <input
+          type="checkbox"
+          checked={teams}
+          {...disabledWhen([!office.supported, 'Excel, Outlook and Teams are reached only on Windows, from a Light Code running on your own desktop.'])}
+          onChange={(event) => props.onSet(office.excel, office.outlook, event.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span>
+          <span style={{ display: 'block', fontSize: 13 }}>Teams</span>
+          <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
+            Open a chat with a colleague with a message already typed in, such as a pull request
+            link. <strong>It cannot send</strong> — you press Send in Teams. Uses the Teams app
+            installed here and your own account; no Graph API.
           </span>
         </span>
       </label>

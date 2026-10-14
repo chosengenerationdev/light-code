@@ -7,19 +7,26 @@ import { AtlassianError, AtlassianRest, type AtlassianConnection } from './rest.
 /**
  * Bitbucket Data Center / Server: pull requests and files, with a personal access token.
  *
- * ## Four tools
+ * ## Five tools
  *
  * `bitbucket_pull_requests` lists, `bitbucket_read_pull_request` reads one (description, reviewers,
  * comments and the diff), `bitbucket_read_file` reads a file at any branch or commit — code the
- * workspace may not have checked out — and `bitbucket_write_pull_request` opens a pull request or
- * comments on one.
+ * workspace may not have checked out — `bitbucket_write_pull_request` opens a pull request or
+ * comments on one, and `bitbucket_merge_pull_request` merges one **a reviewer has already approved**,
+ * optionally tagging the merge.
  *
  * ## What is deliberately absent
  *
- * No merge, no approve, no decline, no branch delete. Each is a decision a reviewer makes about
- * somebody's work, taken under the user's name, and an assistant that could approve a pull request
- * would turn the review it was asked to help with into a formality. Commenting is the assistant's
- * contribution to a review; approving is the person's.
+ * No approve, no decline, no branch delete. Approving and declining are a reviewer's decisions about
+ * somebody's work, taken under the user's name; an assistant that could approve would turn the review
+ * it was asked to help with into a formality. Commenting is the assistant's contribution to a review.
+ *
+ * Merging was absent too until the user asked for it (0.147.0), and it is allowed on exactly the
+ * terms that keep that reasoning true: the review has to have happened. The merge tool refuses unless
+ * a reviewer has approved, nobody has marked it "needs work", and Bitbucket's own merge checks pass -
+ * so it carries out a decision people already made rather than making one. Checked again at the
+ * moment of merging, not only in the preview, and the merge is sent with the version that was
+ * checked, so a pull request changed in between is refused by Bitbucket.
  *
  * Writing is `edit` and in `ALWAYS_ASK_TOOLS`, and the preview is the literal comment or the literal
  * pull request with both branches (invariant 8).
@@ -47,6 +54,17 @@ export interface PullRequestSummary {
 export interface PullRequest extends PullRequestSummary {
   description: string
   reviewers: { name: string; status: string }[]
+  /** Bitbucket's optimistic-locking version; a merge sent with a stale one is refused. */
+  version: number
+  /** The target branch's full ref, e.g. refs/heads/master. */
+  toRef: string
+}
+
+/** Whether Bitbucket would merge it now, and every merge check that says no. */
+export interface MergeStatus {
+  canMerge: boolean
+  conflicted: boolean
+  vetoes: string[]
 }
 
 interface RawPullRequest {
@@ -57,14 +75,31 @@ interface RawPullRequest {
   updatedDate?: number
   author?: { user?: { displayName?: string } }
   fromRef?: { displayId?: string }
-  toRef?: { displayId?: string }
-  reviewers?: { user?: { displayName?: string }; status?: string }[]
+  toRef?: { displayId?: string; id?: string }
+  reviewers?: { user?: { displayName?: string }; status?: string; approved?: boolean }[]
+  version?: number
+  properties?: { mergeCommit?: { id?: string } }
   links?: { self?: { href?: string }[] }
 }
 
 /** Project keys and repository slugs, checked so a model-supplied value cannot reshape a path. */
 export function isSafeSegment(value: string): boolean {
   return /^~?[A-Za-z0-9_.-]+$/.test(value) && value !== '.' && value !== '..'
+}
+
+/** Git's ref-name rules, as far as a model-supplied tag name could break them or reshape a path. */
+export function isSafeTagName(name: string): boolean {
+  return (
+    /^[A-Za-z0-9._/-]+$/.test(name) &&
+    !name.startsWith('-') &&
+    !name.startsWith('/') &&
+    !name.endsWith('/') &&
+    !name.endsWith('.') &&
+    !name.endsWith('.lock') &&
+    !name.includes('..') &&
+    !name.includes('//') &&
+    !name.split('/').some((part) => part.startsWith('.'))
+  )
 }
 
 /** A file path, each segment encoded; `..` refused so it cannot climb out of the repository. */
@@ -74,6 +109,19 @@ export function encodeRepoPath(path: string): string {
     throw new AtlassianError(`"${path}" is not a file path inside the repository.`)
   }
   return segments.map(encodeURIComponent).join('/')
+}
+
+/** Lines asked for per `browse` page; servers cap a page at their own limit and say where to resume. */
+const FILE_PAGE_LINES = 5000
+/** Enough for any source file worth reading whole, and a bound on a generated one. */
+const MAX_FILE_PAGES = 20
+
+interface RawBrowsePage {
+  lines?: { text?: string }[]
+  isLastPage?: boolean
+  nextPageStart?: number
+  binary?: boolean
+  children?: { values?: { path?: { toString?: string; name?: string }; type?: string }[] }
 }
 
 export class BitbucketClient {
@@ -107,8 +155,58 @@ export class BitbucketClient {
       description: raw.description ?? '',
       reviewers: (raw.reviewers ?? []).map((reviewer) => ({
         name: reviewer.user?.displayName ?? 'someone',
-        status: reviewer.status ?? 'UNAPPROVED',
+        status: reviewer.status ?? (reviewer.approved === true ? 'APPROVED' : 'UNAPPROVED'),
       })),
+      version: raw.version ?? 0,
+      toRef: raw.toRef?.id ?? (raw.toRef?.displayId !== undefined ? `refs/heads/${raw.toRef.displayId}` : ''),
+    }
+  }
+
+  async mergeStatus(repo: BitbucketRepo, id: number, signal?: AbortSignal): Promise<MergeStatus> {
+    const raw = await this.rest.json<{ canMerge?: boolean; conflicted?: boolean; vetoes?: { summaryMessage?: string; detailedMessage?: string }[] }>(
+      `checking whether #${String(id)} can be merged`,
+      `${this.repoPath(repo)}/pull-requests/${String(id)}/merge`,
+      { method: 'GET' },
+      signal,
+    )
+    return {
+      canMerge: raw.canMerge === true,
+      conflicted: raw.conflicted === true,
+      vetoes: (raw.vetoes ?? []).map((veto) =>
+        [veto.summaryMessage, veto.detailedMessage].filter((part): part is string => part !== undefined && part.length > 0).join(': '),
+      ),
+    }
+  }
+
+  /** Merges at `version`, so a pull request that changed since it was checked is refused (409). */
+  async merge(repo: BitbucketRepo, id: number, version: number, message: string | undefined, signal?: AbortSignal): Promise<{ mergeCommit: string | undefined }> {
+    const raw = await this.rest.json<RawPullRequest>(
+      `merging #${String(id)}`,
+      `${this.repoPath(repo)}/pull-requests/${String(id)}/merge?version=${String(version)}`,
+      { method: 'POST', body: JSON.stringify(message !== undefined && message.trim().length > 0 ? { message } : {}) },
+      signal,
+    )
+    return { mergeCommit: raw.properties?.mergeCommit?.id }
+  }
+
+  /**
+   * A tag at `startPoint` (a commit id or a ref). The core REST API has this resource only in later
+   * versions; older servers keep it under `/rest/git/1.0`, so a 404 or 405 tries there.
+   */
+  async createTag(repo: BitbucketRepo, name: string, startPoint: string, message: string | undefined, signal?: AbortSignal): Promise<void> {
+    if (!isSafeTagName(name)) throw new AtlassianError(`"${name}" is not a valid tag name.`)
+    const annotated = message !== undefined && message.trim().length > 0
+    const body = { name, startPoint, ...(annotated ? { message } : {}) }
+    try {
+      await this.rest.json(`creating tag ${name}`, `${this.repoPath(repo)}/tags`, { method: 'POST', body: JSON.stringify(body) }, signal)
+    } catch (error) {
+      if (!(error instanceof AtlassianError) || (error.status !== 404 && error.status !== 405)) throw error
+      await this.rest.json(
+        `creating tag ${name}`,
+        `${this.repoPath(repo).replace('/rest/api/1.0/', '/rest/git/1.0/')}/tags`,
+        { method: 'POST', body: JSON.stringify({ ...body, type: annotated ? 'ANNOTATED' : 'LIGHTWEIGHT', force: false }) },
+        signal,
+      )
     }
   }
 
@@ -134,11 +232,36 @@ export class BitbucketClient {
     return this.rest.text(`reading the diff of #${String(id)}`, `${this.repoPath(repo)}/pull-requests/${String(id)}.diff?contextLines=3`, signal)
   }
 
+  /**
+   * A file's text, read through the REST `browse` resource a page of lines at a time.
+   *
+   * Not the `/raw` URL beside the repository page: that is a web URL, and on a site behind SAML
+   * single sign-on the web login filter answers it with a redirect to the identity provider
+   * whatever token is sent - while every `/rest/` call accepts the personal access token. The
+   * redirect was followed, the login page came back, and the file "could not be read" although
+   * pull requests on the same repository could. `browse` is REST, so it authenticates like those.
+   */
   async file(repo: BitbucketRepo, path: string, ref: string | undefined, signal?: AbortSignal): Promise<string> {
-    const at = ref !== undefined && ref.length > 0 ? `?at=${encodeURIComponent(ref)}` : ''
-    // `/raw` sits outside the REST API, beside the repository's browse URL.
-    const browse = this.repoPath(repo).replace('/rest/api/1.0', '')
-    return this.rest.text(`reading ${path}`, `${browse}/raw/${encodeRepoPath(path)}${at}`, signal)
+    const target = encodeRepoPath(path)
+    const lines: string[] = []
+    let start = 0
+    for (let page = 0; page < MAX_FILE_PAGES; page += 1) {
+      const query = new URLSearchParams({ start: String(start), limit: String(FILE_PAGE_LINES) })
+      if (ref !== undefined && ref.length > 0) query.set('at', ref)
+      const body = await this.rest.json<RawBrowsePage>(`reading ${path}`, `${this.repoPath(repo)}/browse/${target}?${query.toString()}`, { method: 'GET' }, signal)
+      if (body.children !== undefined) {
+        const names = (body.children.values ?? []).map((child) => {
+          const name = child.path?.toString ?? child.path?.name ?? '?'
+          return child.type === 'DIRECTORY' ? `${name}/` : name
+        })
+        throw new AtlassianError(`${path} is a folder, not a file. It holds: ${names.join(', ') || 'nothing'}.`)
+      }
+      if (body.binary === true) throw new AtlassianError(`${path} is a binary file, so there is no text to read.`)
+      for (const line of body.lines ?? []) lines.push(line.text ?? '')
+      if (body.isLastPage !== false || body.nextPageStart === undefined || body.nextPageStart <= start) return lines.join('\n')
+      start = body.nextPageStart
+    }
+    return `${lines.join('\n')}\n[... stopped after ${String(lines.length)} lines; the file is longer]`
   }
 
   async createPullRequest(
@@ -352,7 +475,8 @@ export function createBitbucketWritePullRequestTool(options: BitbucketToolOption
     group: 'edit',
     description:
       'Open a Bitbucket pull request (title, from, to, optional description), or comment on one ' +
-      '(id and comment). It cannot approve, merge or decline — tell the user to do that themselves. ' +
+      '(id and comment). It cannot approve or decline — tell the user to do that themselves. To merge a ' +
+      'pull request reviewers have approved, use bitbucket_merge_pull_request. ' +
       `Always shown to the user before anything is posted.${defaultsNote(options)}`,
     parametersSchema: writeSchema,
 
@@ -396,6 +520,99 @@ export function createBitbucketWritePullRequestTool(options: BitbucketToolOption
           to: params.to,
         })
         return { content: `Opened #${String(pr.id)} ${pr.title} (${pr.from} → ${pr.to}).\nLink: ${pr.url}` }
+      } catch (error) {
+        return errorResult(error)
+      }
+    },
+  }
+}
+
+const mergeSchema = z.object({
+  ...repoFields,
+  id: z.number().int().positive().describe('The pull request to merge.'),
+  message: z.string().optional().describe("Merge commit message. Default: Bitbucket's own."),
+  tag: z.string().optional().describe('After merging, create this tag on the merge commit in the target branch, e.g. v1.4.0.'),
+  tagMessage: z.string().optional().describe('Makes the tag annotated, with this message. Without it the tag is lightweight.'),
+})
+type MergeParams = z.infer<typeof mergeSchema>
+
+/** Why this pull request may not be merged by the assistant yet, or nothing when it may. */
+export function mergeRefusal(pr: PullRequest, status: MergeStatus): string | undefined {
+  if (pr.state !== 'OPEN') return `#${String(pr.id)} is ${pr.state.toLowerCase()}, not open.`
+  const needsWork = pr.reviewers.filter((reviewer) => reviewer.status === 'NEEDS_WORK')
+  if (needsWork.length > 0) return `${needsWork.map((reviewer) => reviewer.name).join(', ')} marked it as needing work.`
+  if (!pr.reviewers.some((reviewer) => reviewer.status === 'APPROVED')) {
+    return 'No reviewer has approved it. It is merged only after a person has reviewed and approved it.'
+  }
+  if (status.conflicted) return 'It has merge conflicts; they have to be resolved on the branch first.'
+  if (!status.canMerge) return `Bitbucket's merge checks refuse it${status.vetoes.length > 0 ? `: ${status.vetoes.join('; ')}` : '.'}`
+  return undefined
+}
+
+function describeTag(params: MergeParams, branch: string): string {
+  if (params.tag === undefined) return 'No tag.'
+  if (!isSafeTagName(params.tag)) return `Tag "${params.tag}" is not a valid tag name - this will be refused.`
+  const annotated = params.tagMessage !== undefined && params.tagMessage.trim().length > 0
+  return `Then tag the merge commit on ${branch} as ${params.tag}${annotated ? ` (annotated: "${params.tagMessage ?? ''}")` : ' (lightweight)'}.`
+}
+
+export function createBitbucketMergePullRequestTool(options: BitbucketToolOptions): Tool<MergeParams> {
+  return {
+    name: 'bitbucket_merge_pull_request',
+    group: 'command',
+    description:
+      'Merge a Bitbucket pull request that a reviewer has already approved, and optionally create a tag on ' +
+      'the merge in the target branch (e.g. a release version on master). Refused while nobody has approved ' +
+      "it, anybody has marked it needs-work, it has conflicts, or Bitbucket's merge checks say no - the " +
+      'refusal says which, so tell the user rather than retrying. It cannot approve. Always shown to the ' +
+      `user before anything happens.${defaultsNote(options)}`,
+    parametersSchema: mergeSchema,
+
+    async preview(params): Promise<ToolPreview> {
+      const repo = resolveRepo(options, params)
+      const client = await options.client()
+      const pr = await client.pullRequest(repo, params.id)
+      const refusal = mergeRefusal(pr, await client.mergeStatus(repo, params.id))
+      return {
+        kind: 'text',
+        text: [
+          `MERGE ${repo.project}/${repo.repo} #${String(pr.id)} ${pr.title}`,
+          `${pr.from} → ${pr.to}   (${pr.url})`,
+          '',
+          'Reviewers:',
+          ...(pr.reviewers.length > 0 ? pr.reviewers.map((reviewer) => `  ${reviewer.status.padEnd(10)} ${reviewer.name}`) : ['  (none)']),
+          '',
+          refusal === undefined ? 'Bitbucket reports it can be merged.' : `WILL BE REFUSED: ${refusal}`,
+          describeTag(params, pr.to),
+          ...(params.message !== undefined && params.message.trim().length > 0 ? ['', 'Merge commit message:', params.message] : []),
+        ].join('\n'),
+      }
+    },
+
+    async execute(params): Promise<ToolResult> {
+      try {
+        const repo = resolveRepo(options, params)
+        if (params.tag !== undefined && !isSafeTagName(params.tag)) return { content: `"${params.tag}" is not a valid tag name.`, isError: true }
+        const client = await options.client()
+        // Checked again here: the preview was a while ago, and an approval can be withdrawn.
+        const pr = await client.pullRequest(repo, params.id)
+        const refusal = mergeRefusal(pr, await client.mergeStatus(repo, params.id))
+        if (refusal !== undefined) return { content: `Not merged. ${refusal}`, isError: true }
+        const merged = await client.merge(repo, params.id, pr.version, params.message)
+        const done =
+          `Merged #${String(pr.id)} ${pr.title} (${pr.from} → ${pr.to}).` +
+          `${merged.mergeCommit !== undefined ? ` Merge commit ${merged.mergeCommit.slice(0, 12)}.` : ''}\nLink: ${pr.url}`
+        if (params.tag === undefined) return { content: done }
+        // The merge has happened whatever the tag does next, so a tag failure is reported as that alone.
+        try {
+          await client.createTag(repo, params.tag, merged.mergeCommit ?? pr.toRef, params.tagMessage)
+          return { content: `${done}\nTagged ${params.tag} on ${pr.to}.` }
+        } catch (error) {
+          return {
+            content: `${done}\nThe merge succeeded, but tag ${params.tag} was not created: ${error instanceof Error ? error.message : String(error)}`,
+            isError: true,
+          }
+        }
       } catch (error) {
         return errorResult(error)
       }

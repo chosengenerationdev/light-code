@@ -58,6 +58,10 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   // A production scheduler changed with nobody watching.
   'autosys_send_event',
   'autosys_apply_jil',
+  // A merge into a shared branch, and a release tag, with nobody watching.
+  'bitbucket_merge_pull_request',
+  // A chat window opened with nobody there to press Send, or to notice it.
+  'teams_open_chat',
   'write_skill',
   'delete_skill',
   /*

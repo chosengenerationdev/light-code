@@ -5,6 +5,7 @@ import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
 import { colors, fontFamily, iconButtonStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface ApprovalsTabProps {
   approvals: WorkspaceApprovals
@@ -83,7 +84,7 @@ function ConnectionRetrySection(props: {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={!valid || !changed}
+          {...disabledWhen([!valid, 'Enter minutes between 0 and 1440, and retries between 0 and 10.'], [!changed, 'Nothing has changed since the last save.'])}
           onClick={() => props.onSave(seconds, parsedRetries)}
         >
           Save
@@ -253,7 +254,7 @@ export function ApprovalsTab(props: ApprovalsTabProps): ReactElement {
           <button
             type="button"
             style={secondaryButtonStyle()}
-            disabled={!stepsValid || parsedSteps === props.maxIterations}
+            {...disabledWhen([!stepsValid, 'Enter a whole number from 1 to 500.'], [parsedSteps === props.maxIterations, 'Nothing has changed since the last save.'])}
             onClick={() => props.onSetMaxIterations(parsedSteps)}
           >
             Save
@@ -348,7 +349,7 @@ function ReadRootsSection(props: { roots: string[]; onSave: (roots: string[]) =>
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={!dirty}
+          {...disabledWhen([!dirty, 'Nothing has changed since the last save.'])}
           onClick={() => props.onSave(draft.map((root) => root.trim()).filter((root) => root.length > 0))}
         >
           {dirty ? 'Save folders' : 'Saved'}

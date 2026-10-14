@@ -3,6 +3,7 @@ import type { SearchLogEntry } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
 import { badgeStyle, colors, fontFamily, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -77,7 +78,7 @@ export function SearchActivity(props: SearchActivityProps): ReactElement {
           onChange={(event) => setQuery(event.target.value)}
           style={{ ...textFieldStyle(), flex: 1, minWidth: 160 }}
         />
-        <button type="button" style={secondaryButtonStyle()} disabled={props.probeRunning} onClick={run}>
+        <button type="button" style={secondaryButtonStyle()} {...disabledWhen([props.probeRunning, 'A search is already running.'])} onClick={run}>
           {props.probeRunning ? 'Searching…' : 'Search'}
         </button>
       </div>

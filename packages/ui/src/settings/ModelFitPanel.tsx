@@ -94,7 +94,9 @@ export function ModelFitPanel(props: ModelFitPanelProps): ReactElement {
           style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '2px 8px' }}
           disabled={!canAssess}
           title={
-            props.assessor?.available === true
+            props.assessing === true
+              ? 'An assessment is already running.'
+              : props.assessor?.available === true
               ? `Puts five short questions to that model, then has ${props.assessor.label} grade the answers.`
               : 'Assign somebody to the expert seat first — the assessment is its judgement, not ours.'
           }

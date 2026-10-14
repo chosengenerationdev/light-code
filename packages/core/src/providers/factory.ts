@@ -3,6 +3,7 @@ import type { HttpClient } from '../platform/http.js'
 import { AnthropicProvider } from './anthropic.js'
 import { GeminiProvider } from './gemini.js'
 import { OpenAIProvider } from './openai.js'
+import { HostModelProvider, type HostLanguageModels } from './hostModels.js'
 import type { AuthStrategy, ChatProvider, ProviderProfile } from './types.js'
 
 /**
@@ -17,8 +18,12 @@ export function createChatProvider(
   http: HttpClient,
   auth: AuthStrategy,
   logger?: Logger,
+  /** GitHub Copilot through VS Code, where this host can reach it. */
+  hostModels?: HostLanguageModels,
 ): ChatProvider {
   switch (profile.wireFormat) {
+    case 'vscode-lm':
+      return new HostModelProvider(hostModels, profile.model)
     case 'anthropic':
       return new AnthropicProvider(http, profile, auth, logger)
     case 'gemini':

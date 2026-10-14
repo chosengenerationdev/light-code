@@ -1023,6 +1023,14 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       return true
     }
     const payload = body as { variables?: unknown; ids?: unknown }
+    /*
+     * The Review and Variables tabs exist for a shared server: a queue where an admin approves what
+     * normal users wrote, and variables an admin sets for everybody's sessions. On a run on the
+     * user's own machine - Fire Code always, and `light-code` without --server - there is one person,
+     * who is the admin, and Fire Code has its own Environment settings. The panel shows each tab only
+     * once the host answers, so not answering is what removes it, exactly as in the VS Code extension.
+     */
+    if ((type === 'requestReviews' || type === 'requestVariables') && !roles.shared) return true
     if (type === 'requestReviews') {
       await postReviews(principal, connection)
       return true

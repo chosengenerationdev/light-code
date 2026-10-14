@@ -50,6 +50,7 @@ export type ShareSectionId =
   | 'search'
   | 'agents'
   | 'skills'
+  | 'usage'
   | 'python'
   | 'office'
   | 'mail'
@@ -169,14 +170,14 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
   {
     id: 'python',
     label: 'Python tools',
-    description: 'uv, the tools folder, the package index, and declared environment variables.',
+    description: 'uv, the tools folder, the package index, library folders, and declared environment variables.',
     keys: ['python'],
     machineSpecific: true,
   },
   {
     id: 'office',
-    label: 'Excel and Outlook',
-    description: 'Whether the Office tools are offered at all.',
+    label: 'Excel, Outlook and Teams',
+    description: 'Whether the Office and Teams tools are offered at all.',
     keys: ['office'],
   },
   {
@@ -241,10 +242,16 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
      */
   },
   {
+    id: 'usage',
+    label: 'Usage dashboard',
+    description: 'Whether usage is collected and the shared folder, bucket or vector store it goes to - the team must all point at the same one.',
+    keys: ['usage'],
+  },
+  {
     id: 'network',
-    label: 'TLS and certificates',
-    description: 'The CA, client certificate and certificate folder. Paths, never key material.',
-    keys: ['tls', 'certDir'],
+    label: 'TLS, certificates and proxy',
+    description: 'The CA, client certificate, certificate folder and the http_request proxy. Paths and addresses, never key material or proxy passwords.',
+    keys: ['tls', 'certDir', 'proxy'],
     machineSpecific: true,
   },
   {

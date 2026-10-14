@@ -31,7 +31,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
-import { checkConnectionFile, describeProxyEnvironment, JUPYTER_CONNECTION_ENV, parseJupyterHubSpec, type JupyterHubSpec } from '@light-code/core'
+import { checkConnectionFile, describeProxyEnvironment, findFireCodeHelper, JUPYTER_CONNECTION_ENV, parseJupyterHubSpec, type JupyterHubSpec } from '@light-code/core'
 import type { IdentityProvider } from './identity.js'
 import { PythonToolIdentity, resolveIdentity } from './identityTool.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
@@ -277,7 +277,17 @@ async function main(): Promise<void> {
     }
   }
   const fastFsArg = valueOf(args, '--fast-fs')
-  const fastFs = fastFsArg !== undefined && existsSync(fastFsArg) ? path.resolve(fastFsArg) : undefined
+  /*
+   * Fire Code passes its helper. Run on its own, on a machine where Fire Code is installed, the host uses
+   * that install's helper (it records where it is) - but never on a shared server, where the helper of
+   * whoever installed Fire Code on the box is not something every user should be running.
+   */
+  const fastFs =
+    fastFsArg !== undefined && existsSync(fastFsArg)
+      ? path.resolve(fastFsArg)
+      : fastFsArg === undefined && !args.includes('--server')
+        ? findFireCodeHelper()
+        : undefined
   const changeLedgerFile = valueOf(args, '--change-ledger')
   const mirrorDir = valueOf(args, '--mirror-dir')
   const mentionName = valueOf(args, '--mention-name')

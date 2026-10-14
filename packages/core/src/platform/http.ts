@@ -45,6 +45,12 @@ export interface HttpRequestOptions {
   bodyBytes?: Uint8Array
   signal?: AbortSignal
   tls?: TlsOptions
+  /**
+   * A proxy for this request alone, in HTTP_PROXY/HTTPS_PROXY/NO_PROXY terms (URLs may carry
+   * user:password, sent as Proxy-Authorization). Used whether or not the client reads the environment:
+   * `http_request` routes through the one configured in Settings → Network.
+   */
+  proxy?: { http?: string | undefined; https?: string | undefined; noProxy?: string | undefined }
 }
 
 export interface HttpResponse {
@@ -142,12 +148,23 @@ export class FetchHttpClient implements HttpClient {
    * on the outer hop would present a client certificate to the proxy and none to the gateway —
    * a handshake failure pointing at neither.
    */
-  private proxyFor(target: URL, tls: TlsOptions | undefined): ProxyAgent | undefined {
-    if (this.options.useEnvProxy !== true) return undefined
-    const choice = proxyForUrl(target, this.options.env ?? process.env)
+  private proxyFor(target: URL, tls: TlsOptions | undefined, explicit?: HttpRequestOptions['proxy']): ProxyAgent | undefined {
+    const env: NodeJS.ProcessEnv | undefined =
+      explicit !== undefined
+        ? {
+            ...(explicit.http !== undefined ? { HTTP_PROXY: explicit.http } : {}),
+            ...(explicit.https !== undefined ? { HTTPS_PROXY: explicit.https } : {}),
+            ...(explicit.noProxy !== undefined ? { NO_PROXY: explicit.noProxy } : {}),
+          }
+        : this.options.useEnvProxy === true
+          ? (this.options.env ?? process.env)
+          : undefined
+    if (env === undefined) return undefined
+    const choice = proxyForUrl(target, env)
     if (choice === undefined) return undefined
 
-    const key = `${choice.uri}|${tls === undefined ? 'none' : tlsKey(tls)}`
+    // The credentials are part of the key: two proxies at one address with different logins are two agents.
+    const key = `${choice.uri}|${choice.token === undefined ? '' : createHash('sha256').update(choice.token).digest('hex')}|${tls === undefined ? 'none' : tlsKey(tls)}`
     const existing = this.proxyAgents.get(key)
     if (existing !== undefined) return existing
 
@@ -201,7 +218,7 @@ export class FetchHttpClient implements HttpClient {
     } catch {
       // Left to the WebSocket to reject.
     }
-    const proxy = target === undefined ? undefined : this.proxyFor(target, options.tls)
+    const proxy = target === undefined ? undefined : this.proxyFor(target, options.tls, (options as HttpRequestOptions).proxy)
     const dispatcher = (proxy ?? this.agentFor(options.tls ?? {})) as unknown as Dispatcher
     const socket = new WebSocket(url, { dispatcher, ...(options.headers !== undefined ? { headers: options.headers } : {}) })
     const messages: ((text: string) => void)[] = []
@@ -263,7 +280,7 @@ export class FetchHttpClient implements HttpClient {
     } catch {
       // Left to `fetch` to reject, which says more about a malformed URL than anything here could.
     }
-    const proxy = target === undefined ? undefined : this.proxyFor(target, options.tls)
+    const proxy = target === undefined ? undefined : this.proxyFor(target, options.tls, (options as HttpRequestOptions).proxy)
     if (proxy !== undefined) init.dispatcher = proxy as unknown as Dispatcher
     else if (options.tls !== undefined) init.dispatcher = this.agentFor(options.tls) as Dispatcher
 

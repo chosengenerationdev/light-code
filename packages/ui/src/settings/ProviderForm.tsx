@@ -16,7 +16,14 @@ import {
 } from '@light-code/core/browser'
 import { useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
-import { colors, fieldErrorStyle, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import {
+  colors,
+  fieldErrorStyle,
+  labelStyle,
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  textFieldStyle,
+} from '../theme.js'
 import { AdvancedAuthSection, type AuthType } from './AdvancedAuthSection.js'
 import { ModelSelect } from './ModelSelect.js'
 import { SecretField } from './SecretField.js'
@@ -54,6 +61,8 @@ export interface ProviderFormProps {
   /** Ask the host to fetch the catalogue for the profile as currently typed. */
   onRequestModels: (input: ProfileInput) => void
   onTestConnection: (input: ProfileInput) => void
+  /** GitHub Copilot can be reached through VS Code here, so its preset is offered. */
+  hostModels?: boolean
   models: string[]
   modelsWarning?: string
   modelsLoading: boolean
@@ -83,7 +92,9 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
   const [clientSecret, setClientSecret] = useState('')
   const [certs, setCerts] = useState<CertSummary>(props.initial.certs ?? {})
   const [certPassphrase, setCertPassphrase] = useState('')
-  const [capabilities, setCapabilities] = useState<ModelCapabilityInput>(props.initial.modelCapabilities ?? {})
+  const [capabilities, setCapabilities] = useState<ModelCapabilityInput>(
+    props.initial.modelCapabilities ?? {},
+  )
   /*
    * Thinking, and which parameter carries it.
    *
@@ -94,12 +105,24 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
   const [thinkingStyle, setThinkingStyle] = useState<'effort' | 'qwen'>(
     props.initial.thinking?.style ?? 'effort',
   )
-  const [connectionTls, setConnectionTls] = useState<ConnectionTlsInput>(props.initial.connectionTls ?? {})
+  const [connectionTls, setConnectionTls] = useState<ConnectionTlsInput>(
+    props.initial.connectionTls ?? {},
+  )
   const [errors, setErrors] = useState<FieldError[]>([])
   /** Prevents a re-fetch every time focus leaves the URL field without it having changed. */
   const [lastFetchedUrl, setLastFetchedUrl] = useState<string | undefined>(undefined)
 
-  const errorFor = (path: string): string | undefined => errors.find((e) => e.path === path)?.message
+  const errorFor = (path: string): string | undefined =>
+    errors.find((e) => e.path === path)?.message
+
+  /*
+   * A Copilot profile is a model chosen from what VS Code offers and nothing else: no URL to type, no key,
+   * no certificates - VS Code signs the request. The fields that would mean nothing are not shown.
+   */
+  const copilot = wireFormat === 'vscode-lm'
+  const presets = providerPresets.filter(
+    (preset) => preset.wireFormat !== 'vscode-lm' || props.hostModels === true || copilot,
+  )
 
   const applyPreset = (presetId: string): void => {
     const preset = providerPresets.find((p) => p.id === presetId)
@@ -107,6 +130,18 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
     setWireFormat(preset.wireFormat)
     setBaseUrl(preset.baseUrl)
     if (label.trim().length === 0) setLabel(preset.label)
+    if (preset.wireFormat === 'vscode-lm') {
+      setAuthType('none')
+      // The list is the whole choice here, so it is fetched straight away rather than on a blur.
+      props.onRequestModels({
+        ...currentInput(),
+        wireFormat: preset.wireFormat,
+        baseUrl: preset.baseUrl,
+        authType: 'none',
+      })
+    } else if (wireFormat === 'vscode-lm') {
+      setAuthType('apiKey')
+    }
   }
 
   /**
@@ -166,7 +201,9 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
       authType === 'apigeeMtls' ||
       // A named header with a value is a credential, even though no key box was filled in.
       (authType === 'header' &&
-        authHeaders.some((header) => header.name.trim().length > 0 && header.valueRef.trim().length > 0)) ||
+        authHeaders.some(
+          (header) => header.name.trim().length > 0 && header.valueRef.trim().length > 0,
+        )) ||
       // A script that has been named is a credential, even though nothing was typed into a key box.
       (authType === 'tokenCommand' &&
         tokenCommand.command.filter((part: string) => part.trim().length > 0).length > 0)
@@ -201,7 +238,7 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
           placeholder="Choose a preset…"
           onChange={applyPreset}
           style={{ width: '100%' }}
-          options={providerPresets.map((preset) => ({ value: preset.id, label: preset.label }))}
+          options={presets.map((preset) => ({ value: preset.id, label: preset.label }))}
         />
       </div>
 
@@ -209,25 +246,45 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         <label htmlFor="lc-label" style={labelStyle()}>
           Label
         </label>
-        <input id="lc-label" type="text" value={label} onChange={(event) => setLabel(event.target.value)} style={textFieldStyle()} />
-        {errorFor('label') !== undefined && <span style={fieldErrorStyle()}>{errorFor('label')}</span>}
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <label htmlFor="lc-base-url" style={labelStyle()}>
-          Base URL
-        </label>
         <input
-          id="lc-base-url"
+          id="lc-label"
           type="text"
-          value={baseUrl}
-          placeholder="https://api.openai.com/v1"
-          onChange={(event) => setBaseUrl(event.target.value)}
-          onBlur={maybeAutoFetchModels}
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
           style={textFieldStyle()}
         />
-        {errorFor('baseUrl') !== undefined && <span style={fieldErrorStyle()}>{errorFor('baseUrl')}</span>}
+        {errorFor('label') !== undefined && (
+          <span style={fieldErrorStyle()}>{errorFor('label')}</span>
+        )}
       </div>
+
+      {copilot ? (
+        <p style={{ color: colors.muted, fontSize: 11, lineHeight: 1.5, margin: '0 0 12px' }}>
+          GitHub Copilot as it is signed in to in VS Code. VS Code makes every request with
+          Copilot's own sign-in, so there is no key or address to enter, and requests count against
+          your Copilot plan. The first one asks in VS Code whether Light Code may use Copilot. In
+          Fire Code and the Light Code host, a VS Code window with the Light Code extension has to
+          be open.
+        </p>
+      ) : (
+        <div style={{ marginBottom: 12 }}>
+          <label htmlFor="lc-base-url" style={labelStyle()}>
+            Base URL
+          </label>
+          <input
+            id="lc-base-url"
+            type="text"
+            value={baseUrl}
+            placeholder="https://api.openai.com/v1"
+            onChange={(event) => setBaseUrl(event.target.value)}
+            onBlur={maybeAutoFetchModels}
+            style={textFieldStyle()}
+          />
+          {errorFor('baseUrl') !== undefined && (
+            <span style={fieldErrorStyle()}>{errorFor('baseUrl')}</span>
+          )}
+        </div>
+      )}
 
       <ModelSelect
         value={model}
@@ -249,53 +306,57 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         it had to surface: "OpenAI-compatible" is not one thing, and the two spellings are not
         interchangeable. Sending the wrong one is a 400 on every request.
       */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        <label style={labelStyle()}>Thinking</label>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 150, flex: 1 }}>
-            <Select
-              compact
-              ariaLabel="Thinking level"
-              value={thinkingLevel}
-              onChange={setThinkingLevel}
-              options={[
-                { value: '', label: 'Send nothing (default)' },
-                { value: 'off', label: 'Off' },
-                { value: 'low', label: 'Low' },
-                { value: 'medium', label: 'Medium' },
-                { value: 'high', label: 'High' },
-              ]}
-            />
-          </div>
-          {wireFormat === 'openai' && thinkingLevel !== '' && (
-            <div style={{ minWidth: 210, flex: 1 }}>
+      {!copilot && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+          <label style={labelStyle()}>Thinking</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 150, flex: 1 }}>
               <Select
                 compact
-                ariaLabel="Thinking parameter"
-                value={thinkingStyle}
-                onChange={(value) => setThinkingStyle(value as 'effort' | 'qwen')}
+                ariaLabel="Thinking level"
+                value={thinkingLevel}
+                onChange={setThinkingLevel}
                 options={[
-                  { value: 'effort', label: 'as reasoning_effort' },
-                  { value: 'qwen', label: 'as enable_thinking (Qwen)' },
+                  { value: '', label: 'Send nothing (default)' },
+                  { value: 'off', label: 'Off' },
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
                 ]}
               />
             </div>
-          )}
+            {wireFormat === 'openai' && thinkingLevel !== '' && (
+              <div style={{ minWidth: 210, flex: 1 }}>
+                <Select
+                  compact
+                  ariaLabel="Thinking parameter"
+                  value={thinkingStyle}
+                  onChange={(value) => setThinkingStyle(value as 'effort' | 'qwen')}
+                  options={[
+                    { value: 'effort', label: 'as reasoning_effort' },
+                    { value: 'qwen', label: 'as enable_thinking (Qwen)' },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+          <span style={{ color: colors.muted, fontSize: 11, lineHeight: 1.5 }}>
+            {thinkingLevel === ''
+              ? 'Nothing is sent, which is how every profile behaved before this existed. Set it only against a gateway you know accepts it.'
+              : wireFormat !== 'openai'
+                ? 'This wire format spells thinking one way, so there is nothing to choose.'
+                : thinkingStyle === 'effort'
+                  ? 'Sends reasoning_effort. Right for OpenAI and most gateways fronting a reasoning model.'
+                  : 'Sends chat_template_kwargs.enable_thinking, which vLLM and SGLang expose for Qwen3 and its relatives. On or off only \u2014 the level is not a depth dial here.'}
+          </span>
         </div>
-        <span style={{ color: colors.muted, fontSize: 11, lineHeight: 1.5 }}>
-          {thinkingLevel === ''
-            ? 'Nothing is sent, which is how every profile behaved before this existed. Set it only against a gateway you know accepts it.'
-            : wireFormat !== 'openai'
-              ? 'This wire format spells thinking one way, so there is nothing to choose.'
-              : thinkingStyle === 'effort'
-                ? 'Sends reasoning_effort. Right for OpenAI and most gateways fronting a reasoning model.'
-                : 'Sends chat_template_kwargs.enable_thinking, which vLLM and SGLang expose for Qwen3 and its relatives. On or off only \u2014 the level is not a depth dial here.'}
-        </span>
-      </div>
+      )}
 
-      {authType === 'header' && <HeaderAuthFields headers={authHeaders} onChange={setAuthHeaders} />}
+      {!copilot && authType === 'header' && (
+        <HeaderAuthFields headers={authHeaders} onChange={setAuthHeaders} />
+      )}
 
-      {authType === 'tokenCommand' && (
+      {!copilot && authType === 'tokenCommand' && (
         <TokenCommandFields
           value={tokenCommand}
           onChange={setTokenCommand}
@@ -304,7 +365,7 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
         />
       )}
 
-      {authType === 'apiKey' && (
+      {!copilot && authType === 'apiKey' && (
         <div onBlur={maybeAutoFetchModels}>
           <SecretField
             id="lc-api-key"
@@ -312,7 +373,9 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
             hasValue={props.initial.hasApiKey}
             value={apiKey}
             onChange={setApiKey}
-            {...(props.initial.apiKeyEnvVar === undefined ? {} : { envVar: props.initial.apiKeyEnvVar })}
+            {...(props.initial.apiKeyEnvVar === undefined
+              ? {}
+              : { envVar: props.initial.apiKeyEnvVar })}
           />
           {/*
             Said where the key is typed, because it is not discoverable anywhere else.
@@ -323,32 +386,43 @@ export function ProviderForm(props: ProviderFormProps): ReactElement {
             and it goes stale the moment it rotates.
           */}
           <span
-            style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: -10, marginBottom: 16 }}
+            style={{
+              display: 'block',
+              color: colors.muted,
+              fontSize: 11,
+              marginTop: -10,
+              marginBottom: 16,
+            }}
           >
-            Enter <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>env:API_TOKEN</code> to read the key from
-            that environment variable instead of storing it. It is read fresh on every request, and
-            must be exported before Light Code starts &mdash; a child process cannot see a variable
-            its parent set afterwards.
+            Enter{' '}
+            <code style={{ fontFamily: 'var(--vscode-editor-font-family, monospace)' }}>
+              env:API_TOKEN
+            </code>{' '}
+            to read the key from that environment variable instead of storing it. It is read fresh
+            on every request, and must be exported before Light Code starts &mdash; a child process
+            cannot see a variable its parent set afterwards.
           </span>
         </div>
       )}
 
-      <AdvancedAuthSection
-        authType={authType}
-        onAuthTypeChange={setAuthType}
-        apigee={apigee}
-        onApigeeChange={setApigee}
-        clientSecret={clientSecret}
-        onClientSecretChange={setClientSecret}
-        hasClientSecret={props.initial.hasClientSecret}
-        certs={certs}
-        onCertsChange={setCerts}
-        certPassphrase={certPassphrase}
-        onCertPassphraseChange={setCertPassphrase}
-        hasCertPassphrase={props.initial.hasCertPassphrase}
-        connectionTls={connectionTls}
-        onConnectionTlsChange={setConnectionTls}
-      />
+      {!copilot && (
+        <AdvancedAuthSection
+          authType={authType}
+          onAuthTypeChange={setAuthType}
+          apigee={apigee}
+          onApigeeChange={setApigee}
+          clientSecret={clientSecret}
+          onClientSecretChange={setClientSecret}
+          hasClientSecret={props.initial.hasClientSecret}
+          certs={certs}
+          onCertsChange={setCerts}
+          certPassphrase={certPassphrase}
+          onCertPassphraseChange={setCertPassphrase}
+          hasCertPassphrase={props.initial.hasCertPassphrase}
+          connectionTls={connectionTls}
+          onConnectionTlsChange={setConnectionTls}
+        />
+      )}
 
       <TestConnectionPanel
         running={props.testRunning}

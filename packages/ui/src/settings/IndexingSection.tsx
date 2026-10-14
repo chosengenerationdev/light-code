@@ -2,6 +2,7 @@ import type { IndexProgress, IndexResult, ProfileSummary } from '@light-code/cor
 import { useEffect, useState, type ReactElement } from 'react'
 import { Select } from '../Select.js'
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 export interface EmbedderState {
   profileId?: string
@@ -238,7 +239,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={!configured}
+          {...disabledWhen([profileId.length === 0, 'Choose the provider that serves the embedding model.'], [model.trim().length === 0, 'Enter the embedding model.'], [!configured, 'Enter the vector width as a whole number above 0.'])}
           onClick={() => props.onSaveEmbedder(profileId, model.trim(), parsedDimensions)}
         >
           Save embedder
@@ -320,7 +321,7 @@ export function IndexingSection(props: IndexingSectionProps): ReactElement {
           <button
             type="button"
             style={primaryButtonStyle(!ready)}
-            disabled={!ready}
+            {...disabledWhen([!configured, 'Save the embedding model above first.'], [props.connectionLabel === undefined, 'Choose a vector store connection first.'], [props.embedder?.indexName === undefined, 'Save the embedder first, so the index has a name.'])}
             onClick={() => setConfirming(true)}
           >
             {props.embedder !== undefined && props.embedder.indexedFiles > 0 ? 'Reindex workspace' : 'Index workspace'}

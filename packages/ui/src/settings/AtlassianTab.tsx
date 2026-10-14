@@ -13,6 +13,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
 import { SecretInput } from './CredentialPicker.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 /**
  * Confluence, Jira, Bitbucket and Jenkins: one panel each, from one component and the product table in
@@ -152,7 +153,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         ? `${props.settings.baseUrl}${viaGateway ? ' (via gateway)' : ''}`
         : viaGateway
           ? 'No client secret stored'
-          : 'No token stored'
+          : `No ${info.tokenLabel.toLowerCase()} stored`
 
   // Test runs against what is saved, so it says precisely what is missing from that.
   const testBlocked: string | undefined = dirty
@@ -170,6 +171,26 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
           : props.gateway !== undefined
             ? 'Enter the password and save — or, for the API gateway, tick "Sign in through the gateway" below and save.'
             : `Enter the ${info.tokenLabel.toLowerCase()} and save.`
+
+  // Called, not rendered as <DefaultField />: a component defined in a render remounts on every keystroke.
+  const defaultField = (field: (typeof info.defaults)[number]): ReactElement => (
+    <div key={field.key}>
+      <label htmlFor={id(field.key)} style={labelStyle()}>
+        {field.label}
+        {field.signIn !== 'required' && <span style={{ color: colors.muted, fontWeight: 400 }}> (optional)</span>}
+      </label>
+      <input
+        id={id(field.key)}
+        type="text"
+        value={draft.defaults[field.key] ?? ''}
+        spellCheck={false}
+        placeholder={field.placeholder}
+        onChange={(event) => set({ defaults: { ...draft.defaults, [field.key]: event.target.value } })}
+        style={textFieldStyle()}
+      />
+      <span style={hintStyle}>{field.hint}</span>
+    </div>
+  )
 
   return (
     <Panel id={`atlassian.${info.id}`} title={info.label} summary={summary}>
@@ -203,13 +224,14 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
             : 'Signing in through the API gateway below — the username and password are not used.'}
         </span>
       )}
+      {info.defaults.filter((field) => field.signIn !== undefined).map(defaultField)}
       <label htmlFor={id('token')} style={labelStyle()}>
         {info.tokenLabel}
       </label>
       <SecretInput
         id={id('token')}
         value={token}
-        placeholder={props.hasToken ? 'Stored — leave blank to keep it' : 'Paste a token'}
+        placeholder={props.hasToken ? 'Stored — leave blank to keep it' : `Enter the ${info.tokenLabel.toLowerCase()}`}
         onChange={(value) => {
           setSaved(false)
           setToken(value)
@@ -219,23 +241,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         {info.tokenHint}
       </span>
 
-      {info.defaults.map((field) => (
-        <div key={field.key}>
-          <label htmlFor={id(field.key)} style={labelStyle()}>
-            {field.label} <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
-          </label>
-          <input
-            id={id(field.key)}
-            type="text"
-            value={draft.defaults[field.key] ?? ''}
-            spellCheck={false}
-            placeholder={field.placeholder}
-            onChange={(event) => set({ defaults: { ...draft.defaults, [field.key]: event.target.value } })}
-            style={textFieldStyle()}
-          />
-          <span style={hintStyle}>{field.hint}</span>
-        </div>
-      ))}
+      {info.defaults.filter((field) => field.signIn === undefined).map(defaultField)}
 
       <label htmlFor={id('ca')} style={labelStyle()}>
         CA certificate file <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
@@ -292,7 +298,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         <button
           type="button"
           style={primaryButtonStyle(!dirty)}
-          disabled={!dirty}
+          {...disabledWhen([!dirty, 'Nothing has changed since the last save.'])}
           onClick={() =>
             props.onSave(
               draft,
@@ -320,7 +326,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         </button>
         {props.hasToken && (
           <button type="button" style={secondaryButtonStyle()} onClick={props.onClearToken}>
-            Remove token
+            Remove {info.tokenLabel.toLowerCase()}
           </button>
         )}
       </div>

@@ -11,9 +11,11 @@ describe('providerPresets', () => {
     }
   })
 
-  it('covers all three wire formats from Phase 7', () => {
+  it('covers all three wire formats from Phase 7, and GitHub Copilot through VS Code', () => {
     const formats = new Set(providerPresets.map((preset) => preset.wireFormat))
-    expect(formats).toEqual(new Set(['openai', 'anthropic', 'gemini']))
+    expect(formats).toEqual(new Set(['openai', 'anthropic', 'gemini', 'vscode-lm']))
+    // Not an endpoint: VS Code makes the request, so nothing is ever fetched from this (invariant 3).
+    expect(providerPresets.find((preset) => preset.wireFormat === 'vscode-lm')?.baseUrl).toMatch(/^vscode:/)
   })
 
   it('offers a custom preset per wire format, with an empty base URL to fill in', () => {

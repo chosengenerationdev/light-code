@@ -125,6 +125,16 @@ export function toGeminiTools(tools: readonly ToolDefinition[]): Record<string, 
 }
 
 /**
+ * Parameters a model behind someone else's API will accept whichever vendor it is.
+ *
+ * GitHub Copilot through VS Code serves OpenAI, Anthropic and Gemini models behind one interface,
+ * and the model is the user's choice, so the strictest translation (Gemini's) is the safe one.
+ */
+export function toPortableParameters(parameters: unknown): Record<string, unknown> {
+  return pruneSchema(normalizeObjectSchema(parameters), (key) => !GEMINI_UNSUPPORTED.has(key)) as Record<string, unknown>
+}
+
+/**
  * Every provider expects a tool's parameters to be an object schema. A tool that takes no
  * arguments still needs `{type: "object", properties: {}}` — sending `undefined` or a bare
  * `{}` makes some gateways reject the whole request, which then looks like a model failure

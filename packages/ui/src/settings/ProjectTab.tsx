@@ -15,6 +15,7 @@ import { aliasProblem, formatAliases, parseAliases } from '@light-code/core/brow
 import { Select } from '../Select.js'
 import { Panel } from './Panel.js'
 import { TeamSkillsSection, type SkillsTabProps } from './SkillsTab.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 /**
  * Settings → Project: what this project is called, and the two one-off jobs that name changes.
@@ -89,7 +90,7 @@ export function ProjectTab(props: ProjectTabProps): ReactElement {
             onChange={(event) => setName(event.target.value)}
             style={{ ...textFieldStyle(), flex: 1 }}
           />
-          <button type="button" style={primaryButtonStyle(!dirty)} disabled={!dirty} onClick={() => props.onSaveName(name)}>
+          <button type="button" style={primaryButtonStyle(!dirty)} {...disabledWhen([!dirty, 'Nothing has changed since the last save.'])} onClick={() => props.onSaveName(name)}>
             Save
           </button>
         </div>
@@ -178,7 +179,7 @@ function NamingPanel(props: {
   const teamUnavailable = project?.storeKind !== undefined && project.storeKind !== 'opensearch'
 
   const saveButton = (dirty: boolean, blocked: boolean, save: () => void): ReactElement => (
-    <button type="button" style={secondaryButtonStyle()} disabled={!dirty || blocked} onClick={save}>
+    <button type="button" style={secondaryButtonStyle()} {...disabledWhen([!dirty, 'Nothing has changed since the last save.'], [blocked, 'Fix the problem shown above first.'])} onClick={save}>
       {dirty ? 'Save' : 'Saved'}
     </button>
   )
@@ -296,7 +297,7 @@ function NamingPanel(props: {
       </span>
       {savedAliases.length > 0 && (
         <div style={{ marginBottom: 6 }}>
-          <button type="button" style={secondaryButtonStyle()} disabled={aliasesDirty} onClick={props.onAttachTeamAlias}>
+          <button type="button" style={secondaryButtonStyle()} {...disabledWhen([aliasesDirty, 'Save the aliases first - the saved ones are what get attached.'])} onClick={props.onAttachTeamAlias}>
             Attach alias to my existing index
           </button>
           <span style={hintStyle}>
@@ -386,7 +387,7 @@ function StampPanel(props: {
         file still works and is still found by project searches. Existing labels are never replaced.
       </p>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <button type="button" style={secondaryButtonStyle()} disabled={stamp?.running === true} onClick={() => props.onStamp(false)}>
+        <button type="button" style={secondaryButtonStyle()} {...disabledWhen([stamp?.running === true, 'Labelling is already running.'])} onClick={() => props.onStamp(false)}>
           Find unlabelled files
         </button>
         {stamp?.running === true && <span role="status">Labelling…</span>}
@@ -414,7 +415,7 @@ function StampPanel(props: {
             <button
               type="button"
               style={secondaryButtonStyle()}
-              disabled={ticked.length === 0 || (bulkAuthor.trim().length === 0 && bulkProject.trim().length === 0)}
+              {...disabledWhen([ticked.length === 0, 'Tick the files to fill in first.'], [bulkAuthor.trim().length === 0 && bulkProject.trim().length === 0, 'Enter an author or a project to fill in.'])}
               onClick={() =>
                 setChoices((current) => {
                   const next = { ...current }
@@ -459,7 +460,7 @@ function StampPanel(props: {
                       id={id}
                       type="checkbox"
                       checked={choice.ticked}
-                      disabled={!entry.needsLabels && entry.location === 'project'}
+                      {...disabledWhen([!entry.needsLabels && entry.location === 'project', 'This file is labelled already.'])}
                       onChange={(event) => update(entry, { ticked: event.target.checked })}
                     />
                     <span style={{ fontFamily: monospaceFamily }}>
@@ -499,7 +500,7 @@ function StampPanel(props: {
                         aria-label={`Author of ${entry.name}`}
                         type="text"
                         value={entry.current.author ?? choice.author}
-                        disabled={entry.current.author !== undefined}
+                        {...disabledWhen([entry.current.author !== undefined, 'The file already names its author; existing labels are never replaced.'])}
                         placeholder="author"
                         onChange={(event) => update(entry, { author: event.target.value })}
                         style={smallInput}
@@ -508,7 +509,7 @@ function StampPanel(props: {
                         aria-label={`Project of ${entry.name}`}
                         type="text"
                         value={entry.current.project ?? choice.project}
-                        disabled={entry.current.project !== undefined}
+                        {...disabledWhen([entry.current.project !== undefined, 'The file already names its project; existing labels are never replaced.'])}
                         placeholder="project"
                         onChange={(event) => update(entry, { project: event.target.value })}
                         style={smallInput}
@@ -571,8 +572,7 @@ function RenamesPanel(props: {
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={renames?.running === true || props.configured === undefined}
-          title={props.configured === undefined ? 'Set a project name first' : undefined}
+          {...disabledWhen([props.configured === undefined, 'Set a project name first.'], [renames?.running === true, 'Copying is already running.'])}
           onClick={() => props.onRenames(false)}
         >
           Find indexes to move

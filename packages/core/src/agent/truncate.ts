@@ -113,20 +113,66 @@ export interface TruncationResult {
   truncated: boolean
 }
 
+/**
+ * Records a JSON payload holds - a list of objects, a `data`/`items`/`results`/`value`/`rows`/`records`
+ * wrapper around one, or JSON Lines, optionally after a line of text before the JSON - or undefined.
+ * Shared with `dataframe`'s `result` source, so the notice and the reader agree on what counts.
+ */
+export function jsonRecords(content: string): Record<string, unknown>[] | undefined {
+  const isRecordList = (v: unknown): v is Record<string, unknown>[] =>
+    Array.isArray(v) && v.length > 0 && v.every((x) => x !== null && typeof x === 'object' && !Array.isArray(x))
+  const fromValue = (v: unknown): Record<string, unknown>[] | undefined => {
+    if (isRecordList(v)) return v
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      for (const key of ['data', 'items', 'results', 'value', 'rows', 'records']) {
+        const inner = (v as Record<string, unknown>)[key]
+        if (isRecordList(inner)) return inner
+      }
+    }
+    return undefined
+  }
+  const start = content.search(/[[{]/)
+  if (start < 0) return undefined
+  const body = content.slice(start).trim()
+  try {
+    return fromValue(JSON.parse(body))
+  } catch {
+    // JSON Lines: one object per line.
+    const lines = body.split(/\r?\n/).filter((line) => line.trim().length > 0)
+    try {
+      const parsed = lines.map((line) => JSON.parse(line) as unknown)
+      return isRecordList(parsed) ? parsed : undefined
+    } catch {
+      return undefined
+    }
+  }
+}
+
 export async function truncateToolResult(
   content: string,
   store: TruncationStore,
   maxChars: number = DEFAULT_MAX_CHARS,
+  options: { dataframe?: boolean } = {},
 ): Promise<TruncationResult> {
   if (content.length <= maxChars) return { content, truncated: false }
 
   const handle = await store.save(content)
   const totalLines = content.split('\n').length
   const head = content.slice(0, maxChars)
+  /*
+   * A payload of records is data to analyse, not text to page through: reading it back in pieces and
+   * retyping it into rows costs tokens twice and is where records get dropped or altered. `dataframe`
+   * reads the saved output by its handle instead.
+   */
+  const records = options.dataframe === true && content.length < 50_000_000 ? jsonRecords(content) : undefined
   return {
     content:
       `${head}\n\n[Output truncated: showing ${maxChars} of ${content.length} characters (${totalLines} lines total). ` +
-      `Re-read more with read_tool_result using handle "${handle}".]`,
+      `Re-read more with read_tool_result using handle "${handle}".` +
+      (records !== undefined
+        ? ` It holds ${String(records.length)} JSON records: to analyse, filter or join them, pass {"name": "<table name>", "result": "${handle}"} as a dataframe source rather than reading them in pieces.`
+        : '') +
+      ']',
     truncated: true,
   }
 }

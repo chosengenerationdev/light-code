@@ -47,6 +47,9 @@ pub struct Project {
     /// chat is the codebase itself (runtime key = project id); these are `<id>~<chat id>`.
     #[serde(default)]
     pub chats: Vec<Chat>,
+    /// The first chat's name, once renamed; "Chat 1" until then. The others keep theirs in `chats`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_chat_name: Option<String>,
     /// Set when the codebase is folders on a JupyterHub server; `path` is then the local copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hub: Option<crate::hub::HubSettings>,
@@ -316,11 +319,15 @@ impl State {
             Some(p) => std::iter::once(p.id.clone()).chain(p.chats.iter().map(|c| format!("{}~{}", p.id, c.id))).collect(),
         }
     }
-    /// A notification's title: the codebase, and the chat when it is not the first.
+    /// A notification's title: the codebase, and the chat when it is not the first or has been renamed.
     pub fn chat_title(&self, key: &str) -> Option<String> {
         let p = self.project(key)?;
-        Some(match chat_of(key).and_then(|chat| p.chats.iter().find(|c| c.id.to_string() == chat)) {
-            Some(c) => format!("{} · {}", p.name, c.name),
+        let chat = match chat_of(key) {
+            Some(chat) => p.chats.iter().find(|c| c.id.to_string() == chat).map(|c| c.name.clone()),
+            None => p.first_chat_name.clone(),
+        };
+        Some(match chat {
+            Some(name) => format!("{} · {}", p.name, name),
             None => p.name.clone(),
         })
     }
@@ -363,6 +370,7 @@ mod tests {
             last_used: 0,
             accent: None,
             chats: chats.iter().map(|&n| Chat { id: n, name: format!("Chat {n}") }).collect(),
+            first_chat_name: None,
             hub: None,
         }
     }
@@ -431,8 +439,24 @@ mod mention_name_tests {
             last_used: 0,
             accent: None,
             chats: Vec::new(),
+            first_chat_name: None,
             hub: None,
         }
+    }
+
+    #[test]
+    fn the_first_chat_can_be_named_and_older_state_still_loads() {
+        let mut payments = named("Payments");
+        payments.chats.push(Chat { id: 2, name: "Chat 2".into() });
+        let mut state = State { projects: vec![payments], ..Default::default() };
+        assert_eq!(state.chat_title("Payments").as_deref(), Some("Payments"));
+        state.projects[0].first_chat_name = Some("Reports".into());
+        assert_eq!(state.chat_title("Payments").as_deref(), Some("Payments · Reports"));
+        assert_eq!(state.chat_title("Payments~2").as_deref(), Some("Payments · Chat 2"));
+        // Saved by 0.28 and earlier: no field, so no name.
+        let old: Project = serde_json::from_str(r#"{"id":"p","name":"P","path":"D:/p","configMode":"new","configFile":"c.json"}"#).unwrap();
+        assert_eq!(old.first_chat_name, None);
+        assert!(!serde_json::to_string(&old).unwrap().contains("firstChatName"));
     }
 
     #[test]

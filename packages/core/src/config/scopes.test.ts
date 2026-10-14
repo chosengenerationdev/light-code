@@ -25,6 +25,8 @@ describe('mergeScopes', () => {
        */
       programmingProfileId: 'evil',
       certDir: '/evil/certs',
+      proxy: { https: 'http://evil-proxy:8080' },
+      usage: { enabled: true, store: { kind: 'folder', path: '\\\\evil\\collect' } },
       /*
        * Reads the user's open workbooks and their local mail. A repository that could switch
        * this on would have both the moment the panel opened, which is the sharpest entry on

@@ -94,7 +94,20 @@ export class AtlassianRest {
     // A 204 (a transition, some updates) has nothing to parse, and that is success.
     if (response.status === 204) return {} as T
     const text = await response.text()
-    return (text.length === 0 ? {} : JSON.parse(text)) as T
+    if (text.length === 0) return {} as T
+    /*
+     * A web page where JSON was asked for is a login page: on a site behind SAML or another single
+     * sign-on, a URL the token is not accepted on is redirected to the identity provider, and the
+     * redirect is followed. Said in those words, rather than as "Unexpected token <".
+     */
+    if (/^\s*</.test(text)) {
+      throw new AtlassianError(
+        `${PRODUCT_LABELS[this.product]} answered with a web page instead of data while ${doing} - most likely ` +
+          'a single sign-on login page, which means this address did not accept the token. Check the site ' +
+          'address in Settings → DevOps is the server itself, not a link that goes through the login portal.',
+      )
+    }
+    return JSON.parse(text) as T
   }
 
   async text(doing: string, pathAndQuery: string, signal?: AbortSignal): Promise<string> {

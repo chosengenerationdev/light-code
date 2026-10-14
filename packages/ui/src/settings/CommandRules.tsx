@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react'
 import { Select } from '../Select.js'
 import { TrashIcon } from '../icons.js'
 import { colors, iconButtonStyle, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
+import { disabledWhen } from '../disabledWhen.js'
 
 /**
  * The user's own command rules: what always asks, and what Auto mode may run unprompted.
@@ -297,7 +298,7 @@ export function CommandRulesSection(props: CommandRulesSectionProps): ReactEleme
         <button
           type="button"
           style={secondaryButtonStyle()}
-          disabled={!dirty}
+          {...disabledWhen([!dirty, 'Nothing has changed since the last save.'])}
           onClick={() => props.onSave(draft)}
         >
           {dirty ? 'Save rules' : 'Saved'}

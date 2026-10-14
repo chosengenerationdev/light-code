@@ -48,7 +48,10 @@ import {
   PythonIcon,
   ToolboxIcon,
   LinkedSitesIcon,
+  ChartIcon,
 } from '../icons.js'
+import { UsageTab } from './UsageTab.js'
+import type { Transport } from '@light-code/core/browser'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
   approvals: WorkspaceApprovals
@@ -84,6 +87,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   onInheritAccent?: () => void
   /** False where this host has no Excel, Outlook or mail index — the tab is then not listed. */
   offersOffice?: boolean
+  /** GitHub Copilot can be reached through VS Code here, so its preset is offered. */
+  hostModels?: boolean
   theme?: 'system' | 'light' | 'dark'
   onSetTheme?: (theme: 'system' | 'light' | 'dark') => void
   mcpServers: McpServerState[]
@@ -152,6 +157,8 @@ export interface SettingsPanelProps extends ProvidersTabProps {
   variables?: VariablesTabProps | undefined
   skills: SkillsTabProps
   schedules: SchedulesTabProps
+  /** The usage dashboard talks to the host itself; absent, the tab is not shown. */
+  transport?: Transport
 }
 
 type TabId =
@@ -172,6 +179,7 @@ type TabId =
   | 'appearance'
   | 'variables'
   | 'reviews'
+  | 'usage'
 
 /**
  * Icons rather than words, with the **active tab keeping its label**.
@@ -216,6 +224,8 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   // Beside Outlook, because both are corpora collected from outside the workspace on a timer.
   { id: 'customData', label: 'Custom data', Icon: DatabaseIcon },
   { id: 'skills', label: 'Skills', Icon: BookIcon },
+  // Beside Skills: it is about skills and tools, read rather than configured.
+  { id: 'usage', label: 'Usage', Icon: ChartIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
   { id: 'reviews', label: 'Review', Icon: ReviewIcon },
   { id: 'variables', label: 'Variables', Icon: VariablesIcon },
@@ -245,6 +255,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
     // Absent rather than present-and-apologising where the host does not offer it. Same rule the
     // tools follow, applied to the navigation.
     outlook: props.offersOffice !== false,
+    usage: props.transport !== undefined,
   }
   const visible = TABS.filter((tab) => present[tab.id] ?? true)
   const shown = visible.some((tab) => tab.id === active) ? active : 'providers'
@@ -371,6 +382,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onRequestModels={props.onRequestModels}
             onTestConnection={props.onTestConnection}
             onEditingChange={props.onEditingChange}
+            hostModels={props.hostModels === true}
             models={props.models}
             {...(props.modelsWarning !== undefined ? { modelsWarning: props.modelsWarning } : {})}
             modelsLoading={props.modelsLoading}
@@ -401,6 +413,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <SchedulesTab {...props.schedules} />
         ) : shown === 'skills' ? (
           <SkillsTab {...props.skills} />
+        ) : shown === 'usage' && props.transport !== undefined ? (
+          <UsageTab transport={props.transport} />
         ) : shown === 'tools' ? (
           <ToolsTab {...props.tools} />
         ) : shown === 'devops' ? (
