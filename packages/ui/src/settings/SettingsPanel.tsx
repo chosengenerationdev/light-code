@@ -8,6 +8,8 @@ import type {
   McpServerState,
   McpToolPermission,
   WorkspaceApprovals,
+  HostToUiMessage,
+  UiToHostMessage,
 } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
 import { colors, fontFamily } from '../theme.js'
@@ -42,6 +44,7 @@ import {
   ProjectIcon,
   ProviderIcon,
   SearchIcon,
+  PuzzleIcon,
   ServerIcon,
   ReviewIcon,
   ShieldIcon,
@@ -51,6 +54,8 @@ import {
   ChartIcon,
 } from '../icons.js'
 import { UsageTab } from './UsageTab.js'
+import { AddonsSection } from './AddonsSection.js'
+import { AddonPageTab } from './AddonPageTab.js'
 import type { Transport } from '@light-code/core/browser'
 
 export interface SettingsPanelProps extends ProvidersTabProps {
@@ -180,6 +185,7 @@ type TabId =
   | 'variables'
   | 'reviews'
   | 'usage'
+  | 'addons'
 
 /**
  * Icons rather than words, with the **active tab keeping its label**.
@@ -210,6 +216,8 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'project', label: 'Project', Icon: ProjectIcon },
   { id: 'approvals', label: 'Approvals', Icon: ShieldIcon },
   { id: 'mcp', label: 'MCP', Icon: ServerIcon },
+  // Installed add-ons and switching them on; each enabled one may bring a tab of its own after these.
+  { id: 'addons', label: 'Add-ons', Icon: PuzzleIcon },
   { id: 'search', label: 'Search', Icon: SearchIcon },
   { id: 'agents', label: 'Agents', Icon: ExpertIcon },
   { id: 'schedules', label: 'Schedules', Icon: ClockIcon },
@@ -238,7 +246,31 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
  * actually used.)
  */
 export function SettingsPanel(props: SettingsPanelProps): ReactElement {
-  const [active, setActive] = useState<TabId>('providers')
+  /** A built-in tab, or `addon:<package>` for an installed add-on's own tab. */
+  const [active, setActive] = useState<string>('providers')
+  /*
+   * Installed add-ons that bring a tab of their own (`addons/page.ts`). Light Code has none of these
+   * itself - asked for in exactly those words - so the list comes from what is installed, looked for
+   * again each time Settings opens: uninstall one and its tab is gone.
+   */
+  const [addonTabs, setAddonTabs] = useState<{ package: string; title: string; icon?: string }[]>([])
+  const transport = props.transport
+  useEffect(() => {
+    if (transport === undefined) return
+    const unsubscribe = transport.onMessage((raw) => {
+      const message = raw as HostToUiMessage
+      if (message.type !== 'addons') return
+      setAddonTabs(
+        message.addons
+          // Only while enabled: switched off - or updated and not yet enabled again - its tab goes too.
+          // What was entered on it is kept, and comes back with it.
+          .filter((addon) => addon.pageTitle !== undefined && addon.state === 'enabled')
+          .map((addon) => ({ package: addon.package, title: addon.pageTitle ?? addon.displayName, ...(addon.icon !== undefined ? { icon: addon.icon } : {}) })),
+      )
+    })
+    transport.post({ type: 'requestAddons' } satisfies UiToHostMessage)
+    return unsubscribe
+  }, [transport])
 
   /*
    * Keyed on a nonce, not on the tab name: the walkthrough may ask for the tab already
@@ -256,9 +288,21 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
     // tools follow, applied to the navigation.
     outlook: props.offersOffice !== false,
     usage: props.transport !== undefined,
+    addons: props.transport !== undefined,
   }
-  const visible = TABS.filter((tab) => present[tab.id] ?? true)
+  const builtIn = TABS.filter((tab) => present[tab.id] ?? true)
+  const visible: { id: string; label: string; Icon: (props: { size?: number }) => ReactElement }[] = [
+    ...builtIn,
+    ...addonTabs.map((tab) => ({
+      id: `addon:${tab.package}`,
+      label: tab.title,
+      // The add-on's own picture, as an <img>: an SVG there never runs script.
+      Icon: ({ size }: { size?: number }) =>
+        tab.icon !== undefined ? <img src={tab.icon} alt="" width={size ?? 15} height={size ?? 15} style={{ display: 'block' }} /> : <ServerIcon size={size ?? 15} />,
+    })),
+  ]
   const shown = visible.some((tab) => tab.id === active) ? active : 'providers'
+  const shownAddon = shown.startsWith('addon:') ? shown.slice('addon:'.length) : undefined
 
   const requested = props.requestedTab
   useEffect(() => {
@@ -271,7 +315,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
      * clicking a link that appears to do nothing at all, which is worse than an error.
      */
     const wanted = RENAMED_TABS[requested.tab] ?? requested.tab
-    if (TABS.some((tab) => tab.id === wanted)) setActive(wanted as TabId)
+    if (TABS.some((tab) => tab.id === wanted) || wanted.startsWith('addon:')) setActive(wanted)
   }, [requested])
 
   return (
@@ -332,7 +376,11 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         className="lc-scroll lc-panel"
         style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}
       >
-        {shown === 'reviews' && props.reviews !== undefined ? (
+        {shownAddon !== undefined && transport !== undefined ? (
+          <AddonPageTab transport={transport} package={shownAddon} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
+        ) : shown === 'addons' && transport !== undefined ? (
+          <AddonsSection transport={transport} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
+        ) : shown === 'reviews' && props.reviews !== undefined ? (
           <ReviewsTab {...props.reviews} />
         ) : shown === 'variables' && props.variables !== undefined ? (
           <VariablesTab {...props.variables} />
@@ -474,7 +522,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           />
         ) : (
           <McpTab
-            servers={props.mcpServers}
+            servers={props.mcpServers.filter((server) => (props.mcpConfigs[server.name] as { addon?: unknown } | undefined)?.addon === undefined)}
             json={props.mcpJson}
             warnings={props.mcpWarnings}
             saveError={props.mcpSaveError}

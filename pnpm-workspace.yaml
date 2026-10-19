@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+  - "addons/*"
 allowBuilds:
   '@vscode/vsce-sign': true
   esbuild: true

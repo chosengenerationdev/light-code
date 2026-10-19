@@ -1,5 +1,6 @@
 import { clipQuote, reactionLabel, type MessageQuote, type Reaction } from '@light-code/core/browser'
-import type { ReactElement, RefObject } from 'react'
+import { useState, type ReactElement, type RefObject } from 'react'
+import { copyRich } from './richCopy.js'
 import { colors, fontFamily } from './theme.js'
 
 /**
@@ -67,6 +68,20 @@ export function MessageActions(props: {
   const pending = props.feedback.pendingKeys.has(props.messageKey)
   const quote = (): MessageQuote => quoteFrom(props.containerRef.current, props.content, props.source)
   const what = props.source === 'reasoning' ? 'this thinking' : 'this reply'
+  const [copied, setCopied] = useState<'yes' | 'failed' | undefined>(undefined)
+  /*
+   * The whole reply, formatted: tables, headings, lists and code paste into Word, OneNote, a wiki or an
+   * email as they look here (richCopy.ts). The Markdown source rides along as the plain-text version.
+   */
+  const copy = (): void => {
+    const rendered = props.containerRef.current?.querySelector('[data-copy-root]') ?? props.containerRef.current
+    const done = (result: 'yes' | 'failed'): void => {
+      setCopied(result)
+      setTimeout(() => setCopied(undefined), 1500)
+    }
+    if (rendered === null || rendered === undefined) return
+    copyRich(rendered, props.content).then(() => done('yes'), () => done('failed'))
+  }
 
   return (
     <div
@@ -84,6 +99,20 @@ export function MessageActions(props: {
         onClick={() => props.feedback.onReply(quote())}
       >
         ↩ Reply
+      </button>
+      <button
+        type="button"
+        className="lc-btn"
+        title={
+          copied === 'failed'
+            ? 'Copying was refused - select the text and press Ctrl+C instead.'
+            : `Copy ${what} with its formatting - tables, headings and lists paste into Word, OneNote, a wiki or an email as they look here`
+        }
+        aria-label={`Copy ${what}`}
+        style={actionStyle(false)}
+        onClick={copy}
+      >
+        {copied === 'yes' ? '✓ Copied' : copied === 'failed' ? 'Copy failed' : '⧉ Copy'}
       </button>
       {REACTIONS.map(({ reaction, emoji }) => {
         const active = current === reaction

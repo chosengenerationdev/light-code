@@ -80,30 +80,31 @@ export function AutosysGatewaySection(props: {
       <legend style={{ padding: '0 4px', fontSize: 12 }}>API gateway (Apigee)</legend>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, cursor: 'pointer' }}>
         <input type="checkbox" checked={draft.enabled} onChange={(event) => set({ enabled: event.target.checked })} />
-        <span>Sign in through the gateway instead of with a username and password</span>
+        <span>Sign in through the API gateway</span>
       </label>
       <span style={hintStyle}>
-        A token is requested from the token URL with the client id and secret, then sent with every call to
-        the site address above. It is kept in memory only and renewed before it expires.
+        A token is requested from the token URL with the consumer key and secret alone, then sent with every
+        call to the site address above. It is kept in memory only and renewed before it expires. Your AutoSys
+        username and password are never sent to the token URL - tick the box below if AutoSys also needs them.
       </span>
 
       {field('tokenUrl', 'Token URL', 'https://gateway.example.com/oauth/token', 'Where the token is issued — usually a different address from the AutoSys API.')}
-      {field('clientId', 'Client id', 'The client (application) name the gateway issued')}
+      {field('clientId', 'Consumer key (client id)', 'The key the gateway issued for this application')}
 
       <label htmlFor="lc-autosys-gw-secret" style={labelStyle()}>
-        Client secret
+        Consumer secret (client secret)
       </label>
       <SecretInput
         id="lc-autosys-gw-secret"
         value={props.secret}
-        placeholder={props.hasClientSecret ? 'Stored — leave blank to keep it' : 'Paste the client secret'}
+        placeholder={props.hasClientSecret ? 'Stored — leave blank to keep it' : 'Paste the consumer secret'}
         onChange={props.onSecret}
       />
       <span style={hintStyle}>Kept in secure storage, never in the settings file.</span>
 
       {field('scope', 'Scope (optional)', 'Only if the gateway asks for one')}
 
-      <span style={labelStyle()}>How the client id and secret are sent for the token</span>
+      <span style={labelStyle()}>How the consumer key and secret are sent for the token</span>
       <div style={{ display: 'flex', gap: 14, margin: '4px 0 4px', fontSize: 12 }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
           <input
@@ -128,11 +129,12 @@ export function AutosysGatewaySection(props: {
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 4px', cursor: 'pointer' }}>
         <input type="checkbox" checked={draft.sendBasic} onChange={(event) => set({ sendBasic: event.target.checked })} />
-        <span>Also send the AutoSys username and password (HTTP Basic)</span>
+        <span>Also send the AutoSys username and password with each job call (HTTP Basic)</span>
       </label>
       <span style={hintStyle}>
-        For a gateway that checks its own token and passes AutoSys&apos;s sign-in through. Uses the username and
-        password entered above. The two go in different headers — one header cannot hold both.
+        For an AutoSys that wants its own sign-in as well as the gateway&apos;s token, for job status, details and
+        actions. Uses the username and password entered above, on AutoSys calls only - never on the token
+        request. The token and the sign-in go in different headers, because one header cannot hold both.
       </span>
       {draft.sendBasic && (
         <>
@@ -218,7 +220,7 @@ export function AutosysGatewaySection(props: {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {props.hasClientSecret && (
             <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('clientSecret')}>
-              Remove client secret
+              Remove consumer secret
             </button>
           )}
           {props.hasPassphrase && (

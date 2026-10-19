@@ -241,6 +241,8 @@ describe('what the newer messages default to on a shared server', () => {
    */
   it('does not let a normal user create standing instructions for everyone', () => {
     expect(isAdminOnly('openStandingSkill')).toBe(true)
+    // The panel editor writes skills and tools every user shares.
+    expect(isAdminOnly('saveEditorFile')).toBe(true)
   })
 
   /** Spending is not a personal setting when the plan belongs to the server. */

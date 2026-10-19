@@ -47,7 +47,15 @@ interface DapMessage {
   body?: Record<string, unknown>
 }
 
+let tracking = false
+
+/**
+ * Started at activation (so Fire Code can read a session's output before this window's panel was ever
+ * opened) and again when the bridge is built; only the first call registers, or every line would be kept twice.
+ */
 export function startTrackingDebugSessions(context: vscode.ExtensionContext): void {
+  if (tracking) return
+  tracking = true
   context.subscriptions.push(
     vscode.debug.registerDebugAdapterTrackerFactory('*', {
       createDebugAdapterTracker(session) {

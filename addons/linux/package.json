@@ -1,0 +1,197 @@
+{
+  "name": "@chosengeneration/light-code-addon-linux",
+  "version": "0.2.1",
+  "description": "Light Code and Fire Code add-on: connect to Linux machines over SSH, run read-only commands and download files for investigation.",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist/server.cjs",
+    "linux.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "light-code",
+    "fire-code",
+    "light-code-addon",
+    "ssh",
+    "linux",
+    "mcp"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "smoke": "node esbuild.mjs && node smoke.mjs"
+  },
+  "lightCode": {
+    "addon": {
+      "main": "dist/server.cjs",
+      "displayName": "Linux",
+      "description": "Connect to Linux machines over SSH: read-only commands and file downloads for investigation.",
+      "icon": "linux.svg",
+      "settings": {
+        "title": "Linux",
+        "description": "Linux machines the assistant can connect to over SSH, to run read-only commands and download files for investigation. The assistant cannot change anything on a machine: every command it sends is checked against a read-only list first, and shown to you for approval like any other tool. The only thing written to a machine is by your own press of Set up SSH key.",
+        "fields": [
+          {
+            "key": "extraCommands",
+            "label": "Also allow these programs",
+            "type": "text",
+            "placeholder": "One per line, e.g. my-status-tool",
+            "help": "Programs you know only read, beyond the built-in list. Any arguments are accepted for these, so add only ones that cannot change anything."
+          },
+          {
+            "key": "timeoutSeconds",
+            "label": "Command time limit (seconds)",
+            "type": "number",
+            "default": 60
+          },
+          {
+            "key": "maxDownloadMB",
+            "label": "Largest download (MB)",
+            "type": "number",
+            "default": 100
+          }
+        ],
+        "records": {
+          "noun": "machine",
+          "title": "Machines",
+          "description": "Give each machine a short label: it is what you and the assistant call it (\"check the disk on prod-web-1\").",
+          "keyField": "label",
+          "summary": "{username}@{host}:{port}",
+          "fields": [
+            {
+              "key": "label",
+              "label": "Label",
+              "type": "string",
+              "required": true,
+              "placeholder": "prod-web-1",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$",
+              "patternMessage": "A label is letters, digits, dot, dash and underscore - up to 40, starting with a letter or digit.",
+              "help": "What you and the assistant call this machine."
+            },
+            {
+              "key": "host",
+              "label": "Host name or address",
+              "type": "string",
+              "required": true,
+              "placeholder": "web1.corp.example"
+            },
+            {
+              "key": "port",
+              "label": "Port",
+              "type": "number",
+              "default": 22
+            },
+            {
+              "key": "username",
+              "label": "User name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "key": "auth",
+              "label": "Sign in with",
+              "type": "choice",
+              "default": "pageant",
+              "options": [
+                {
+                  "value": "pageant",
+                  "label": "Pageant (PuTTY's key agent, running)"
+                },
+                {
+                  "value": "agent",
+                  "label": "Windows OpenSSH agent"
+                },
+                {
+                  "value": "key",
+                  "label": "Private key file"
+                },
+                {
+                  "value": "password",
+                  "label": "Password"
+                }
+              ]
+            },
+            {
+              "key": "password",
+              "label": "Password",
+              "type": "secret",
+              "required": true,
+              "showWhen": {
+                "field": "auth",
+                "equals": "password"
+              },
+              "help": "Kept in Light Code's secret storage. A wrong password is not retried, so the account is not locked."
+            },
+            {
+              "key": "keyFile",
+              "label": "Private key file",
+              "type": "path",
+              "required": true,
+              "showWhen": {
+                "field": "auth",
+                "equals": "key"
+              },
+              "help": "OpenSSH format, or a PuTTY .ppk from an older PuTTYgen (version 2, RSA). For a newer .ppk, load it into Pageant and choose Pageant, or save it from PuTTYgen with Conversions > Export OpenSSH key."
+            },
+            {
+              "key": "passphrase",
+              "label": "Key passphrase",
+              "type": "secret",
+              "showWhen": {
+                "field": "auth",
+                "equals": "key"
+              }
+            },
+            {
+              "key": "jumpVia",
+              "label": "Connect through (another machine's label)",
+              "type": "string",
+              "placeholder": "bastion",
+              "help": "For a machine reached only through a jump host: add the jump host as a machine too, and put its label here."
+            },
+            {
+              "key": "notes",
+              "label": "Notes for the assistant",
+              "type": "text",
+              "placeholder": "What runs here, where its logs are",
+              "help": "Told to the assistant along with the machine list."
+            }
+          ],
+          "actions": [
+            {
+              "label": "Test connection",
+              "tool": "test_connection"
+            },
+            {
+              "label": "Set up SSH key",
+              "tool": "setup_key",
+              "showWhen": {
+                "field": "auth",
+                "equals": "password"
+              },
+              "confirm": "This signs in to {label} with its stored password and adds this PC's SSH key to ~/.ssh/authorized_keys there (making the key first, in your .ssh folder, if there is none). Then it checks the key works and switches {label} to sign in with it. Nothing else on the machine is changed."
+            },
+            {
+              "label": "Forget host key",
+              "tool": "forget_host_key"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@types/node": "^26.1.2",
+    "@types/ssh2": "^1.15.5",
+    "esbuild": "^0.27.2",
+    "ssh2": "^1.17.0",
+    "zod": "^4.4.3"
+  }
+}

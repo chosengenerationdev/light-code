@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { replaceFile } from '../platform/node/replaceFile.js'
 import type { JupyterClient, RemoteEntry } from './client.js'
+import { HUBIGNORE, HubIgnore } from './hubIgnore.js'
 import { localFolderNames, type JupyterHubSpec } from './spec.js'
 
 /**
@@ -21,11 +22,13 @@ import { localFolderNames, type JupyterHubSpec } from './spec.js'
  * - saving refuses when the hub's timestamp moved since (somebody edited it there), so their work is
  *   never replaced by an older copy's edit;
  * - a file deleted on the hub is removed here only when unchanged here.
+ *
+ * **What `.hubignore` lists is never synced** (`hubIgnore.ts`), either way: not fetched, not saved,
+ * not reported as waiting. A file synced before it was listed simply stops being tracked - it is
+ * left as it is on both sides rather than deleted from either.
  */
 
 const MANIFEST = '.lightcode-hub.json'
-/** Never copied: they are machine state, and Jupyter's checkpoints would double every notebook. */
-const SKIPPED_FOLDERS = new Set(['.ipynb_checkpoints', '__pycache__', '.git', 'node_modules', '.venv', 'venv', '.mypy_cache', '.pytest_cache'])
 const CONCURRENCY = 8
 
 interface ManifestEntry {
@@ -44,6 +47,8 @@ export interface PullResult {
   conflicts: string[]
   /** Too large to copy. */
   skipped: string[]
+  /** Synced before, listed in `.hubignore` now: no longer tracked, left as they are on both sides. */
+  ignored: string[]
   failed: { path: string; problem: string }[]
 }
 
@@ -116,14 +121,14 @@ export class HubMirror {
 
   private async pullNow(signal?: AbortSignal): Promise<PullResult> {
     const manifest = await this.loadManifest()
-    const result: PullResult = { fetched: [], unchanged: 0, removed: [], conflicts: [], skipped: [], failed: [] }
+    const result: PullResult = { fetched: [], unchanged: 0, removed: [], conflicts: [], skipped: [], ignored: [], failed: [] }
     const maxBytes = (this.spec.maxFileMB ?? 20) * 1024 * 1024
     const seen = new Set<string>()
 
     for (const folder of this.folders) {
       let files: RemoteEntry[]
       try {
-        files = await this.walk(folder.remote, signal)
+        files = await this.walk(folder, signal)
       } catch (error) {
         result.failed.push({ path: folder.remote || '(top folder)', problem: error instanceof Error ? error.message : String(error) })
         // A folder that could not be listed must not read as "everything in it was deleted".
@@ -164,9 +169,15 @@ export class HubMirror {
       })
     }
 
-    // Gone from the hub: removed here too, unless changed here since.
+    // Gone from the hub: removed here too, unless changed here since. Not seen because .hubignore lists
+    // it now is a different thing: tracking stops, and nothing is deleted on either side.
     for (const [key, known] of Object.entries(manifest)) {
       if (seen.has(key)) continue
+      if (await this.ignoredHere(key)) {
+        delete manifest[key]
+        result.ignored.push(key)
+        continue
+      }
       const local = path.join(this.root, ...key.split('/'))
       const localHash = await hashFile(local)
       if (localHash !== undefined && localHash !== known.hash) {
@@ -182,21 +193,33 @@ export class HubMirror {
     return result
   }
 
-  /** Every file under a remote folder, folders listed in parallel. */
-  private async walk(remote: string, signal?: AbortSignal): Promise<RemoteEntry[]> {
+  /**
+   * Every file under a remote folder that is not ignored, folders listed in parallel. An ignored
+   * folder is not listed at all - which is the point for a `node_modules` of forty thousand files.
+   */
+  private async walk(folder: { remote: string; local: string }, signal?: AbortSignal): Promise<RemoteEntry[]> {
     const files: RemoteEntry[] = []
-    let level = [remote]
+    let level: { remote: string; inside: string; ignore: HubIgnore }[] = [{ remote: folder.remote, inside: '', ignore: new HubIgnore() }]
     while (level.length > 0) {
-      const next: string[] = []
-      await inBatches(level, CONCURRENCY, async (folder) => {
-        const entries = await this.client.list(folder, signal)
+      const next: typeof level = []
+      await inBatches(level, CONCURRENCY, async (dir) => {
+        const entries = await this.client.list(dir.remote, signal)
         if (entries === undefined) {
-          if (folder === remote) throw new Error(`The hub has no folder "${remote}".`)
+          if (dir.remote === folder.remote) throw new Error(`The hub has no folder "${folder.remote}".`)
           return
         }
+        let ignore = dir.ignore
+        const rules = entries.find((entry) => entry.name === HUBIGNORE && entry.type !== 'directory')
+        if (rules !== undefined) {
+          // This machine's copy first: an edit made here applies before it has reached the hub.
+          const local = path.join(this.root, folder.local, ...dir.inside.split('/').filter((p) => p.length > 0), HUBIGNORE)
+          const text = await fs.readFile(local, 'utf8').catch(async () => (await this.client.read(rules.path, signal)).bytes.toString('utf8'))
+          ignore = ignore.with(text, dir.inside)
+        }
         for (const entry of entries) {
-          if (entry.name.startsWith('.') || SKIPPED_FOLDERS.has(entry.name)) continue
-          if (entry.type === 'directory') next.push(entry.path)
+          const inside = dir.inside.length > 0 ? `${dir.inside}/${entry.name}` : entry.name
+          if (ignore.ignores(inside, entry.type === 'directory')) continue
+          if (entry.type === 'directory') next.push({ remote: entry.path, inside, ignore })
           else files.push(entry)
         }
       })
@@ -206,18 +229,38 @@ export class HubMirror {
   }
 
   /**
+   * Whether a local key (`<folder>/<path>`) is left out by `.hubignore` - the rules in this machine's
+   * copy, from the synced folder down to the file, and any folder on the way that is itself left out.
+   */
+  async ignoredHere(key: string): Promise<boolean> {
+    const [folderName, ...parts] = key.split('/')
+    const folder = this.folders.find((f) => f.local.toLowerCase() === (folderName ?? '').toLowerCase())
+    if (folder === undefined || parts.length === 0) return false
+    let ignore = new HubIgnore()
+    for (let depth = 0; depth < parts.length; depth++) {
+      const inside = parts.slice(0, depth).join('/')
+      const text = await fs.readFile(path.join(this.root, folder.local, ...parts.slice(0, depth), HUBIGNORE), 'utf8').catch(() => undefined)
+      if (text !== undefined) ignore = ignore.with(text, inside)
+      const here = parts.slice(0, depth + 1).join('/')
+      if (ignore.ignores(here, depth < parts.length - 1)) return true
+    }
+    return false
+  }
+
+  /**
    * Saves one local file to the hub. Refuses - and changes nothing - when the hub's copy changed
    * since this copy last agreed with it.
    */
-  push(localAbsolute: string, signal?: AbortSignal): Promise<{ saved: boolean; message: string }> {
+  push(localAbsolute: string, signal?: AbortSignal): Promise<{ saved: boolean; message: string; ignored?: true }> {
     return this.serial(() => this.pushNow(localAbsolute, signal))
   }
 
-  private async pushNow(localAbsolute: string, signal?: AbortSignal): Promise<{ saved: boolean; message: string }> {
+  private async pushNow(localAbsolute: string, signal?: AbortSignal): Promise<{ saved: boolean; message: string; ignored?: true }> {
     const remote = this.remoteOf(localAbsolute)
     if (remote === undefined) return { saved: false, message: 'not inside one of the JupyterHub folders, so it stays local' }
     const manifest = await this.loadManifest()
     const key = path.relative(this.root, localAbsolute).split(path.sep).join('/')
+    if (await this.ignoredHere(key)) return { saved: false, ignored: true, message: `listed in ${HUBIGNORE} (or skipped by default), so it stays local` }
     let bytes: Buffer
     try {
       bytes = await fs.readFile(localAbsolute)
@@ -277,7 +320,7 @@ export class HubMirror {
     const changes: PendingChange[] = []
     const seen = new Set<string>()
     for (const folder of this.folders) {
-      for (const local of await listLocal(path.join(this.root, folder.local))) {
+      for (const local of await listLocal(path.join(this.root, folder.local), '', new HubIgnore())) {
         const key = path.relative(this.root, local).split(path.sep).join('/')
         seen.add(key)
         const known = manifest[key]
@@ -287,7 +330,7 @@ export class HubMirror {
       }
     }
     for (const [key, known] of Object.entries(manifest)) {
-      if (!seen.has(key)) changes.push({ local: key, remote: known.remote, kind: 'deleted' })
+      if (!seen.has(key) && !(await this.ignoredHere(key))) changes.push({ local: key, remote: known.remote, kind: 'deleted' })
     }
     return changes
   }
@@ -312,7 +355,8 @@ async function writeWhole(target: string, bytes: Buffer): Promise<void> {
   await replaceFile(temporary, target)
 }
 
-async function listLocal(folder: string): Promise<string[]> {
+/** The local files under one synced folder that are not ignored; `inside` is `folder`'s path within it. */
+async function listLocal(folder: string, inside: string, ignore: HubIgnore): Promise<string[]> {
   const found: string[] = []
   let entries: import('node:fs').Dirent[]
   try {
@@ -320,10 +364,15 @@ async function listLocal(folder: string): Promise<string[]> {
   } catch {
     return found
   }
+  if (entries.some((entry) => entry.name === HUBIGNORE && entry.isFile())) {
+    const text = await fs.readFile(path.join(folder, HUBIGNORE), 'utf8').catch(() => undefined)
+    if (text !== undefined) ignore = ignore.with(text, inside)
+  }
   for (const entry of entries) {
-    if (entry.name.startsWith('.') || SKIPPED_FOLDERS.has(entry.name)) continue
+    const relative = inside.length > 0 ? `${inside}/${entry.name}` : entry.name
+    if (ignore.ignores(relative, entry.isDirectory())) continue
     const full = path.join(folder, entry.name)
-    if (entry.isDirectory()) found.push(...(await listLocal(full)))
+    if (entry.isDirectory()) found.push(...(await listLocal(full, relative, ignore)))
     else if (entry.isFile() && !entry.name.endsWith('.part')) found.push(full)
   }
   return found

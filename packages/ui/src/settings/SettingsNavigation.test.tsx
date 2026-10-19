@@ -3,6 +3,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import type { HostToUiMessage, Transport } from '@light-code/core/browser'
+
 import { SettingsPanel } from './SettingsPanel.js'
 
 /**
@@ -150,13 +152,14 @@ const noops = new Proxy(
   },
 )
 
-function render(requestedTab?: { tab: string; nonce: number }): void {
+function render(requestedTab?: { tab: string; nonce: number }, transport?: Transport): void {
   act(() =>
     root.render(
       <SettingsPanel
         {...(noops as React.ComponentProps<typeof SettingsPanel>)}
         {...(base as unknown as React.ComponentProps<typeof SettingsPanel>)}
         {...(requestedTab !== undefined ? { requestedTab } : {})}
+        {...(transport !== undefined ? { transport } : {})}
       />,
     ),
   )
@@ -241,5 +244,74 @@ describe('opening settings on a named tab', () => {
     render({ tab, nonce: 1 })
     expect(activeTab()).toBe(tab)
     expect((container.textContent ?? '').length).toBeGreaterThan(20)
+  })
+})
+
+/**
+ * An add-on's own tab. Asked for in exactly these terms: "I don't want the new tab to be appearing in
+ * Light Code or Fire Code, it should appear only when addon is installed".
+ */
+describe('a tab an add-on brings', () => {
+  const ICON = 'data:image/svg+xml;base64,PHN2Zy8+'
+  function fakeTransport(): Transport & { sent: unknown[]; deliver: (message: HostToUiMessage) => void } {
+    let listeners: ((message: unknown) => void)[] = []
+    const sent: unknown[] = []
+    return {
+      sent,
+      post: (message: unknown) => sent.push(message),
+      onMessage: (listener: (message: unknown) => void) => {
+        listeners.push(listener)
+        return () => {
+          listeners = listeners.filter((l) => l !== listener)
+        }
+      },
+      deliver: (message: HostToUiMessage) => act(() => [...listeners].forEach((listener) => listener(message))),
+    }
+  }
+  const installed = (addons: { pageTitle?: string; state?: 'available' | 'enabled' | 'updated' }[]): HostToUiMessage => ({
+    type: 'addons',
+    addons: addons.map((extra) => ({
+      package: 'light-code-addon-linux',
+      version: '0.1.0',
+      displayName: 'Linux',
+      dir: 'd',
+      main: 'm',
+      server: 'addon-linux',
+      state: extra.state ?? 'enabled',
+      ...(extra.pageTitle !== undefined ? { pageTitle: extra.pageTitle, icon: ICON } : {}),
+    })),
+    problems: [],
+    missing: [],
+    folders: [],
+    defaultFolders: [],
+  })
+
+  it('appears only while the add-on is installed and enabled, with its own icon', () => {
+    const transport = fakeTransport()
+    render(undefined, transport)
+    expect(transport.sent).toContainEqual({ type: 'requestAddons' })
+    expect(container.querySelector('button[title="Linux"]')).toBeNull()
+
+    transport.deliver(installed([{ pageTitle: 'Linux' }]))
+    const tab = container.querySelector<HTMLButtonElement>('button[title="Linux"]')
+    expect(tab?.querySelector('img')?.getAttribute('src')).toBe(ICON)
+    act(() => tab?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(activeTab()).toBe('linux')
+    expect(transport.sent).toContainEqual({ type: 'requestAddonPage', package: 'light-code-addon-linux' })
+
+    // Uninstalled: gone, and the panel falls back rather than showing an empty page.
+    transport.deliver(installed([]))
+    expect(container.querySelector('button[title="Linux"]')).toBeNull()
+    expect(activeTab()).toBe('providers')
+    // Installed but declaring no page: no tab either.
+    transport.deliver(installed([{}]))
+    expect(container.querySelector('button[title="Linux"]')).toBeNull()
+    // Installed but switched off, or updated and not yet enabled again: no tab.
+    transport.deliver(installed([{ pageTitle: 'Linux', state: 'available' }]))
+    expect(container.querySelector('button[title="Linux"]')).toBeNull()
+    transport.deliver(installed([{ pageTitle: 'Linux', state: 'updated' }]))
+    expect(container.querySelector('button[title="Linux"]')).toBeNull()
+    // The Add-ons tab, where they are switched on, is always there.
+    expect(container.querySelector('button[title="Add-ons"]')).not.toBeNull()
   })
 })

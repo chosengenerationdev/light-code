@@ -8,6 +8,7 @@ import {
   prepareUploads,
   type PreparedFile,
 } from '../atlassian/uploads.js'
+import { markdownToStorage } from '../markdown/confluence.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
 import type { ConfluenceClient } from './client.js'
 
@@ -245,14 +246,34 @@ const writeSchema = z.object({
     .min(1)
     .optional()
     .describe(
-      'The complete page body — required for a new page. Omit when updating to change only ' +
+      'The complete page body in storage format — or give `markdown` instead; one of the two is required ' +
+        'for a new page. Omit both when updating to change only ' +
         `attachments, e.g. to replace an image by attaching one with the same name. ${STORAGE_GUIDE}`,
+    ),
+  markdown: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'The page body as Markdown - the same Markdown you write in the chat - instead of `body`. Prefer it: ' +
+        'headings, lists, links, **bold**, `code`, ``` fenced code ``` (shown in the Confluence code macro), ' +
+        '> quotes and | tables | with a header row all come out as they look in the chat. Use `body` instead ' +
+        'only for what Markdown cannot say - info/note panels, expand blocks, images on the page, a table of ' +
+        'contents. Give one of the two, not both.',
     ),
   attachments: attachmentsSchema('page', 'Refer to them in the body by name.'),
   diagrams: diagramsSchema,
 })
 
 type WriteParams = z.infer<typeof writeSchema>
+
+/** The page as storage format: `markdown` converted, or `body` as written. Both at once is refused. */
+function withStorageBody(input: WriteParams): WriteParams {
+  if (input.markdown === undefined) return input
+  if (input.body !== undefined) throw new Error('Give the page as markdown or as body, not both.')
+  const { markdown, ...rest } = input
+  return { ...rest, body: markdownToStorage(markdown) }
+}
 
 const REPLACES_ON_PAGE = 'REPLACES the attachment of this name on the page'
 
@@ -269,8 +290,9 @@ export function createConfluenceWritePageTool(options: ConfluenceToolOptions): T
       'and drawn diagrams. A body replaces the whole page, so read an existing page first and edit ' +
       'from its current body. To replace an image, give the pageId and attach a file or diagram ' +
       'with exactly the same name as the existing attachment — the body can then be left out. ' +
+      'Write the page as `markdown`, just as you would in the chat, so it looks the same on the page. ' +
       'Make pages easy to scan: a short summary first, headings, tables for settings, info/note ' +
-      'panels for warnings, code blocks for anything to copy, and a diagram where a picture ' +
+      'panels for warnings (those need `body`), code blocks for anything to copy, and a diagram where a picture ' +
       'explains the structure faster than prose. Always shown to the user before anything is ' +
       'published.' +
       /*
@@ -283,7 +305,9 @@ export function createConfluenceWritePageTool(options: ConfluenceToolOptions): T
         : ' No default space is configured, so a new page needs a space key; ask the user if they have not given one.'),
     parametersSchema: writeSchema,
 
-    async preview(params, context): Promise<ToolPreview> {
+    async preview(input, context): Promise<ToolPreview> {
+      // The converted page, so what is approved is what is published.
+      const params = withStorageBody(input)
       const prepared = await prepareUploads(params, context)
       if (params.pageId !== undefined) {
         // The real current page, so the user approves a change to what is actually there.
@@ -325,8 +349,9 @@ export function createConfluenceWritePageTool(options: ConfluenceToolOptions): T
       }
     },
 
-    async execute(params, context): Promise<ToolResult> {
+    async execute(input, context): Promise<ToolResult> {
       try {
+        const params = withStorageBody(input)
         const prepared = await prepareUploads(params, context)
         if (!prepared.ok) return { content: prepared.message, isError: true }
         const client = await options.client()

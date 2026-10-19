@@ -1114,6 +1114,30 @@ export const configSchema = z
      * **User-scope only** (invariant 5): it names programs to run. A repository able to set a command
      * here would run a program of its choosing the first time a file in that language was edited.
      */
+    /**
+     * Add-ons (`addons/discover.ts`): installed Node packages labelled `lightCode.addon` that run an
+     * MCP server. `folders` are looked in as well as npm's global folder - a folder of packages, or
+     * one add-on being written. Enabling one writes an ordinary `mcpServers` entry.
+     *
+     * **User-scope only** (invariant 5): it decides where programs to run are found. A repository
+     * able to add a folder could offer its own add-on under a familiar name.
+     */
+    addons: z
+      .object({
+        folders: z.array(z.string().min(1)).max(50),
+        /**
+         * What the user entered on each add-on's own tab (`addons/page.ts`), by package name. Never
+         * a secret: those are in secret storage under `addon:<package>:<record>:<field>`.
+         */
+        settings: z.record(
+          z.string(),
+          z.object({
+            values: z.record(z.string(), z.unknown()).optional(),
+            records: z.array(z.object({ id: z.string().min(1).max(40), values: z.record(z.string(), z.unknown()) })).max(500).optional(),
+          }),
+        ),
+      })
+      .partial(),
     lsp: z
       .object({
         enabled: z.boolean(),

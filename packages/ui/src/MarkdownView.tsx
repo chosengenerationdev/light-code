@@ -1,6 +1,7 @@
 import { useState, type ReactElement, type ReactNode } from 'react'
 import { CheckIcon, CopyIcon } from './icons.js'
 import { parseMarkdown, type Block, type Inline } from './markdown.js'
+import { installRichCopy } from './richCopy.js'
 import { colors, fontFamily } from './theme.js'
 
 import { tokenize, TOKEN_COLORS } from './highlight.js'
@@ -53,6 +54,13 @@ function renderInline(nodes: readonly Inline[], keyPrefix = ''): ReactNode[] {
       <a
         key={key}
         href={node.href}
+        /*
+         * A new window, always. Without it a click navigated the chat's own frame to the site: in Fire Code
+         * most sites refuse to be framed ("content is blocked"), and in the browser host the chat page was
+         * replaced. A new-window request is what each host turns into the right thing - VS Code and Fire
+         * Code open the default browser, a browser opens a tab.
+         */
+        target="_blank"
         // The scheme was already checked when parsing; these are for the target document.
         rel="noopener noreferrer"
         title={node.href}
@@ -92,6 +100,8 @@ function CodeBlock(props: { text: string; language?: string | undefined }): Reac
       }}
     >
       <div
+        // The language label and Copy button are the chat's chrome, not part of the reply.
+        data-copy="skip"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -173,7 +183,7 @@ function renderBlock(block: Block, key: string): ReactElement {
     // model uses headings far more freely than a document author would.
     const size = [15, 14, 13, 12.5, 12, 12][block.level - 1] ?? 12
     return (
-      <div key={key} style={{ fontSize: size, fontWeight: 600, margin: '10px 0 4px' }}>
+      <div key={key} data-copy={`h${String(block.level)}`} style={{ fontSize: size, fontWeight: 600, margin: '10px 0 4px' }}>
         {renderInline(block.content, `${key}-`)}
       </div>
     )
@@ -182,6 +192,7 @@ function renderBlock(block: Block, key: string): ReactElement {
     return (
       <div
         key={key}
+        data-copy="blockquote"
         style={{
           margin: '6px 0',
           paddingLeft: 10,
@@ -258,7 +269,7 @@ function renderBlock(block: Block, key: string): ReactElement {
     )
   }
   return (
-    <div key={key} style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>
+    <div key={key} data-copy="p" style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>
       {renderInline(block.content, `${key}-`)}
     </div>
   )
@@ -270,5 +281,8 @@ function renderBlock(block: Block, key: string): ReactElement {
  * one import to the other and the error names neither cause.
  */
 export function MarkdownView(props: { text: string }): ReactElement {
-  return <>{parseMarkdown(props.text).map((block, index) => renderBlock(block, String(index)))}</>
+  // Copying a reply (Ctrl+C on a selection, or the reply's Copy button) writes clean document HTML that
+  // pastes into Word, OneNote, a wiki or an email as it looks here - see richCopy.ts.
+  installRichCopy()
+  return <div data-copy-root="">{parseMarkdown(props.text).map((block, index) => renderBlock(block, String(index)))}</div>
 }

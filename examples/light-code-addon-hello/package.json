@@ -1,0 +1,19 @@
+{
+  "name": "light-code-addon-hello",
+  "version": "1.0.0",
+  "description": "An example Light Code / Fire Code add-on: two small tools, to copy from.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "lightCode": {
+    "addon": {
+      "main": "server.js",
+      "displayName": "Hello (example)",
+      "description": "Greets people and counts words. Copy this folder to start your own add-on."
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.0"
+  }
+}

@@ -117,6 +117,8 @@ try {
       showErrorMessage: noop,
     },
     commands: { registerCommand: () => disposable, executeCommand: noop },
+    // Activation tracks debug sessions so Fire Code can read one (platform/debugSession.ts).
+    debug: { registerDebugAdapterTrackerFactory: () => disposable, onDidTerminateDebugSession: () => disposable, activeDebugSession: undefined },
     workspace: {
       workspaceFolders: undefined,
       getConfiguration: () => ({ get: noop }),
@@ -168,12 +170,25 @@ try {
     extensionMode: 1,
   }
 
+  /*
+   * Activation starts the relay that serves Copilot and the debugger to Fire Code, which records its pipe in
+   * %LOCALAPPDATA%\light-code\lm-relay. Pointed at a temporary folder, so a smoke test never leaves a
+   * file in the real one; the relay is then disposed with the rest of activation.
+   */
+  const relayHome = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-smoke-relay-'))
+  const realLocalAppData = process.env.LOCALAPPDATA
+  process.env.LOCALAPPDATA = relayHome
   try {
     await extension.activate(context)
     check('activate() completes', true)
     check('activation registered at least one disposable', context.subscriptions.length > 0, `${context.subscriptions.length}`)
+    for (const subscription of context.subscriptions) subscription?.dispose?.()
   } catch (error) {
     check('activate() completes', false, String(error?.message ?? error))
+  } finally {
+    if (realLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = realLocalAppData
+    fs.rmSync(relayHome, { recursive: true, force: true })
   }
 } finally {
   fs.rmSync(staging, { recursive: true, force: true })

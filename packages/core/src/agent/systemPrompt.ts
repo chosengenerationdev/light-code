@@ -32,6 +32,11 @@ export interface SystemPromptOptions {
    */
   skills?: string
   /**
+   * What the user wrote for this codebase (`agent/codebaseInstructions.ts`), rendered. Placed
+   * directly before the skills, whose standing instructions it outranks.
+   */
+  codebaseInstructions?: string
+  /**
    * Set when Python tools are switched off, so "create a tool" is not silently answered with a
    * script.
    *
@@ -150,6 +155,10 @@ export function buildSystemPrompt(
     '- Before asking, check what is here: the imports and existing calls in this workspace are',
     '  evidence about the version actually installed, and a skill may already describe it.',
   )
+
+  if (options.codebaseInstructions !== undefined && options.codebaseInstructions.length > 0) {
+    lines.push('', options.codebaseInstructions)
+  }
 
   if (options.skills !== undefined && options.skills.length > 0) {
     lines.push('', options.skills)

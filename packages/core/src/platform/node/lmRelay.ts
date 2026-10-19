@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { HostLanguageModels, HostModelInfo, HostModelRequest } from '../../providers/hostModels.js'
 import type { StreamChunk } from '../../providers/types.js'
+import type { DebugSessionSnapshot } from '../../tools/debugSession.js'
 
 /**
  * GitHub Copilot for Fire Code, the Node host and the JetBrains plugin, through a VS Code window.
@@ -31,7 +32,7 @@ interface RelayEntry {
   startedAt: number
 }
 
-type RelayOp = { op: 'list' } | { op: 'chat'; request: HostModelRequest }
+type RelayOp = { op: 'list' } | { op: 'chat'; request: HostModelRequest } | { op: 'debug' }
 type RelayRequest = RelayOp & { token: string }
 
 /** One request line may carry a long conversation with pictures in it. */
@@ -58,14 +59,20 @@ function writeLine(socket: Socket, value: unknown): void {
 }
 
 /**
- * Serves `models` to other hosts of this user. Called by the VS Code extension once per window; the
- * returned `dispose` closes the pipe and removes the window's file.
+ * Serves this VS Code window to other hosts of this user: its language models (Copilot), and its live
+ * debug session (`debug`, for Fire Code to investigate a paused program - asked for alongside the
+ * handoff). Called by the VS Code extension once per window; `dispose` closes the pipe and removes the
+ * window's file. Either half may be absent: an older VS Code with no `vscode.lm` still serves its debugger.
  */
-export function startLmRelay(models: HostLanguageModels, options: { dir?: string; log?: (line: string) => void } = {}): { dispose(): void; pipe: string } {
+export function startLmRelay(
+  models: HostLanguageModels | undefined,
+  options: { dir?: string; log?: (line: string) => void; debug?: () => Promise<DebugSessionSnapshot | undefined> } = {},
+): { dispose(): void; pipe: string } {
   const dir = options.dir ?? defaultRelayDir()
   const token = randomBytes(32).toString('hex')
   const pipe = pipeName(randomBytes(12).toString('hex'))
-  const file = path.join(dir, `${String(process.pid)}.json`)
+  // The pipe's own random id in the name too: two relays in one process (a test, a reloaded window) must not share a file.
+  const file = path.join(dir, `${String(process.pid)}-${pipe.slice(-8)}.json`)
   const log = options.log ?? (() => undefined)
 
   const server: Server = createServer((socket) => {
@@ -106,14 +113,20 @@ export function startLmRelay(models: HostLanguageModels, options: { dir?: string
       return
     }
     try {
-      if (request.op === 'list') {
-        writeLine(socket, { models: await models.listModels(signal) })
-      } else if (request.op === 'chat') {
-        for await (const chunk of models.chat(request.request, signal)) {
-          if (signal.aborted) return
-          writeLine(socket, { chunk })
+      if (request.op === 'debug') {
+        writeLine(socket, { debug: (await options.debug?.()) ?? null })
+      } else if (request.op === 'list' || request.op === 'chat') {
+        if (models === undefined) {
+          writeLine(socket, { error: 'This VS Code window offers no language models (it is too old for the Language Model API).' })
+        } else if (request.op === 'list') {
+          writeLine(socket, { models: await models.listModels(signal) })
+        } else {
+          for await (const chunk of models.chat(request.request, signal)) {
+            if (signal.aborted) return
+            writeLine(socket, { chunk })
+          }
+          writeLine(socket, { done: true })
         }
-        writeLine(socket, { done: true })
       } else {
         writeLine(socket, { error: 'Unknown request.' })
       }
@@ -251,5 +264,62 @@ export function createRelayLanguageModels(options: { dir?: string } = {}): HostL
       }
       if (signal?.aborted !== true) throw new Error('VS Code closed the connection before the answer finished - was the window closed?')
     },
+  }
+}
+
+export const NO_VSCODE_DEBUG =
+  'No VS Code window with the Light Code extension is open, so its debugger cannot be read. Start the program in ' +
+  'the VS Code debugger (Light Code 0.166.0 or later installed there), pause it at a breakpoint, and ask again.'
+
+/** One request to one window, answered by its first line; undefined when the window is gone or silent. */
+function askWindow(entry: RelayEntry, file: string, request: RelayOp, timeoutMs: number): Promise<Record<string, unknown> | undefined> {
+  return new Promise((resolve) => {
+    let settled = false
+    let buffered = ''
+    const finish = (value: Record<string, unknown> | undefined): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      resolve(value)
+    }
+    const socket = connect(entry.pipe)
+    const timer = setTimeout(() => finish(undefined), timeoutMs)
+    socket.setEncoding('utf8')
+    socket.once('connect', () => socket.write(`${JSON.stringify({ ...request, token: entry.token })}\n`))
+    socket.on('data', (chunk: string) => {
+      buffered += chunk
+      const newline = buffered.indexOf('\n')
+      if (newline < 0) return
+      try {
+        finish(JSON.parse(buffered.slice(0, newline)) as Record<string, unknown>)
+      } catch {
+        finish(undefined)
+      }
+    })
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      // That window closed without tidying up (a crash, a killed process).
+      if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') rmSync(file, { force: true })
+      finish(undefined)
+    })
+    socket.once('close', () => finish(undefined))
+  })
+}
+
+/**
+ * The live debug session of a VS Code window, for Fire Code and the Light Code host. Every open window is
+ * asked - the program being debugged need not be in the newest one - and a session paused at a breakpoint
+ * is preferred over one that is merely running. Undefined when windows are open but none is debugging.
+ */
+export function createRelayDebugReader(options: { dir?: string } = {}): () => Promise<DebugSessionSnapshot | undefined> {
+  const dir = options.dir ?? defaultRelayDir()
+  return async () => {
+    const entries = relayEntries(dir)
+    const answers = await Promise.all(entries.map(({ entry, file }) => askWindow(entry, file, { op: 'debug' }, 8_000)))
+    if (!answers.some((answer) => answer !== undefined)) throw new Error(NO_VSCODE_DEBUG)
+    const sessions = answers
+      .map((answer) => answer?.['debug'])
+      .filter((debug): debug is DebugSessionSnapshot => debug !== null && debug !== undefined && typeof debug === 'object')
+    return sessions.find((session) => session.stopped !== undefined) ?? sessions[0]
   }
 }

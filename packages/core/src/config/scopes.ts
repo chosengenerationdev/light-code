@@ -21,6 +21,8 @@ export const USER_SCOPE_ONLY_KEYS = [
   'office',
   // Names language-server programs to run when a file is edited.
   'lsp',
+  // Names folders where add-ons - programs to run - are found.
+  'addons',
   // Names folders of the user's mail to read, embed and send to whichever store is configured.
   // The same threat as `embedder`, with the user's correspondence as the payload.
   'mail',

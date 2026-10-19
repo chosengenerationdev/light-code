@@ -69,7 +69,9 @@ import type { ExpertState } from './settings/ExpertTab.js'
 import type { SearchIndex } from './settings/SearchTab.js'
 import type { EmbedderState } from './settings/IndexingSection.js'
 import { HistoryList } from './history/HistoryList.js'
-import { BackIcon, ExportSourceIcon, HelpIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
+import { BackIcon, ExportSourceIcon, HandoffIcon, HelpIcon, HistoryIcon, NewTaskIcon, SettingsIcon } from './icons.js'
+import { disabledWhen } from './disabledWhen.js'
+import { HandoffProgress, type HandoffPhase } from './HandoffProgress.js'
 import {
   applyAccent,
   applyAgentColor,
@@ -79,6 +81,7 @@ import {
   DEFAULT_EXPERT,
 } from './styles.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
+import { FileEditor, type EditorFile, type FileEditorProps } from './FileEditor.js'
 
 export interface AppProps {
   transport: Transport
@@ -136,6 +139,11 @@ export function App(props: AppProps): ReactElement {
   /** Whether this host ships its own source as a zip — the VS Code extension does. */
   const [exportsSource, setExportsSource] = useState(false)
   const [picksFiles, setPicksFiles] = useState(false)
+  /** A skill or tool open in the panel's own editor (hosts with no editor - Fire Code, the browser). */
+  const [editorFile, setEditorFile] = useState<EditorFile | undefined>(undefined)
+  const [editorSaved, setEditorSaved] = useState<FileEditorProps['saved']>(undefined)
+  /** A handoff to a new chat in progress, or how the last one ended (until dismissed). */
+  const [handoff, setHandoff] = useState<{ phase: HandoffPhase; written?: number; message?: string } | undefined>(undefined)
   const [hostModels, setHostModels] = useState(false)
   const [addedFiles, setAddedFiles] = useState<{ paths: string[]; nonce: number } | undefined>(undefined)
   /*
@@ -668,6 +676,14 @@ export function App(props: AppProps): ReactElement {
         setMessages(finalizePendingMessage)
         setPendingApproval(undefined)
         setIsStreaming(false)
+      } else if (message.type === 'handoffProgress') {
+        // A finished handoff needs no panel: the new chat, opening with the handoff, is the result.
+        setHandoff(message.phase === 'done' ? undefined : { phase: message.phase, ...(message.written !== undefined ? { written: message.written } : {}), ...(message.message !== undefined ? { message: message.message } : {}) })
+      } else if (message.type === 'editorFile') {
+        setEditorSaved(undefined)
+        setEditorFile({ path: message.path, name: message.name, content: message.content, mtimeMs: message.mtimeMs })
+      } else if (message.type === 'editorSaved') {
+        setEditorSaved(message)
       } else if (message.type === 'error') {
         // An approval that threw never sends its closing message; the rows must not stay busy.
         setPythonApproving({})
@@ -1664,9 +1680,27 @@ export function App(props: AppProps): ReactElement {
     setShare(undefined)
   }
 
+  const handoffRunning = handoff !== undefined && handoff.phase !== 'failed' && handoff.phase !== 'cancelled'
   const hasNoProviders = profilesLoaded && profiles.length === 0
 
   return (
+    <>
+    {editorFile !== undefined && (
+      <FileEditor
+        // A different file is a fresh editor, not this one's text under another name.
+        key={editorFile.path}
+        file={editorFile}
+        saved={editorSaved}
+        onSave={(content, mtimeMs) => {
+          setEditorSaved(undefined)
+          props.transport.post({ type: 'saveEditorFile', path: editorFile.path, content, mtimeMs } satisfies UiToHostMessage)
+        }}
+        onClose={() => {
+          setEditorFile(undefined)
+          setEditorSaved(undefined)
+        }}
+      />
+    )}
     <div
       style={{
         display: 'flex',
@@ -1742,6 +1776,23 @@ export function App(props: AppProps): ReactElement {
               onClick={newTask}
             >
               <NewTaskIcon />
+            </button>
+            <button
+              type="button"
+              aria-label="New chat with a handoff"
+              style={iconButtonStyle('ghost', isStreaming || handoffRunning || messages.length === 0)}
+              {...disabledWhen(
+                [isStreaming, 'A reply is running. Wait for it to finish, or press Stop, before handing over.'],
+                [handoffRunning, 'A handoff is already being written.'],
+                [messages.length === 0, 'This chat is empty, so there is nothing to hand over.'],
+                { enabledTitle: 'New chat with a handoff - the assistant writes up this chat (goal, decisions, what is done, next steps) and a new chat starts from it. A clean start, instead of compacting.' },
+              )}
+              onClick={() => {
+                setHandoff({ phase: 'gathering' })
+                props.transport.post({ type: 'startHandoff' } satisfies UiToHostMessage)
+              }}
+            >
+              <HandoffIcon />
             </button>
             <button
               type="button"
@@ -2118,6 +2169,8 @@ export function App(props: AppProps): ReactElement {
               onOpenFile: openManagedFile,
               onOpenStandingSkill: () =>
                 props.transport.post({ type: 'openStandingSkill' } satisfies UiToHostMessage),
+              onOpenCodebaseInstructions: () =>
+                props.transport.post({ type: 'openCodebaseInstructions' } satisfies UiToHostMessage),
               // The button sits here because this is where a skill changes. It reindexes skills
               // only: a run that also swept tools would invite the question of what it touched.
               onReindex: () => {
@@ -2549,6 +2602,16 @@ export function App(props: AppProps): ReactElement {
             </button>
           </div>
         ) : (
+          <>
+          {handoff !== undefined && (
+            <HandoffProgress
+              phase={handoff.phase}
+              written={handoff.written}
+              message={handoff.message}
+              onCancel={() => props.transport.post({ type: 'cancelHandoff' } satisfies UiToHostMessage)}
+              onDismiss={() => setHandoff(undefined)}
+            />
+          )}
           <Chat
             /*
              * Identifies the conversation so the transcript can open at its end. A new,
@@ -2693,8 +2756,10 @@ export function App(props: AppProps): ReactElement {
               } satisfies UiToHostMessage)
             }
           />
+          </>
         )}
       </div>
     </div>
+    </>
   )
 }

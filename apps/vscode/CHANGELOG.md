@@ -1,5 +1,62 @@
 # light-code-vscode
 
+## 0.171.0
+
+### Minor Changes
+
+- **Settings → Add-ons** (puzzle piece): installed add-ons, Enable, and the folders to look in - now with **Browse…**. The MCP tab lists only the servers you configured yourself. An add-on's own tab (Linux) shows only while it is enabled - disable it and the tab goes, keeping what you entered - and lists its tools with Ask first / Always allow / Never, changed right there.
+
+## 0.170.0
+
+### Minor Changes
+
+- **Set up SSH key**, one press on a Linux machine that signs in with a password: makes one key for this PC (`.ssh\light-code_ed25519`, reused for every machine), adds its public half to the machine's `authorized_keys` using the stored password, proves the key works, then switches the machine to it. A button only - the assistant cannot call it.
+- **An add-on's tab lists the tools it gives the assistant**, with whether each asks first.
+- **Add-ons installed globally are found with nothing to set**, also where `npm config set prefix` moved npm's folder, and beside node.exe (nvm-windows).
+- **Fixed: "New chat with a handoff" refused straight after a reply** with "A reply is still running": the reply had said it was done but was still saving the chat. The button now waits for that instead of refusing.
+
+## 0.169.0
+
+### Minor Changes
+
+- **Add-ons can bring their own settings tab.** An add-on declares its fields in `package.json` and Light Code draws the tab, with the add-on's own icon; it appears only while the add-on is installed. What you enter is kept in your settings, passwords in secret storage, and the add-on receives them when it starts.
+- **New: the Linux add-on** (`npm i -g @chosengeneration/light-code-addon-linux`). Add your Linux machines with short labels on its Linux tab; the assistant can then run read-only commands there (disk, processes, logs, services, containers) and download files to investigate. SSH runs inside Node - no plink, no ssh.exe, no new program - with one sign-in per machine reused and a refused sign-in never retried. Commands that could change a machine are refused before they are sent, and every command is approved like any other tool.
+
+## 0.168.0
+
+### Patch Changes
+
+- Shared code with the Light Code host and Fire Code: `.hubignore` for JupyterHub codebases (Fire Code only).
+
+## 0.167.0
+
+### Minor Changes
+
+- **Add-ons: more tools from Node packages you install.** An add-on is an npm package whose `package.json` carries `"lightCode": { "addon": { "main": "server.js" } }`, where `server.js` is an MCP server. Install it with `npm i -g`, then Settings → MCP → Add-ons lists it; press Enable, read the program it will run, and confirm. Its tools appear as `addon-<name>__<tool>` and are approved like any other tool. Installed is not enabled, an update stays off until you enable the new version, and a repository's own settings can never switch one on. `examples/light-code-addon-hello` in the source is a complete one to copy.
+- **Codebase instructions.** Instructions for one codebase that every chat on it gets with every message, ahead of the standing instructions (where they disagree these win; what you say in a chat wins over both). Edit them in Settings → Skills → Codebase instructions. Kept on this machine, not in the repository.
+- **Less disk per chat.** Chats on one codebase (Fire Code) now share its checkpoint store, its Python venv and its index bookkeeping, so a new chat no longer adds another copy of the codebase's snapshots or another venv. Rolling back now refuses, rather than deleting files, if a checkpoint cannot be read.
+
+## 0.166.0
+
+### Minor Changes
+
+- **New chat with a handoff.** A button beside + starts a new chat from a handoff of this one, instead of compacting: the assistant writes up the goal, what is done and decided, the current state, open questions and next steps, and the new chat opens with it as its first message. Your own messages are quoted word for word, and the files read and changed and the commands run are listed from the actual tool calls, so nothing important rests on the summary alone. A progress panel shows each step and how much has been written, with Cancel; a failure leaves the chat as it was. The old chat stays in History.
+- **This window's debug session is available to Fire Code and the Light Code host on the same machine**, through the same private, per-user link as Copilot - so they can investigate a program you paused here. The link is served whether or not Copilot is available.
+
+## 0.165.0
+
+### Patch Changes
+
+- Shared code with the panel editor added for Fire Code and the browser host; VS Code keeps opening files in its own editor.
+
+## 0.164.0
+
+### Minor Changes
+
+- **Copying a reply keeps its formatting.** Select part of a reply and press Ctrl+C, or use the new **Copy** button on a reply: tables (with borders and a header row), headings, lists, quotes and code paste into Word, OneNote, a wiki or an email as they look in the chat, in dark text on white whatever the editor's theme. Before, a copy carried the theme's colours (white text that vanished in Word) and lost table borders.
+- **Confluence pages look like the chat.** The assistant can now write a page as the same Markdown it uses in replies, converted to Confluence's own format: real headings, tables with a header row, code in Confluence's code macro, quotes, lists and links. Before, it had to hand-write Confluence's XHTML, which came out plain. The approval shows the converted page.
+- **AutoSys behind Apigee says what goes where.** The token is fetched with the consumer key and secret alone; your AutoSys username and password go only with job calls, never to the token URL. The panel used to read as if the gateway replaced the username and password, and called the key and secret "client id" and "client secret". It now uses Apigee's names and says so; a test pins that the token request carries no AutoSys sign-in.
+
 ## 0.163.0
 
 ### Minor Changes

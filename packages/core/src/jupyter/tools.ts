@@ -136,6 +136,8 @@ export function describePull(result: PullResult): string {
   if (result.conflicts.length > 0)
     lines.push(`Changed both here and on the hub - kept as they are here, NOT replaced: ${result.conflicts.join(', ')}. Compare with hub_sync "hub_version".`)
   if (result.skipped.length > 0) lines.push(`Too large to copy: ${result.skipped.join(', ')}`)
+  if (result.ignored.length > 0)
+    lines.push(`Now listed in .hubignore, so no longer synced (left as they are here and on the hub): ${result.ignored.slice(0, 20).join(', ')}${result.ignored.length > 20 ? ', …' : ''}`)
   for (const failure of result.failed) lines.push(`Could not fetch ${failure.path}: ${failure.problem}`)
   if (lines.length === 0) lines.push(`Up to date (${String(result.unchanged)} file(s) unchanged).`)
   return lines.join('\n')
@@ -220,7 +222,8 @@ export function createHubTools(runtime: HubRuntime): Tool[] {
       'are fetched every few minutes; use this to fetch now ("pull"), save local changes made another way, such as by a ' +
       'shell command ("push", optionally one path), list what is not saved ("status"), read the hub\'s copy of a file after ' +
       'a refused save ("hub_version"), or replace the local file with the hub\'s copy ("use_hub_version" - discards the ' +
-      'local edit; ask the user first). Never overwrites anything changed on the other side.',
+      'local edit; ask the user first). Never overwrites anything changed on the other side. Files and folders listed in ' +
+      'a .hubignore file (gitignore syntax, in any synced folder) are never synced either way.',
     parametersSchema: syncSchema,
     async preview(params, context) {
       if (params.action === 'push') {
@@ -250,7 +253,7 @@ export function createHubTools(runtime: HubRuntime): Tool[] {
             let failed = false
             for (const file of pending.files) {
               const result = await runtime.mirror.push(file, context.signal)
-              failed ||= !result.saved
+              failed ||= !result.saved && result.ignored !== true
               lines.push(`- ${path.relative(runtime.mirror.root, file).split(path.sep).join('/')}: ${result.message}`)
             }
             return { content: lines.length > 0 ? lines.join('\n') : 'Nothing to save.', ...(failed ? { isError: true } : {}) }

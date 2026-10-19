@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { ConfigManager, Logger, isDue, startLmRelay, wireChatBridge, type ChatBridge, type Schedule } from '@light-code/core'
 import { vscodeLanguageModels } from './platform/languageModels.js'
+import { readDebugSession, startTrackingDebugSessions } from './platform/debugSession.js'
 import { VSCodeConfigStore } from './platform/config.js'
 import { WebviewTransport } from './platform/transport.js'
 import { ChatViewProvider } from './webview/chatViewProvider.js'
@@ -205,13 +206,18 @@ export function activate(context: vscode.ExtensionContext): void {
    * token opens). Nothing is spawned and nothing is contacted until one of them asks.
    */
   const models = vscodeLanguageModels()
-  const relay = models !== undefined ? startLmRelay(models, { log: (line) => outputChannel.appendLine(`[info] ${line}`) }) : undefined
+  /*
+   * The same relay serves this window's live debug session (read_debug_session), so Fire Code can
+   * investigate a program paused in VS Code. Served whether or not Copilot is available.
+   */
+  startTrackingDebugSessions(context)
+  const relay = startLmRelay(models, { log: (line) => outputChannel.appendLine(`[info] ${line}`), debug: readDebugSession })
 
   context.subscriptions.push(viewDisposable, openCommand, addToContextCommand, commitMessageCommand, walkthroughCommand, settingsCommand, shareCommand, {
     dispose: () => {
       clearInterval(poll)
       bridge?.dispose()
-      relay?.dispose()
+      relay.dispose()
     },
   })
 }

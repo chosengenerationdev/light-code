@@ -1,5 +1,50 @@
 # @chosengeneration/fire-code
 
+## 0.39.0
+
+- **Set up SSH key**, one press on a Linux machine that signs in with a password: makes one key for this PC (`.ssh\light-code_ed25519`, reused for every machine), adds its public half to the machine's `authorized_keys` using the stored password, proves the key works, then switches the machine to it. A button only - the assistant cannot call it.
+- **An add-on's tab lists the tools it gives the assistant**, with whether each asks first.
+- **Add-ons installed globally are found with nothing to set**, also where `npm config set prefix` moved npm's folder, and beside node.exe (nvm-windows).
+- **Fixed: "New chat with a handoff" refused straight after a reply** with "A reply is still running": the reply had said it was done but was still saving the chat. The button now waits for that instead of refusing.
+- **Settings → Add-ons** (puzzle piece): installed add-ons, Enable, and the folders to look in - now with **Browse…**. The MCP tab lists only the servers you configured yourself. An add-on's own tab (Linux) shows only while it is enabled - disable it and the tab goes, keeping what you entered - and lists its tools with Ask first / Always allow / Never, changed right there.
+- **Browse buttons work in Fire Code**: they open a Windows file or folder dialog. Before, every Browse button in a chat's settings did nothing there.
+
+## 0.38.0
+
+- **Add-ons can bring their own settings tab.** An add-on declares its fields in `package.json` and Light Code draws the tab, with the add-on's own icon; it appears only while the add-on is installed. What you enter is kept in your settings, passwords in secret storage, and the add-on receives them when it starts.
+- **New: the Linux add-on** (`npm i -g @chosengeneration/light-code-addon-linux`). Add your Linux machines with short labels on its Linux tab; the assistant can then run read-only commands there (disk, processes, logs, services, containers) and download files to investigate. SSH runs inside Node - no plink, no ssh.exe, no new program - with one sign-in per machine reused and a refused sign-in never retried. Commands that could change a machine are refused before they are sent, and every command is approved like any other tool.
+
+## 0.37.0
+
+- **Fixed: chat tabs stuck on "That link has already been used".** A chat page loaded a second time with its first, single-use link was refused - after a restart, or when a page unloaded while hidden came back. The fresh link that followed never reloaded it, because it differs only after the `#`, and changing only that part of an address does not reload a page. Now a page that already holds its session in that window carries on with it; Fire Code gives a fresh link a new frame, which always loads, unless the page is already connected; and the page reloads itself if a fresh link arrives anyway.
+
+## 0.36.0
+
+- **`.hubignore` for JupyterHub codebases.** Files and folders it lists are never synced, in either direction: `.gitignore` syntax (`dist/`, `*.log`, `/build/`, `!keep.me`), in any synced folder, applying beneath it. Dot-files, `node_modules`, `.git`, virtualenvs and Python caches were skipped already and still are; a `!` line brings one back (`!.editorconfig`). The `.hubignore` itself is synced, so the hub and other machines follow it. A file synced before a rule listed it simply stops being synced; nothing is deleted on either side. The agent writes one when it sets up a Node, Angular or other build project in a hub folder, before installing or building.
+
+## 0.35.0
+
+- **Codebase instructions, edited in Fire Code.** Right-click a codebase → *Codebase instructions…*: what every chat on that codebase is told with every message, ahead of the standing instructions (where they disagree these win; what you say in a chat wins over both). A save reaches every chat from its next message - nothing restarts. *Edit standing instructions* in the same dialog opens those too.
+- **Much less memory.** Each chat's agent process is about 130 MB smaller (237 MB → 103 MB idle): its bundle had been carrying old exported copies of itself. Chat pages you are not looking at are unloaded after 5 idle minutes while their agents keep running (Settings → *Unload hidden chat pages after*; never while working or waiting for you) and reload when opened. WebView2's disk cache is capped at 32 MB.
+- **Less disk per chat.** A codebase's chats share one checkpoint store, one Python venv and one set of index bookkeeping, so a new chat no longer adds another copy of the codebase's snapshots or another venv.
+- **Add-ons: more tools from Node packages you install.** An add-on is an npm package whose `package.json` carries `"lightCode": { "addon": { "main": "server.js" } }`, where `server.js` is an MCP server. Install it with `npm i -g`, then Settings → MCP → Add-ons lists it; press Enable, read the program it will run, and confirm. Its tools appear as `addon-<name>__<tool>` and are approved like any other tool. Installed is not enabled, an update stays off until you enable the new version, and a repository's own settings can never switch one on. `examples/light-code-addon-hello` in the source is a complete one to copy.
+
+## 0.34.0
+
+- **New chat with a handoff.** A button beside + starts a new chat from a handoff of this one, instead of compacting: the assistant writes up the goal, what is done and decided, the current state, open questions and next steps, and the new chat opens with it as its first message. Your own messages are quoted word for word, and the files read and changed and the commands run are listed from the actual tool calls, so nothing important rests on the summary alone. A progress panel shows each step and how much has been written, with Cancel; a failure leaves the chat as it was. The old chat stays in History.
+- **Read a program paused in VS Code's debugger.** With a VS Code window open (Light Code 0.166.0 or later there), `read_debug_session` reads its call stack, variables and recent output - every open window is asked, and the one stopped at a breakpoint wins. Read-only. IntelliJ and PyCharm are not supported yet.
+
+## 0.33.0
+
+- **Edit skills, tools and the standing instructions without leaving the app.** Where there is no code editor - Fire Code, the browser host, JetBrains - *Open* (and the standing-instructions button) now opens Light Code's own editor: a full-panel text box with Save (Ctrl+S), Close (Esc) and a Markdown preview. Before, it only pasted the file's text into the chat. A save is refused if the file changed on disk after you opened it, rather than overwriting that change; line endings are kept as the file had them. Editing a Python tool sends it back for approval, as any change to its code does. On a shared server only an admin can save.
+
+## 0.32.0
+
+- **Copying a reply keeps its formatting.** Select part of a reply and press Ctrl+C, or use the new **Copy** button on a reply: tables (with borders and a header row), headings, lists, quotes and code paste into Word, OneNote, a wiki or an email as they look in the chat, in dark text on white whatever the editor's theme. Before, a copy carried the theme's colours (white text that vanished in Word) and lost table borders.
+- **Confluence pages look like the chat.** The assistant can now write a page as the same Markdown it uses in replies, converted to Confluence's own format: real headings, tables with a header row, code in Confluence's code macro, quotes, lists and links. Before, it had to hand-write Confluence's XHTML, which came out plain. The approval shows the converted page.
+- **Links in a reply open in your default browser.** In Fire Code a click opened the site inside the chat, where most sites refuse to appear ("content is blocked"); in the browser-based host it replaced the chat page. Links now always open in a new window, which VS Code and Fire Code send to the default browser (mail links to the mail app).
+- **AutoSys behind Apigee says what goes where.** The token is fetched with the consumer key and secret alone; your AutoSys username and password go only with job calls, never to the token URL. The panel used to read as if the gateway replaced the username and password, and called the key and secret "client id" and "client secret". It now uses Apigee's names and says so; a test pins that the token request carries no AutoSys sign-in.
+
 ## 0.31.0
 
 - **A renamed first chat keeps its name.** The name was saved, but the list of codebases sent to the window left that one field out, so the tab still said "Chat 1". Names given to any chat now show at once and come back after a restart. A test now fails if a saved codebase field is not sent to the window.

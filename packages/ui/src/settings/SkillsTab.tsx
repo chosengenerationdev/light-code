@@ -91,6 +91,8 @@ export interface SkillsTabProps {
   onOpenFile: (path: string) => void
   /** Opens the standing-instructions skill, creating it from a template the first time. */
   onOpenStandingSkill: () => void
+  /** Opens this codebase's instructions, creating the file empty the first time. */
+  onOpenCodebaseInstructions?: (() => void) | undefined
   /**
    * Reindexes skill documentation only.
    *
@@ -497,6 +499,26 @@ export function SkillsTab(props: SkillsTabProps): ReactElement {
         silently does nothing when mistyped. Neither of those should be discoverable only by
         reading the source, so the tab states which skill it is, or offers to create it.
       */}
+      {/*
+        Codebase instructions come first because they rank first: written for this one codebase,
+        they are what every chat on it is told, ahead of standing instructions that may come from a
+        team bucket and apply everywhere. Kept outside the repository, so a cloned repository cannot
+        write them.
+      */}
+      {props.onOpenCodebaseInstructions !== undefined && (
+        <Panel id="skills.codebase" title="Codebase instructions">
+          <p style={{ color: colors.muted, fontSize: 11, margin: '0 0 8px' }}>
+            Instructions for <strong>this codebase</strong>, given to every chat on it before the
+            standing instructions below - where the two disagree, these win, and what you say in a chat
+            wins over both. Kept on this machine, not in the repository. Paid for on every request, so
+            keep them short.
+          </p>
+          <button type="button" style={secondaryButtonStyle()} onClick={props.onOpenCodebaseInstructions}>
+            Edit codebase instructions
+          </button>
+        </Panel>
+      )}
+
       <Panel id="skills.standing" title="Standing instructions" summary={standing?.name ?? 'None'}>
         {standing === undefined ? (
           <>

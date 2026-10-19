@@ -215,9 +215,23 @@ export class HttpTransport implements Transport {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ handoff }),
       })
-      if (!response.ok) throw new Error(await response.text())
-      this.token = ((await response.json()) as { token: string }).token
-      sessionStorage.setItem('lightCodeToken', this.token)
+      if (response.ok) {
+        this.token = ((await response.json()) as { token: string }).token
+        sessionStorage.setItem('lightCodeToken', this.token)
+      } else {
+        /*
+         * A link already used, while this tab already holds the session it opened: carry on with that.
+         *
+         * Fire Code reloads a chat page with the link it was first given - a page unloaded while hidden
+         * comes back that way, and so does a frame loaded twice while the window starts. The link is
+         * single-use, so the page used to stop on "That link has already been used" with the session
+         * sitting in this tab's own storage. A stored token is only ever one this server handed to this
+         * tab; a stale one is refused by the event stream as any wrong token is.
+         */
+        const stored = sessionStorage.getItem('lightCodeToken')
+        if (stored === null) throw new Error(await response.text())
+        this.token = stored
+      }
     } else {
       // A reload has no fragment left. sessionStorage is per-tab and cleared when it
       // closes, which matches the lifetime of the session this token belongs to.

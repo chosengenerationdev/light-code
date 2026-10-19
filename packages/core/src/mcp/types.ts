@@ -59,6 +59,11 @@ export const stdioServerSchema = z.object({
    * keyed the same way and a namespaced name pasted here does not silently fail to match.
    */
   toolTimeouts: z.record(z.string(), z.number().positive().max(3600)).optional(),
+  /**
+   * Set when this server is an installed add-on (`addons/discover.ts`): which package, and the
+   * version that was enabled. Another installed version leaves the server off until enabled again.
+   */
+  addon: z.object({ package: z.string().min(1), version: z.string().min(1) }).optional(),
 })
 
 export const httpServerSchema = z.object({

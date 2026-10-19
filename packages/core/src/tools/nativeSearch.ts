@@ -43,7 +43,7 @@ export interface WalkResult {
   truncated: boolean
 }
 
-interface IgnoreRule {
+export interface IgnoreRule {
   /** Directory the rule's `.gitignore` sits in, relative to the walk root ('' for the root). */
   base: string
   regex: RegExp
@@ -143,7 +143,15 @@ export function parseIgnoreFile(text: string, base: string): IgnoreRule[] {
 
 /** Last matching rule wins, as in git; a path outside a rule's directory is not its business. */
 function isIgnored(rules: IgnoreRule[], relative: string, isDirectory: boolean): boolean {
-  let ignored = false
+  return ignoreDecision(rules, relative, isDirectory, false)
+}
+
+/**
+ * The same, starting from a default other than "not ignored" - `.hubignore` (`jupyter/hubIgnore.ts`)
+ * starts from its built-in skips, so a `!` line can bring one back.
+ */
+export function ignoreDecision(rules: readonly IgnoreRule[], relative: string, isDirectory: boolean, initial: boolean): boolean {
+  let ignored = initial
   for (const rule of rules) {
     if (rule.dirOnly && !isDirectory) continue
     let scoped = relative

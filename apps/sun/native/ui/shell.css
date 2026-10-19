@@ -2110,3 +2110,15 @@ input[type='password']:focus {
   justify-content: flex-end;
   margin-top: 8px;
 }
+
+/* Codebase instructions: prose, so it wraps, and tall enough to read a page of it. */
+.modal textarea.instructions-box {
+  white-space: pre-wrap;
+  min-height: 280px;
+}
+
+.instructions-meta {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}

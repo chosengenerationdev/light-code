@@ -290,6 +290,7 @@ async function main(): Promise<void> {
         : undefined
   const changeLedgerFile = valueOf(args, '--change-ledger')
   const mirrorDir = valueOf(args, '--mirror-dir')
+  const codebaseDir = valueOf(args, '--codebase-dir')
   const mentionName = valueOf(args, '--mention-name')
   // A codebase that is JupyterHub folders: its connection, written by Fire Code (never a workspace file).
   const jupyterHubFile = valueOf(args, '--jupyter-hub')
@@ -452,6 +453,7 @@ async function main(): Promise<void> {
     ...(args.includes('--no-schedules') ? { noSchedules: true } : {}),
     ...(siblings.length > 0 ? { siblings } : {}),
     ...(mirrorDir !== undefined ? { mirrorRoot: path.resolve(mirrorDir) } : {}),
+    ...(codebaseDir !== undefined ? { codebaseDir: path.resolve(codebaseDir) } : {}),
     ...(mentionName !== undefined && mentionName.length > 0 ? { mentionName } : {}),
     ...(jupyterHub !== undefined ? { jupyterHub } : {}),
     ...(siblingHubs.length > 0 ? { siblingHubs } : {}),
@@ -740,6 +742,7 @@ const KNOWN_FLAGS = new Set([
   '--change-ledger',
   '--chat-label',
   '--mirror-dir',
+  '--codebase-dir',
   '--mention-name',
   '--jupyter-hub',
   '--sibling-hub',
@@ -1021,6 +1024,9 @@ Usage: light-code [options]
   --mirror-dir <dir>  Keep copies of bucket folders here, shared with other
                       hosts on this machine (Fire Code), so a tool approved
                       once is approved for every codebase
+  --codebase-dir <dir> What every chat on this codebase shares (Fire Code):
+                      checkpoint objects, the created Python venv, index
+                      bookkeeping and the codebase instructions
   --no-schedules      Leave this codebase's schedules to another process
                       (Fire Code's extra chat tabs, so a job runs once)
   --fast-fs <exe>     The fire-fs helper: adds find_files, read_many_files,

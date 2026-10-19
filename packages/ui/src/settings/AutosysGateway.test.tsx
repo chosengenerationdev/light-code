@@ -91,7 +91,7 @@ describe('the AutoSys panel with an API gateway', () => {
     expect(container.textContent).toContain('tick "Sign in through the gateway"')
 
     render({ settings: { ...settings, baseUrl: 'https://autosys.test' }, gateway: { ...gateway, enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a' } })
-    expect(container.textContent).toContain('Enter the gateway client secret and save.')
+    expect(container.textContent).toContain('Enter the gateway consumer secret and save.')
 
     render({ settings: { ...settings, baseUrl: 'https://autosys.test' }, gateway: { ...gateway, enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', hasClientSecret: true } })
     expect(buttonByText('Test connection').disabled).toBe(false)

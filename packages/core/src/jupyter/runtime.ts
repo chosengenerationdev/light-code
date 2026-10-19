@@ -45,6 +45,14 @@ export function hubGuidance(runtime: HubRuntime): string {
     'libraries, so "import could not be resolved" is not reported here - it says nothing about the hub.',
     'The git repository is on the hub too, not in this copy: run git there with hub_run shell (cwd = the folder),',
     'and after anything that changes files (pull, checkout, merge) use hub_sync "pull" to bring them here.',
+    '',
+    '**.hubignore** lists files and folders that are never synced, in either direction - .gitignore syntax (`dist/`,',
+    '`*.log`, `/build/`, `!keep.me`), in any synced folder, applying beneath it. Dot-files, node_modules, .git,',
+    'virtualenvs and Python caches are skipped already (`!.editorconfig` brings one back). When you create or set up',
+    'a project whose tools generate output or caches - Angular, React, any Node or Java build - write a .hubignore in',
+    'its folder FIRST, before installing or building, listing what those tools generate (for Angular: dist/,',
+    '.angular/, out-tsc/, coverage/, *.log), and tell the user what you put in it. A file already synced that a new',
+    'rule lists simply stops being synced; nothing is deleted on either side.',
   ].join('\n')
 }
 

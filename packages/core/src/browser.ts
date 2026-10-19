@@ -163,6 +163,9 @@ export type { SearchLogEntry, SearchLogSource } from './rag/searchLog.js'
 export type { Schedule, ScheduleTrigger, Schedules, ScheduleRun } from './schedule/types.js'
 export { riskyGroupsIn } from './schedule/types.js'
 export { describeTrigger, describeNextRun, nextFireTime, isDue } from './schedule/timing.js'
+export type { AddonPageView, AddonView } from './agent/protocol.js'
+export type { AddonField, AddonPage } from './addons/page.js'
+export { cleanAddonValues, isShown } from './addons/page.js'
 export type { ScheduleToolInfo, SchedulerStatus } from './agent/protocol.js'
 export type { IndexRenamesMessage, ProjectMessage, ProjectStampEntry, ProjectStampMessage } from './agent/protocol.js'
 export type { PythonStatus } from './python/manager.js'
@@ -223,3 +226,6 @@ export {
 } from './secrets/credentials.js'
 
 export { declaredCredentials } from './python/declaredCredentials.js'
+
+// The Markdown the chat renders, shared with Confluence pages (markdown/confluence.ts).
+export { isSafeHref, looksLikeMarkdown, parseInline, parseMarkdown, type Align, type Block, type Inline } from './markdown/parse.js'

@@ -219,6 +219,17 @@ export function NewTaskIcon({ size = 16 }: IconProps): ReactElement {
   )
 }
 
+/** A new chat that carries a handoff of this one: a page, and an arrow leading out of it to a new one. */
+export function HandoffIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 2.5h5v11h-5z" />
+      <path d="M4.25 5.5h1.5M4.25 8h1.5" />
+      <path d="M9.5 8h4.5M12 5.5 14 8l-2 2.5" />
+    </svg>
+  )
+}
+
 export function SettingsIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg
@@ -326,6 +337,15 @@ export function ReviewIcon({ size = 16 }: IconProps): ReactElement {
 }
 
 /** MCP — connected blocks, for external servers. */
+/** Add-ons: a puzzle piece. */
+export function PuzzleIcon({ size = 16 }: IconProps): ReactElement {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 5.5h2.2a1.6 1.6 0 1 1 3.1 0H10.5v2.2a1.6 1.6 0 1 1 0 3.1V13H8.3a1.6 1.6 0 1 0-3.1 0H3v-2.2a1.6 1.6 0 1 0 0-3.1z" />
+    </svg>
+  )
+}
+
 export function ServerIcon({ size = 16 }: IconProps): ReactElement {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">

@@ -549,7 +549,72 @@ export interface ContextUsage {
   cacheHitRate?: number
 }
 
+/** One installed add-on, as the MCP tab lists it (`addons/discover.ts`). */
+export interface AddonView {
+  package: string
+  version: string
+  displayName: string
+  description?: string
+  /** The package folder, and the server script that would run - shown before enabling. */
+  dir: string
+  main: string
+  /** The MCP server it runs as: tools appear as `<server>__<tool>`. */
+  server: string
+  /** available: installed, not enabled. updated: enabled at `enabledVersion`, off until enabled again. */
+  state: 'available' | 'enabled' | 'updated'
+  enabledVersion?: string
+  /** Its own settings tab, when it declares one: the tab's title, and its icon as an SVG data URI. */
+  pageTitle?: string
+  icon?: string
+  pageProblem?: string
+  /**
+   * While enabled: whether it is running, why not, and its recent log. Its server is not on the MCP
+   * tab, so this is where somebody looks when it will not start.
+   */
+  status?: 'idle' | 'connecting' | 'ready' | 'failed' | 'disabled'
+  error?: string
+  logs?: string[]
+}
+
+/** An add-on's own settings tab, as the panel renders it. Secrets appear only as "set" or not. */
+export interface AddonPageView {
+  package: string
+  displayName: string
+  icon?: string
+  page: import('../addons/page.js').AddonPage
+  state: 'available' | 'enabled' | 'updated'
+  values: Record<string, unknown>
+  /** The add-on's own secret fields that have a value stored. */
+  secretsSet: string[]
+  records: { id: string; values: Record<string, unknown>; secretsSet: string[] }[]
+  /**
+   * The tools it gives the assistant, as it reports them while running, with each one's Always / Ask
+   * / Never. Empty while it is not enabled or not started. Panel-only tools are not among them.
+   */
+  tools: { name: string; server: string; tool: string; description: string; permission: 'always' | 'ask' | 'never' }[]
+}
+
 export type UiToHostMessage =
+  /** An installed add-on's own settings tab. */
+  | { type: 'requestAddonPage'; package: string }
+  /**
+   * Adds (no `id`) or changes one record on an add-on's tab. `secrets` are written to secret storage
+   * and never stored with the values; a secret field left out is unchanged, one in `clearSecrets` removed.
+   */
+  | { type: 'saveAddonRecord'; package: string; id?: string; values: Record<string, unknown>; secrets: Record<string, string>; clearSecrets?: string[] }
+  | { type: 'deleteAddonRecord'; package: string; id: string }
+  /** The add-on's own fields (not a record's). */
+  | { type: 'saveAddonValues'; package: string; values: Record<string, unknown>; secrets: Record<string, string>; clearSecrets?: string[] }
+  /** A record's button: runs one of the add-on's own tools about that record. */
+  | { type: 'runAddonAction'; package: string; id: string; tool: string }
+  /** Lists installed add-ons, looking in every folder again. */
+  | { type: 'requestAddons' }
+  /** Enables the installed add-on with this package name, at its installed version. */
+  | { type: 'enableAddon'; package: string }
+  /** Removes an add-on's server entry. The package stays installed. */
+  | { type: 'removeAddon'; server: string }
+  /** The folders looked in besides npm's global folder. */
+  | { type: 'saveAddonFolders'; folders: string[] }
   /** `replyTo` is the part of an earlier message being answered — see `agent/feedback.ts`. */
   | { type: 'sendMessage'; text: string; images?: ImageAttachmentInput[]; replyTo?: MessageQuote }
   /** Ask the host to resolve `@` mentions for autocomplete as the user types. */
@@ -891,6 +956,8 @@ export type UiToHostMessage =
    * and the editor they already have is better than anything a settings panel could offer.
    */
   | { type: 'openStandingSkill' }
+  /** Opens this codebase's instructions (`agent/codebaseInstructions.ts`), creating the file empty. */
+  | { type: 'openCodebaseInstructions' }
   /** Empties the documentation index, so nothing stale can be matched. */
   /**
    * Empties the documentation index, or just one kind of it.
@@ -1014,6 +1081,14 @@ export type UiToHostMessage =
   | { type: 'deleteSkillFile'; name: string }
   /** Opens a skill or Python tool file in an editor tab, where it can actually be edited. */
   | { type: 'openManagedFile'; path: string }
+  /**
+   * The panel's own editor saving a skill or tool. `mtimeMs` is when the file was read for editing:
+   * a file changed on disk since then is not overwritten.
+   */
+  | { type: 'saveEditorFile'; path: string; content: string; mtimeMs: number }
+  /** Start a new chat from a handoff the model writes of this one (agent/handoff.ts). */
+  | { type: 'startHandoff' }
+  | { type: 'cancelHandoff' }
   /**
    * `filePath` names the exact copy. Without it the host used to delete `<tools folder>/<name>.py`
    * whichever row was clicked — so a Delete on a second, shadowed copy of a working tool would
@@ -1213,6 +1288,21 @@ export type UiToHostMessage =
   | { type: 'importConfig'; path?: string; sections?: string[] }
 
 export type HostToUiMessage =
+  | { type: 'addonPage'; view?: AddonPageView; package: string; error?: string; saved?: boolean }
+  | { type: 'addonActionResult'; package: string; id: string; tool: string; ok: boolean; text: string }
+  | {
+      type: 'addons'
+      addons: AddonView[]
+      /** Packages carrying the label that cannot be used, and why. */
+      problems: { dir: string; package?: string; problem: string }[]
+      /** Enabled add-ons no longer installed: their servers stay off. */
+      missing: { server: string; package: string; version: string }[]
+      /** Configured folders, and npm's global folders, which are always looked in. */
+      folders: string[]
+      defaultFolders: string[]
+      /** A refusal from enabling or saving, for the panel to show. */
+      error?: string
+    }
   /**
    * `text` is the FULL accumulated response so far, not just the latest delta.
    * `postMessage` delivery isn't guaranteed — sending cumulative state makes each
@@ -1584,6 +1674,19 @@ export type HostToUiMessage =
   /** `awaitingAnswer`: the turn ended with a question to the user (Fire Code marks the codebase as waiting). */
   | { type: 'done'; awaitingAnswer?: boolean }
   | { type: 'error'; message: string }
+  /**
+   * A skill or tool to edit in the panel - for hosts without an editor of their own (Fire Code, the
+   * browser). Line endings are normalised to 
+ here and restored on save, so CRLF files survive.
+   */
+  | { type: 'editorFile'; path: string; name: string; content: string; mtimeMs: number; eol: 'lf' | 'crlf' }
+  /**
+   * How a handoff is going, so a slow model never looks like a hung button: what it is doing, how much of
+   * the note is written, and how it ended. `failed` and `cancelled` leave the current chat as it was.
+   */
+  | { type: 'handoffProgress'; phase: 'gathering' | 'writing' | 'starting' | 'done' | 'failed' | 'cancelled'; written?: number; message?: string }
+  /** The answer to `saveEditorFile`. `conflict` means the file changed on disk after it was opened. */
+  | { type: 'editorSaved'; path: string; ok: boolean; mtimeMs?: number; conflict?: boolean; message?: string }
   | { type: 'profiles'; profiles: ProfileSummary[]; activeProfileId: string | undefined }
   | { type: 'profileSaved' }
   /**

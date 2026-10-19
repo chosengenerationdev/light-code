@@ -14,6 +14,10 @@ export default defineConfig({
       // ever been render-tested: a component test could not have run even if one existed.
       'packages/*/src/**/*.test.tsx',
       'apps/*/src/**/*.test.ts',
+      // Fire Code's window script, which lives beside its page rather than under a src folder.
+      'apps/sun/native/ui/**/*.test.ts',
+      // Add-ons are separate packages in this repository.
+      'addons/*/src/**/*.test.ts',
     ],
     passWithNoTests: true,
     /*

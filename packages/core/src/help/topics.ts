@@ -273,7 +273,7 @@ alert about.
   {
     id: 'skills',
     title: 'Skills: teaching it things it cannot work out',
-    keywords: ['skill', 'teach', 'instructions', 'standing', 'always', 'master skill', 'markdown'],
+    keywords: ['skill', 'teach', 'instructions', 'standing', 'always', 'master skill', 'markdown', 'edit skill', 'editor', 'edit standing instructions', 'standing instructions', 'edit a skill'],
     body: `
 A skill is markdown with frontmatter (\`name\`, \`description\`), kept in the workspace so it lands
 in git and gets reviewed. **Settings → Skills.**
@@ -288,6 +288,13 @@ body is read on demand. That is what lets a skill be as long as it needs to be.
 standing instructions — house style, the name of the internal library, how your team writes
 commits. It is paid for on every request, so keep it short. The Skills tab names the skill that
 carries this flag, or offers to create one.
+
+**Editing a skill, a tool or the standing instructions.** *Open* (Skills tab, Python tab, Usage) opens
+the file for editing: in VS Code in its own editor; in Fire Code, the browser and JetBrains in Light
+Code's editor, a full-panel text box with Save (Ctrl+S), Close (Esc) and a Preview for Markdown. A save
+is refused if the file changed on disk after you opened it - another chat, the agent or a sync wrote
+it - rather than overwriting that; open it again to see the new version. Editing a Python tool changes
+its code, so it waits for approval again before it runs. On a shared server only an admin can save.
 
 **Folders**: config:skills.dir is the one written to, and config:skills.paths are read-only extras
 searched after it. Earlier folders win a name collision and a shadowed skill is reported rather
@@ -699,7 +706,7 @@ There is no tool that changes a job's configuration.
       'autosys', 'workload automation', 'wcc', 'jil', 'sendevent', 'autorep', 'force start',
       'force_startjob', 'on hold', 'on ice', 'kill job', 'change status', 'job definition',
       'job dependencies', 'condition', 'box', 'why has my job not started', 'job failed', 'job log',
-      'apigee', 'gateway', 'token url', 'client id', 'client secret', 'oauth',
+      'apigee', 'gateway', 'token url', 'client id', 'client secret', 'oauth', 'consumer key', 'consumer secret',
     ],
     body: `
 **Settings → DevOps → AutoSys**: the web services address (for example
@@ -712,16 +719,18 @@ signs in without listing any jobs.
 token URL ticks "Sign in through the gateway" — and press the panel's one **Save**, which stores the
 site address and the gateway together. Test connection runs against what is saved and says on the
 page what it is still waiting for; a refused save is explained there too. Enter the **token URL** (where the token is issued — usually a
-different address from the AutoSys API), the **client id** and **client secret** (kept in secure
-storage), and a scope if the gateway asks for one. A token is fetched with those, kept in memory
-only, renewed before it expires, and sent with every call to the site address — the username and
-password are then not used. The **client certificate** comes from Settings → Network unless you
+different address from the AutoSys API), the **consumer key** and **consumer secret** (Apigee's names
+for the client id and secret; the secret is kept in secure storage), and a scope if the gateway asks
+for one. The token is fetched with those **alone** — your AutoSys username and password are never sent
+to the token URL — kept in memory only, renewed before it expires, and sent with every call to the site
+address. The **client certificate** comes from Settings → Network unless you
 name one under *Client certificate* (certificate and key, or a PFX, plus a passphrase); the same
 certificate is presented to the token URL and to the API. If the token request is refused with 401
-and the secret is right, switch *How the client id and secret are sent* between the request body
-and a Basic header — gateways differ. **Gateway token and AutoSys username and password together:** tick *Also send the AutoSys
-username and password (HTTP Basic)* — it sends the username and password entered above as Basic,
-alongside the gateway's token. One header holds one value, so the two must go in different headers:
+and the secret is right, switch *How the consumer key and secret are sent* between the request body
+and a Basic header — gateways differ. **Gateway token and AutoSys username and password together** (an AutoSys that wants both, plus the
+certificate, for job status, details and actions): tick *Also send the AutoSys username and password
+with each job call (HTTP Basic)* — it sends the username and password entered above as Basic on every
+AutoSys call, alongside the gateway's token, and never on the token request. One header holds one value, so the two must go in different headers:
 usually the token in a gateway header (Advanced → *Header the token is sent in*, such as
 x-apigee-token) and the Basic sign-in in Authorization, or the other way round with *Header for the
 username and password*. The panel warns before saving if both would land in the same one. *Advanced* covers the grant type, where the token and its
@@ -1157,6 +1166,12 @@ and with \`images\` the pictures on the page — shown to the model when it can 
 diagrams read as their source), and \`confluence_write_page\`, which creates a page or updates one
 given its id, with attached files and drawn diagrams.
 
+**Pages look like the chat.** The assistant writes a page as Markdown - the same Markdown a reply
+uses - and it is converted to Confluence's own format: real headings, tables with a shaded header row,
+code in Confluence's code macro with highlighting, quotes, lists and links. Raw storage format is still
+there for what Markdown cannot say (info and note panels, expand blocks, images on the page). The
+approval shows the converted page, so what you approve is what is published.
+
 **Every write asks first.** An update shows a diff against the page as it is now; a new page shows
 its whole body; every attachment is listed, and one that **replaces** an existing attachment of the
 same name is marked so. Pages are published as you.
@@ -1220,6 +1235,8 @@ desktops of the same person; importing the file is how a second machine is set u
       'remote folder', 'remote code', 'not saved to the hub', 'changed on the hub', 'conflict', 'merge',
       'git on the hub', 'commit on the hub', 'push from the hub', 'hub git', 'outside the folder',
       'hub_browse', 'browse the hub', 'other codebase hub', 'files on the hub',
+      'hubignore', '.hubignore', 'ignore files', 'do not sync', 'not synced', 'exclude from sync', 'skip folder',
+      'node_modules', 'dist folder', 'angular', 'build output', 'sync ignore',
     ],
     body: `
 **Add codebase → On JupyterHub** (Fire Code): the hub's address, your hub user name, the folders on
@@ -1228,6 +1245,14 @@ on the hub's Token page (\`<hub>/hub/token\`). The token is saved encrypted in C
 "JupyterHub <user>@<host>" and only ever sent to that hub, in a header. Optional: a named server and
 a kernel (e.g. python3). Right-click the codebase → JupyterHub settings… changes them later.
 Your hub server must be running; if it is not, the agent says so - start it from the hub's home page.
+
+**\`.hubignore\`** lists files and folders that are never synced, either way - \`.gitignore\` syntax
+(\`dist/\`, \`*.log\`, \`/build/\`, \`!keep.me\`), in any synced folder, applying beneath it. Dot-files and
+dot-folders, \`node_modules\`, \`.git\`, virtualenvs and Python caches are skipped already; \`!.editorconfig\`
+brings one back. The \`.hubignore\` file itself is synced, so the hub and other machines follow it too.
+A file synced before a rule listed it just stops being synced - nothing is deleted on either side. For
+an Angular project: \`dist/\`, \`.angular/\`, \`out-tsc/\`, \`coverage/\`, \`*.log\`. The agent writes one
+when it sets up such a project, before installing or building, and says what it put in it.
 
 **How it works**: Fire Code keeps a copy of the folders on this computer, so reading and searching
 are as fast as for any local codebase (and the Rust search tools apply). Changes on the hub are
@@ -1285,6 +1310,11 @@ edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push
       'needs my approval', 'short name', 'codebase name', 'review python tools once',
     ],
     body: `
+**Editing skills, tools and the standing instructions in Fire Code.** Fire Code has no code editor, so
+*Open* on a skill or tool (and the standing-instructions button in the Skills tab) opens Light Code's own
+editor: a full-panel text box with Save (Ctrl+S), Close (Esc) and a Markdown preview. A save is refused if
+the file changed on disk after it was opened, rather than overwriting that change.
+
 **Fire Code** (called Sun Code until 0.6.0, and Sun Light Code before that) is a Windows app holding every codebase you work on,
 each with its own Light Code agent. Install with \`npm i -g @chosengeneration/fire-code\` and run
 \`fire-code\`. Its data moves across from the old name by itself on first start. The
@@ -1420,8 +1450,114 @@ flagged as possibly inconsistent); a WAL database with recent changes is read as
 never blocks a writer. Parallel ranges pay off on heavy work - grouping by several columns, text across
 every column - by two to three times on 8 cores; a light filtered count is limited by reading the file.
 
-**Not in Fire Code**: reading a VS Code debug session, and editor file pickers — paths are typed. Fire Code's
+**Reading a program paused in VS Code's debugger** works from Fire Code too: with a VS Code window open
+(Light Code 0.166.0 or later installed there), \`read_debug_session\` asks every open VS Code window and
+reads the one stopped at a breakpoint - call stack, variables, recent output - through the same private
+link Copilot uses. Read-only: it cannot step or continue. IntelliJ and PyCharm are not supported yet.
+
+**Memory and disk.** Each chat is its own agent process. A chat page you are not looking at is
+**unloaded after a few idle minutes** while its agent keeps running (Settings → *Unload hidden chat
+pages after*; never while it is working or waiting for you), and a whole codebase **sleeps** after
+the idle time set there. The chats of one codebase **share** its checkpoint store, its Python venv
+and its index bookkeeping, so a new chat no longer adds another copy of the codebase's snapshots.
+WebView2's cache is capped at 32 MB.
+
+**Not in Fire Code**: editor file pickers — paths are typed. Fire Code's
 Settings → Export source code saves the whole repository as a zip that builds offline.
+`,
+  },
+  {
+    id: 'addons',
+    title: 'Add-ons',
+    keywords: [
+      'addon', 'add-on', 'add-ons', 'addons', 'plugin', 'plugins', 'extension', 'extend', 'extendable',
+      'more tools', 'my own tools', 'node app', 'node package', 'npm package', 'install tools', 'npm i -g',
+      'write an addon', 'create an addon', 'build an addon', 'lightcode addon', 'package.json',
+      'addon for fire code', 'fire code addon', 'addon for light code', 'light code addon', 'addon tools',
+      'linux', 'linux machine', 'linux server', 'ssh', 'putty', 'plink', 'pageant', 'remote server', 'connect to a server',
+      'run a command on a server', 'download a log', 'jump host', 'bastion', 'host key', 'addon tab', 'linux tab',
+      'add-ons tab', 'enable addon', 'disable addon', 'linux tab missing',
+      'ssh key', 'set up ssh key', 'key setup', 'authorized_keys', 'passwordless',
+    ],
+    body: `
+**An add-on is an npm package that runs an MCP server**, labelled in its \`package.json\`:
+
+    {
+      "name": "light-code-addon-weather",
+      "version": "1.0.0",
+      "type": "module",
+      "lightCode": { "addon": { "main": "server.js", "displayName": "Weather" } },
+      "dependencies": { "@modelcontextprotocol/sdk": "^1.30.0", "zod": "^3.25.0" }
+    }
+
+\`main\` is an MCP server over stdio, written with \`@modelcontextprotocol/sdk\` (\`McpServer\`,
+\`registerTool\`, \`StdioServerTransport\`). \`examples/light-code-addon-hello\` in the source is a
+complete one. Light Code, Fire Code, the Node host and the JetBrains plugin all use the same add-ons.
+
+**Install it** with \`npm i -g <package or folder>\`, then open **Settings → Add-ons** (the puzzle
+piece). Light Code finds it by itself in npm's global folder - also where \`npm config set prefix\` moved
+it, and beside node.exe - and in any folders listed there (Browse… adds one). **Installed is not
+enabled**: press Enable, read the program it will run, and confirm. Its tools then appear as
+\`addon-<name>__<tool>\` and are asked about like every other tool. An add-on's server is not listed on
+the MCP tab, which keeps the servers you configured yourself.
+
+**An update stays off until you enable the new version** - new code is looked at first. An add-on
+that is no longer installed stays off and is listed so you can remove it. Enabling writes an ordinary
+\`mcpServers\` entry, so export and the JSON editor carry it; on another machine it runs only if that
+machine has the add-on installed, and from wherever it is installed there. A repository's own settings
+can never switch an add-on on. \`addons.folders\` is user-scope only.
+
+**Add-ons run as you and can do anything you can.** Only install ones you trust. They run with the
+editor's own Node inside VS Code, so no Node install is needed there; Fire Code uses its Node.
+
+**An add-on can bring its own settings tab**, with its own icon - it appears in Settings only while
+the add-on is installed **and enabled**; disable it and the tab goes (what you entered is kept). The tab
+lists the tools the add-on gives the assistant, each with Ask first / Always allow / Never. The add-on describes the fields in \`package.json\`
+(\`lightCode.addon.settings\`: a title, its own fields, and a list such as "machines" with buttons like
+Test connection); Light Code draws the form. What you enter is kept in your settings, passwords in
+secret storage, and the add-on receives them when it starts - saving the tab restarts it.
+
+**The Linux add-on** (\`npm i -g @chosengeneration/light-code-addon-linux\`): enable it on the
+**Add-ons** tab, then add machines on its **Linux** tab, each with a short label (\`prod-web-1\`), host, user
+and sign-in (Pageant - the default - the Windows OpenSSH agent, a key file, or a password), and press
+Test connection. The assistant can then list the machines, **run read-only commands** (\`df -h\`, \`tail\`,
+\`grep\`, \`ps\`, \`journalctl\`, \`systemctl status\`, \`docker ps\`... joined with \`|\`; nothing that writes,
+chains or never ends is sent) and **download a file** to read here. SSH runs inside Node - no plink, no
+ssh.exe, no new program - with one sign-in per machine reused, and a refused sign-in never retried, so
+it does not set off security monitoring or lock an account. Host keys are trusted the first time and
+checked after; a changed key is refused until you press Forget host key. A machine behind a bastion:
+add the bastion too and put its label in *Connect through*. Newer PuTTY keys (.ppk version 3): load
+them into Pageant, or export an OpenSSH key from PuTTYgen. **No key yet?** Choose Password, then press
+**Set up SSH key** on the machine: it makes one key for this PC (\`.ssh\\light-code_ed25519\`), adds its
+public half to the server's authorized_keys with the stored password, proves the key works, and switches
+the machine to it. It is a button only - the assistant cannot call it - and the tab lists the tools the
+assistant does get. A globally installed add-on is found by itself (npm's folder, your .npmrc prefix,
+or beside node.exe); the folder box is only for somewhere else.
+`,
+  },
+  {
+    id: 'codebase-instructions',
+    title: 'Codebase instructions',
+    keywords: [
+      'codebase instructions', 'project instructions', 'instructions for this codebase', 'every chat',
+      'all chats', 'instructions for all chats', 'always tell it', 'remember for this project',
+      'agents.md', 'claude.md', 'rules for this repo', 'house rules', 'system prompt', 'custom instructions',
+      'edit codebase instructions', 'codebase instructions in fire code',
+    ],
+    body: `
+**Three levels**, most specific first: what you say **in the chat**, then **codebase instructions**,
+then **standing instructions**. Every chat on a codebase gets the codebase instructions with every
+message, ahead of the standing instructions; where they disagree the codebase instructions win.
+
+**Codebase instructions** are about one codebase and are kept on this machine, not in the repository,
+so a cloned repository cannot write them. Edit them in **Settings → Skills → Codebase instructions**,
+or in **Fire Code** from a codebase's right-click menu → **Codebase instructions…**. A save reaches every
+chat on that codebase from its next message - nothing restarts. Only the first 20,000 characters are
+sent; keep them short, they are paid for on every request.
+
+**Standing instructions** are a skill with \`always: true\` (Settings → Skills → Standing
+instructions). They can live in the repository or a shared bucket, so they can apply to many
+codebases and a whole team. Fire Code's dialog has a button that opens them too.
 `,
   },
   {
@@ -1553,7 +1689,7 @@ called at all.
       'lost what i typed', 'draft', 'missing context', 'forgot', 'forgets', 'auto compact', 'compact automatically',
       'retry', 'retries', 'stuck thinking', 'thinking forever', 'hangs', 'connection dropped', 'timeout', '502', '429', 'drag and drop', 'drop a file', 'dropped', 'attach a file',
       'file is too large', 'drag an email', 'add files to context', 'add file to chat', 'copilot',
-      'select files', 'current file',
+      'select files', 'current file', 'handoff', 'hand over', 'new chat with handoff', 'new chat with a handoff', 'a handoff', 'start fresh', 'clean handover',
     ],
     body: `
 The token bar under the composer shows where the window is going — system prompt, tool
@@ -1567,6 +1703,14 @@ lost; it is just not all in the window at once.
 
 **Superseded reads are dropped** — if a file was read three times, only the latest matters. Repeated
 *commands* are not dropped, because running the tests twice gives two real answers.
+
+**A new chat with a handoff** (the button beside +, a page with an arrow): when a long chat is near the
+limit and compacting would blur it, start clean instead. The assistant writes a handoff - the goal, what
+is done and decided, the current state, open questions and next steps - and a new chat opens with it as
+its first message. Your own messages are quoted word for word, and the files read and changed and the
+commands run are listed from the actual tool calls, so nothing important rests on the summary alone. A
+progress panel shows each step and how much has been written; Cancel stops it, and a failure leaves the
+chat as it was. The old chat stays in History.
 
 **History is compacted only when you say so.** **Compact now** under the token bar summarises the
 older part (highlighted near the limit); the stored transcript keeps everything, only what is sent to
@@ -1776,8 +1920,15 @@ transcript was written.
       // Phrases, which score above their words: "dark mode" would otherwise go to Modes, where
       // "mode" is a keyword and the subject is something else entirely.
       'dark mode', 'light mode', 'change the colour', 'change the color',
+      'copy', 'paste', 'word', 'onenote', 'copy table', 'paste into word', 'formatting',
     ],
     body: `
+**Copying a reply keeps its formatting.** Select part of a reply and press Ctrl+C, or press a reply's
+**Copy** button for the whole of it: tables (with borders and a header row), headings, lists, quotes
+and code paste into Word, OneNote, a wiki or an email as they look in the chat - in dark text on a
+white page, whatever theme the editor uses. The plain-text version is the reply's Markdown, for wikis
+and Markdown editors.
+
 **Settings → Appearance.**
 
 **Accent colour** (config:ui.accentColor) and **expert colour** (config:ui.expertColor), both hex.

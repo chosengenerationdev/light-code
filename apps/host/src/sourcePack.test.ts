@@ -87,6 +87,19 @@ describe('what the source pack collects', () => {
     }
   })
 
+  it('stays small enough that a process per chat can afford to carry it', async () => {
+    /*
+     * Exported bundles in apps/host were packed into the next build, each carrying the previous
+     * pack: 57 MB raw, and about 130 MB of memory in every Fire Code chat. Measured on an idle
+     * host: 237 MB with that pack, 103 MB with the pack as it should be.
+     */
+    const { collectSource } = await loadPack()
+    const files = collectSource(repoRoot)
+    expect(Object.keys(files).filter((file) => /light-code-pkg/i.test(file))).toEqual([])
+    const raw = Object.values(files).reduce((total, text) => total + text.length, 0)
+    expect(raw).toBeLessThan(20 * 1024 * 1024)
+  })
+
   it('leaves out .tsbuildinfo, which is the one that is not obvious', async () => {
     /*
      * It cost a debugging round. TypeScript's record of what it has already compiled, consulted by

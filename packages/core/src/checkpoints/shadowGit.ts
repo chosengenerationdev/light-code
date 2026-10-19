@@ -14,9 +14,9 @@ interface GitResult {
   code: number
 }
 
-function runGit(args: string[], cwd: string): Promise<GitResult> {
+function runGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<GitResult> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile('git', args, { cwd, maxBuffer: 32 * 1024 * 1024, ...(env !== undefined ? { env } : {}) }, (error, stdout, stderr) => {
       if (error && typeof (error as { code?: unknown }).code !== 'number') {
         reject(error) // git missing or failed to spawn at all
         return
@@ -40,12 +40,38 @@ export class ShadowGit {
     private readonly workspaceRoot: string,
     /** Somewhere outside the workspace — the host passes a path under global storage. */
     private readonly shadowDir: string,
+    /**
+     * One object store for every chat on this codebase (Fire Code), so ten chats keep one copy of
+     * the codebase's snapshots rather than ten. Each chat keeps its own index and HEAD in
+     * `shadowDir` - those are what two chats committing at once would fight over - and only the
+     * objects, which are content-addressed and written atomically, are shared. Objects a chat wrote
+     * before this existed stay readable as an alternate, so an older checkpoint still restores.
+     */
+    private readonly sharedObjects?: string,
   ) {}
 
   private gitArgs(args: string[]): string[] {
     // A snapshot keeps bytes exactly as they were. Without this the user's global core.autocrlf
     // (true on most Windows installs) turned every LF file into CRLF on rollback.
-    return ['-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', '--git-dir', this.shadowDir, '--work-tree', this.workspaceRoot, ...args]
+    const base = ['-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false']
+    // gc in one chat sees only that chat's refs, so it would prune objects another chat's
+    // checkpoints still need. Nothing collects a shared store.
+    if (this.sharedObjects !== undefined) base.push('-c', 'gc.auto=0')
+    return [...base, '--git-dir', this.shadowDir, '--work-tree', this.workspaceRoot, ...args]
+  }
+
+  private sharedReady: Promise<unknown> | undefined
+
+  private async git(args: string[]): Promise<GitResult> {
+    if (this.sharedObjects === undefined) return runGit(this.gitArgs(args), this.workspaceRoot)
+    // Git refuses an object directory that is not there, and a restore can come before any snapshot.
+    this.sharedReady ??= fs.mkdir(this.sharedObjects, { recursive: true })
+    await this.sharedReady
+    return runGit(this.gitArgs(args), this.workspaceRoot, {
+      ...process.env,
+      GIT_OBJECT_DIRECTORY: this.sharedObjects,
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(this.shadowDir, 'objects'),
+    })
   }
 
   /**
@@ -73,10 +99,10 @@ export class ShadowGit {
 
     // Identity is set locally so the snapshot never depends on (or is attributed to) the
     // user's global git config.
-    await runGit(this.gitArgs(['config', 'user.name', 'Light Code']), this.workspaceRoot)
-    await runGit(this.gitArgs(['config', 'user.email', 'light-code@localhost']), this.workspaceRoot)
+    await this.git(['config', 'user.name', 'Light Code'])
+    await this.git(['config', 'user.email', 'light-code@localhost'])
     // The workspace's own .gitignore still applies, so node_modules and friends stay out.
-    await runGit(this.gitArgs(['config', 'core.excludesFile', '']), this.workspaceRoot)
+    await this.git(['config', 'core.excludesFile', ''])
   }
 
   private async isInitialized(): Promise<boolean> {
@@ -91,19 +117,16 @@ export class ShadowGit {
   async snapshot(): Promise<Checkpoint> {
     await this.init()
     await this.keepBytes()
-    await runGit(this.gitArgs(['add', '-A']), this.workspaceRoot)
+    await this.git(['add', '-A'])
 
     // `--allow-empty` so a snapshot with no changes since the last one still yields a
     // commit to roll back to, rather than silently failing.
-    const commit = await runGit(
-      this.gitArgs(['commit', '--allow-empty', '-m', `checkpoint ${new Date().toISOString()}`]),
-      this.workspaceRoot,
-    )
+    const commit = await this.git(['commit', '--allow-empty', '-m', `checkpoint ${new Date().toISOString()}`])
     if (commit.code !== 0 && !commit.stdout.includes('nothing to commit')) {
       throw new Error(`Could not create checkpoint: ${commit.stderr || commit.stdout}`)
     }
 
-    const head = await runGit(this.gitArgs(['rev-parse', 'HEAD']), this.workspaceRoot)
+    const head = await this.git(['rev-parse', 'HEAD'])
     if (head.code !== 0) {
       throw new Error(`Could not read checkpoint commit: ${head.stderr}`)
     }
@@ -115,11 +138,11 @@ export class ShadowGit {
    * too — otherwise "rollback" would leave the workspace in a state that never existed.
    */
   async restore(checkpoint: Checkpoint): Promise<void> {
-    const restore = await runGit(this.gitArgs(['restore', '--source', checkpoint.commit, '--worktree', '.']), this.workspaceRoot)
+    const restore = await this.git(['restore', '--source', checkpoint.commit, '--worktree', '.'])
     if (restore.code !== 0) {
       throw new Error(`Could not roll back to checkpoint: ${restore.stderr || restore.stdout}`)
     }
-    await runGit(this.gitArgs(['clean', '-fd']), this.workspaceRoot)
+    await this.git(['clean', '-fd'])
   }
 
   /**
@@ -131,13 +154,19 @@ export class ShadowGit {
   async restoreFiles(checkpoint: Checkpoint, files: readonly string[]): Promise<{ restored: string[]; removed: string[] }> {
     const restored: string[] = []
     const removed: string[] = []
+    // A file the checkpoint lacks is deleted below, so a checkpoint that cannot be read at all must
+    // stop here - otherwise every file would look new and be removed.
+    const readable = await this.git(['cat-file', '-e', `${checkpoint.commit}^{commit}`])
+    if (readable.code !== 0) {
+      throw new Error(`The checkpoint ${checkpoint.commit.slice(0, 12)} cannot be read, so nothing was rolled back: ${readable.stderr.trim()}`)
+    }
     for (const file of files) {
       const relative = path.relative(this.workspaceRoot, file)
       if (relative.startsWith('..') || path.isAbsolute(relative)) continue
       const spec = relative.split(path.sep).join('/')
-      const existed = await runGit(this.gitArgs(['cat-file', '-e', `${checkpoint.commit}:${spec}`]), this.workspaceRoot)
+      const existed = await this.git(['cat-file', '-e', `${checkpoint.commit}:${spec}`])
       if (existed.code === 0) {
-        const result = await runGit(this.gitArgs(['restore', '--source', checkpoint.commit, '--worktree', '--', spec]), this.workspaceRoot)
+        const result = await this.git(['restore', '--source', checkpoint.commit, '--worktree', '--', spec])
         if (result.code !== 0) throw new Error(`Could not roll back ${spec}: ${result.stderr || result.stdout}`)
         restored.push(spec)
       } else {

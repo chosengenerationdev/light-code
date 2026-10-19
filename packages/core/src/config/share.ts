@@ -293,6 +293,9 @@ export const NEVER_SHARED: readonly (keyof LightCodeConfig)[] = [
   'identity',
   // Language-server programs found on this machine, by path - another machine has its own.
   'lsp',
+  // Folders on this machine where add-ons are installed. The add-ons themselves travel as
+  // `mcpServers` entries, and each machine enables what it has installed.
+  'addons',
 ]
 
 export interface SectionSummary {

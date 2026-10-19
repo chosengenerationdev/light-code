@@ -1,6 +1,6 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
 import type { CredentialSummary, JupyterHubSpec } from '@light-code/core'
-import { CredentialPointerStore, createRelayLanguageModels, replaceFile, runFastFs } from '@light-code/core'
+import { CredentialPointerStore, createRelayDebugReader, createRelayLanguageModels, replaceFile, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -185,6 +185,13 @@ function createBrowserUi(
      */
     openDocument: async ({ title, content }) => post([`[info] ${title}`, '', content].join('\n')),
 
+    /*
+     * No editor here: skills, tools and the standing instructions open in the panel's own editor
+     * (Fire Code, the browser, JetBrains). Asked for: "i am not able to edit things like standing
+     * instruction with in fire code".
+     */
+    editsInPanel: true,
+
     /**
      * Reads the file and shows it, since the browser has no editor either.
      *
@@ -354,6 +361,8 @@ export interface SessionOptions {
   changeLedger?: { file: string; chat: string }
   /** One folder for every host's copies of bucket folders, so approvals are shared (Fire Code). */
   mirrorRoot?: string
+  /** What this codebase's chats share: checkpoint objects, venv, index bookkeeping, instructions. */
+  codebaseDir?: string
   /** This codebase's own @name in Fire Code. */
   mentionName?: string
   /** The workspace is a copy of JupyterHub folders (Fire Code). */
@@ -514,11 +523,17 @@ export async function createSession(
      * on every user's requests.
      */
     ...(options.shared !== true ? { languageModels: createRelayLanguageModels() } : {}),
+    /*
+     * A program paused in VS Code's debugger, read through the same relay - asked for so Fire Code can
+     * investigate it. Every open VS Code window is asked. IntelliJ and PyCharm are not yet (deferred).
+     */
+    ...(options.shared !== true ? { readDebugSession: createRelayDebugReader() } : {}),
     ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
     ...(options.noSchedules === true ? { runsSchedules: false } : {}),
     ...(options.siblings !== undefined && options.siblings.length > 0 ? { siblings: options.siblings } : {}),
     ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),
     ...(options.mirrorRoot !== undefined ? { mirrorRoot: options.mirrorRoot } : {}),
+    ...(options.codebaseDir !== undefined ? { codebaseDir: options.codebaseDir } : {}),
     ...(options.mentionName !== undefined ? { mentionName: options.mentionName } : {}),
     ...(options.jupyterHub !== undefined ? { jupyterHub: options.jupyterHub } : {}),
     ...(options.siblingHubs !== undefined ? { siblingHubs: options.siblingHubs } : {}),

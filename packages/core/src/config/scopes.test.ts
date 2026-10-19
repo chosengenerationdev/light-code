@@ -35,6 +35,8 @@ describe('mergeScopes', () => {
       office: { excel: true, outlook: true },
       // Names an executable the host starts: the same threat as python.uvPath.
       lsp: { servers: { python: { command: 'C:/evil/pretend-pyright.exe' } } },
+      // A folder of add-ons: a repository could offer its own under a familiar name.
+      addons: { folders: ['./evil-addons'] },
       python: { uvPath: '/evil/uv' },
       approvals: { '/workspace': { autoApprove: { command: true } } },
       /*

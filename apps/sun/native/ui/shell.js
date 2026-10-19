@@ -135,6 +135,7 @@ const HANDLERS = {
   },
   unload(m) {
     delete model.urls[m.id]
+    parked.delete(m.id)
     const frame = $(`.pane[data-id="${m.id}"] iframe`)
     if (frame !== null) frame.remove()
     renderPanes()
@@ -200,6 +201,19 @@ const HANDLERS = {
   },
   reports(m) {
     if (openModal?.kind === 'reportList') openModal.list(m.reports)
+  },
+  pathPicked(m) {
+    const frame = $(`.pane[data-id="${m.id}"] iframe`)
+    const url = model.urls[m.id]
+    if (frame?.contentWindow == null || url === undefined) return
+    frame.contentWindow.postMessage({ source: 'sun', picked: { purpose: m.purpose, path: m.path } }, new URL(url).origin)
+  },
+  instructions(m) {
+    if (openModal?.kind === 'instructions' && openModal.projectId === m.id) openModal.onInstructions(typeof m.text === 'string' ? m.text : '')
+  },
+  instructionsSaved(m) {
+    if (openModal?.kind === 'instructions' && openModal.projectId === m.id) openModal.onInstructionsSaved(m.ok === true, m.error)
+    else if (m.ok !== true) notice(m.error || 'The instructions could not be saved.', 'error')
   },
   gitDone(m) {
     notice(m.text, m.ok ? 'info' : 'error')
@@ -981,6 +995,57 @@ $('#resizer').addEventListener('pointerdown', (event) => {
 
 const panes = $('#panes')
 
+/*
+ * Chat pages that are hidden and idle are unloaded; the agent behind them keeps running.
+ *
+ * Every chat page is a whole copy of the chat UI - React, the transcript, highlighted code - and all
+ * of them stayed loaded for as long as their agents ran, so ten chats meant ten pages in memory
+ * while one was on screen. The agent is a separate process and its session outlives the page (the
+ * Node host buffers what happens while nothing is attached and replays the transcript when a page
+ * attaches again), so the page can go and come back. Only an idle one: a page reports when its agent
+ * is working or waiting for you, and that report is what drives the badges and notifications.
+ * Opening it again reloads it; the spent launch link is answered with a fresh one, as on a reload.
+ */
+const parked = new Set()
+const hiddenSince = {}
+/** A request for a chat page that may not be loaded yet, sent once it reports ready. */
+const pendingAsks = {}
+
+function deliverPendingAsk(key) {
+  const ask = pendingAsks[key]
+  const frame = $(`.pane[data-id="${key}"] iframe`)
+  const url = model.urls[key]
+  if (ask === undefined || frame?.contentWindow == null || url === undefined || frame.dataset.ready !== 'true') return
+  delete pendingAsks[key]
+  deliveredAsks[key] = { ask, at: Date.now() }
+  frame.contentWindow.postMessage({ source: 'sun', ask }, new URL(url).origin)
+}
+/*
+ * An unloaded page comes back with its spent launch link, says it is ready, and is then replaced by
+ * the page the fresh link opens - taking anything just asked of it along. An ask delivered moments
+ * before the link changed is asked again of the new page.
+ */
+const deliveredAsks = {}
+
+function parkIdlePages() {
+  const minutes = model.settings.unloadMinutes ?? 5
+  if (!(minutes > 0)) return
+  const now = Date.now()
+  for (const pane of panes.querySelectorAll('.pane')) {
+    const key = pane.dataset.id
+    const frame = $('iframe', pane)
+    if (frame === null || key === model.active || parked.has(key)) continue
+    const s = statusOf(key)
+    if (s.phase !== 'running' || s.agent !== 'idle') continue
+    if (hiddenSince[key] === undefined || now - hiddenSince[key] < minutes * 60_000) continue
+    // A dialog waiting on this codebase's page (a commit message, hub git) keeps it.
+    if (openModal?.projectId === projectOf(key)) continue
+    parked.add(key)
+    frame.remove()
+  }
+}
+setInterval(parkIdlePages, 30_000)
+
 function renderPanes() {
   const keys = []
   for (const project of model.projects) for (const key of chatKeys(project)) {
@@ -991,11 +1056,15 @@ function renderPanes() {
       panes.append(pane)
     }
     pane.classList.toggle('active', key === model.active)
+    if (key === model.active) {
+      parked.delete(key)
+      delete hiddenSince[key]
+    } else if (hiddenSince[key] === undefined) hiddenSince[key] = Date.now()
 
     const s = statusOf(key)
     const url = model.urls[key]
     let frame = $('iframe', pane)
-    if (url !== undefined && s.phase === 'running') {
+    if (url !== undefined && s.phase === 'running' && !parked.has(key)) {
       if (frame === null) {
         frame = el('iframe', {
           title: `Light Code — ${project.name}${key.includes('~') || project.firstChatName ? ` — ${chatName(key)}` : ''}`,
@@ -1006,14 +1075,37 @@ function renderPanes() {
         pane.prepend(frame)
       } else if (frame.dataset.url !== url) {
         // A fresh launch link: the old one was spent (a reload) or the host restarted.
-        frame.dataset.url = url
-        frame.src = url
+        if (frame.dataset.connected === 'true' && sameOrigin(frame.dataset.url, url)) {
+          // This page already has its session: keep it, and keep the link for the next load.
+          frame.dataset.url = url
+        } else {
+          /*
+           * A new frame, not a new address. The fresh link differs from the spent one only after the
+           * `#`, and assigning such an address does not reload the page - so a page showing "that link
+           * has already been used" stayed on it for good. A new frame always loads.
+           */
+          const recent = deliveredAsks[key]
+          if (recent !== undefined && Date.now() - recent.at < 15_000 && pendingAsks[key] === undefined) pendingAsks[key] = recent.ask
+          delete deliveredAsks[key]
+          const fresh = el('iframe', { title: frame.title, allow: frame.getAttribute('allow') ?? '', src: url })
+          fresh.dataset.url = url
+          frame.replaceWith(fresh)
+          frame = fresh
+        }
       }
     }
     renderPaneState(pane, project, s, frame !== null && s.phase === 'running', key)
   }
   for (const pane of panes.querySelectorAll('.pane')) {
     if (!keys.includes(pane.dataset.id)) pane.remove()
+  }
+}
+
+function sameOrigin(a, b) {
+  try {
+    return new URL(a).origin === new URL(b).origin
+  } catch {
+    return false
   }
 }
 
@@ -1104,8 +1196,17 @@ window.addEventListener('message', (event) => {
   if (typeof data.shortcut === 'string') shortcut(data.shortcut)
   // An accent picked in that codebase's own Appearance tab, or null to follow Fire Code's again.
   if (data.accent === null || validHex(data.accent)) send('projectAccent', { id: project.id, accent: data.accent })
+  if (data.connected === true) frame.dataset.connected = 'true'
+  // A Browse button: the page's agent has no dialog of its own, so Fire Code opens one.
+  if (data.pick !== null && typeof data.pick === 'object' && typeof data.pick.purpose === 'string') {
+    const kind = data.pick.kind === 'folder' ? 'folder' : 'file'
+    const extensions = Array.isArray(data.pick.extensions) ? data.pick.extensions.filter((e) => typeof e === 'string').slice(0, 20) : []
+    send('pickPath', { id: key, purpose: data.pick.purpose.slice(0, 200), kind, extensions })
+  }
   if (data.ready === true) {
+    frame.dataset.ready = 'true'
     sendAppearance(frame)
+    deliverPendingAsk(key)
     // The counts for a hub codebase arrive only from its host, so ask as soon as it is up.
     if (project.hub && key === project.id) askHubGit(project, 'status')
   }
@@ -1510,6 +1611,7 @@ function showMenu(project, x, y) {
     item('pin', 'Keep awake', () => send('keepAwake', { id: project.id, on: !project.keepAwake }), { checked: project.keepAwake }),
     el('hr'),
     item('settings', 'Settings source…', () => openConfigChooser(project)),
+    item('rename', 'Codebase instructions…', () => openInstructions(project)),
     project.hub ? item('link', 'JupyterHub settings…', () => openHubSettings(project)) : null,
     item('rename', 'Rename', () => startRename(project)),
     item('log', 'Reports…', () => openReportList(project)),
@@ -1552,6 +1654,113 @@ function startRename(project) {
 
 let openModal
 
+/**
+ * Codebase instructions: what every chat on this codebase is told, ahead of the standing
+ * instructions (a skill marked `always: true`, which may come from a team bucket and apply
+ * everywhere). Kept in Fire Code's data folder, not the repository, and read by each chat's host at
+ * its next message - so a save here reaches every chat without restarting anything.
+ */
+const INSTRUCTIONS_SENT_IN_FULL = 20000
+
+function openInstructions(project) {
+  showModal('instructions', (scrim, modal) => {
+    const state = { loaded: false, saved: '', saving: false }
+    const card = el('div', { class: 'modal', style: 'width: min(720px, calc(100vw - 48px))' })
+    scrim.append(card)
+    const box = el('textarea', {
+      class: 'instructions-box',
+      rows: '16',
+      spellcheck: 'true',
+      'aria-label': 'Codebase instructions',
+      placeholder:
+        'How this codebase works, for every chat on it. For example:\n- Run the tests with: pnpm test\n- Never edit generated files under src/generated\n- Use our logging helper, not print',
+    })
+    const count = el('span', { class: 'sub' })
+    const dirty = () => state.loaded && box.value !== state.saved
+    const refresh = () => {
+      const n = box.value.length
+      count.textContent = `${n.toLocaleString()} characters${n > INSTRUCTIONS_SENT_IN_FULL ? ` - only the first ${INSTRUCTIONS_SENT_IN_FULL.toLocaleString()} are sent` : ''}`
+      count.classList.toggle('form-error', n > INSTRUCTIONS_SENT_IN_FULL)
+      why(save, !state.loaded ? 'Still reading the saved instructions.' : state.saving ? 'Saving.' : !dirty() ? 'Nothing has changed since the last save.' : undefined)
+    }
+    box.disabled = true
+    box.addEventListener('input', refresh)
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        if (dirty() && !state.saving) save.click()
+      }
+    })
+    const save = el('button', {
+      class: 'primary',
+      text: 'Save',
+      onclick: () => {
+        state.saving = true
+        save.textContent = 'Saving…'
+        refresh()
+        send('saveInstructions', { id: project.id, text: box.value })
+      },
+    })
+    // The standing instructions are a skill, and only the codebase's own agent knows which folder
+    // holds it - so its chat opens it, in the same editor as any other skill.
+    const current = model.lastChat[project.id] ?? project.id
+    const running = model.urls[current] !== undefined && statusOf(current).phase === 'running'
+    const standing = el('button', {
+      class: 'secondary',
+      text: 'Edit standing instructions',
+      title: 'Opens the standing instructions in this codebase\'s chat.',
+      onclick: () => {
+        if (model.urls[current] === undefined) return notice('Start the codebase first - its agent finds the standing instructions.', 'error')
+        if (dirty()) return notice('Save or cancel the codebase instructions first.', 'error')
+        closeModal()
+        // Delivered when the page says it is ready: it may have been unloaded while hidden.
+        pendingAsks[current] = 'openStandingSkill'
+        if (model.active !== current) select(current)
+        deliverPendingAsk(current)
+      },
+    })
+    why(standing, running ? undefined : 'Start this codebase first - its agent finds the standing instructions.')
+    card.append(
+      el(
+        'header',
+        {},
+        el('h2', { text: `Codebase instructions — ${project.name}` }),
+        el('p', {
+          class: 'sub',
+          text:
+            'Every chat on this codebase gets these with every message, before the standing instructions. Where the two disagree these win, and what you say in a chat wins over both. Kept on this machine, not in the repository. Keep them short - they are paid for on every request.',
+        }),
+      ),
+      el('div', { class: 'body' }, box, el('div', { class: 'instructions-meta' }, count)),
+      el('footer', {}, standing, el('span', { class: 'spacer' }), el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }), save),
+    )
+    modal.projectId = project.id
+    modal.keepOpen = dirty
+    modal.onInstructions = (text) => {
+      state.loaded = true
+      state.saved = text
+      box.value = text
+      box.disabled = false
+      refresh()
+      box.focus()
+    }
+    modal.onInstructionsSaved = (ok, error) => {
+      state.saving = false
+      save.textContent = 'Save'
+      if (ok) {
+        state.saved = box.value
+        closeModal()
+        notice(`Saved. Every chat on ${project.name} uses them from its next message.`)
+      } else {
+        notice(error || 'The instructions could not be saved.', 'error')
+        refresh()
+      }
+    }
+    refresh()
+    send('instructions', { id: project.id })
+  })
+}
+
 function closeModal() {
   openModal?.node.remove()
   openModal = undefined
@@ -1561,7 +1770,8 @@ function closeModal() {
 function showModal(kind, build) {
   closeModal()
   const scrim = el('div', { class: 'scrim' })
-  scrim.addEventListener('pointerdown', (e) => e.target === scrim && closeModal())
+  // A modal holding unsaved typing says so through keepOpen, so a stray click beside it loses nothing.
+  scrim.addEventListener('pointerdown', (e) => e.target === scrim && openModal?.keepOpen?.() !== true && closeModal())
   openModal = { kind, node: scrim }
   build(scrim, openModal)
   $('#layer').append(scrim)
@@ -2086,6 +2296,18 @@ function openSettings() {
               { class: 'segmented' },
               ...sleepOptions.map(([value, label]) =>
                 el('button', { class: s.sleepMinutes === value ? 'on' : '', text: label, onclick: () => patch({ sleepMinutes: value }) }),
+              ),
+            ),
+          ),
+          el(
+            'div',
+            { class: 'row' },
+            el('span', { class: 'meta' }, el('b', { text: 'Unload hidden chat pages after' }), el('span', { text: 'Frees the memory of a chat page you are not looking at, while its agent keeps running. Never while it is working or waiting for you. Opening it again takes a moment.' })),
+            el(
+              'div',
+              { class: 'segmented' },
+              ...[[0, 'Never'], [2, '2 min'], [5, '5 min'], [15, '15 min']].map(([value, label]) =>
+                el('button', { class: (s.unloadMinutes ?? 5) === value ? 'on' : '', text: label, onclick: () => patch({ unloadMinutes: value }) }),
               ),
             ),
           ),

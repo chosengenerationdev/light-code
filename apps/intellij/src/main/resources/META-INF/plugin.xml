@@ -8,6 +8,9 @@
   <description><![CDATA[
     A minimal agentic coding assistant, for working inside an organisation.
     <ul>
+      <li>Light Code 0.139.0: new chat with a handoff; reads a program paused in VS Code's debugger.</li>
+      <li>Light Code 0.138.0: skills, tools and the standing instructions open in Light Code's own editor.</li>
+      <li>Light Code 0.137.0: replies copy with their formatting; Confluence pages are written from Markdown; links in a reply open in the default browser; AutoSys says the token needs only the consumer key and secret.</li>
       <li>Light Code 0.136.0: every greyed-out button says why when hovered; AutoSys asks for username and password plainly.</li>
       <li>Light Code 0.135.0: GitHub Copilot as a provider, through an open VS Code window with Light Code.</li>
       <li>Light Code 0.134.0: the company-directory lookup no longer uses PowerShell; a second Fire Code chat no longer reports its scheduler as stopped.</li>
@@ -47,6 +50,11 @@
   -->
   <change-notes><![CDATA[
     <ul>
+      <li>Light Code 0.144.0: Set up SSH key on the Linux add-on's tab; an add-on tab lists its tools.</li>
+      <li>Light Code 0.143.0: add-ons can bring their own settings tab; the Linux add-on (SSH, read-only commands, downloads).</li>
+      <li>Light Code 0.142.0: a chat page loaded twice no longer stops on "That link has already been used".</li>
+      <li>Light Code 0.141.0: .hubignore for JupyterHub codebases (no change in the IDE).</li>
+      <li>Light Code 0.140.0: add-ons (extra tools from Node packages you install), codebase instructions, and about 130 MB less memory for the Light Code process.</li>
       <li>Light Code 0.117.0: drafts kept, compaction at the token limit, Excel recalculation, tinted code blocks, dropped files and Outlook emails read in place, email attachments read.</li>
       <li>Light Code 0.116.0: Fire Code's fast file tools are introduced to the agent (no change in the IDE).</li>
       <li>Light Code 0.115.0: Python tools reading saved credentials safely; identical tools approved once (Fire Code).</li>

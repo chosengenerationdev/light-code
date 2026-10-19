@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { HostModelProvider, listHostModels, testHostModels, type HostLanguageModels } from '../../providers/hostModels.js'
 import type { StreamChunk } from '../../providers/types.js'
-import { createRelayLanguageModels, NO_VSCODE_WINDOW, startLmRelay } from './lmRelay.js'
+import { createRelayDebugReader, createRelayLanguageModels, NO_VSCODE_DEBUG, NO_VSCODE_WINDOW, startLmRelay } from './lmRelay.js'
 
 /**
  * GitHub Copilot from Fire Code and the Node host, through a VS Code window. Driven over a real pipe:
@@ -130,5 +130,49 @@ describe('a Copilot profile where VS Code cannot be reached', () => {
     expect(test.ok).toBe(false)
     expect(test.steps.at(-1)?.detail).toContain('not "gpt-9"')
     expect((await testHostModels(fakeVsCode(), 'gpt-4.1')).ok).toBe(true)
+  })
+})
+
+describe('a VS Code debug session, from Fire Code', () => {
+  const paused = {
+    sessionName: 'Python: app.py',
+    sessionType: 'python',
+    stopped: { reason: 'breakpoint', frames: [{ name: 'total', source: 'invoice.py', line: 42, scopes: [] }] },
+    recentOutput: ['starting'],
+  }
+
+  it('is served by a window with no language models at all, and read by the host', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-relay-'))
+    const relay = startLmRelay(undefined, { dir, debug: async () => paused as never })
+    disposers.push(() => relay.dispose())
+    await waitForFile(dir)
+    expect(await createRelayDebugReader({ dir })()).toMatchObject({ sessionName: 'Python: app.py', stopped: { reason: 'breakpoint' } })
+  })
+
+  it('asks every window, and prefers the one paused at a breakpoint', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-relay-'))
+    const running = { sessionName: 'Node: server', sessionType: 'node', recentOutput: [] }
+    for (const session of [running, paused, undefined]) {
+      const relay = startLmRelay(undefined, { dir, debug: async () => session as never })
+      disposers.push(() => relay.dispose())
+    }
+    // Three windows, three files.
+    for (let i = 0; i < 100 && readdirSync(dir).length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(readdirSync(dir)).toHaveLength(3)
+    // The paused one wins over the merely running one, whichever window is newest.
+    expect(await createRelayDebugReader({ dir })()).toMatchObject({ sessionName: 'Python: app.py' })
+  })
+
+  it('says to open VS Code when no window is serving', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-relay-'))
+    await expect(createRelayDebugReader({ dir })()).rejects.toThrow(NO_VSCODE_DEBUG)
+  })
+
+  it('answers "no session" from a window that is not debugging', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'lm-relay-'))
+    const relay = startLmRelay(fakeVsCode(), { dir, debug: async () => undefined })
+    disposers.push(() => relay.dispose())
+    await waitForFile(dir)
+    expect(await createRelayDebugReader({ dir })()).toBeUndefined()
   })
 })

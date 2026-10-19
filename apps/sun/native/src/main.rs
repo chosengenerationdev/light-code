@@ -234,6 +234,11 @@ enum Command {
     /// Close an extra chat: its agent stops; its history stays in its folder.
     CloseChat { id: String },
     RenameChat { id: String, name: String },
+    /// A Browse button in a chat page: the Node host has no dialog of its own, so Fire Code opens one.
+    PickPath { id: String, purpose: String, kind: String, #[serde(default)] extensions: Vec<String> },
+    /// The codebase instructions every chat on it is told: read for the dialog, and saved from it.
+    Instructions { id: String },
+    SaveInstructions { id: String, text: String },
 }
 
 fn main() {
@@ -322,6 +327,10 @@ fn main() {
         .with_devtools(cfg!(debug_assertions))
         // Reload and friends would rebuild every chat frame; nothing in Fire Code needs them.
         .with_browser_accelerator_keys(false)
+        // Every page here comes from this machine, so a cache saves almost nothing, and WebView2's
+        // grows into the hundreds of megabytes in the data folder. Capped at 32 MB. Setting these
+        // replaces wry's defaults, which are repeated first.
+        .with_additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disk-cache-size=33554432")
         .with_default_context_menus(cfg!(debug_assertions))
         .with_custom_protocol("sun".into(), |_id, request| serve(request))
         .with_ipc_handler(move |request: Request<String>| {
@@ -330,7 +339,8 @@ fn main() {
         // The shell itself never navigates away. Links a chat opens in a new window go to the browser.
         .with_navigation_handler(|url| url.starts_with(SHELL_ORIGIN) || url.starts_with("sun:") || url == "about:blank")
         .with_new_window_req_handler(|url, _features| {
-            if url.starts_with("https://") || url.starts_with("http://") {
+            // A link in a chat: the default browser, or the mail app for mailto (both schemes the chat allows).
+            if url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:") {
                 system::open_with_default_app(&url);
             }
             NewWindowResponse::Deny
@@ -765,6 +775,28 @@ impl App {
             Command::CheckFolders { path_prefix } => {
                 send(webview, json!({ "type": "folderStatus", "folders": environment::folder_status(&path_prefix) }));
             }
+            Command::PickPath { id, purpose, kind, extensions } => {
+                // Only a chat that exists, and only an answer the user chose in a Windows dialog.
+                if !self.state.has_chat(&id) || purpose.len() > 200 {
+                    return;
+                }
+                let mut dialog = rfd::FileDialog::new().set_parent(window);
+                if let Some(project) = self.state.project(&id) {
+                    if Path::new(&project.path).is_dir() {
+                        dialog = dialog.set_directory(&project.path);
+                    }
+                }
+                let picked = if kind == "folder" {
+                    dialog.set_title("Choose a folder").pick_folder()
+                } else {
+                    let names: Vec<&str> = extensions.iter().map(|e| e.trim_start_matches('.')).filter(|e| !e.is_empty() && e.len() <= 10).collect();
+                    let dialog = if names.is_empty() { dialog } else { dialog.add_filter("Files", &names) };
+                    dialog.set_title("Choose a file").pick_file()
+                };
+                if let Some(path) = picked {
+                    send(webview, json!({ "type": "pathPicked", "id": id, "purpose": purpose, "path": path.to_string_lossy() }));
+                }
+            }
             Command::PickEnvFolder { index } => {
                 let picked = rfd::FileDialog::new().set_title("Choose a folder to put on PATH").set_parent(window).pick_folder();
                 if let Some(folder) = picked {
@@ -1077,6 +1109,27 @@ impl App {
                     self.push_projects(webview);
                 }
             }
+            Command::Instructions { id } => {
+                let Some(project) = self.state.project(&id) else { return };
+                let pid = project.id.clone();
+                let text = std::fs::read_to_string(self.paths.instructions_file(&pid)).unwrap_or_default();
+                send(webview, json!({ "type": "instructions", "id": pid, "text": text.trim_start_matches('\u{feff}') }));
+            }
+            Command::SaveInstructions { id, text } => {
+                let Some(project) = self.state.project(&id) else { return };
+                let pid = project.id.clone();
+                // Read in full by every chat on every request; the host cuts at 20,000 characters and
+                // says so. This only refuses what cannot be meant.
+                let result = if text.len() > 200_000 {
+                    Err("Codebase instructions are limited to 200 KB - they are sent with every request.".to_string())
+                } else {
+                    state::write_atomic(&self.paths.instructions_file(&pid), &text.replace("\r\n", "\n"))
+                };
+                match result {
+                    Ok(()) => send(webview, json!({ "type": "instructionsSaved", "id": pid, "ok": true })),
+                    Err(error) => send(webview, json!({ "type": "instructionsSaved", "id": pid, "ok": false, "error": error })),
+                }
+            }
             Command::ProjectAccent { id, accent } => {
                 let valid = accent.filter(|a| a.len() == 7 && a.starts_with('#') && a[1..].chars().all(|c| c.is_ascii_hexdigit()));
                 if let Some(p) = self.state.project_mut(&id) {
@@ -1340,6 +1393,7 @@ impl App {
             no_schedules: state::chat_of(id).is_some(),
             change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
             mirror_dir: self.paths.root.join("mirrors"),
+            codebase_dir: self.paths.codebase_dir(id),
             approved_tools: self.paths.root.join("approved-tools.json"),
             jupyter_hub: match &project.hub {
                 Some(settings) => {

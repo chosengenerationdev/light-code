@@ -171,6 +171,26 @@ describe('writing a page', () => {
     expect(createConfluenceWritePageTool({ client: async () => client }).description).toContain('No default space')
   })
 
+  /** Reported: pages looked plainer than the chat. The model writes the Markdown it writes there. */
+  it('writes a page from Markdown, and the preview shows the converted page', async () => {
+    const { client } = fakeConfluence({
+      'GET /rest/api/content/42': { json: PAGE },
+      'GET /rest/api/content/42/child/attachment': { json: { results: [] } },
+    })
+    const tool = createConfluenceWritePageTool({ client: async () => client })
+    const markdown = ['## Status', '', '| Job | State |', '| --- | --- |', '| A | OK |'].join('\n')
+    const preview = await tool.preview?.({ pageId: '42', markdown }, NO_CONTEXT)
+    expect(preview).toMatchObject({ kind: 'diff', before: '<p>old</p>' })
+    expect(JSON.stringify(preview)).toContain('<h2>Status</h2><table><tbody><tr><th><p>Job</p></th>')
+  })
+
+  it('refuses markdown and body together rather than choosing one', async () => {
+    const { client } = fakeConfluence({})
+    const tool = createConfluenceWritePageTool({ client: async () => client, defaultSpace: 'TEAM' })
+    const result = await tool.execute({ title: 'x', body: '<p>a</p>', markdown: 'a' }, NO_CONTEXT)
+    expect(result).toMatchObject({ isError: true, content: expect.stringContaining('not both') })
+  })
+
   it('refuses a new page with no body', async () => {
     const { client } = fakeConfluence({})
     const tool = createConfluenceWritePageTool({ client: async () => client, defaultSpace: 'TEAM' })

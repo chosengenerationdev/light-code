@@ -48,6 +48,8 @@ apps/host          Node server + browser UI. Published as @chosengeneration/ligh
 apps/intellij      JetBrains plugin: a panel and a launcher that packs apps/host.
 apps/sun           Fire Code: a Windows app (Rust, WebView2) holding many codebases, one
                    Node host per codebase. Published as @chosengeneration/fire-code. §14b.
+addons/linux       The Linux add-on (SSH, read-only commands, downloads), its own npm package
+                   @chosengeneration/light-code-addon-linux. §12ai.
 ```
 
 pnpm workspaces. No Turborepo — the repo is too small to justify it.
@@ -2190,7 +2192,9 @@ refusals come back as the panel's own status line; and Test names exactly what i
 the page. `AutosysGateway.test.tsx` replays the report.
 
 **Token and Basic together** (`auth.sendBasic`, reported: the gateway needs its token *and* AutoSys's
-username and password). `withBasicCredentials` adds `Basic user:password` from the panel's existing
+username and password). **The token request carries the consumer key and secret alone** - the username
+and password go only on AutoSys calls; `autosysGateway.test.ts` pins that the token call never carries
+them, and the panel uses Apigee's names (consumer key / consumer secret). `withBasicCredentials` adds `Basic user:password` from the panel's existing
 username and password (no new secret) after the gateway's headers, in `basicHeaderName` (default
 `Authorization`). One header holds one value, so the save refuses the two sharing a header and says
 to move the token to a gateway header such as `x-apigee-token` — sending both would silently keep
@@ -2481,6 +2485,15 @@ the hub*. `packages/core/src/jupyter/`.
   Folders that contain one another are refused in both Rust and TypeScript.
 - Local diagnostics hide "import could not be resolved" for these codebases (`withoutMissingImports`):
   the hub's libraries are invisible here, so that message is always wrong there.
+- **`.hubignore`** (`jupyter/hubIgnore.ts`, Fire Code 0.36.0, asked for an Angular project): gitignore syntax in
+  any synced folder, parsed by `tools/nativeSearch.ts`'s `parseIgnoreFile` (one reading of the syntax), evaluated by
+  `ignoreDecision` starting from the **built-in skips** (dot-entries, `node_modules`, `.git`, venvs, caches) so `!`
+  can re-include one; `.hubignore` itself always syncs. Applied to the remote walk (an ignored folder is never even
+  listed), the local walk, `pending`, and `push` - which covers `afterEdit` (reported as "not synced", not a
+  failure, via `ignored: true`). Rules come from this machine's copy first, else the hub's. **A file synced before
+  it was listed is untracked, never deleted** (`PullResult.ignored`): the "gone from the hub" pass would otherwise
+  have deleted local build output. `hubGuidance` tells the agent to write one before installing or building.
+  `hubIgnore.test.ts` drives the real mirror.
 - **Not done**: local deletions are not pushed; edits made outside the agent need `hub_sync` push;
   no notebook (.ipynb) cell editing beyond the file's JSON. **Not verified against a real JupyterHub**
   (a real Jupyter Server at `/user/<name>/` stands in for one); hub-specific behaviour such as a
@@ -2824,6 +2837,152 @@ relies on a lock that a crashed window could leave held:
   all three kinds of store.
 - `concurrency.test.ts` runs three sessions against one folder at once, holds a write to land last, and
   forces endless races; it was run repeatedly to be sure it is not passing by luck.
+
+## 12ah. Codebase instructions, add-ons, and the cost of a chat (0.167.0, host 0.140.0, Fire Code 0.35.0)
+
+Asked for together: Fire Code "taking lot of ram / space", "creating more chat sessions also takes more
+space", codebase-level instructions above the standing ones and editable in Fire Code, and add-on Node
+apps that give both products more tools once installed.
+
+- **The host bundle carried copies of itself** - the biggest single cost, found by measuring rather than
+  guessing. `--export-pkg` writes `light-code-pkg-*.cjs` into `apps/host`; git ignores it and
+  `sourcePack.mjs` did not, so each build packed the previous exported bundle (each with its own pack):
+  32.8 MB gzipped, a 49.7 MB `cli.cjs`, and V8 holds a script's whole source. **Idle host: 237 MB before,
+  103 MB after**, per Fire Code chat. The pack now skips that name and any file over 2 MB, and
+  `sourcePack.test.ts` holds the raw pack under 20 MB. Node flags (`--max-semi-space-size`,
+  `--optimize-for-size`) were measured at ~2 MB and **not** adopted.
+- **What a codebase's chats share** (`HostServices.codebaseDir`, `--codebase-dir`, Fire Code passes
+  `projects/<id>/codebase`): checkpoint objects, the created Python venv, index bookkeeping, codebase
+  instructions. Each was per chat, so every chat added a copy of the codebase's snapshots and a venv.
+  - **Checkpoints share objects, never the index or refs** (`ShadowGit`'s third argument): each chat keeps
+    its own `shadow.git` (HEAD, index - what two chats committing at once would fight over) and git writes
+    objects to the shared store through `GIT_OBJECT_DIRECTORY`; the chat's older objects stay readable via
+    `GIT_ALTERNATE_OBJECT_DIRECTORIES`. **`gc.auto=0` on a shared store**: one chat's gc sees only its own
+    refs and would prune another chat's checkpoints. `sharedObjects.test.ts` runs real git.
+  - **Found while testing it:** `restoreFiles` deleted every listed file when the checkpoint commit could
+    not be read (each looked new). It now refuses first. Pre-existing, and worth not reintroducing.
+  - Index manifests are seeded once from the chat's own folder, so the upgrade does not re-embed.
+- **Hidden idle chat pages are unloaded** (Fire Code shell, `unloadMinutes`, default 5, 0 = never). The
+  agent keeps running - its session outlives the page (§14) - and only an **idle** page goes, because the
+  page's state word drives badges and notifications. Reopening reloads with the spent link, which the host
+  answers with a fresh one. Shell requests to a page (`ask:`) are queued until it says `ready`, and re-sent
+  if the link is replaced within 15 s, since the spent-link page says ready and is then replaced.
+  **That recovery never worked, and the fix is worth keeping (Fire Code 0.37.0, reported as tabs stuck on "That
+  link has already been used" after a restart):** a fresh link differs from the spent one only after the `#`,
+  and assigning such an address to a frame is a fragment navigation, not a load - so the page sat on its error.
+  Three changes, each enough alone: the shell gives a fresh link a **new frame** (`replaceWith`) unless the page
+  has posted `connected` and the origin is unchanged; the client keeps a session already in this tab's
+  `sessionStorage` when its link is refused; and it reloads on a `hashchange` carrying `#t=`.
+  `apps/sun/native/ui/shell.test.ts` is the first test of `shell.js` (jsdom, run as WebView2 runs it) and fails
+  against the old assignment.
+- WebView2's disk cache is capped at 32 MB (`with_additional_browser_args`, which **replaces** wry's
+  default `--disable-features=...` - repeated first).
+- **Codebase instructions** (`agent/codebaseInstructions.ts`): three levels, most specific first - the
+  chat, codebase instructions, standing instructions (`always: true` skills). Rendered just before the
+  skills, saying which wins; read every turn so a save reaches every chat's next message; cut at 20,000
+  characters with the model told. **Outside the repository on purpose** (a repo able to write it could
+  inject into every session): `<codebaseDir>/instructions/codebase-instructions.md`, else
+  `<storageDir>/codebases/<slug>-<digest of the case-folded path>/`. Its own folder because the panel
+  editor may open anything in the folder (`managedRoots`), and the codebase folder also holds the venv.
+  Edited in Settings → Skills (`openCodebaseInstructions`) or Fire Code's dialog (Rust
+  `Instructions`/`SaveInstructions`, `state::write_atomic`); `state.rs` pins the path against core's constant.
+- **Add-ons** (`addons/discover.ts`): an npm package with `"lightCode": { "addon": { "main": … } }` whose
+  main is an MCP stdio server. **MCP, not an in-process plugin API**: out of process (invariant 2 and the
+  secret store stay ours, a crash dies alone), and the approval gate, Always/Ask/Never, timeouts, deny
+  rules and the dispatcher all apply unchanged. Found in npm's global folder and `addons.folders`
+  (user-scope only, `NEVER_SHARED`). **Installed is not enabled**: Enable writes an ordinary `mcpServers`
+  entry tagged `addon: { package, version }`, so the MCP tab, JSON editor and export need nothing new.
+  **Every change to the server set goes through `configureMcp` → `runnableServers`** (`wiring.test.ts`
+  fails on a direct `mcp.configure`), which runs a tagged entry only at the enabled version, only while
+  installed, **never when the workspace config names it** (a repo could otherwise switch on an installed
+  add-on), and from where it is installed *here* with this host's runtime (`ELECTRON_RUN_AS_NODE` inside
+  VS Code). The panel shows the program before the second press (invariant 8).
+  `examples/light-code-addon-hello` is the copyable one; `endToEnd.test.ts` drives an add-on through the
+  real registry and SDK to a tool call, and a test keeps the example discoverable.
+- **Not verified in a running Fire Code window**: the instructions dialog and page unloading were checked by
+  `node --check`, the Rust build and tests, and the Fire Code smoke test (which starts an agent with
+  `--codebase-dir`), not by clicking through. The JetBrains plugin is bumped (0.4.32) and not built: no
+  Gradle on this machine.
+
+## 12ai. Add-on tabs, and the Linux add-on (0.169.0, host 0.143.0, Fire Code 0.38.0, add-on 0.1.0)
+
+Asked for: an add-on that connects to Linux machines, runs simple read-only commands and downloads
+files, with a tab (Linux icon) to add machines with labels - and, stated twice, **no tab in Light Code
+or Fire Code unless the add-on is installed**, and **no security alerts** from the connections.
+
+- **Add-on tabs are declared, never supplied** (`addons/page.ts`): `lightCode.addon.settings` gives a
+  title, own fields, and a record list (noun, `keyField`, `summary` template, fields with `showWhen`,
+  `actions` naming the add-on's own tools); `icon` an SVG inside the package (64 KB, shown only as an
+  `<img>` data URI, which never runs script). No add-on HTML or script enters the panel: it holds secrets
+  on screen and talks to the host. A broken page or icon is a `pageProblem`; the tools still work.
+- **The tab exists only while installed**: `SettingsPanel` asks `requestAddons` and builds `addon:<pkg>`
+  tabs from the answer, so uninstalling removes it, and an add-on without a page brings none.
+- **Delivery** (`addons/delivery.ts`): values in `addons.settings[<pkg>]` (user-scope, inside the
+  `NEVER_SHARED` `addons` block), secrets in secret storage as `addon:<pkg>:<record>:<field>`. At start
+  `configureMcp` writes `<data>/settings.json` (no secrets - a test asserts the password is absent) and
+  passes `LIGHT_CODE_ADDON_SETTINGS/DATA/DOWNLOADS` plus one `LC_SECRET_<hash>` per **stored** secret as a
+  `${secret:...}` reference, resolved by the MCP client like any server's (§15 permits it: the user typed
+  it into that add-on's own tab). An unstored secret is left out - an unresolvable reference would stop
+  the server starting. Saving restarts a running add-on so changed secrets apply. `<data>` is
+  `codebaseDir ?? storageDir` (per codebase in Fire Code, so a trusted host key is not re-trusted per chat).
+  Each installed add-on's `downloads` is a read root.
+- **Record buttons** call only an action the page declares (`<server>__<tool>`, `{ [keyField]: name }`),
+  and only for an enabled add-on: user-initiated, so no approval, but never an arbitrary tool.
+- **SSH runs in Node (`ssh2`), not plink or a Rust helper** - the user's question, answered: plink is on
+  EDR watch lists (attackers carry it), and a new unsigned binary opening SSH is the shape that got the
+  PowerShell directory lookup flagged. `ssh2` in the Node process already running Light Code adds no
+  program and no child process. One pooled connection per machine (10 idle minutes), keep-alives, and
+  **a refused sign-in is never retried** (no lockouts, no burst of failures in the remote auth log).
+  Bundled to one CJS file with ssh2's two native speed-ups left out (both load inside `try`), so
+  `npm i -g` fetches nothing else - `smoke.mjs` installs the packed tarball with plain npm and checks.
+- **Read-only is enforced before sending** (`addons/linux/src/readonly.ts`), not left to approval
+  ("Always" exists): no `; & > < $ ( ) backtick newline` outside single quotes, `|` between allow-listed
+  programs by bare name, per-program flag refusals (`find -delete/-exec`, `sort -o`, `uniq a b`, `xxd a b`,
+  `tail -f`, `journalctl --vacuum-*`, `dmesg -c`, `date -s`, `ss -K`, `systemctl` beyond status/show...).
+  `sed`, `awk`, `perl`, `python`, `xargs`, `sudo`, `env cmd` are absent by design. The user may add
+  programs on the tab. `readonly.test.ts` pins both what must pass and what must not.
+- **Host keys: trust on first use, then refuse a change** (`known-hosts.json`), naming both
+  fingerprints. `forget_host_key` is a tool (MCP cannot hide one from the model); its description says
+  only on the user's word, and it asks for approval like the rest.
+- **Never `agent: 'pageant'`**: ssh2 reaches Pageant that way by spawning its bundled `pagent.exe` - a new
+  executable (the promise this add-on exists to keep) that the bundle does not even carry, so 0.2.0's Pageant
+  could not work. 0.2.1 lists the named pipes for `pageant.<user>.*` (PuTTY 0.75+ listens there with the OpenSSH
+  agent protocol) and passes that path; `pageant.test.ts` drives a stand-in Pageant on a real named pipe.
+- Auth: Pageant (default; any key format), the Windows OpenSSH agent pipe, a key file (OpenSSH or
+  `.ppk` v2 RSA - `ssh2` cannot read `.ppk` v3, which is detected and explained), or a password
+  (also answers keyboard-interactive). Jump hosts via `forwardOut` from the bastion's pooled connection.
+- Tested against a real SSH server (ssh2's server side, in-process): sign-in, first-use trust, changed
+  key refused with nothing sent, password not retried, jump host, SFTP download, and the MCP tools.
+  `installed.test.ts` copies only the published files and runs them through core's discovery, delivery
+  and `McpRegistry`. **Not verified against a real Linux machine, Pageant or the Windows agent.**
+- In Fire Code each codebase with its own settings file has its own machine list (settings live in the
+  config); linking codebases to one settings file shares it.
+- **Panel-only tools** (0.170.0, for "Set up SSH key"): an MCP tool with `_meta["lightCode/panelOnly"]`
+  is kept out of the registry's tool list entirely (`McpRegistry.panelTools`), so neither the prompt nor
+  `call_tool` reaches it; only a declared page action does, through `callPanelTool`, which returns the
+  structured result. The add-on registers such a tool only when `LIGHT_CODE_ADDON_PANEL_TOOLS=1` (set by
+  delivery) - an older Light Code would list it to the model. Actions gained `confirm` (second press,
+  `{field}` filled) and `showWhen`. A result `{ lightCode: { recordUpdate } }` changes the record as if
+  typed (`cleanAddonValues`: declared fields only, never a secret).
+- **Set up SSH key** (`addons/linux/src/keySetup.ts`): one ed25519 key per PC at
+  `~/.ssh/light-code_ed25519` (reused, never replaced, `wx`; unencrypted as `ssh-keygen` defaults, and
+  `.ssh` is on the agent's never-read floor), installed by one fixed command whose only variable is the
+  generated public line, checked against its exact shape before quoting; proven by a key-only sign-in
+  before the record switches to `auth: key`. Tested against the in-process SSH server with real
+  signature checks, and a server refusing keys leaves the password in place.
+- Default add-on folders also read `prefix=` from the user's `.npmrc` (`NPM_CONFIG_USERCONFIG` honoured)
+  and look beside `node.exe` (nvm-windows) - never beside VS Code's own executable.
+- **Settings → Add-ons** (puzzle icon) holds the installed list, Enable, and the folders (with Browse);
+  the MCP tab no longer lists add-on servers (their config entry carries `addon`), so it shows only what
+  the user configured. **An add-on's own tab shows only while it is enabled** (the user's rule: disabled
+  means no tab; settings are kept). The add-on tab lists its tools with Ask/Always/Never, saved through
+  the same `setMcpToolPermission` the MCP tab uses, and re-reads itself on every `mcp` message.
+- **Browse works in Fire Code now**, every Browse button: the Node host has no dialog, so the chat page
+  sends `browseForPath` to the shell (`pick`), Rust opens an `rfd` dialog (`PickPath`, chat must exist,
+  purpose bounded), and the answer comes back as `picked` and is redelivered to the app as `pathPicked`.
+- **`done` is posted before a turn finishes** (it still saves the chat): `userTurnWindingDown` and
+  `userTurnSettled` let New chat with a handoff wait out that gap instead of refusing. `handoff.test.ts`
+  failed only on a loaded machine, three times, before its assertion was made to print the reason.
 
 ## 13. Python interop and skills (phase 9)
 
@@ -3530,7 +3689,13 @@ contained. The pane is the host's ordinary browser UI in an iframe, kept mounted
   ~1.1x on a light filtered count, which is bound by reading the file. `rusqlite` 0.40 `bundled`.
 - **Several chats per codebase** (0.4.0): tabs, each its own host on the same folder and settings,
   with stale-read refusal and per-file rollback - §12z.
-- **Not in Fire Code**: the debug-session tool and editor pickers, exactly as in the Node host.
+- **Chat pages unload while hidden and idle; a codebase's chats share checkpoints, venv and index bookkeeping** - §12ah.
+- **Not in Fire Code**: editor pickers, exactly as in the Node host. **The debug-session tool now is**
+  (0.166.0): `createRelayDebugReader` asks every VS Code window over the Copilot relay (`op: 'debug'`) and
+  prefers a session paused at a breakpoint; VS Code starts the relay and its output tracker at activation,
+  whether or not Copilot exists. **IntelliJ/PyCharm debug sessions are deferred by the user** ("can be done
+  later, but keep in your todolist"): Kotlin in `apps/intellij` reading `XDebuggerManager`, serving the same
+  snapshot shape; no Gradle on the development machine, so it cannot be built or tested here.
 - Fire Code's version lives in `npm/package.json` and `native/Cargo.toml`; `build.mjs` refuses a mismatch
   (and 66).
 
@@ -3722,6 +3887,41 @@ Primary development platform. These are silent-failure sources, not preferences.
   `disabledReasons.test.ts` reads every `.tsx` and fails on a `disabled={…}` element with no `title`.
   Fire Code's `shell.js` uses `why(node, reason | undefined)`, which remembers the control's own title.
   A reason names what to do where it can ("Save a team pool name first (step 1)"), not just "disabled".
+- **A new chat with a handoff** (`agent/handoff.ts`, `handleHandoff`, 0.166.0, asked for: compaction
+  "dilutes the chat", so start clean from a handoff the agent writes, with progress so it never looks hung).
+  The model writes the narrative (goal, done, decisions, state, open questions, next steps) from a capped
+  transcript - start kept, as much of the end as fits, one retry at half size if the model still refuses the
+  length. **Facts are not left to the model**: every user message verbatim (newest kept if they do not all
+  fit), and files read/changed and commands run from the actual tool calls, `call_tool` unwrapped. The new
+  chat opens with the handoff as its first message; the old one stays in History. `handoffProgress` is
+  posted at each phase and every 200 ms while writing; Cancel aborts the stream, and a failure leaves the
+  chat untouched. `handoff.test.ts` (host) drives it end to end against a stand-in model on loopback.
+- **Hosts without an editor edit in the panel** (`FileEditor.tsx`, `HostUi.editsInPanel`, 0.165.0, asked
+  for: "not able to edit things like standing instruction with in fire code"). `handleOpenManagedFile` is the
+  one choke point for every Open button and the standing-instructions button; with `editsInPanel` it posts
+  `editorFile` (content with `
+` endings, the file's mtime) instead of `openFile`, which there only pasted
+  the text into the chat. `saveEditorFile` re-confines to `managedRoots()` (the same list the open uses -
+  one owner), refuses when the mtime moved since opening, restores CRLF if the file was mostly CRLF, and
+  writes through `writeFileAtomically`. Admin-only on a shared server by the `save*` rule.
+  `panelEditor.test.ts` drives a running server: an edit lands, a stale save is refused, an outside path is.
+- **Copying a reply writes clean document HTML** (`richCopy.ts`, 0.164.0, asked for: paste into Word,
+  OneNote, a wiki or email "in the same format"). A browser's own copy carries the theme (white text that
+  vanishes on a white page) and drops stylesheet table borders, so the rendered reply is walked and
+  rewritten with neutral inline styles. Rendered elements say what they are with `data-copy` where the tag
+  does not (headings and quotes are styled `div`s; a code block's header is `skip`). One document-level
+  `copy` listener handles Ctrl+C on any selection touching `[data-copy-root]`; each reply has a Copy button
+  (`copyRich`, with an `execCommand` fallback for embedded browsers). **Style values go inside
+  `style="…"`, so they may not contain a double quote** - `"Courier New"` did, and broke the attribute.
+- **The Markdown parser lives in core** (`markdown/parse.ts`, re-exported by `ui/src/markdown.ts`), because
+  Confluence pages are written from it too (`markdown/confluence.ts`, `confluence_write_page`'s `markdown`):
+  headings, tables with a header row, the code macro (only its own language names - an unknown one is an
+  error on the page, so it falls back to plain), CDATA with `]]>` split. One reading of Markdown for both.
+- **A link in a reply is `target="_blank"`** (`MarkdownView.tsx`, 0.164.0). Each host turns a new-window
+  request into the right thing: VS Code opens externally, Fire Code's `with_new_window_req_handler` and the
+  JetBrains plugin's `onBeforePopup` hand http(s) and mailto to the default browser or mail app, a browser
+  opens a tab. Without it the click navigated the chat's own frame: in Fire Code the site refused to be
+  framed ("content is blocked"), in the browser host the chat page was replaced.
 - **Every change updates Light Code's own help and, when settings change, export/import.** The
   handbook (`help/topics.ts`) is what `light_code_help` repeats to users as fact, so a feature it does
   not describe — or describes as it used to be — is answered wrongly. Add the questions people would

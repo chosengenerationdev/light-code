@@ -177,6 +177,16 @@ if (embedder !== undefined) {
       window.parent.postMessage({ source: 'light-code', accent: null }, embedder)
       return true
     }
+    /*
+     * Browse. This host has no dialog of its own (a server cannot open one on your screen), so every
+     * Browse button did nothing in Fire Code. Fire Code can: the request goes to it, and the chosen
+     * path comes back below exactly as the host would have sent it.
+     */
+    if (outgoing?.type === 'browseForPath') {
+      const request = message as { purpose?: unknown; kind?: unknown; extensions?: unknown }
+      window.parent.postMessage({ source: 'light-code', pick: { purpose: request.purpose, kind: request.kind, extensions: request.extensions } }, embedder)
+      return true
+    }
     return false
   })
   window.addEventListener('message', (event) => {
@@ -187,11 +197,21 @@ if (embedder !== undefined) {
       op?: unknown
       message?: unknown
       appearance?: { theme?: unknown; accent?: unknown; own?: unknown }
+      picked?: { purpose?: unknown; path?: unknown }
     } | null
     if (data?.source !== 'sun') return
+    if (data.picked !== undefined && typeof data.picked.purpose === 'string' && typeof data.picked.path === 'string') {
+      transport.redeliver({ type: 'pathPicked', purpose: data.picked.purpose, path: data.picked.path })
+      return
+    }
     // Fire Code's commit dialog asks this codebase's agent for a message; the answer goes back below.
     if (data.ask === 'commitMessage') {
       transport.post({ type: 'suggestCommitMessage' })
+      return
+    }
+    // Fire Code's instructions dialog: the standing instructions are a skill only this host can find.
+    if (data.ask === 'openStandingSkill') {
+      transport.post({ type: 'openStandingSkill' })
       return
     }
     // Fire Code's git buttons for a JupyterHub codebase: git runs on the hub, through this host.
@@ -252,9 +272,22 @@ transport.onMessage((message) => {
   }
 })
 
+/*
+ * A fresh launch link for a page already open differs only after the `#`, and changing only that part
+ * of an address does not reload a page - so a page stuck on "that link has already been used" stayed
+ * stuck when its fresh link arrived. It reloads itself instead, and the reload reads the new link.
+ */
+window.addEventListener('hashchange', () => {
+  if (new URLSearchParams(window.location.hash.slice(1)).has('t')) window.location.reload()
+})
+
 transport
   .connect()
-  .then(() => createRoot(rootElement).render(<App transport={transport} />))
+  .then(() => {
+    // Fire Code: this page has its session, so a fresh link need not reload it.
+    if (embedder !== undefined) window.parent.postMessage({ source: 'light-code', connected: true }, embedder)
+    createRoot(rootElement).render(<App transport={transport} />)
+  })
   .catch((error: unknown) => {
     // Nothing further is coming, so the screen must not sit there: show the panel and the reason.
     clearTimeout(bootingTimer)

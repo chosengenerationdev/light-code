@@ -92,11 +92,31 @@ const SKIP_EXTENSIONS = new Set([
  * Paths use forward slashes whatever produced them, so a pack made on Windows unpacks the same
  * way on Linux — §16's rule applied to something that crosses machines by design.
  */
+/**
+ * No source file comes near this; `bridge.ts`, the largest, is under 700 KB.
+ *
+ * Found the expensive way (0.140.0). `--export-pkg` writes `light-code-pkg-<version>.cjs` into
+ * `apps/host`, git ignores it, and this walk did not: each exported bundle - already carrying a
+ * pack - was packed into the next, until the pack was 32 MB gzipped and the bundle 50 MB. Every
+ * Fire Code chat is a Node process that holds its bundle in memory, so that was about 130 MB per
+ * chat for a string almost nobody reads. The name rule catches that file; the size rule catches
+ * whatever is next.
+ */
+export const MAX_FILE_BYTES = 2 * 1024 * 1024
+
+/** What `--export-pkg` writes by default, possibly into this very folder. */
+const EXPORTED_BUNDLE = /^light-code-pkg/i
+
 export function collectSource(repoRoot) {
   const files = {}
 
   const add = (absolute) => {
     if (SKIP_EXTENSIONS.has(path.extname(absolute).toLowerCase())) return
+    if (EXPORTED_BUNDLE.test(path.basename(absolute))) return
+    if (fs.statSync(absolute).size > MAX_FILE_BYTES) {
+      console.warn(`[sourcePack] left out ${absolute}: larger than any source file should be`)
+      return
+    }
     const relative = path.relative(repoRoot, absolute).split(path.sep).join('/')
     files[relative] = fs.readFileSync(absolute, 'utf8')
   }

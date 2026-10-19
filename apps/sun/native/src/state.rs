@@ -120,6 +120,8 @@ pub struct WindowBounds {
 pub struct Settings {
     /// Minutes an idle codebase stays awake. 0 means never sleep.
     pub sleep_minutes: u32,
+    /// Minutes a hidden, idle chat page stays loaded; its agent keeps running. 0 means never unload.
+    pub unload_minutes: u32,
     pub sidebar_hidden: bool,
     pub sidebar_width: u32,
     pub last_project: Option<String>,
@@ -147,6 +149,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             sleep_minutes: 30,
+            unload_minutes: 5,
             sidebar_hidden: false,
             sidebar_width: 264,
             last_project: None,
@@ -238,6 +241,17 @@ impl Paths {
             Some(chat) => base.join("chats").join(chat),
             None => base,
         }
+    }
+    /// What every chat on one codebase shares: checkpoint objects, the created Python venv, index
+    /// bookkeeping and the codebase instructions. Each was kept per chat, so every new chat added
+    /// another copy of the codebase's snapshots and another venv.
+    pub fn codebase_dir(&self, key: &str) -> PathBuf {
+        self.root.join("projects").join(project_of(key)).join("codebase")
+    }
+    /// The codebase instructions every chat on it is told. The host reads the same file
+    /// (`agent/codebaseInstructions.ts`): `<codebase dir>/instructions/codebase-instructions.md`.
+    pub fn instructions_file(&self, key: &str) -> PathBuf {
+        self.codebase_dir(key).join("instructions").join("codebase-instructions.md")
     }
     pub fn webview_dir(&self) -> PathBuf {
         self.root.join("webview")
@@ -333,6 +347,21 @@ impl State {
     }
 }
 
+/// A whole file through a sibling and a rename: a chat reading it mid-save sees the old text or the new.
+pub fn write_atomic(file: &Path, text: &str) -> Result<(), String> {
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Could not create {}: {e}", parent.display()))?;
+    }
+    let temp = file.with_extension(format!("{}.tmp", std::process::id()));
+    fs::write(&temp, text).map_err(|e| format!("Could not write {}: {e}", temp.display()))?;
+    replace_file(&temp, file);
+    if temp.exists() {
+        let _ = fs::remove_file(&temp);
+        return Err(format!("Could not replace {}: another program has it open.", file.display()));
+    }
+    Ok(())
+}
+
 /// Rename over the target, retrying briefly. Windows refuses a rename over a file another program
 /// has open for that moment (antivirus, an indexer), which `replaceFile` in core answers the same way.
 fn replace_file(from: &Path, to: &Path) {
@@ -413,6 +442,19 @@ mod tests {
         assert_eq!(state.projects[1].config_file, r"C:\Users\a\AppData\Roaming\Code\config.json");
         assert_eq!(state.projects[2].config_file, r"C:\Users\a\AppData\Local\sun-light-code-old\config.json");
         assert!(!state.rebase(&old, &new));
+    }
+
+    #[test]
+    fn the_instructions_file_is_where_the_host_reads_it() {
+        // Two programs, one file: the dialog here writes it, every chat's host reads it each turn.
+        let core = include_str!("../../../../packages/core/src/agent/codebaseInstructions.ts");
+        assert!(core.contains("export const CODEBASE_INSTRUCTIONS_FILE = 'codebase-instructions.md'"));
+        assert!(core.contains("path.join(options.codebaseDir, 'instructions', CODEBASE_INSTRUCTIONS_FILE)"));
+        let paths = Paths { root: PathBuf::from("R") };
+        let expected = PathBuf::from("R").join("projects").join("abc").join("codebase").join("instructions").join("codebase-instructions.md");
+        assert_eq!(paths.instructions_file("abc"), expected);
+        // Every chat of the codebase reads the same one.
+        assert_eq!(paths.instructions_file("abc~3"), expected);
     }
 
     #[test]

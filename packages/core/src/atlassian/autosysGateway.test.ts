@@ -141,6 +141,13 @@ describe('the gateway form', () => {
     const api = calls.find((call) => call.url.startsWith('https://autosys.test/'))!
     expect(api.options.headers?.['x-apigee-token']).toBe('Bearer tok-1')
     expect(api.options.headers?.['Authorization']).toBe(`Basic ${Buffer.from('jsmith:pw').toString('base64')}`)
+    // The token is got with the consumer key and secret alone: AutoSys's username and password go only
+    // to AutoSys, never to the token URL (asked about directly).
+    const token = calls.find((call) => call.url.startsWith('https://gw.test/'))!
+    const sent = JSON.stringify(token.options)
+    expect(sent).toContain('lc-app')
+    expect(sent).not.toContain('jsmith')
+    expect(sent).not.toContain(Buffer.from('jsmith:pw').toString('base64'))
   })
 
   it('refuses the token and the Basic sign-in in one header, naming the way out', () => {

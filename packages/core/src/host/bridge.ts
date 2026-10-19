@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
 import { AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView, withBasicCredentials } from '../atlassian/autosysGateway.js'
-import type { AutosysGatewaySettings } from '../agent/protocol.js'
+import type { AddonView, AutosysGatewaySettings } from '../agent/protocol.js'
 import type { TlsOptions } from '../platform/http.js'
 import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
@@ -11,8 +11,25 @@ import { listSkillFiles } from '../skills/files.js'
 import { createHubRuntime, hubGuidance, withoutMissingImports } from '../jupyter/runtime.js'
 import { FileMachineApprovals } from '../python/machineApprovals.js'
 import { redact } from '../logging/redact.js'
-import { compactHistory, isSummaryMessage } from '../context/compact.js'
+import { compactHistory, isContextOverflow, isSummaryMessage } from '../context/compact.js'
 import { repairUnansweredToolCalls } from '../agent/repairHistory.js'
+import {
+  addonServerEntry,
+  addonState,
+  defaultAddonFolders,
+  discoverAddons,
+  missingAddons,
+  runnableServers,
+  type Addon,
+  type AddonProblem,
+} from '../addons/discover.js'
+import { addonDownloadsDir, deliveryFor, possibleSecretRefs } from '../addons/delivery.js'
+import { addonSecretRef, cleanAddonValues, recordUpdateFrom, type AddonStoredSettings } from '../addons/page.js'
+import {
+  codebaseInstructionsPath,
+  readCodebaseInstructions,
+  renderCodebaseInstructions,
+} from '../agent/codebaseInstructions.js'
 import { readToolCredential } from '../python/toolCredentials.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
 import { createHubTools, describePull } from '../jupyter/tools.js'
@@ -38,6 +55,7 @@ import {
   type ShareSectionId,
 } from '../config/share.js'
 import os from 'node:os'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   droppedFilesRoot as droppedFilesRootDir,
@@ -56,6 +74,7 @@ import { isOffloadable, offloadedCatalogue } from '../tools/offload.js'
 import { createHttpTool } from '../tools/http.js'
 import { negotiateRequest } from '../platform/node/negotiateHttp.js'
 import { CONTINUE_PROMPT } from '../agent/unfinished.js'
+import { composeHandoff, handoffFacts, handoffTranscript, HANDOFF_PROMPT } from '../agent/handoff.js'
 import { searchMentions, type MentionIndex } from '../context/mentionSearch.js'
 import { siblingMention } from '../context/mentions.js'
 import { ChangeLedger, RecordedChanges } from '../checkpoints/changeLedger.js'
@@ -641,9 +660,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * turns it on — §13 requires the feature not to exist until someone enables it, and an
    * inert object is easier to reason about than a conditionally-undefined one.
    */
+  /*
+   * Index bookkeeping ("everything up to here is embedded") is about the codebase and the store,
+   * not about a chat - kept per chat, every new chat would re-embed the whole repository. Seeded
+   * once from this chat's own folder, so an upgrade does not re-embed either.
+   */
+  const manifestsRoot = services.codebaseDir ?? storageDir
+  /** What every chat on this codebase is told; see `agent/codebaseInstructions.ts`. */
+  const codebaseInstructionsFile = codebaseInstructionsPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot })
+  if (services.codebaseDir !== undefined) {
+    const shared = path.join(services.codebaseDir, 'index-manifests')
+    void fs
+      .access(shared)
+      .catch(() => fs.cp(path.join(storageDir, 'index-manifests'), shared, { recursive: true, errorOnExist: false, force: false }))
+      .catch(() => undefined)
+  }
+
   const python: PythonManager = new PythonManager({
     workspaceRoot,
     storageDir,
+    ...(services.codebaseDir !== undefined ? { venvRoot: services.codebaseDir } : {}),
     logger,
     // Fire Code: one review per tool's code on this machine, however many codebases hold it.
     ...(services.machineApprovalsFile !== undefined ? { machineApprovals: machineApprovals } : {}),
@@ -1031,24 +1067,88 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   async function handleOpenManagedFile(filePath: string): Promise<void> {
     try {
-      if (ui.openFile === undefined) {
+      if (ui.openFile === undefined && ui.editsInPanel !== true) {
         ui.showWarning('This host cannot open files. The path is shown beside each entry.')
         return
       }
-      const roots = [
-        python.toolsDirectory(),
-        ...(skillsDir === undefined ? [] : [skillsDir]),
-        ...extraSkillDirs.filter((dir): dir is string => dir !== undefined),
-        // Reports a scheduled run wrote. Confined like everything else here: the path arrives
-        // from the UI, which only ever sends one it was given, and "the UI would not do that"
-        // is not a boundary when the result is opening a file in the user's editor.
-        path.join(storageDir, 'reports'),
-      ]
+      // Skills, tools, and reports a scheduled run wrote. Confined: the path arrives from the UI, which
+      // only ever sends one it was given, and "the UI would not do that" is not a boundary.
+      const roots = managedRoots()
       if (roots.length === 0) return
+      if (ui.editsInPanel === true) {
+        await openInPanelEditor(filePath)
+        return
+      }
       const real = await confineToAny(path.resolve(filePath), roots)
-      await ui.openFile(real)
+      await ui.openFile?.(real)
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  /** Where a skill or tool may be opened from, and saved to: the folders those things live in. */
+  function managedRoots(): string[] {
+    return [
+      python.toolsDirectory(),
+      ...(skillsDir === undefined ? [] : [skillsDir]),
+      ...extraSkillDirs.filter((dir): dir is string => dir !== undefined),
+      path.join(storageDir, 'reports'),
+      // Its own folder: nothing else lives there.
+      ...(codebaseInstructionsFile === undefined ? [] : [path.dirname(codebaseInstructionsFile)]),
+    ].filter((dir) => dir.length > 0)
+  }
+
+  /** Whether a file is mostly CRLF: the panel edits with \n and puts the file's own endings back on save. */
+  function mostlyCrlf(text: string): boolean {
+    const crlf = text.split('\r\n').length - 1
+    return crlf > text.split('\n').length - 1 - crlf
+  }
+
+  /** The largest file the panel's editor opens. Skills and tools are pages; anything larger is not one. */
+  const EDITOR_MAX_BYTES = 2 * 1024 * 1024
+
+  /**
+   * Opens a skill or tool in the panel's own editor - for a host with no editor (Fire Code, the browser),
+   * where `openFile` could only show the text. Asked for: "i am not able to edit things like standing
+   * instruction with in fire code". Confined exactly as `handleOpenManagedFile` is.
+   */
+  async function openInPanelEditor(filePath: string): Promise<void> {
+    const real = await confineToAny(path.resolve(filePath), managedRoots())
+    const stat = await fs.stat(real)
+    if (stat.size > EDITOR_MAX_BYTES) throw new Error(`${path.basename(real)} is too large to edit here (${String(Math.round(stat.size / 1024))} KB).`)
+    const raw = await fs.readFile(real, 'utf8')
+    const crlf = mostlyCrlf(raw)
+    post({ type: 'editorFile', path: real, name: path.basename(real), content: raw.split('\r\n').join('\n'), mtimeMs: stat.mtimeMs, eol: crlf ? 'crlf' : 'lf' })
+  }
+
+  /**
+   * Saves from the panel's editor. Confined again (the path comes back from the UI, which is not a
+   * boundary), written whole through a temporary file, and refused when the file changed on disk after
+   * it was opened - another chat, the agent or a sync - rather than putting back what someone replaced.
+   */
+  async function handleSaveEditorFile(filePath: string, content: string, mtimeMs: number): Promise<void> {
+    try {
+      const real = await confineToAny(path.resolve(filePath), managedRoots())
+      const current = await fs.stat(real).catch(() => undefined)
+      if (current !== undefined && Math.abs(current.mtimeMs - mtimeMs) > 1) {
+        post({
+          type: 'editorSaved',
+          path: real,
+          ok: false,
+          conflict: true,
+          message: `${path.basename(real)} was changed on disk after you opened it. Copy your text, close the editor, and open it again to see the new version.`,
+        })
+        return
+      }
+      const before = current === undefined ? '' : await fs.readFile(real, 'utf8')
+      const crlf = mostlyCrlf(before)
+      await writeFileAtomically(real, crlf ? content.split('\r\n').join('\n').split('\n').join('\r\n') : content)
+      const saved = await fs.stat(real)
+      post({ type: 'editorSaved', path: real, ok: true, mtimeMs: saved.mtimeMs })
+      // Skills are read per turn and listed in the tab; a tool's watcher sees the change and asks for review.
+      await postSkills().catch(() => undefined)
+    } catch (error) {
+      post({ type: 'editorSaved', path: filePath, ok: false, message: error instanceof Error ? error.message : String(error) })
     }
   }
 
@@ -1086,6 +1186,29 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
     await postSkills()
     await handleOpenManagedFile(target)
+  }
+
+  /**
+   * Opens this codebase's instructions, creating the file empty the first time - in the editor, or
+   * in the panel's own editor where there is none (Fire Code). Every chat on the codebase reads it
+   * at its next message.
+   */
+  async function handleOpenCodebaseInstructions(): Promise<void> {
+    if (codebaseInstructionsFile === undefined) {
+      ui.showWarning('Open a folder first - codebase instructions belong to a codebase.')
+      return
+    }
+    try {
+      await fs.mkdir(path.dirname(codebaseInstructionsFile), { recursive: true })
+      // Never overwrite: written by Fire Code's dialog, another chat, or the user.
+      await fs.writeFile(codebaseInstructionsFile, '', { encoding: 'utf8', flag: 'wx' })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        return
+      }
+    }
+    await handleOpenManagedFile(codebaseInstructionsFile)
   }
 
   async function handleDeletePythonTool(name: string, filePath?: string): Promise<void> {
@@ -2098,6 +2221,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * tell the two apart.
    */
   let userTurnRunning = false
+  /**
+   * The user's turn as a promise, and whether it has already told the panel it is done.
+   *
+   * `done` is posted from inside the turn, which then still saves the chat and tidies up. A press
+   * in that gap - New chat with a handoff, straight after a reply - found the turn "still running"
+   * and was refused for a reply the user could see had finished. Found by the handoff test failing
+   * only on a loaded machine, which widens the gap.
+   */
+  let userTurnSettled: Promise<void> | undefined
+  let userTurnWindingDown = false
 
   /** Set while a scheduled run is in flight, so a user message can wait for it rather than interleave. */
   let scheduledRunInFlight: Promise<void> | undefined
@@ -3949,17 +4082,348 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return combined
   }
 
+  /*
+   * Add-ons (`addons/discover.ts`): installed packages that run an MCP server. Looked for again on
+   * every sync, so one installed while the panel is open is found the next time settings load or
+   * the MCP tab is opened.
+   */
+  let installedAddons: Addon[] = []
+  let addonProblems: AddonProblem[] = []
+  /**
+   * Where each add-on keeps its data (trusted host keys, downloads): per codebase where several chats
+   * share one (Fire Code), so a key trusted in one chat is not trusted afresh in the next.
+   */
+  const addonRoot = services.codebaseDir ?? storageDir
+
+  /** The user's `.npmrc`, for where `npm i -g` puts packages when its prefix was changed. */
+  function readUserNpmrc(): string | undefined {
+    try {
+      return readFileSync(process.env['NPM_CONFIG_USERCONFIG'] ?? path.join(os.homedir(), '.npmrc'), 'utf8')
+    } catch {
+      return undefined
+    }
+  }
+
+  function addonFolders(config: LightCodeConfig): { configured: string[]; defaults: string[] } {
+    return {
+      configured: (config.addons?.folders ?? []).map((folder) => path.resolve(folder)),
+      defaults: defaultAddonFolders(process.env, process.execPath, process.platform, readUserNpmrc()),
+    }
+  }
+
+  async function rescanAddons(config: LightCodeConfig): Promise<void> {
+    const folders = addonFolders(config)
+    const found = await discoverAddons([...folders.configured, ...folders.defaults])
+    installedAddons = found.addons
+    addonProblems = found.problems
+  }
+
+  /**
+   * Every change to the server set goes through here, so an add-on runs only at the version enabled,
+   * only from the user's own settings, and from wherever it is installed on this machine.
+   */
+  async function configureMcp(servers: McpServersConfig): Promise<void> {
+    const { config, workspaceMcpServers } = await configManager.load()
+    // What each add-on's own tab holds, written where the add-on reads it, and its secrets as
+    // references the MCP client resolves at start (`addons/delivery.ts`).
+    const delivered = new Map<string, Record<string, string>>()
+    for (const addon of installedAddons) {
+      if (addon.page === undefined) continue
+      const settings = config.addons?.settings?.[addon.package]
+      const stored = new Set<string>()
+      for (const ref of possibleSecretRefs(addon, settings)) if ((await secrets.get(ref)) !== undefined) stored.add(ref)
+      const delivery = deliveryFor(addonRoot, addon, settings, stored)
+      try {
+        await writeFileAtomically(delivery.file, JSON.stringify(delivery.contents, null, 2))
+        await fs.mkdir(addonDownloadsDir(addonRoot, addon), { recursive: true })
+        delivered.set(addon.package, delivery.env)
+      } catch (error) {
+        logger.warn(`Could not write the settings for add-on ${addon.package}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    await mcp.configure(
+      runnableServers(
+        servers,
+        installedAddons,
+        { execPath: process.execPath, electron: process.versions['electron'] !== undefined },
+        workspaceMcpServers,
+        (addon) => delivered.get(addon.package) ?? {},
+      ),
+    )
+  }
+
+  /** An installed add-on's own tab, as the panel shows it: values, and which secrets are set. */
+  async function postAddonPage(pkg: string, extra: { error?: string; saved?: boolean } = {}): Promise<void> {
+    const { config } = await configManager.load()
+    const addon = installedAddons.find((candidate) => candidate.package === pkg)
+    if (addon?.page === undefined) {
+      post({ type: 'addonPage', package: pkg, error: `${pkg} is not installed, or has no settings of its own.` })
+      return
+    }
+    const settings = config.addons?.settings?.[pkg]
+    const isSet = async (recordId: string | undefined, fields: readonly { key: string; type: string }[]): Promise<string[]> => {
+      const set: string[] = []
+      for (const field of fields) {
+        if (field.type === 'secret' && (await secrets.get(addonSecretRef(pkg, recordId, field.key))) !== undefined) set.push(field.key)
+      }
+      return set
+    }
+    post({
+      type: 'addonPage',
+      package: pkg,
+      ...extra,
+      view: {
+        package: pkg,
+        displayName: addon.displayName,
+        ...(addon.icon !== undefined ? { icon: addon.icon } : {}),
+        page: addon.page,
+        state: addonState(addon, config.mcpServers ?? {}),
+        values: settings?.values ?? {},
+        secretsSet: await isSet(undefined, addon.page.fields ?? []),
+        records: await Promise.all(
+          (settings?.records ?? []).map(async (record) => ({ ...record, secretsSet: await isSet(record.id, addon.page?.records?.fields ?? []) })),
+        ),
+        tools: (mcp.states_().find((server) => server.name === addon.server)?.tools ?? []).map((tool) => ({
+          name: tool.namespacedName,
+          server: addon.server,
+          tool: tool.name,
+          description: tool.description,
+          permission: tool.permission,
+        })),
+      },
+    })
+  }
+
+  /** Writes an add-on's settings, then restarts it if it is running so its tools see them at once. */
+  async function storeAddonSettings(addon: Addon, next: AddonStoredSettings): Promise<void> {
+    const { config } = await configManager.load()
+    const all = { ...(config.addons?.settings ?? {}), [addon.package]: next }
+    await configManager.save('user', { addons: { ...(config.addons ?? {}), settings: all } })
+    const reloaded = (await configManager.load()).config
+    await configureMcp(reloaded.mcpServers ?? {})
+    if (mcp.states_().some((server) => server.name === addon.server && server.status === 'ready')) {
+      await mcp.restart(addon.server).catch(() => undefined)
+    }
+  }
+
+  async function writeAddonSecrets(
+    pkg: string,
+    recordId: string | undefined,
+    fields: readonly { key: string; type: string }[],
+    given: Record<string, string>,
+    clear: readonly string[] = [],
+  ): Promise<void> {
+    for (const field of fields) {
+      if (field.type !== 'secret') continue
+      const ref = addonSecretRef(pkg, recordId, field.key)
+      const value = given[field.key]
+      if (typeof value === 'string' && value.length > 0) await secrets.set(ref, value)
+      else if (clear.includes(field.key)) await secrets.delete(ref)
+    }
+  }
+
+  async function handleSaveAddonRecord(message: Extract<UiToHostMessage, { type: 'saveAddonRecord' }>): Promise<void> {
+    const addon = installedAddons.find((candidate) => candidate.package === message.package)
+    const spec = addon?.page?.records
+    if (addon === undefined || spec === undefined) return postAddonPage(message.package, { error: 'This add-on keeps no list.' })
+    const cleaned = cleanAddonValues(spec.fields, message.values)
+    if (!cleaned.ok) return postAddonPage(message.package, { error: cleaned.message })
+    const { config } = await configManager.load()
+    const current = config.addons?.settings?.[addon.package] ?? {}
+    const records = [...(current.records ?? [])]
+    const name = String(cleaned.values[spec.keyField] ?? '')
+    const clash = records.find((record) => record.id !== message.id && String(record.values[spec.keyField] ?? '').toLowerCase() === name.toLowerCase())
+    if (clash !== undefined) return postAddonPage(message.package, { error: `There is already a ${spec.noun} called "${name}".` })
+    let id = message.id
+    if (id === undefined) {
+      if (records.length >= (spec.max ?? 500)) return postAddonPage(message.package, { error: `No more than ${String(spec.max ?? 500)} ${spec.noun}s.` })
+      id = randomBytes(6).toString('hex')
+      records.push({ id, values: cleaned.values })
+    } else {
+      const at = records.findIndex((record) => record.id === id)
+      if (at < 0) return postAddonPage(message.package, { error: `That ${spec.noun} no longer exists.` })
+      records[at] = { id, values: cleaned.values }
+    }
+    await writeAddonSecrets(addon.package, id, spec.fields, message.secrets, message.clearSecrets)
+    await storeAddonSettings(addon, { ...current, records })
+    await postAddonPage(message.package, { saved: true })
+  }
+
+  async function handleDeleteAddonRecord(pkg: string, id: string): Promise<void> {
+    const addon = installedAddons.find((candidate) => candidate.package === pkg)
+    const spec = addon?.page?.records
+    if (addon === undefined || spec === undefined) return postAddonPage(pkg)
+    const { config } = await configManager.load()
+    const current = config.addons?.settings?.[pkg] ?? {}
+    // Its secrets go with it: an orphan in secret storage is a password nobody can see or remove.
+    await writeAddonSecrets(pkg, id, spec.fields, {}, spec.fields.map((field) => field.key))
+    await storeAddonSettings(addon, { ...current, records: (current.records ?? []).filter((record) => record.id !== id) })
+    await postAddonPage(pkg, { saved: true })
+  }
+
+  async function handleSaveAddonValues(message: Extract<UiToHostMessage, { type: 'saveAddonValues' }>): Promise<void> {
+    const addon = installedAddons.find((candidate) => candidate.package === message.package)
+    const fields = addon?.page?.fields
+    if (addon === undefined || fields === undefined) return postAddonPage(message.package)
+    const cleaned = cleanAddonValues(fields, message.values)
+    if (!cleaned.ok) return postAddonPage(message.package, { error: cleaned.message })
+    const { config } = await configManager.load()
+    await writeAddonSecrets(addon.package, undefined, fields, message.secrets, message.clearSecrets)
+    await storeAddonSettings(addon, { ...(config.addons?.settings?.[addon.package] ?? {}), values: cleaned.values })
+    await postAddonPage(message.package, { saved: true })
+  }
+
+  /**
+   * A record's button: one of the add-on's own declared tools, about that record. The user pressed it
+   * on the record they are looking at, so it is theirs rather than the agent's and asks no approval -
+   * but only a tool the page declares, so the panel cannot be used to call anything else.
+   */
+  async function handleRunAddonAction(pkg: string, id: string, tool: string): Promise<void> {
+    const reply = (ok: boolean, text: string): void => post({ type: 'addonActionResult', package: pkg, id, tool, ok, text })
+    const addon = installedAddons.find((candidate) => candidate.package === pkg)
+    const spec = addon?.page?.records
+    if (addon === undefined || spec === undefined || !(spec.actions ?? []).some((action) => action.tool === tool)) return reply(false, 'That button is not one this add-on declares.')
+    const { config } = await configManager.load()
+    if (addonState(addon, config.mcpServers ?? {}) !== 'enabled') return reply(false, `Enable ${addon.displayName} first, on the Add-ons tab in Settings.`)
+    const record = (config.addons?.settings?.[pkg]?.records ?? []).find((candidate) => candidate.id === id)
+    if (record === undefined) return reply(false, `That ${spec.noun} no longer exists.`)
+    await mcp.ensureConnected()
+    try {
+      // The registry's own call: reaches a tool kept from the model for exactly this, and returns
+      // the add-on's structured answer, which the model-facing rendering drops.
+      const result = await mcp.callPanelTool(addon.server, tool, { [spec.keyField]: record.values[spec.keyField] })
+      /*
+       * The add-on may ask for its record to change - "sign in with the key just set up". Applied as
+       * if typed on the tab: declared fields only, checked, never a secret.
+       */
+      const update = result.isError ? undefined : recordUpdateFrom(result.structured)
+      if (update !== undefined) {
+        const cleaned = cleanAddonValues(spec.fields, { ...record.values, ...update })
+        if (cleaned.ok) {
+          const current = config.addons?.settings?.[pkg] ?? {}
+          await storeAddonSettings(addon, { ...current, records: (current.records ?? []).map((r) => (r.id === id ? { id, values: cleaned.values } : r)) })
+          await postAddonPage(pkg)
+        }
+      }
+      reply(!result.isError, result.text.slice(0, 4000))
+    } catch (error) {
+      reply(false, error instanceof Error ? error.message : String(error))
+    }
+  }
+
   async function syncMcpFromConfig(config: LightCodeConfig): Promise<void> {
     const servers: McpServersConfig = config.mcpServers ?? {}
     setMcpServersState(servers)
-    await mcp.configure(servers)
+    await rescanAddons(config).catch(() => undefined)
+    await configureMcp(servers)
+  }
+
+  async function postAddons(error?: string): Promise<void> {
+    const { config } = await configManager.load()
+    await rescanAddons(config)
+    const servers = config.mcpServers ?? {}
+    const folders = addonFolders(config)
+    const addons: AddonView[] = installedAddons.map((addon) => {
+      const state = addonState(addon, servers)
+      const enabled = (servers[addon.server] as { addon?: { version?: string } } | undefined)?.addon?.version
+      return {
+        package: addon.package,
+        version: addon.version,
+        displayName: addon.displayName,
+        ...(addon.description !== undefined ? { description: addon.description } : {}),
+        dir: addon.dir,
+        main: addon.main,
+        server: addon.server,
+        state,
+        ...(state === 'updated' && enabled !== undefined ? { enabledVersion: enabled } : {}),
+        ...(addon.page !== undefined ? { pageTitle: addon.page.title } : {}),
+        ...(addon.icon !== undefined ? { icon: addon.icon } : {}),
+        ...(addon.pageProblem !== undefined ? { pageProblem: addon.pageProblem } : {}),
+        ...((): Partial<AddonView> => {
+          const running = state === 'enabled' ? mcp.states_().find((server) => server.name === addon.server) : undefined
+          if (running === undefined) return {}
+          return { status: running.status, ...(running.error !== undefined ? { error: running.error } : {}), logs: running.logs.slice(-40) }
+        })(),
+      }
+    })
+    post({
+      type: 'addons',
+      addons,
+      problems: addonProblems,
+      missing: missingAddons(installedAddons, servers).map((row) => ({
+        server: row.server,
+        package: row.tag.package,
+        version: row.tag.version,
+      })),
+      folders: folders.configured,
+      defaultFolders: folders.defaults,
+      ...(error !== undefined ? { error } : {}),
+    })
+  }
+
+  async function handleEnableAddon(pkg: string): Promise<void> {
+    const { config } = await configManager.load()
+    await rescanAddons(config)
+    const addon = installedAddons.find((candidate) => candidate.package === pkg)
+    if (addon === undefined) {
+      await postAddons(`${pkg} is not installed in any add-on folder any more.`)
+      return
+    }
+    const servers = config.mcpServers ?? {}
+    const existing = servers[addon.server]
+    const existingTag = (existing as { addon?: { package?: string } } | undefined)?.addon?.package
+    // A server someone configured by hand under this name is theirs, not this add-on's.
+    if (existing !== undefined && existingTag !== addon.package) {
+      await postAddons(`An MCP server named "${addon.server}" already exists and is not this add-on. Rename it first.`)
+      return
+    }
+    const next: McpServersConfig = { ...servers, [addon.server]: addonServerEntry(addon, existing) }
+    await configManager.save('user', { mcpServers: next })
+    setMcpServersState(next)
+    await configureMcp(next)
+    postMcp()
+    await postAddons()
+    await mcp.ensureConnected()
+  }
+
+  async function handleRemoveAddon(server: string): Promise<void> {
+    const { config } = await configManager.load()
+    const servers = { ...(config.mcpServers ?? {}) }
+    if ((servers[server] as { addon?: unknown } | undefined)?.addon === undefined) {
+      await postAddons(`"${server}" is not an add-on. Remove it from the server list instead.`)
+      return
+    }
+    delete servers[server]
+    await configManager.save('user', { mcpServers: servers })
+    setMcpServersState(servers)
+    await configureMcp(servers)
+    postMcp()
+    await postAddons()
+  }
+
+  async function handleSaveAddonFolders(folders: readonly string[]): Promise<void> {
+    const cleaned = [...new Set(folders.map((folder) => folder.trim()).filter((folder) => folder.length > 0))]
+    const relative = cleaned.find((folder) => !path.isAbsolute(folder))
+    if (relative !== undefined) {
+      await postAddons(`"${relative}" is not a full path. Add-on folders are full paths, such as C:\\addons.`)
+      return
+    }
+    const { config } = await configManager.load()
+    await configManager.save('user', { addons: { ...(config.addons ?? {}), folders: cleaned } })
+    await syncMcpFromConfig((await configManager.load()).config)
+    postMcp()
+    await postAddons()
   }
 
   // Kept outside globalStorage's config area and outside the workspace, so a checkpoint
   // never lands inside the very tree it snapshots.
   const shadowGit =
     workspaceRoot !== undefined
-      ? new ShadowGit(workspaceRoot, path.join(storageDir, 'checkpoints', 'shadow.git'))
+      ? new ShadowGit(
+          workspaceRoot,
+          path.join(storageDir, 'checkpoints', 'shadow.git'),
+          services.codebaseDir !== undefined ? path.join(services.codebaseDir, 'checkpoint-objects') : undefined,
+        )
       : undefined
 
   async function postProfiles(): Promise<void> {
@@ -4183,6 +4647,101 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     await postTasks()
   }
 
+  let handoffAbort: AbortController | undefined
+
+  /**
+   * A new chat that starts from a handoff of this one (agent/handoff.ts says why it is not compaction).
+   * The current chat is saved and left in history; the new one opens with the handoff as its first
+   * message, so what was carried over is on screen. Progress is posted throughout, because writing the
+   * note takes as long as any long reply. A failure or a cancel leaves the current chat exactly as it was.
+   */
+  async function handleHandoff(): Promise<void> {
+    if (handoffAbort !== undefined) return
+    const progress = (phase: 'gathering' | 'writing' | 'starting' | 'done' | 'failed' | 'cancelled', extra: { written?: number; message?: string } = {}): void =>
+      post({ type: 'handoffProgress', phase, ...extra })
+    // A reply that has said it is done is only saving: wait for that rather than refuse.
+    if (userTurnRunning && userTurnWindingDown && userTurnSettled !== undefined) {
+      await Promise.race([userTurnSettled, new Promise((resolve) => setTimeout(resolve, 30_000))])
+    }
+    if (userTurnRunning || scheduledRunInFlight !== undefined) {
+      progress('failed', { message: 'A reply is still running. Wait for it to finish, or press Stop, then try again.' })
+      return
+    }
+    const messages = conversation.toArray()
+    if (!messages.some((message) => message.role === 'user')) {
+      progress('failed', { message: 'There is nothing in this chat to hand over yet.' })
+      return
+    }
+    const abort = new AbortController()
+    handoffAbort = abort
+    try {
+      progress('gathering')
+      await persistActiveTask()
+      const previousTitle = deriveTitle(messages)
+      const facts = handoffFacts(messages)
+      const config = await loadSettings()
+      const profile = resolveActiveProfile(config)
+      const capabilities = withReportedWindow(
+        resolveModelCapabilities(profile.model, profile.modelCapabilities),
+        await reportedWindowFor(config, profile),
+        profile.modelCapabilities,
+      )
+      const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger, services.languageModels)
+      // About half the window for the conversation, at roughly three and a half characters a token.
+      let maxChars = Math.max(20_000, Math.floor(capabilities.contextWindow * 0.5 * 3.5))
+      let note = ''
+      for (let attempt = 0; ; attempt += 1) {
+        note = ''
+        let lastPost = 0
+        progress('writing', { written: 0 })
+        let refused: string | undefined
+        for await (const chunk of provider.streamChat(
+          [
+            { role: 'system', content: HANDOFF_PROMPT },
+            { role: 'user', content: redact(handoffTranscript(messages, maxChars), cachedSecretValues) },
+          ],
+          { signal: abort.signal },
+        )) {
+          if (chunk.type === 'text') {
+            note += chunk.text
+            if (Date.now() - lastPost > 200) {
+              lastPost = Date.now()
+              progress('writing', { written: note.length })
+            }
+          } else if (chunk.type === 'error') {
+            refused = chunk.error
+            break
+          }
+        }
+        if (abort.signal.aborted) {
+          progress('cancelled')
+          return
+        }
+        // Too long for this model after all (an unknown window was guessed): once more, with half.
+        if (refused !== undefined && attempt === 0 && isContextOverflow(refused)) {
+          maxChars = Math.floor(maxChars / 2)
+          continue
+        }
+        if (refused !== undefined) throw new Error(refused)
+        break
+      }
+      if (note.trim().length === 0) throw new Error('The model replied with nothing, so there is no handoff to start from.')
+
+      progress('starting')
+      await startNewTask()
+      conversation.addUserMessage(composeHandoff(note, facts, previousTitle))
+      await persistActiveTask()
+      post({ type: 'taskRestored', taskId: activeTaskId, entries: toTranscript(conversation.toArray()) })
+      await postTasks()
+      progress('done')
+    } catch (error) {
+      if (abort.signal.aborted) progress('cancelled')
+      else progress('failed', { message: `The handoff could not be written: ${error instanceof Error ? error.message : String(error)}. This chat is unchanged.` })
+    } finally {
+      handoffAbort = undefined
+    }
+  }
+
   async function deleteTask(id: string): Promise<void> {
     // Cascades to the task's spilled tool results inside the store.
     await taskStore.delete(id)
@@ -4293,6 +4852,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * tells the model.
        */
       await refreshSkills()
+      // Read every turn, like skills: an edit in another chat or in Fire Code's dialog applies to the next message.
+      const codebaseInstructions = renderCodebaseInstructions(await readCodebaseInstructions(codebaseInstructionsFile))
 
       /*
        * Resolved once here and reused for the turn. The mode contributes both tool filtering
@@ -4375,6 +4936,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           : renderSkillsForPrompt(turnSkills),
         skillsSearchable,
         canWriteSkills: skillsDir !== undefined,
+        codebaseInstructions,
         // Last in the prompt, and the most specific thing in it — see `agent/plan.ts`.
         ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
         // Only when a pool actually exists: telling the model about a tool it has not been given
@@ -4518,6 +5080,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ? {
               afterEdit: async (realPath: string) => {
                 const saved = await hub.mirror.push(realPath, activeAbortController?.signal)
+                if (saved.ignored === true) return `JupyterHub: not synced - ${saved.message}.`
                 return saved.saved ? `JupyterHub: ${saved.message}.` : `JupyterHub: NOT saved to the hub - ${saved.message}`
               },
             }
@@ -4530,6 +5093,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...(services.siblings ?? []).map((s) => s.path),
           droppedFilesRoot,
           mailAttachmentsRoot,
+          // What an add-on fetched for investigation (a file from a Linux machine, say) is read without asking.
+          ...installedAddons.map((addon) => addonDownloadsDir(addonRoot, addon)),
         ],
         ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
         // Resolved per turn by the host, so an edit applies to the next command rather than
@@ -4975,7 +5540,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             taskCheckpoint = checkpoint
             post({ type: 'checkpointAvailable' })
           },
-          onDone: (ending) => post({ type: 'done', ...(ending === 'question' ? { awaitingAnswer: true } : {}) }),
+          onDone: (ending) => {
+            userTurnWindingDown = true
+            post({ type: 'done', ...(ending === 'question' ? { awaitingAnswer: true } : {}) })
+          },
           onError: (message) => post({ type: 'error', message }),
         },
         turnOptions,
@@ -8965,7 +9533,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // One file per kind, plus the combined one. Sharing a file would mean a tools-only run
     // recording "everything is current" and a later full run doing nothing.
     const suffix = kind === undefined ? 'docs' : `docs.${kind}`
-    return path.join(storageDir, 'index-manifests', `${manifestKey(index, storeId)}.${suffix}.json`)
+    return path.join(manifestsRoot, 'index-manifests', `${manifestKey(index, storeId)}.${suffix}.json`)
   }
 
   /**
@@ -8988,7 +9556,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** Where that manifest lives. Spelled out at four call sites before this. */
   function manifestPath(index: string, storeId: string): string {
-    return path.join(storageDir, 'index-manifests', `${manifestKey(index, storeId)}.json`)
+    return path.join(manifestsRoot, 'index-manifests', `${manifestKey(index, storeId)}.json`)
   }
 
   async function readDocsFingerprint(
@@ -9903,7 +10471,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           aliases: plan.kind === 'codebase' ? codebaseAliases(config) : plan.kind === 'skills' ? skillAliases(config) : [],
           onProgress: (count) => post({ type: 'indexRenames', running: true, plans, store, current: plan.to, copied: count }),
         })
-        await copyBookkeeping(path.join(storageDir, 'index-manifests'), plan.from, plan.to, search.id)
+        await copyBookkeeping(path.join(manifestsRoot, 'index-manifests'), plan.from, plan.to, search.id)
         done.push({ ...plan, copied })
       }
       post({ type: 'indexRenames', running: false, plans: [], store, done })
@@ -9939,7 +10507,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       project: projectName(config, workspaceRoot),
       aliases: codebaseAliases(config),
     })
-    await copyBookkeeping(path.join(storageDir, 'index-manifests'), legacy, current, search.id)
+    await copyBookkeeping(path.join(manifestsRoot, 'index-manifests'), legacy, current, search.id)
     post({ type: 'indexRenames', running: false, plans: [], done: [{ kind: 'codebase', from: legacy, to: current, copied }] })
     logger.info(`copied ${String(copied)} chunks from ${legacy} to ${current} rather than re-embedding them`)
   }
@@ -11076,7 +11644,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (index !== undefined) {
       try {
         const manifest = JSON.parse(
-          await fs.readFile(path.join(storageDir, 'index-manifests', `${index}.json`), 'utf8'),
+          await fs.readFile(path.join(manifestsRoot, 'index-manifests', `${index}.json`), 'utf8'),
         ) as IndexManifest
         indexedFiles = Object.keys(manifest.files ?? {}).length
       } catch {
@@ -12301,7 +12869,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const next: McpServersConfig = { ...servers, [name]: change(existing) }
     await configManager.save('user', { mcpServers: next })
     setMcpServersState(next)
-    await mcp.configure(next)
+    await configureMcp(next)
   }
 
   /**
@@ -12476,7 +13044,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
     try {
       await configManager.save('user', { mcpServers: result.data })
-      await mcp.configure(result.data)
+      await configureMcp(result.data)
       setMcpServersState(result.data)
       postMcp()
       // Verify immediately rather than leaving the user to discover a typo the next time
@@ -12522,7 +13090,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       await configManager.save('user', { mcpServers: result.data })
       setMcpServersState(result.data)
-      await mcp.configure(result.data)
+      await configureMcp(result.data)
       postMcp()
       post({ type: 'mcpServerSaved', name })
       // Verify now rather than leaving a typo to surface the next time something happens
@@ -12683,7 +13251,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       servers[copy] = { ...source, disabled: true }
       await configManager.save('user', { mcpServers: servers })
       setMcpServersState(servers)
-      await mcp.configure(servers)
+      await configureMcp(servers)
       postMcp()
       post({ type: 'mcpServerSaved', name: copy })
     } catch (error) {
@@ -12702,7 +13270,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       setMcpServersState(servers)
       // Closes the child process: a removed stdio server left running would keep its tools
       // alive for the rest of the session.
-      await mcp.configure(servers)
+      await configureMcp(servers)
       postMcp()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -12758,15 +13326,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           await scheduledRunInFlight
         }
         userTurnRunning = true
+        userTurnWindingDown = false
+        // Composed before anything else: the reply quote and any reactions are part of what
+        // the user said, so mentions and #roles are read from the same text the model sees.
+        const turn = handleSendMessage(
+          composeUserText(message.text, { replyTo: boundedQuote(message.replyTo), reactions: takeReactions() }),
+          message.images,
+        )
+        userTurnSettled = turn.then(
+          () => undefined,
+          () => undefined,
+        )
         try {
-          // Composed before anything else: the reply quote and any reactions are part of what
-          // the user said, so mentions and #roles are read from the same text the model sees.
-          await handleSendMessage(
-            composeUserText(message.text, { replyTo: boundedQuote(message.replyTo), reactions: takeReactions() }),
-            message.images,
-          )
+          await turn
         } finally {
           userTurnRunning = false
+          userTurnWindingDown = false
         }
       })()
     } else if (message.type === 'compactConversation') {
@@ -12847,6 +13422,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('deleteTask', deleteTask(message.id))
     } else if (message.type === 'newTask') {
       reportFailure('startNewTask', startNewTask())
+    } else if (message.type === 'startHandoff') {
+      reportFailure('handleHandoff', handleHandoff())
+    } else if (message.type === 'cancelHandoff') {
+      handoffAbort?.abort()
     } else if (message.type === 'setMode') {
       reportFailure('handleSetMode', handleSetMode(message.modeId))
     } else if (message.type === 'setConnectionRetry') {
@@ -13049,6 +13628,26 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleClearCodebaseIndex', handleClearCodebaseIndex())
     } else if (message.type === 'openStandingSkill') {
       reportFailure('handleOpenStandingSkill', handleOpenStandingSkill())
+    } else if (message.type === 'requestAddonPage') {
+      reportFailure('postAddonPage', postAddonPage(message.package))
+    } else if (message.type === 'saveAddonRecord') {
+      reportFailure('handleSaveAddonRecord', handleSaveAddonRecord(message))
+    } else if (message.type === 'deleteAddonRecord') {
+      reportFailure('handleDeleteAddonRecord', handleDeleteAddonRecord(message.package, message.id))
+    } else if (message.type === 'saveAddonValues') {
+      reportFailure('handleSaveAddonValues', handleSaveAddonValues(message))
+    } else if (message.type === 'runAddonAction') {
+      reportFailure('handleRunAddonAction', handleRunAddonAction(message.package, message.id, message.tool))
+    } else if (message.type === 'requestAddons') {
+      reportFailure('postAddons', postAddons())
+    } else if (message.type === 'enableAddon') {
+      reportFailure('handleEnableAddon', handleEnableAddon(message.package))
+    } else if (message.type === 'removeAddon') {
+      reportFailure('handleRemoveAddon', handleRemoveAddon(message.server))
+    } else if (message.type === 'saveAddonFolders') {
+      reportFailure('handleSaveAddonFolders', handleSaveAddonFolders(message.folders))
+    } else if (message.type === 'openCodebaseInstructions') {
+      reportFailure('handleOpenCodebaseInstructions', handleOpenCodebaseInstructions())
     } else if (message.type === 'requestAtlassian') {
       reportFailure('postAtlassian', postAtlassian())
     } else if (message.type === 'saveAtlassian') {
@@ -13311,6 +13910,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         .catch((error: unknown) => post({ type: 'error', message: String(error) }))
     } else if (message.type === 'openManagedFile') {
       reportFailure('handleOpenManagedFile', handleOpenManagedFile(message.path))
+    } else if (message.type === 'saveEditorFile') {
+      reportFailure('handleSaveEditorFile', handleSaveEditorFile(message.path, message.content, message.mtimeMs))
     } else if (message.type === 'deletePythonTool') {
       reportFailure('handleDeletePythonTool', handleDeletePythonTool(message.name, message.filePath))
     } else if (message.type === 'approvePythonTool') {

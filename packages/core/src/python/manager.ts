@@ -144,6 +144,11 @@ export interface PythonManagerOptions {
     ((name: string, args: Record<string, unknown>, caller: string) => Promise<unknown>) | undefined
   /** Per-user storage; the venv lives here, outside the workspace. */
   storageDir: string
+  /**
+   * Where the created venv lives instead, when several chats share a codebase (Fire Code): one
+   * venv with its packages per codebase, not one per chat.
+   */
+  venvRoot?: string
   logger: Logger
   /**
    * Fired after the registry reloads — a tool created, updated or deleted.
@@ -431,7 +436,7 @@ export class PythonManager {
           interpreter = discovered.interpreter
         } else {
           // Outside the workspace, so ours is never indexed, committed or read by a tool.
-          this.venvPath = path.join(this.options.storageDir, 'python-venv')
+          this.venvPath = path.join(this.options.venvRoot ?? this.options.storageDir, 'python-venv')
           this.venvSource = 'created'
           this.venvIsUvManaged = true
           interpreter = await ensureVenv({ uv: this.uv, venvDir: this.venvPath, env })

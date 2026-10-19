@@ -152,7 +152,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       : credentialStored
         ? `${props.settings.baseUrl}${viaGateway ? ' (via gateway)' : ''}`
         : viaGateway
-          ? 'No client secret stored'
+          ? 'No consumer secret stored'
           : `No ${info.tokenLabel.toLowerCase()} stored`
 
   // Test runs against what is saved, so it says precisely what is missing from that.
@@ -162,7 +162,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       ? 'Save the site address first.'
       : viaGateway
         ? props.gateway?.hasClientSecret !== true
-          ? 'Enter the gateway client secret and save.'
+          ? 'Enter the gateway consumer secret and save.'
           : props.gateway.sendBasic && (!props.hasToken || (props.settings.defaults['username'] ?? '').trim().length === 0)
             ? 'Enter the AutoSys username and password and save — the gateway is set to pass them on.'
             : undefined
@@ -220,7 +220,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       {viaGateway && (
         <span style={hintStyle}>
           {props.gateway?.sendBasic === true
-            ? 'Signing in through the API gateway below, which also passes on this username and password.'
+            ? 'Signing in through the API gateway below. The token is got with the consumer key and secret; this username and password go with each AutoSys call.'
             : 'Signing in through the API gateway below — the username and password are not used.'}
         </span>
       )}

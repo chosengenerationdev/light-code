@@ -500,6 +500,7 @@ option:hover {
 /* ---- the working indicator ---- */
 
 @keyframes lc-spin { to { transform: rotate(360deg); } }
+@keyframes lc-handoff-slide { 0% { left: -35%; } 100% { left: 100%; } }
 .lc-spin { animation: lc-spin 900ms linear infinite; transform-origin: 50% 50%; }
 
 @keyframes lc-typing {

@@ -144,6 +144,18 @@ export interface McpToolDescriptor {
   name: string
   description: string
   inputSchema: unknown
+  /**
+   * Marked `_meta["lightCode/panelOnly"]` by an add-on: a tool for a button on its own settings tab
+   * (`addons/page.ts`), never offered to the model. See `McpRegistry.callPanelTool`.
+   */
+  panelOnly?: boolean
+}
+
+/** What a panel button gets back: the text, and the add-on's structured answer if it gave one. */
+export interface RawToolResult {
+  text: string
+  isError: boolean
+  structured?: unknown
 }
 
 /**
@@ -263,7 +275,24 @@ export class McpConnection {
       name: tool.name,
       description: tool.description ?? '',
       inputSchema: tool.inputSchema,
+      ...((tool._meta as Record<string, unknown> | undefined)?.['lightCode/panelOnly'] === true ? { panelOnly: true } : {}),
     }))
+  }
+
+  /** The same call, keeping what a button needs that the model's text rendering drops. */
+  async callToolRaw(name: string, args: Record<string, unknown>): Promise<RawToolResult> {
+    if (this.client === undefined) throw new Error(`MCP server "${this.serverName}" is not connected.`)
+    const timeoutSeconds = this.config.toolTimeouts?.[name] ?? this.config.timeout ?? this.defaultTimeout?.()
+    const result = await this.client.callTool(
+      { name, arguments: args },
+      undefined,
+      timeoutSeconds === undefined ? undefined : { timeout: timeoutSeconds * 1000 },
+    )
+    return {
+      text: renderToolResult(result),
+      isError: result.isError === true,
+      ...(result.structuredContent !== undefined ? { structured: result.structuredContent } : {}),
+    }
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<string> {

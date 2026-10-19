@@ -188,7 +188,7 @@ export {
   type HostModelRequest,
 } from './providers/hostModels.js'
 export { toPortableParameters } from './providers/schema.js'
-export { createRelayLanguageModels, defaultRelayDir, NO_VSCODE_WINDOW, startLmRelay } from './platform/node/lmRelay.js'
+export { createRelayDebugReader, createRelayLanguageModels, defaultRelayDir, NO_VSCODE_DEBUG, NO_VSCODE_WINDOW, startLmRelay } from './platform/node/lmRelay.js'
 export {
   toOpenAITools,
   toAnthropicTools,
@@ -841,3 +841,4 @@ export { UsageLog, usageDay, usageInstanceId, parseUsageLines, type UsageEvent }
 export { FolderShardStore, S3ShardStore, VectorShardStore, type UsageShardStore } from './usage/store.js'
 export { pushUsage } from './usage/push.js'
 export { computeDashboard, type UsageDashboard, type InventoryItem } from './usage/dashboard.js'
+export { isSafeHref, looksLikeMarkdown, parseInline, parseMarkdown, type Align, type Block, type Inline } from './markdown/parse.js'

@@ -88,6 +88,11 @@ export interface HostUi {
    * keeps showing the path so the file is still findable by hand (§19).
    */
   openFile?(filePath: string): Promise<void>
+  /**
+   * True where the host has no editor of its own (Fire Code, the browser host): skills and tools are
+   * then edited in the panel's own editor instead of `openFile`, which there can only show the text.
+   */
+  editsInPanel?: boolean
   showOpenDialog(options: OpenDialogOptions): Promise<string | undefined>
   /**
    * The editor's own multi-select list of files - open ones first, the current file ticked - for
@@ -262,6 +267,14 @@ export interface HostServices {
    * folder, so separate copies meant reviewing the same tools once per codebase.
    */
   mirrorRoot?: string
+  /**
+   * What this codebase's chats share, when one codebase has several (Fire Code passes
+   * `projects/<id>/codebase`): the checkpoint objects, the created Python venv, the index
+   * bookkeeping and the codebase instructions. Each was kept per chat, so every new chat added
+   * another copy of the codebase's snapshots and another venv. Absent: those stay in `storageDir`
+   * as before, and codebase instructions go under it, per workspace.
+   */
+  codebaseDir?: string
   /**
    * Where ripgrep is **right now**, or undefined to degrade `search_files` and `list_files`
    * with a clear message.

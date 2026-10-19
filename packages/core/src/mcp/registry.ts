@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { Logger } from '../logging/logger.js'
 import type { SecretStore } from '../platform/secrets.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
-import { McpConnection, type McpToolDescriptor } from './client.js'
+import { McpConnection, type McpToolDescriptor, type RawToolResult } from './client.js'
 import { denyCheck } from './deny.js'
 import {
   isPackageRunnerCommand,
@@ -99,6 +99,8 @@ export class McpRegistry {
   private readonly statuses = new Map<string, McpServerStatus>()
   private readonly errors = new Map<string, string>()
   private readonly toolsByServer = new Map<string, DiscoveredTool[]>()
+  /** Tools a server marked for its own settings-tab buttons only: never offered to the model. */
+  private readonly panelTools = new Map<string, Set<string>>()
   private readonly logs = new Map<string, string[]>()
   private servers: McpServersConfig = {}
 
@@ -260,7 +262,15 @@ export class McpRegistry {
     if (connection === undefined) return
 
     try {
-      const descriptors = await connection.listTools()
+      const listed = await connection.listTools()
+      /*
+       * Panel-only tools are kept out of the tool list entirely - not hidden from the prompt but
+       * callable, which `call_tool` would then reach. A button on the add-on's own tab is the only
+       * way to them (`callPanelTool`), so an add-on can offer an action that changes something
+       * (setting up a key on a server) without the model ever being able to ask for it.
+       */
+      this.panelTools.set(name, new Set(listed.filter((descriptor) => descriptor.panelOnly === true).map((descriptor) => descriptor.name)))
+      const descriptors = listed.filter((descriptor) => descriptor.panelOnly !== true)
       this.toolsByServer.set(
         name,
         descriptors.map((descriptor) => ({
@@ -307,6 +317,20 @@ export class McpRegistry {
       this.statuses.set(name, 'idle')
     }
     if (options.silent !== true) this.events.onStateChanged()
+  }
+
+  /**
+   * Calls one of a server's tools for a button the user pressed, returning the structured answer as
+   * well as the text. Reaches a panel-only tool, and an ordinary one; deny rules still apply.
+   */
+  async callPanelTool(server: string, tool: string, args: Record<string, unknown>): Promise<RawToolResult> {
+    const connection = this.connections.get(server)
+    if (connection === undefined) throw new Error(`MCP server "${server}" is not running.`)
+    const known = this.panelTools.get(server)?.has(tool) === true || (this.toolsByServer.get(server) ?? []).some((entry) => entry.descriptor.name === tool)
+    if (!known) throw new Error(`"${server}" offers no tool "${tool}".`)
+    const decision = denyCheck(tool, args, this.servers[server]?.deny)
+    if (decision.denied) throw new Error(decision.message ?? 'Refused by a deny rule.')
+    return connection.callToolRaw(tool, args)
   }
 
   async restart(name: string): Promise<void> {

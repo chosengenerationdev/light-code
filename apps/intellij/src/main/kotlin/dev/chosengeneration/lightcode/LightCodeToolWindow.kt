@@ -1,5 +1,6 @@
 package dev.chosengeneration.lightcode
 
+import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
@@ -15,6 +16,9 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 import javax.swing.JComponent
 import javax.swing.SwingConstants
+import org.cef.browser.CefBrowser
+import org.cef.browser.CefFrame
+import org.cef.handler.CefLifeSpanHandlerAdapter
 
 /**
  * The Light Code panel.
@@ -97,6 +101,23 @@ class LightCodePanel(private val project: Project) : Disposable {
 
   private fun show(url: String) {
     val view = JBCefBrowser.createBuilder().setUrl(url).build()
+    /*
+     * A link in a reply opens a new window (target="_blank"), and that goes to the default browser - the
+     * same as VS Code and Fire Code. Left to JCEF it would open a bare browser window of its own, and before
+     * the chat asked for a new window it navigated this panel away from the chat.
+     */
+    view.jbCefClient.addLifeSpanHandler(
+      object : CefLifeSpanHandlerAdapter() {
+        override fun onBeforePopup(browser: CefBrowser?, frame: CefFrame?, targetUrl: String?, targetFrameName: String?): Boolean {
+          val target = targetUrl ?: return true
+          if (target.startsWith("https://") || target.startsWith("http://") || target.startsWith("mailto:")) {
+            BrowserUtil.browse(target)
+          }
+          return true
+        }
+      },
+      view.cefBrowser,
+    )
     Disposer.register(this, view)
     browser = view
     wrapper.setContent(view.component)
