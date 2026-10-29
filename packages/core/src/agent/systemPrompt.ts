@@ -32,8 +32,8 @@ export interface SystemPromptOptions {
    */
   skills?: string
   /**
-   * What the user wrote for this codebase (`agent/codebaseInstructions.ts`), rendered. Placed
-   * directly before the skills, whose standing instructions it outranks.
+   * What the user wrote for this codebase (`agent/codebaseInstructions.ts`), rendered. Placed at
+   * the end, after the mode and before only the chat's plan, with a pointer at the top.
    */
   codebaseInstructions?: string
   /**
@@ -104,6 +104,17 @@ export function buildSystemPrompt(
     `Workspace root: ${workspaceRoot}`,
   ]
 
+  const codebaseInstructions = options.codebaseInstructions ?? ''
+  if (codebaseInstructions.length > 0) {
+    // Said first as well as placed last: a model reading top-down learns before anything else that
+    // the user has rules for this codebase, and where they are.
+    lines.push(
+      '',
+      'The user has written instructions for this codebase. They are under "## Codebase instructions" at the',
+      'end of this prompt, and they override the general guidance in between. Follow them in every reply.',
+    )
+  }
+
   if (options.model !== undefined && options.model.length > 0) {
     lines.push(
       '',
@@ -155,10 +166,6 @@ export function buildSystemPrompt(
     '- Before asking, check what is here: the imports and existing calls in this workspace are',
     '  evidence about the version actually installed, and a skill may already describe it.',
   )
-
-  if (options.codebaseInstructions !== undefined && options.codebaseInstructions.length > 0) {
-    lines.push('', options.codebaseInstructions)
-  }
 
   if (options.skills !== undefined && options.skills.length > 0) {
     lines.push('', options.skills)
@@ -410,6 +417,17 @@ export function buildSystemPrompt(
   if (options.modeGuidance !== undefined && options.modeGuidance.length > 0) {
     lines.push('', options.modeGuidance)
   }
+
+  /*
+   * The user's codebase instructions, after everything general and before only the plan.
+   *
+   * Reported: "codebase instructions don't seem to have any impact". They were placed before the
+   * skills - the middle of a prompt that runs to tens of thousands of tokens once the tool, mode
+   * and Fire Code guidance follow - and a model weighs the middle of a long prompt least. Here they
+   * qualify everything general above them, as the mode does, and the plan (about this chat) still
+   * narrows them, which is the order of specificity the file describes.
+   */
+  if (codebaseInstructions.length > 0) lines.push('', codebaseInstructions)
 
   /*
    * After the mode, and therefore last of everything.

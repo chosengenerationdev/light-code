@@ -28,3 +28,5 @@ apps/intellij/build/
 # Fire Code: Rust build output, and the npm package staging folder.
 apps/sun/native/target/
 apps/sun/package/
+
+__pycache__/

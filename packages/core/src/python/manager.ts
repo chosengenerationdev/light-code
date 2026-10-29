@@ -48,6 +48,7 @@ import {
   minimalPythonEnv,
   type UvInfo,
 } from './uv.js'
+import { declaresAlwaysAsk } from './declaredCredentials.js'
 import { PythonWorker } from './worker.js'
 import { PYTHON_WORKER_SOURCE } from './workerSource.js'
 
@@ -81,6 +82,11 @@ export interface PythonStatus {
   venvSource: 'workspace' | 'configured' | 'created' | 'interpreter' | 'none'
   venvIsUvManaged: boolean
   ready: boolean
+  /**
+   * Shown before Python has started: the tools approved in each folder's registry, read from disk.
+   * Nothing is listed as needing approval until the real check, which needs the worker.
+   */
+  starting?: boolean
   /** Why it is not ready, phrased for a human. */
   detail: string
   /**
@@ -208,6 +214,9 @@ export interface PythonManagerOptions {
   generateSource?: () => CodeGenerator | undefined
   /** Labels every tool saved; see `PythonToolContext.attribution`. */
   attribution?: (() => { author?: string | undefined; project?: string | undefined }) | undefined
+  /** The user's own tools folder and where team tools go; see `PythonToolContext.personalToolsDir`. */
+  personalToolsDir?: string | undefined
+  sharedWith?: (() => string) | undefined
 }
 
 export class PythonManager {
@@ -219,6 +228,8 @@ export class PythonManager {
   private missingPackages = new Map<string, string[]>()
   /** Author, project, version and time from each tool's own header. See `sharing/attribution.ts`. */
   private labels = new Map<string, Attribution>()
+  /** Tools whose source declares `__always_ask__ = True`. */
+  private alwaysAsk = new Set<string>()
   private ready = false
   private detail = 'Dynamic Python tools are off.'
   private enabled = false
@@ -271,6 +282,8 @@ export class PythonManager {
   /** The Jupyter kernel tools run in, when this session was given one. See `jupyter.ts`. */
   private jupyterConnectionFile: string | undefined
   private envFingerprint = ''
+  /** `python.bannedCalls`, trimmed, unique and sorted, handed to the worker in its environment. */
+  private bannedCalls: string[] = []
   private missingEnv: string[] = []
 
   constructor(private readonly options: PythonManagerOptions) {}
@@ -295,6 +308,8 @@ export class PythonManager {
     defaultTimeoutSeconds?: number | undefined
     indexUrl?: string | undefined
     extraIndexUrls?: string[] | undefined
+    /** Functions and modules no tool may use (`python.bannedCalls`). Checked by the worker before loading. */
+    bannedCalls?: readonly string[] | undefined
     offline?: boolean | undefined
     /** Variables to run every tool with. See `env.ts` for the shape config holds. */
     env?:
@@ -368,7 +383,9 @@ export class PythonManager {
     const fromConfig = (config.jupyterConnectionFile ?? '').trim()
     const kernel = fromEnvironment.length > 0 ? fromEnvironment : fromConfig
     this.jupyterConnectionFile = kernel.length > 0 ? kernel : undefined
-    const fingerprint = JSON.stringify([this.envEntries, this.jupyterConnectionFile])
+    this.bannedCalls = [...new Set((config.bannedCalls ?? []).map((entry) => entry.trim()).filter((entry) => entry.length > 0))].sort()
+    // Part of the worker's environment, so a changed list restarts it like a changed variable does.
+    const fingerprint = JSON.stringify([this.envEntries, this.jupyterConnectionFile, this.bannedCalls])
     if (fingerprint !== this.envFingerprint) {
       this.envFingerprint = fingerprint
       if (this.worker !== undefined) {
@@ -528,6 +545,47 @@ export class PythonManager {
     return this.registered.find((tool) => tool.name === name)
   }
 
+  /**
+   * Which of these modules the tools' environment has, without importing any (`importlib.util.find_spec`).
+   * Undefined when Python is not running, so nobody is told a module is missing that was never looked for.
+   */
+  async hasModules(modules: readonly string[]): Promise<Record<string, boolean> | undefined> {
+    if (!this.ready || this.interpreter.length === 0 || modules.length === 0) return undefined
+    try {
+      const answer = await interpreterCheck(this.interpreter, await this.childEnv())({ modules: [...modules], distributions: [] })
+      return Object.fromEntries(modules.map((module) => [module, !answer.missingModules.includes(module)]))
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * What the Python tab can show at once, before Python starts: the tools already approved in each folder,
+   * from its `.registry.json` (no interpreter, no import). Reported as slow on a managed machine, where
+   * starting uv and Python costs seconds and the tab used to stay empty until both had.
+   *
+   * Issues are left out on purpose: deciding that a tool needs approval may take adopting an approval
+   * made elsewhere on this machine, which loads the tool in the worker - so a guess here would flash an
+   * approval request for something already approved.
+   */
+  async previewStatus(folders: { toolsDir?: string | undefined; extraToolDirs?: readonly string[] | undefined }): Promise<PythonStatus> {
+    const current = this.status()
+    if (current.ready || this.options.workspaceRoot === undefined) return current
+    const toolsDir = folders.toolsDir ?? defaultPythonToolsDir(this.options.workspaceRoot)
+    const dirs = [toolsDir, ...(folders.extraToolDirs ?? [])].filter((dir) => dir.length > 0)
+    const loaded = await loadRegistries(dirs, undefined, this.options.logger, this.declinedTools, undefined)
+    return {
+      ...current,
+      enabled: true,
+      ready: false,
+      starting: true,
+      toolsDir,
+      detail: 'Starting Python… the tools below were approved before; anything new to review is listed once it is running.',
+      tools: loaded.tools.map((tool) => ({ name: tool.name, description: tool.description, filePath: tool.filePath, sourceDir: tool.sourceDir })),
+      issues: [],
+    }
+  }
+
   async refresh(): Promise<void> {
     if (!this.enabled || this.toolsDir.length === 0) return
     const loaded = await loadRegistries(
@@ -550,6 +608,15 @@ export class PythonManager {
    * packages are present. One interpreter start for all of them.
    */
   private async checkPackages(): Promise<Map<string, string[]>> {
+    // Read whether or not packages can be checked: an always-ask declaration must hold regardless.
+    this.alwaysAsk = new Set()
+    for (const tool of this.registered) {
+      try {
+        if (declaresAlwaysAsk(await fs.readFile(tool.filePath, 'utf8'))) this.alwaysAsk.add(tool.name)
+      } catch {
+        // Unreadable: the tool cannot load either.
+      }
+    }
     if (!this.ready || this.interpreter.length === 0) return new Map()
     this.labels = new Map()
     const files = new Map<string, string>()
@@ -683,6 +750,7 @@ export class PythonManager {
         canInstall: this.toolContext()?.installDeps !== undefined,
         project: this.labels.get(tool.name)?.project,
         author: this.labels.get(tool.name)?.author,
+        ...(this.alwaysAsk.has(tool.name) ? { alwaysAsk: true } : {}),
         redact: (text: string) => redact(text, [...this.revealed]),
       }),
     ) as unknown as Tool<never>[]
@@ -706,6 +774,8 @@ export class PythonManager {
         ? { onSaved: this.options.onToolSaved }
         : {}),
       ...(this.options.attribution !== undefined ? { attribution: this.options.attribution } : {}),
+      ...(this.options.personalToolsDir !== undefined ? { personalToolsDir: this.options.personalToolsDir } : {}),
+      ...(this.options.sharedWith !== undefined ? { sharedWith: this.options.sharedWith } : {}),
       /*
        * No installing against an interpreter we do not own.
        *
@@ -876,6 +946,8 @@ export class PythonManager {
         ? { [JUPYTER_CONNECTION_ENV]: this.jupyterConnectionFile }
         : {}),
       ...resolved.env,
+      // Last, so nothing declared in python.env can replace the list the worker enforces.
+      LIGHT_CODE_BANNED_CALLS: JSON.stringify(this.bannedCalls),
     })
   }
 

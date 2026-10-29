@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises'
-import { declaredCredentials } from './declaredCredentials.js'
+import { declaredCredentials, declaredToolCalls, declaresAlwaysAsk } from './declaredCredentials.js'
 import path from 'node:path'
 import { z } from 'zod'
 import { confine } from '../fs/confine.js'
@@ -107,6 +107,43 @@ export interface PythonToolContext {
    * approves and in the hash that is pinned.
    */
   attribution?: (() => { author?: string | undefined; project?: string | undefined }) | undefined
+  /**
+   * The user's own tools, on this machine, in every project - never uploaded or committed. The same
+   * choice write_skill offers; absent on a shared server, where there is no one person.
+   */
+  personalToolsDir?: string | undefined
+  /** Where a tool written for the team goes, in a few words, for the approval prompt. */
+  sharedWith?: (() => string) | undefined
+}
+
+const audienceParam = z
+  .enum(['me', 'team'])
+  .optional()
+  .describe(
+    'Who the tool is for. "me": kept only for this user, on this computer, in every project - never shared. ' +
+      '"team" (the default - leave this out): saved where the team shares tools. Use "me" ONLY when the user ' +
+      'explicitly says the tool is personal, private or just for them; do not ask. Omit when updating: the tool stays where it is.',
+  )
+
+/** Which writable folder a tool goes in: personal for "me" (or a tool already there), else the save folder. */
+function toolFolder(context: PythonToolContext, name: string, audience: 'me' | 'team' | undefined): { dir: string; personal: boolean } {
+  const personal = context.personalToolsDir
+  if (audience === 'me') {
+    if (personal === undefined) throw new Error('Keeping a tool to yourself is not available here (a shared server has no personal folder).')
+    return { dir: personal, personal: true }
+  }
+  if (audience === undefined && personal !== undefined) {
+    const existing = context.findTool?.(name)
+    if (existing !== undefined && path.resolve(existing.sourceDir) === path.resolve(personal)) return { dir: personal, personal: true }
+  }
+  return { dir: context.toolsDir, personal: false }
+}
+
+function toolAudienceNote(context: PythonToolContext, personal: boolean): string | undefined {
+  if (context.personalToolsDir === undefined) return undefined
+  return personal
+    ? 'For: only you - kept in your personal tools on this computer, used in every project, never uploaded or committed'
+    : 'For: the team - ' + (context.sharedWith?.() ?? 'saved in this project')
 }
 
 const createParams = z.object({
@@ -115,6 +152,7 @@ const createParams = z.object({
     .describe(
       'Tool name: lowercase letters, digits and underscores. Becomes py__<name> and <name>.py.',
     ),
+  audience: audienceParam,
   source: z
     .string()
     .describe(
@@ -145,6 +183,7 @@ const specifyParams = z.object({
     .describe(
       'Tool name: lowercase letters, digits and underscores. Becomes py__<name> and <name>.py.',
     ),
+  audience: audienceParam,
   specification: z
     .string()
     .describe(
@@ -235,7 +274,7 @@ function makeWriteTool(
     const key = `${params.name}::${params.specification}`
     let inFlight = pending.get(key)
     if (inFlight === undefined) {
-      const toolPath = resolveToolPath(context.toolsDir, params.name)
+      const toolPath = resolveToolPath(toolFolder(context, params.name, params.audience).dir, params.name)
       inFlight = (async () => {
         // An update is a change, not a rewrite, so the generator is shown what is already there.
         const before = await readIfPresent(await toolPath)
@@ -283,7 +322,8 @@ function makeWriteTool(
      * later hashed, so what was reviewed is what can run.
      */
     async preview(params): Promise<ToolPreview> {
-      const filePath = await resolveToolPath(context.toolsDir, params.name)
+      const target = toolFolder(context, params.name, params.audience)
+      const filePath = await resolveToolPath(target.dir, params.name)
       const before = await readIfPresent(filePath)
       const generated = await sourceFor(params)
       const source = label(params.name, generated.source, before)
@@ -298,6 +338,9 @@ function makeWriteTool(
       const notes = [
         ...(producedBy !== undefined ? [`Written by ${producedBy}`] : []),
         ...(reads.length > 0 ? [`Reads saved credentials: ${reads.join(', ')}`] : []),
+        ...(declaredToolCalls(source).length > 0 ? [`Calls tools: ${declaredToolCalls(source).join(', ')}`] : []),
+        ...(declaresAlwaysAsk(source) ? ['Always asks before every run, for everyone who has this tool (__always_ask__ = True)'] : []),
+        ...[toolAudienceNote(context, target.personal)].filter((note): note is string => note !== undefined),
       ]
       return {
         kind: 'diff',
@@ -310,7 +353,8 @@ function makeWriteTool(
 
     async execute(params): Promise<ToolResult> {
       try {
-        const filePath = await resolveToolPath(context.toolsDir, params.name)
+        const target = toolFolder(context, params.name, params.audience)
+        const filePath = await resolveToolPath(target.dir, params.name)
         const before = await readIfPresent(filePath)
 
         if (options.mustExist && before.length === 0) {
@@ -347,7 +391,7 @@ function makeWriteTool(
           }
         }
 
-        await fs.mkdir(context.toolsDir, { recursive: true })
+        await fs.mkdir(target.dir, { recursive: true })
         await fs.writeFile(filePath, source, 'utf8')
 
         /*
@@ -420,7 +464,7 @@ function makeWriteTool(
 
         // Only now, with the source proven to load, is the approval recorded — pinned to
         // exactly the bytes that were shown in the diff.
-        await approveTool(context.toolsDir, params.name, source, described)
+        await approveTool(target.dir, params.name, source, described)
         await context.onChanged()
 
         /*
@@ -428,7 +472,8 @@ function makeWriteTool(
          * a bucket that could not be reached must not undo any of that.
          */
         let publishProblem: string | undefined
-        if (context.onSaved !== undefined) {
+        // A personal tool is never uploaded: that is the whole of what "only me" means.
+        if (context.onSaved !== undefined && !target.personal) {
           try {
             await context.onSaved(params.name, source)
           } catch (error) {
@@ -486,7 +531,9 @@ export function createCreatePythonTool(context: PythonToolContext): Tool<CreateP
       'Passwords and tokens are never written into a tool: in Fire Code, declare the saved credentials ' +
       'it needs at module level, `__credentials__ = ["Corp LDAP"]`, and read one with ' +
       '`light_code.credential("Corp LDAP")` (a string, or {"username", "password"} for a login). ' +
-      'Never print or return a credential.',
+      'Never print or return a credential. ' +
+      'If the user says the tool must always ask before it runs (no "always allow", for anyone), put ' +
+      '`__always_ask__ = True` at module level: every run then asks, for everybody who has the tool.',
   })
 }
 
@@ -609,6 +656,14 @@ export function createInstallPackagesTool(
   }
 }
 
+/** The writable folder a tool is deleted from: the personal one when it lives there, else the save folder. */
+function deletableToolFolder(context: PythonToolContext, name: string): string {
+  const existing = context.findTool?.(name)
+  const personal = context.personalToolsDir
+  if (existing !== undefined && personal !== undefined && path.resolve(existing.sourceDir) === path.resolve(personal)) return personal
+  return context.toolsDir
+}
+
 export function createDeletePythonTool(context: PythonToolContext): Tool<DeletePythonToolParams> {
   return {
     name: 'delete_python_tool',
@@ -617,7 +672,7 @@ export function createDeletePythonTool(context: PythonToolContext): Tool<DeleteP
     parametersSchema: deleteParams,
 
     async preview(params): Promise<ToolPreview> {
-      const filePath = await resolveToolPath(context.toolsDir, params.name)
+      const filePath = await resolveToolPath(deletableToolFolder(context, params.name), params.name)
       // Shown as a diff to nothing, so the user sees exactly what is being removed rather
       // than just its name.
       return { kind: 'diff', path: filePath, before: await readIfPresent(filePath), after: '' }
@@ -634,9 +689,10 @@ export function createDeletePythonTool(context: PythonToolContext): Tool<DeleteP
          * be listed afterwards with no explanation. The same rule skills already follow.
          */
         const existing = context.findTool?.(params.name)
+        const own = deletableToolFolder(context, params.name)
         if (
           existing !== undefined &&
-          path.resolve(existing.sourceDir) !== path.resolve(context.toolsDir)
+          path.resolve(existing.sourceDir) !== path.resolve(own)
         ) {
           return {
             content:
@@ -646,9 +702,9 @@ export function createDeletePythonTool(context: PythonToolContext): Tool<DeleteP
           }
         }
 
-        const filePath = await resolveToolPath(context.toolsDir, params.name)
+        const filePath = await resolveToolPath(own, params.name)
         await fs.rm(filePath, { force: true })
-        await forgetTool(context.toolsDir, params.name)
+        await forgetTool(own, params.name)
         await context.onChanged()
         return { content: `Removed py__${params.name}.`, path: filePath }
       } catch (error) {
@@ -685,6 +741,8 @@ export function adaptPythonTool(
     /** From the tool's own header, for searches scoped to a project or author. */
     project?: string | undefined
     author?: string | undefined
+    /** The tool declares `__always_ask__ = True`: every call asks, with no "Always allow". */
+    alwaysAsk?: boolean | undefined
     /**
      * Blanks saved-credential values this session handed to Python tools, before the result
      * reaches the model - a tool that prints or returns the password it was given must not put it
@@ -710,6 +768,7 @@ export function adaptPythonTool(
     group: 'command',
     ...(context.project !== undefined ? { project: context.project } : {}),
     ...(context.author !== undefined ? { author: context.author } : {}),
+    ...(context.alwaysAsk === true ? { alwaysAsk: true } : {}),
     description:
       needs +
       (registered.description.length > 0 ? registered.description : `Python tool "${registered.name}".`),

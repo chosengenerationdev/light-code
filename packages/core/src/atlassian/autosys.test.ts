@@ -38,7 +38,7 @@ function fakeAutosys(routes: Record<string, { status?: number; json?: unknown; t
     },
   }
   const client = async (): Promise<AutosysClient> =>
-    new AutosysClient(http, { baseUrl: 'https://wla.test:9443', token: 'secret', username: 'jsmith' })
+    new AutosysClient(http, { baseUrl: 'https://wla.test:9443/AEWS', token: 'secret', username: 'jsmith' })
   return { calls, client }
 }
 

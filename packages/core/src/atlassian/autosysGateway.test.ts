@@ -5,7 +5,7 @@ import type { AutosysGatewaySettings } from '../agent/protocol.js'
 import type { HttpClient, HttpRequestOptions, HttpResponse } from '../platform/http.js'
 import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
 import { AutosysClient } from './autosys.js'
-import { AUTOSYS_CLIENT_SECRET_REF, gatewayFromSettings, gatewayView, withBasicCredentials } from './autosysGateway.js'
+import { AUTOSYS_BASIC_VALUE_REF, AUTOSYS_CLIENT_SECRET_REF, gatewayFromSettings, gatewayView, withBasicCredentials, withHeader } from './autosysGateway.js'
 
 const blank = (): AutosysGatewaySettings => ({ ...gatewayView(undefined, false, false) })
 
@@ -148,6 +148,34 @@ describe('the gateway form', () => {
     expect(sent).toContain('lc-app')
     expect(sent).not.toContain('jsmith')
     expect(sent).not.toContain(Buffer.from('jsmith:pw').toString('base64'))
+  })
+
+  it('sends a pasted sign-in header value verbatim beside the Bearer token, with no username or password', async () => {
+    const { http, calls } = fakeGateway()
+    const gateway = new ApigeeMtlsAuthStrategy(
+      http,
+      { tokenUrl: 'https://gw.test/oauth/token', clientId: 'lc-app', resolveClientSecret: async () => 's3cret' },
+      'https://autosys.test',
+      async () => undefined,
+    )
+    const header = 'x-api-authorization-header-for-service-provider'
+    const value = `Basic ${Buffer.from('jsmith:pw').toString('base64')}`
+    const auth = withHeader(gateway, header, value)
+    await new AutosysClient(http, { baseUrl: 'https://autosys.test', token: '', auth }).probe('x')
+    const api = calls.find((call) => call.url.startsWith('https://autosys.test/'))!
+    expect(api.options.headers?.['Authorization']).toBe('Bearer tok-1')
+    expect(api.options.headers?.[header]).toBe(value)
+    const token = calls.find((call) => call.url.startsWith('https://gw.test/'))!
+    expect(JSON.stringify(token.options)).not.toContain(value)
+  })
+
+  it('stores a reference to the pasted value only when one is stored, and shows that it is', () => {
+    const settings = { ...blank(), enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', sendBasic: true, basicHeaderName: 'x-api-authorization-header-for-service-provider' }
+    const withValue = gatewayFromSettings(settings, { clientSecret: true, passphrase: false, basicValue: true })
+    expect(withValue).toMatchObject({ auth: { basicHeaderValueRef: AUTOSYS_BASIC_VALUE_REF, basicHeaderName: settings.basicHeaderName } })
+    const without = gatewayFromSettings(settings, { clientSecret: true, passphrase: false })
+    expect((without as { auth: Record<string, unknown> }).auth['basicHeaderValueRef']).toBeUndefined()
+    expect(gatewayView((withValue as { auth: never }).auth, true, false, true).hasBasicValue).toBe(true)
   })
 
   it('refuses the token and the Basic sign-in in one header, naming the way out', () => {

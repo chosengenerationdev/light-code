@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.171.0",
+  "version": "0.197.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -76,6 +76,15 @@
       {
         "command": "lightCode.shareKeysWithSun",
         "title": "Light Code: Share credentials with Fire Code"
+      },
+      {
+        "command": "lightCode.openBranch",
+        "title": "Light Code: Open Branch in New Window",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "lightCode.branches",
+        "title": "Light Code: Branches"
       }
     ],
     "viewsContainers": {
@@ -394,6 +403,11 @@
           "command": "lightCode.writeCommitMessage",
           "when": "scmProvider == git",
           "group": "navigation@0"
+        },
+        {
+          "command": "lightCode.openBranch",
+          "when": "scmProvider == git",
+          "group": "navigation@90"
         }
       ]
     }
@@ -401,7 +415,7 @@
   "scripts": {
     "build": "node ./esbuild.mjs",
     "typecheck": "tsc -b tsconfig.json",
-    "build:helper": "cargo build --release --bin fire-fs --no-default-features --target-dir ../sun/native/target/slim --manifest-path ../sun/native/Cargo.toml",
+    "build:helper": "cargo build --release -p fire-fs --no-default-features --target-dir ../sun/native/target/slim --manifest-path ../sun/native/Cargo.toml",
     "package": "node ../../scripts/remove-old-vsix.mjs && vsce package --no-dependencies"
   },
   "devDependencies": {

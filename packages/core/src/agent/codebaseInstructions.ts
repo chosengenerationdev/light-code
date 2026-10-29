@@ -73,9 +73,10 @@ export function renderCodebaseInstructions(text: string): string {
   return [
     '## Codebase instructions',
     '',
-    'The user wrote these for this codebase, and every chat on it receives them. They come before',
-    'the standing instructions below: where the two disagree, follow these. What the user says in',
-    'this conversation overrides both.',
+    'The user wrote these for this codebase, and every chat on it receives them. Follow them in every',
+    'reply. They outrank the standing instructions and every general guideline above: where the two',
+    'disagree, follow these. Only what the user says in this conversation, or a plan they set for',
+    'it, overrides them.',
     '',
     cut ? trimmed.slice(0, CODEBASE_INSTRUCTIONS_LIMIT) : trimmed,
     ...(cut

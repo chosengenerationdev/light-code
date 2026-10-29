@@ -64,10 +64,11 @@ export const readFileTool: Tool<ReadFileParams> = {
     await recordRead(context, resolved.realPath)
 
     try {
+      const note = context.annotateRead?.(resolved.realPath) ?? ''
       if (size <= REQUIRE_WINDOW_BYTES) {
-        return { content: readSmall(await context.fs.readFile(resolved.realPath), params), path: params.path }
+        return { content: readSmall(await context.fs.readFile(resolved.realPath), params) + note, path: params.path }
       }
-      return { content: await readLarge(context.fs, resolved.realPath, params, size), path: params.path }
+      return { content: (await readLarge(context.fs, resolved.realPath, params, size)) + note, path: params.path }
     } catch (error) {
       return {
         content: `Could not read "${params.path}": ${error instanceof Error ? error.message : String(error)}`,

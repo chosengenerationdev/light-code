@@ -273,7 +273,7 @@ alert about.
   {
     id: 'skills',
     title: 'Skills: teaching it things it cannot work out',
-    keywords: ['skill', 'teach', 'instructions', 'standing', 'always', 'master skill', 'markdown', 'edit skill', 'editor', 'edit standing instructions', 'standing instructions', 'edit a skill'],
+    keywords: ['skill', 'teach', 'instructions', 'standing', 'always', 'master skill', 'markdown', 'edit skill', 'editor', 'edit standing instructions', 'standing instructions', 'edit a skill', 'placeholder', 'placeholders', 'skill defaults', 'default values', 'skill inputs', 'stop asking', 'keep skill private', 'which skills to send', 'keep to myself', 'delete everywhere', 'force delete', 'delete a skill for the team', 'only me', 'personal skill'],
     body: `
 A skill is markdown with frontmatter (\`name\`, \`description\`), kept in the workspace so it lands
 in git and gets reviewed. **Settings → Skills.**
@@ -305,6 +305,26 @@ and the assistant copies it into the workspace with \`use_skill_file\` rather th
 bytes into the conversation. Describe each file in one line in the skill body; a file nobody
 described is one the assistant will never know to reach for.
 
+**Delete everywhere.** Each skill in Settings -> Skills, and each tool in Settings -> Python, has
+**Delete everywhere**: it first lists exactly what will go - every copy on this computer, the objects in
+each S3 bucket folder, and its files in the team repository - and only the second press removes them. The
+repository cannot delete a file over Bitbucket's REST API, so each file is replaced by a one-line
+"deleted by you on <date>" marker; history keeps the old version, and every Light Code treats it as gone:
+colleagues' unchanged copies in folders Light Code syncs are removed at their next sync, and a copy someone
+changed, or keeps in their own project folder, is reported rather than removed. The repository goes first:
+if it refuses (someone changed the file meanwhile), nothing else is removed - press Sync now and try again.
+Writing a new skill or tool of the same name brings it back. It is a button only: the assistant cannot
+delete for the team. On a shared server only an admin may.
+
+**Only me, or the team.** A new skill or Python tool is **for the team** unless you say it is personal
+("just for me", "keep it private") - the assistant does not ask. **Only me** keeps it in your personal folder on this computer
+(%LOCALAPPDATA%\\light-code\\personal) - used in every project, in VS Code, Fire Code and the Node host
+alike, and never uploaded to a bucket, committed to the team repository or sent to the team skills
+pool. **The team** saves it where your team shares: committed to the team repository and/or uploaded
+to the bucket folder marked "Publish" - the approval prompt names the destination before anything is
+written. Updating one keeps it where it is. Personal skills show **only you** in the Skills tab and can
+be removed there. Not offered on a shared server, where every user is the same account.
+
 **Moving them.** Changed where skills live, or turned a bucket on after you already had some?
 Settings -> Skills -> "Bring skills in from another folder" copies them in. Nothing is moved and
 nothing is overwritten: the old folder is untouched and a name already present is skipped and
@@ -328,6 +348,20 @@ so one person re-indexing never disturbs anybody else. The team skills aliases, 
 team search test are in **Settings -> Project -> Team skills**. Searches return this project's
 skills by default; say "all projects", another project's name, or a person to widen or change that.
 
+**Choosing which skills go to the team.** Settings -> Project -> Team skills -> *Choose which skills to
+send*: untick a skill to keep it to yourself. The choice is remembered (config:teamSkills), the Send
+button counts what goes, and a skill unticked after it was sent is taken back from the pool by the
+next Send - only your own copy; colleagues' collections are never touched. Check status marks it
+"kept to yourself".
+
+**Defaults for a skill's inputs.** A skill that needs answers - an environment, a team, a user name -
+can be answered in advance, so the assistant fills them in instead of stopping to ask. Settings ->
+Skills -> a skill -> *Defaults for its inputs*: placeholders written \`{{name}}\` or \`<NAME>\` in the
+skill are offered as boxes, and any other input can be added by name. They are yours, kept in your own
+settings (config:skillDefaults), never in the skill, so a shared skill stays the same for everyone.
+The assistant is told them up front and again when it reads the skill, says which it used, and still
+asks for anything without a default; a different value you give in the chat wins.
+
 A skill is **prose nobody code-reviews that steers every conversation that finds it**. That is why
 writing one always asks for approval, whatever else is auto-approved, and why plain markdown in
 git is the main defence.
@@ -344,8 +378,11 @@ git is the main defence.
     title: 'Python tools written by the assistant',
     keywords: [
       'python', 'tool', 'uv', 'venv', 'dependencies', 'pip', 'dynamic', 'registry', 'missing package',
+      'new team tools', 'check for new tools', 'pull tools', 'tools not showing for approval', 'python tab slow',
       'install package', 'module not found', 'library', 'approve tool', 'credential in a tool',
-      'password in a python tool', 'read credential', '__credentials__',
+      'password in a python tool', 'read credential', '__credentials__', '__always_ask__',
+      'always ask', 'never always allow', 'banned calls', 'ban function', 'forbid function', 'blocked function',
+      'approved again', 'approval in fire code',
     ],
     body: `
 **Settings → Python.** Off by default — set config:python.dynamicTools to \`on\`. This is the
@@ -368,6 +405,12 @@ installed or removed: that environment belongs to whatever built it.
 **Dependencies** install before validation, so a failure names the package rather than surfacing
 as an ImportError from inside the worker. config:python.indexUrl points at an internal mirror and
 config:python.offline refuses the network.
+
+**A colleague's new tool, now**: Settings → Python → **Check for new team tools** pulls the team's bucket tool
+folders and the team repository straight away (instead of at the next sync, every 15 minutes by default) and
+says what came down; anything new appears above the chat for approval. The Python tab shows the tools already
+approved at once, marked "Starting Python…", and fills in the rest once Python is running - starting uv and
+Python can take seconds on a managed machine.
 
 **Missing packages are spotted before they fail.** Tools arriving from a bucket often need packages
 this machine's environment lacks. Light Code checks every tool's declared dependencies and imports
@@ -407,6 +450,23 @@ another credential means approving the tool again. Nothing goes into the environ
 handed out is replaced by [REDACTED] in what the tool returns or prints before the model sees it.
 Reviewing the code is still what stops a tool sending a credential somewhere it should not.
 Outside Fire Code, use a secret variable (config:python.env) instead.
+
+**A tool that must always ask before it runs**, for everyone who has it: put
+\`__always_ask__ = True\` at module level (ask the assistant to, when it creates the tool). It is part of
+the approved source, so it travels with the tool to colleagues; the approval prompt then never offers
+"Always allow", and neither the command auto-approve switch nor an earlier "always allow" covers it.
+
+**Banned calls** (config:python.bannedCalls, Settings → Python): functions or modules no tool may use,
+one per line - \`os.system\`, \`subprocess\`, \`certainLib.certainFunction\`. Every tool is checked when
+it loads and again before every call, through import aliases (\`import os as o\` then \`o.system\`) and
+\`from x import y\`; a tool that uses one is refused, naming the line. It reads the code, so it stops
+the obvious uses, not a tool determined to hide a call (\`getattr\` with a built-up string) - reviewing
+the source is still the real check.
+
+**Approved once per machine.** A tool's code approved in the VS Code extension, the Node host or Fire
+Code is approved in the others too, for the same Windows user: the approved hashes live in one list,
+\`%LOCALAPPDATA%\\light-code\\approvals\` (no tool can read or write it). A changed file still needs
+approving again.
 
 A created tool becomes callable on your **next** message, not later in the same turn — tool
 definitions have to stay stable for a whole turn or the prompt cache is thrown away.
@@ -660,6 +720,7 @@ comment or move fails after the fields were saved, the result says exactly which
       'jenkins', 'ci', 'build', 'pipeline', 'jenkinsfile', 'job', 'console log', 'build log',
       'why did the build fail', 'failed build', 'start a build', 'trigger', 'rerun', 'replay',
       'stop build', 'abort', 'queue', 'agent offline', 'api token', 'sso',
+      'create job', 'new job', 'clone job', 'copy job', 'modify job', 'job parameters', 'add parameter', 'job config', 'config.xml',
     ],
     body: `
 **Settings → DevOps → Jenkins**: the site address, an **API token**, your **Jenkins user id**, and
@@ -696,7 +757,15 @@ an access token as a Bearer token, leave the user id empty and paste that token 
   end of its log. Needs a pipeline job that has run at least once and the Replay permission. Run
   \`jenkins_check_jenkinsfile\` first; it is instant and catches syntax and unknown steps.
 
-There is no tool that changes a job's configuration.
+- \`jenkins_write_job\` — **create a job, copy one into a new job, or change a job**. "A job like
+  platform/api but with a HOTFIX branch parameter" is a copy with new parameters. Parameters are set by
+  name, type (string, text, boolean, choice), default, description and choices, or removed; anything
+  else (script path, branch, schedule, agent label) is an exact edit of the job's config.xml. The
+  approval shows the diff of the configuration Jenkins will be sent - against the job copied, or the job
+  as Jenkins holds it now - and it **cannot be set to always allow**. It never deletes a job, never
+  creates or copies over an existing one, and refuses to save if the job was edited on Jenkins after
+  you were shown the change. Ticking **My access is read-only** removes it with the other acting tools.
+  Needs the Job/Create or Job/Configure permission on your Jenkins.
 `,
   },
   {
@@ -707,13 +776,34 @@ There is no tool that changes a job's configuration.
       'force_startjob', 'on hold', 'on ice', 'kill job', 'change status', 'job definition',
       'job dependencies', 'condition', 'box', 'why has my job not started', 'job failed', 'job log',
       'apigee', 'gateway', 'token url', 'client id', 'client secret', 'oauth', 'consumer key', 'consumer secret',
+      'machine', 'agent', 'running on', 'jobs on host', 'long running', 'global variable', 'calendar',
+      'run calendar', 'what runs at', 'scheduled', 'start times', 'read only', 'read-only', 'readonly access',
+      '403', 'forbidden', 'test connection details', 'service account',
+      'rerun', 're-run', 'started manually', 'who started', 'manual run', 'run history', 'runs today',
+      'last n hours', 'aews', '404', 'wrong address', 'addresses', 'urls', 'endpoints', 'wiki', 'share addresses',
     ],
     body: `
-**Settings → DevOps → AutoSys**: the web services address (for example
-\`https://autosys.example.com:9443\`), your **username** and **password**, and optionally a default
+**Settings → DevOps → AutoSys**: the web services address, as far as the web services' own prefix (for
+example \`https://autosys.example.com:9443/AEWS\`), your **username** and **password**, and optionally a default
 job pattern such as \`PAY_*\`, a CA file and the skip-verify escape hatch. Off until switched on;
 **user-scope only** (config:autosys). The password is kept in secure storage. **Test connection**
-signs in without listing any jobs.
+signs in without listing any jobs; with **Job to check in Test connection** filled in
+(config:autosys (testJob)) it reads that one job's definition instead - the same request as
+\`<site>/job/<name>\` in Postman, so the two answers can be compared. Under its result, **Details** shows every request it made and what
+came back - the address, HTTP status, response headers and the start of the body, the gateway's token
+request first - with passwords, tokens and secrets masked; open by default when the test failed, with a
+**Copy details** button for whoever runs the service. Details begin with **Likely cause**, the first step that failed
+read in plain words (a name that does not resolve, a certificate not trusted, a redirect to a login page, what a
+401, 403 or 404 usually means there), and each step says the same - for Confluence, Jira, Bitbucket and Jenkins too.
+**A pattern finds only some jobs?** Many servers answer a page at a time; when an answer says it has more (a total,
+a "next" link), the status and find tools say how many came back of how many, and to add the server's page-size
+parameter to the address in config:autosys (paths) - autosys_check_addresses shows what each address answers. Error messages name the HTTP status (401 not signed
+in, 403 forbidden - signed in but that account is not allowed) so they can be compared with Postman.
+
+**Read-only access?** Tick **My access is read-only** in the panel. The tools that change things
+(\`autosys_send_event\`, \`autosys_apply_jil\`) are then left out entirely and the reading tools tell
+the assistant the access is read-only, so it explains what someone with access would need to do instead
+of trying. The same tick box is on Confluence, Jira, Bitbucket and Jenkins (config:autosys (readOnly)).
 
 **Behind an API gateway (Apigee)?** Fill in **API gateway (Apigee)** in the same panel — typing a
 token URL ticks "Sign in through the gateway" — and press the panel's one **Save**, which stores the
@@ -730,26 +820,64 @@ and the secret is right, switch *How the consumer key and secret are sent* betwe
 and a Basic header — gateways differ. **Gateway token and AutoSys username and password together** (an AutoSys that wants both, plus the
 certificate, for job status, details and actions): tick *Also send the AutoSys username and password
 with each job call (HTTP Basic)* — it sends the username and password entered above as Basic on every
-AutoSys call, alongside the gateway's token, and never on the token request. One header holds one value, so the two must go in different headers:
+AutoSys call, alongside the gateway's token, and never on the token request. **Or paste the whole header
+value yourself** in *Header value* (for example \`Basic \` followed by the base64 of username:password -
+in Python \`"Basic " + base64.b64encode(b"user:pass").decode()\`): it is sent exactly as stored, kept in
+secure storage, and the username and password are then not needed. *Header name for the sign-in* takes
+whatever your gateway expects (for example x-api-authorization-header-for-service-provider), and is
+editable if it was mistyped. One header holds one value, so the two must go in different headers:
 usually the token in a gateway header (Advanced → *Header the token is sent in*, such as
-x-apigee-token) and the Basic sign-in in Authorization, or the other way round with *Header for the
-username and password*. The panel warns before saving if both would land in the same one. *Advanced* covers the grant type, where the token and its
+x-apigee-token) and the Basic sign-in in Authorization, or the token in Authorization (Bearer) and the
+sign-in in a header of its own. The panel warns before saving if both would land in the same one. *Advanced* covers the grant type, where the token and its
 expiry sit in the response, the header and prefix it is sent with, extra headers (an API key, say)
 and extra token parameters (config:autosys).
 
-Without a gateway, it talks to AutoSys's REST web services (AEWS) with HTTP Basic. Paths follow the documented layout
-(\`/AEWS/job\`, \`/AEWS/job-run-info\`, \`/AEWS/event\`, \`/AEWS/jil\`); a server that answers
+Without a gateway, it talks to AutoSys's REST web services (AEWS) with HTTP Basic. **The site address is used
+exactly as typed, so include the web services' own prefix** - usually \`https://autosys.example.com:9443/AEWS\`.
+Light Code adds only the resource and its query to it (\`/job\`, \`/job-run-info?filter=...\`, \`/event\`,
+\`/jil\`); a 404 from Test connection usually means the prefix is missing or doubled - its Details show the
+exact address used. A server that answers
 elsewhere can be pointed at with config:autosys (paths) — one template each for jobs, job,
-runInfo, jobRunInfo, boxMembers, event, jil and log.
+runInfo, jobRunInfo, boxMembers, event, jil, log, machines, machine, globalVariables, calendar,
+extendedCalendar, runHistory and eventHistory. A tool whose address this server does not answer says which of these to set.
+
+**Your office's server answers at other addresses?** (Test connection 404, one job works but \`JOB*UK\`
+does not.) Fill in **Job to check in Test connection** with a job that exists, and ask the assistant to
+**"find the AutoSys addresses"**. \`autosys_check_addresses\` tries the saved addresses and the usual
+layouts (\`/v1\`, \`/AEWS\`, \`/AEWS/v1\`, \`/api/v1\`, other query forms) with that job and says what each
+answered, with the field names. **If your wiki documents the AutoSys REST service**, ask it to read that
+page first (Confluence configured: it searches and reads it; otherwise drop the page into the chat) - it tries
+what the page names, since a wiki page can be out of date and the server cannot. \`autosys_set_addresses\`
+then saves the ones that answered: it asks **every time**, the prompt shows the addresses before and after
+with each changed one tried live, and it is never available to a schedule or with read-only access.
+Addresses must be paths on your site (\`/v1/job/{job}\`) - never another host - and the ones that send
+(events, JIL) are never tried. Placeholders: {job}, {pattern}, {filter:name} (\`name==PAY_*\`), {runNum},
+{type}, {machine}, {calendar}. Even without any of this, a **pattern** works on a server with no pattern
+status address: the jobs are listed and each one's status read in turn.
+
+**Share them with the team**: Settings → Export, tick only **AutoSys addresses**; colleagues import the
+file with that section ticked. It carries config:autosys (paths) alone, so their own site, sign-in and
+other DevOps settings are not touched. The assistant can write the same file (\`light_code_export_config\`
+with the section \`autosysAddresses\`), for example next to an onboarding page.
 
 **Reading** — ordinary read tools, which you may set to always allow:
-- \`autosys_find_jobs\` — jobs matching a name pattern, with type, box and machine.
+- \`autosys_find_jobs\` — jobs matching a name pattern, with type, box, machine and owner, narrowed by
+  what their definitions say: the **machine** they run on, **owner**, **box**, **type**, a **calendar**
+  they use, or text in their **command** ("which jobs call load_gl.sh").
 - \`autosys_job\` — job definitions in JIL terms with each job's status, and a box's members. One
   job, a list, or a **pattern** for every matching job; for many jobs ask for just the attributes
   you need ("the command and start times of every PAY_* job").
 - \`autosys_status\` — like autorep: status, last start and end, exit code, run number. One job, a
   pattern, or **several at once** ("PAY_LOAD and every GL_* job"), with a count by status first and
-  failures at the top; \`only\` narrows to FAILURE, or to several statuses at once.
+  failures at the top; \`only\` narrows to FAILURE, or to several statuses at once. Also by
+  **machine** ("what is running on host X"), by **time** ("what failed in the last 6 hours"), and
+  **long runners** ("running longer than 2 hours", each with how long it has run).
+- \`autosys_runs\` — **today's runs, or the last N hours**, for a list of jobs: each run's start, end,
+  status and exit code, and **how it was started** - on its schedule, **by hand** (a STARTJOB or
+  FORCE_STARTJOB event shortly before it, with **who** sent it and when), or an automatic retry.
+  It needs the server's run history and event history; where those live elsewhere set
+  config:autosys (paths) runHistory and eventHistory, and the tool names which one is missing. A run
+  with no event record is reported as "not known", never guessed as scheduled.
 - Ask it to **follow a job until it finishes**: it checks the status, waits, and checks again.
 - \`autosys_job_log\` — a job's stderr or stdout, the end of it or matching lines. If the server
   offers no log endpoint, it says which file on which machine the job writes to instead.
@@ -757,6 +885,18 @@ runInfo, jobRunInfo, boxMembers, event, jil and log.
   (success, failure, done, notrunning, terminated, exit code) with its status and whether the
   condition is met, following unmet ones further up, and the box it runs in. Downstream: the jobs
   whose conditions name it, and a box's members.
+- \`autosys_machines\` — machines (agents) like autorep -M: definition and status, and for one machine
+  the jobs **running on it now** and the jobs **defined on it**, each with its status.
+- \`autosys_schedule\` — **what starts when**, from the definitions' start times, start minutes, days and
+  run calendar: "what runs between 2 and 4 am", "what is scheduled on Saturday", "what starts on host X
+  tonight", in start order, optionally with each job's current status. Jobs started only by a condition
+  or their box are counted rather than listed.
+- \`autosys_calendar\` — a calendar's dates (between two days, or whether one day is in it), or an
+  extended calendar's rules: "will this job run on the 31st?".
+- \`autosys_global_variables\` — global variables like autorep -G, for conditions such as
+  \`v(RUN_DATE)\`.
+- There is no run-history tool: the web services report each job's latest run; earlier runs are in
+  AutoSys's own reports.
 
 **Changing** — asked **every time**, and cannot be set to always allow; never available to a
 schedule:
@@ -804,6 +944,135 @@ versions read files from the web \`/raw/\` address, which a SAML site sends to t
 whatever the token - so pull requests worked and files did not. If a call still comes back as "a web
 page instead of data", the site address is going through the login portal: use the server's own
 address. Granting the token more permission does not help with this; it is not a permission problem.
+`,
+  },
+  {
+    id: 'team-repository',
+    title: 'Team repository for skills and tools (Bitbucket)',
+    keywords: [
+      'team repository', 'team repo', 'skills repository', 'tools repository', 'commit skills', 'push skills',
+      'push tools', 'share skills with team', 'sync skills', 'git for skills', 'branch for skills',
+      'cannot commit to main', 'bitbucket skills', 'skills and tools', 'commit our skills', 'team skills branch',
+    ],
+    body: `
+**Settings → DevOps → Team repository for skills and tools.** Offered once Bitbucket is set up: the
+repository is reached with that site and its personal access token, through Bitbucket's REST API -
+nothing is cloned and git is not needed. It is a separate repository from your working folder's
+(config:teamRepo): project key, repository slug, a **branch** (if your team cannot commit to main,
+name another - it is created from the default branch when missing), an optional folder holding
+\`skills/\` and \`tools/\`, and how often to sync. User-scope only; it travels in export under DevOps.
+
+**Two-way, every few minutes, and soon after you save.** The first sync commits every skill and tool
+you already have; after that, each one you write or change is committed directly to the branch, and
+your colleagues' are brought into a local copy that joins your skill and tool folders read-only.
+Tools from the repository still need approving once on each machine before they run.
+
+**Nothing is overwritten.** A file changed both here and in the repository since the last sync is
+listed as not synced, on the panel and in Settings → Usage → Needs attention; a commit Bitbucket
+refuses because someone committed first is the same. A skill or tool you **delete** stays in the
+repository until somebody removes it there - the panel lists them.
+
+**With S3 buckets too.** Everything skills and tools load from is committed - the folder new ones are
+saved in, the project's .lightcode folders, **and the S3 bucket folders** - so a team that keeps its
+skills and tools in a bucket gets all of them in the repository. Never the repository's own copy, so the
+two syncs cannot bounce files between them. Two colleagues committing the same bucket file meet as
+identical content, which is agreement, not a conflict; an edit someone makes in the bucket is committed
+by the next sync. The same name in two folders here is one file when identical; when the copies differ,
+the one Light Code uses is committed and the other is listed.
+
+**Deleting one for the team.** Use **Delete everywhere** on the skill (Settings -> Skills) or tool (Settings -> Python): it lists every copy - this computer, S3 bucket folders, the repository - before removing them, and replaces the repository file with a "deleted" marker that every Light Code honours. See the skills topic for the details.
+
+**Where new ones are saved.** While the repository is on, new skills and Python tools are saved in a
+folder of its own outside the project (the panel shows the path), so they never land in the project's git.
+A folder you chose in Settings -> Skills or Settings -> Python, or an S3 bucket folder marked "Publish",
+still wins. Skills and tools already in the project's .lightcode folders keep loading and are committed
+too. The agent can read every skill and tool folder, wherever it is, without asking.
+
+**Starting with the repository alone** needs no S3 bucket: set up Bitbucket, fill in this panel and press
+Sync now. Everyone's skills and tools come down; yours are committed as you create them.
+
+**Python tools from the repository** need approving once on each machine, like any shared tool. Tool code
+approved before (from a bucket, say) with exactly the same content is recognised and not asked again.
+
+**"Newer in the repository"** (grey, not red): a colleague's change reached the repository before your
+bucket sync brought it here. Your copy is unchanged, so nothing clashes; it clears once the bucket syncs.
+**"Not synced - changed both here and in the repository"** (red) means both sides really changed. Compare
+your copy with the team copy, keep one, and the next sync agrees. Line-ending differences (Windows CRLF
+against LF) are not counted as changes.
+
+**Do I still need the S3 bucket?** Either is enough to share: the bucket delivers files to everyone's
+machine, and the repository does too while keeping history and diffs. With both on, the same file in both
+is one file. A team can switch the bucket folders off and use the repository alone: **Use the repository
+instead of the S3 bucket**, in the same panel. **Check** syncs the bucket and the repository, then makes sure
+every skill and tool in the bucket folders is in the repository with the same content, listing anything that
+is not. Only after a clean check can **Switch bucket folders off** be pressed, and it checks once more first.
+It switches the skills and tools bucket folders off together and only unticks them - nothing is deleted in the bucket or on this computer, and ticking them again in
+Settings -> S3 undoes it. Afterwards new skills and tools are saved in the project's folders and committed to
+the repository, and what came from the bucket loads from the team copy (tools approved before stay approved
+when their content is the same). Colleagues still using only the bucket stop receiving yours, so switch over
+together.
+
+Problems from syncing in the background (the repository, buckets, tools that did not load) show in
+**Settings → Usage → Needs attention**.
+`,
+  },
+  {
+    id: 'branches',
+    title: 'Several branches at once, side by side',
+    keywords: [
+      'branch', 'branches', 'worktree', 'git worktree', 'different branches', 'another branch', 'switch branch',
+      'work on two branches', 'parallel branches', 'branch folder', 'new chat on a branch', 'open branch',
+      'close branch', 'run and debug a branch', 'port offset', 'setup command', 'pnpm install in branch',
+    ],
+    body: `
+Work on several branches of one repository at the same time, each in its own folder - git worktrees, part of
+git since 2015. You clone once; opening a branch makes a folder for it beside the repository
+(<repo>.worktrees\\\\<branch>, or under config:branches (folder)), sharing the repository's history. Nothing is
+downloaded again, your codebase stays on its own branch, and a commit in any branch folder is in the one
+repository straight away.
+
+**VS Code**: Light Code: Open Branch in New Window (Command Palette, or the branch button in Source Control)
+lists local branches, fetched remote branches and those already open, plus New branch… - which starts from
+the repository's main branch (the remote's default, else main or master) unless you pick another. The branch opens in a new VS Code window - running, debugging and terminals there use that
+branch's files and its own launch.json, with its own Light Code. Light Code: Branches lists every branch folder
+with its state (clean, uncommitted changes, commits not pushed) to open it or close it.
+
+**Fire Code**: New chat on a branch… (the + button, a tab's right-click menu, or the codebase's) lists every
+branch to pick from, and has a New branch box at the top: type a name and it is made starting from the main
+branch (main or master) unless you pick another. The branch opens as a chat tab working in its own folder. Each tab shows its chat name with the branch underneath (trimmed when long - a Jira key is kept
+whole - full name on hover); renaming the chat never changes the branch. Close branch… (right-click a branch
+chat's tab) removes its folder and the chat. To debug a branch, right-click its tab -> Open this branch in
+VS Code: that window runs and debugs the branch, and the agent in Fire Code can read the paused session
+(read_debug_session). Tests run from the chat itself - ask the agent; it runs them in the branch's folder. Fire Code's Commit and push acts on the codebase's own folder; in
+a branch chat, commit through the agent or git in that folder.
+
+**Setting a branch up** (once, when its folder is first opened): config:branches (copyFiles) - files git does
+not track that it needs, such as .env, copied from the main checkout - and config:branches (setupCommand),
+e.g. pnpm install or uv sync (VS Code runs it in a terminal you can watch). Each branch folder has its own
+node_modules or .venv, because a shared one breaks as soon as branches differ. Per project; user-scope only
+(a repository cannot set a command for you), and never exported.
+
+**.vscode and the venv**: a committed .vscode folder is part of the branch already. An uncommitted one is not -
+add ".vscode" to config:branches (copyFiles) and it is copied (adding only what the branch lacks). A virtualenv
+is never copied - it records absolute paths, so a copy breaks; give each branch its own with the setup command
+(uv sync, or python -m venv .venv and a pip install), or point VS Code's python.defaultInterpreterPath at the
+main folder's .venv while branches share the same dependencies.
+
+**Running two at once**: commands and debug sessions in a branch folder get LIGHT_CODE_BRANCH and
+LIGHT_CODE_PORT_OFFSET (0 in the main checkout, 1, 2... in branch folders), so a dev server can add the
+offset to its port. Nothing is written into your repository for this.
+
+**Shared or separate**: codebase instructions, skills, settings and "always allow" approvals are shared by all
+of a repository's branches; checkpoints and rollback, chat history and running processes are each folder's own.
+The agent in a branch folder can only change files in that folder.
+
+**A repository with no commits yet has no branches** - git makes a branch with the first commit - so there is
+nothing to open or start from until you make one (Commit and push, or ask the agent to commit). Both products
+say so instead of showing an empty list.
+
+**Safe by git's own rules**: one branch can be open in only one folder at a time; closing a folder checks for
+uncommitted changes and unpushed commits first and never deletes the branch; folders stay until you close them
+(not temporary). If you delete one by hand, git forgets it (git worktree prune) and committed work is safe.
 `,
   },
   {
@@ -1094,7 +1363,9 @@ marked *stale* when not updated for a year); and new or updated ones.
 is used), identical content under two names, near-identical names, skills without a description,
 skills and tools without an author, Python tools not loaded, tools that fail often, and skills
 colleagues use that are not installed here. A copy of the same file in a bucket mirror is *not* a
-problem - that is how sharing works.
+problem - that is how sharing works. Things that broke behind the scenes come first: a team repository
+or bucket sync that failed or skipped a file to avoid overwriting it, and Python tools that did not load
+(a banned call, a missing package) - each with what to do.
 
 **Acting on it**: Open any skill or tool, and **Delete** one that lives in this project's own folder (two
 clicks; the second names it). A shared or bucket copy belongs to everybody and is only opened here -
@@ -1142,7 +1413,9 @@ the Windows VS Code package carries a slim one with every tool below except \`da
 
 To see whether they are on right now, look at the tool list in Settings → Tools, or ask "which tools do
 you have?" - the assistant answers from the tools it was actually given.
-`,
+
+
+**For a monitor**: find_files, grep_files, big_file (search), query_table, query_sqlite and dataframe take \`"records": true\` and answer as a JSON list of records, so a Fire Code monitor can use them as its source directly - Rust collects, Rust judges, no Python in between. See the Monitoring topic.`,
   },
   {
     id: 'confluence',
@@ -1291,6 +1564,195 @@ edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push
 `,
   },
   {
+    id: 'monitoring',
+    title: 'Monitoring dashboard (Fire Code)',
+    keywords: [
+      'monitoring', 'monitor', 'monitors', 'dashboard', 'alert', 'alerts', 'alerting', 'tile', 'tiles', 'data grid',
+      'highlight', 'highlighted', 'traffic light', 'red amber green', 'watch', 'check every', 'notification level',
+      'alarm', 'snooze', 'acknowledge', 'team alerts', 'personal alerts', 'monitor_create', 'quiet hours',
+      'run window', 'specific time', 'once a day', 'history of alert', 'recurring alert', 'retention', 'cleanup',
+      'opensearch history', 'explain alert', 'tool_calls', 'edit schedule', 'change schedule', 'delete monitor',
+      'delete check', 'remove monitor', 'personal monitor', 'personal check', 'monitor schedule', 'schedule of a monitor',
+      'monitor check', 'monitoring check', 'snooze until', 'snooze row', 'review all', 'approve several monitors',
+      'run history', 'past failures', 'polars', 'team monitors', 'approve monitors', 'approve the team monitors',
+      'offline', 'runs elsewhere', 'claim', 'who runs the check', 'not shared', 'team checks', 'my checks', 'checks offline',
+      'past failure', 'specific date', 'grid as it was', 'delete a check', 'delete one check', 'rust tools',
+      'find_files', 'grep_files', 'records', 'only alerted rows', 'all rows', 'lazy load', 'many rows',
+      'older than', 'delete old history', 'delete history older than', 'clean up history',
+      'not on time', 'not triggered', 'late check', 'check is late', 'waiting', 'scheduler', 'scheduler stopped',
+      'start the scheduler', 'stop the scheduler', 'is the scheduler running', 'refresh monitors', 'new checks',
+      'deleted checks', 'who wrote the monitor', 'author of the monitor', 'last updated by', 'who changed the monitor',
+      'monitor changes', 'changes to the monitor', 'audit of changes', 'updated_by', 'takeover',
+    ],
+    body: `
+**Fire Code only.** Settings → Monitoring switches it on; a Monitoring button then appears at the top of the
+sidebar (Ctrl+M), showing the worst colour and how many monitors are alerting. Chats that were idle restart
+so their agents get the monitoring tools.
+
+**The dashboard** fills the window: one glowing tile per monitor, under **Team alerts** and **Personal**, with
+a search box and a chip per colour - **red** failure, **amber** warning, **purple** no fresh data (the check
+failed or is late), **blue** information, **green** all clear, **grey** paused, not run yet, or waiting for
+your review. Hover a tile for what it watches and when it last checked; right-click it to check now, pause,
+snooze or change how it notifies. **Click it for its grid**, in a window of its own: rows and cells coloured
+by its alert rules, a filter on every column (text, or \`>10\`, \`<5\`, \`=x\`), sort by a header, the alerts
+as chips above. **Double-click a row** for every field and, when the monitor names one, a breakdown fetched
+for that row. **Acknowledge** an alert and it stops counting until it gets worse.
+
+**A monitor is a skill** with a \`monitor\` block - what to read, how often (\`every\`, \`activeHours\`,
+\`days\`), the columns and the alert rules - so it travels like any skill: a **personal** one stays in your
+personal skills; a **team** one goes where the team shares skills (the codebase, a bucket, the team
+repository), and each person's Fire Code runs it with their own credentials. Ask an agent: "monitor the
+PAY_* jobs every 15 minutes, red when one fails". It reuses a tool that returns the data or writes a Python
+tool, and creates the monitor with \`monitor_create\`; you approve the file, which approves it here. A
+colleague's monitor shows grey **Review** until you approve exactly what it runs.
+
+**Tools written for monitoring** return a list of records - one per job, host or feed, the same fields in each,
+numbers as numbers, times as ISO timestamps, a field naming the row - return an empty list when there is
+nothing to report, and fail loudly when the data cannot be read (the tile then turns purple rather than
+falsely green). The agent tries a tool with \`monitor_create\` \`tryOnly\` first: it shows the columns, rows and
+alerts Fire Code would see, saving nothing. A tool that answers in sentences is read one line per row, and the
+result says how to change it.
+
+**Checks need no model.** Fire Code (Rust) runs them on schedule and judges the rows itself. SQLite and
+CSV/Excel/JSON files are read by Fire Code; a Python, MCP or read tool runs in a background agent with the
+settings of the codebase chosen under Settings → Monitoring. A monitor may never run a tool that changes
+things.
+
+**Notifications at your level**, per colour (Settings → Monitoring): Off, Count (only on the button and
+title bar), Silent, Sound, Stays (on screen until dismissed) or Alarm (loops until dismissed); a reminder
+while it stays red or amber, a quiet word when it clears, and quiet hours when only failures get through.
+Each monitor can override it (right-click → How this one notifies), and its own \`notify\` sets the least
+severe level that notifies. Notifications have Open, Acknowledge and Snooze buttons.
+
+**When checks run**: \`every\` ("15m") for an interval - once in each window of the clock (every 10 minutes is
+10:00, 10:10, 10:20 ..., windows counted from UTC so a team across time zones agrees), whoever joined when, kept to \`activeHours\` ("07:00-19:00", or "09:00-" for not
+before nine, "-17:00" for until five); \`at\` for exact times of day ("07:30" - once a day - or ["07:30", "12:00",
+"18:00"]); \`days\` for the days of the week, for both. A time missed while Fire Code was closed is not made up the
+next day.
+
+**Change when it runs**: in its grid window, **Schedule** (or right-click a tile → Edit schedule…): every N minutes
+or hours, only between two times (either may be empty), at set times of day, on chosen days. Saving writes only those
+fields into the skill file and keeps an approved monitor approved. An agent can change it too ("run the batch check
+every 10 minutes on weekdays"); you approve the change as a diff.
+
+**Delete a monitor for good**: right-click its tile → Delete this monitor… (or ⋯ → Delete in its window). Its skill
+file, its results and history here, and your own checks in the team history go; Pause stops it for a while instead.
+A copy synced from the team's bucket or repository is changed or deleted **where the team keeps it** - uploaded
+to the bucket or committed to the repository (a deletion goes from the repository, the bucket and this computer,
+like Delete everywhere in Settings → Skills) - so the next sync does not put the old one back. Colleagues get the
+change at their next sync and approve it once. This uses the bucket and repository of the codebase chosen under
+Settings → Monitoring ("Run tools with the settings of").
+
+**Snooze**: right-click a tile → Snooze 1 hour / until tomorrow / **Snooze until…** (a date and time, up to 30 days),
+or the Snooze button in its window. **One row**: right-click the row in the grid (or **Snooze row** in its details)
+→ 1 hour, 4 hours, until tomorrow 09:00, or until a date and time - its alerts stop counting until then, unless one
+gets worse, which counts again at once.
+
+**Reviewing a colleague's monitors**: a blue banner on the dashboard says how many wait for your review; **Review
+all…** lists each with its definition and a tick box - approve the ones you ticked (Select all ticks every one).
+
+**Run history**: the wide button across the bottom of each tile shows the last checks as bars, oldest on the left.
+Press it for the monitor's History - every check kept, earlier days too (24 hours to 90 days, or **On** a chosen
+date); press one bar to open on that check. Choosing a check shows, under the bars: its time, result, who ran it,
+rows read, how long it took, and **its whole grid as it was** - every row, coloured as it was - straight away;
+**Open in grid view** for filters and sorting, read-only, with **Back to now**. Whole grids are kept from Fire Code
+0.64.0 on, once per distinct grid, for as long as its history; a **team** check's grid is also shared in the team
+index (from 0.65.0), so **every member sees every row** of the newest check and of past ones, whoever ran it. A grid
+over 5,000 rows or about 2 MB is not shared - members then see its alerted rows, and an older check says why.
+
+**Big grids** are drawn as you scroll: the first 200 rows at once, more as the bottom comes near - filters, search,
+sorting and counts cover every row. **Delete this check**
+removes one check: here, and your own record of it in the team history.
+
+**A team check is collected once, not once per person**: each scheduled run is claimed in the team index first, so
+one member's Fire Code runs it and everyone sees that result ("checked by …"); **Run now** claims a two-minute slot, so
+people pressing it together get one check. The full history is stored once, in the team index; each computer keeps
+only the newest 200 checks of a team monitor, for its tile.
+
+**Only a computer that can run it claims it.** Before claiming, Fire Code checks the monitor can run here: a SQLite
+or file source's path is reachable, a tool exists, is approved here and is allowed for monitors (checked without
+running it, re-checked every 10 minutes). A computer that cannot leaves it to colleagues, and its tile says **Runs
+elsewhere** with the reason on hover. A check that **failed** here (a credential, a network route) makes this computer
+step back for three windows (at least 30 minutes) while a colleague's runs succeed - unless nobody has checked it for
+a window, when it tries again rather than leave it unrun.
+
+**When a check has not run on time**, its tile says so: **waiting…** with the reason on hover (making sure it can run
+here first, its turn behind 4 checks already running, a colleague's Fire Code has this window, the monitoring
+executor still starting), or **due N min ago** when it is past its time. The executor is started as soon as a monitor
+uses a tool, not when the check falls due, and a tool's timeout counts from when the executor is up. A file or
+database path on a share is checked in the background, so a share that does not answer never holds the dashboard up.
+**If the colleague who won a window never reports** (their Fire Code closed or failed mid-check), one other member
+takes the window over once its timeout and three more minutes have passed - by a second claim, so still only one.
+
+**Is the scheduler working?** A line at the top of the dashboard says **Scheduler running** and when it last looked
+(every 3 seconds), with **Stop**; stopped, it says so, with **Start**; not heard from for 90 seconds it says **not
+responding**, with **Start again**, which lets go of anything stuck and restarts its timer. Stopped means no check
+starts by itself - Run now still works and colleagues' checks still show - and it stays stopped after a restart until
+started. Only you stop or start it, never an agent.
+
+**Refresh** (the circular arrow at the top of the dashboard) brings the team's skills down now - its bucket folders and
+the team repository - instead of at the next timed sync, reads the folders again, and says which monitors are new
+and which are gone.
+
+**Who wrote it, and who changed it**: every save Light Code or Fire Code makes labels a skill with \`version\`,
+\`updated\` and \`updated_by\` (who saved it), and a new one with its \`author\`. The tile's tooltip and the grid
+window's header show them; **Changes** (the grid window's arrow button, or "Updated … by …" in its header) lists every
+version - when, by whom, what changed (the schedule, which fields, or only the text around the monitor) and the
+monitor as it was. Each Fire Code records a version as it arrives; a team monitor's changes are also kept in the team
+index, so every member sees the same list however long their Fire Code was closed. Cleaning up history keeps them;
+deleting the monitor removes your own record of it. The grid window's buttons are icons - hover one to see what it does.
+
+**Offline**: when the team history cannot be reached, a team monitor still runs on this computer - its tile, colours
+and notifications stay current - and the tile says **Offline · N not shared**. Once the history answers again, each
+offline check claims its window: written if nobody had it, dropped if a colleague already checked that window. At
+most 50 per monitor are kept for this, on disk.
+
+**Personal monitors need nothing set up.** Ask for "a personal check" (or just a check, before team history exists)
+and the agent makes one only on this computer.
+
+**Team monitors need OpenSearch** (Settings → Monitoring → Team history): choose an OpenSearch connection from the
+codebase monitoring runs with, and an index name the whole team shares. Without it a team monitor stays grey
+("Needs team history"); personal monitors keep their history on this computer. Every member's Fire Code may run a
+team monitor, but each slot is **claimed** first, so it runs once across the team, and everyone's dashboard shows
+the newest check, saying who ran it. Writes never overwrite each other, and cleanup removes only your own checks.
+
+**History** (the grid's History view): a bar per check in its colour, its height how many alerts it had; each
+alert's pattern - **new** today, **ongoing** since when, **recurring** on several days ("usually starting around
+02:00"), comes and goes, or cleared; and any past check's alerted rows. A check keeps its colour, headline and the
+rows that had an alert. **Kept 90 days** by default (30 days to a year), cleaned every few hours; **Clean up now** in
+Settings → Monitoring, and **Delete its history** on a tile's right-click menu - **everything, or only checks older
+than 7, 30, 90 or any number of days**; **Clean up…** takes the same choice for every monitor. Both remove checks on
+this computer (with the grids they kept) and **your own** records in the team index; a colleague's records are theirs
+and stay until their Fire Code cleans them up. A snoozed or paused monitor keeps its
+colour on its tile but no longer colours the Monitoring button.
+
+**An alert explained**: double-click a coloured row. The author's advice for that rule comes first (asked for when
+the monitor is created), then **the agent's explanation** - what is wrong, whether it is new or known from the
+history, what to do. **Start a chat** opens a chat named after the alert in the codebase you pick (the first by
+default), with what is known already in the message box - press Enter to send it.
+
+**Fast data collection**: a monitor that reads SQLite or a CSV/Excel/JSON file is read by Fire Code's Rust helper
+(Polars) - no Python at all. Fire Code's Rust tools can be a monitor's source too, with \`"records": true\` (a JSON list
+of records): find_files (a feed file late or missing - ageMinutes, sizeBytes), grep_files (ERROR lines across logs or
+shares), big_file search (one huge log), query_table, query_sqlite and dataframe. Prefer, in order: a SQLite or file
+source, a Rust tool, an existing Python or MCP tool that returns records, and only then a new Python tool. Reusing an
+existing Python tool is fine when it only reads and is approved on each member's computer. A Python tool source is Python: the agent is told whether Polars is installed in the tools'
+environment and to prefer it to pandas (filter and aggregate there, return df.to_dicts()). Rust then judges the rows.
+
+**Tools can call tools**: a Python tool lists what it calls in \`__tool_calls__ = ["server__query", "autosys_status"]\`
+- MCP tools, other Python tools and Fire Code's reading tools. That line is part of the approved code; in a
+monitor's check those calls run without asking - the same when the agent tries the monitor in a chat - and nothing
+that edits or runs commands is reachable. A tool calling another Python tool several times works (before Fire Code
+0.61.0 only the first call did, which read as an approval problem).
+
+**Agents can**: \`monitor_history\` (an alert's history: new, ongoing, recurring), \`monitor_check_tool\` (run a tool once and check its answer strictly: PASS or FAIL with what
+to change, and the columns and key for the monitor - an agent writing a Python tool for a monitor works until
+it passes), \`monitor_status\` (every monitor, or one monitor's alerts and rows), \`monitor_show\` (check
+now, open a grid or the dashboard), \`monitor_control\` (pause, snooze, acknowledge, notification level -
+always asks you).
+`,
+  },
+  {
     id: 'fire-code',
     title: 'Fire Code: several codebases in one Windows window',
     keywords: [
@@ -1301,6 +1763,7 @@ edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push
       'big log', 'large log', 'big csv', 'large csv', 'huge file', 'find files', 'duplicate files',
       'sqlite', 'sqlite database', 'sqlite db', 'read a database', 'query a database', 'locking',
       'several chats', 'two chats', 'parallel chats', 'parallel agents', 'chat tabs', 'new chat tab',
+      'archive chat', 'archived chat', 'close chat', 'blank chat', 'new chat shows old', 'reopen chat',
       'two agents same codebase', 'same codebase at once', 'same codebase', 'second chat',
       'environment variable', 'environment variables', 'startup script', 'setenv', 'add to path',
       'path variable', 'report viewer', 'open report', 'html report', 'markdown report',
@@ -1349,7 +1812,11 @@ with a note saying so - whether the copies come from a bucket, a shared folder o
 **Several chats per codebase**: the tabs above the chat. + (or Ctrl+T, or right-click → New chat) opens
 another chat on the same codebase — its own agent, working at the same time, with the same settings and
 keys. To rename a chat - the first one too - double-click its tab, or right-click it → Rename chat; the
-name shows on the tab and in notifications. × or Ctrl+W closes a chat (its history is kept). Two safeguards make
+name shows on the tab and in notifications. × or Ctrl+W asks how to close a chat: **Archive** keeps its
+conversation and takes the tab away; **Close and delete** removes its conversations, reports and log
+(files it changed in the codebase stay). **New chat** is always blank - a closed chat's number is never
+reused - and when chats are archived, + offers *New blank chat* or any archived chat, which opens exactly
+where it was left (each archived row also has a delete). Ctrl+T is always blank. Two safeguards make
 this safe: an edit is refused when the file changed since that chat read it (another chat, you, or any
 program edited it) — the agent re-reads and edits what is there now; and **Rollback undoes only the files
 that chat changed**, never another chat's work. If another chat also changed one of those files since,
@@ -1476,7 +1943,7 @@ Settings → Export source code saves the whole repository as a zip that builds 
       'addon for fire code', 'fire code addon', 'addon for light code', 'light code addon', 'addon tools',
       'linux', 'linux machine', 'linux server', 'ssh', 'putty', 'plink', 'pageant', 'remote server', 'connect to a server',
       'run a command on a server', 'download a log', 'jump host', 'bastion', 'host key', 'addon tab', 'linux tab',
-      'add-ons tab', 'enable addon', 'disable addon', 'linux tab missing',
+      'add-ons tab', 'enable addon', 'disable addon', 'linux tab missing', 'addon could not start', 'addon failed', 'start again',
       'ssh key', 'set up ssh key', 'key setup', 'authorized_keys', 'passwordless',
     ],
     body: `
@@ -1533,6 +2000,12 @@ public half to the server's authorized_keys with the stored password, proves the
 the machine to it. It is a button only - the assistant cannot call it - and the tab lists the tools the
 assistant does get. A globally installed add-on is found by itself (npm's folder, your .npmrc prefix,
 or beside node.exe); the folder box is only for somewhere else.
+
+**The Linux tab is missing, or Enable seemed to do nothing?** Look at the add-on's row on the **Add-ons**
+tab: once enabled it says Running, or *Could not start* with the reason, a **Log** with what the add-on
+printed, and **Start again**. An add-on that cannot start is still enabled, so its tab is there. Any
+other failure is shown at the top of the Add-ons tab (not in the chat). Fire Code writes the full error to
+the agent's log too (right-click the codebase → View agent log); VS Code to View → Output → Light Code.
 `,
   },
   {
@@ -1547,7 +2020,9 @@ or beside node.exe); the folder box is only for somewhere else.
     body: `
 **Three levels**, most specific first: what you say **in the chat**, then **codebase instructions**,
 then **standing instructions**. Every chat on a codebase gets the codebase instructions with every
-message, ahead of the standing instructions; where they disagree the codebase instructions win.
+message; where they disagree with the standing instructions the codebase instructions win. They are
+placed at the end of what the agent is told (before only a plan you set for the chat), and named at the
+very start, because instructions in the middle of a long prompt are the ones a model follows least.
 
 **Codebase instructions** are about one codebase and are kept on this machine, not in the repository,
 so a cloned repository cannot write them. Edit them in **Settings → Skills → Codebase instructions**,
@@ -1558,6 +2033,23 @@ sent; keep them short, they are paid for on every request.
 **Standing instructions** are a skill with \`always: true\` (Settings → Skills → Standing
 instructions). They can live in the repository or a shared bucket, so they can apply to many
 codebases and a whole team. Fire Code's dialog has a button that opens them too.
+`,
+  },
+  {
+    id: 'diagrams',
+    title: 'Diagrams in the chat: SVG and PNG',
+    keywords: [
+      'diagram', 'flowchart', 'flow chart', 'architecture diagram', 'draw', 'save svg', 'save png',
+      'save diagram', 'export diagram', 'download diagram', 'diagram as image', 'show_diagram',
+    ],
+    body: `
+Ask for a diagram ("draw the request flow", "show the architecture") and the assistant draws one in the
+chat with \`show_diagram\`. It follows your theme and accent.
+
+Under each diagram: **Copy SVG** copies the markup to paste into a document or editor; **Save SVG** and
+**Save PNG** open a Save dialog - VS Code's own, or a Windows one in Fire Code starting in Downloads - and
+say where the file went. A PNG is drawn at twice the size so it stays sharp in a slide. In a plain browser
+the file downloads instead. If a save fails, the reason is shown under the buttons.
 `,
   },
   {
@@ -1710,7 +2202,9 @@ is done and decided, the current state, open questions and next steps - and a ne
 its first message. Your own messages are quoted word for word, and the files read and changed and the
 commands run are listed from the actual tool calls, so nothing important rests on the summary alone. A
 progress panel shows each step and how much has been written; Cancel stops it, and a failure leaves the
-chat as it was. The old chat stays in History.
+chat as it was. The old chat stays in History. When a reply fails because the conversation is too long
+for the model, the error offers this too - it still works then, because the write-up is made from a
+shortened transcript.
 
 **History is compacted only when you say so.** **Compact now** under the token bar summarises the
 older part (highlighted near the limit); the stored transcript keeps everything, only what is sent to

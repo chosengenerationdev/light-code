@@ -59,17 +59,29 @@ describe('in the prompt', () => {
     expect(renderCodebaseInstructions('  \n ')).toBe('')
   })
 
-  it('comes before the standing instructions and says which wins', () => {
+  /*
+   * Reported as having no impact: they sat mid-prompt, before the skills and thousands of tokens of
+   * tool and mode guidance. Now after all of that, before only the chat's plan, and named at the top.
+   */
+  it('comes after the standing instructions and the mode, before the plan, named at the top, and says which wins', () => {
     const prompt = buildSystemPrompt('D:/work', {
       codebaseInstructions: renderCodebaseInstructions('Use the payments logger.'),
       skills: renderAlwaysSkills([{ name: 'team-rules', description: 'd', filePath: 'f', always: true, body: 'Team rule.' }]),
+      modeGuidance: ['## Mode guidance', 'Work in the shell.'].join(String.fromCharCode(10)),
+      plan: '1. Fix the bug',
     })
-    const codebase = prompt.indexOf('## Codebase instructions')
+    const pointer = prompt.indexOf('under "## Codebase instructions"')
+    const codebase = prompt.lastIndexOf('## Codebase instructions')
     const standing = prompt.indexOf('## Standing instructions')
-    expect(codebase).toBeGreaterThan(-1)
-    expect(standing).toBeGreaterThan(codebase)
+    const mode = prompt.indexOf('## Mode guidance')
+    const plan = prompt.indexOf('Fix the bug')
+    expect(pointer).toBeGreaterThan(-1)
+    expect(pointer).toBeLessThan(standing)
+    expect(codebase).toBeGreaterThan(standing)
+    expect(codebase).toBeGreaterThan(mode)
+    expect(plan).toBeGreaterThan(codebase)
     expect(prompt).toContain('Use the payments logger.')
-    expect(prompt).toContain('where the two disagree, follow these')
+    expect(prompt).toContain('disagree, follow these')
   })
 
   it('is cut past the limit, and the model is told so', () => {

@@ -38,10 +38,16 @@ export interface Attribution {
   version?: number | undefined
   /** ISO 8601, UTC, to the second. */
   updated?: string | undefined
+  /** Who made the last save - `updated_by:` / `__updated_by__`. Set on every save Light Code makes, by its user. */
+  updatedBy?: string | undefined
 }
 
 type Field = keyof Attribution
-const FIELDS: readonly Field[] = ['author', 'project', 'version', 'updated']
+const FIELDS: readonly Field[] = ['author', 'project', 'version', 'updated', 'updatedBy']
+/** What labelling an existing file fills: who saved it last is not something a label can know afterwards. */
+const LABEL_FIELDS: readonly Field[] = ['author', 'project', 'version', 'updated']
+/** The name a field has in the file. */
+const key = (field: Field): string => (field === 'updatedBy' ? 'updated_by' : field)
 
 /** What a value may contain once written. */
 export function cleanAttributionValue(value: string | number | undefined): string | undefined {
@@ -62,6 +68,7 @@ function toAttribution(read: (field: Field) => string | undefined): Attribution 
     project: read('project'),
     version: Number.isFinite(version) && version > 0 ? version : undefined,
     updated: read('updated'),
+    updatedBy: read('updatedBy'),
   }
 }
 
@@ -73,8 +80,8 @@ const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/
 export function readSkillAttribution(source: string): Attribution {
   const block = FRONTMATTER.exec(source)?.[1]
   if (block === undefined) return {}
-  return toAttribution((key) => {
-    const match = new RegExp(`^${key}\\s*:\\s*(.*)$`, 'm').exec(block)
+  return toAttribution((field) => {
+    const match = new RegExp(`^${key(field)}\\s*:\\s*(.*)$`, 'm').exec(block)
     const value = match?.[1]?.trim().replace(/^["']|["']$/g, '')
     return value !== undefined && value.length > 0 ? value : undefined
   })
@@ -97,11 +104,11 @@ function writeSkillFields(source: string, values: Attribution, replace: Readonly
   for (const field of FIELDS) {
     const value = cleanAttributionValue(values[field])
     if (value === undefined) continue
-    const line = new RegExp(`^${field}\\s*:.*$`, 'm')
+    const line = new RegExp(`^${key(field)}\\s*:.*$`, 'm')
     if (line.test(block)) {
-      if (replace.has(field)) block = block.replace(line, `${field}: ${value}`)
+      if (replace.has(field)) block = block.replace(line, `${key(field)}: ${value}`)
     } else if (existing[field] === undefined) {
-      block = `${block}${eol}${field}: ${value}`
+      block = `${block}${eol}${key(field)}: ${value}`
     }
   }
   return `${source.slice(0, blockStart)}${block}${source.slice(blockEnd)}`
@@ -118,7 +125,7 @@ function dunderValue(source: string, name: string): string | undefined {
 }
 
 export function readToolAttribution(source: string): Attribution {
-  return toAttribution((field) => dunderValue(source, field))
+  return toAttribution((field) => dunderValue(source, key(field)))
 }
 
 /**
@@ -160,11 +167,11 @@ function writeToolFields(source: string, values: Attribution, replace: ReadonlyS
   for (const field of FIELDS) {
     const value = cleanAttributionValue(values[field])
     if (value === undefined) continue
-    const assignment = `__${field}__ = "${value}"`
-    const plain = new RegExp(`^__${field}__\\s*=\\s*["'][^"'\\\\\\r\\n]*["']\\s*$`, 'm')
+    const assignment = `__${key(field)}__ = "${value}"`
+    const plain = new RegExp(`^__${key(field)}__\\s*=\\s*["'][^"'\\\\\\r\\n]*["']\\s*$`, 'm')
     if (plain.test(text)) {
       if (replace.has(field)) text = text.replace(plain, assignment)
-    } else if (!new RegExp(`^__${field}__\\s*=`, 'm').test(text)) {
+    } else if (!new RegExp(`^__${key(field)}__\\s*=`, 'm').test(text)) {
       // A non-literal assignment of the same name is somebody's code, and is left alone.
       additions.push(assignment)
     }
@@ -175,7 +182,7 @@ function writeToolFields(source: string, values: Attribution, replace: ReadonlyS
   const at = insertionLine(lines)
   const before = lines.slice(0, at)
   const after = lines.slice(at)
-  const existingBlock = /^__(author|project|version|updated)__\s*=/.test(after[0] ?? '')
+  const existingBlock = /^__(author|project|version|updated|updated_by)__\s*=/.test(after[0] ?? '')
   const block = [
     ...(before.length > 0 && (before[before.length - 1] ?? '').trim() !== '' ? [''] : []),
     ...additions,
@@ -231,13 +238,15 @@ export function stampRevision(
     project: incoming.project ?? before.project ?? (isNew ? defaults.project : undefined),
     version,
     updated: attributionTimestamp(now),
+    // Who saved it: unlike the author, this is about this save, so it is the person making it.
+    updatedBy: defaults.author,
   }
-  const replace = new Set<Field>(['version', 'updated'])
+  const replace = new Set<Field>(['version', 'updated', 'updatedBy'])
   return kind === 'skill' ? writeSkillFields(source, values, replace) : writeToolFields(source, values, replace)
 }
 
 /** Which fields a file is missing, for the preview of labelling existing files. */
 export function missingAttribution(kind: AttributedKind, source: string): Field[] {
   const present = readAttribution(kind, source)
-  return FIELDS.filter((field) => present[field] === undefined)
+  return LABEL_FIELDS.filter((field) => present[field] === undefined)
 }

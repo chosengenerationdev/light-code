@@ -205,6 +205,16 @@ function AddonRow(props: { addon: AddonView; busy: boolean; onEnable: () => void
       {addon.state === 'enabled' && addon.status !== undefined && (
         <div style={{ fontSize: 11, margin: '4px 0 0', color: addon.status === 'failed' ? colors.error : colors.muted }}>
           {addon.status === 'ready' ? 'Running' : addon.status === 'failed' ? `Could not start${addon.error !== undefined ? `: ${addon.error}` : ''}` : 'Starting…'}
+          {addon.status === 'failed' && (
+            <button
+              type="button"
+              style={{ ...secondaryButtonStyle(), marginLeft: 8 }}
+              {...disabledWhen([props.busy, 'Wait for the last change to finish.'], { enabledTitle: 'Start the add-on again, with the settings saved now.' })}
+              onClick={props.onEnable}
+            >
+              Start again
+            </button>
+          )}
           {(addon.logs ?? []).length > 0 && (
             <details style={{ marginTop: 2 }}>
               <summary style={{ cursor: 'pointer' }}>Log</summary>

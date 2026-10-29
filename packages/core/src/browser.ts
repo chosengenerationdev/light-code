@@ -8,6 +8,7 @@
  */
 export type { Transport } from './platform/transport.js'
 // The panel composes the live bubble with the same function the host uses for the model.
+export { branchLabel } from './git/branchLabel.js'
 export {
   composeUserText,
   clipQuote,
@@ -126,6 +127,12 @@ export type {
   AtlassianSettingsView,
   AutosysGatewaySettings,
   AutosysGatewayView,
+  AutosysGatewaySecret,
+  TeamSkillState,
+  TeamRepoSettings,
+  TeamRepoStatus,
+  TeamRepoRetire,
+  DeleteEverywherePlan,
 } from './agent/protocol.js'
 
 /** Type-only: the UI needs the backend names for its picker, not the schema that validates them. */
@@ -225,7 +232,7 @@ export {
   type CredentialSummary,
 } from './secrets/credentials.js'
 
-export { declaredCredentials } from './python/declaredCredentials.js'
+export { declaredCredentials, declaredToolCalls, declaresAlwaysAsk } from './python/declaredCredentials.js'
 
 // The Markdown the chat renders, shared with Confluence pages (markdown/confluence.ts).
 export { isSafeHref, looksLikeMarkdown, parseInline, parseMarkdown, type Align, type Block, type Inline } from './markdown/parse.js'

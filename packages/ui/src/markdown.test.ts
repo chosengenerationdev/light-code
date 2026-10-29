@@ -190,3 +190,18 @@ describe('link targets containing parentheses', () => {
     ])
   })
 })
+
+describe('underscores inside a word', () => {
+  // Reported: "_ in a string is swallowed" - snake_case names lost their underscores to italics.
+  it('are the word\'s, not emphasis', () => {
+    expect(parseInline('set job_status_flag to true')).toEqual([{ kind: 'text', text: 'set job_status_flag to true' }])
+    expect(parseInline('PAY_*_USD and __init__ files')).toEqual([{ kind: 'text', text: 'PAY_*_USD and __init__ files' }])
+    expect(parseInline('my_var__name__x')).toEqual([{ kind: 'text', text: 'my_var__name__x' }])
+  })
+
+  it('still make emphasis at word edges, and * still works inside a word', () => {
+    expect(parseInline('an _important_ word')).toEqual([{ kind: 'text', text: 'an ' }, { kind: 'em', children: [{ kind: 'text', text: 'important' }] }, { kind: 'text', text: ' word' }])
+    expect(parseInline('__really bold__ here')).toEqual([{ kind: 'strong', children: [{ kind: 'text', text: 'really bold' }] }, { kind: 'text', text: ' here' }])
+    expect(parseInline('un*frigging*believable')).toEqual([{ kind: 'text', text: 'un' }, { kind: 'em', children: [{ kind: 'text', text: 'frigging' }] }, { kind: 'text', text: 'believable' }])
+  })
+})

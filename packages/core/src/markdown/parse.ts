@@ -243,13 +243,39 @@ const INLINE = new RegExp(
   ].join('|'),
 )
 
+/** A letter or digit: `_` beside one is part of a word (`job_status_flag`), never emphasis - CommonMark's rule. */
+const WORD = /[\p{L}\p{N}]/u
+
 export function parseInline(source: string): Inline[] {
   const out: Inline[] = []
   let rest = source
+  // The character before `rest`, for the intraword rule when a match starts at its very beginning.
+  let before = ''
 
   while (rest.length > 0) {
     const match = INLINE.exec(rest)
     if (match === null || match.index === undefined) break
+
+    /*
+     * Underscores inside a word are the word's (reported: "_ in a string is swallowed" - `snake_case_name` came out
+     * as "snake", an italic "case" and "name"). An `_`/`__` run with a letter or digit just outside it is text:
+     * keep the underscore and look again after it. `*` keeps its intraword emphasis, as CommonMark does.
+     */
+    const delimiter = match[5] ?? match[9]
+    if (delimiter !== undefined && delimiter.startsWith('_')) {
+      const prev = match.index > 0 ? (rest[match.index - 1] ?? '') : before
+      const next = rest[match.index + match[0].length] ?? ''
+      // `__init__`, `__main__`: a dunder name, not bold - in a coding assistant that is what it nearly always is,
+      // and models write bold as `**...**`. `__two words__` is still bold.
+      const dunder = delimiter === '__' && /^[A-Za-z0-9_]+$/.test(match[6] ?? '')
+      if (WORD.test(prev) || WORD.test(next) || dunder) {
+        const upto = match.index + delimiter.length
+        out.push({ kind: 'text', text: rest.slice(0, upto) })
+        before = rest[upto - 1] ?? ''
+        rest = rest.slice(upto)
+        continue
+      }
+    }
 
     if (match.index > 0) out.push({ kind: 'text', text: rest.slice(0, match.index) })
 
@@ -270,10 +296,22 @@ export function parseInline(source: string): Inline[] {
       out.push({ kind: 'em', children: parseInline(match[10] ?? '') })
     }
 
+    before = rest[match.index + match[0].length - 1] ?? ''
     rest = rest.slice(match.index + match[0].length)
   }
 
   if (rest.length > 0) out.push({ kind: 'text', text: rest })
+  return mergeText(out)
+}
+
+/** Neighbouring text pieces as one, so an underscore kept as text does not split a word into several nodes. */
+function mergeText(parts: Inline[]): Inline[] {
+  const out: Inline[] = []
+  for (const part of parts) {
+    const last = out[out.length - 1]
+    if (part.kind === 'text' && last !== undefined && last.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + part.text }
+    else out.push(part)
+  }
   return out
 }
 

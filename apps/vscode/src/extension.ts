@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { ConfigManager, Logger, isDue, startLmRelay, wireChatBridge, type ChatBridge, type Schedule } from '@light-code/core'
+import { ConfigManager, Logger, isDue, mainCheckoutOf, startLmRelay, wireChatBridge, type ChatBridge, type Schedule } from '@light-code/core'
 import { vscodeLanguageModels } from './platform/languageModels.js'
 import { readDebugSession, startTrackingDebugSessions } from './platform/debugSession.js'
 import { VSCodeConfigStore } from './platform/config.js'
@@ -8,6 +8,7 @@ import { ChatViewProvider } from './webview/chatViewProvider.js'
 import { createVSCodeHostServices } from './webview/hostServices.js'
 import { shareKeysWithSun } from './shareWithSun.js'
 import { registerCommitMessageCommand } from './commitMessage.js'
+import { registerBranchCommands } from './branches.js'
 
 /** How often the host looks in on the scheduler. Frequent enough to revive it within a minute. */
 const SCHEDULE_POLL_MS = 30_000
@@ -154,7 +155,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
   // The root is passed so this project's own settings apply — a schedule due here belongs to
   // this codebase, and so does the vector store it would index into.
-  const configManager = new ConfigManager(new VSCodeConfigStore(context, workspaceRoot), workspaceRoot)
+  // A branch folder's project settings are its repository's (git worktrees; see branches.ts).
+  const configManager = new ConfigManager(
+    new VSCodeConfigStore(context, workspaceRoot),
+    workspaceRoot !== undefined ? (mainCheckoutOf(workspaceRoot) ?? workspaceRoot) : undefined,
+  )
   const poll = setInterval(() => {
     void (async () => {
       try {
@@ -213,7 +218,12 @@ export function activate(context: vscode.ExtensionContext): void {
   startTrackingDebugSessions(context)
   const relay = startLmRelay(models, { log: (line) => outputChannel.appendLine(`[info] ${line}`), debug: readDebugSession })
 
-  context.subscriptions.push(viewDisposable, openCommand, addToContextCommand, commitMessageCommand, walkthroughCommand, settingsCommand, shareCommand, {
+  // Branches in their own windows: open one, list them, close one safely.
+  const branchCommands = registerBranchCommands(context, configManager, () => {
+    ensureBridge()
+  })
+
+  context.subscriptions.push(...branchCommands, viewDisposable, openCommand, addToContextCommand, commitMessageCommand, walkthroughCommand, settingsCommand, shareCommand, {
     dispose: () => {
       clearInterval(poll)
       bridge?.dispose()

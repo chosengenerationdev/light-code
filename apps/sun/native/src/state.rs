@@ -53,6 +53,53 @@ pub struct Project {
     /// Set when the codebase is folders on a JupyterHub server; `path` is then the local copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hub: Option<crate::hub::HubSettings>,
+    /// Chats put away with "Archive": stopped, out of the tabs, history kept in their folder, and
+    /// offered by New chat to open again. Newest last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archived: Vec<ArchivedChat>,
+    /// The highest chat number ever handed out. Numbers are never reused: a new chat given the
+    /// number of a closed one opened that chat's folder, and so its old conversation - reported as
+    /// "a new chat always shows the previous chat".
+    #[serde(default)]
+    pub last_chat: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedChat {
+    pub id: u32,
+    pub name: String,
+    #[serde(default)]
+    pub archived_at: u64,
+    /// A branch chat keeps its folder and branch while archived, so it opens again on them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+impl Project {
+    /// The number for a new, blank chat: above every chat open, archived, ever handed out, or
+    /// with a folder on disk (`on_disk`, from chats closed before numbers were remembered).
+    pub fn next_chat_id(&self, on_disk: &[u32]) -> u32 {
+        let highest = self
+            .chats
+            .iter()
+            .map(|c| c.id)
+            .chain(self.archived.iter().map(|c| c.id))
+            .chain(on_disk.iter().copied())
+            .chain([self.last_chat, 1])
+            .max()
+            .unwrap_or(1);
+        highest + 1
+    }
+}
+
+/// The chat numbers that have a folder under a codebase's `chats` folder.
+pub fn chat_numbers_on_disk(project_dir: &Path) -> Vec<u32> {
+    fs::read_dir(project_dir.join("chats"))
+        .map(|entries| entries.flatten().filter_map(|e| e.file_name().to_str().and_then(|n| n.parse::<u32>().ok())).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -60,6 +107,12 @@ pub struct Project {
 pub struct Chat {
     pub id: u32,
     pub name: String,
+    /// A branch chat's own folder (a git worktree, branches.rs); absent: the codebase's folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// The branch checked out there, shown under the chat's name. Renaming the chat never changes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// The short name each codebase is mentioned by in another's chat - `@payments-api:src/app.py`:
@@ -103,6 +156,18 @@ pub fn project_of(key: &str) -> &str {
 /// The chat part of a runtime key, for the extra chats; None for a codebase's first chat.
 pub fn chat_of(key: &str) -> Option<&str> {
     key.split_once('~').map(|(_, chat)| chat)
+}
+
+/// Which tab is shown when chat `chat` of this codebase is closed: the one to its right, else the one to
+/// its left - as a browser does. Tabs run first chat, then the others in order (shell.js `chatKeys`).
+/// It used to be the first chat, wherever the closed one was.
+pub fn tab_after_close(p: &Project, chat: u32) -> String {
+    let keys: Vec<String> = std::iter::once(p.id.clone()).chain(p.chats.iter().map(|c| format!("{}~{}", p.id, c.id))).collect();
+    let closed = format!("{}~{}", p.id, chat);
+    match keys.iter().position(|k| *k == closed) {
+        Some(at) => keys.get(at + 1).or_else(|| at.checked_sub(1).and_then(|i| keys.get(i))).cloned().unwrap_or_else(|| p.id.clone()),
+        None => p.id.clone(),
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -326,6 +391,12 @@ impl State {
             (Some(p), Some(chat)) => p.chats.iter().any(|c| c.id.to_string() == chat),
         }
     }
+    /// The folder a chat works in: its branch folder when it has one, else the codebase's.
+    pub fn chat_folder(&self, key: &str) -> Option<String> {
+        let p = self.project(key)?;
+        let own = chat_of(key).and_then(|c| p.chats.iter().find(|chat| chat.id.to_string() == c)).and_then(|chat| chat.folder.clone());
+        Some(own.unwrap_or_else(|| p.path.clone()))
+    }
     /// Every runtime key of a codebase: its first chat, then the others.
     pub fn chat_keys(&self, id: &str) -> Vec<String> {
         match self.project(id) {
@@ -398,10 +469,50 @@ mod tests {
             keep_awake: false,
             last_used: 0,
             accent: None,
-            chats: chats.iter().map(|&n| Chat { id: n, name: format!("Chat {n}") }).collect(),
+            chats: chats.iter().map(|&n| Chat { id: n, name: format!("Chat {n}"), folder: None, branch: None }).collect(),
             first_chat_name: None,
             hub: None,
+            archived: Vec::new(),
+            last_chat: 0,
         }
+    }
+
+    #[test]
+    fn closing_a_chat_shows_the_tab_beside_it() {
+        // Tabs: abc, abc~2, abc~5, abc~3.
+        let p = project("abc", &[2, 5, 3]);
+        assert_eq!(tab_after_close(&p, 5), "abc~3", "the one to its right");
+        assert_eq!(tab_after_close(&p, 2), "abc~5");
+        assert_eq!(tab_after_close(&p, 3), "abc~5", "the last closes to its left");
+        assert_eq!(tab_after_close(&project("abc", &[2]), 2), "abc", "the only extra chat closes to the first");
+        assert_eq!(tab_after_close(&p, 9), "abc", "not a tab: the first");
+    }
+
+    #[test]
+    fn a_new_chat_never_reuses_a_number() {
+        let mut p = project("abc", &[2, 3]);
+        assert_eq!(p.next_chat_id(&[]), 4);
+        // Chat 3 closed: its number is still remembered, so its old folder is never opened as new.
+        p.chats.retain(|c| c.id != 3);
+        p.last_chat = 3;
+        assert_eq!(p.next_chat_id(&[]), 4);
+        // Archived chats and folders left by chats closed before this was remembered count too.
+        p.archived.push(ArchivedChat { id: 7, name: "Chat 7".into(), archived_at: 0, folder: None, branch: None });
+        assert_eq!(p.next_chat_id(&[]), 8);
+        assert_eq!(p.next_chat_id(&[12, 5]), 13);
+        assert_eq!(project("x", &[]).next_chat_id(&[]), 2);
+    }
+
+    #[test]
+    fn chat_folders_on_disk_are_found_by_number() {
+        let dir = std::env::temp_dir().join(format!("fire-chats-{}", now_millis()));
+        fs::create_dir_all(dir.join("chats").join("4")).unwrap();
+        fs::create_dir_all(dir.join("chats").join("not-a-chat")).unwrap();
+        let mut found = chat_numbers_on_disk(&dir);
+        found.sort();
+        assert_eq!(found, vec![4]);
+        assert!(chat_numbers_on_disk(&dir.join("missing")).is_empty());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -483,13 +594,15 @@ mod mention_name_tests {
             chats: Vec::new(),
             first_chat_name: None,
             hub: None,
+            archived: Vec::new(),
+            last_chat: 0,
         }
     }
 
     #[test]
     fn the_first_chat_can_be_named_and_older_state_still_loads() {
         let mut payments = named("Payments");
-        payments.chats.push(Chat { id: 2, name: "Chat 2".into() });
+        payments.chats.push(Chat { id: 2, name: "Chat 2".into(), folder: None, branch: None });
         let mut state = State { projects: vec![payments], ..Default::default() };
         assert_eq!(state.chat_title("Payments").as_deref(), Some("Payments"));
         state.projects[0].first_chat_name = Some("Reports".into());

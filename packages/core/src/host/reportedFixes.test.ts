@@ -47,7 +47,11 @@ describe('the Python tab', () => {
    */
   it('configures Python from saved settings before reporting its status', () => {
     const route = bridge.slice(bridge.indexOf("message.type === 'requestPython'"), bridge.indexOf("message.type === 'requestPython'") + 200)
-    expect(route).toContain('configurePythonFromSettings().then(postPython)')
+    expect(route).toContain('showPythonTab()')
+    // A preview from disk may come first; the real status still follows configuring from saved settings.
+    const show = fn('async function showPythonTab(')
+    expect(show.indexOf('await configurePythonFromSettings()')).toBeGreaterThan(show.indexOf('previewStatus'))
+    expect(show.indexOf('await postPython()')).toBeGreaterThan(show.indexOf('await configurePythonFromSettings()'))
     const configure = fn('async function configurePythonFromSettings(')
     expect(configure).toContain('pythonFolders(config)')
     expect(configure).toContain('if (userTurnRunning || runningScheduleId !== undefined) return')

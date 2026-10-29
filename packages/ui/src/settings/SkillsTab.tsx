@@ -1,4 +1,4 @@
-import { aliasProblem, formatAliases, parseAliases, type ProbeTarget } from '@light-code/core/browser'
+import { aliasProblem, formatAliases, parseAliases, type ProbeTarget, type TeamSkillState } from '@light-code/core/browser'
 import { IndexProbe } from './IndexProbe.js'
 import { IndexingProgress, type IndexingProgressState } from './IndexingProgress.js'
 import { useEffect, useState, type ReactElement } from 'react'
@@ -10,6 +10,9 @@ import { DismissableProblems } from './DismissableProblems.js'
 import { CheckIcon } from '../icons.js'
 import { Panel } from './Panel.js'
 import { disabledWhen } from '../disabledWhen.js'
+import { SkillDefaultsEditor } from './SkillDefaultsEditor.js'
+import { DeleteEverywhere } from './DeleteEverywhere.js'
+import type { Transport } from '@light-code/core/browser'
 
 const monospace = 'var(--vscode-editor-font-family, monospace)'
 
@@ -57,7 +60,14 @@ export interface SkillsTabProps {
      * with `reason` said out loud rather than the button quietly doing nothing.
      */
     bucket?: { label: string; canDelete: boolean; reason?: string }
+    /** Placeholders found in its text, offered for defaults. */
+    placeholders?: string[]
+    /** In the user's personal folder - kept to themself, never shared, and theirs to remove. */
+    personal?: boolean
   }[]
+  /** This user's answers to skills' placeholders, by skill then placeholder. */
+  skillDefaults?: Record<string, Record<string, string>> | undefined
+  onSaveSkillDefaults?: ((skill: string, values: Record<string, string>) => void) | undefined
   /**
    * Pictures already fetched, keyed `skill/image`.
    *
@@ -89,6 +99,8 @@ export interface SkillsTabProps {
   onCancelBucketDelete?: (() => void) | undefined
   /** Opens the skill in an editor tab. A skill is markdown; editing it is editing a file. */
   onOpenFile: (path: string) => void
+  /** For "Delete everywhere", which talks to the host itself. Absent: not offered. */
+  transport?: Transport | undefined
   /** Opens the standing-instructions skill, creating it from a template the first time. */
   onOpenStandingSkill: () => void
   /** Opens this codebase's instructions, creating the file empty the first time. */
@@ -136,17 +148,23 @@ export interface SkillsTabProps {
      */
     collection?: string
     onSaveAliases: (aliases: string[]) => void
-    onPublish: () => void
+    /** Sends every loaded skill except those kept private, which it saves first. */
+    onPublish: (keepPrivate: string[]) => void
+    /** Every loaded skill's name, for choosing what to send. Optional: a fresh install has none. */
+    skillNames?: string[]
+    /** Skills kept out of the pool, as saved. */
+    keepPrivate?: string[]
+    onSaveSelection?: (keepPrivate: string[]) => void
     onClear: () => void
     onStop: () => void
     publishing?: boolean
     progress: IndexingProgressState | undefined
-    result: { count?: number; collection?: string; cleared?: number; error?: string } | undefined
+    result: { count?: number; collection?: string; cleared?: number; withdrawn?: number; error?: string } | undefined
     /**
      * Which of *this machine's own* skills currently have a matching document in the
      * collection — undefined until asked for, so a stale answer is never shown as current.
      */
-    status?: { name: string; state: 'indexed' | 'stale' | 'missing' }[] | undefined
+    status?: { name: string; state: TeamSkillState }[] | undefined
     statusError?: string | undefined
     statusLoading?: boolean | undefined
     onRefreshStatus: () => void
@@ -201,6 +219,17 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
    * team search came to look dead with nothing pointing at the name. Capitals are simply lowered
    * (the host does the same), so only genuinely unusable names are refused here.
    */
+  // What goes to the pool: every loaded skill not kept private. Held here so a tick shows at once;
+  // the saved list comes back with the next skills message.
+  const skillNames = props.skillNames ?? []
+  const savedPrivate = JSON.stringify(props.keepPrivate ?? [])
+  const [keepPrivate, setKeepPrivate] = useState<string[]>(props.keepPrivate ?? [])
+  useEffect(() => setKeepPrivate(JSON.parse(savedPrivate) as string[]), [savedPrivate])
+  const sendCount = skillNames.filter((name) => !keepPrivate.includes(name)).length
+  const choose = (next: string[]): void => {
+    setKeepPrivate(next)
+    props.onSaveSelection?.(next)
+  }
   const aliasError = alias
     .split(/[,\n]/)
     .map((part) => part.trim())
@@ -281,11 +310,53 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
           type="button"
           style={primaryButtonStyle(aliases.length === 0)}
           {...disabledWhen([aliases.length === 0, 'Save a team pool name first (step 1).'], [props.publishing === true, 'Sending is already running.'], { enabledTitle: 'Embeds your skills and writes them to the shared collection' })}
-          onClick={props.onPublish}
+          onClick={() => props.onPublish(keepPrivate)}
         >
-          {props.publishing === true ? 'Sending…' : '2. Send my skills to the team'}
+          {props.publishing === true
+            ? 'Sending…'
+            : keepPrivate.length > 0
+              ? `2. Send ${String(sendCount)} skill${sendCount === 1 ? '' : 's'} to the team`
+              : '2. Send my skills to the team'}
         </button>
       </div>
+
+      {/*
+        Which skills go. Asked for: "user should be able to select which skills should go, as some
+        skills he can keep for himself". Saved as ticked, so the choice holds for every later Send;
+        a skill kept private that an earlier Send put in the pool is taken back by the next one.
+      */}
+      {skillNames.length > 0 && (
+        <details style={{ marginTop: 10 }} open={keepPrivate.length > 0}>
+          <summary style={{ cursor: 'pointer', fontSize: 12 }}>
+            Choose which skills to send ({String(sendCount)} of {String(skillNames.length)})
+          </summary>
+          <p style={{ color: colors.muted, fontSize: 11, margin: '4px 0 6px' }}>
+            Untick a skill to keep it to yourself. The choice is remembered; a skill you untick after sending it is
+            taken back from the pool the next time you send.
+          </p>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+            <button type="button" style={secondaryButtonStyle()} {...disabledWhen([keepPrivate.length === 0, 'Every skill is already ticked.'])} onClick={() => choose([])}>
+              Send all
+            </button>
+            <button type="button" style={secondaryButtonStyle()} {...disabledWhen([sendCount === 0, 'No skill is ticked.'])} onClick={() => choose(skillNames)}>
+              Keep all to myself
+            </button>
+          </div>
+          {skillNames.map((name) => (
+            <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!keepPrivate.includes(name)}
+                onChange={(event) =>
+                  choose(event.target.checked ? keepPrivate.filter((each) => each !== name) : [...keepPrivate, name])
+                }
+              />
+              <span style={{ fontFamily: monospace, fontSize: 12 }}>{name}</span>
+              {keepPrivate.includes(name) && <span style={{ color: colors.muted, fontSize: 11 }}>kept to yourself</span>}
+            </label>
+          ))}
+        </details>
+      )}
 
       {/*
         Taking it back is as much a part of publishing as sending it, and there was no way to.
@@ -346,6 +417,9 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
         props.result?.count !== undefined && (
           <span style={{ display: 'block', color: colors.muted, fontSize: 11, marginTop: 6 }}>
             {`Published ${String(props.result.count)} skill(s) to "${props.result.collection ?? ''}". `}
+            {props.result.withdrawn !== undefined && props.result.withdrawn > 0
+              ? `Took back ${String(props.result.withdrawn)} you now keep to yourself. `
+              : ''}
             Sending again replaces your own copies and never touches anyone else&rsquo;s.
           </span>
         )}
@@ -399,7 +473,8 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
                       width: 8,
                       height: 8,
                       borderRadius: '50%',
-                      background: entry.state === 'indexed' ? colors.accent : colors.error,
+                      background:
+                        entry.state === 'indexed' ? colors.accent : entry.state === 'private' ? colors.muted : colors.error,
                       flexShrink: 0,
                     }}
                   />
@@ -436,10 +511,12 @@ export function TeamSkillsSection(props: SkillsTabProps['team']): ReactElement {
 }
 
 /** One wording per state, shared by the dot's tooltip and the text beside it. */
-const STATUS_WORDS: Record<'indexed' | 'stale' | 'missing', string> = {
+const STATUS_WORDS: Record<TeamSkillState, string> = {
   indexed: 'indexed',
   stale: 'changed since sent — send again',
   missing: 'not sent',
+  private: 'kept to yourself',
+  withdraw: 'kept to yourself, but an earlier copy is in the pool — send again to take it back',
 }
 
 export function SkillsTab(props: SkillsTabProps): ReactElement {
@@ -653,10 +730,16 @@ function SkillList(
                   in conversation, so the only place the difference shows is here — and the
                   Remove button being absent needs an explanation beside it.
                 */}
-                {skill.sourceDir !== undefined && props.skillsDir !== undefined && skill.sourceDir !== props.skillsDir && (
-                  <span style={{ ...badgeStyle(), fontSize: 9 }} title={`Read-only, from ${skill.sourceDir}`}>
-                    shared
+                {skill.personal === true ? (
+                  <span style={{ ...badgeStyle(), fontSize: 9 }} title={`Kept to yourself: ${skill.sourceDir ?? ''} - used in every project on this computer, never uploaded or committed`}>
+                    only you
                   </span>
+                ) : (
+                  skill.sourceDir !== undefined && props.skillsDir !== undefined && skill.sourceDir !== props.skillsDir && (
+                    <span style={{ ...badgeStyle(), fontSize: 9 }} title={`Read-only, from ${skill.sourceDir}`}>
+                      shared
+                    </span>
+                  )
                 )}
                 {/*
                   Positive-only: absence means "not confirmed indexed", which covers both "never
@@ -685,7 +768,7 @@ function SkillList(
                   >
                     Open
                   </button>
-                  {skill.sourceDir === undefined || props.skillsDir === undefined || skill.sourceDir === props.skillsDir ? (
+                  {skill.personal === true || skill.sourceDir === undefined || props.skillsDir === undefined || skill.sourceDir === props.skillsDir ? (
                     <button type="button" style={secondaryButtonStyle()} onClick={() => setConfirming(skill.name)}>
                       Remove
                     </button>
@@ -719,6 +802,11 @@ function SkillList(
                 </span>
               </div>
               <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{skill.description}</div>
+              {props.transport !== undefined && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 4 }}>
+                  <DeleteEverywhere transport={props.transport} kind="skill" name={skill.name} />
+                </div>
+              )}
               {(skill.author !== undefined || skill.project !== undefined || skill.version !== undefined) && (
                 <div style={{ color: colors.muted, fontSize: 10, marginTop: 2 }}>
                   {[
@@ -734,6 +822,15 @@ function SkillList(
               <div style={{ color: colors.muted, fontSize: 10, fontFamily: monospace, marginTop: 2 }}>
                 {skill.filePath}
               </div>
+
+              {props.onSaveSkillDefaults !== undefined && (
+                <SkillDefaultsEditor
+                  skill={skill.name}
+                  placeholders={skill.placeholders ?? []}
+                  values={props.skillDefaults?.[skill.name] ?? {}}
+                  onSave={(values) => props.onSaveSkillDefaults?.(skill.name, values)}
+                />
+              )}
 
               {/*
                 The pictures, shown on demand.

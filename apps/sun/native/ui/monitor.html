@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Monitor</title>
+    <link rel="stylesheet" href="monitor.css" />
+  </head>
+  <body>
+    <div id="grid-app" class="grid-app">
+      <header class="g-head">
+        <div class="g-title">
+          <span id="g-orb" class="orb lv-grey"></span>
+          <div class="g-title-text">
+            <h1 id="g-name">Loading…</h1>
+            <p id="g-headline" class="g-headline"></p>
+          </div>
+        </div>
+        <div class="g-actions" id="g-actions"></div>
+      </header>
+      <div class="g-meta" id="g-meta"></div>
+      <div class="g-past" id="g-past" hidden></div>
+      <div class="g-alerts" id="g-alerts"></div>
+      <div class="g-toolbar">
+        <div class="g-views" id="g-views"></div>
+        <label class="g-search">
+          <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg>
+          <input id="g-search" type="search" placeholder="Search every cell" spellcheck="false" />
+        </label>
+        <div class="g-chips" id="g-chips"></div>
+        <span class="g-count" id="g-count"></span>
+      </div>
+      <main class="g-body">
+        <div class="g-table-wrap" id="g-table-wrap">
+          <table class="g-table" id="g-table"></table>
+          <div class="g-empty" id="g-empty" hidden></div>
+        </div>
+        <div class="g-history" id="g-history" hidden></div>
+        <aside class="g-drawer" id="g-drawer" hidden></aside>
+      </main>
+    </div>
+    <div id="g-tip" class="g-tip" hidden></div>
+    <div id="g-notice" class="g-notice" hidden></div>
+    <div id="g-sheet" class="g-sheet" hidden></div>
+    <script src="monitor.js"></script>
+  </body>
+</html>

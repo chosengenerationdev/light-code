@@ -154,3 +154,13 @@ describe('removing', () => {
     expect(result.rejected).toEqual(['skills/deploy.md'])
   })
 })
+
+describe('a tool in a bucket', () => {
+  it('is exactly name.py - never a neighbour whose name starts the same', async () => {
+    const { belongsToTool } = await import('./remove.js')
+    expect(belongsToTool('team/tools/report.py', 'team/tools/', 'report')).toBe(true)
+    expect(belongsToTool('team/tools/report_daily.py', 'team/tools/', 'report')).toBe(false)
+    expect(belongsToTool('team/tools/sub/report.py', 'team/tools/', 'report')).toBe(false)
+    expect(belongsToTool('other/report.py', 'team/tools/', 'report')).toBe(false)
+  })
+})

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import { watchFile } from 'node:fs'
-import type { CredentialSummary, JupyterHubSpec } from '@light-code/core'
+import type { CredentialSummary, JupyterHubSpec, MonitorExecutorChannel, MonitoringChannel } from '@light-code/core'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import {
@@ -120,6 +120,15 @@ export interface ServerOptions {
   secretsFile?: string
   /** See `SessionOptions.desktopNotify`. */
   desktopNotify?: boolean
+  /** Fire Code's monitoring (`controlChannel.ts`): see `HostServices.monitoring` and `monitorExecutor`. */
+  monitoring?: MonitoringChannel
+  monitorExecutor?: MonitorExecutorChannel
+  extraToolDirs?: string[]
+  /**
+   * Opens the one user's session at start, with no browser attached: Fire Code's monitoring executor has no
+   * page, and its tools run in the session's bridge. Single-user only.
+   */
+  eagerSession?: boolean
   /** See `SessionOptions.reachAnywhere`. */
   reachAnywhere?: boolean
   /** See `SessionOptions.sharedWorkspace`. */
@@ -477,6 +486,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       ...(options.configFile !== undefined ? { configFile: options.configFile } : {}),
       ...(options.secretsFile !== undefined ? { secretsFile: options.secretsFile } : {}),
       ...(options.desktopNotify === true ? { desktopNotify: true } : {}),
+      ...(options.monitoring !== undefined ? { monitoring: options.monitoring } : {}),
+      ...(options.monitorExecutor !== undefined ? { monitorExecutor: options.monitorExecutor } : {}),
+      ...(options.extraToolDirs !== undefined ? { extraToolDirs: options.extraToolDirs } : {}),
       ...(options.secretsKey !== undefined ? { secretsKey: options.secretsKey } : {}),
       ...(options.reachAnywhere === true ? { reachAnywhere: true } : {}),
       ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
@@ -1159,6 +1171,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const address = server.address()
   if (address === null || typeof address === 'string')
     throw new Error('Server did not bind a port.')
+  // Fire Code's monitoring executor: its one session, now, with no page to open it.
+  if (options.eagerSession === true && identity instanceof SingleUserIdentity && !connections.has(identity.localPrincipal.id)) {
+    connections.set(identity.localPrincipal.id, await openConnection(identity.localPrincipal))
+  }
 
   const authority = `${bindAddress}:${address.port}`
   // Both checks are pinned to the address actually bound, which is why this is set after

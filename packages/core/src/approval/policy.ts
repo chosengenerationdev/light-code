@@ -83,11 +83,18 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   // Shared CI under the user's name: starting or stopping a build, and replaying one with a local
   // Jenkinsfile, which runs whatever that file says with the job's credentials.
   'jenkins_start_build',
+  'jenkins_write_job',
   'jenkins_stop_build',
   'jenkins_try_jenkinsfile',
   // Production schedules: an event (force-start, kill, hold, ice, status) or a changed definition.
   'autosys_send_event',
   'autosys_apply_jil',
+  // Where every AutoSys request goes from now on - often learned from a wiki page; the prompt shows each one tried live.
+  'autosys_set_addresses',
+  // A monitor runs a tool unattended on a schedule; approving the file approves it on this machine.
+  'monitor_create',
+  // Silencing, pausing or muting an alert: an agent doing that unseen would defeat the dashboard.
+  'monitor_control',
   'bitbucket_write_pull_request',
   // Merges into a shared branch (and may tag it) under the user's name; only after a reviewer approved.
   'bitbucket_merge_pull_request',
@@ -178,6 +185,8 @@ export function decideFromPolicy(
    * ordinary edit.
    */
   if (ALWAYS_ASK_TOOLS.has(request.toolName)) return undefined
+  // A tool that declares it must always ask - a Python tool's `__always_ask__ = True` - for everyone who has it.
+  if (request.alwaysAsk === true) return undefined
   // A write outside the workspace (Fire Code's reach anywhere): no checkpoint covers it, so a person
   // approves every one, whatever is auto-approved or always-allowed.
   if (request.preview.kind === 'diff' && request.preview.outsideWorkspace === true) return undefined

@@ -87,6 +87,26 @@ const toMs = (value: string | undefined): number | undefined => {
   return Number.isNaN(ms) ? undefined : ms
 }
 
+/**
+ * `records: true` - the answer as a JSON list of plain records instead of text for reading, so a Fire Code monitor
+ * can use the tool directly as its source: Rust collects, Rust judges, no Python in between (asked for).
+ */
+const RECORDS = z
+  .boolean()
+  .optional()
+  .describe('Answer as a JSON list of records (one per file, hit or row; numbers as numbers, times as ISO) - for a Fire Code monitor\'s source or for dataframe. Default: text for reading.')
+
+/** The answer as records, or a failure when it was cut short - a monitor must not read a partial answer as all clear. */
+function asRecords(records: Record<string, unknown>[], answer: HelperAnswer): ToolResult {
+  if (answer.timedOut === true) return { content: 'Stopped at the time limit, so the answer is partial - narrow the folders, names or dates.', isError: true }
+  return { content: JSON.stringify(records) }
+}
+const iso = (ms: unknown): string | null => (typeof ms === 'number' && Number.isFinite(ms) ? new Date(ms).toISOString() : null)
+const ageMinutes = (ms: unknown): number | null => (typeof ms === 'number' && Number.isFinite(ms) ? Math.max(0, Math.round((Date.now() - ms) / 60_000)) : null)
+/** Rows as arrays plus their column names, as objects keyed by name. */
+const keyed = (columns: string[], rows: unknown[][]): Record<string, unknown>[] =>
+  rows.map((row) => Object.fromEntries(columns.map((c, i) => [c, row[i] ?? null])))
+
 const grepSchema = z.object({
   pattern: z.string().min(1).describe('A regular expression (or plain text with literal: true). Case-insensitive unless it has a capital letter.'),
   roots: z.array(z.string().min(1)).min(1).max(20).describe('Folders or files to search: workspace-relative, absolute, another drive, or shares like \\\\server\\share\\folder - several at once.'),
@@ -480,7 +500,7 @@ export function createFastFsTools(exe: string, ops?: ReadonlySet<string>, option
 }
 
 function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
-  const findTool: Tool<z.infer<typeof findSchema>> = {
+  const findTool: Tool<z.infer<typeof findSchema> & { records?: boolean | undefined }> = {
     name: 'find_files',
     group: 'read',
     description:
@@ -488,7 +508,7 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       'extension, size and modified date (action "find"); summarise a folder tree — total size, size by file type, ' +
       'largest and newest files ("summary"); or find identical files by content ("duplicates"). Read-only. ' +
       'Prefer this to list_files for anything larger than one folder.',
-    parametersSchema: findSchema,
+    parametersSchema: findSchema.extend({ records: RECORDS }),
     async execute(input, context): Promise<ToolResult> {
       const params = { ...input, action: input.action ?? 'find' }
       const roots: string[] = []
@@ -526,6 +546,14 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       if (params.action === 'find') {
         const matches = (answer.matches as { path: string; size: number; modified: number; directory: boolean }[]) ?? []
         const keep = await allowedResults(context, matches.map((m) => m.path))
+        if (params.records === true) {
+          return asRecords(
+            matches
+              .filter((m) => keep.has(m.path))
+              .map((m) => ({ path: m.path, name: m.path.split(/[\\/]/).pop() ?? m.path, folder: m.directory, sizeBytes: m.directory ? null : m.size, modified: iso(m.modified), ageMinutes: ageMinutes(m.modified) })),
+            answer,
+          )
+        }
         const lines = matches.filter((m) => keep.has(m.path)).map((m) => `${m.path}\t${m.directory ? 'folder' : formatBytes(m.size)}\t${when(m.modified)}`)
         return { content: `${lines.length === 0 ? 'Nothing matched.' : lines.join('\n')}\n\n${scanned}${answer.limitReached === true ? ' The limit was reached; more match.' : ''}` }
       }
@@ -581,7 +609,7 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
     },
   }
 
-  const bigFileTool: Tool<z.infer<typeof bigFileSchema>> = {
+  const bigFileTool: Tool<z.infer<typeof bigFileSchema> & { records?: boolean | undefined }> = {
     name: 'big_file',
     group: 'read',
     description:
@@ -589,7 +617,7 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       'gives size, line count, the first lines and (for CSV/Excel) the columns and types; "lines" reads any window; ' +
       '"tail" reads the end; "search" runs a regular expression over the whole file on every CPU core and returns ' +
       'matching lines with numbers and context. Start with inspect, then read or search part by part.',
-    parametersSchema: bigFileSchema,
+    parametersSchema: bigFileSchema.extend({ records: RECORDS }),
     async execute(params, context): Promise<ToolResult> {
       const r = await readable(context, params.path)
       if (!r.ok) return { content: r.message, isError: true, path: params.path }
@@ -619,6 +647,7 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       }
       if (params.action === 'search') {
         const matches = (answer.matches as { line: number; text: string; before: string[]; after: string[] }[]) ?? []
+        if (params.records === true) return { ...asRecords(matches.map((m) => ({ line: m.line, text: m.text })), answer), path: params.path }
         const text = matches
           .map((m) => [...m.before.map((b, i) => `${String(m.line - m.before.length + i).padStart(8)}  ${b}`), `${String(m.line).padStart(8)}> ${m.text}`, ...m.after.map((a, i) => `${String(m.line + 1 + i).padStart(8)}  ${a}`)].join('\n'))
           .join('\n--\n')
@@ -634,21 +663,23 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
     },
   }
 
-  const tableTool: Tool<z.infer<typeof tableSchema>> = {
+  const tableTool: Tool<z.infer<typeof tableSchema> & { records?: boolean | undefined }> = {
     name: 'query_table',
     group: 'read',
     description:
       'Query a CSV/TSV file or an Excel sheet of any size without reading it all: choose columns, filter rows, group ' +
       'with count/sum/avg/min/max/distinct, sort, and page with offset/limit. Runs on every CPU core and returns only ' +
       'the small result. Use big_file inspect first to learn the column names.',
-    parametersSchema: tableSchema,
-    async execute(params, context): Promise<ToolResult> {
+    parametersSchema: tableSchema.extend({ records: RECORDS }),
+    async execute(input, context): Promise<ToolResult> {
+      const { records: asJson, ...params } = input
       const r = await readable(context, params.path)
       if (!r.ok) return { content: r.message, isError: true, path: params.path }
       const answer = await runHelper(exe, { op: 'table', ...params, path: r.path }, context.signal)
       if (answer.ok !== true) return { content: answer.error ?? 'The query failed.', isError: true, path: params.path }
       const columns = (answer.columns as string[]) ?? []
       const rows = (answer.rows as unknown[][]) ?? []
+      if (asJson === true) return { ...asRecords(keyed(columns, rows), answer), path: params.path }
       const cell = (v: unknown): string => (v === null || v === undefined ? '' : typeof v === 'number' ? String(Math.round(v * 1e6) / 1e6) : String(v).replace(/\|/g, '\\|'))
       const table = [`| ${columns.join(' | ')} |`, `|${columns.map(() => ' --- ').join('|')}|`, ...rows.map((row) => `| ${row.map(cell).join(' | ')} |`)].join('\n')
       const offset = (answer.offset as number) ?? 0
@@ -663,7 +694,7 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
     },
   }
 
-  const grepTool: Tool<z.infer<typeof grepSchema>> = {
+  const grepTool: Tool<z.infer<typeof grepSchema> & { records?: boolean | undefined }> = {
     name: 'grep_files',
     group: 'read',
     description:
@@ -671,7 +702,7 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       'shares at once, on every CPU core - filtered by file name, extension and date first. Reads UTF-16 files too, ' +
       'and names every file or folder it could not read and why. Use for searching outside the workspace or across ' +
       'many roots; search_files is fine inside the workspace.',
-    parametersSchema: grepSchema,
+    parametersSchema: grepSchema.extend({ records: RECORDS }),
     async execute(params, context): Promise<ToolResult> {
       const roots: string[] = []
       for (const root of params.roots) {
@@ -703,11 +734,20 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
         context.signal,
       )
       if (answer.ok !== true) return { content: answer.error ?? 'The search failed.', isError: true }
-      return { content: formatGrepAnswer(answer, await allowedResults(context, ((answer.files as { path: string }[]) ?? []).map((f) => f.path))) }
+      const allowed = await allowedResults(context, ((answer.files as { path: string }[]) ?? []).map((f) => f.path))
+      if (params.records === true) {
+        // One record per matching line; a file listed without its lines (filesOnly) is one record with its count.
+        const files = ((answer.files as { path: string; matches: number; hits: { line: number; text: string }[] }[]) ?? []).filter((f) => allowed.has(f.path))
+        return asRecords(
+          files.flatMap((f) => (f.hits.length === 0 ? [{ path: f.path, matches: f.matches }] : f.hits.map((h) => ({ path: f.path, line: h.line, text: h.text, matches: f.matches })))),
+          answer,
+        )
+      }
+      return { content: formatGrepAnswer(answer, allowed) }
     },
   }
 
-  const sqliteTool: Tool<z.infer<typeof sqliteSchema>> = {
+  const sqliteTool: Tool<z.infer<typeof sqliteSchema> & { records?: boolean | undefined }> = {
     name: 'query_sqlite',
     group: 'read',
     description:
@@ -715,17 +755,23 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       'columns, indexes, row counts), query (one read-only SQL statement), scan (filter/group/sort a big table on ' +
       'every CPU core), search (text anywhere in the database). Use instead of python or a sqlite3 shell. A missing ' +
       'file is reported, never created; writes are refused.',
-    parametersSchema: sqliteSchema,
-    async execute(params, context): Promise<ToolResult> {
+    parametersSchema: sqliteSchema.extend({ records: RECORDS }),
+    async execute(input, context): Promise<ToolResult> {
+      const { records: asJson, ...params } = input
       const r = await readable(context, params.path)
       if (!r.ok) return { content: r.message, isError: true, path: params.path }
       const answer = await runHelper(exe, { op: 'sqlite', ...params, path: r.path }, context.signal)
       if (answer.ok !== true) return { content: answer.error ?? 'The SQLite read failed.', isError: true, path: params.path }
+      if (asJson === true && (params.action === 'query' || params.action === 'scan')) {
+        // A database being written while it was read gives no answer a monitor should trust.
+        if (answer.consistent === false) return { content: 'The database was being written throughout the read; check again.', isError: true, path: params.path }
+        return { ...asRecords(keyed((answer.columns as string[]) ?? [], (answer.rows as unknown[][]) ?? []), answer), path: params.path }
+      }
       return { content: formatSqliteAnswer(params, answer), path: params.path }
     },
   }
 
-  const dataframeTool: Tool<z.infer<typeof dataframeSchema>> = {
+  const dataframeTool: Tool<z.infer<typeof dataframeSchema> & { records?: boolean | undefined }> = {
     name: 'dataframe',
     group: 'read',
     description:
@@ -734,8 +780,9 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       'source and query them together with SQL: joins across sources, GROUP BY, window functions - and pivot. ' +
       'Reading is forgiving: every value is kept, and a column becomes numbers or dates only when all of it converts ' +
       '(the answer says which columns stayed text and why). Use instead of writing pandas or opening Excel.',
-    parametersSchema: dataframeSchema,
-    async execute(params, context): Promise<ToolResult> {
+    parametersSchema: dataframeSchema.extend({ records: RECORDS }),
+    async execute(input, context): Promise<ToolResult> {
+      const { records: asJson, ...params } = input
       const sources = []
       for (const source of params.sources) {
         if (source.path !== undefined) {
@@ -758,6 +805,10 @@ function allFastFsTools(exe: string, options: FastFsOptions = {}): Tool[] {
       }
       const answer = await runHelper(exe, { op: 'dataframe', ...params, sources }, context.signal)
       if (answer.ok !== true) return { content: answer.error ?? 'The dataframe operation failed.', isError: true }
+      if (asJson === true && params.action !== 'describe') {
+        const columns = ((answer.columns as { name: string }[]) ?? []).map((c) => c.name)
+        return asRecords(keyed(columns, (answer.rows as unknown[][]) ?? []), answer)
+      }
       return { content: formatDataframeAnswer(params.action, answer) }
     },
   }

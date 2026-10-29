@@ -132,6 +132,7 @@ export default tseslint.config(
       'apps/host/src/choosesTheme.test.ts',
       'apps/host/src/localTabs.test.ts',
       'apps/host/src/panelEditor.test.ts',
+      'apps/host/src/addonEnable.test.ts',
       'apps/host/src/handoff.test.ts',
     ],
     rules: { 'no-restricted-globals': 'off' },

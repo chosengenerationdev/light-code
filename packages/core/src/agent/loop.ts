@@ -528,6 +528,8 @@ async function runOneToolCall(
       toolName: tool.name,
       group: tool.group,
       preview,
+      // A tool that must ask every time (a Python tool's `__always_ask__ = True`): no standing grant applies.
+      ...(tool.alwaysAsk === true ? { alwaysAsk: true } : {}),
     })
 
     if (decision === 'deny') {
@@ -733,7 +735,9 @@ export async function runAgentTurn(
 
 The conversation is longer than this model accepts. Press **Compact now** under the ` +
           'token bar to summarise the older part (the saved transcript keeps everything), then send again - or ' +
-          'tick "Compact automatically" there to have this done for you. Starting a new chat with + also works.',
+          'tick "Compact automatically" there to have this done for you. Or press **New chat with a handoff** (beside + at the top): ' +
+          'the assistant writes up this chat - goal, decisions, what is done, next steps - and a new chat starts from it, ' +
+          'a clean start that keeps the thread.',
       )
       return
     }
@@ -758,8 +762,9 @@ The conversation is longer than this model accepts. Press **Compact now** under 
       }
       events.onError(
         `${streamError}\n\nThe conversation is longer than this model accepts, and it could not be shortened enough ` +
-          '(the most recent messages, or one very large tool result, are too big on their own). Start a new chat with +, ' +
-          'or choose a model with a larger context window.',
+          '(the most recent messages, or one very large tool result, are too big on their own). Press **New chat with a handoff** ' +
+          '(beside + at the top): the assistant writes up this chat and a new chat starts from it, so the work carries on. ' +
+          'Or start an empty chat with +, or choose a model with a larger context window.',
       )
       return
     }

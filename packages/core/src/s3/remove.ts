@@ -133,3 +133,41 @@ export async function removeSkillFromBucket(
   }
   return result
 }
+
+/**
+ * The same two steps for a Python tool: one object, `name.py`, matched exactly - `report` never takes
+ * `report_daily.py`. Used by "Delete everywhere" (Settings -> Python), which a person presses; no tool
+ * calls it, for the reason at the top of this file.
+ */
+export function belongsToTool(key: string, where: string, name: string): boolean {
+  return key.startsWith(where) && key.slice(where.length) === `${name}.py`
+}
+
+export async function toolKeysInBucket(options: SkillKeysOptions): Promise<string[]> {
+  const base = normalisePrefix(options.target.prefix)
+  const where = normalisePrefix(`${base}${options.prefix ?? ''}`)
+  const objects = await options.target.client.list(where, 1000, options.signal)
+  return objects.map((object) => object.key).filter((key) => belongsToTool(key, where, options.name)).sort()
+}
+
+export async function removeToolFromBucket(options: RemoveSkillOptions): Promise<RemoveSkillResult> {
+  if (options.target.readOnly === true) {
+    throw new Error(`${options.target.label} is configured read-only, so nothing can be deleted from it.`)
+  }
+  const base = normalisePrefix(options.target.prefix)
+  const where = normalisePrefix(`${base}${options.prefix ?? ''}`)
+  const result: RemoveSkillResult = { removed: [], failed: [], rejected: [] }
+  for (const key of options.keys) {
+    if (!belongsToTool(key, where, options.name)) {
+      result.rejected.push(key)
+      continue
+    }
+    try {
+      await options.target.client.remove(key, options.signal)
+      result.removed.push(key)
+    } catch (error) {
+      result.failed.push({ key, problem: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return result
+}

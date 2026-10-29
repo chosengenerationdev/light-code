@@ -53,13 +53,13 @@ export function contentTypeFor(filename: string): string {
  * spliced in as bytes (see `HttpRequestOptions.bodyBytes`).
  */
 export function multipartBody(
-  file: { name: string; bytes: Uint8Array; contentType?: string | undefined },
+  file: { name: string; bytes: Uint8Array; contentType?: string | undefined; field?: string | undefined },
   fields: Record<string, string> = {},
 ): { contentType: string; bytes: Uint8Array } {
   const boundary = `lightcode${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
   const head =
     `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="file"; filename="${file.name}"\r\n` +
+    `Content-Disposition: form-data; name="${file.field ?? 'file'}"; filename="${file.name}"\r\n` +
     `Content-Type: ${file.contentType ?? contentTypeFor(file.name)}\r\n\r\n`
   const tail =
     '\r\n' +

@@ -1,5 +1,193 @@
 # light-code-vscode
 
+## 0.197.0
+
+- **Underscores in replies are kept.** `job_status_flag`, `PAY_*_USD`, `__init__` and other names with underscores lost them in a formatted reply, read as italics or bold. An underscore inside a word, or around a single dunder name, is now text; `_this_` and `__these words__` still emphasise.
+- **Skills and Python tools record who saved them last** (`updated_by:` / `__updated_by__`), beside the author, version and time they already carried. The author stays whoever wrote it.
+
+## 0.196.0
+
+### Patch Changes
+
+- Help: deleting a monitor’s history older than a number of days.
+
+## 0.195.0
+
+### Patch Changes
+
+- Help: a check chosen in Fire Code’s monitoring History shows its whole grid straight away.
+- Fire Code monitoring: the team index can hold a check's whole grid (`writeGrid`, `grid`, a `hash` field added to existing indexes), so every member sees every row.
+
+## 0.194.0
+
+### Patch Changes
+
+- Fire Code's Rust tools (`find_files`, `grep_files`, `big_file` search, `query_table`, `query_sqlite`, `dataframe`) take `records: true` and answer as a JSON list of records, so a monitor can use them directly; `monitor_create` and `monitor_check_tool` say which source to prefer.
+- The team monitoring history can delete one of this person's checks.
+
+## 0.193.0
+
+### Patch Changes
+
+- Fire Code monitoring: the team history can be read for one day (`until` on the history query).
+- Fire Code monitoring: `probe` - whether a monitor's tool can run on this computer, by the same lookup a check uses (`monitorToolHere`), without running it.
+
+## 0.192.0
+
+### Patch Changes
+
+- Fire Code monitoring: a monitor that is a copy from the team’s bucket or team repository can be changed and deleted from the dashboard - this host writes the change to the bucket or commits it to the repository, and a deletion uses the same "Delete everywhere" as Settings → Skills.
+- Settings → Python → **Check for new team tools** pulls the team’s bucket tool folders and the team repository now and reloads, so a colleague’s new tool is offered for approval at once instead of at the next 15-minute sync.
+- The Python tab shows the tools already approved straight away (“Starting Python…”) instead of waiting for uv and Python to start.
+- Fire Code monitoring: the template for a monitoring tool called another tool with a dict (`call_tool("x", {...})`), a `TypeError` before the call left the tool - it uses keyword arguments now. The guidance prefers Polars to pandas, and `monitor_check_tool` says whether Polars is installed.
+
+## 0.191.0
+
+### Patch Changes
+
+- Fire Code monitoring: a monitoring tool that calls another Python tool more than once now works in the background check. The worker forgot which tool was running after the first nested call, so later calls were judged against the wrong tool and refused - which read as an approval problem.
+- Trying a monitor in a chat (`monitor_create`, `monitor_check_tool`) runs its tool’s calls under the same rule as the background check, so a monitor that passes in the chat also passes when Fire Code runs it.
+- `monitor_create` makes a **personal** monitor when nobody said who it is for and the team’s OpenSearch history is not set up, instead of refusing over a missing setting.
+
+## 0.190.0
+
+### Patch Changes
+
+- Test connection Details now lead with **Likely cause** - the failing step in plain words - for every DevOps product. AutoSys says when its server pages an answer, so a pattern that found only some jobs explains itself.
+- Python tools may call the built-in reading tools they declare in `__tool_calls__` (approved with the tool, and still asked per call in a chat).
+- Fire Code monitoring: team history in OpenSearch, schedules by time of day, alert history and explanations, `monitor_history`.
+- Fire Code monitoring: the agent tools (`monitor_create`, `monitor_status`, `monitor_show`, `monitor_control`) and the background executor they run in. Nothing changes outside Fire Code.
+
+## 0.189.0
+
+### Minor Changes
+
+- **AutoSys on a server with its own addresses.** A pattern such as `JOB*UK` now works where the server has no pattern status address: the matching jobs are listed and each one's status read in turn (one job falls back to a definition carrying its status). Test connection passes on the job list too, and a 404 says what to do next.
+- **The assistant finds and keeps the addresses.** `autosys_check_addresses` tries the saved addresses, the usual layouts (`/v1`, `/AEWS`, `/AEWS/v1`, `/api/v1`) and anything read on the office wiki, with a job you name, and shows what each answered. `autosys_set_addresses` saves the working ones after you approve - always asked, each changed address tried live in the prompt, paths on your own site only, never in a schedule or with read-only access.
+- **Share them with the team**: Settings → Export → **AutoSys addresses** carries only `autosys.paths`; importing it changes nothing else of the importer's.
+
+## 0.188.0
+
+### Patch Changes
+
+- Help: how to run and debug a branch opened in Fire Code.
+- **Copying a folder into a new branch folder.** `branches.copyFiles` now takes folders as well as files - for example an uncommitted `.vscode` - copying only what the branch does not already have. Help explains .vscode and virtualenvs in branch folders (a venv is never copied: it records absolute paths).
+
+## 0.187.0
+
+### Patch Changes
+
+- **A repository with no commits yet now says so** when you open a branch, instead of showing an empty list and an empty "starting from" box. Git makes a branch with the first commit, so make one (Commit and push, or ask the agent) and the branches appear. Make branch is also disabled, with the reason on hover, whenever there is nothing to start from.
+
+## 0.186.0
+
+### Patch Changes
+
+- **A new branch starts from the main branch by default.** In VS Code's New branch… and Fire Code's New chat on a branch, the "starting from" choice now defaults to the repository's main branch - the one the remote marks as default, else main, else master - instead of whatever branch is checked out. Any other branch can still be picked; the list marks the main branch and the one the codebase is on.
+
+## 0.185.0
+
+### Minor Changes
+
+- **Several branches of one repository at once.** VS Code: **Light Code: Open Branch in New Window** (also a branch button in Source Control) opens a branch - existing, fetched from the remote, or new - in its own folder beside the repository and its own VS Code window, where running, debugging, terminals and Light Code all use that branch. **Light Code: Branches** lists the branch folders with their state and closes one safely. Fire Code: **New chat on a branch…** opens a branch as a chat tab working in its own folder; each tab shows its chat name with the branch underneath (trimmed when long, keeping a Jira key whole, full name on hover) and renaming a chat never changes its branch; **Close branch…** removes the folder. Git keeps it safe: one branch in one folder at a time, a close checks for uncommitted and unpushed work first, and the branch itself is never deleted. Optional per project: files to copy into a new branch folder (such as .env) and a setup command (such as pnpm install), run once. Commands and debug sessions get LIGHT_CODE_BRANCH and LIGHT_CODE_PORT_OFFSET so two branches can run at once. Codebase instructions, settings and approvals are shared by a repository's branches.
+
+## 0.184.0
+
+### Minor Changes
+
+- **Create, copy and change Jenkins jobs.** `jenkins_write_job` creates a job, copies an existing job into a new one, or changes a job - most often its parameters: add one, change a default, its choices or its description, or remove one (string, text, boolean and choice parameters). Anything else - script path, branch, schedule, agent label - is an exact edit of the job's configuration. "A job like platform/api but with a hotfix branch parameter" is one copy with new parameters. It always asks first, showing the diff of the configuration Jenkins will be sent, and cannot be set to always allow. It never deletes a job, never creates or copies over an existing one, refuses to save if the job was edited on Jenkins after you were shown the change, and is removed by "My access is read-only".
+
+## 0.183.0
+
+### Minor Changes
+
+- **New skills and tools are for the team by default.** The assistant no longer asks; a skill or tool becomes personal only when you say so ("just for me", "keep it private").
+- **Delete everywhere.** Each skill (Settings → Skills) and tool (Settings → Python) has **Delete everywhere**: the first press lists exactly what will go - every copy on this computer, the objects in each S3 bucket folder and its files in the team repository - and the second removes them. Bitbucket cannot delete a file through its REST API, so each repository file is replaced by a one-line "deleted by you on <date>" marker; history keeps the old version, and every Light Code treats it as gone - colleagues' unchanged copies in folders Light Code syncs are removed at their next sync, while a copy someone changed or keeps in their own project folder is reported in red rather than removed. The repository goes first, and if it refuses (someone changed the file meanwhile) nothing else is removed. Writing a new one of the same name brings it back. A button only - the assistant cannot delete for the team; on a shared server only an admin can.
+
+## 0.182.0
+
+### Minor Changes
+
+- **Choose "Only me" or "The team" when a skill or Python tool is created.** The assistant asks who it is for (unless you said). **Only me** keeps it in your personal folder on this computer (%LOCALAPPDATA%\light-code\personal), used in every project in VS Code, Fire Code and the Node host, and never uploaded to a bucket, committed to the team repository or sent to the team skills pool. **The team** saves it where your team shares - the team repository and/or the bucket folder marked "Publish". The approval prompt says which before anything is written, and updating one keeps it where it is. Personal skills are marked **only you** in Settings → Skills and can be removed there. Not offered on a shared Node server.
+
+## 0.181.0
+
+### Minor Changes
+
+- **New skills and Python tools are saved outside the project while the team repository is on**, in a folder of the repository's own (the panel shows the path), so they never land in the project's git. A folder you chose in Settings → Skills or Settings → Python, or an S3 bucket folder marked "Publish", still takes precedence. Skills and tools already in the project's .lightcode folders keep loading and are still committed.
+- **Fixed: the agent could not read skills kept outside the project.** Skills in S3 bucket folders or the team repository's copy were outside every folder the agent may read: VS Code asked permission for each one, and Fire Code refused them. Every skill and tool folder is now readable without asking.
+- **Fixed: after switching the S3 bucket folders off, editing a skill that came from the bucket showed as a conflict.** It is now committed as an ordinary update.
+- The team repository needs no S3 bucket: a new user can set up Bitbucket, fill in the panel and press Sync now.
+- **Hitting the model's context limit now suggests a new chat with a handoff.** The error offers **New chat with a handoff** (beside + at the top) alongside Compact now: the assistant writes up the chat - goal, decisions, what is done, next steps - and a new chat starts from it, so the work carries on.
+
+## 0.180.0
+
+### Minor Changes
+
+- **Switch the S3 bucket folders off safely once the team repository has everything.** Settings → DevOps → Team repository → *Use the repository instead of the S3 bucket*. **Check** syncs the bucket and the repository, then confirms every skill and tool in the bucket folders is in the repository with the same content, and lists anything that is not (not committed yet, or different). **Switch bucket folders off** is offered only after a clean check, and checks once more before acting. It switches the skills and tools bucket folders off together, and only unticks them: nothing is deleted in the bucket or on disk, and ticking them again in Settings → S3 undoes it. Afterwards new skills and tools are saved in the project's folders and committed to the repository, and what came from the bucket keeps loading from the repository's copy. Both buttons are disabled, with the reason, when no bucket folder is syncing skills or tools.
+
+## 0.179.0
+
+### Patch Changes
+
+- **Fixed: the team repository panel showed false "Not synced - changed both here and in the repository" warnings.** When a colleague's edit reached the repository before your S3 bucket sync brought it to your machine, your unchanged copy was reported as a clash. Now only a file changed on both sides is red. A file that is newer in the repository while yours is unchanged is listed in grey as "Newer in the repository" and clears once the bucket catches up. Line-ending differences (Windows CRLF against LF) and a leading byte-order mark no longer count as changes. Existing sync records carry over; the next sync clears the false warnings.
+
+## 0.178.0
+
+### Patch Changes
+
+- **Fixed: the team repository committed almost nothing when skills and tools live in an S3 bucket.** It committed only the folder new skills are saved in and skipped every file a bucket sync had brought down, so a team keeping its skills and tools in a bucket saw one skill and no tools reach the repository. It now commits everything skills and tools load from - the save folder, the project's `.lightcode` folders and every S3 bucket folder (never the repository's own copy). Two people committing the same bucket file agree rather than conflict, and an edit made in the bucket is committed by the next sync. The same name in two folders on one machine: identical is one file; if they differ, the one Light Code uses is committed and the other is listed under Needs attention. Press **Sync now** once after updating.
+
+## 0.177.0
+
+### Minor Changes
+
+- **AutoSys: runs today or in the last N hours, and who started them.** `autosys_runs` takes a list of jobs and reports each run's start, end, status and exit code, and whether it ran on its schedule, was started **by hand** (with who sent the start and when) or was an automatic retry. It reads the server's run history and event history; where your server keeps those elsewhere, set `autosys.paths.runHistory` / `eventHistory` - the tool says which is missing. A run with no event record is reported as "not known", never guessed.
+- **AutoSys Test connection can check a named job.** Fill in *Job to check in Test connection* and the test reads that job's definition - the same request as `<site>/job/<name>` in Postman.
+- **Python tools that always ask.** A tool with `__always_ask__ = True` at module level asks before every run for everyone who has it: no "Always allow", and no auto-approve covers it. Ask the assistant to add it when it creates the tool.
+- **Banned calls for Python tools.** Settings → Python → *Banned calls*: functions or modules no tool may use (`os.system`, `subprocess`, `someLib.someFunction`). Every tool is checked when it loads and before each call, through import aliases, and refused with the line named.
+- **A team repository for skills and tools.** Settings → DevOps → *Team repository for skills and tools*, offered once Bitbucket is set up and using its token: a project, repository, branch (created from the default branch if main is protected) and folder. Existing skills and tools are committed on the first sync, changes are committed as you make them, and colleagues' are brought back every few minutes. Nothing is overwritten - a file changed on both sides is listed, not replaced; a deleted skill or tool stays in the repository. Only your own files are committed, never copies synced from an S3 bucket, so the two syncs cannot bounce files. Included in export/import under DevOps.
+- **"Needs attention" shows background failures**: a team repository or bucket sync that failed or skipped a file, and Python tools that did not load, first in Settings → Usage.
+- **Fixed: a tool approved in VS Code had to be approved again in Fire Code.** Approved tool code is now one list per Windows user (`%LOCALAPPDATA%light-codeapprovals`), shared by the extension, the Node host and Fire Code; Fire Code's earlier approvals are carried over.
+- A skill identical in two folders (yours and a synced copy) is no longer reported as shadowed.
+
+## 0.176.0
+
+### Patch Changes
+
+- **Fixed: AutoSys requests went to the wrong address (HTTP 404).** Every request added /AEWS to the site address, so an address that already ended in /AEWS asked for /AEWS/AEWS/... . The site address is now used exactly as you type it - include the web services prefix, e.g. https://autosys.example.com:9443/AEWS - and only the resource and its query are added (/job-run-info?filter=...). Test connection's Details show the exact address used. If you set request paths by hand in config (autosys.paths), they are unchanged.
+
+## 0.175.0
+
+### Minor Changes
+
+- **"My access is read-only" on every DevOps connection** (AutoSys, Jira, Confluence, Bitbucket, Jenkins). Ticked, the tools that would change something there are left out entirely and the reading tools tell the assistant the access is read-only - so it explains what someone with access would need to do instead of trying, and you are never asked to approve a change the server would refuse.
+- **More ways to read AutoSys.** Status can be narrowed by machine ("what is running on host X"), by time ("what failed in the last 6 hours") and to long runners ("running longer than 2 hours", with how long). Finding jobs can be narrowed by machine, owner, box, type, calendar or text in the command ("which jobs call load_gl.sh"). New: `autosys_machines` (machines like autorep -M, with the jobs running on and defined on one), `autosys_schedule` (what starts in a time window or on a day, from start times, days and run calendars), `autosys_calendar` (a calendar's dates, or whether a day is in it) and `autosys_global_variables` (like autorep -G). A server that answers one of these somewhere else is told which address setting to change.
+- **Test connection shows its details.** Under the result, **Details** lists every request it made - the gateway's token request first - with the address, HTTP status, response headers and the start of the body; passwords, tokens and secrets are masked, and **Copy details** puts it on the clipboard for whoever runs the service. It opens by itself when the test fails.
+- **Clearer sign-in errors from DevOps sites**: messages now name the HTTP status (401 not signed in, 403 forbidden) so they can be compared with Postman, and AutoSys and Jenkins are no longer told about a "personal access token" they do not use.
+
+## 0.174.0
+
+### Patch Changes
+
+- **Fixed: Save SVG and Save PNG on a diagram did nothing** in VS Code and Fire Code. They used a browser download link, which neither window acts on. They now open a Save dialog (VS Code's own; a Windows one in Fire Code, starting in Downloads), show "Saving…" while it works, then say where the file went - or why it could not be saved. In a plain browser they still download.
+- **Buttons show they are working.** A button that sends something to Light Code (Save, Test connection, Sync, Send…) now shows a small spinner and a busy cursor until the answer comes back, instead of looking like nothing happened for a few seconds.
+
+## 0.173.0
+
+### Minor Changes
+
+- **Choose which skills go to the team.** Settings → Project → Team skills → *Choose which skills to send*: untick a skill to keep it to yourself. The choice is remembered, the Send button counts what goes, and a skill you untick after sending it is taken back from the pool on the next Send (only your own copy). Check status shows it as "kept to yourself".
+- **Defaults for a skill's inputs.** Settings → Skills → a skill → *Defaults for its inputs*: placeholders written `{{name}}` or `<NAME>` are offered as boxes, and any other input can be added by name. The assistant uses them instead of stopping to ask, says which it used, and still asks for anything without a default; a value you give in the chat wins. Kept in your own settings, never in the skill.
+- **Fixed: codebase instructions were easy for the model to ignore.** They sat in the middle of a long prompt, followed by thousands of words of tool and mode guidance. They now come last (before only a chat's plan) and are named at the very start, with plainer wording that they apply to every reply.
+- **AutoSys through a gateway: paste the sign-in header value yourself.** With *Also send an AutoSys sign-in header* ticked, a new *Header value* field takes the whole value (for example `Basic ` + base64 of username:password). It is sent exactly as stored on every AutoSys call, beside the gateway's Bearer token, in the header you name (for example `x-api-authorization-header-for-service-provider`), and kept in secure storage - the username and password are then not needed.
+
+## 0.172.0
+
+### Patch Changes
+
+- **Fixed: enabling an add-on could fail out of sight and leave no tab.** If starting it threw, the add-on list never came back to Settings, so no Linux tab appeared, and the reason went to the chat behind the Settings page (Fire Code showed nothing at all). Now the add-on stays enabled and its tab appears whatever happens; the reason is shown on the Add-ons tab, with the add-on's log and a **Start again** button; a failure preparing one add-on no longer stops the other MCP servers starting; and a start-up failure when Light Code opens is shown on the Add-ons tab too, with the full error in the log.
+
 ## 0.171.0
 
 ### Minor Changes

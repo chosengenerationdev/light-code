@@ -49,6 +49,8 @@ export const OVERRIDABLE_KEYS = [
   'tools',
   /** What this project is called. A project name that did not vary by project would be no name. */
   'project',
+  /** Branch folders: one project's setup is pnpm install, another's uv sync. */
+  'branches',
 ] as const
 
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number]

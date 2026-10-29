@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { HttpClient } from '../platform/http.js'
 import { resolveToolPath } from '../tools/paths.js'
 import type { Tool, ToolExecutionContext, ToolPreview, ToolResult } from '../tools/types.js'
+import { applyJobChanges, jobParameters, type JobChanges } from './jenkinsConfig.js'
 import { AtlassianError, AtlassianRest, type AtlassianConnection } from './rest.js'
 
 /**
@@ -26,7 +27,15 @@ import { AtlassianError, AtlassianRest, type AtlassianConnection } from './rest.
  * under the user's name**, and a replay runs whatever the file says with the job's credentials. All
  * three are `command`, in `ALWAYS_ASK_TOOLS` and never available to a schedule, and each preview
  * shows the literal job, build and parameters — or the whole Jenkinsfile — that will run
- * (invariant 8). There is deliberately no tool that changes a job's configuration.
+ * (invariant 8).
+ *
+ * **Creating, copying and changing a job's configuration** (`jenkins_write_job`) was deliberately absent
+ * until the user asked for it: create a job, copy one into a new job, give it new parameters. It is the same
+ * class of act - shared CI, under the user's name - so it is `command`, in `ALWAYS_ASK_TOOLS` (no "Always
+ * allow", whatever is auto-approved) and never available to a schedule; its preview is the diff of the
+ * config.xml Jenkins will be sent against what it holds now. It never deletes a job, never replaces an
+ * existing one by copying or creating over it, and refuses a change when the job was edited after the
+ * preview read it.
  *
  * ## Logs are streamed
  *
@@ -425,7 +434,10 @@ export class JenkinsClient {
    * current Jenkins; an older or stricter one answers 403 mentioning the crumb, and gets one retry.
    */
   private async post(doing: string, pathAndQuery: string, form: Record<string, string>, signal?: AbortSignal) {
-    const body = new URLSearchParams(form).toString()
+    return this.postBody(doing, pathAndQuery, new URLSearchParams(form).toString(), 'application/x-www-form-urlencoded', signal)
+  }
+
+  private async postBody(doing: string, pathAndQuery: string, body: string, contentType: string, signal?: AbortSignal) {
     const send = () =>
       this.rest.send(
         doing,
@@ -433,7 +445,7 @@ export class JenkinsClient {
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': contentType,
             ...(this.crumb !== undefined ? { [this.crumb.field]: this.crumb.value } : {}),
           },
           body,
@@ -487,6 +499,36 @@ export class JenkinsClient {
 
   async stopBuild(job: string, build: string | number, signal?: AbortSignal): Promise<void> {
     await this.post(`stopping ${job} #${String(build)}`, `${jobPath(job, this.base)}/${buildRef(build)}/stop`, {}, signal)
+  }
+
+  /** A job's config.xml, as Jenkins holds it now. */
+  async configXml(job: string, signal?: AbortSignal): Promise<string> {
+    return this.rest.text(`reading the configuration of ${job}`, `${jobPath(job, this.base)}/config.xml`, signal)
+  }
+
+  /** Whether a job (or folder) of this name exists. */
+  async exists(job: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      await this.rest.json(`looking for ${job}`, `${jobPath(job, this.base)}/api/json?tree=name`, { method: 'GET' }, signal)
+      return true
+    } catch (error) {
+      if (error instanceof AtlassianError && error.status === 404) return false
+      throw error
+    }
+  }
+
+  /** Creates a job from a whole config.xml, in the folder its name gives (`folder/sub/new-job`). */
+  async createJob(job: string, xml: string, signal?: AbortSignal): Promise<void> {
+    const path = jobPath(job, this.base)
+    const cut = path.lastIndexOf('/job/')
+    const parent = path.slice(0, cut)
+    const name = decodeURIComponent(path.slice(cut + '/job/'.length))
+    await this.postBody(`creating ${job}`, `${parent}/createItem?${new URLSearchParams({ name }).toString()}`, xml, 'application/xml', signal)
+  }
+
+  /** Replaces a job's config.xml. */
+  async saveConfig(job: string, xml: string, signal?: AbortSignal): Promise<void> {
+    await this.postBody(`saving the configuration of ${job}`, `${jobPath(job, this.base)}/config.xml`, xml, 'application/xml', signal)
   }
 
   /** The declarative linter. Read-only on the server; answers in plain text. */
@@ -1023,6 +1065,127 @@ async function explainFailure(client: JenkinsClient, job: string, number: number
 }
 
 /** Every Jenkins tool, in the order they are registered. */
+const parameterInput = z.object({
+  name: z.string().min(1),
+  type: z.enum(['string', 'text', 'boolean', 'choice']).optional().describe('Default string for a new parameter; an existing one keeps its type.'),
+  description: z.string().optional(),
+  default: z.union([z.string(), z.boolean()]).optional().describe('The default value; for a choice, which choice comes first.'),
+  choices: z.array(z.string()).optional().describe('For a choice parameter: every choice.'),
+})
+
+export function createJenkinsWriteJobTool(options: JenkinsToolOptions) {
+  const schema = z.object({
+    action: z
+      .enum(['create', 'copy', 'update'])
+      .describe('create: a new job from a whole config (or an existing job\'s config given as from). copy: a new job copied from "from", optionally changed. update: change an existing job.'),
+    job: z.string().describe('The job to create (copy, create) or change (update), as folder/name. For create and copy it must not exist yet.'),
+    from: z.string().optional().describe('copy: the existing job to copy, as folder/name or its URL.'),
+    config: z.string().optional().describe('create: the whole config.xml. Prefer copy from a similar job - a config written from scratch is easy to get subtly wrong.'),
+    parameters: z
+      .object({
+        set: z.array(parameterInput).optional().describe('Add these parameters, or change those of the same name.'),
+        remove: z.array(z.string()).optional().describe('Parameter names to remove.'),
+      })
+      .optional(),
+    description: z.string().optional().describe("The job's description."),
+    edits: z
+      .array(z.object({ find: z.string().min(1), replace: z.string() }))
+      .optional()
+      .describe('Exact text changes to the config.xml - for anything else (script path, branch, schedule, agent label). Each find must occur exactly once; read the job with jenkins_job and include enough around it to be unique.'),
+  })
+  type Params = z.infer<typeof schema>
+
+  /*
+   * What the preview showed, reused by the write it approves: the config the change started from (to refuse
+   * a job edited in between) and the exact XML that will be sent (invariant 8).
+   */
+  const shown = new Map<string, { before: string; after: string }>()
+  const keyOf = (params: Params): string => JSON.stringify(params)
+
+  const plan = async (client: JenkinsClient, params: Params): Promise<{ before: string; after: string; notes: string[]; target: string }> => {
+    const target = params.job.trim()
+    jobPath(target, client.base) // refuses a malformed name before anything is read
+    const changes: JobChanges = {
+      ...(params.parameters !== undefined ? { parameters: params.parameters } : {}),
+      ...(params.description !== undefined ? { description: params.description } : {}),
+      ...(params.edits !== undefined ? { edits: params.edits } : {}),
+    }
+    if (params.action === 'update') {
+      const before = await client.configXml(target)
+      const changed = applyJobChanges(before, changes)
+      if (changed.xml === before) throw new AtlassianError('Nothing would change: give parameters, a description or edits.')
+      return { before, after: changed.xml, notes: changed.notes, target }
+    }
+    if (await client.exists(target)) {
+      throw new AtlassianError(`"${target}" already exists. Use action update to change it, or pick another name - a job is never replaced by creating or copying over it.`)
+    }
+    if (params.action === 'copy') {
+      if (params.from === undefined || params.from.trim().length === 0) throw new AtlassianError('copy needs "from": the job to copy.')
+      const source = await client.configXml(params.from.trim())
+      const changed = applyJobChanges(source, changes)
+      return { before: source, after: changed.xml, notes: [`copied from ${params.from.trim()}`, ...changed.notes], target }
+    }
+    if (params.config === undefined || params.config.trim().length === 0) {
+      throw new AtlassianError('create needs "config", the whole config.xml - or use copy from a similar job.')
+    }
+    const changed = applyJobChanges(params.config, changes)
+    return { before: '', after: changed.xml, notes: ['a new job', ...changed.notes], target }
+  }
+
+  const tool: Tool<Params> = {
+    name: 'jenkins_write_job',
+    group: 'command',
+    description:
+      'Create a Jenkins job, copy an existing job into a new one, or change a job\'s configuration - most often its parameters (add, change default/choices/description, remove), and anything else by exact text edits of its config.xml. ' +
+      'To make a job "like X but with new parameters", use copy with from: X and parameters.set. Never deletes a job and never replaces an existing one by creating over it. ' +
+      'Always shown to the user first as a diff of the configuration Jenkins will be sent; it cannot be set to always allow.',
+    parametersSchema: schema,
+    async preview(params): Promise<ToolPreview> {
+      try {
+        const client = await options.client()
+        const result = await plan(client, params)
+        shown.set(keyOf(params), { before: result.before, after: result.after })
+        const parameters = jobParameters(result.after)
+        return {
+          kind: 'diff',
+          path: `${client.base}${jobPath(result.target, client.base)}/config.xml`,
+          before: result.before,
+          after: result.after,
+          note: [
+            `${params.action === 'update' ? 'Change' : 'Create'} Jenkins job ${result.target}: ${result.notes.join(', ')}`,
+            parameters.length > 0 ? `Parameters after: ${parameters.map((each) => `${each.name} (${each.type}${each.default !== undefined ? ` = ${each.default}` : ''})`).join(', ')}` : 'No parameters',
+          ].join(' · '),
+        }
+      } catch (error) {
+        return { kind: 'text', text: `${error instanceof Error ? error.message : String(error)} - this will be refused.` }
+      }
+    },
+    async execute(params): Promise<ToolResult> {
+      try {
+        const client = await options.client()
+        const approved = shown.get(keyOf(params))
+        const now = await plan(client, params)
+        // The job (or the job copied) was edited after the preview read it: what was approved is stale.
+        if (approved !== undefined && approved.before !== now.before) {
+          return {
+            content: `${params.action === 'update' ? params.job : params.from ?? params.job} changed on Jenkins after this was shown, so nothing was saved. Ask again to see the change against the current configuration.`,
+            isError: true,
+          }
+        }
+        const xml = approved?.after ?? now.after
+        if (params.action === 'update') await client.saveConfig(now.target, xml)
+        else await client.createJob(now.target, xml)
+        shown.delete(keyOf(params))
+        const link = `${client.base}${jobPath(now.target, client.base)}/`
+        return { content: `${params.action === 'update' ? 'Saved' : 'Created'} ${now.target}: ${now.notes.join(', ')}.\nLink: ${link}` }
+      } catch (error) {
+        return errorResult(error)
+      }
+    },
+  }
+  return tool
+}
+
 export function createJenkinsTools(options: JenkinsToolOptions): Tool<never>[] {
   return [
     createJenkinsFindJobsTool(options),
@@ -1034,5 +1197,6 @@ export function createJenkinsTools(options: JenkinsToolOptions): Tool<never>[] {
     createJenkinsStopBuildTool(options),
     createJenkinsCheckJenkinsfileTool(options),
     createJenkinsTryJenkinsfileTool(options),
+    createJenkinsWriteJobTool(options),
   ] as unknown as Tool<never>[]
 }

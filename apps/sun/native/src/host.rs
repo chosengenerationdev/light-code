@@ -14,7 +14,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -33,6 +33,9 @@ pub enum HostEvent {
     Url { id: String, generation: u64, url: String },
     Notify { id: String, message: String, level: String, report_path: Option<String> },
     Exited { id: String, generation: u64, code: Option<i32>, tail: String },
+    /// A `light-code-monitor:` line: a chat's agent asking the monitoring engine something, or the
+    /// monitoring executor answering a fetch. Answered on the host's stdin (`HostProcess::send_line`).
+    Monitor { id: String, generation: u64, payload: serde_json::Value },
 }
 
 #[derive(Deserialize)]
@@ -47,6 +50,8 @@ struct NotifyLine {
 
 pub struct HostProcess {
     job: HANDLE,
+    /// Kept open after the vault key (`--control-stdin`): Fire Code's answers to the host, one JSON line each.
+    stdin: Option<Arc<Mutex<ChildStdin>>>,
 }
 
 // The job handle is used from the main thread and the memory sampler; both only call thread-safe
@@ -64,6 +69,13 @@ impl HostProcess {
     /// Working-set bytes summed over the whole tree: the host, its MCP servers, its Python worker.
     pub fn memory(&self) -> u64 {
         job_memory(self.job)
+    }
+
+    /// One JSON line to the host. False when it could not be written - the host has gone.
+    pub fn send_line(&self, value: &serde_json::Value) -> bool {
+        let Some(stdin) = &self.stdin else { return false };
+        let Ok(mut guard) = stdin.lock() else { return false };
+        writeln!(guard, "{value}").and_then(|()| guard.flush()).is_ok()
     }
 }
 
@@ -121,6 +133,13 @@ pub struct LaunchSpec {
     /// This codebase's own @name, so `@name:path` works in its own chats too.
     pub mention_name: String,
     pub chat_label: String,
+    /// Monitoring is on: the agent gets the monitoring tools (`--monitoring`).
+    pub monitoring: bool,
+    /// This host is monitoring's executor: it runs the tools monitors name, and has no chat (`--monitor-executor`).
+    pub monitor_executor: bool,
+    /// More Python tool folders, read only (`--extra-tool-folder`): for the executor, every codebase's
+    /// own, so a monitor can use a tool that lives in any codebase. Still approved per machine.
+    pub extra_tool_folders: Vec<PathBuf>,
 }
 
 pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static) -> Result<HostProcess, String> {
@@ -144,6 +163,8 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         .arg("--secrets-file")
         .arg(&spec.secrets_file)
         .arg("--secrets-key-stdin")
+        // stdin stays open after the key: monitoring answers the agent there.
+        .arg("--control-stdin")
         .arg("--credentials-file")
         .arg(&spec.credentials_file)
         .arg("--print-url")
@@ -168,6 +189,15 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
     }
     if spec.no_schedules {
         command.arg("--no-schedules");
+    }
+    if spec.monitoring {
+        command.arg("--monitoring");
+    }
+    if spec.monitor_executor {
+        command.arg("--monitor-executor");
+    }
+    for folder in &spec.extra_tool_folders {
+        command.arg("--extra-tool-folder").arg(folder);
     }
     command.arg("--mirror-dir").arg(&spec.mirror_dir);
     command.arg("--codebase-dir").arg(&spec.codebase_dir);
@@ -201,11 +231,13 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         format!("Could not start Node ({}): {e}. Is Node.js installed and on PATH?", spec.node.display())
     })?;
 
-    // The key, on stdin and then closed: not an argument (visible in the process list) and not a
-    // variable (inherited by every command the agent runs).
-    if let Some(mut stdin) = child.stdin.take() {
+    // The key, first on stdin: not an argument (visible in the process list) and not a variable
+    // (inherited by every command the agent runs). The pipe then stays open for monitoring's answers.
+    let stdin = child.stdin.take().map(|mut stdin| {
         let _ = writeln!(stdin, "{}", spec.vault_key);
-    }
+        let _ = stdin.flush();
+        Arc::new(Mutex::new(stdin))
+    });
 
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if job.is_null() {
@@ -246,6 +278,13 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
                     record(&log, &tail, "light-code-url: (launch link, not logged)");
                     continue;
                 }
+                if let Some(json) = line.strip_prefix("light-code-monitor: ") {
+                    // Not logged: a fetch answer carries the monitored rows, which can be large.
+                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(json) {
+                        send(HostEvent::Monitor { id: id.clone(), generation, payload });
+                    }
+                    continue;
+                }
                 if let Some(json) = line.strip_prefix("light-code-notify: ") {
                     if let Ok(n) = serde_json::from_str::<NotifyLine>(json) {
                         send(HostEvent::Notify {
@@ -281,7 +320,7 @@ pub fn launch(spec: LaunchSpec, send: impl Fn(HostEvent) + Send + Sync + 'static
         });
     }
 
-    Ok(HostProcess { job })
+    Ok(HostProcess { job, stdin })
 }
 
 fn open_log(file: &PathBuf) -> Option<File> {

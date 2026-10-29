@@ -23,6 +23,12 @@
           <kbd>Ctrl K</kbd>
         </button>
 
+        <button id="monitoring-btn" class="monitor-btn" hidden title="Monitoring dashboard (Ctrl+M)">
+          <span id="monitoring-orb" class="orb lv-grey"></span>
+          <span class="monitor-btn-label">Monitoring</span>
+          <span id="monitoring-count" class="monitor-count" hidden></span>
+        </button>
+
         <div class="section-label">
           <span>Codebases</span>
           <button id="waiting-chip" class="waiting-chip" hidden></button>
@@ -55,6 +61,9 @@
         <button id="expand" class="icon-btn" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar">
           <svg viewBox="0 0 16 16"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" /><path d="M6 3v10" /><path d="m9 6 2 2-2 2" /></svg>
         </button>
+        <button id="rail-monitoring" class="icon-btn rail-monitor" hidden title="Monitoring dashboard (Ctrl+M)" aria-label="Monitoring dashboard">
+          <span id="rail-monitoring-orb" class="orb lv-grey"></span>
+        </button>
         <div id="rail-list" class="rail-list"></div>
         <button id="rail-add" class="icon-btn" title="Add a codebase (Ctrl+N)" aria-label="Add a codebase">
           <svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" /></svg>
@@ -80,6 +89,9 @@
         </section>
       </main>
     </div>
+
+    <section id="monitoring" class="dashboard" hidden aria-label="Monitoring dashboard"></section>
+    <div id="dash-tip" class="dash-tip" hidden></div>
 
     <div id="layer"></div>
     <div id="notices" class="notices" aria-live="polite"></div>

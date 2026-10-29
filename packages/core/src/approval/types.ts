@@ -16,6 +16,8 @@ export interface ApprovalRequest {
    * grant than the words describe, which is the failure invariant 8 exists to prevent.
    */
   alwaysScope?: 'folder'
+  /** The tool says every call must ask (`Tool.alwaysAsk`): no standing grant applies, and none is offered. */
+  alwaysAsk?: boolean
 }
 
 export type ApprovalDecision = 'approve' | 'deny'

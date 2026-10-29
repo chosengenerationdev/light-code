@@ -53,6 +53,11 @@ export interface ToolExecutionContext {
    * codebase saves the file to the hub here (`jupyter/mirror.ts`). Absent everywhere else.
    */
   afterEdit?: (realPath: string) => Promise<string | undefined>
+  /**
+   * Something to tell the model with a file it read - the user's defaults for a skill's placeholders
+   * (`skills/defaults.ts`), placed where the skill's "ask the user" instruction is. Absent elsewhere.
+   */
+  annotateRead?: (realPath: string) => string | undefined
   /** Language-server diagnostics, where the host has them (`lsp/manager.ts`; VS Code's own in the extension). */
   diagnostics?: DiagnosticsProvider
   /**
@@ -177,6 +182,11 @@ export interface Tool<TParams = Record<string, unknown>> {
    */
   project?: string
   author?: string
+  /**
+   * Every call asks, whatever is auto-approved, and the prompt offers no "Always allow". A Python tool
+   * declaring `__always_ask__ = True` sets it (`python/declaredCredentials.ts`).
+   */
+  alwaysAsk?: boolean
   execute(params: TParams, context: ToolExecutionContext): Promise<ToolResult>
   /**
    * Computes ground truth for the approval prompt without performing the action. Tools

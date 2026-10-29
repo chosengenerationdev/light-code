@@ -53,11 +53,17 @@ export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
   'install_python_packages',
   // CI actions nobody would see happen: a build started, aborted, or replayed with a changed script.
   'jenkins_start_build',
+  'jenkins_write_job',
   'jenkins_stop_build',
   'jenkins_try_jenkinsfile',
   // A production scheduler changed with nobody watching.
   'autosys_send_event',
   'autosys_apply_jil',
+  // Repointing every later AutoSys request, with nobody to see where.
+  'autosys_set_addresses',
+  // A new unattended check, or an alert silenced, with nobody to see it.
+  'monitor_create',
+  'monitor_control',
   // A merge into a shared branch, and a release tag, with nobody watching.
   'bitbucket_merge_pull_request',
   // A chat window opened with nobody there to press Send, or to notice it.

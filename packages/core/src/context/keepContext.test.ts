@@ -114,6 +114,7 @@ describe('automatic compaction is a switch', () => {
     expect(compacted).toEqual([])
     expect(provider.calls).toHaveLength(1)
     expect(errors[0]).toContain('Compact now')
+    expect(errors[0]).toContain('New chat with a handoff')
   })
 
   it('when the window is a guess, does not compact ahead of the provider', async () => {

@@ -38,6 +38,10 @@ configure a provider.
   everything in one click. Your own git repository is never touched.
 - **Task history.** Conversations survive closing the panel, reloading the window, and
   restarting VS Code.
+- **Several branches at once.** Open another branch of the same repository in its own folder and window
+  (git worktrees) - run, debug and let the agent work on it while your codebase stays on its branch. A
+  one-time setup command per branch, a separate port per branch, and a close that checks for uncommitted and
+  unpushed work first and never deletes the branch.
 
 ### Reading what you actually work with
 
@@ -56,10 +60,19 @@ configure a provider.
 
 - **Python tools the model writes.** Off by default. `uv`-managed, dependency blocks
   installed from your own index, and every tool pinned to a hash of the source you approved —
-  a `.py` that changes on disk is refused, not quietly reloaded.
+  a `.py` that changes on disk is refused, not quietly reloaded. A tool can declare
+  `__always_ask__ = True` so it asks before every run, for everyone who has it, and a list of
+  **banned calls** (`os.system`, `subprocess`, any `library.function`) refuses every tool that uses one.
+  Approving a tool's code once covers the VS Code extension, the Node host and Fire Code on the same
+  machine.
 - **Skills**: markdown you or the assistant writes down about your codebase. Only the name
   and one-line description cost context; the body is read on demand. Several folders
   supported, including read-only shared ones.
+- **A team repository for skills and tools.** With Bitbucket set up, point it at a repository (and a
+  branch, if main is protected): your skills and tools are committed there as you write them, and
+  your colleagues' are brought back every few minutes. Nothing is overwritten - a file changed on both
+  sides is reported, under Settings → Usage → *Needs attention* with anything else that failed in the
+  background.
 - **Semantic search over your code and over the tool catalogue** — against a local **Qdrant**
   or **Chroma** container, or an **OpenSearch** cluster you already run. Opt-in and disabled by
   default, with a dispatcher that keeps tool schemas out of the prompt when you have more tools
@@ -127,6 +140,7 @@ described in [apps/sun/README.md](apps/sun/README.md).
 | Config | The extension's global storage, or `.lightcode/config.json` for workspace scope |
 | Secrets | VS Code `SecretStorage` (DPAPI on Windows, Keychain on macOS, libsecret on Linux) |
 | Conversations | Global storage, per workspace |
+| Approved Python tool code | `%LOCALAPPDATA%light-codeapprovals` (Windows), shared by the extension, the Node host and Fire Code |
 
 API keys, certificate passphrases, and OAuth secrets are stored as *references*. The config
 file only ever holds a pointer, never a value — so exporting your config to share a working

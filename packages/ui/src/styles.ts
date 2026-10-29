@@ -402,6 +402,29 @@ button:focus:not(:focus-visible) { outline: none; }
 }
 .lc-btn-accent:active:not(:disabled) { box-shadow: 0 1px 4px var(--lc-accent-a35); }
 
+/*
+ * Working: a button whose click sent work to the host, until the host answers (\`buttonFeedback.ts\`).
+ * A small spinner after the label and a progress cursor - so a Save that takes two seconds visibly
+ * took the click, rather than feeling like pressing a stone.
+ */
+button[data-lc-busy],
+[role='button'][data-lc-busy] {
+  cursor: progress;
+}
+button[data-lc-busy]::after,
+[role='button'][data-lc-busy]::after {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 6px;
+  vertical-align: -1px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: lc-spin 0.7s linear infinite;
+}
+
 /* ---- inputs ---- */
 
 input,

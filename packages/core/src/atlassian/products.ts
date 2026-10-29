@@ -129,9 +129,10 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
     tokenHint:
       'The password for the user below, as you sign in to AutoSys web services. Kept in secure storage, never in the settings file, and never sent back to this panel.',
     tokenRef: 'autosys:password',
-    sitePlaceholder: 'https://autosys.example.com:9443',
+    // As far as the web services' own prefix: requests add only the resource (/job-run-info?filter=...).
+    sitePlaceholder: 'https://autosys.example.com:9443/AEWS',
     does:
-      'find jobs, read job definitions, status and run logs, and — always shown to you first — send events such as force-start, kill, hold and ice, or apply JIL',
+      'find jobs and machines, read job definitions, status, schedules, calendars, global variables and run logs, and — always shown to you first, and only without read-only access — send events such as force-start, kill, hold and ice, or apply JIL',
     defaults: [
       {
         key: 'username',
@@ -145,6 +146,12 @@ export const ATLASSIAN_PRODUCTS: readonly AtlassianProductInfo[] = [
         label: 'Default job pattern',
         placeholder: 'e.g. PAY_*',
         hint: 'Used when you ask about "the jobs" without naming any. * matches anything.',
+      },
+      {
+        key: 'testJob',
+        label: 'Job to check in Test connection',
+        placeholder: 'e.g. PAY_LOAD',
+        hint: 'A job you can read. Test connection then fetches its definition (…/job/PAY_LOAD) - the same call you would make in Postman. Without it, the test asks for the status of a made-up job (…/job-run-info?filter=…), which not every server offers.',
       },
     ],
   },

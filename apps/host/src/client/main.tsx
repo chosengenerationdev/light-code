@@ -127,7 +127,7 @@ if (embedder !== undefined) {
       if (!event.ctrlKey || event.altKey || event.metaKey) return
       const key = event.key.toLowerCase()
       const shortcut =
-        key === 'b' || key === 'k' || key === 'n' || key === 't' || key === 'w' || key === ',' || /^[1-9]$/.test(key) || key === 'tab'
+        key === 'b' || key === 'k' || key === 'n' || key === 't' || key === 'w' || key === 'm' || key === ',' || /^[1-9]$/.test(key) || key === 'tab'
           ? `${event.shiftKey ? 'shift+' : ''}${key}`
           : undefined
       if (shortcut === undefined) return
@@ -153,10 +153,12 @@ if (embedder !== undefined) {
     const incoming = message as { type?: string } | null
     if (incoming?.type !== 'settings') return message
     lastSettings = message
-    if (sunAppearance === undefined) return message
+    if (sunAppearance === undefined) return { ...incoming, savesFiles: true }
     return {
       ...incoming,
       choosesTheme: false,
+      // Fire Code opens a Windows Save dialog for the panel's Save buttons (below), so it can save files.
+      savesFiles: true,
       theme: sunAppearance.theme,
       accentColor: sunAppearance.accent,
       appearanceFrom: 'Fire Code',
@@ -182,6 +184,15 @@ if (embedder !== undefined) {
      * Browse button did nothing in Fire Code. Fire Code can: the request goes to it, and the chosen
      * path comes back below exactly as the host would have sent it.
      */
+    /*
+     * Save a file the panel made (a diagram). A download link does nothing in Fire Code's window, so
+     * Fire Code opens a Windows Save dialog and writes it; the answer comes back below as `fileSaved`.
+     */
+    if (outgoing?.type === 'saveFile') {
+      const request = message as { requestId?: unknown; name?: unknown; base64?: unknown }
+      window.parent.postMessage({ source: 'light-code', save: { requestId: request.requestId, name: request.name, base64: request.base64 } }, embedder)
+      return true
+    }
     if (outgoing?.type === 'browseForPath') {
       const request = message as { purpose?: unknown; kind?: unknown; extensions?: unknown }
       window.parent.postMessage({ source: 'light-code', pick: { purpose: request.purpose, kind: request.kind, extensions: request.extensions } }, embedder)
@@ -196,10 +207,21 @@ if (embedder !== undefined) {
       ask?: unknown
       op?: unknown
       message?: unknown
+      text?: unknown
       appearance?: { theme?: unknown; accent?: unknown; own?: unknown }
       picked?: { purpose?: unknown; path?: unknown }
+      saved?: { requestId?: unknown; path?: unknown; error?: unknown }
     } | null
     if (data?.source !== 'sun') return
+    if (data.saved !== undefined && typeof data.saved.requestId === 'string') {
+      transport.redeliver({
+        type: 'fileSaved',
+        requestId: data.saved.requestId,
+        ...(typeof data.saved.path === 'string' ? { path: data.saved.path } : {}),
+        ...(typeof data.saved.error === 'string' ? { error: data.saved.error } : {}),
+      })
+      return
+    }
     if (data.picked !== undefined && typeof data.picked.purpose === 'string' && typeof data.picked.path === 'string') {
       transport.redeliver({ type: 'pathPicked', purpose: data.picked.purpose, path: data.picked.path })
       return
@@ -207,6 +229,11 @@ if (embedder !== undefined) {
     // Fire Code's commit dialog asks this codebase's agent for a message; the answer goes back below.
     if (data.ask === 'commitMessage') {
       transport.post({ type: 'suggestCommitMessage' })
+      return
+    }
+    // Fire Code's "Start a chat" from a monitoring alert: the alert's context, put in the box to send.
+    if (data.ask === 'prefill' && typeof data.text === 'string') {
+      transport.redeliver({ type: 'prefillComposer', text: data.text.slice(0, 20_000) })
       return
     }
     // Fire Code's instructions dialog: the standing instructions are a skill only this host can find.

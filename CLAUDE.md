@@ -2076,8 +2076,18 @@ skill, tool or index belonged to whom.
   steps — queue and offline agents, the declarative linter) and three that act on shared CI
   (start, stop, **try a local Jenkinsfile via Replay** and wait for the result), all `command`, in
   `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES`. **Logs are streamed** — only a bounded tail or
-  the matching lines are ever held, because a console log can be hundreds of megabytes. No tool
-  edits job configuration. A CSRF crumb is fetched only when Jenkins asks (API-token requests are
+  the matching lines are ever held, because a console log can be hundreds of megabytes.
+  **Job configuration can be written since 0.184.0**, reversing "no tool edits job configuration" at the
+  user's request ("create jobs or modify jobs or clone from an existing job ... give new parameters", "always
+  as permission, no always allow"). `jenkins_write_job`: create / copy / update over `createItem` and
+  `config.xml` (application/xml, crumb as for every POST). A copy is the source's config.xml created under
+  the new name - not `mode=copy` - so the diff the user approves (against the source) is exactly what is
+  sent. Parameters are structured (`atlassian/jenkinsConfig.ts`, no XML library: element scanning, values
+  escaped, everything outside the parameter block left byte for byte); anything else is exact
+  find/replace, each matching once. `command`, in `ALWAYS_ASK_TOOLS` (so no "Always allow") and
+  `NEVER_AVAILABLE_TO_SCHEDULES`, hidden by readOnly. Never deletes, never creates or copies over an
+  existing job, and refuses when the config read for the preview no longer matches Jenkins (no ETag, so the
+  text is compared). A CSRF crumb is fetched only when Jenkins asks (API-token requests are
   exempt on current Jenkins). The tab id is `devops`; `atlassian` still opens it via `RENAMED_TABS`.
   The share section stays `atlassian` internally, gains `jenkins`, and strips `jenkins.username`.
   **Import writes only the chosen sections** (asked: does it leave the rest alone? — not quite): it
@@ -2980,9 +2990,482 @@ or Fire Code unless the add-on is installed**, and **no security alerts** from t
 - **Browse works in Fire Code now**, every Browse button: the Node host has no dialog, so the chat page
   sends `browseForPath` to the shell (`pick`), Rust opens an `rfd` dialog (`PickPath`, chat must exist,
   purpose bounded), and the answer comes back as `picked` and is redelivered to the app as `pathPicked`.
+- **Enable never fails out of sight** (0.172.0, reported from real use: "starting MCP failed" in VS Code, nothing in Fire
+  Code, no Linux tab - error text unknown). A throw while starting skipped `postAddons`, so no tab, and `reportFailure`
+  sent the reason to the chat behind Settings. Now: once saved it is enabled and the list is always sent; add-on
+  handlers use `reportAddonFailure` (Add-ons tab or the add-on's own tab); one add-on's delivery (secrets included) is
+  inside its own try in `configureMcp`; the panel-open failure is kept as `mcpStartProblem` and shown on the Add-ons
+  tab; a failed add-on has **Start again**. `apps/host/src/addonEnable.test.ts` drives Enable on a running host.
+  **The office cause itself is still unknown** - the next report will carry the message.
 - **`done` is posted before a turn finishes** (it still saves the chat): `userTurnWindingDown` and
   `userTurnSettled` let New chat with a handoff wait out that gap instead of refusing. `handoff.test.ts`
   failed only on a loaded machine, three times, before its assertion was made to print the reason.
+
+## 12aj. Private skills, skill defaults, archived chats, AutoSys header value (0.173.0, host 0.146.0, Fire Code 0.41.0)
+
+Asked for together, from real use.
+
+- **Which skills go to the team** (`teamSkills.keepPrivate`, a new top-level user-scope key, `NEVER_SHARED`).
+  `handlePublishTeamSkills` saves the ticks it was sent, sends the rest, and **takes back** a private
+  skill's earlier copy - from this machine's own collection only, and only paths `listPaths` shows are
+  there. Status gains `private` / `withdraw`. `host/teamSkillSelection.test.ts` pins it by reading `bridge.ts`.
+- **Skill defaults** (`skillDefaults`, by skill then placeholder, user-scope only, `NEVER_SHARED`;
+  `skills/defaults.ts`). The user's answers, never written into the skill (it may be shared). Told twice:
+  a `## Skill defaults` prompt section beside the skills, and `ToolExecutionContext.annotateRead` appends
+  them to `read_file`'s result for that skill's file - where the skill's "ask the user" sits. Detection
+  (`{{name}}`, capitalised `<NAME>`) only *suggests* boxes; lower-case `<x>` and `${x}` are not taken
+  (HTML, generics, shell). Defaults are answers, not permission (§6b).
+- **Codebase instructions moved to the end of the prompt** (after the mode guidance, before only the
+  plan) with a pointer at the top. Reported as "no impact"; the wiring was verified correct (same file in
+  Rust and core, read every turn), so the cause taken is placement: mid-prompt, followed by the long tool
+  and mode sections. **Not verified against the reporting user's model** - if it recurs, look at what
+  model it is and the full prompt, not the wiring.
+- **Fire Code chats are never renumbered** (`Project.last_chat`, plus `chat_numbers_on_disk` for chats
+  closed before it existed). `NewChat` used `max(open)+1`, so closing the highest chat and opening a new
+  one reused its folder - and its conversation (the host keeps the open task in the chat's data dir).
+  `CloseChat { archive }`: archive moves it to `Project.archived` (folder kept); close deletes the
+  folder in a background thread with retries (locks linger after the job is killed; a folder that will
+  not go is harmless, its number is retired). **Absent `archive` means archive** - the choice that loses
+  nothing. `NewChat { archived }` brings one back under its own number. `DeleteArchivedChat` deletes for good.
+- **AutoSys sign-in header value** (`auth.basicHeaderValueRef` → secret `autosys:basicHeaderValue`):
+  pasted whole (e.g. `Basic <base64>`), sent verbatim in `basicHeaderName` by `withHeader`; the
+  username and password are then not required. Never prefixed by us - a prefix added to a correct value
+  is a 401. **Not verified against the live gateway.**
+- **Diagram Save SVG / Save PNG did nothing** in VS Code and Fire Code (0.174.0, Fire Code 0.42.0): an
+  `<a download>` is ignored by a webview and by Fire Code's window. `diagrams/saveFile.ts` -
+  `SaveFileContext`; where the host declares `savesFiles` the bytes go as `saveFile` (base64) and come
+  back as `fileSaved`. VS Code: `HostUi.savesFiles` + its Save dialog (`handleSaveFile`). Fire Code: the
+  page's client intercepts `saveFile` like `browseForPath`, Rust opens an `rfd` Save dialog and writes
+  (`files.rs`, own base64 decoder - no new crate on the pinned toolchain). Plain browser: download.
+- **Buttons show they are working** (`buttonFeedback.ts`, reported as "stone buttons"): a click whose
+  handler posts to the host marks the button `data-lc-busy` (spinner, progress cursor) until the next
+  non-streaming host message or 20 s. One mechanism, not a busy flag per component.
+- **`fire-fs` is its own package in a Cargo workspace** (`apps/sun/native/fire-fs/Cargo.toml`, own
+  version, source still at `src/bin/fire_fs.rs` and shared by `#[path]`). As a second binary of
+  `fire-code` every version bump rebuilt it - Polars, thin LTO - measured at **8 min** for a bump that
+  changed nothing in it. Bump `fire-fs`'s version only when the helper changes. `default-members` keeps
+  plain `cargo build`/`cargo test` covering both; VS Code's slim helper is `-p fire-fs --no-default-features`.
+  The helper keeps the window's manifest (UTF-8 code page) through its own `app.rc` naming the same files.
+
+## 12ak. Read-only DevOps access, more AutoSys reading, and what a test saw (0.175.0, host 0.148.0, Fire Code 0.43.0)
+
+- **`readOnly` on every DevOps connection** (`atlassianConnectionShape` and `confluence`; tick box under "Let the
+  assistant use…"). `atlassian/readOnly.ts` `toolsForAccess` keeps only `group: 'read'` tools and appends a
+  read-only sentence to each. **Left out, not described as unavailable**: a visible tool gets tried, and the user
+  would approve a change the server then refuses. Every DevOps writer is `edit` or `command` - keep it so, the
+  split depends on it. `httpTrace.test.ts` pins that all five registrations pass through it.
+- **AutoSys reading**: status filters `machine`/`withinHours`/`runningLongerThanMinutes` (`runMatches`), find
+  filters on the definition (`definitionMatches`), and `autosys_machines`, `autosys_schedule`, `autosys_calendar`,
+  `autosys_global_variables`. Time and schedule rules are pure in `atlassian/autosysSchedule.ts` (autorep's
+  `MM/DD/YYYY HH:MM:SS` read in local time; windows past midnight wrap; a calendar-only job is listed under its
+  calendar, never expanded by guess). New address templates `machines`, `machine`, `globalVariables`,
+  `calendar`, `extendedCalendar` - **guessed from the AEWS layout, not verified against a live server**; a 404
+  names the `autosys.paths` key. No run history: AEWS reports the latest run only.
+- **Test connection is recorded** (`platform/httpTrace.ts`, reported: Postman showed 403, the test said something
+  else). `tracingHttpClient` wraps the one HttpClient (invariant 2 unchanged) for the test only - it reads bodies
+  whole - and `atlassianConnection`/`autosysGatewayAuth`/the client factories take an optional `http`; a test gets
+  a fresh, uncached gateway strategy so its token request is recorded too. **Everything is masked before it is
+  kept**: authorization headers (scheme + length; Basic keeps the user name), cookies, secret-named headers, query
+  params and body fields, plus the product's stored secrets by value. `atlassianTest.diagnostics` -> Details
+  (open on failure, Copy). `describeAtlassianFailure` now names 401/403/404 and stops calling AutoSys and Jenkins
+  credentials a "personal access token".
+- **The AutoSys site address is used as typed** (0.176.0, reported: Test connection 404). The default templates began
+  with `/AEWS`, so an address ending in `/AEWS` requested `/AEWS/AEWS/...`. Defaults now hold only the resource and query
+  (`/job-run-info?filter=...`); the address carries the prefix, and the panel placeholder shows it. Do not put a prefix
+  back into the defaults.
+
+## 12al. Runs and who started them, tools that always ask, banned calls, a team repository (0.177.0, host 0.150.0, Fire Code 0.45.0)
+
+Asked for together, from real use.
+
+- **One approved-tools list per user** (the reported bug: approving in VS Code, asked again in Fire Code).
+  Fire Code's list was in its own data folder and VS Code had none, so each kept its own approvals.
+  `platform/node/sharedApprovals.ts` names `%LOCALAPPDATA%light-codeapprovalsapproved-tools.json`
+  (XDG elsewhere); the extension, the Node host (not `--server`, and `--approved-tools` still wins) and
+  Fire Code (`system::shared_approvals_file`) all use it. Fire Code merges its old list in once
+  (`merge_approvals`: adds, never replaces). The folder is on the reach floor - a tool able to write it
+  could approve itself. Still per machine and per user, as section 13 requires.
+- **`autosys_runs`** (`atlassian/autosysRuns.ts`): runs of a list of jobs today or in the last N hours,
+  from `paths.runHistory` and `paths.eventHistory`. A run is **manual** when a STARTJOB/FORCE_STARTJOB
+  event for the job lands within 5 minutes before its start (who and when from the event), a **retry**
+  when its try number is above 1, and **unknown** when no event history exists - never "scheduled" by
+  default, since a guess there is exactly the answer somebody acts on. A missing endpoint (404) is named.
+  **The user's server has no `job-run-info` at all** (404 in Postman; `v1/job/NAME` exists), so the
+  defaults are templates to be pointed at their real endpoints - asked for, not yet known.
+  `autosys.testJob`: Test connection reads that job, the same request as Postman's.
+- **`__always_ask__ = True`** in a tool's source (`declaresAlwaysAsk`, module level only): the adapted
+  tool carries `alwaysAsk`, the loop puts it on the approval request, `decideFromPolicy` returns
+  "ask" before any grant, and the prompt hides "Always allow". In the source, so it is part of the
+  approved bytes and travels to every colleague - a setting would be one person's.
+- **`python.bannedCalls`**: checked in the worker with `ast` (aliases, `from x import y`, attribute
+  chains) at load and before every call, kernel runs included; refused with the line. Delivered as
+  `LIGHT_CODE_BANNED_CALLS`, set **last** in `childEnv` so `python.env` cannot replace it, and part of
+  the worker fingerprint so a change restarts it. **A static check, said plainly**: `getattr` with a
+  built string gets past it; source review is still the boundary.
+- **Team repository** (`teamrepo/sync.ts`, config `teamRepo`, user-scope, shared under DevOps). The
+  user's decisions: **commit directly** (no pull requests), **two-way**, **deletions stay in the repo**,
+  a **branch** of their choice (created from the default branch), and Bitbucket's token - offered only
+  when Bitbucket is configured. All REST (`browse` PUT multipart with `sourceCommitId`, `changes`,
+  `raw`), so the one HttpClient and no git binary. The rules that keep it from making a mess:
+  - **Never overwrite.** State records each file's last agreed commit and hash; a file changed on both
+    sides, or a 409 because someone committed first, is a conflict, reported and left alone.
+  - **Pull goes only to its own mirror** (`mirrorRoot/teamrepo/<project>-<repo>-<digest>`), read-only
+    in the skill and tool search paths, and **push reads every other folder skills and tools load from** -
+    the save folder, the project folder, every S3 bucket mirror - never the team mirror, so the two syncs
+    cannot bounce a file. **0.177.0 pushed only the save folder and skipped bucket-synced files** ("each
+    colleague pushes their own"); reported from real use as one skill synced and no tools, because a team
+    keeping everything in a bucket has nearly nothing that is "only theirs". Reversed in 0.178.0: the bucket
+    is the team's store and the repository holds the same. Identical bytes are agreement (including after a
+    409 - two people pushing one bucket file); a name in two local folders pushes the first and lists a
+    differing second. Dotfiles (`.registry.json`, `.lightcode-sync.json`) never travel.
+  - **A conflict needs both sides changed from the last agreed version** (0.179.0, reported: a red list of
+    "changed both here and in the repository"). The first rule compared only the repository with what was
+    last pushed, so a colleague's edit arriving by repository before the bucket brought it here read as a
+    clash. Unchanged here and newer there is `behind` - grey, cleared when the bucket catches up. Versions
+    are compared by `contentHash` (BOM, CRLF and trailing whitespace ignored for text; bytes for binary),
+    so a server or editor storing other line endings never reads as an edit. State is version 2; a
+    version-1 record is carried over by re-hashing the team copy where it still matches.
+  - **Switching the S3 bucket folders off** (0.180.0, asked for: "safely switch s3 bucket off when repository is
+    added cleanly"). `handleRetireS3Buckets`: bucket sync, then repository sync, refuse on an error or any
+    conflict, then `checkCoverage` - every file in every bucket mirror must be in the repository with the same
+    content, or be an unchanged copy the repository has a newer version of. Check and the switch run the same
+    path; the switch only acts after a clean pass, so a file arriving in between is caught. It **only unticks**
+    `enabled` on the mirrors - nothing deleted, re-ticking undoes it - and `releaseFromRecord` drops those
+    files from `pushed` so they are not reported as deleted here; they keep loading from the team copy.
+    `wiring.test.ts` pins the order and that the handler deletes nothing. Released files go into
+    `state.released`, not out of `pushed`: their base follows the repository while no copy is here, so an
+    edit saved later into a local folder is an ordinary update, not a clash (0.181.0).
+  - **New skills and tools are saved outside the project while the repository is on** (0.181.0, asked for:
+    "ideally it should be in some other folder outside current working folder"): `teamRepoPlan().own` =
+    `<mirror root>/teamrepo/<id>/saved-here/{skills,tools}`. Precedence: `skills.dir` / `python.toolsDir`,
+    then a bucket folder marked Publish, then this, then the project folder. The project folder stays loaded
+    and committed. The panel shows the path.
+  - **Every skill and tool folder is a read root** (`skillSearchPath()`, `python.toolDirectories()` in the
+    tool context). Found while doing the above: skills outside the project (bucket mirrors, the team copy)
+    were outside every root, so VS Code asked to read each skill body and Fire Code refused them as inside
+    its own data folder (`fs/reach.ts`). Read only; writes still go through write_skill and the Python tools.
+- **"Only me" or "the team" when a skill or tool is created** (0.182.0, asked for: "an option to choose if he
+  wants to keep a skill for himself when it is created"). `audience: 'me' | 'team'` on write_skill and
+  create/update_python_tool; the description tells the model to **ask** (ask_user_form) for a new one rather
+  than guess, and omitting it on an update keeps the file where it is. "me" writes to
+  `HostServices.personalDir` (`personalLibraryDir()`: `%LOCALAPPDATA%\light-code\personal\{skills,tools}`,
+  one per user for the extension, the Node host and Fire Code; **absent with --server**, where every user is
+  the service account). Never uploaded (`onSaved` skipped), never in the team repository's push sources,
+  and counted as private for the team skills pool (`isPersonalSkill`). Loaded in every project, right after
+  the save folder so the user's own win a name. The approval prompt's `note` states the destination
+  (`sharedWith()`: bucket folder marked Publish, team repository, or "this project only"), so the choice
+  is ground truth before anything is written. The Skills tab marks them **only you** and lets them be
+  removed. Not a security boundary: a personal tool still runs only once approved, like any other.
+  **Team is the default and the model does not ask** (0.183.0, the user's correction of 0.182.0's "ask
+  first"): `audience: 'me'` only when the user explicitly says personal/private/just for me.
+- **Delete everywhere** (0.183.0, asked for: "force delete skill or tool even from repo or s3 bucket").
+  Bitbucket Data Center has **no REST call to delete a file** (BSERV-20219 unresolved); the user chose a
+  **tombstone commit** over running git or an undocumented REST trick. `teamrepo/sync.ts`: the file is
+  replaced by one line starting `LIGHT-CODE-DELETED:` (who, date); `state.files[p].deleted` marks it; a
+  pull never writes a tombstone to the team copy and removes what was there; a push treats a deleted path as
+  (a) acknowledged (`pushed === marker`, set by the deleter and by anyone whose stale copy was removed) - a
+  file of that name now is a re-creation and is committed over the marker; (b) an unchanged copy in a
+  `removable` folder (bucket mirrors, the saved-here folder) - removed; (c) unchanged elsewhere or changed -
+  a red conflict, never re-added. `handleDeleteEverywhere`: sync, re-plan, **repository first and stop on
+  any refusal** (otherwise the next sync would bring the file back), then bucket keys
+  (`removeSkillFromBucket`/`removeToolFromBucket`, keys re-checked), then local copies; only entries a
+  fresh plan still lists. A **button only** - no tool sends it (wiring.test.ts checks tools/) and
+  `previewDeleteEverywhere` is admin-only on a shared server. Bucket-only teams (no repository): a
+  colleague's bucket mirror still keeps its copy, because the S3 sync never deletes (§13) - unchanged.
+  - A skill identical in two folders is silent now (`sameFile`), as Python tools already were.
+  - Sync on its timer, ten seconds after a save, never two at once.
+- **"Needs attention" carries background failures** (`backgroundProblems`/`noteProblem`): team repo and
+  S3 sync errors and conflicts, and Python tools that did not load, ahead of the dashboard's own.
+- **Not verified against a live Bitbucket or AutoSys** - against a fake repository with Bitbucket's 409
+  rule, and a fake AutoSys. The banned-call check *is* verified in a real Python worker.
+
+## 12am. Several branches at once (0.185.0, host 0.158.0, Fire Code 0.53.0)
+
+Asked for: "work in different branches under same repo from same machine ... run and test the changes in
+different branches too", planned first and agreed before building. **Git worktrees** - `git worktree`, in git
+since 2.5 - not clones (duplicate history, drift) and not switching branches in one folder (no parallel runs,
+and an agent mid-task would see files change). Defaults taken when the three open questions went unanswered:
+folders beside the repository, approvals and instructions shared across branches, both products.
+
+- **One implementation per language, same rules**: `packages/core/src/git/worktrees.ts` (VS Code, the host's
+  setup) and `apps/sun/native/src/branches.rs` (Fire Code). Arguments as lists, never a shell;
+  `check-ref-format --branch` and a leading-dash refusal before a name is used. Folder:
+  `<parent>/<repo>.worktrees/<branch slug>` or `branches.folder`; never an existing folder. **A new branch starts from the main branch** - origin/HEAD, else
+  main, else master, only then the checked-out branch (`defaultBaseBranch` / `Branches.default_branch`; asked for:
+  "by default it should clone from main or master"). **An empty repository** (no commits: git makes a branch with the
+  first commit) is said plainly in both products (`Branches.no_commits`; VS Code: no local or remote branches) -
+  reported as an empty list and an empty "starting from" box. **A chat tab's Open in VS Code / File Explorer open that
+  chat's own folder** (`State::chat_folder`; the sidebar's still open the codebase's), so a branch is debugged in VS
+  Code - Fire Code has no debugger of its own, and its agent reads the paused session through the relay. A remote branch is
+  checked out tracking it, from what is already fetched (no network). **Closing never deletes the branch**, never
+  the main checkout, and git itself refuses a dirty folder unless forced after the user saw what is lost.
+- **The project root** (`mainCheckoutOf`, a file read of `.git` -> `commondir`, no git run): per-project
+  settings (`ConfigManager`), "always allow" approvals and codebase instructions are filed under the main checkout,
+  so all branches share them. The workspace - what the agent may touch, checkpoints, history - is the branch
+  folder. Fire Code chats share the codebase's `codebaseDir` anyway.
+- **One-time setup**: a marker `light-code-setup-pending` written **in git's own worktree record**
+  (`.git/worktrees/<name>/`), never in the folder; the host's `prepareBranchFolder` removes it *first*, then copies
+  `branches.copyFiles` from the main checkout (confined, never overwriting) and runs `branches.setupCommand` -
+  in a VS Code terminal (`HostUi.runInTerminal`) or in the background with the result reported. VS Code starts the
+  agent at activation when the marker is there, since the agent otherwise waits for the panel. `branches` is
+  **user-scope only** (a repository could otherwise run a command) and **NEVER_SHARED** (an import would run a
+  colleague's command here), per project via `OVERRIDABLE_KEYS`.
+- **Ports**: `LIGHT_CODE_BRANCH` and `LIGHT_CODE_PORT_OFFSET` (0 main, 1.. branch folders) for the agent's commands
+  (merged into `sessionEnv`), VS Code terminals (`environmentVariableCollection`) and debug sessions (a `*`
+  `DebugConfigurationProvider` adding env, only in a branch window). Never written into the repository.
+- **VS Code**: one window per branch (`apps/vscode/src/branches.ts`): Open Branch in New Window (palette, Source
+  Control title) and Branches (state, open, close; refuses to close the folder its own window has open).
+- **Fire Code**: `Chat.folder`/`Chat.branch` (and on `ArchivedChat`, so an archived branch chat reopens on its
+  folder); `start()` uses the chat's folder. ListBranches / NewBranchChat (opens an existing folder's chat
+  instead of a second folder) / CheckBranch / CloseBranch (stops the agent first - its processes hold the folder).
+  Tabs show the chat name with the branch under it - every tab: a chat without its own folder shows the codebase's branch (0.54.0, reported: only the first tab had one). The + button always opens the menu (blank / on a branch / archived; Ctrl+T stays blank) - before 0.54.0 the branch option was only in the right-click menu, reported as missing. trimmed by `branchLabel` (core) / the same function in
+  shell.js, keeping a leading Jira key whole; `shell.test.ts` holds the two to the same cases. Renaming touches
+  `Chat.name` only. **Fire Code's Commit and push still acts on the codebase's own folder** - a branch chat
+  commits through the agent or git in its folder.
+- **Not verified in a running VS Code window or Fire Code window** - the git layer against real git (core and
+  Rust), the window against jsdom, the extension by typecheck and the VSIX smoke test.
+
+## 12an. AutoSys addresses, learned and shared (0.189.0, host 0.162.0, Fire Code 0.58.0)
+
+Reported from real use: Test connection 404, one job's status fine, `JOB*UK` not - the office's AutoSys REST
+service answers at addresses of its own. Asked for: let the agent learn them from the internal wiki and update
+them, and share the learned setup with the team. `atlassian/autosysAddresses.ts`.
+
+- **A pattern works without a pattern address.** `runInfo` on a 404 lists the jobs (`paths.jobs`) and reads each
+  status (`jobRunInfo`, then a definition carrying a status), four at a time, at most 200; an unreadable job is
+  listed `UNREADABLE`, not dropped. `probe` goes through `runInfo`, so Test connection passes on the job list.
+- **`autosys_check_addresses`** (read): the saved addresses, wiki candidates (`addresses`) and the usual layouts
+  (prefixes `/v1`, `/AEWS`, `/AEWS/v1`, `/api/v1`, `/wla/v1`, and a few query forms), with a job the user names -
+  never a made-up one, since some servers answer 404 for "no match". Stops at the first 401/403 (the credential,
+  not the address). Proposes, per key, the first address that answered with records.
+- **`autosys_set_addresses`** (edit, `ALWAYS_ASK_TOOLS`, `NEVER_AVAILABLE_TO_SCHEDULES`, hidden by readOnly): the
+  approval is a diff of `autosys.paths` with each changed address tried live (invariant 8 - a wiki page is a
+  source of candidates, the server is the ground truth). Saves `paths` only.
+- **A template is a path on the configured site** (`autosysPathProblem`): starts with one `/`, no `://`, `..`
+  (decoded too), spaces, backslash or `#`, known placeholders, and the key's subject (`{job}`, `{pattern}` or a
+  `{filter:}`). Without the leading `/` it would extend the *host name* and carry the credential elsewhere. Checked
+  when the tool saves *and* whenever a client is built from config. `event`/`jil` are never tried - a test
+  event is a real event.
+- **Sharing: `ShareSection.nested`.** The "AutoSys addresses" export section owns `autosys.paths` inside a key
+  the DevOps section owns; import replaces only that path, after the whole-key sections. `describeSections`
+  judges a whole-key section with nested paths removed, so an addresses-only file does not also tick DevOps -
+  which would replace the importer's whole DevOps setup with an empty one.
+- **Not verified against the office server** - against a fake that answers only under `/v1`.
+
+## 12ao. Monitoring (Fire Code 0.59.0, host 0.163.0, VS Code 0.190.0)
+
+Asked for as an add-on: agents create monitoring skills (what to watch, how to show it - a data grid with
+cell highlights and filters - alert rules, how often), creating or reusing tools; a full-window dashboard of
+glowing tiles, Team and Personal, hover for a description, click for the grid in a new window, double-click a
+row for its breakdown; colours red/amber/blue/green and more; theme and accent; search; **powered by Rust**;
+agents with some control of the dashboard; Windows notifications at levels the user sets. The user's choices
+(asked): checks are **tool + rules, no model call**; a team monitor is a **shared definition** each machine
+runs with its own credentials; **one dashboard with its own runner**; **built into Fire Code, switched on in
+Settings** (an add-on cannot draw a window or call Python tools - add-ons are MCP servers, §12ah); the
+dashboard is **Fire Code's own UI**, not the Light Code chat page.
+
+- **A monitor is a skill** with a ` ```monitor ` JSON block (`monitor.rs` `compile`: `every`, `activeHours`,
+  `days`, `source`, `rows`, `columns`, `key`, `rules`, `whenEmpty`, `whenClear`, `details`, `notify`,
+  `timeoutSeconds`; `deny_unknown_fields`, every error a sentence naming the field). Found in the personal
+  skills folder (Personal), each codebase's `.lightcode/skills` and configured skill folders, the bucket and
+  team-repository mirrors, and Settings' extra folders (Team). First folder wins a name, like skills.
+- **Levels**, by severity: grey < green < blue < purple < amber < red. Purple is "cannot tell" (check failed,
+  stale past 3× its interval) and ranks below amber. A rule colours a row or a cell; the worst unacknowledged
+  alert is the level; an acknowledgement lasts until the alert gets worse, expires, or goes away.
+- **Trust**: a monitor runs only when its block's SHA-256 is approved here (`monitoring/state.json`) - by
+  `monitor_create` passing the exact block it wrote (`approve` with `block`, `Origin::Agent`), or the user's
+  Approve on the review card, which shows the block (invariant 8). `monitorToolRefusal` (one function for the
+  executor and `monitor_create`): read and MCP tools and approved Python tools only.
+- **Rust** (`apps/sun/native/src/monitor.rs` pure + 13 tests; `monitoring.rs` runtime): scan every 30 s, at
+  most 4 checks at once, SQLite/files through `fire-fs` (`sqlite` query / `dataframe` sql), tools through the
+  **executor** - a host Fire Code starts with no window (`--monitor-executor`, the settings of the codebase
+  chosen in Settings → Monitoring, every codebase's `.lightcode/tools` via `--extra-tool-folder`, an eager
+  session since no page opens one). Results in `monitoring/results`, history in `monitoring/history`
+  (bounded), settings and per-monitor state beside them.
+- **The control channel**: every Fire Code host gets `--control-stdin` - stdin stays open after the vault key;
+  Fire Code answers on it, the host asks on `light-code-monitor:` stdout lines (`apps/host/src/controlChannel.ts`).
+  No socket, no port. `monitor_op` is the one set of operations for the dashboard, grid windows and agents.
+- **Agent tools** (`packages/core/src/monitoring/`, while `--monitoring`): `monitor_create` (writes through
+  `write_skill`; `tryOnly` runs once without saving), `monitor_check_tool` (strict check of a tool's answer,
+  `rowsCheck.ts`, with the Python template - asked for: "make sure that it will work"), `monitor_status`,
+  `monitor_show`, `monitor_control` (always asks). Create and control are in `ALWAYS_ASK_TOOLS` and
+  `NEVER_AVAILABLE_TO_SCHEDULES`.
+- **Notifications** (`should_notify`): per level Off / Count / Silent / Sound / Stays (Reminder scenario) /
+  Alarm (looping); worse → told; still bad → a plain reminder every `repeatMinutes`; clear again → quiet;
+  quiet hours let only red through (if set); per-monitor mode and least level; snooze. Buttons Open /
+  Acknowledge / Snooze 1 hour.
+- **Grid windows** are real Fire Code windows (tao + wry, `open_grid`), `sun://localhost/monitor.html`.
+  **Every WebView2 on one data folder must have the same browser arguments (`BROWSER_ARGS`)** - the grid's
+  first version had none and WebView2 refused it: clicking a tile did nothing (reported).
+- **`replaceChildren(null)` writes "null"** - the first dashboard showed it; `put()` and `el()` filter.
+- **Verified by running it**: installed with plain npm, a demo with every colour (scratch data folder),
+  dashboard and grid screenshots, a row's drawer. **Not verified**: a tool source through the executor end to
+  end, notifications clicked, light theme, a team monitor arriving through a bucket.
+
+**Second round (Fire Code 0.60.0, host 0.164.0, VS Code 0.190.0)** - the user's decisions: team monitors **need
+OpenSearch** (no OpenSearch, no team monitoring); everyone runs, results shared; keep **summary + alerted rows**;
+**90 days**; advice from the **author, then the agent**.
+- **Team history** (`packages/core/src/monitoring/history.ts`, a writer separate from the read-only
+  `OpenSearchClient`): checks are `_create`d under unique ids; a check first `_create`s `claim:<monitor>:<slot>`
+  - one winner per slot, a lost claim is not retried for that slot (`last_claim`); the index is created by
+  whoever is first ("already exists" is success); `dynamic: false` with rows in an unindexed `payload`, so
+  members' field types never clash; prune and delete only the caller's own (`by`), `conflicts=proceed`. Rust
+  reaches it through the executor (`kind: store`); the document is Rust's `CheckRecord` plus `monitor`.
+- **Schedules** (`Monitor::due_slot`): `every` (with `activeHours`, which may be open-ended: "09:00-", "-17:00"),
+  `at` times of day, `days` for both; the slot (interval number, or the time's instant) is what is claimed. A
+  missed time is not made up. `stale_after` follows the schedule.
+- **History**: local `history/<name>.jsonl` holds `CheckRecord`s (old lines still read); appended, cut to its
+  newer half past 20 MB, pruned by `retention_days` every 6 h; `alert_patterns` reads new / ongoing / recurring
+  (with the usual hour) / intermittent / cleared - one function for the grid's History, the explanation and the
+  agent's `monitor_history`.
+- **Explanation and chat**: double-click → the executor's model explains from the facts Rust gathers
+  (`alert_context`: monitor, the rule's `advice`, `runbook`, row, each alert's pattern; `explain.ts`). **Start a
+  chat** → `new_chat` (now a function in main.rs) named "Alert: …" on the chosen codebase, and the text goes to
+  the pane as `ask: prefill` → `prefillComposer` → the composer; the user sends it.
+- **Tools calling tools**: `__tool_calls__ = [...]` in a Python tool's source (`declaredToolCalls`), part of the
+  approved bytes. In a chat it adds Fire Code's built-in *read* tools to what `call_tool` may reach (still
+  approved per call); in a monitor's check (`monitorRunContext`) the declared calls run unasked, under
+  `monitorToolRefusal`. The approval card and the create diff say "Calls tools: …".
+- **Memory**: `Summary` per monitor (never rows; rows are read from disk for a grid or an agent), a 48-point
+  sparkline tail (`history_tail` reads the last 256 KB), `ScanCache` (unchanged skill files are not re-read),
+  one explanation per monitor kept. **Snooze** no longer colours the Monitoring button.
+- **Also in this release**: Test connection Details lead with **Likely cause** (`explainStep`, every DevOps
+  product); AutoSys notices a paged answer (`pagingNote`) and says how many of how many.
+
+**Third round (Fire Code 0.61.0, host 0.165.0, VS Code 0.191.0)** - reported from real use:
+- **A monitoring tool calling an existing Python tool failed in the background**, and the agent ended up
+  re-implementing the tool's logic inside the monitoring tool. Cause: the worker's `_CURRENT_TOOL` was set by each
+  `call` and never put back, so after the first nested call to a Python tool every later `call_tool` was sent as
+  if the *callee* asked, judged against its `__tool_calls__` (empty) and refused. `_handle` now restores it
+  (`_serve` does the work); `nestedCall.test.ts` calls a Python tool twice through a real worker and fails on the
+  old one. Second half: in a chat, `monitorRunContext` now takes the same declared-calls rule as the background
+  check (it was gated on `!pythonNestedCallsAllowed`), so a monitor tried in a chat cannot pass by being approved
+  call by call and then fail unattended.
+- **Personal monitors were refused over a missing setting**: `audience` omitted meant team, and team needs
+  OpenSearch history. `audienceFor` now makes it personal when team history is not ready, says so in the prompt
+  and the result; an explicit `team` is still refused without it.
+- **Schedule edits in the UI** (`setSchedule`, `monitor::with_schedule`): rewrites only `SCHEDULE_KEYS` in the
+  block, keeping the other fields' order (serde_json `preserve_order`, indexmap already in the lock), the rest of
+  the file and its line endings; compiled before writing; refused when the file changed since the editor opened
+  (hash). A user's own edit keeps an approved monitor approved; an agent still goes through `monitor_create`.
+  Editor in the grid window (Schedule button, ⋯ menu) and from the tile menu via `open` + `sheet` (held in
+  `open_sheet` until the new window says ready).
+- **Delete for good** (`delete`): skill file (its folder for `name/SKILL.md`), results, history, state, and the
+  user's own team-history checks. User only.
+- **Closing a chat shows the tab beside it** (`state::tab_after_close`: right, else left), not the first chat.
+
+**Fourth round (Fire Code 0.62.0, host 0.166.0, VS Code 0.192.0)** - reported from real use:
+- **Menus stayed open until Esc.** Every Fire Code menu closed on `pointerdown` with `{ once: true }`, so a press
+  *inside* the menu (a disabled item, a separator) used the listener up. `dismissOnOutside` keeps one capturing
+  listener until `closeMenu` removes it, and closes on window `blur` (a press in a chat's frame never reaches the
+  shell's document). Any new menu in `shell.js` uses it.
+- **Team monitors could not be edited or deleted**: 0.61.0 made bucket and team-repository copies read-only (the
+  next sync would undo a local change) - and those are exactly a team's monitors, so the items were greyed and
+  the Save did nothing. Now they are changed **where the team keeps them**, through the executor host (Fire Code
+  has no network): a `skill` monitor request (`MonitorRequest`, `controlChannel.ts`). `write`: into the bucket
+  folder and uploaded (`writeTeamMonitorSkill`; a read-only connection refuses), or for the team repository's
+  pull-only copy, into the save folder and synced now, a conflict reported, never overwritten. `delete`: the same
+  `deleteEverywhere` as Settings → Skills (split out of `handleDeleteEverywhere`; repository first). Rust waits on
+  `Pending::SkillChange` (180 s) and only then approves the new hash / forgets the monitor. The grid window's
+  sheet closes only on `sheetDone` - a check finishing meanwhile is not the answer - and shows `sheetPending`'s
+  "Saving … to the team's bucket". It uses the executor codebase's bucket and repository settings, and says so
+  when the file is in neither.
+- **"It takes time to enable things"** (asked in the same report): the Python tab waited for uv detection, the
+  venv check, the worker and the package check before showing anything - process starts that cost seconds on a
+  managed machine. Rust would not help (the time is in starting Python). `PythonManager.previewStatus` reads each
+  folder's `.registry.json` with no worker and the tab shows that first (`starting: true`); **issues are left out
+  of the preview**, because "needs approval" may be an approval made elsewhere that only the worker can adopt.
+- **"Check for new team tools"** (`checkTeamTools` → `handleCheckTeamTools`, Settings → Python): bucket tool sync +
+  team repository sync now, then reload, and says which tools are new to review. The timer (15 min) is unchanged.
+- **Review all**, **Snooze until**, **row snooze**, **Run history button** (asked together): `reviewMonitors` lists
+  every waiting monitor's block with a tick each, nothing ticked at first, and approves the ticked ones one by one
+  (`approve` per name - no bulk op, so each is still the user approving that block). `snooze`/`ack` take `until`
+  (`snooze_end`: future, at most 30 days); a row snooze is an `ack` with an end - it still breaks through if the
+  alert gets worse. The grid gets `acks` (id → until) to say when. A tile's bars are one wide `spark-btn` (a span
+  with role=button inside the tile's button, stopping propagation) opening the window via `open` + `sheet:
+  history` + `at`; the window picks a range that holds it and selects the nearest check (`wantCheckAt`).
+- **The monitoring tool template passed a dict to `call_tool`**, which takes keyword arguments - a `TypeError`
+  before the call. Pinned by test. Guidance prefers **Polars** when installed; `monitor_check_tool` says whether
+  it is (`PythonManager.hasModules`, `find_spec`, no import). Rust already reads SQLite and files itself.
+- **History, from real use**: a chosen check now renders *under the bars* (`pickCheck`, scrolled into view) with its
+  facts (`durationMs` added to the payload) - below the patterns it was out of sight and read as "nothing happens";
+  a clear check says only alerted rows are kept. **One day**: the page sends `from`/`until` (local midnights); Rust
+  filters local history and passes `until` to the team query (`MonitorHistoryStore.history`'s fourth argument).
+- **Team data once**: scheduled runs were already claimed per slot. Two gaps closed: **Run now** on a team monitor
+  claims `-(now/120)` (a two-minute slot, negative so it never meets a schedule's) via `Pending::Claim { manual }`,
+  and a lost claim tells the user a colleague just ran it; and each computer's copy of a team monitor's history is
+  cut to the newest `TEAM_LOCAL_CHECKS` (200, `Store::keep_last`, rewritten only past twice that) - the team
+  index holds the whole of it once.
+- **Intervals are clock windows** (asked: A runs every 10 min, B joins later - how do claims line up?). `due_slot`
+  was "due `every` after my last run", slot `now / every`: starts crept, and two members either side of a window's
+  edge claimed different windows and both ran. Now due when no check falls in the current window
+  (`last_run < slot * every`), so every member names the same window and the claim always settles it. Windows count
+  from UTC (members in other zones agree; a 1 h interval runs at :30 local in a half-hour zone - use `at` for a time
+  of day). `next_run` is the next window's start. `two_members_who_started_at_different_times_agree_on_every_window`.
+- **Claim only where it can run** (asked: "before a user's Fire Code claims, make sure the check works on that
+  machine"). `ready_here`: SQLite/file paths are stat'ed; a tool is asked of the executor with a `probe` request,
+  answered by `monitorToolHere` - the one lookup `executeForMonitor` also uses, so ready never says yes to what a
+  check refuses - kept 10 min (`READY_FOR`). Not ready: no claim; tile `notHere` ("Runs elsewhere"). A failure here
+  (`failed_here`) steps back (`steps_back`: three windows, at least 30 min) unless the team's newest check is more
+  than a window old - then nobody else is running it and this computer tries again.
+- **Offline** (asked: "during offline the claim cannot work - how does the check run?"): before, a failed claim ran
+  nothing and the tile went stale. Now a claim that cannot reach the store runs the check here (`offline_slot`),
+  and the record goes to `offline_queue` (disk, `offline-queue.json`, 50 per monitor) instead of the store. When a
+  `latest` read succeeds, `offer_offline` claims each queued window (`Pending::Backfill`): won → written, lost → a
+  colleague's record stands, dropped. Tile: "Offline · N not shared".
+- **The grid as it was** (asked: History shows no data for a time): each check's whole `Evaluation` is kept on the
+  computer that ran it (`Store::save_grid`, `grids/<monitor>/<hash>.json`, named by content so unchanged data costs
+  nothing; `CheckRecord.grid` names it), pruned with its history and capped at 200 MB per monitor (`prune_grids`).
+  The window swaps it into `state.data` (copied, never mutated - a test caught that) read-only: no ack, snooze,
+  explain or breakdown, a fresh check kept aside for Back to now. The team index still holds summary + alerted rows.
+  **Delete this check** (`deleteCheck`): the local line (and its grid) and the user's own team document.
+- **Rust tools as monitor sources**: `records: true` on find_files, grep_files, big_file search, query_table,
+  query_sqlite and dataframe returns JSON records (`asRecords`; a timed-out or inconsistent read is an error, never a
+  partial all-clear). The monitor tools' descriptions now give the order: file/SQLite source, Rust tool, existing
+  reading tool, new Python tool. Versions: Fire Code 0.64.0, host 0.168.0, VS Code 0.194.0, JetBrains 0.4.59.
+- **A chosen check shows its grid at once** (Fire Code 0.65.0, asked: "why do I need to click Show grid?"):
+  `pickCheck` fetches the whole grid with the choice (`state.pastGrids`, by check time) and History draws it under
+  the bars (`pastTable`, 500 rows); "Open in grid view" is the read-only full grid. No whole grid: one line why -
+  recorded before 0.64.0, or run on a colleague's computer.
+- **Every member sees every row** (asked: "data rows should be same for all the users"), reversing "summary +
+  alerted rows" for the team index: the runner also `writeGrid`s the whole grid - `grid:<monitor>:<hash>:<day>`,
+  created once (409 is success), so unchanged data adds a document a day at most; `share_grid` skips one over 5,000
+  rows or 2 MB. A colleague's newest check is shown in full once fetched (`Pending::TeamGrid` → `full_team_grid`,
+  only if still the newest); History fetches a colleague's past grid (`Pending::PastGrid`). Existing indexes get the
+  `hash` keyword by `PUT _mapping` (adding a field is allowed and idempotent; `dynamic: false` would otherwise leave it
+  unsearchable). Offline checks share their grid when backfilled.
+- **Rows are drawn as scrolled** (`drawMoreRows`, 200 at a time; `drawUntilRow` for an alert far down): the grid
+  used to draw 3000 rows and never the rest. History's past grid the same.
+- **Older than N days** (Fire Code 0.67.0 - 0.66 skipped by the standing rule; asked: "delete history older than a
+  month or N days"): `deleteHistory` and `cleanup` take `olderThanDays` (`older_than_days`: whole days, 1-3650);
+  one monitor uses `Store::prune_monitor` and the team prune with `monitor`; every monitor `prune_before`. Own
+  records only in the team index - a team-wide cleanup (members who left) was offered and not decided.
+
+**Fifth round (Fire Code 0.68.0, host 0.171.0, VS Code 0.197.0)** - reported: checks not triggered on time; who wrote
+and changed a monitor, with an audit; a refresh; the grid window's buttons cropped; scheduler start/stop.
+- **Why a check is late is said, not guessed** (`waiting_for`, `waiting_reason` → tile/grid `waitingFor`; the tile
+  also shows **due N min ago** past `nextRun`). Causes fixed: the executor now starts when a tool monitor exists,
+  not when one falls due; a queued request's timeout restarts when the executor is ready; file/SQLite readiness is
+  stat'ed on a thread (a dead share blocked the event loop, the tick with it); `running` entries with no
+  `Check`/`Claim` in flight are freed after 10 s (one lost answer stopped a monitor for good).
+- **Takeover**: a lost claim records `claim_lost`; when no check for that window arrived `timeoutSecs +
+  TAKEOVER_GRACE_SECS` (180) later, attempt 2 claims `claim:<monitor>:<slot>-r2` - one winner again. Once only.
+- **Scheduler status and Start/Stop** (`scheduler` in `monitors_message`, ops `schedulerStop`/`schedulerStart`, user
+  only): `Settings.scheduler_stopped` persists; stopped skips only the due loop (team reads, Run now still work).
+  Start clears stuck state and calls `spawn_ticker` again when the 3 s tick has not run for 10 s.
+- **Refresh** (`refresh` op → executor `{ kind: 'sync' }` → `handleSyncS3` + `handleTeamRepoSync`, then rescan;
+  `refresh_words` names new and gone monitors).
+- **Labels**: `updatedBy` (`updated_by:` / `__updated_by__`) joins `sharing/attribution.ts`, set by every
+  `stampRevision` (not by labelling existing files - `LABEL_FIELDS`). Rust reads them (`monitor::labels`) and stamps
+  the schedule editor's save the same way (`stamp_save`, CRLF kept: the span ends before the `\r`).
+- **Changes** (the audit): `note_revisions` after every scan appends a `Revision` (hash + version changed) to
+  `revisions/<name>.jsonl`, saying what changed (`describe_change`: schedule fields, other fields, or text only); a
+  team monitor's goes to the team index as `rev:<monitor>:<version>:<hash16>` (create-once, `writeRevision`), read
+  by `revisions`. Prune keeps `kind: revision` unless `revisions: true` (deleting the monitor). The grid's Changes
+  sheet merges both, one row per version.
+- **Grid header buttons are `.hbtn` icons** with `title` = `aria-label`; `.g-head` and `.g-actions` wrap. Tests find
+  them by title.
+- **Underscores**: `parseInline` treats `_`/`__` touching a letter or digit, and `__dunder__`, as text.
 
 ## 13. Python interop and skills (phase 9)
 
@@ -3934,6 +4417,18 @@ Primary development platform. These are silent-failure sources, not preferences.
 - **Build only a package that has changes** (2026-10-03, "going forward"). A Fire Code-only change
   rebuilds Fire Code alone; a change in packages/core or packages/ui reaches every package, since each
   bundles them or packs the host. Those still ship everywhere, per the next rule.
+  **Help text alone is not a reason to rebuild** (user, 2026-10-27): when a change is for Fire Code only and its
+  one touch of core is the handbook (`help/topics.ts`) describing it, build and publish **Fire Code alone**; the
+  help text reaches VS Code, the Node host and JetBrains with their next real change. A VS Code user cannot use a
+  Fire Code dashboard feature, so a new VSIX for its paragraph of help is churn. (Fire Code packs the host, so its
+  own copy of the help is current.)
+- **The JetBrains plugin is built only when the user asks** (user, 2026-10-27). An ordinary release builds VS Code, the
+  Node host and Fire Code; the plugin is not built, bumped or reported as missing. When asked, bump it then and build.
+- **Building the JetBrains plugin here**: Gradle 8.10.2 and Temurin JDK 17 are kept in
+  `%LOCALAPPDATA%\light-code-buildtools` (not on PATH, not in Temp - a copy there was cleaned out and failed
+  silently). PowerShell: `$env:JAVA_HOME = "$env:LOCALAPPDATA\light-code-buildtools\jdk-17.0.20.1+1"`, then
+  `& "$env:LOCALAPPDATA\light-code-buildtools\gradle-8.10.2\bin\gradle.bat" buildPlugin --offline` in `apps/intellij`,
+  after the host is built (it packs `apps/host/dist/cli.cjs`).
 - **Every enhancement and fix ships in every package, every time.** Standing instruction from
   the user (2026-10-02, "always"): the VS Code extension, the Node host and the JetBrains plugin are
   built from the same commit for each release, so none of them is behind. **Fire Code is the

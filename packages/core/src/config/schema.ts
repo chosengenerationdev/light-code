@@ -51,6 +51,13 @@ export const pythonConfigSchema = z
      * brings it straight back as pending. Nothing has to be fetched again to undo a "no".
      */
     declinedTools: z.record(z.string(), z.string()),
+    /**
+     * Functions and modules no Python tool may use: `certainLib.certainFunction`, `os.system`, or a
+     * whole module such as `subprocess`. A tool using one is refused when it is created, updated, synced
+     * or loaded, naming the line (`banned_uses` in `python/worker/main.py`, Python's own parser, aliases
+     * followed). Shared with the Python section on export, so a team can hold one list.
+     */
+    bannedCalls: z.array(z.string().min(1)),
     uvPath: z.string(),
     /**
      * Defaults to `.lightcode/tools/` **inside the workspace**, deliberately. Changes then
@@ -993,6 +1000,11 @@ export const autosysAuthSchema = z
      */
     sendBasic: z.boolean(),
     basicHeaderName: z.string().min(1),
+    /**
+     * The whole value for `basicHeaderName`, as the user made it (e.g. `Basic dXNlcjpwYXNz`), in
+     * secret storage. When set it is sent verbatim and the username and password are not needed.
+     */
+    basicHeaderValueRef: z.string().min(1),
     /** Client certificate for the gateway. Absent uses Settings → Network's, as every connection does. */
     certFile: z.string().min(1),
     keyFile: z.string().min(1),
@@ -1008,6 +1020,12 @@ const atlassianConnectionShape = {
   tokenRef: z.string().min(1),
   caFile: z.string().min(1),
   rejectUnauthorized: z.boolean(),
+  /**
+   * The user has read access only. Every tool that would change something on this site is left out
+   * and the readers say the access is read-only (`atlassian/readOnly.ts`), so the agent neither tries
+   * a change the server will refuse nor asks the user to approve one.
+   */
+  readOnly: z.boolean(),
 }
 
 /**
@@ -1079,6 +1097,17 @@ export const configSchema = z
     embedder: embedderConfigSchema,
     retrieval: retrievalConfigSchema,
     skills: skillsConfigSchema,
+    /**
+     * Sending skills to the team pool. `keepPrivate` names skills this user keeps to themselves:
+     * "Send my skills to the team" skips them and takes back any copy sent before. A top-level key
+     * of its own, so a window saving `skills` (its folders) cannot drop it (§12u, 0.122.1).
+     */
+    teamSkills: z.object({ keepPrivate: z.array(z.string().min(1)) }).partial(),
+    /**
+     * What this user answers by default to a skill's placeholders, by skill name then placeholder
+     * name - so the assistant uses them instead of stopping to ask. See `skills/defaults.ts`.
+     */
+    skillDefaults: z.record(z.string(), z.record(z.string(), z.string())),
     /**
      * Where tools may read outside the workspace.
      *
@@ -1169,6 +1198,8 @@ export const configSchema = z
         caFile: z.string().min(1),
         /** The escape hatch, never the fix — see the provider profile's own `tls` (§10). */
         rejectUnauthorized: z.boolean(),
+        /** Read access only: the writing tool is left out (`atlassian/readOnly.ts`). */
+        readOnly: z.boolean(),
       })
       .partial(),
     /**
@@ -1207,6 +1238,8 @@ export const configSchema = z
         ...atlassianConnectionShape,
         username: z.string().min(1),
         defaultPattern: z.string().min(1),
+        /** A job Test connection reads (`job/{name}`) instead of asking for the status of a made-up one. */
+        testJob: z.string().min(1),
         auth: autosysAuthSchema,
         paths: z
           .object({
@@ -1218,8 +1251,45 @@ export const configSchema = z
             event: z.string().min(1),
             jil: z.string().min(1),
             log: z.string().min(1),
+            machines: z.string().min(1),
+            machine: z.string().min(1),
+            globalVariables: z.string().min(1),
+            calendar: z.string().min(1),
+            extendedCalendar: z.string().min(1),
+            runHistory: z.string().min(1),
+            eventHistory: z.string().min(1),
           })
           .partial(),
+      })
+      .partial(),
+    /**
+     * The team's Bitbucket repository for skills and Python tools (`teamrepo/sync.ts`): everyone's
+     * committed there, everyone's brought back. Uses the Bitbucket connection and its token.
+     * **User-scope only**: it chooses where this person's skills and tools are sent.
+     */
+    /**
+     * Branch folders - several branches of one repository open at once (git worktrees, git/worktrees.ts).
+     * `folder`: where they go (default beside the repository, `<repo>.worktrees`); `setupCommand`: run once in a
+     * new one (`pnpm install`); `copyFiles`: untracked files copied from the main checkout (`.env`).
+     * **User-scope only** - the command runs on this machine - and per project.
+     */
+    branches: z
+      .object({
+        folder: z.string(),
+        setupCommand: z.string(),
+        copyFiles: z.array(z.string()),
+      })
+      .partial(),
+    teamRepo: z
+      .object({
+        enabled: z.boolean(),
+        project: z.string().min(1),
+        repo: z.string().min(1),
+        /** The branch commits go to. Created from the default branch when it does not exist. */
+        branch: z.string().min(1),
+        /** A folder in the repository holding `skills/` and `tools/`; empty is the top. */
+        folder: z.string(),
+        syncMinutes: z.number().int().min(1).max(24 * 60),
       })
       .partial(),
     /** Bitbucket Data Center / Server. As `jira`. */

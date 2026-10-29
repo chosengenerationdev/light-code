@@ -25,8 +25,17 @@ export function withBasicCredentials(
   password: string,
 ): ConnectionAuth {
   const basic = `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`
+  return withHeader(auth, headerName, basic)
+}
+
+/**
+ * One more header, after the gateway's own. For the pasted Basic value: some offices make the
+ * `Basic <base64>` string themselves and would rather store that than a username and password.
+ * Sent exactly as stored - a prefix added here would turn a correct value into a 401.
+ */
+export function withHeader(auth: ConnectionAuth, headerName: string, value: string): ConnectionAuth {
   return {
-    resolveHeaders: async () => ({ ...(await auth.resolveHeaders()), [headerName]: basic }),
+    resolveHeaders: async () => ({ ...(await auth.resolveHeaders()), [headerName]: value }),
     onUnauthorized: () => auth.onUnauthorized(),
   }
 }
@@ -34,6 +43,7 @@ export function withBasicCredentials(
 /** Secret storage keys. Namespaced, so clearing AutoSys clears these too. */
 export const AUTOSYS_CLIENT_SECRET_REF = 'autosys:clientSecret'
 export const AUTOSYS_PASSPHRASE_REF = 'autosys:certPassphrase'
+export const AUTOSYS_BASIC_VALUE_REF = 'autosys:basicHeaderValue'
 
 function linesFrom(map: Record<string, string> | undefined, separator: string): string {
   return Object.entries(map ?? {})
@@ -41,7 +51,12 @@ function linesFrom(map: Record<string, string> | undefined, separator: string): 
     .join('\n')
 }
 
-export function gatewayView(auth: AutosysAuth | undefined, hasClientSecret: boolean, hasPassphrase: boolean): AutosysGatewayView {
+export function gatewayView(
+  auth: AutosysAuth | undefined,
+  hasClientSecret: boolean,
+  hasPassphrase: boolean,
+  hasBasicValue = false,
+): AutosysGatewayView {
   return {
     enabled: auth?.type === 'apigee',
     tokenUrl: auth?.tokenUrl ?? '',
@@ -63,6 +78,7 @@ export function gatewayView(auth: AutosysAuth | undefined, hasClientSecret: bool
     useGlobalClientCertificate: auth?.useGlobalClientCertificate !== false,
     hasClientSecret,
     hasPassphrase,
+    hasBasicValue,
   }
 }
 
@@ -86,7 +102,7 @@ function parseLines(text: string, separator: ':' | '=', what: string): Record<st
  */
 export function gatewayFromSettings(
   input: AutosysGatewaySettings,
-  stored: { clientSecret: boolean; passphrase: boolean },
+  stored: { clientSecret: boolean; passphrase: boolean; basicValue?: boolean },
 ): { auth: AutosysAuth } | { error: string } {
   const text = (value: string): string | undefined => (value.trim().length > 0 ? value.trim() : undefined)
   const tokenUrl = text(input.tokenUrl)
@@ -111,7 +127,7 @@ export function gatewayFromSettings(
   if (input.sendBasic && tokenHeader === basicHeader) {
     return {
       error:
-        `The gateway token and the AutoSys username and password would both go in the ${text(input.basicHeaderName) ?? 'Authorization'} header, and one header holds one value. ` +
+        `The gateway token and the AutoSys sign-in would both go in the ${text(input.basicHeaderName) ?? 'Authorization'} header, and one header holds one value. ` +
         'Set the header the gateway reads its token from (Advanced → "Header the token is sent in", for example x-apigee-token), or the header AutoSys reads the username and password from — your gateway team knows which.',
     }
   }
@@ -148,6 +164,7 @@ export function gatewayFromSettings(
       ...(Object.keys(params).length > 0 ? { extraTokenParams: params } : {}),
       ...(input.sendBasic ? { sendBasic: true } : {}),
       ...optional('basicHeaderName', text(input.basicHeaderName)),
+      ...(stored.basicValue === true ? { basicHeaderValueRef: AUTOSYS_BASIC_VALUE_REF } : {}),
       ...optional('certFile', text(input.certFile)),
       ...optional('keyFile', text(input.keyFile)),
       ...optional('pfxFile', text(input.pfxFile)),

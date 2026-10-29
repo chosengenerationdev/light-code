@@ -70,6 +70,36 @@ function start(callTool: ConstructorParameters<typeof PythonWorker>[0]['callTool
   return worker
 }
 
+describeIfPython('a Python tool calling another Python tool more than once', () => {
+  it('is still the one asking after the first nested call returns', async () => {
+    // Reported as monitors failing on "approval" in the background: the second call was sent as if
+    // the callee asked, and judged against the callee's __tool_calls__, which declares nothing.
+    const inner = await toolFile('inner', ['def run(job: str) -> str:', '    """Status of one job."""', '    return job + ":OK"'].join('\n'))
+    const outer = await toolFile(
+      'outer',
+      [
+        'import light_code',
+        '',
+        '__tool_calls__ = ["inner"]',
+        '',
+        'def run() -> list:',
+        '    """Two jobs, one call each."""',
+        '    return [light_code.call_tool("py__inner", job="A"), light_code.call_tool("py__inner", job="B")]',
+      ].join('\n'),
+    )
+    const callers: string[] = []
+    const instance = start(async (name, args, caller) => {
+      callers.push(caller)
+      // Served by the same worker while `outer` waits, as the host does for a Python callee.
+      const answer = await instance.call('inner', inner, args)
+      return answer.result
+    })
+    const result = await instance.call('outer', outer, {})
+    expect(result.result).toEqual(['A:OK', 'B:OK'])
+    expect(callers).toEqual(['outer', 'outer'])
+  })
+})
+
 describeIfPython('a Python tool calling another tool', () => {
   it('reaches the host and gets the answer back', async () => {
     const file = await toolFile(
@@ -120,7 +150,7 @@ describeIfPython('a Python tool calling another tool', () => {
 
     const result = await instance.call('guarded', file, {})
     expect(String(result.result)).toContain('refused:')
-    expect(String(result.result)).toContain('only call other Python tools')
+    expect(String(result.result)).toContain('deliberately out of reach')
   })
 
   it('says so when the session cannot make nested calls at all', async () => {

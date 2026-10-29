@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { Diagram, fileNameFor, isDark, resolveColour } from './Diagram.js'
+import { SaveFileContext, type SaveFile, type SaveOutcome } from './saveFile.js'
 
 let container: HTMLDivElement
 let root: Root
@@ -162,5 +163,58 @@ describe('the buttons offered', () => {
     expect(labels).toContain('Copy SVG')
     expect(labels).toContain('Save SVG')
     expect(labels).toContain('Save PNG')
+  })
+})
+
+/*
+ * Reported: Save SVG and Save PNG "did nothing" in Fire Code - a download link is ignored in its window
+ * and in VS Code's webview. Where the host can save, the file goes to it and the result is shown.
+ */
+describe('saving through the host', () => {
+  it('hands the SVG to the host and says where it went', async () => {
+    const saved: { name: string; type: string }[] = []
+    const saver: SaveFile = async (name, blob) => {
+      saved.push({ name, type: blob.type })
+      return { path: `D:/out/${name}` }
+    }
+    await act(async () => {
+      root.render(
+        <SaveFileContext.Provider value={saver}>
+          <Diagram diagram={spec} />
+        </SaveFileContext.Provider>,
+      )
+    })
+    const button = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Save SVG')!
+    await act(async () => {
+      button.click()
+      await Promise.resolve()
+    })
+    expect(saved).toEqual([{ name: 'request-path.svg', type: 'image/svg+xml' }])
+    expect(container.textContent).toContain('Saved to D:/out/request-path.svg')
+  })
+
+  it('says why when the host could not save it, and nothing when the dialog was cancelled', async () => {
+    let outcome: SaveOutcome = { error: 'Could not write D:/out: access denied' }
+    const saver: SaveFile = async () => outcome
+    await act(async () => {
+      root.render(
+        <SaveFileContext.Provider value={saver}>
+          <Diagram diagram={spec} />
+        </SaveFileContext.Provider>,
+      )
+    })
+    const button = (): HTMLButtonElement => [...container.querySelectorAll('button')].find((b) => b.textContent === 'Save SVG')!
+    await act(async () => {
+      button().click()
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('access denied')
+    outcome = { cancelled: true }
+    await act(async () => {
+      button().click()
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+    expect(container.textContent).not.toContain('Saved to')
   })
 })

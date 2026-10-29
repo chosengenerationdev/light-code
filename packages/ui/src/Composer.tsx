@@ -83,6 +83,8 @@ export interface ComposerProps {
   onPickFiles?: (() => void) | undefined
   /** Files to add as mentions, from the picker or the editor's menu; `nonce` makes a repeat land. */
   addedFiles?: { paths: string[]; nonce: number } | undefined
+  /** Text to put in the box (Fire Code's "Start a chat" from an alert), once per nonce; the user sends it. */
+  prefill?: { text: string; nonce: number } | undefined
 }
 
 /** Beyond this the request usually fails on the provider side, so refuse it here instead. */
@@ -96,6 +98,8 @@ export interface TextAttachment {
   text: string
 }
 
+/** The last `prefill` applied - outside the component for the same reason as `lastAddedNonce`. */
+let lastPrefillNonce: number | undefined
 /** The last `addedFiles` applied, kept outside the component because the box is remounted. */
 let lastAddedNonce: number | undefined
 
@@ -233,6 +237,20 @@ export function Composer(props: ComposerProps): ReactElement {
       box.setSelectionRange(box.value.length, box.value.length)
     })
   }, [props.addedFiles])
+  useEffect(() => {
+    if (props.prefill === undefined || props.prefill.nonce === lastPrefillNonce) return
+    lastPrefillNonce = props.prefill.nonce
+    const given = props.prefill.text
+    // Added after anything already typed, never over it.
+    setText((previous) => (previous.trim().length === 0 ? given : `${previous.trimEnd()}\n\n${given}`))
+    requestAnimationFrame(() => {
+      const box = textareaRef.current
+      if (box === null) return
+      box.focus()
+      box.setSelectionRange(0, 0)
+      box.scrollTop = 0
+    })
+  }, [props.prefill])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   /** Grows the box to fit the text, capped, so the send button never drifts out of line. */

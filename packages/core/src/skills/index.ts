@@ -207,6 +207,16 @@ async function loadOneDirectory(skillsDir: string): Promise<LoadedSkills> {
  * one entry is relative and another absolute — would otherwise make every skill in it shadow
  * itself and report a spurious conflict.
  */
+/** Whether two files hold the same bytes. Unreadable counts as different, so a problem is still reported. */
+async function sameFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [left, right] = await Promise.all([fs.readFile(a), fs.readFile(b)])
+    return left.equals(right)
+  } catch {
+    return false
+  }
+}
+
 export async function loadSkills(dirs: string | readonly string[]): Promise<LoadedSkills> {
   const ordered = (typeof dirs === 'string' ? [dirs] : dirs).map((dir) => path.resolve(dir))
   const unique = ordered.filter((dir, index) => ordered.indexOf(dir) === index)
@@ -222,6 +232,12 @@ export async function loadSkills(dirs: string | readonly string[]): Promise<Load
     for (const skill of loaded.skills) {
       const winner = claimed.get(skill.name)
       if (winner !== undefined) {
+        /*
+         * The same bytes in two folders is one skill, not a conflict: your own skill coming back from the
+         * team repository or a bucket beside the original. Reported, it was a warning per skill you ever
+         * shared. A copy that differs is still reported - that is two folders disagreeing.
+         */
+        if (await sameFile(winner.filePath, skill.filePath)) continue
         issues.push({
           filePath: skill.filePath,
           detail: `Shadowed: "${skill.name}" is already defined by ${winner.filePath}, which takes precedence.`,

@@ -40,6 +40,10 @@ export const SECRET_FOLDERS = [
   // Its name until 0.5.0; a folder the move could not take is still the vault.
   '/appdata/local/sun-light-code/',
   '/appdata/local/light-code/data/users/',
+  // The Python tool code approved on this machine (platform/node/sharedApprovals.ts): a tool able to
+  // write it could approve itself.
+  '/appdata/local/light-code/approvals/',
+  '/.local/share/light-code/approvals/',
   '/windows/system32/config/',
 ]
 

@@ -46,6 +46,7 @@ export const OFFLOAD_FAMILIES: readonly OffloadFamily[] = [
   { label: 'Bitbucket', about: 'pull requests, files at a branch, comments, merge and tag', matches: (n) => n.startsWith('bitbucket_') },
   { label: 'Jenkins', about: 'jobs, builds, logs, queue, start, stop and replay a Jenkinsfile', matches: (n) => n.startsWith('jenkins_') },
   { label: 'AutoSys', about: 'job status, definitions, logs, dependencies, events and JIL', matches: (n) => n.startsWith('autosys_') },
+  { label: 'Monitoring (Fire Code)', about: 'create monitors; their status, rows and alerts; run, show, pause, snooze, acknowledge', matches: (n) => n.startsWith('monitor_') },
   { label: 'JupyterHub', about: 'run code and inspect libraries on the hub, sync files, browse it', matches: (n) => n.startsWith('hub_') },
   { label: 'S3 buckets', about: 'list, read, download and upload files', matches: (n) => n.startsWith('s3_') },
   { label: 'APIs and messaging', about: 'call a REST API; open or send a Teams message', matches: named('http_request', 'teams_open_chat') },

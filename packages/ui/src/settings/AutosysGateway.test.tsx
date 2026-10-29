@@ -32,7 +32,7 @@ const gateway: AutosysGatewayView = {
   useGlobalClientCertificate: true, hasClientSecret: false, hasPassphrase: false,
 }
 
-function render(overrides: { settings?: AtlassianSettingsView; gateway?: AutosysGatewayView; hasToken?: boolean } = {}) {
+function render(overrides: { settings?: AtlassianSettingsView; gateway?: AutosysGatewayView; hasToken?: boolean; test?: { ok: boolean; detail: string; diagnostics?: string } } = {}) {
   const saves: [AtlassianSettingsView, string | undefined, GatewaySave | undefined][] = []
   act(() =>
     root.render(
@@ -42,7 +42,7 @@ function render(overrides: { settings?: AtlassianSettingsView; gateway?: Autosys
         hasToken={overrides.hasToken ?? false}
         gateway={overrides.gateway ?? gateway}
         savedTick={0}
-        test={undefined}
+        test={overrides.test}
         testing={false}
         onSave={(s, t, g) => saves.push([s, t, g])}
         onClearToken={() => {}}
@@ -100,12 +100,43 @@ describe('the AutoSys panel with an API gateway', () => {
   /* Reported next: the gateway wants its token and AutoSys's Basic sign-in on the same request. */
   it('offers Basic alongside the token, and warns before saving when both would share a header', () => {
     const saves = render({ settings: { ...settings, baseUrl: 'https://autosys.test' }, gateway: { ...gateway, enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', hasClientSecret: true } })
-    const box = [...container.querySelectorAll('label')].find((label) => label.textContent?.includes('Also send the AutoSys username'))!.querySelector('input')!
+    const box = [...container.querySelectorAll('label')].find((label) => label.textContent?.includes('Also send an AutoSys sign-in header'))!.querySelector('input')!
     act(() => box.click())
     expect(container.textContent).toContain('would both go in the Authorization header')
     type('#lc-autosys-gw-tokenHeaderName', 'x-apigee-token')
     expect(container.textContent).not.toContain('would both go in')
     act(() => buttonByText('Save').click())
     expect(saves[0]?.[2]?.settings).toMatchObject({ sendBasic: true, tokenHeaderName: 'x-apigee-token' })
+  })
+
+  /* Reported next: the office makes the "Basic <base64>" value itself and would rather store that. */
+  it('takes a pasted sign-in header value, sent with Save and never shown back', () => {
+    const saves = render({ settings: { ...settings, baseUrl: 'https://autosys.test' }, gateway: { ...gateway, enabled: true, tokenUrl: 'https://gw.test/t', clientId: 'a', hasClientSecret: true, sendBasic: true, tokenHeaderName: 'x-apigee-token' } })
+    type('#lc-autosys-gw-basicHeaderName', 'x-api-authorization-header-for-service-provider')
+    type('#lc-autosys-gw-basic-value', 'Basic dXNlcjpwdw==')
+    act(() => buttonByText('Save').click())
+    expect(saves[0]?.[2]).toMatchObject({
+      settings: { basicHeaderName: 'x-api-authorization-header-for-service-provider' },
+      basicValue: 'Basic dXNlcjpwdw==',
+    })
+  })
+})
+
+/* Asked for: a read-only account, and a way to see what Test connection actually got back. */
+describe('read-only access and test details', () => {
+  it('saves the read-only tick with the panel', () => {
+    const saves = render({ settings: { ...settings, baseUrl: 'https://autosys.test' } })
+    const box = [...container.querySelectorAll('label')].find((label) => label.textContent?.includes('My access is read-only'))!.querySelector('input')!
+    act(() => box.click())
+    act(() => buttonByText('Save').click())
+    expect(saves[0]?.[0]).toMatchObject({ readOnly: true })
+  })
+
+  it('shows every request and what came back under a failed test, open, with a copy button', () => {
+    render({ test: { ok: false, detail: 'AutoSys answered HTTP 403 (forbidden)', diagnostics: ['#1 GET https://autosys.test/AEWS/job-run-info', 'Response: HTTP 403 after 12 ms'].join(String.fromCharCode(10)) } })
+    const details = [...container.querySelectorAll('details')].find((element) => element.textContent?.includes('every request and what came back'))!
+    expect(details.open).toBe(true)
+    expect(details.textContent).toContain('Response: HTTP 403 after 12 ms')
+    expect(buttonByText('Copy details')).toBeDefined()
   })
 })

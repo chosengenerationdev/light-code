@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { HttpClient } from '../platform/http.js'
 import type { Tool, ToolPreview, ToolResult } from '../tools/types.js'
 import { AtlassianError, AtlassianRest, type AtlassianConnection } from './rest.js'
+import { multipartBody } from './uploads.js'
 
 /**
  * Bitbucket Data Center / Server: pull requests and files, with a personal access token.
@@ -284,6 +285,122 @@ export class BitbucketClient {
 
   async comment(repo: BitbucketRepo, id: number, text: string, signal?: AbortSignal): Promise<void> {
     await this.rest.json(`commenting on #${String(id)}`, `${this.repoPath(repo)}/pull-requests/${String(id)}/comments`, { method: 'POST', body: JSON.stringify({ text }) }, signal)
+  }
+
+  // --- A repository as a store of files: the team repository for skills and tools (`teamrepo/sync.ts`). ---
+  // Every call is REST under /rest/, so the personal access token authenticates it like the rest (no git, no web URL).
+
+  /** The newest commit on a branch, or undefined when the branch does not exist. */
+  async branchHead(repo: BitbucketRepo, branch: string, signal?: AbortSignal): Promise<string | undefined> {
+    try {
+      const page = await this.rest.json<{ values?: { id?: string }[] }>(
+        `reading branch ${branch} of ${repo.project}/${repo.repo}`,
+        `${this.repoPath(repo)}/commits?${new URLSearchParams({ until: `refs/heads/${branch}`, limit: '1' }).toString()}`,
+        { method: 'GET' },
+        signal,
+      )
+      return page.values?.[0]?.id
+    } catch (error) {
+      if (error instanceof AtlassianError && (error.status === 404 || error.status === 400)) return undefined
+      throw error
+    }
+  }
+
+  /** The repository's default branch, e.g. "main". */
+  async defaultBranch(repo: BitbucketRepo, signal?: AbortSignal): Promise<string | undefined> {
+    try {
+      const raw = await this.rest.json<{ displayId?: string }>(`reading the default branch of ${repo.project}/${repo.repo}`, `${this.repoPath(repo)}/branches/default`, { method: 'GET' }, signal)
+      return raw.displayId
+    } catch (error) {
+      if (error instanceof AtlassianError && error.status === 404) return undefined
+      throw error
+    }
+  }
+
+  /** A new branch at `startPoint` (a branch name or commit). */
+  async createBranch(repo: BitbucketRepo, name: string, startPoint: string, signal?: AbortSignal): Promise<void> {
+    if (!isSafeTagName(name)) throw new AtlassianError(`"${name}" is not a valid branch name.`)
+    const body = JSON.stringify({ name, startPoint: /^[0-9a-f]{40}$/.test(startPoint) ? startPoint : `refs/heads/${startPoint}` })
+    await this.rest.json(`creating branch ${name}`, `${this.repoPath(repo)}/branches`, { method: 'POST', body }, signal)
+  }
+
+  /** Every file under `folder` at `at`, as paths relative to `folder`. A folder that does not exist yet holds none. */
+  async listFiles(repo: BitbucketRepo, folder: string, at: string, signal?: AbortSignal): Promise<string[]> {
+    const files: string[] = []
+    let start = 0
+    const base = folder.length > 0 ? `/files/${encodeRepoPath(folder)}` : '/files'
+    for (let page = 0; page < 100; page++) {
+      try {
+        const raw = await this.rest.json<{ values?: string[]; isLastPage?: boolean; nextPageStart?: number }>(
+          `listing ${folder || 'the repository'}`,
+          `${this.repoPath(repo)}${base}?${new URLSearchParams({ at, limit: '1000', start: String(start) }).toString()}`,
+          { method: 'GET' },
+          signal,
+        )
+        files.push(...(raw.values ?? []))
+        if (raw.isLastPage !== false || raw.nextPageStart === undefined) return files
+        start = raw.nextPageStart
+      } catch (error) {
+        if (error instanceof AtlassianError && error.status === 404) return files
+        throw error
+      }
+    }
+    return files
+  }
+
+  /** The files changed between two commits: path, and whether it was added, changed, moved or deleted. */
+  async changes(repo: BitbucketRepo, since: string, until: string, signal?: AbortSignal): Promise<{ path: string; type: string; from?: string | undefined }[]> {
+    const out: { path: string; type: string; from?: string | undefined }[] = []
+    let start = 0
+    for (let page = 0; page < 100; page++) {
+      const raw = await this.rest.json<{ values?: { path?: { toString?: string }; srcPath?: { toString?: string }; type?: string }[]; isLastPage?: boolean; nextPageStart?: number }>(
+        'reading what changed',
+        `${this.repoPath(repo)}/changes?${new URLSearchParams({ since, until, limit: '1000', start: String(start) }).toString()}`,
+        { method: 'GET' },
+        signal,
+      )
+      for (const change of raw.values ?? []) {
+        if (change.path?.toString === undefined) continue
+        out.push({ path: change.path.toString, type: (change.type ?? 'MODIFY').toUpperCase(), ...(change.srcPath?.toString !== undefined ? { from: change.srcPath.toString } : {}) })
+      }
+      if (raw.isLastPage !== false || raw.nextPageStart === undefined) return out
+      start = raw.nextPageStart
+    }
+    return out
+  }
+
+  /** A file's bytes at `at`, or undefined when it is not there. */
+  async readBytes(repo: BitbucketRepo, path: string, at: string, signal?: AbortSignal): Promise<Uint8Array | undefined> {
+    try {
+      return await this.rest.bytes(`reading ${path}`, `${this.repoPath(repo)}/raw/${encodeRepoPath(path)}?${new URLSearchParams({ at }).toString()}`, signal)
+    } catch (error) {
+      if (error instanceof AtlassianError && error.status === 404) return undefined
+      throw error
+    }
+  }
+
+  /**
+   * Commits one file to a branch. `sourceCommitId` is the commit the file was last seen at; Bitbucket refuses
+   * (409) when the file changed since, so a colleague's edit is never overwritten. Absent for a new file.
+   * Returns the new commit.
+   */
+  async commitFile(
+    repo: BitbucketRepo,
+    file: { path: string; bytes: Uint8Array; branch: string; message: string; sourceCommitId?: string | undefined },
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const name = file.path.split('/').pop() ?? 'file'
+    const body = multipartBody(
+      { name, bytes: file.bytes, contentType: 'application/octet-stream', field: 'content' },
+      { message: file.message, branch: file.branch, ...(file.sourceCommitId !== undefined ? { sourceCommitId: file.sourceCommitId } : {}) },
+    )
+    const raw = await this.rest.json<{ id?: string }>(
+      `committing ${file.path}`,
+      `${this.repoPath(repo)}/browse/${encodeRepoPath(file.path)}`,
+      { method: 'PUT', headers: { 'Content-Type': body.contentType, 'X-Atlassian-Token': 'no-check' }, bodyBytes: body.bytes },
+      signal,
+    )
+    return raw.id
   }
 
   private repoPath(repo: BitbucketRepo): string {

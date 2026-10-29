@@ -95,6 +95,8 @@ export const ADMIN_ONLY_MESSAGES: readonly string[] = [
    * else's bucket folder is not a normal user's business either.
    */
   'previewBucketSkillDelete',
+  // Lists what "Delete everywhere" would remove from shared buckets and the team repository.
+  'previewDeleteEverywhere',
   // Processes this machine will spawn.
   'saveMcpServer',
   'saveMcpServers',

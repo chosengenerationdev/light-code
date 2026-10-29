@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from 'react'
 
-import { declaredCredentials } from '@light-code/core/browser'
+import { declaredCredentials, declaredToolCalls, declaresAlwaysAsk } from '@light-code/core/browser'
 import { tokenize, TOKEN_COLORS } from './highlight.js'
 import { colors, fontFamily, primaryButtonStyle, secondaryButtonStyle } from './theme.js'
 
@@ -282,6 +282,17 @@ export function PendingToolApprovals(props: PendingToolApprovalsProps): ReactEle
                 <div style={{ fontSize: 11, marginTop: 4 }} role="note">
                   🔑 Reads saved credentials:{' '}
                   <b>{declaredCredentials(fetched.source).join(', ')}</b> — given only to this tool, never shown to the model.
+                </div>
+              )}
+              {fetched?.source !== undefined && declaredToolCalls(fetched.source).length > 0 && (
+                // Approving the tool approves these calls: in a monitor's check they run without a prompt.
+                <div style={{ fontSize: 11, marginTop: 4 }} role="note">
+                  🧩 Calls tools: <b>{declaredToolCalls(fetched.source).join(', ')}</b> — in a Fire Code monitor these run without asking.
+                </div>
+              )}
+              {fetched?.source !== undefined && declaresAlwaysAsk(fetched.source) && (
+                <div style={{ fontSize: 11, marginTop: 4 }} role="note">
+                  🔒 Always asks before every run (<code style={{ fontFamily: monospace }}>__always_ask__ = True</code>) - &quot;Always allow&quot; is never offered for it.
                 </div>
               )}
               {(props.missingPackages?.[tool.name]?.length ?? 0) > 0 && (

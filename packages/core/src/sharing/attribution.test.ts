@@ -14,7 +14,7 @@ describe('skills', () => {
   it('labels a new skill with author, project, version 1 and the time', () => {
     const stamped = stampRevision('skill', SKILL, undefined, { author: 'ana', project: 'Payments' }, NOW)
     expect(stamped).toBe(
-      '---\nname: deploy\ndescription: How we deploy\nauthor: ana\nproject: Payments\nversion: 1\nupdated: 2026-09-29T08:15:02Z\n---\n\nSteps.\n',
+      '---\nname: deploy\ndescription: How we deploy\nauthor: ana\nproject: Payments\nversion: 1\nupdated: 2026-09-29T08:15:02Z\nupdated_by: ana\n---\n\nSteps.\n',
     )
   })
 
@@ -22,7 +22,7 @@ describe('skills', () => {
     const first = stampRevision('skill', SKILL, undefined, { author: 'ana', project: 'Payments' }, NOW)
     // The model rewrites the skill without the labels; somebody else saves it.
     const second = stampRevision('skill', SKILL, first, { author: 'bo', project: 'Other' }, new Date('2026-10-01T00:00:00Z'))
-    expect(readAttribution('skill', second)).toEqual({ author: 'ana', project: 'Payments', version: 2, updated: '2026-10-01T00:00:00Z' })
+    expect(readAttribution('skill', second)).toEqual({ author: 'ana', project: 'Payments', version: 2, updated: '2026-10-01T00:00:00Z', updatedBy: 'bo' })
   })
 
   it('counts a skill saved before versions existed as version 1', () => {
@@ -35,7 +35,7 @@ describe('skills', () => {
    */
   it('never guesses the author or project of an existing unlabelled skill on save', () => {
     const saved = readAttribution('skill', stampRevision('skill', SKILL, SKILL, { author: 'ana', project: 'Payments' }, NOW))
-    expect(saved).toEqual({ author: undefined, project: undefined, version: 2, updated: '2026-09-29T08:15:02Z' })
+    expect(saved).toEqual({ author: undefined, project: undefined, version: 2, updated: '2026-09-29T08:15:02Z', updatedBy: 'ana' })
   })
 
   it('fills only what is missing when labelling an existing file', () => {
@@ -43,6 +43,17 @@ describe('skills', () => {
     const filled = fillAttribution('skill', colleague, { author: 'ana', project: 'Payments', version: 1, updated: '2026-01-01T00:00:00Z' })
     expect(readAttribution('skill', filled)).toEqual({ author: 'chen', project: 'Payments', version: 1, updated: '2026-01-01T00:00:00Z' })
     expect(missingAttribution('skill', filled)).toEqual([])
+  })
+
+  // The author stays whoever wrote it; who saved it last is a label of its own (the monitoring dashboard's
+  // "last updated by").
+  it('records who made each save, apart from the author', () => {
+    const first = stampRevision('skill', SKILL, undefined, { author: 'ana' }, NOW)
+    const second = stampRevision('skill', first, first, { author: 'bo' }, NOW)
+    expect(readAttribution('skill', second)).toMatchObject({ author: 'ana', updatedBy: 'bo' })
+    expect(second.match(/updated_by:/g)).toHaveLength(1)
+    // Labelling existing files never asks for it: nobody can know afterwards who saved a file last.
+    expect(missingAttribution('skill', first)).toEqual(['project'])
   })
 
   it('cannot break out of the frontmatter', () => {
@@ -77,14 +88,14 @@ describe('python tools', () => {
     const lines = stamped.split('\n')
     expect(lines.indexOf('from __future__ import annotations')).toBeLessThan(lines.indexOf('__author__ = "ana"'))
     expect(lines[4]).toBe('"""Fetch a ledger.')
-    expect(stamped).toContain('__author__ = "ana"\n__project__ = "Payments"\n__version__ = "1"\n__updated__ = "2026-09-29T08:15:02Z"\n\nimport httpx')
+    expect(stamped).toContain('__author__ = "ana"\n__project__ = "Payments"\n__version__ = "1"\n__updated__ = "2026-09-29T08:15:02Z"\n__updated_by__ = "ana"\n\nimport httpx')
   })
 
   it('bumps the version and time in place on the next save', () => {
     const first = stampRevision('tool', TOOL, undefined, { author: 'ana', project: 'Payments' }, NOW)
     const edited = first.replace('return day', 'return day.upper()')
     const second = stampRevision('tool', edited, first, { author: 'bo' }, new Date('2026-10-01T00:00:00Z'))
-    expect(readAttribution('tool', second)).toEqual({ author: 'ana', project: 'Payments', version: 2, updated: '2026-10-01T00:00:00Z' })
+    expect(readAttribution('tool', second)).toEqual({ author: 'ana', project: 'Payments', version: 2, updated: '2026-10-01T00:00:00Z', updatedBy: 'bo' })
     expect(second.match(/__version__/g)).toHaveLength(1)
   })
 

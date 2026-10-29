@@ -91,6 +91,38 @@ export interface SkillToolContext {
    * `sharing/attribution.ts`. Absent writes the skill as it is, which is what tests get.
    */
   attribution?: (() => { author?: string | undefined; project?: string | undefined }) | undefined
+  /**
+   * The user's own skills, on this machine, in every project - never uploaded, committed or sent to the
+   * team pool. Asked for: "an option to choose if he wants to keep a skill for himself when it is created".
+   * Absent where there is no one person (a shared server), and then every skill is written as before.
+   */
+  personalSkillsDir?: string | undefined
+  /** Where a skill written for the team goes, in a few words, for the approval prompt. */
+  sharedWith?: (() => string) | undefined
+}
+
+/** Who a skill is for: `me` keeps it in the personal folder, `team` puts it where the team shares. */
+async function folderFor(
+  context: SkillToolContext,
+  name: string,
+  audience: 'me' | 'team' | undefined,
+): Promise<{ dir: string; personal: boolean }> {
+  const personal = context.personalSkillsDir
+  if (audience === 'me') {
+    if (personal === undefined) throw new Error('Keeping a skill to yourself is not available here (a shared server has no personal folder).')
+    return { dir: personal, personal: true }
+  }
+  if (audience === 'team' || personal === undefined) return { dir: context.skillsDir, personal: false }
+  // Not said: an existing skill stays where it is.
+  const there = (await exists(path.join(personal, skillFileName(name)))) || (await exists(path.join(personal, name, 'SKILL.md')))
+  return there ? { dir: personal, personal: true } : { dir: context.skillsDir, personal: false }
+}
+
+function audienceNote(context: SkillToolContext, personal: boolean): string | undefined {
+  if (context.personalSkillsDir === undefined) return undefined
+  return personal
+    ? 'For: only you - kept in your personal skills on this computer, used in every project, never uploaded or committed'
+    : `For: the team - ${context.sharedWith?.() ?? 'saved in this project'}`
 }
 
 /** A skill is an illustrated page, not a gallery. */
@@ -111,6 +143,14 @@ const writeParams = z.object({
     .describe(
       'The markdown content. Be concrete: package names, import paths, function signatures, a ' +
         'short example. This is read only when relevant, so length costs nothing.',
+    ),
+  audience: z
+    .enum(['me', 'team'])
+    .optional()
+    .describe(
+      'Who the skill is for. "me": kept only for this user, on this computer, in every project - never shared. ' +
+        '"team" (the default - leave this out): saved where the team shares skills. Use "me" ONLY when the user ' +
+        'explicitly says the skill is personal, private or just for them; do not ask. Omit when updating: the skill stays where it is.',
     ),
   images: z
     .array(
@@ -379,11 +419,14 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
     parametersSchema: writeParams,
 
     async preview(params): Promise<ToolPreview> {
-      const filePath = await resolveSkillPath(context.skillsDir, params.name)
+      const target = await folderFor(context, params.name, params.audience)
+      const filePath = await resolveSkillPath(target.dir, params.name)
       const before = await readIfPresent(filePath)
+      const note = audienceNote(context, target.personal)
       return {
         kind: 'diff',
         path: filePath,
+        ...(note !== undefined ? { note } : {}),
         before,
         // Rendered here, so the diff is exactly the bytes that get written rather than an
         // approximation of them.
@@ -413,7 +456,8 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
         // Either kind of attachment forces the folder layout: a flat `name.md` has nowhere to
         // keep them, which is the same reason pictures already did this.
         const wantsFolder = (params.images ?? []).length > 0 || (params.files ?? []).length > 0
-        const filePath = await resolveSkillPath(context.skillsDir, params.name, wantsFolder)
+        const target = await folderFor(context, params.name, params.audience)
+        const filePath = await resolveSkillPath(target.dir, params.name, wantsFolder)
         const before = await readIfPresent(filePath)
         const existed = before.length > 0
 
@@ -469,7 +513,7 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
          * folder write succeeded, so a failure cannot lose the original.
          */
         if (wantsFolder) {
-          const flat = path.join(context.skillsDir, skillFileName(params.name))
+          const flat = path.join(target.dir, skillFileName(params.name))
           if (await exists(flat)) await fs.rm(flat).catch(() => undefined)
         }
 
@@ -477,11 +521,12 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
 
         // Reported, never thrown: see `onSaved`. The local file is already written and valid.
         let publishProblem: string | undefined
-        if (context.onSaved !== undefined) {
+        // A personal skill is never uploaded: that is the whole of what "only me" means.
+        if (context.onSaved !== undefined && !target.personal) {
           try {
             // Where it actually is: a skill kept as a folder is `name/SKILL.md`, and uploading it
             // as `name.md` would bring a second copy back down on the next sync.
-            await context.onSaved(params.name, rendered, path.relative(context.skillsDir, filePath).split(path.sep).join('/'))
+            await context.onSaved(params.name, rendered, path.relative(target.dir, filePath).split(path.sep).join('/'))
           } catch (error) {
             publishProblem = error instanceof Error ? error.message : String(error)
           }
@@ -655,6 +700,15 @@ export function createUseSkillFileTool(context: SkillToolContext): Tool<UseSkill
   }
 }
 
+/** The writable folder holding a skill to delete: the save folder, else the personal one when it is there. */
+async function deletableFolder(context: SkillToolContext, name: string): Promise<string> {
+  const has = async (dir: string): Promise<boolean> =>
+    (await exists(path.join(dir, skillFileName(name)))) || (await exists(path.join(dir, name, 'SKILL.md')))
+  if (await has(context.skillsDir)) return context.skillsDir
+  if (context.personalSkillsDir !== undefined && (await has(context.personalSkillsDir))) return context.personalSkillsDir
+  return context.skillsDir
+}
+
 export function createDeleteSkillTool(context: SkillToolContext): Tool<DeleteSkillParams> {
   return {
     name: 'delete_skill',
@@ -663,14 +717,15 @@ export function createDeleteSkillTool(context: SkillToolContext): Tool<DeleteSki
     parametersSchema: deleteParams,
 
     async preview(params): Promise<ToolPreview> {
-      const filePath = await resolveSkillPath(context.skillsDir, params.name)
+      const filePath = await resolveSkillPath(await deletableFolder(context, params.name), params.name)
       // A diff to nothing, so the user sees what is being discarded rather than just a name.
       return { kind: 'diff', path: filePath, before: await readIfPresent(filePath), after: '' }
     },
 
     async execute(params): Promise<ToolResult> {
       try {
-        const filePath = await resolveSkillPath(context.skillsDir, params.name)
+        const root = await deletableFolder(context, params.name)
+        const filePath = await resolveSkillPath(root, params.name)
         /*
          * A folder skill is removed whole, not just its SKILL.md.
          *
@@ -680,9 +735,9 @@ export function createDeleteSkillTool(context: SkillToolContext): Tool<DeleteSki
          * a recursive delete of somewhere else.
          */
         const folder = path.dirname(filePath)
-        const isFolderSkill = path.resolve(folder) !== path.resolve(context.skillsDir)
+        const isFolderSkill = path.resolve(folder) !== path.resolve(root)
         if (isFolderSkill) {
-          await fs.rm(await confine(folder, context.skillsDir), { recursive: true, force: true })
+          await fs.rm(await confine(folder, root), { recursive: true, force: true })
         } else {
           await fs.rm(filePath, { force: true })
         }

@@ -40,6 +40,7 @@ const svg = (paths, extra = '') =>
   paths === 'cog' ? `<svg viewBox="0 0 24 24" class="cog" ${extra}>${COG}</svg>` :
   paths === 'key24' ? `<svg viewBox="0 0 24 24" class="cog" ${extra}><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>` : `<svg viewBox="0 0 16 16" ${extra}>${paths}</svg>`
 const ICONS = {
+  clock: '<circle cx="8" cy="8" r="5.75"/><path d="M8 4.75V8l2.25 1.5"/>',
   folder: '<path d="M1.75 4.25c0-.83.67-1.5 1.5-1.5h3l1.5 1.75h5c.83 0 1.5.67 1.5 1.5v5.75c0 .83-.67 1.5-1.5 1.5h-9.5c-.83 0-1.5-.67-1.5-1.5z"/>',
   moon: '<path d="M13.25 9.6A5.5 5.5 0 0 1 6.4 2.75a5.5 5.5 0 1 0 6.85 6.85z"/>',
   pin: '<path d="M9.75 1.75 14.25 6.25 11.5 7.5 8.5 10.5 8.75 13 3 7.25 5.5 7.5 8.5 4.5z"/><path d="m5.75 10.25-4 4"/>',
@@ -64,6 +65,7 @@ const ICONS = {
   push: '<circle cx="8" cy="11" r="2.25"/><path d="M8 8.75V2.5M5.5 5 8 2.5 10.5 5"/>',
   pull: '<path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10"/>',
   alert: '<path d="M8 1.75 14.5 13.5h-13z"/><path d="M8 6.25v3.5M8 11.6v.01"/>',
+  archive: '<rect x="1.75" y="2.75" width="12.5" height="3" rx=".75"/><path d="M2.75 5.75v6.75c0 .41.34.75.75.75h9c.41 0 .75-.34.75-.75V5.75M6.5 8.5h3"/>',
 }
 
 // ─── Bridge to Rust ──────────────────────────────────────────────────────────
@@ -92,6 +94,8 @@ window.__sun = {
     const handler = HANDLERS[message.type]
     if (handler !== undefined) handler(message)
   },
+  // For shell.test.ts: the branch label rule, held to the same cases as Light Code's.
+  branchLabel: (name) => branchLabel(name),
 }
 
 const HANDLERS = {
@@ -128,6 +132,16 @@ const HANDLERS = {
     if (changed) renderPanes()
     if (changed) renderTabs()
     renderMemory()
+  },
+  branches(m) {
+    if (openModal?.kind === 'branch' && openModal.project === m.id) openModal.fill?.(m)
+  },
+  branchFailed(m) {
+    if (openModal?.kind === 'branch' && openModal.project === m.id) openModal.fail?.(m.error)
+    else notice(m.error, 'error')
+  },
+  branchCheck(m) {
+    confirmCloseBranch(m)
   },
   url(m) {
     model.urls[m.id] = m.url
@@ -201,6 +215,12 @@ const HANDLERS = {
   },
   reports(m) {
     if (openModal?.kind === 'reportList') openModal.list(m.reports)
+  },
+  fileSaved(m) {
+    const frame = $(`.pane[data-id="${m.id}"] iframe`)
+    const url = model.urls[m.id]
+    if (frame?.contentWindow == null || url === undefined) return
+    frame.contentWindow.postMessage({ source: 'sun', saved: { requestId: m.requestId, path: m.path, error: m.error } }, new URL(url).origin)
   },
   pathPicked(m) {
     const frame = $(`.pane[data-id="${m.id}"] iframe`)
@@ -426,6 +446,37 @@ const chatName = (key) => {
   if (!key.includes('~')) return p?.firstChatName ?? 'Chat 1'
   return p?.chats?.find((c) => `${p.id}~${c.id}` === key)?.name ?? 'Chat'
 }
+/**
+ * The branch a chat works on: a branch chat's own, or - for the first chat - the codebase's current one.
+ * Shown under the chat's name; renaming the chat never changes it.
+ */
+const chatBranch = (key) => {
+  const p = model.projects.find((x) => x.id === projectOf(key))
+  if (p === undefined) return undefined
+  const chat = key.includes('~') ? p.chats?.find((c) => `${p.id}~${c.id}` === key) : undefined
+  // A chat without a folder of its own works in the codebase's folder, so it is on the codebase's branch.
+  return chat?.branch ?? gitOf(p)?.branch ?? undefined
+}
+/** A chat working in its own branch folder (a git worktree), which "Close branch" may remove. */
+const isBranchChat = (key) => {
+  const p = model.projects.find((x) => x.id === projectOf(key))
+  return key.includes('~') && p?.chats?.find((c) => `${p.id}~${c.id}` === key)?.folder !== undefined
+}
+/**
+ * A long branch name, trimmed - never through a leading Jira key, the part people look for. The same rule
+ * as Light Code's packages/core/src/git/branchLabel.ts; shell.test.ts holds the two to the same cases.
+ */
+function branchLabel(branch, max = 28) {
+  if (branch.length <= max) return branch
+  const jira = /^([A-Za-z][A-Za-z0-9]+-\d+)([-_/].*)?$/.exec(branch)
+  if (jira !== null) {
+    const key = jira[1]
+    const rest = (jira[2] ?? '').replace(/^[-_/]/, '')
+    const room = Math.max(max - key.length - 2, 4)
+    return rest.length === 0 ? key : `${key} ${rest.length > room ? `${rest.slice(0, room - 1)}…` : rest}`
+  }
+  return `${branch.slice(0, max - 1)}…`
+}
 const PHASE_RANK = ['stopped', 'sleeping', 'failed', 'starting', 'running']
 const AGENT_RANK = ['idle', 'busy', 'attention']
 
@@ -504,7 +555,14 @@ function renderTabs() {
           },
         },
         el('span', { class: `dot ${dotClass(k)}` }),
-        el('span', { class: 'tab-name', text: chatName(k) }),
+        el(
+          'span',
+          { class: 'tab-text' },
+          el('span', { class: 'tab-name', text: chatName(k) }),
+          chatBranch(k) !== undefined
+            ? el('span', { class: 'tab-branch', text: branchLabel(chatBranch(k)), title: `Branch ${chatBranch(k)}${isBranchChat(k) ? ' - in its own folder' : ''}` })
+            : null,
+        ),
         s.unread && k !== key ? el('span', { class: 'unread' }) : null,
         k.includes('~')
           ? el('span', {
@@ -522,18 +580,104 @@ function renderTabs() {
     }),
     el('button', {
       class: 'tab-new',
-      title: 'New chat (Ctrl+T) - another agent on this codebase',
+      title: (p.archived ?? []).length > 0
+        ? 'New chat - blank, on a branch, or an archived one (Ctrl+T: blank)'
+        : 'New chat - blank, or on a branch in its own folder (Ctrl+T: blank)',
       'aria-label': 'New chat',
       html: svg(ICONS.plus),
-      onclick: () => send('newChat', { id: p.id }),
+      onclick: (e) => newChat(p, e.currentTarget),
     }),
   )
 }
 
+/**
+ * Closing a chat asks what to do with it (asked for: "user should be able to select close the chat or
+ * archive the chat"). Archive keeps its conversation and offers it again from New chat; Close deletes
+ * its folder. Either stops its agent. Archive is the default button, because it loses nothing.
+ */
 function closeChat(key) {
   const s = statusOf(key)
-  if (s.phase === 'running' && s.agent !== 'idle' && !confirm(`${chatName(key)} is still working. Stop it and close the chat?`)) return
-  send('closeChat', { id: key })
+  const working = s.phase === 'running' && s.agent !== 'idle'
+  const name = chatName(key)
+  showModal('closeChat', (scrim) => {
+    const done = (archive) => {
+      closeModal()
+      send('closeChat', { id: key, archive })
+    }
+    const archive = el('button', { class: 'primary', text: 'Archive', title: 'Keep its conversation; open it again from New chat', onclick: () => done(true) })
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(480px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `Close ${name}?` })),
+        el(
+          'div',
+          { class: 'body' },
+          working ? el('p', { class: 'sub form-error', text: `${name} is still working - either choice stops it.` }) : null,
+          el('p', { class: 'sub', text: 'Archive takes the tab away and keeps the conversation: New chat offers it again, exactly where it was left.' }),
+          el('p', { class: 'sub', text: "Close deletes this chat's conversations, reports and log for good. Files it changed in the codebase stay as they are." }),
+        ),
+        el(
+          'footer',
+          {},
+          el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }),
+          el('button', { class: 'secondary danger', text: 'Close and delete', onclick: () => done(false) }),
+          archive,
+        ),
+      ),
+    )
+    setTimeout(() => archive.focus())
+  })
+}
+
+/**
+ * New chat: blank, or one brought back from the archive. With nothing archived it simply opens a
+ * blank chat, as before; Ctrl+T is always blank.
+ */
+function newChat(project, anchor) {
+  const archived = project.archived ?? []
+  // Ctrl+T, with no button to anchor a menu to, is a quick blank chat; the + button always offers the choice.
+  if (anchor === undefined) return send('newChat', { id: project.id })
+  closeMenu()
+  const box = anchor.getBoundingClientRect()
+  const when = (ms) => (ms > 0 ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '')
+  const menu = el(
+    'div',
+    { class: 'menu', role: 'menu' },
+    el('button', { onclick: () => { closeMenu(); send('newChat', { id: project.id }) } }, el('span', { html: svg(ICONS.plus) }), 'New blank chat'),
+    el('button', { onclick: () => { closeMenu(); openBranchDialog(project) } }, el('span', { html: svg(ICONS.plus) }), 'New chat on a branch…'),
+    archived.length > 0 ? el('hr') : null,
+    archived.length > 0 ? el('div', { class: 'menu-label', text: 'Open an archived chat' }) : null,
+    ...archived.map((chat) =>
+      el(
+        'div',
+        { class: 'menu-row' },
+        el(
+          'button',
+          { title: `Archived ${when(chat.archivedAt)}`, onclick: () => { closeMenu(); send('newChat', { id: project.id, archived: chat.id }) } },
+          el('span', { html: svg(ICONS.archive) }),
+          el('span', { class: 'menu-row-name', text: chat.name }),
+          el('span', { class: 'menu-row-when', text: when(chat.archivedAt) }),
+        ),
+        el('button', {
+          class: 'danger menu-row-delete',
+          title: `Delete ${chat.name} and its conversation for good`,
+          'aria-label': `Delete ${chat.name}`,
+          html: svg(ICONS.remove),
+          onclick: () => {
+            if (!confirm(`Delete the archived chat "${chat.name}" and its conversation for good?`)) return
+            closeMenu()
+            send('deleteArchivedChat', { id: project.id, chat: chat.id })
+          },
+        }),
+      ),
+    ),
+  )
+  document.body.append(menu)
+  const size = menu.getBoundingClientRect()
+  menu.style.left = `${Math.max(8, Math.min(box.left, innerWidth - size.width - 8))}px`
+  menu.style.top = `${Math.min(box.bottom + 4, innerHeight - size.height - 8)}px`
+  dismissOnOutside(menu)
 }
 
 /** Right-click on a chat tab: what can be done to that one chat. */
@@ -556,16 +700,133 @@ function showChatMenu(project, key, tab, x, y) {
     'div',
     { class: 'menu', role: 'menu' },
     item('rename', 'Rename chat', () => renameChat(key, tab)),
-    item('plus', 'New chat', () => send('newChat', { id: project.id })),
+    item('plus', 'New chat', () => newChat(project, tabs.querySelector('.tab-new') ?? undefined)),
+    item('plus', 'New chat on a branch…', () => openBranchDialog(project)),
     item('log', 'View agent log', () => send('openLog', { id: key })),
+    // This chat's own folder - a branch chat's branch folder - to run and debug it in VS Code.
+    item('vscode', isBranchChat(key) ? 'Open this branch in VS Code' : 'Open in VS Code', () => send('openVsCode', { id: key })),
+    item('explorer', 'Open in File Explorer', () => send('openExplorer', { id: key })),
     key.includes('~') ? el('hr') : null,
     key.includes('~') ? item('remove', 'Close chat', () => closeChat(key), true) : null,
+    isBranchChat(key) ? item('remove', 'Close branch… (remove its folder)', () => send('checkBranch', { id: key }), true) : null,
   )
   document.body.append(menu)
   const box = menu.getBoundingClientRect()
   menu.style.left = `${Math.min(x, innerWidth - box.width - 8)}px`
   menu.style.top = `${Math.min(y, innerHeight - box.height - 8)}px`
-  setTimeout(() => document.addEventListener('pointerdown', (e) => !menu.contains(e.target) && closeMenu(), { once: true }))
+  dismissOnOutside(menu)
+}
+
+/**
+ * New chat on a branch (asked for: "work in different branches under same repo ... run and test the changes
+ * in different branches too"). Each branch chat works in its own folder beside the repository - a git
+ * worktree - so it can be edited, run and tested while other chats work on other branches.
+ */
+function openBranchDialog(project) {
+  showModal('branch', (scrim, modal) => {
+    modal.project = project.id
+    const body = el('div', { class: 'body' }, el('p', { class: 'sub', text: 'Reading branches…' }))
+    const error = el('p', { class: 'sub form-error', hidden: true })
+    const open = (branch, from) => {
+      error.hidden = true
+      body.replaceChildren(el('p', { class: 'sub', text: from === undefined ? `Opening ${branch}…` : `Making ${branch} from ${from}…` }))
+      send('newBranchChat', { id: project.id, branch, ...(from !== undefined ? { from } : {}) })
+      setTimeout(() => openModal?.kind === 'branch' && closeModal(), 400)
+    }
+    modal.fail = (text) => {
+      error.textContent = text
+      error.hidden = false
+    }
+    modal.fill = (m) => {
+      if (m.error !== undefined) return modal.fail(m.error)
+      const b = m.branches
+      // Git makes a branch with the first commit: an empty repository has nothing to open or start from.
+      if (b.noCommits === true) {
+        body.replaceChildren(
+          el('p', { class: 'sub', text: `${project.name} has no commits yet, so there is no branch to open or to start a new one from - git makes a branch with the first commit.` }),
+          el('p', { class: 'sub', text: 'Make a first commit (Commit and push in the sidebar, or ask the agent to commit), then open branches here.' }),
+        )
+        return
+      }
+      const openIn = new Map(b.open.map((o) => [o.branch, o]))
+      const row = (branch, note, onclick) =>
+        el('button', { class: 'branch-row', title: branch, onclick }, el('span', { class: 'branch-name', text: branch }), note ? el('span', { class: 'branch-note', text: note }) : null)
+      const name = el('input', { type: 'text', placeholder: 'e.g. PAY-1234-add-retry', 'aria-label': 'New branch name' })
+      // Starts from the main branch by default (the remote's default, else main or master) - not from what is checked out.
+      const bases = [...new Set([b.defaultBranch, b.current, ...b.local, ...b.remote].filter(Boolean))]
+      const base = el(
+        'select',
+        { 'aria-label': 'Start the new branch from', title: 'The branch the new one starts from' },
+        ...bases.map((x) => el('option', { value: x, text: x === b.defaultBranch ? `${x} (main branch)` : x === b.current ? `${x} (the codebase is on it)` : x })),
+      )
+      const make = el('button', { class: 'primary', text: 'Make branch', onclick: () => name.value.trim() !== '' && base.value !== '' && open(name.value.trim(), base.value) })
+      if (bases.length === 0) why(make, 'There is no branch to start from.')
+      body.replaceChildren(
+        el('p', { class: 'sub', text: 'Each branch chat works in its own folder beside the repository, so it can run and test that branch while other chats work on others. The codebase itself stays on its branch.' }),
+        el('div', { class: 'field-label', text: 'New branch' }),
+        el('div', { class: 'branch-new' }, name, el('span', { class: 'sub', text: 'starting from' }), base, make),
+        el('div', { class: 'field-label', text: 'Branches' }),
+        el(
+          'div',
+          { class: 'branch-list' },
+          ...b.local.map((branch) => {
+            const where = openIn.get(branch)
+            return row(branch, where === undefined ? '' : where.main ? 'the codebase is on it' : 'open in a folder - opens its chat', () => open(branch))
+          }),
+          ...b.remote.map((branch) => row(branch, 'remote - opened as a local branch tracking it', () => open(branch))),
+        ),
+      )
+      setTimeout(() => name.focus())
+    }
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(560px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `New chat on a branch — ${project.name}` })),
+        body,
+        error,
+        el('footer', {}, el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal })),
+      ),
+    )
+    send('listBranches', { id: project.id })
+  })
+}
+
+/** "Close branch": says what would be lost, then removes the folder - never the branch - and the chat. */
+function confirmCloseBranch(m) {
+  const name = chatName(m.id)
+  const branch = chatBranch(m.id) ?? ''
+  const st = m.status ?? { uncommitted: 0 }
+  const losing = [
+    st.uncommitted > 0 ? `${st.uncommitted} uncommitted change${st.uncommitted === 1 ? '' : 's'} will be lost.` : '',
+    st.unpushed > 0 ? `${st.unpushed} commit${st.unpushed === 1 ? ' is' : 's are'} not pushed - they stay on the branch.` : '',
+    st.noUpstream ? 'This branch has never been pushed - its commits stay in the repository on this computer.' : '',
+  ].filter(Boolean)
+  showModal('closeBranch', (scrim) => {
+    const go = el('button', {
+      class: losing.length > 0 && st.uncommitted > 0 ? 'secondary danger' : 'primary',
+      text: st.uncommitted > 0 ? 'Remove anyway' : 'Remove folder',
+      onclick: () => {
+        closeModal()
+        send('closeBranch', { id: m.id, force: st.uncommitted > 0 })
+      },
+    })
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(500px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `Close branch ${branch}?` })),
+        el(
+          'div',
+          { class: 'body' },
+          el('p', { class: 'sub', text: `Removes the folder ${m.folder} and deletes ${name}'s conversation. The branch ${branch} and its commits stay in the repository - open it again any time.` }),
+          m.error !== undefined ? el('p', { class: 'sub form-error', text: `Could not check the folder: ${m.error}` }) : null,
+          ...losing.map((text) => el('p', { class: 'sub form-error', text })),
+        ),
+        el('footer', {}, el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }), go),
+      ),
+    )
+  })
 }
 
 function renameChat(key, tab) {
@@ -1203,6 +1464,11 @@ window.addEventListener('message', (event) => {
     const extensions = Array.isArray(data.pick.extensions) ? data.pick.extensions.filter((e) => typeof e === 'string').slice(0, 20) : []
     send('pickPath', { id: key, purpose: data.pick.purpose.slice(0, 200), kind, extensions })
   }
+  // A Save button in the page (a diagram): Fire Code opens a Windows Save dialog and writes the file.
+  if (data.save !== null && typeof data.save === 'object' && typeof data.save.requestId === 'string' && typeof data.save.base64 === 'string') {
+    const name = typeof data.save.name === 'string' ? data.save.name.slice(0, 120) : 'file'
+    send('saveFile', { id: key, requestId: data.save.requestId.slice(0, 80), name, data: data.save.base64 })
+  }
   if (data.ready === true) {
     frame.dataset.ready = 'true'
     sendAppearance(frame)
@@ -1309,7 +1575,7 @@ function mdJoin(base, relative) {
 function mdInline(text, base) {
   const out = []
   const pattern =
-    /(`+)([\s\S]*?[^`])\1(?!`)|!?\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<)\]]+[^\s<)\].,;:!?'"])|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|~~([\s\S]+?)~~|\*([^\s*][\s\S]*?)\*|(?<![\w])_([^\s_][\s\S]*?)_(?![\w])/g
+    /(`+)([\s\S]*?[^`])\1(?!`)|!?\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<)\]]+[^\s<)\].,;:!?'"])|\*\*([\s\S]+?)\*\*|(?<![\w])__([\s\S]+?)__(?![\w])|~~([\s\S]+?)~~|\*([^\s*][\s\S]*?)\*|(?<![\w])_([^\s_][\s\S]*?)_(?![\w])/g
   let last = 0
   for (const m of text.matchAll(pattern)) {
     if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)))
@@ -1537,6 +1803,7 @@ function shortcut(name) {
   if (name === 'k') return openSwitcher()
   if (name === 'n') return openAdd()
   if (name === ',') return openSettings()
+  if (name === 'm') return dash.open ? closeDashboard() : openDashboard()
   if (name === 't' && model.active !== undefined) return send('newChat', { id: projectOf(model.active) })
   if (name === 'w' && model.active?.includes('~')) return closeChat(model.active)
   if (name === 'tab') return selectRelative(1)
@@ -1553,10 +1820,11 @@ window.addEventListener(
     if (event.key === 'Escape') {
       if ($('.menu') !== null) return closeMenu()
       if (openModal !== undefined) return closeModal()
+      if (dash.open) return closeDashboard()
     }
     if (!event.ctrlKey || event.altKey) return
     const key = event.key.toLowerCase()
-    if (['b', 'k', 'n', ',', 'tab', 't', 'w'].includes(key) || /^[1-9]$/.test(key)) {
+    if (['b', 'k', 'n', ',', 'tab', 't', 'w', 'm'].includes(key) || /^[1-9]$/.test(key)) {
       event.preventDefault()
       shortcut(`${event.shiftKey && key === 'tab' ? 'shift+' : ''}${key}`)
     }
@@ -1566,8 +1834,30 @@ window.addEventListener(
 
 // ─── Context menu ────────────────────────────────────────────────────────────
 
+/*
+ * A menu closes on any press outside it, for as long as it is open. It used to listen for one press only
+ * ({ once: true }), so a press inside the menu - a disabled item, a separator - used the listener up and the
+ * menu then stayed until Esc (reported). Capturing, so nothing below can stop it; and on the window losing
+ * focus, because a press in a chat's frame never reaches this document.
+ */
+let menuDismiss
+function dismissOnOutside(menu) {
+  setTimeout(() => {
+    if (!menu.isConnected) return
+    menuDismiss = (e) => {
+      if (e.type === 'blur' || !menu.contains(e.target)) closeMenu()
+    }
+    document.addEventListener('pointerdown', menuDismiss, true)
+    window.addEventListener('blur', menuDismiss)
+  })
+}
 function closeMenu() {
   $('.menu')?.remove()
+  if (menuDismiss !== undefined) {
+    document.removeEventListener('pointerdown', menuDismiss, true)
+    window.removeEventListener('blur', menuDismiss)
+    menuDismiss = undefined
+  }
 }
 
 function showMenu(project, x, y) {
@@ -1604,6 +1894,13 @@ function showMenu(project, x, y) {
     item('explorer', 'Open in File Explorer', () => send('openExplorer', { id: project.id })),
     el('hr'),
     item('plus', 'New chat', () => send('newChat', { id: project.id })),
+    item('plus', 'New chat on a branch…', () => openBranchDialog(project)),
+    (project.archived ?? []).length > 0
+      ? item('archive', `Open an archived chat (${String(project.archived.length)})…`, () => {
+          select(project.id)
+          setTimeout(() => newChat(project, tabs.querySelector('.tab-new') ?? undefined))
+        })
+      : null,
     running
       ? item('sleep', s.chats > 1 ? 'Sleep all chats' : 'Sleep now', each('sleep'))
       : item('play', 'Start agent', () => send('start', { id: current })),
@@ -1623,7 +1920,7 @@ function showMenu(project, x, y) {
   const box = menu.getBoundingClientRect()
   menu.style.left = `${Math.min(x, innerWidth - box.width - 8)}px`
   menu.style.top = `${Math.min(y, innerHeight - box.height - 8)}px`
-  setTimeout(() => document.addEventListener('pointerdown', (e) => !menu.contains(e.target) && closeMenu(), { once: true }))
+  dismissOnOutside(menu)
 }
 
 function startRename(project) {
@@ -2340,6 +2637,28 @@ function openSettings() {
             el(
               'span',
               { class: 'meta' },
+              el('b', { text: 'Monitoring' }),
+              el('span', {
+                text:
+                  model.monitoring?.enabled === true
+                    ? `On — ${(model.monitoring.monitors ?? []).length} monitor(s). Agents can create and control monitors; idle chats were restarted to get the tools.`
+                    : 'A dashboard of checks that run on a schedule, coloured by alert rules, with Windows notifications at the levels you choose. Agents create them.',
+              }),
+            ),
+            el(
+              'div',
+              { class: 'inline' },
+              model.monitoring?.enabled === true ? el('button', { class: 'secondary', text: 'Open', onclick: () => (closeModal(), openDashboard()) }) : null,
+              el('button', { class: 'secondary', text: 'Settings…', onclick: openMonitorSettings }),
+              toggle(model.monitoring?.enabled === true, (on) => monitorOp('settings', { patch: { enabled: on } })),
+            ),
+          ),
+          el(
+            'div',
+            { class: 'row' },
+            el(
+              'span',
+              { class: 'meta' },
               el('b', { text: 'Environment' }),
               el('span', { text: environmentSummary(s) }),
             ),
@@ -2943,6 +3262,801 @@ function openCredentials() {
   })
 }
 
+// ─── Monitoring ──────────────────────────────────────────────────────────────
+//
+// The dashboard: one glowing tile per monitor, Team and Personal, over the whole window. The monitors,
+// their colours and every number come from Rust (monitor.rs, monitoring.rs); this only draws them and
+// sends the user's clicks back as monitoring operations. A tile opens the monitor's grid in its own window.
+
+const MON_LEVELS = ['red', 'amber', 'purple', 'blue', 'green', 'grey']
+const MON_LABEL = { red: 'Failure', amber: 'Warning', purple: 'No data', blue: 'Information', green: 'All clear', grey: 'Off or to review' }
+const MON_MODES = [
+  ['off', 'Off', 'Never'],
+  ['dashboard', 'Count', 'Only counted on the dashboard button and title bar'],
+  ['silent', 'Silent', 'A notification without sound'],
+  ['toast', 'Sound', 'A notification with its sound; the taskbar flashes'],
+  ['urgent', 'Stays', 'Stays on screen until dismissed, with the reminder sound'],
+  ['alarm', 'Alarm', 'Stays on screen with a looping alarm until dismissed'],
+]
+const dash = { open: false, search: '', tab: 'all', level: undefined }
+const monitorOp = (op, args = {}) => send('monitor', { op, args })
+
+function monAgo(seconds) {
+  if (seconds === undefined || seconds === null) return 'not checked yet'
+  const d = Math.round(Date.now() / 1000 - seconds)
+  if (d < 0) return -d < 90 ? 'in a moment' : -d < 3600 ? `in ${Math.round(-d / 60)} min` : `in ${Math.round(-d / 3600)} h`
+  return d < 45 ? 'just now' : d < 3600 ? `${Math.round(d / 60)} min ago` : d < 86400 ? `${Math.round(d / 3600)} h ago` : `${Math.round(d / 86400)} d ago`
+}
+const monEvery = (s) => (s == null ? '' : s % 86400 === 0 ? `every ${s / 86400} d` : s % 3600 === 0 ? `every ${s / 3600} h` : `every ${Math.round(s / 60)} min`)
+
+/** The worst colour among monitors that are running, and how many are red or amber. */
+function monitorSummary() {
+  const list = model.monitoring?.monitors ?? []
+  // Snoozed and paused monitors keep their own tile's colour, but do not colour the whole dashboard: a
+  // snoozed red is somebody having said "I know".
+  const live = list.filter((m) => m.approved && !m.paused && !m.snoozeUntil)
+  const worst = MON_LEVELS.find((l) => live.some((m) => m.level === l)) ?? (list.length > 0 ? 'green' : 'grey')
+  const alerting = list.filter((m) => (m.level === 'red' || m.level === 'amber') && !m.snoozeUntil).length
+  const review = list.filter((m) => m.status === 'review').length
+  return { worst, alerting, review }
+}
+
+function renderMonitorButton() {
+  const on = model.monitoring?.enabled === true
+  const { worst, alerting, review } = monitorSummary()
+  for (const [btn, orb] of [['#monitoring-btn', '#monitoring-orb'], ['#rail-monitoring', '#rail-monitoring-orb']]) {
+    $(btn).hidden = !on
+    $(orb).className = `orb lv-${worst}`
+  }
+  const count = $('#monitoring-count')
+  count.hidden = alerting === 0 && review === 0
+  count.textContent = alerting > 0 ? String(alerting) : review > 0 ? `${review} to review` : ''
+  count.className = `monitor-count${alerting > 0 ? ` lv-${worst}` : ' review'}`
+  $('#monitoring-btn').title = alerting > 0 ? `Monitoring — ${alerting} alerting (Ctrl+M)` : 'Monitoring dashboard (Ctrl+M)'
+  if (!on && dash.open) closeDashboard()
+}
+
+function openDashboard() {
+  if (model.monitoring?.enabled !== true) {
+    notice('Monitoring is off. Switch it on in Settings → Monitoring.')
+    return
+  }
+  dash.open = true
+  $('#monitoring').hidden = false
+  document.body.classList.add('dashboard-open')
+  renderDashboard()
+  monitorOp('rescan')
+  setTimeout(() => $('#dash-search')?.focus(), 0)
+}
+
+function closeDashboard() {
+  dash.open = false
+  $('#monitoring').hidden = true
+  $('#dash-tip').hidden = true
+  document.body.classList.remove('dashboard-open')
+  $(`.pane[data-id="${model.active}"] iframe`)?.focus()
+}
+
+/** A row of small bars, one per recent check, in that check's colour - how it has been lately. */
+/**
+ * The run history, as a wide button across the bottom of a tile (asked for): a bar per recent check, oldest on
+ * the left. Pressing it opens the monitor's window on History - every check kept, earlier days too (90 days by
+ * default); pressing one bar opens it on that check.
+ */
+function historyStrip(m) {
+  const points = (m.history ?? []).slice(-24)
+  const open = (at) => {
+    $('#dash-tip').hidden = true
+    monitorOp('open', { name: m.name, sheet: 'history', ...(at !== undefined ? { at } : {}) })
+  }
+  const stamp = (at) => new Date(at * 1000).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  const strip = el(
+    'span',
+    {
+      class: 'spark-btn',
+      role: 'button',
+      tabindex: '0',
+      'aria-label': `Run history of ${m.title}`,
+      title: points.length > 0 ? 'Run history - the last checks, oldest on the left. Click for every check, earlier days too; click a bar for that check.' : 'Run history - no checks yet',
+    },
+    el('span', { class: 'spark' }, ...points.map(([at, level]) => el('i', { class: `lv-${level}`, 'data-at': String(at), title: `${stamp(at)} - ${MON_LABEL[level] ?? level} - open this check` }))),
+  )
+  // Inside the tile, which is a button too: the tile's own click (its grid) must not also fire.
+  strip.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const at = e.target instanceof HTMLElement ? e.target.dataset.at : undefined
+    open(at !== undefined ? Number(at) : undefined)
+  })
+  strip.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    e.preventDefault()
+    e.stopPropagation()
+    open()
+  })
+  return strip
+}
+
+function monitorMatches(m) {
+  if (dash.tab === 'team' && !m.team) return false
+  if (dash.tab === 'personal' && m.team) return false
+  if (dash.level !== undefined && m.level !== dash.level) return false
+  const needle = dash.search.trim().toLowerCase()
+  if (!needle) return true
+  return [m.title, m.name, m.summary, m.headline, m.origin, m.source, MON_LABEL[m.level]].some((t) => (t ?? '').toLowerCase().includes(needle))
+}
+
+function tile(m) {
+  const node = el(
+    'button',
+    {
+      class: `tile lv-${m.level}${m.status === 'review' ? ' review' : ''}${m.paused ? ' paused' : ''}${m.running ? ' running' : ''}`,
+      'data-name': m.name,
+      'aria-label': `${m.title}: ${MON_LABEL[m.level]}. ${m.headline}`,
+      onclick: () => clickTile(m),
+    },
+    el('span', { class: 'tile-glow', 'aria-hidden': 'true' }),
+    el(
+      'span',
+      { class: 'tile-top' },
+      el('span', { class: `orb lv-${m.level}` }),
+      m.status === 'review'
+        ? el('span', { class: 'tile-flag', text: 'Review' })
+        : m.status === 'noTeam'
+          ? el('span', { class: 'tile-flag', text: 'Needs team history' })
+        : m.snoozeUntil
+          ? el('span', { class: 'tile-flag', text: 'Snoozed' })
+          : m.paused
+            ? el('span', { class: 'tile-flag', text: 'Paused' })
+            : m.notHere
+              // A team monitor this computer cannot run: colleagues' Fire Code does - the reason on hover.
+              ? el('span', { class: 'tile-flag', text: 'Runs elsewhere', title: m.notHere })
+            : m.offline > 0
+              ? el('span', { class: 'tile-flag', text: `Offline · ${m.offline} not shared`, title: 'Checked on this computer while the team history could not be reached. Offered to the team when it can be - unless a colleague already has that check.' })
+            : m.openAlerts
+              ? el('span', { class: 'tile-count', text: String(m.openAlerts) })
+              : null,
+    ),
+    el('span', { class: 'tile-title', text: m.title }),
+    el('span', { class: 'tile-headline', text: m.headline }),
+    el('span', { class: 'tile-foot' }, el('span', { class: `tile-when${m.waitingFor || monLate(m) ? ' late' : ''}`, text: m.waitingFor ? 'waiting…' : m.running ? 'checking…' : monLate(m) ? `due ${monAgo(m.nextRun)}` : monAgo(m.lastRun), title: m.waitingFor || '' })),
+    historyStrip(m),
+  )
+  node.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    tileMenu(m, e.clientX, e.clientY)
+  })
+  node.addEventListener('mouseenter', () => showTileTip(m, node))
+  node.addEventListener('mouseleave', () => ($('#dash-tip').hidden = true))
+  return node
+}
+
+/** A check more than a minute and a half past when it should have started, and not running: said on the tile. */
+function monLate(m) {
+  return !m.running && !m.paused && m.approved && m.nextRun && m.nextRun < Date.now() / 1000 - 90
+}
+
+function showTileTip(m, node) {
+  const tip = $('#dash-tip')
+  tip.className = `dash-tip lv-${m.level}`
+  tip.replaceChildren(
+    el('div', { class: 'tip-head' }, el('span', { class: `orb lv-${m.level}` }), el('b', { text: m.title }), el('span', { class: 'tip-level', text: MON_LABEL[m.level] })),
+    el('p', { class: 'tip-summary', text: m.summary || m.description || '' }),
+    el('p', { class: 'tip-headline', text: m.headline }),
+    el(
+      'dl',
+      {},
+      el('dt', { text: 'For' }),
+      el('dd', { text: `${m.team ? 'The team' : 'You only'} · ${m.origin}` }),
+      m.source ? [el('dt', { text: 'Reads' }), el('dd', { text: m.source })] : null,
+      m.schedule ? [el('dt', { text: 'Checks' }), el('dd', { text: `${m.schedule} · last ${monAgo(m.lastRun)}${m.lastBy ? ` by ${m.lastBy}` : ''}${m.nextRun ? ` · next ${monAgo(m.nextRun)}` : ''}` })] : null,
+      m.waitingFor ? [el('dt', { text: 'Waiting' }), el('dd', { text: m.waitingFor })] : null,
+      m.author || m.updatedBy ? [el('dt', { text: 'Written by' }), el('dd', { text: `${m.author ?? 'not named'}${m.updatedAt || m.updatedBy ? ` · updated ${m.updatedAt ? monAgo(m.updatedAt) : ''}${m.updatedBy ? ` by ${m.updatedBy}` : ''}` : ''}${m.version ? ` · v${m.version}` : ''}` })] : null,
+      m.snoozeUntil ? [el('dt', { text: 'Snoozed' }), el('dd', { text: `until ${new Date(m.snoozeUntil * 1000).toLocaleTimeString()}` })] : null,
+      m.mode ? [el('dt', { text: 'Notifies' }), el('dd', { text: MON_MODES.find(([id]) => id === m.mode)?.[2] ?? m.mode })] : null,
+    ),
+    el('p', { class: 'tip-hint', text: m.status === 'review' ? 'Click to review what it runs, and approve it.' : 'Click to open its grid · right-click for more' }),
+  )
+  tip.hidden = false
+  const r = node.getBoundingClientRect()
+  const w = tip.offsetWidth
+  const h = tip.offsetHeight
+  const left = r.right + 12 + w < innerWidth ? r.right + 12 : Math.max(8, r.left - w - 12)
+  tip.style.left = `${left}px`
+  tip.style.top = `${Math.max(8, Math.min(r.top, innerHeight - h - 8))}px`
+}
+
+function clickTile(m) {
+  $('#dash-tip').hidden = true
+  if (m.status === 'review') return reviewMonitor(m)
+  if (m.status === 'broken') return brokenMonitor(m)
+  monitorOp('open', { name: m.name })
+}
+
+function tileMenu(m, x, y) {
+  closeMenu()
+  $('#dash-tip').hidden = true
+  const item = (icon, label, action, extra = {}) =>
+    why(
+      el('button', { class: extra.danger ? 'danger' : '', onclick: () => (closeMenu(), action()) }, el('span', { html: svg(ICONS[icon]) }), label, extra.checked ? el('span', { class: 'check', html: svg(ICONS.check) }) : null),
+      extra.disabled,
+    )
+  const menu = el(
+    'div',
+    { class: 'menu', role: 'menu' },
+    m.status === 'review'
+      ? item('check', 'Review and approve…', () => reviewMonitor(m))
+      : [item('play', 'Open grid', () => monitorOp('open', { name: m.name })), item('restart', 'Check now', () => monitorOp('run', { name: m.name }))],
+    el('hr'),
+    m.paused ? item('play', 'Resume checks', () => monitorOp('resume', { name: m.name })) : item('sleep', 'Pause checks', () => monitorOp('pause', { name: m.name })),
+    item('moon', 'Snooze 1 hour', () => monitorOp('snooze', { name: m.name, minutes: 60 })),
+    item('moon', 'Snooze until tomorrow', () => monitorOp('snooze', { name: m.name, minutes: 1440 })),
+    item('moon', 'Snooze until…', () => snoozeUntil(m)),
+    m.snoozeUntil ? item('sun', 'End the snooze', () => monitorOp('snooze', { name: m.name, minutes: 0 })) : null,
+    el('hr'),
+    el('div', { class: 'menu-label', text: 'How this one notifies' }),
+    item('info', 'As Settings say', () => monitorOp('notify', { name: m.name, mode: 'default' }), { checked: !m.mode }),
+    ...MON_MODES.map(([id, label, about]) => item('info', `${label} — ${about.toLowerCase()}`, () => monitorOp('notify', { name: m.name, mode: id }), { checked: m.mode === id })),
+    el('hr'),
+    // In the monitor's own window, where the schedule it changes is in view.
+    item('clock', 'Edit schedule…', () => monitorOp('open', { name: m.name, sheet: 'schedule' })),
+    item('explorer', 'Show the skill file', () => monitorOp('openFile', { name: m.name })),
+    item('remove', 'Delete its history…', () => confirmDeleteHistory(m), { danger: true }),
+    item('remove', 'Delete this monitor…', () => confirmDeleteMonitor(m), { danger: true }),
+    m.approved ? item('remove', 'Take back the approval', () => monitorOp('revoke', { name: m.name }), { danger: true }) : null,
+  )
+  document.body.append(menu)
+  const box = menu.getBoundingClientRect()
+  menu.style.left = `${Math.min(x, innerWidth - box.width - 8)}px`
+  menu.style.top = `${Math.min(y, innerHeight - box.height - 8)}px`
+  dismissOnOutside(menu)
+}
+
+/** What approving a monitor lets run, shown whole (invariant 8: the spec itself, not a description). */
+function reviewMonitor(m) {
+  showModal('monitorReview', (scrim) => {
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(720px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `Review “${m.title}”` }), el('p', { class: 'sub', text: `${m.team ? 'A team monitor' : 'A personal monitor'} from ${m.origin}. It runs on this computer, unattended, once you approve it.` })),
+        el(
+          'div',
+          { class: 'body' },
+          el('p', { text: m.summary || m.description || '' }),
+          m.source ? el('p', {}, 'It reads ', el('b', { text: m.source }), ` ${monEvery(m.every)}.`) : null,
+          el('pre', { class: 'mon-spec', text: m.block ?? '(the definition could not be read)' }),
+          el('p', { class: 'hint', text: 'A tool it names is still subject to its own approval: a Python tool must already be approved here, and monitors may never run tools that change things.' }),
+        ),
+        el(
+          'footer',
+          {},
+          el('button', { class: 'secondary', text: 'Show the file', onclick: () => monitorOp('openFile', { name: m.name }) }),
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Not now', onclick: closeModal }),
+          el('button', { class: 'primary', text: 'Approve and run', onclick: () => (monitorOp('approve', { name: m.name }), closeModal()) }),
+        ),
+      ),
+    )
+  })
+}
+
+function brokenMonitor(m) {
+  showModal('monitorBroken', (scrim) => {
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(600px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `“${m.title}” cannot run` })),
+        el('div', { class: 'body' }, el('p', { text: m.specError ?? m.headline }), el('p', { class: 'hint', text: 'Ask the agent to fix it with monitor_create under the same name, or edit its skill file.' })),
+        el('footer', {}, el('button', { class: 'secondary', text: 'Show the file', onclick: () => monitorOp('openFile', { name: m.name }) }), el('span', { class: 'spacer' }), el('button', { class: 'primary', text: 'Close', onclick: closeModal })),
+      ),
+    )
+  })
+}
+
+function renderDashboard() {
+  const root = $('#monitoring')
+  const data = model.monitoring ?? { monitors: [] }
+  const all = data.monitors ?? []
+  const sorted = [...all].sort((a, b) => MON_LEVELS.indexOf(a.level) - MON_LEVELS.indexOf(b.level) || a.title.localeCompare(b.title))
+  const shown = sorted.filter(monitorMatches)
+  const count = (pred) => all.filter(pred).length
+  const focused = document.activeElement?.id === 'dash-search'
+  const search = el('input', { id: 'dash-search', type: 'search', placeholder: 'Search alerts', value: dash.search, spellcheck: 'false', 'aria-label': 'Search alerts' })
+  search.addEventListener('input', () => {
+    dash.search = search.value
+    renderDashboard()
+  })
+  const tab = (id, label, n) => el('button', { class: dash.tab === id ? 'on' : '', onclick: () => ((dash.tab = id), renderDashboard()) }, label, el('span', { class: 'tab-n', text: String(n) }))
+  const levelChip = (level) => {
+    const n = all.filter((m) => m.level === level && (dash.tab === 'all' || (dash.tab === 'team') === m.team)).length
+    if (n === 0 && dash.level !== level) return null
+    return el('button', { class: `level-chip lv-${level}${dash.level === level ? ' on' : ''}`, title: MON_LABEL[level], onclick: () => ((dash.level = dash.level === level ? undefined : level), renderDashboard()) }, el('i', { class: 'mon-dot' }), `${MON_LABEL[level]} ${n}`)
+  }
+  const grid = (list) => el('div', { class: 'tiles' }, ...list.map(tile))
+  const section = (title, list, hint) =>
+    list.length === 0 ? null : el('section', { class: 'dash-section' }, el('h3', {}, title, el('span', { class: 'dash-section-n', text: String(list.length) }), hint ? el('span', { class: 'dash-section-hint', text: hint }) : null), grid(list))
+  const executor = data.executor ?? {}
+  const body =
+    all.length === 0
+      ? el(
+          'div',
+          { class: 'dash-empty' },
+          el('div', { class: 'dash-empty-orbs', 'aria-hidden': 'true' }, ...['green', 'blue', 'amber', 'red', 'purple'].map((l) => el('span', { class: `orb lv-${l}` }))),
+          el('h2', { text: 'No monitors yet' }),
+          el('p', { text: 'A monitor checks something on a schedule — a job, a table, a log, an API — colours what needs attention, and tells you the way you choose. Ask an agent in any codebase to make one:' }),
+          el(
+            'ul',
+            {},
+            el('li', { text: '“Monitor the PAY_* AutoSys jobs every 15 minutes: red when one fails, amber when one runs over an hour.”' }),
+            el('li', { text: '“Watch C:\\data\\positions.db: amber when yesterday’s count drops by more than 10%, just for me.”' }),
+            el('li', { text: '“Make a team monitor of the disk space on our build servers, red under 10% free.”' }),
+          ),
+          el('p', { class: 'hint', text: 'It reuses a tool you already have, or writes one; you approve the monitor before it runs.' }),
+        )
+      : shown.length === 0
+        ? el('div', { class: 'dash-empty small' }, el('p', { text: 'Nothing matches.' }))
+        : dash.tab === 'all'
+          ? el('div', {}, section('Team alerts', shown.filter((m) => m.team), 'shared with the team · each person’s Fire Code runs them'), section('Personal', shown.filter((m) => !m.team), 'only on this computer'))
+          : grid(shown)
+  // Through el(), which leaves out what is absent: replaceChildren given null writes the word "null".
+  const parts = el(
+    'div',
+    {},
+    el(
+      'header',
+      { class: 'dash-head' },
+      el('div', { class: 'dash-brand' }, el('span', { class: `orb big lv-${monitorSummary().worst}` }), el('div', {}, el('h1', { text: 'Monitoring' }), el('p', { class: 'sub', text: dashSubtitle(all) }))),
+      el('label', { class: 'dash-search' }, el('span', { html: svg('<circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" />') }), search),
+      el('div', { class: 'segmented dash-tabs' }, tab('all', 'All', all.length), tab('team', 'Team', count((m) => m.team)), tab('personal', 'Personal', count((m) => !m.team))),
+      el('div', { class: 'dash-tools' }, el('button', { class: `icon-btn${dash.refreshing ? ' spinning' : ''}`, title: dash.refreshing ? 'Refreshing…' : 'Refresh - sync the team\u2019s skills and show monitors added or deleted since', 'aria-label': 'Refresh', disabled: dash.refreshing, onclick: refreshMonitors, html: svg(ICONS.restart) }), el('button', { class: 'icon-btn', title: 'Monitoring settings', 'aria-label': 'Monitoring settings', onclick: openMonitorSettings, html: svg('cog') }), el('button', { class: 'icon-btn', title: 'Close (Esc)', 'aria-label': 'Close', onclick: closeDashboard, html: svg(ICONS.close) })),
+    ),
+    el('div', { class: 'dash-levels' }, ...MON_LEVELS.map(levelChip)),
+    reviewBanner(all),
+    schedulerBar(data.scheduler),
+    executor.error ? el('div', { class: 'dash-banner lv-purple' }, el('span', { class: 'orb lv-purple' }), el('span', { text: `Monitors that use a tool cannot run: ${executor.error}` })) : null,
+    el('div', { class: 'dash-body' }, body),
+    el('footer', { class: 'dash-legend' }, ...MON_LEVELS.map((l) => el('span', {}, el('span', { class: `orb small lv-${l}` }), (data.levels ?? []).find((x) => x.level === l)?.meaning ?? MON_LABEL[l]))),
+  )
+  root.replaceChildren(...parts.childNodes)
+  if (focused) {
+    search.focus()
+    search.setSelectionRange(search.value.length, search.value.length)
+  }
+}
+
+/**
+ * Whether checks are being started on time (asked for: "a way to check if scheduler is working or running, if not
+ * user can start it", and to stop it). Rust looks every 3 seconds and the dashboard hears it at least every 30;
+ * not heard from for 90 seconds is not working.
+ */
+function schedulerBar(s) {
+  if (!s) return null
+  const stale = !s.stopped && (s.lastTick == null || Date.now() / 1000 - s.lastTick > 90)
+  const state = s.stopped ? 'stopped' : stale ? 'stale' : 'ok'
+  const text = {
+    ok: `Scheduler running \u00b7 looked ${monAgo(s.lastTick)}${s.running ? ` \u00b7 ${s.running} checking now` : ''}${s.waiting ? ` \u00b7 ${s.waiting} waiting` : ''}`,
+    stopped: 'Scheduler stopped \u2014 no check starts by itself. Run now still works.',
+    stale: `Scheduler not responding \u2014 it last looked ${monAgo(s.lastTick)}. Start it again.`,
+  }[state]
+  const act = (op, label, cls, tip) => el('button', { class: cls, text: label, title: tip, onclick: () => monitorOp(op) })
+  return el(
+    'div',
+    { class: `dash-scheduler ${state}`, role: 'status' },
+    el('span', { class: `orb small lv-${state === 'ok' ? 'green' : state === 'stopped' ? 'grey' : 'amber'}` }),
+    el('span', { text }),
+    el('span', { class: 'spacer' }),
+    state === 'ok'
+      ? act('schedulerStop', 'Stop', 'secondary small', 'Stop starting checks by themselves - until you start it again, also after a restart')
+      : act('schedulerStart', state === 'stale' ? 'Start again' : 'Start', 'primary small', 'Start checks when they are due again, letting go of anything stuck'),
+  )
+}
+
+/** Monitors waiting for approval on this computer - colleagues' new ones, and any whose definition changed. */
+function reviewBanner(all) {
+  const waiting = all.filter((m) => m.status === 'review')
+  if (waiting.length === 0) return null
+  return el(
+    'div',
+    { class: 'dash-banner lv-blue' },
+    el('span', { class: 'orb lv-blue' }),
+    el('span', { text: `${waiting.length} monitor${waiting.length === 1 ? '' : 's'} waiting for your review before ${waiting.length === 1 ? 'it runs' : 'they run'} on this computer.` }),
+    el('span', { class: 'spacer' }),
+    el('button', { class: 'primary small', text: waiting.length === 1 ? 'Review…' : 'Review all…', onclick: () => reviewMonitors(waiting) }),
+  )
+}
+
+/**
+ * Several monitors at once (asked for: accept all, or choose which). Each definition is on screen - what
+ * approving runs, unattended (invariant 8) - with a tick per monitor; only the ticked ones are approved.
+ * Nothing is ticked at first, so approving is something done, not a default accepted.
+ */
+function reviewMonitors(list) {
+  const chosen = new Set()
+  showModal('monitorReviewMany', (scrim) => {
+    const count = el('span', { class: 'muted' })
+    const approve = el('button', { class: 'primary' })
+    const all = el('input', { type: 'checkbox', 'aria-label': 'Select all' })
+    const boxes = []
+    const refresh = () => {
+      approve.textContent = chosen.size === 0 ? 'Approve selected' : `Approve ${chosen.size} selected`
+      why(approve, chosen.size === 0 ? 'Tick the monitors to approve first' : undefined)
+      all.checked = chosen.size === list.length
+      all.indeterminate = chosen.size > 0 && chosen.size < list.length
+      count.textContent = `${chosen.size} of ${list.length} selected`
+      for (const [name, box] of boxes) box.checked = chosen.has(name)
+    }
+    all.addEventListener('change', () => {
+      if (all.checked) list.forEach((m) => chosen.add(m.name))
+      else chosen.clear()
+      refresh()
+    })
+    approve.addEventListener('click', () => {
+      for (const name of chosen) monitorOp('approve', { name })
+      closeModal()
+      notice(`Approved ${chosen.size} monitor${chosen.size === 1 ? '' : 's'}; ${chosen.size === 1 ? 'it starts' : 'they start'} at the next check.`)
+    })
+    const rows = list.map((m) => {
+      const box = el('input', { type: 'checkbox', 'aria-label': `Approve ${m.title}` })
+      box.addEventListener('change', () => {
+        if (box.checked) chosen.add(m.name)
+        else chosen.delete(m.name)
+        refresh()
+      })
+      boxes.push([m.name, box])
+      return el(
+        'div',
+        { class: 'review-item' },
+        el('label', { class: 'review-pick' }, box, el('b', { text: m.title }), el('span', { class: 'muted', text: ` ${m.team ? 'team' : 'personal'} · from ${m.origin}${m.schedule ? ` · ${m.schedule}` : ''}` })),
+        m.summary ? el('p', { class: 'review-summary', text: m.summary }) : null,
+        el('pre', { class: 'mon-spec', text: m.block ?? '(the definition could not be read)' }),
+      )
+    })
+    refresh()
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(760px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: 'Review monitors' }), el('p', { class: 'sub', text: 'Each runs on this computer, unattended, once approved. Read what each one runs, then tick the ones to approve.' })),
+        el('div', { class: 'body review-list' }, el('label', { class: 'review-all' }, all, 'Select all'), ...rows),
+        el(
+          'footer',
+          {},
+          count,
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Not now', onclick: closeModal }),
+          approve,
+        ),
+      ),
+    )
+  })
+}
+
+/** "Snooze until…": a date and time, tomorrow 09:00 to start from, at most 30 days ahead (Rust checks it too). */
+function snoozeUntil(m) {
+  const pad = (n) => String(n).padStart(2, '0')
+  const local = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const start = new Date()
+  start.setDate(start.getDate() + 1)
+  start.setHours(9, 0, 0, 0)
+  showModal('monitorSnooze', (scrim) => {
+    const input = el('input', { type: 'datetime-local', value: local(start), min: local(new Date()), max: local(new Date(Date.now() + 30 * 86_400_000)), 'aria-label': 'Until' })
+    const problem = el('p', { class: 'form-error', hidden: true })
+    const go = () => {
+      const chosen = new Date(input.value)
+      const fail = Number.isNaN(chosen.getTime())
+        ? 'Choose a date and a time.'
+        : chosen.getTime() <= Date.now()
+          ? 'That time has already passed.'
+          : chosen.getTime() > Date.now() + 30 * 86_400_000
+            ? 'At most 30 days ahead - to stop it for longer, pause it.'
+            : undefined
+      if (fail) {
+        problem.textContent = fail
+        problem.hidden = false
+        return
+      }
+      monitorOp('snooze', { name: m.name, until: Math.floor(chosen.getTime() / 1000) })
+      closeModal()
+    }
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(420px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `Snooze \u201c${m.title}\u201d until` })),
+        el('div', { class: 'body' }, el('p', { class: 'sub', text: 'No notifications from it, and it does not colour the Monitoring button, until then.' }), input, problem),
+        el('footer', {}, el('span', { class: 'spacer' }), el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }), el('button', { class: 'primary', text: 'Snooze', onclick: go })),
+      ),
+    )
+  })
+}
+
+function dashSubtitle(all) {
+  if (all.length === 0) return 'Nothing is being watched yet'
+  const { alerting, review } = monitorSummary()
+  const parts = [`${all.length} monitor${all.length === 1 ? '' : 's'}`]
+  if (alerting > 0) parts.push(`${alerting} alerting`)
+  else parts.push('nothing alerting')
+  if (review > 0) parts.push(`${review} to review`)
+  return parts.join(' · ')
+}
+
+function openMonitorSettings() {
+  showModal('monitorSettings', (scrim, modal) => {
+    const card = el('div', { class: 'modal', style: 'width: min(640px, calc(100vw - 48px))' })
+    scrim.append(card)
+    let newFolder = ''
+    const patch = (changes) => monitorOp('settings', { patch: changes })
+    modal.refresh = () => {
+      const data = model.monitoring ?? {}
+      const s = data.settings ?? {}
+      const levelRow = (level) =>
+        el(
+          'div',
+          { class: 'row' },
+          el('span', { class: 'meta' }, el('b', {}, el('span', { class: `orb small lv-${level}` }), ` ${MON_LABEL[level]}`), el('span', { text: MON_MODES.find(([id]) => id === s[level])?.[2] ?? '' })),
+          el('div', { class: 'segmented small' }, ...MON_MODES.map(([id, label, about]) => el('button', { class: s[level] === id ? 'on' : '', text: label, title: about, onclick: () => patch({ [level]: id }) }))),
+        )
+      const folderInput = el('input', { type: 'text', placeholder: 'C:\\team\\monitors', value: newFolder, spellcheck: 'false' })
+      folderInput.addEventListener('input', () => (newFolder = folderInput.value))
+      const quiet = el('input', { type: 'text', placeholder: '22:00-07:00', value: s.quietHours ?? '', spellcheck: 'false', style: 'width: 130px' })
+      const teamIndex = el('input', { type: 'text', value: s.teamIndex ?? 'fire-code-monitoring', spellcheck: 'false', style: 'width: 220px' })
+      teamIndex.addEventListener('change', () => patch({ teamIndex: teamIndex.value.trim().toLowerCase() }))
+      quiet.addEventListener('change', () => patch({ quietHours: quiet.value.trim() === '' ? null : quiet.value.trim() }))
+      card.replaceChildren(
+        el('header', {}, el('h2', { text: 'Monitoring' }), el('p', { class: 'sub', text: 'How monitors tell you, and what their tools run with.' })),
+        el(
+          'div',
+          { class: 'body' },
+          el('h3', { class: 'group', text: 'Windows notifications, by level' }),
+          ...['red', 'amber', 'purple', 'blue', 'green'].map(levelRow),
+          el(
+            'div',
+            { class: 'row' },
+            el('span', { class: 'meta' }, el('b', { text: 'Remind me while it stays red or amber' }), el('span', { text: 'A reminder is a plain notification, never an alarm again.' })),
+            el('div', { class: 'segmented small' }, ...[[0, 'Never'], [15, '15 min'], [30, '30 min'], [60, '1 h'], [240, '4 h']].map(([v, label]) => el('button', { class: s.repeatMinutes === v ? 'on' : '', text: label, onclick: () => patch({ repeatMinutes: v }) }))),
+          ),
+          el('div', { class: 'row' }, el('span', { class: 'meta' }, el('b', { text: 'Tell me when it clears' }), el('span', { text: 'A quiet notification when a red or amber monitor is clear again.' })), monToggle(s.recovery !== false, (on) => patch({ recovery: on }))),
+          el(
+            'div',
+            { class: 'row' },
+            el('span', { class: 'meta' }, el('b', { text: 'Quiet hours' }), el('span', { text: 'Only counted then — failures still get through if you say so.' })),
+            el('div', { class: 'inline' }, quiet, el('label', { class: 'check-label' }, monToggle(s.quietLetsRedThrough !== false, (on) => patch({ quietLetsRedThrough: on })), ' Failures get through')),
+          ),
+          el('h3', { class: 'group', text: 'Team history (OpenSearch)' }),
+          el(
+            'div',
+            { class: 'row stacked' },
+            el(
+              'span',
+              { class: 'meta' },
+              el('b', { text: 'Where the team keeps its checks' }),
+              el('span', {
+                text:
+                  'Team monitors run only with this: every member\u2019s Fire Code writes its checks to one shared index, a check runs once across the team, and everyone sees the newest. Choose an OpenSearch connection from the search connections of the codebase below.',
+              }),
+            ),
+            (data.teamStores ?? []).length === 0
+              ? el('p', { class: 'hint', text: 'That codebase has no OpenSearch connection. Add one in its chat: Settings → Search.' })
+              : el(
+                  'div',
+                  { class: 'choice-list' },
+                  el('button', { class: !s.teamStore ? 'on' : '', onclick: () => patch({ teamStore: null }) }, 'None - no team monitors'),
+                  ...data.teamStores.map((store) => el('button', { class: s.teamStore === store.id ? 'on' : '', onclick: () => patch({ teamStore: store.id }) }, store.label)),
+                ),
+            el('div', { class: 'inline' }, el('span', { class: 'hint', text: 'Index (the same for the whole team):' }), teamIndex),
+            data.teamReady ? el('p', { class: 'hint', text: data.teamError ? `Last problem: ${data.teamError}` : 'Ready.' }) : el('p', { class: 'hint', text: data.teamProblem ?? '' }),
+          ),
+          el('h3', { class: 'group', text: 'History' }),
+          el(
+            'div',
+            { class: 'row' },
+            el('span', { class: 'meta' }, el('b', { text: 'Keep check history for' }), el('span', { text: 'Older checks are removed here and - only your own - from the team\u2019s index, every few hours.' })),
+            el('div', { class: 'segmented small' }, ...[[30, '30 d'], [90, '90 d'], [180, '180 d'], [365, '1 year']].map(([v, label]) => el('button', { class: (s.retentionDays ?? 90) === v ? 'on' : '', text: label, onclick: () => patch({ retentionDays: v }) }))),
+          ),
+          el('div', { class: 'row' }, el('span', { class: 'meta' }, el('b', { text: 'Clean up now' }), el('span', { text: 'Remove what is older than that - or older than a number of days you choose - without waiting.' })), el('button', { class: 'secondary', text: 'Clean up…', onclick: () => confirmCleanup(s.retentionDays ?? 90) })),
+          el('h3', { class: 'group', text: 'Running checks' }),
+          el(
+            'div',
+            { class: 'row stacked' },
+            el('span', { class: 'meta' }, el('b', { text: 'Run tools with the settings of' }), el('span', { text: 'A monitor that uses a tool runs it in the background with this codebase’s MCP servers, Python and connections. SQLite and file monitors are read by Fire Code itself.' })),
+            el(
+              'div',
+              { class: 'choice-list' },
+              ...(data.codebases ?? []).map((c, i) =>
+                el('button', { class: (s.executor ?? (data.codebases[0]?.id)) === c.id ? 'on' : '', onclick: () => patch({ executor: c.id }) }, c.name, i === 0 && !s.executor ? el('span', { class: 'muted', text: ' (default)' }) : null),
+              ),
+            ),
+          ),
+          el(
+            'div',
+            { class: 'row stacked' },
+            el('span', { class: 'meta' }, el('b', { text: 'More folders to find monitors in' }), el('span', { text: 'Besides your personal skills, each codebase’s skills and the team’s bucket and repository copies. A monitor found here counts as a team one.' })),
+            ...(s.extraFolders ?? []).map((f) => el('div', { class: 'inline' }, el('code', { text: f }), el('button', { class: 'secondary', text: 'Remove', onclick: () => patch({ extraFolders: s.extraFolders.filter((x) => x !== f) }) }))),
+            el('div', { class: 'inline' }, folderInput, el('button', { class: 'secondary', text: 'Add', onclick: () => newFolder.trim() && (patch({ extraFolders: [...(s.extraFolders ?? []), newFolder.trim()] }), (newFolder = '')) })),
+          ),
+        ),
+        el('footer', {}, el('span', { class: 'spacer' }), el('button', { class: 'primary', text: 'Done', onclick: closeModal })),
+      )
+    }
+    modal.refresh()
+  })
+}
+
+const monToggle = (on, change) => el('button', { class: `toggle${on ? ' on' : ''}`, role: 'switch', 'aria-checked': String(on), onclick: () => change(!on) })
+
+HANDLERS.monitors = (m) => {
+  model.monitoring = m
+  renderMonitorButton()
+  if (dash.open) renderDashboard()
+  if (openModal?.kind === 'monitorSettings' || openModal?.kind === 'settings') openModal.refresh()
+}
+/** The dashboard's refresh: Rust reads the folders, the host syncs the bucket and repository, and Rust reads again. */
+function refreshMonitors() {
+  dash.refreshing = true
+  renderDashboard()
+  monitorOp('refresh')
+  // An answer that never comes must not leave the button spinning.
+  setTimeout(() => {
+    if (!dash.refreshing) return
+    dash.refreshing = false
+    renderDashboard()
+  }, 200_000)
+}
+
+HANDLERS.monitorReply = (m) => {
+  if (m.data?.refreshed || (m.op === 'refresh' && !m.ok)) {
+    dash.refreshing = false
+    renderDashboard()
+  }
+  if (!m.ok) notice(m.error, 'error')
+  // A team copy is changed or deleted by the host: said when it starts and when it is done.
+  else if (typeof m.data?.message === 'string' && m.data.message.length > 0) notice(m.data.message)
+}
+HANDLERS.showMonitoring = () => openDashboard()
+/*
+ * "Start a chat" from an alert: Rust opened the chat; its page may still be loading, so the text waits with
+ * the other requests for a page (deliverPendingAsk) and the dashboard steps aside to show the chat.
+ */
+HANDLERS.prefillChat = (m) => {
+  if (dash.open) closeDashboard()
+  pendingAsks[m.id] = { ask: 'prefill', text: m.text }
+  deliverPendingAsk(m.id)
+  notice('The chat is open with what is known about the alert - press Enter to send it.')
+}
+
+/**
+ * "Older than": a choice of 7, 30 or 90 days, or a number typed - for one monitor's history (`m`) or, without one,
+ * every monitor's (Clean up). Asked for: "delete history older than a month or N days".
+ */
+function olderThanPicker(initial) {
+  const state = { mode: initial === undefined ? 'all' : 'older', days: initial ?? 30 }
+  const custom = el('input', { type: 'number', min: '1', max: '3650', value: String(state.days), 'aria-label': 'Days', class: 'days-box' })
+  const node = el('div', { class: 'older-picker' })
+  const draw = () => {
+    node.replaceChildren(
+      el(
+        'div',
+        { class: 'segmented small' },
+        ...(initial === undefined ? [el('button', { class: state.mode === 'all' ? 'on' : '', text: 'Everything', onclick: () => ((state.mode = 'all'), draw()) })] : []),
+        ...[7, 30, 90].map((d) => el('button', { class: state.mode === 'older' && state.days === d ? 'on' : '', text: `Older than ${d} days`, onclick: () => ((state.mode = 'older'), (state.days = d), (custom.value = String(d)), draw()) })),
+      ),
+      el('label', { class: `older-custom${state.mode === 'older' && ![7, 30, 90].includes(state.days) ? ' on' : ''}` }, 'or older than ', custom, ' days'),
+    )
+  }
+  custom.addEventListener('input', () => {
+    state.mode = 'older'
+    state.days = Number(custom.value)
+    draw()
+    custom.focus()
+  })
+  draw()
+  return {
+    node,
+    /** Days, or undefined for everything; a problem in words when the number is not one. */
+    read: () => (state.mode === 'all' ? { days: undefined } : Number.isInteger(state.days) && state.days >= 1 && state.days <= 3650 ? { days: state.days } : { problem: 'Older than how many days? A whole number, 1 or more.' }),
+  }
+}
+
+function confirmDeleteHistory(m) {
+  showModal('monitorDelete', (scrim) => {
+    const picker = olderThanPicker(undefined)
+    const problem = el('p', { class: 'form-error', hidden: true })
+    const go = () => {
+      const chosen = picker.read()
+      if (chosen.problem) {
+        problem.textContent = chosen.problem
+        problem.hidden = false
+        return
+      }
+      monitorOp('deleteHistory', { name: m.name, ...(chosen.days !== undefined ? { olderThanDays: chosen.days } : {}) })
+      closeModal()
+      notice(chosen.days !== undefined ? `Deleting checks of \u201c${m.title}\u201d older than ${chosen.days} days.` : `Deleting the history of \u201c${m.title}\u201d.`)
+    }
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(560px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `Delete the history of \u201c${m.title}\u201d` })),
+        el(
+          'div',
+          { class: 'body' },
+          picker.node,
+          el('p', { class: 'muted', text: m.team ? 'Its checks on this computer, and your own checks in the team\u2019s index (with the grids they kept). Colleagues\u2019 checks are theirs and stay.' : 'Its checks on this computer, with the grids they kept. The monitor itself stays.' }),
+          problem,
+        ),
+        el('footer', {}, el('span', { class: 'spacer' }), el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }), el('button', { class: 'primary danger', text: 'Delete', onclick: go })),
+      ),
+    )
+  })
+}
+
+/** "Clean up now" with a choice: the retention, or older than N days - every monitor, here and your own team records. */
+function confirmCleanup(retention) {
+  showModal('monitorCleanup', (scrim) => {
+    const picker = olderThanPicker(retention)
+    const problem = el('p', { class: 'form-error', hidden: true })
+    const go = () => {
+      const chosen = picker.read()
+      if (chosen.problem || chosen.days === undefined) {
+        problem.textContent = chosen.problem ?? 'Choose how old.'
+        problem.hidden = false
+        return
+      }
+      monitorOp('cleanup', { olderThanDays: chosen.days })
+      closeModal()
+    }
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(560px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: 'Clean up every monitor\u2019s history' })),
+        el('div', { class: 'body' }, picker.node, el('p', { class: 'muted', text: 'On this computer, and your own checks in the team\u2019s index. Colleagues\u2019 checks are theirs and stay.' }), problem),
+        el('footer', {}, el('span', { class: 'spacer' }), el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }), el('button', { class: 'primary danger', text: 'Clean up', onclick: go })),
+      ),
+    )
+  })
+}
+
+/** Deleting a monitor for good: its file, results and history (pausing is the way to stop it for a while). */
+function confirmDeleteMonitor(m) {
+  showModal('monitorDelete', (scrim) => {
+    scrim.append(
+      el(
+        'div',
+        { class: 'modal', style: 'width: min(520px, calc(100vw - 48px))' },
+        el('header', {}, el('h2', { text: `Delete “${m.title}” for good?` })),
+        el(
+          'div',
+          { class: 'body' },
+          el('p', { text: 'This removes:' }),
+          el(
+            'ul',
+            {},
+            m.teamCopy
+              ? el('li', { text: `the monitor from ${m.teamCopy}, for everyone - colleagues lose it at their next sync` })
+              : el('li', {}, 'its skill file ', el('code', { text: m.file })),
+            el('li', { text: 'its results and history on this computer' }),
+            m.team ? el('li', { text: 'your own checks in the team’s index - colleagues’ checks are theirs and stay' }) : null,
+          ),
+          m.team && !m.teamCopy ? el('p', { class: 'muted', text: 'If the file is shared through a codebase in git, colleagues keep it until the deletion is committed.' }) : null,
+          el('p', { class: 'muted', text: 'To stop it for a while instead, pause it.' }),
+        ),
+        el(
+          'footer',
+          {},
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'secondary', text: 'Cancel', onclick: closeModal }),
+          el('button', { class: 'primary danger', text: 'Delete for good', onclick: () => (monitorOp('delete', { name: m.name }), closeModal()) }),
+        ),
+      ),
+    )
+  })
+}
+
+// Relative times on the tiles stay true while the dashboard is open.
+setInterval(() => dash.open && !$('.menu') && renderDashboard(), 30_000)
+
 // ─── Notices ─────────────────────────────────────────────────────────────────
 
 function notice(text, level = 'info') {
@@ -2959,6 +4073,8 @@ $('#settings-btn').addEventListener('click', openSettings)
 $('#rail-settings').addEventListener('click', openSettings)
 $('#credentials-btn').addEventListener('click', openCredentials)
 $('#rail-credentials').addEventListener('click', openCredentials)
+$('#monitoring-btn').addEventListener('click', openDashboard)
+$('#rail-monitoring').addEventListener('click', openDashboard)
 document.addEventListener('contextmenu', (e) => {
   // The browser's own menu (Reload, Inspect) has nothing for anyone here.
   if (!(e.target instanceof HTMLInputElement)) e.preventDefault()

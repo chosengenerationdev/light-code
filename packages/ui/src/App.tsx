@@ -1,5 +1,5 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
-import { CUSTOM_ROLE_LIMIT, composeUserText, skillAliases, type MessageQuote, type Reaction } from '@light-code/core/browser'
+import { CUSTOM_ROLE_LIMIT, composeUserText, skillAliases, type MessageQuote, type Reaction, branchLabel } from '@light-code/core/browser'
 import type { CredentialSummary, SchedulerStatus } from '@light-code/core/browser'
 import type { LanguageServersState } from './settings/LanguageServersSection.js'
 import type { S3Mirror } from './settings/S3Section.js'
@@ -20,6 +20,7 @@ import {
   DEFAULT_MODE_ID,
   type ApprovalDecision,
   type HostToUiMessage,
+  type TeamSkillState,
   type ProfileInput,
   type ProfileSummary,
   type ApprovableGroup,
@@ -48,7 +49,7 @@ import {
   type ResolvedVariable,
   type SessionVariable,
 } from '@light-code/core/browser'
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { stageFileWith } from './stagedFiles.js'
 import { Chat } from './Chat.js'
 import { ExpertBudget } from './ExpertBudget.js'
@@ -82,6 +83,8 @@ import {
 } from './styles.js'
 import { colors, fontFamily, iconButtonStyle, primaryButtonStyle } from './theme.js'
 import { FileEditor, type EditorFile, type FileEditorProps } from './FileEditor.js'
+import { installButtonFeedback } from './buttonFeedback.js'
+import { blobToBase64, downloadFile, SaveFileContext, type SaveFile, type SaveOutcome } from './diagrams/saveFile.js'
 
 export interface AppProps {
   transport: Transport
@@ -139,13 +142,18 @@ export function App(props: AppProps): ReactElement {
   /** Whether this host ships its own source as a zip — the VS Code extension does. */
   const [exportsSource, setExportsSource] = useState(false)
   const [picksFiles, setPicksFiles] = useState(false)
+  // The host has a Save dialog, so the panel's Save buttons go through it (`diagrams/saveFile.ts`).
+  const [savesFiles, setSavesFiles] = useState(false)
   /** A skill or tool open in the panel's own editor (hosts with no editor - Fire Code, the browser). */
   const [editorFile, setEditorFile] = useState<EditorFile | undefined>(undefined)
   const [editorSaved, setEditorSaved] = useState<FileEditorProps['saved']>(undefined)
   /** A handoff to a new chat in progress, or how the last one ended (until dismissed). */
   const [handoff, setHandoff] = useState<{ phase: HandoffPhase; written?: number; message?: string } | undefined>(undefined)
   const [hostModels, setHostModels] = useState(false)
+  /** The branch this workspace is on, and the repository when it is a branch folder of one. */
+  const [branch, setBranch] = useState<{ name: string; of?: string } | undefined>(undefined)
   const [addedFiles, setAddedFiles] = useState<{ paths: string[]; nonce: number } | undefined>(undefined)
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>(undefined)
   /*
    * Undefined until a host answers `requestVariables`. The VS Code bridge does not handle that
    * message, so the tab never appears there — the capability announces itself rather than being
@@ -377,7 +385,7 @@ export function App(props: AppProps): ReactElement {
    * an earlier publish is never shown as current.
    */
   const [teamSkillsStatus, setTeamSkillsStatus] = useState<
-    { name: string; state: 'indexed' | 'stale' | 'missing' }[] | undefined
+    { name: string; state: TeamSkillState }[] | undefined
   >(undefined)
   const [teamSkillsStatusError, setTeamSkillsStatusError] = useState<string | undefined>(undefined)
   const [teamSkillsStatusLoading, setTeamSkillsStatusLoading] = useState(false)
@@ -385,7 +393,7 @@ export function App(props: AppProps): ReactElement {
   const [atlassian, setAtlassian] = useState<Record<AtlassianProductId, AtlassianProductStatus> | undefined>(undefined)
   const [atlassianSavedTicks, setAtlassianSavedTicks] = useState<Partial<Record<AtlassianProductId, number>>>({})
   const [atlassianTests, setAtlassianTests] = useState<
-    Partial<Record<AtlassianProductId, { ok: boolean; detail: string }>>
+    Partial<Record<AtlassianProductId, { ok: boolean; detail: string; diagnostics?: string }>>
   >({})
   const [atlassianTesting, setAtlassianTesting] = useState<Partial<Record<AtlassianProductId, boolean>>>({})
   const [embedderModels, setEmbedderModels] = useState<string[]>([])
@@ -433,10 +441,12 @@ export function App(props: AppProps): ReactElement {
    * unmounts, and a cache inside it would make somebody fetch the same screenshot every visit.
    */
   const [skillImages, setSkillImages] = useState<Record<string, { dataUri?: string; problem?: string }>>({})
-  const [skills, setSkills] = useState<{ name: string; description: string; filePath: string }[]>(
+  const [skills, setSkills] = useState<Extract<HostToUiMessage, { type: 'skills' }>['skills']>(
     [],
   )
   const [skillIssues, setSkillIssues] = useState<{ filePath: string; detail: string }[]>([])
+  const [skillKeepPrivate, setSkillKeepPrivate] = useState<string[]>([])
+  const [skillDefaults, setSkillDefaults] = useState<Record<string, Record<string, string>>>({})
   const [skillsDir, setSkillsDir] = useState<string | undefined>(undefined)
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [scheduleTools, setScheduleTools] = useState<ScheduleToolInfo[]>([])
@@ -502,6 +512,9 @@ export function App(props: AppProps): ReactElement {
   // What the user typed, not the resolved absolute path — the field must round-trip a
   // relative entry as the relative entry, or saving would silently rewrite it.
   const [skillConfiguredDir, setSkillConfiguredDir] = useState('')
+
+  // A button that sent work to the host shows it is working until the host answers (`buttonFeedback.ts`).
+  useEffect(() => installButtonFeedback(props.transport), [props.transport])
 
   useEffect(() => {
     const unsubscribe = props.transport.onMessage((raw) => {
@@ -592,6 +605,10 @@ export function App(props: AppProps): ReactElement {
         // From the picker or the editor's "Add to Light Code chat": back to the chat to see them.
         setAddedFiles({ paths: message.paths, nonce: Date.now() })
         setView('chat')
+      } else if (message.type === 'prefillComposer') {
+        // Fire Code's "Start a chat" from an alert: the box holds it, the user sends it.
+        setPrefill({ text: message.text, nonce: Date.now() })
+        setView('chat')
       } else if (message.type === 'openSettings') {
         /*
          * The walkthrough asking to be shown a tab. It arrives as a normal host message so
@@ -641,7 +658,13 @@ export function App(props: AppProps): ReactElement {
         setToolTimeoutSeconds(message.toolTimeoutSeconds)
         setExportsSource(message.exportsSource === true)
         setPicksFiles(message.picksFiles === true)
+        setSavesFiles(message.savesFiles === true)
         setHostModels(message.hostModels === true)
+        setBranch(
+          message.workspaceBranch === undefined
+            ? undefined
+            : { name: message.workspaceBranch, ...(message.branchFolderOf !== undefined ? { of: message.branchFolderOf } : {}) },
+        )
         setGuide({
           native: message.nativeGuide,
           ...(message.guideMediaBase !== undefined ? { mediaBase: message.guideMediaBase } : {}),
@@ -905,6 +928,8 @@ export function App(props: AppProps): ReactElement {
       } else if (message.type === 'skills') {
         setSkills(message.skills)
         setSkillIssues(message.issues)
+        setSkillKeepPrivate(message.keepPrivate ?? [])
+        setSkillDefaults(message.skillDefaults ?? {})
         setSkillsDir(message.skillsDir)
         setSkillExtraDirs(message.extraDirs)
       } else if (message.type === 's3') {
@@ -996,6 +1021,8 @@ export function App(props: AppProps): ReactElement {
         setTeamSkillsResult({
           ...(message.count !== undefined ? { count: message.count } : {}),
           ...(message.collection !== undefined ? { collection: message.collection } : {}),
+          ...(message.cleared !== undefined ? { cleared: message.cleared } : {}),
+          ...(message.withdrawn !== undefined ? { withdrawn: message.withdrawn } : {}),
           ...(message.error !== undefined ? { error: message.error } : {}),
         })
       } else if (message.type === 'project') {
@@ -1012,7 +1039,14 @@ export function App(props: AppProps): ReactElement {
         setAtlassianSavedTicks((ticks) => ({ ...ticks, [message.product]: (ticks[message.product] ?? 0) + 1 }))
       } else if (message.type === 'atlassianTest') {
         setAtlassianTesting((testing) => ({ ...testing, [message.product]: false }))
-        setAtlassianTests((tests) => ({ ...tests, [message.product]: { ok: message.ok, detail: message.detail } }))
+        setAtlassianTests((tests) => ({
+          ...tests,
+          [message.product]: {
+            ok: message.ok,
+            detail: message.detail,
+            ...(message.diagnostics !== undefined ? { diagnostics: message.diagnostics } : {}),
+          },
+        }))
       } else if (message.type === 'teamSkillsIndexStatus') {
         setTeamSkillsStatusLoading(false)
         setTeamSkillsStatus(message.entries)
@@ -1377,10 +1411,14 @@ export function App(props: AppProps): ReactElement {
         type: 'saveSkillsAlias',
         aliases,
       } satisfies UiToHostMessage),
-    onPublish: () => {
+    onPublish: (keepPrivate: string[]) => {
       setTeamSkillsResult(undefined)
-      props.transport.post({ type: 'publishTeamSkills' } satisfies UiToHostMessage)
+      props.transport.post({ type: 'publishTeamSkills', keepPrivate } satisfies UiToHostMessage)
     },
+    skillNames: skills.map((skill) => skill.name),
+    keepPrivate: skillKeepPrivate,
+    onSaveSelection: (keepPrivate: string[]) =>
+      props.transport.post({ type: 'saveTeamSkillSelection', keepPrivate } satisfies UiToHostMessage),
     onClear: () => {
       setTeamSkillsResult(undefined)
       props.transport.post({ type: 'clearTeamSkills' } satisfies UiToHostMessage)
@@ -1683,8 +1721,43 @@ export function App(props: AppProps): ReactElement {
   const handoffRunning = handoff !== undefined && handoff.phase !== 'failed' && handoff.phase !== 'cancelled'
   const hasNoProviders = profilesLoaded && profiles.length === 0
 
+  /*
+   * Saving a file the panel made. Through the host's Save dialog where it has one - a webview and
+   * Fire Code's window ignore a download link - and as a browser download otherwise. Each request
+   * waits for its own answer; one that never comes resolves as an error after a minute, so a button
+   * cannot stay on "Saving…" for ever.
+   */
+  const saveFile: SaveFile = useCallback(
+    async (name: string, blob: Blob): Promise<SaveOutcome> => {
+      if (!savesFiles) return await downloadFile(name, blob)
+      const requestId = `save-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`
+      const base64 = await blobToBase64(blob)
+      return await new Promise<SaveOutcome>((resolve) => {
+        const timer = setTimeout(() => {
+          stop()
+          resolve({ error: 'No answer from Light Code about the save. Try again.' })
+        }, 60_000)
+        const stop = props.transport.onMessage((raw) => {
+          const message = raw as HostToUiMessage
+          if (message.type !== 'fileSaved' || message.requestId !== requestId) return
+          clearTimeout(timer)
+          stop()
+          resolve(
+            message.error !== undefined
+              ? { error: message.error }
+              : message.path !== undefined
+                ? { path: message.path }
+                : { cancelled: true },
+          )
+        })
+        props.transport.post({ type: 'saveFile', requestId, name, base64 } satisfies UiToHostMessage)
+      })
+    },
+    [savesFiles, props.transport],
+  )
+
   return (
-    <>
+    <SaveFileContext.Provider value={saveFile}>
     {editorFile !== undefined && (
       <FileEditor
         // A different file is a fresh editor, not this one's text under another name.
@@ -1724,7 +1797,21 @@ export function App(props: AppProps): ReactElement {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <strong>Light Code</strong>
+          {/*
+            The branch under the name, small: which branch a window works on is the first thing to know when
+            several are open. A long one is trimmed (a leading Jira key is kept whole); the full name is on hover.
+          */}
+          <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+            <strong>Light Code</strong>
+            {branch !== undefined && (
+              <span
+                title={`Branch ${branch.name}${branch.of !== undefined ? ` - a branch folder of ${branch.of}` : ''}`}
+                style={{ fontSize: 10, color: colors.muted, maxWidth: 220, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}
+              >
+                {branchLabel(branch.name)}
+              </span>
+            )}
+          </span>
           {view === 'chat' && (
             <ModeSelector
               modeId={modeId}
@@ -2162,6 +2249,9 @@ export function App(props: AppProps): ReactElement {
                 } satisfies UiToHostMessage),
               team: skillsTeam,
               skills,
+              skillDefaults,
+              onSaveSkillDefaults: (skill: string, values: Record<string, string>) =>
+                props.transport.post({ type: 'saveSkillDefaults', skill, values } satisfies UiToHostMessage),
               issues: skillIssues,
               skillsDir,
               extraDirs: skillExtraDirs,
@@ -2376,6 +2466,7 @@ export function App(props: AppProps): ReactElement {
               },
             }}
             atlassian={{
+              transport: props.transport,
               products: atlassian,
               savedTicks: atlassianSavedTicks,
               tests: atlassianTests,
@@ -2393,6 +2484,7 @@ export function App(props: AppProps): ReactElement {
                           settings: gateway.settings,
                           ...(gateway.clientSecret !== undefined ? { clientSecret: gateway.clientSecret } : {}),
                           ...(gateway.passphrase !== undefined ? { passphrase: gateway.passphrase } : {}),
+                          ...(gateway.basicValue !== undefined ? { basicValue: gateway.basicValue } : {}),
                         },
                       }
                     : {}),
@@ -2570,6 +2662,7 @@ export function App(props: AppProps): ReactElement {
                   venvPath: settings.venvPath,
                   interpreterPath: settings.interpreterPath,
                   libraryFolders: settings.libraryFolders,
+                  bannedCalls: settings.bannedCalls,
                   timeoutSeconds: settings.timeoutSeconds,
                   indexUrl: settings.indexUrl,
                   offline: settings.offline,
@@ -2733,6 +2826,7 @@ export function App(props: AppProps): ReactElement {
               picksFiles ? () => props.transport.post({ type: 'pickContextFiles' } satisfies UiToHostMessage) : undefined
             }
             addedFiles={addedFiles}
+            prefill={prefill}
             expertSpend={expertSpend}
             supportsVision={supportsVision}
             mentionCandidates={mentionCandidates}
@@ -2760,6 +2854,6 @@ export function App(props: AppProps): ReactElement {
         )}
       </div>
     </div>
-    </>
+    </SaveFileContext.Provider>
   )
 }

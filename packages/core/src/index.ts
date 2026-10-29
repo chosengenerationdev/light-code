@@ -704,6 +704,7 @@ export { NodeFileSystem } from './platform/node/filesystem.js'
 export { NodeTerminal } from './platform/node/terminal.js'
 export { JsonTaskStore } from './platform/node/taskStore.js'
 export { findFireCodeHelper, fastFsCapabilities } from './platform/node/fireHelper.js'
+export { personalLibraryDir, sharedMachineApprovalsFile } from './platform/node/sharedApprovals.js'
 
 export { taskSummary, type Task, type TaskSummary, type TaskStore } from './history/types.js'
 export { deriveTitle } from './history/titles.js'
@@ -811,6 +812,9 @@ export {
   skillKeysInBucket,
   removeSkillFromBucket,
   belongsToSkill,
+  belongsToTool,
+  toolKeysInBucket,
+  removeToolFromBucket,
   type RemoveSkillResult,
 } from './s3/remove.js'
 export { composeUserText, clipQuote, type MessageQuote, type MessageReaction, type Reaction } from './agent/feedback.js'
@@ -842,3 +846,26 @@ export { FolderShardStore, S3ShardStore, VectorShardStore, type UsageShardStore 
 export { pushUsage } from './usage/push.js'
 export { computeDashboard, type UsageDashboard, type InventoryItem } from './usage/dashboard.js'
 export { isSafeHref, looksLikeMarkdown, parseInline, parseMarkdown, type Align, type Block, type Inline } from './markdown/parse.js'
+export {
+  addWorktree,
+  branchFolderName,
+  copySetupFiles,
+  currentBranchOf,
+  defaultBaseBranch,
+  GitError,
+  listBranches,
+  listWorktrees,
+  mainCheckoutOf,
+  markForSetup,
+  removeWorktree,
+  repositoryOf,
+  setupMarkerFor,
+  worktreeFolderFor,
+  worktreeStatus,
+  type BranchList,
+  type WorktreeInfo,
+  type WorktreeStatus,
+} from './git/worktrees.js'
+export { branchLabel } from './git/branchLabel.js'
+// Fire Code's monitoring, as a host sees it: the control channel's two roles.
+export { monitorToolRefusal, type MonitoringChannel, type MonitorExecutorChannel, type MonitorRequest, type MonitorAnswer } from './monitoring/channel.js'

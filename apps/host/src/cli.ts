@@ -31,7 +31,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import envPaths from 'env-paths'
-import { checkConnectionFile, describeProxyEnvironment, findFireCodeHelper, JUPYTER_CONNECTION_ENV, parseJupyterHubSpec, type JupyterHubSpec } from '@light-code/core'
+import { checkConnectionFile, describeProxyEnvironment, findFireCodeHelper, JUPYTER_CONNECTION_ENV, personalLibraryDir, sharedMachineApprovalsFile, parseJupyterHubSpec, type JupyterHubSpec } from '@light-code/core'
 import type { IdentityProvider } from './identity.js'
 import { PythonToolIdentity, resolveIdentity } from './identityTool.js'
 import { ProxyHeaderIdentity, validateTrustedProxies } from './proxyIdentity.js'
@@ -44,6 +44,7 @@ import { guidePage } from './guideHtml.js'
 import { renderGuide } from './guideText.js'
 import { SharedConfigStore } from './sharedConfig.js'
 import { startServer } from './server.js'
+import { StdioControl } from './controlChannel.js'
 
 /**
  * The line of a failure that actually says what went wrong.
@@ -276,6 +277,13 @@ async function main(): Promise<void> {
       return
     }
   }
+  /*
+   * Fire Code's control channel: stdin stays open after the key, and Fire Code's monitoring answers there.
+   * One person's machine only - on a shared server stdin is the operator's terminal.
+   */
+  const control = args.includes('--control-stdin') && !args.includes('--server') ? new StdioControl() : undefined
+  control?.start(stdinRest)
+  const extraToolDirs = args.flatMap((arg, i) => (arg === '--extra-tool-folder' && args[i + 1] !== undefined ? [path.resolve(args[i + 1] as string)] : []))
   const fastFsArg = valueOf(args, '--fast-fs')
   /*
    * Fire Code passes its helper. Run on its own, on a machine where Fire Code is installed, the host uses
@@ -449,6 +457,10 @@ async function main(): Promise<void> {
     // Single-user only, like --config-file: on a shared server this would be every user reaching everywhere.
     ...(args.includes('--reach-anywhere') && !serverMode ? { reachAnywhere: true } : {}),
     ...(fastFs !== undefined ? { fastFs } : {}),
+    // Fire Code's monitoring: the agent's tools while it is on, and the background executor.
+    ...(control !== undefined && args.includes('--monitoring') ? { monitoring: control.channel() } : {}),
+    ...(control !== undefined && args.includes('--monitor-executor') ? { monitorExecutor: control.executor(), eagerSession: true } : {}),
+    ...(extraToolDirs.length > 0 ? { extraToolDirs } : {}),
     ...(args.includes('--shared-workspace') ? { sharedWorkspace: true } : {}),
     ...(args.includes('--no-schedules') ? { noSchedules: true } : {}),
     ...(siblings.length > 0 ? { siblings } : {}),
@@ -457,7 +469,17 @@ async function main(): Promise<void> {
     ...(mentionName !== undefined && mentionName.length > 0 ? { mentionName } : {}),
     ...(jupyterHub !== undefined ? { jupyterHub } : {}),
     ...(siblingHubs.length > 0 ? { siblingHubs } : {}),
-    ...(approvedToolsFile !== undefined ? { machineApprovalsFile: path.resolve(approvedToolsFile) } : {}),
+    /*
+     * The machine's list of approved tool code: as named, else the one the VS Code extension and Fire Code
+     * share - but never by default on a shared server, where one user's review must not stand for another's.
+     */
+    ...(approvedToolsFile !== undefined
+      ? { machineApprovalsFile: path.resolve(approvedToolsFile) }
+      : serverMode
+        ? {}
+        : { machineApprovalsFile: sharedMachineApprovalsFile() }),
+    // "Only me" skills and tools: one person's, so never on a shared server.
+    ...(serverMode ? {} : { personalDir: personalLibraryDir() }),
     ...(changeLedgerFile !== undefined ? { changeLedger: { file: changeLedgerFile, chat: valueOf(args, '--chat-label') ?? 'another chat' } } : {}),
     /*
      * Decoded once, at startup.
@@ -733,6 +755,10 @@ const KNOWN_FLAGS = new Set([
   '--secrets-file',
   '--desktop-notify',
   '--secrets-key-stdin',
+  '--control-stdin',
+  '--monitoring',
+  '--monitor-executor',
+  '--extra-tool-folder',
   '--credentials-file',
   '--reach-anywhere',
   '--fast-fs',
@@ -809,13 +835,19 @@ function valueOf(args: string[], flag: string): string | undefined {
  * once shipped a VSIX that could not activate at all (§19). The require is inside a
  * function for the same reason: an import would be hoisted back to the top.
  */
-/** The first line of stdin, which Fire Code writes and then closes. */
+/**
+ * The first line of stdin, which Fire Code writes first - and whatever came after it on the same read,
+ * which with `--control-stdin` is the start of the control channel (`controlChannel.ts`).
+ */
+let stdinRest = ''
 function readStdinLine(): Promise<string> {
   return new Promise((resolve) => {
     let text = ''
     const done = (): void => {
       process.stdin.removeAllListeners('data')
       process.stdin.pause()
+      const at = text.indexOf('\n')
+      stdinRest = at === -1 ? '' : text.slice(at + 1)
       resolve(text.split(/\r?\n/)[0] ?? '')
     }
     process.stdin.setEncoding('utf8')

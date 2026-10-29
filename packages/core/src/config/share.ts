@@ -56,6 +56,7 @@ export type ShareSectionId =
   | 'mail'
   | 's3'
   | 'atlassian'
+  | 'autosysAddresses'
   | 'datasets'
   | 'schedules'
   | 'tools'
@@ -71,6 +72,14 @@ export interface ShareSection {
   description: string
   /** Top-level config keys it owns. A key belongs to exactly one section. */
   keys: readonly (keyof LightCodeConfig)[]
+  /**
+   * Dotted paths *inside* a key another section owns, carried on their own.
+   *
+   * For a part of a block a team wants to pass round without the rest of it: the AutoSys addresses
+   * one person worked out, without their sign-in or their Confluence and Jira sites. On import only
+   * these paths are replaced, so the importer's own block around them is untouched.
+   */
+  nested?: readonly string[]
   /**
    * Names paths on one particular machine.
    *
@@ -198,11 +207,19 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     id: 'atlassian',
     label: 'DevOps',
     description:
-      'The Confluence, Jira, Bitbucket, Jenkins and AutoSys sites, and their defaults. Tokens and passwords are not included.',
-    keys: ['confluence', 'jira', 'bitbucket', 'jenkins', 'autosys'],
+      'The Confluence, Jira, Bitbucket, Jenkins and AutoSys sites, their defaults and read-only settings, and the team repository for skills and tools. Tokens and passwords are not included.',
+    keys: ['confluence', 'jira', 'bitbucket', 'jenkins', 'autosys', 'teamRepo'],
     // A user id names one person: kept out of the file, and the importer's own is kept.
     strip: ['jenkins.username', 'autosys.username'],
     stripNote: 'Your Jenkins and AutoSys user names are left out; each person uses their own.',
+  },
+  {
+    id: 'autosysAddresses',
+    label: 'AutoSys addresses',
+    description:
+      "The addresses this office's AutoSys server answers at, as found by the assistant or set by hand. Alone, an import changes only these - not the importer's site, sign-in or other DevOps settings.",
+    keys: [],
+    nested: ['autosys.paths'],
   },
   {
     id: 'datasets',
@@ -278,6 +295,11 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
  */
 export const NEVER_SHARED: readonly (keyof LightCodeConfig)[] = [
   /*
+   * Branch folders: a setup command run in each new one, and where they go on this machine's disk. Importing
+   * a colleague's would run their command here unasked the next time a branch is opened.
+   */
+  'branches',
+  /*
    * Which shell commands have been approved, keyed by workspace path. Importing somebody else's
    * would pre-approve commands on this machine that nobody here has read — invariant 5's exact
    * threat, arriving through a file a colleague sent rather than through a repository.
@@ -296,6 +318,11 @@ export const NEVER_SHARED: readonly (keyof LightCodeConfig)[] = [
   // Folders on this machine where add-ons are installed. The add-ons themselves travel as
   // `mcpServers` entries, and each machine enables what it has installed.
   'addons',
+  // Which of *my* skills I keep to myself - about this person's skills, by name.
+  'teamSkills',
+  // My answers to skills' placeholders: a user name, an environment, a team. Personal by nature,
+  // and an imported default would be filled in without anybody being asked.
+  'skillDefaults',
 ]
 
 export interface SectionSummary {
@@ -360,6 +387,8 @@ function detailFor(section: ShareSection, config: LightCodeConfig): string {
       )
       return sites.length > 0 ? sites.join(', ') : 'not set up'
     }
+    case 'autosysAddresses':
+      return count(Object.keys(config.autosys?.paths ?? {}).length, 'address', 'addresses')
     case 'datasets':
       return count((config.datasets ?? []).length, 'dataset')
     case 'commands':
@@ -420,6 +449,8 @@ function secretRefsFor(section: ShareSection, config: LightCodeConfig): string[]
       if (config.autosys?.auth?.type === 'apigee') {
         refs.push('AutoSys: gateway client secret')
         if (config.autosys.auth.passphraseRef !== undefined) refs.push('AutoSys: client certificate passphrase')
+        if (config.autosys.auth.basicHeaderValueRef !== undefined) refs.push('AutoSys: sign-in header value')
+        else if (config.autosys.auth.sendBasic === true && config.autosys.tokenRef !== undefined) refs.push('AutoSys: username and password')
       } else if (config.autosys?.tokenRef !== undefined) refs.push('AutoSys: username and password')
       break
     case 'network':
@@ -438,13 +469,59 @@ function secretRefsFor(section: ShareSection, config: LightCodeConfig): string[]
   return refs
 }
 
+/** A dotted path's value, or undefined. */
+function getPath(source: unknown, path: string): unknown {
+  let value = source
+  for (const part of path.split('.')) {
+    if (typeof value !== 'object' || value === null) return undefined
+    value = (value as Record<string, unknown>)[part]
+  }
+  return value
+}
+
+function hasValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false
+  if (typeof value === 'object') return Object.keys(value).length > 0
+  return true
+}
+
+/** Sets (or, with undefined, removes) a dotted path, copying each level on the way down. */
+function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  const [head, ...rest] = path.split('.')
+  if (head === undefined) return
+  if (rest.length === 0) {
+    if (value === undefined) delete target[head]
+    else target[head] = value
+    return
+  }
+  const inner = target[head]
+  if ((inner === undefined || inner === null) && value === undefined) return
+  const copy = typeof inner === 'object' && inner !== null ? { ...(inner as Record<string, unknown>) } : {}
+  setPath(copy, rest.join('.'), value)
+  target[head] = copy
+}
+
+const NESTED_PATHS = SHARE_SECTIONS.flatMap((section) => section.nested ?? [])
+
+/**
+ * The config without what nested sections carry - so a file holding only the AutoSys addresses does
+ * not also read as "has DevOps settings", which on import would tick that section and replace the
+ * importer's whole DevOps setup with an empty one.
+ */
+function withoutNested(config: LightCodeConfig): LightCodeConfig {
+  const copy: Record<string, unknown> = { ...config }
+  for (const path of NESTED_PATHS) setPath(copy, path, undefined)
+  return copy as LightCodeConfig
+}
+
 /** Every section, described against a particular config. Sections with nothing in them included. */
 export function describeSections(config: LightCodeConfig): SectionSummary[] {
+  const owned = withoutNested(config)
   return SHARE_SECTIONS.map((section) => ({
     id: section.id,
     label: section.label,
     description: section.description,
-    present: section.keys.some((key) => has(config, key)),
+    present: section.keys.some((key) => has(owned, key)) || (section.nested ?? []).some((path) => hasValue(getPath(config, path))),
     detail: detailFor(section, config),
     secretRefs: secretRefsFor(section, config),
     ...(section.machineSpecific === true ? { machineSpecific: true } : {}),
@@ -477,6 +554,10 @@ export function buildExport(
     if (!chosen.has(section.id)) continue
     for (const key of section.keys) {
       if (has(config, key)) exported[key] = config[key]
+    }
+    for (const path of section.nested ?? []) {
+      const value = getPath(config, path)
+      if (hasValue(value)) setPath(exported, path, value)
     }
     for (const path of section.strip ?? []) stripPath(exported, path)
   }
@@ -546,6 +627,14 @@ export function applyImport(
      */
     for (const path of section.strip ?? []) {
       carryPath(existing as Record<string, unknown>, merged, path)
+    }
+  }
+  // After the whole-key sections, so a nested part is the same whichever combination was ticked.
+  for (const section of SHARE_SECTIONS) {
+    if (!chosen.has(section.id)) continue
+    for (const path of section.nested ?? []) {
+      const value = getPath(imported, path)
+      setPath(merged, path, hasValue(value) ? value : undefined)
     }
   }
   return merged as LightCodeConfig

@@ -100,6 +100,16 @@ export const USER_SCOPE_ONLY_KEYS = [
   // where that happens is the user's call. `.lightcode/skills/` is always read regardless, so
   // a project loses nothing.
   'skills',
+  // Where this person's skills and tools are committed: a repository able to set it would send them elsewhere.
+  'teamRepo',
+  // A command run in every new branch folder: a repository able to set it would run a program of its choosing.
+  'branches',
+  // Which skills go to the team pool: a repository able to set it could publish skills the user
+  // chose to keep to themselves.
+  'teamSkills',
+  // Answers given to skills on the user's behalf. A repository able to set them would choose what
+  // the assistant fills in - an environment, a recipient - without anybody being asked.
+  'skillDefaults',
   // A schedule runs tools with nobody watching. A repository able to add one would execute
   // code of its choosing the moment the panel opened.
   'schedules',

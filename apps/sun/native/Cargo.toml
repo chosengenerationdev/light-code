@@ -1,51 +1,41 @@
 [package]
 name = "fire-code"
-version = "0.39.0"
+version = "0.68.0"
 edition = "2021"
 rust-version = "1.86"
 description = "Fire Code: several codebases, each with its own Light Code agent, in one Windows window"
 license = "MIT"
 publish = false
+# src/bin/fire_fs.rs belongs to the fire-fs package (below); without this Cargo would also build it here.
+autobins = false
 
 [[bin]]
 name = "fire-code"
 path = "src/main.rs"
 
-# The parallel file helper the agents call: find, summarise, read many, big files, tables.
-[[bin]]
-name = "fire-fs"
-path = "src/bin/fire_fs.rs"
-
-# `dataframe` is the one heavy operation: Polars is ~40 MB of the helper's ~45 MB. Fire Code ships it;
-# the VS Code extension carries a slim helper built with `--no-default-features`, which has every
-# other operation and reports exactly those in `capabilities`.
-[features]
-default = ["dataframe"]
-dataframe = ["dep:polars"]
+# The parallel file helper the agents call (find, summarise, read many, big files, tables, SQLite,
+# dataframes) is its own package, `fire-fs/`, in this workspace. It holds Polars, and as a second
+# binary of this package every Fire Code version bump rebuilt it with link-time optimisation - about
+# eight minutes - though nothing in it had changed. Now it rebuilds only when its own code does.
+[workspace]
+members = ["fire-fs"]
+default-members = [".", "fire-fs"]
+resolver = "2"
 
 [dependencies]
 tao = "0.37"
 wry = "0.57"
 rfd = "0.17"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 window-vibrancy = "0.8"
 tauri-winrt-notification = "0.8"
 winreg = "0.56"
 aes-gcm = "0.10"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 sha2 = "0.10"
-ignore = "=0.4.23"
-rayon = "1"
+# Monitoring's `matches` rule. Already in the lock through fire-fs.
 regex = "1"
-memchr = "2"
-csv = "1"
-calamine = "0.26"
-flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
-zip = { version = "=2.4.2", default-features = false, features = ["deflate-flate2"] }
-rusqlite = { version = "0.40.2", features = ["bundled", "limits"] }
-polars = { version = "=0.49", optional = true, default-features = false, features = ["lazy", "sql", "csv", "strings", "temporal", "dtype-date", "dtype-datetime", "round_series", "is_in"] }
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
@@ -64,6 +54,8 @@ windows-sys = { version = "0.60", features = [
   "Win32_System_DataExchange",
   "Win32_System_Memory",
   "Win32_Networking_Ldap",
+  # GetLocalTime/GetSystemTime: monitoring's active hours and local timestamps.
+  "Win32_System_SystemInformation",
 ] }
 
 [build-dependencies]

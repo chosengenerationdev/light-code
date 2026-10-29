@@ -4,14 +4,17 @@ import {
   type AtlassianProductInfo,
   type AtlassianProductStatus,
   type AtlassianSettingsView,
+  type AutosysGatewaySecret,
   type AutosysGatewaySettings,
   type AutosysGatewayView,
+  type Transport,
 } from '@light-code/core/browser'
 import { AutosysGatewaySection, gatewayDraftFrom } from './AutosysGateway.js'
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { colors, labelStyle, primaryButtonStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
 import { Panel } from './Panel.js'
+import { TeamRepoPanel } from './TeamRepoPanel.js'
 import { SecretInput } from './CredentialPicker.js'
 import { disabledWhen } from '../disabledWhen.js'
 
@@ -29,7 +32,7 @@ export interface AtlassianTabProps {
   products: Record<AtlassianProductId, AtlassianProductStatus> | undefined
   /** Bumped per product by the host after a successful save, so its button can say "Saved". */
   savedTicks: Partial<Record<AtlassianProductId, number>>
-  tests: Partial<Record<AtlassianProductId, { ok: boolean; detail: string }>>
+  tests: Partial<Record<AtlassianProductId, { ok: boolean; detail: string; diagnostics?: string }>>
   testing: Partial<Record<AtlassianProductId, boolean>>
   onSave: (
     product: AtlassianProductId,
@@ -39,7 +42,9 @@ export interface AtlassianTabProps {
   ) => void
   onClearToken: (product: AtlassianProductId) => void
   onTest: (product: AtlassianProductId) => void
-  onClearGatewaySecret?: (which: 'clientSecret' | 'passphrase') => void
+  onClearGatewaySecret?: (which: AutosysGatewaySecret) => void
+  /** For the team repository panel, which talks to the host itself. Absent in tests that do not need it. */
+  transport?: Transport | undefined
 }
 
 /** The AutoSys gateway fields, sent with the panel's one Save. Secrets blank mean "keep". */
@@ -47,6 +52,7 @@ export interface GatewaySave {
   settings: AutosysGatewaySettings
   clientSecret?: string | undefined
   passphrase?: string | undefined
+  basicValue?: string | undefined
 }
 
 export function AtlassianTab(props: AtlassianTabProps): ReactElement {
@@ -83,6 +89,8 @@ export function AtlassianTab(props: AtlassianTabProps): ReactElement {
           />
         )
       })}
+      {/* The team's repository for skills and tools rides the Bitbucket connection above. */}
+      {props.transport !== undefined && <TeamRepoPanel transport={props.transport} />}
     </div>
   )
 }
@@ -92,14 +100,14 @@ export interface AtlassianSectionProps {
   settings: AtlassianSettingsView
   hasToken: boolean
   savedTick: number
-  test: { ok: boolean; detail: string } | undefined
+  test: { ok: boolean; detail: string; diagnostics?: string } | undefined
   testing: boolean
   onSave: (settings: AtlassianSettingsView, token: string | undefined, gateway?: GatewaySave | undefined) => void
   onClearToken: () => void
   onTest: () => void
   /** AutoSys only. */
   gateway?: AutosysGatewayView | undefined
-  onClearGatewaySecret?: ((which: 'clientSecret' | 'passphrase') => void) | undefined
+  onClearGatewaySecret?: ((which: AutosysGatewaySecret) => void) | undefined
 }
 
 const hintStyle = { display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' } as const
@@ -122,6 +130,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
   )
   const [clientSecret, setClientSecret] = useState('')
   const [passphrase, setPassphrase] = useState('')
+  const [basicValue, setBasicValue] = useState('')
   useEffect(() => setGatewayDraft(gatewayKey === '' ? undefined : (JSON.parse(gatewayKey) as AutosysGatewaySettings)), [gatewayKey])
 
   useEffect(() => {
@@ -130,11 +139,12 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       setToken('')
       setClientSecret('')
       setPassphrase('')
+      setBasicValue('')
     }
   }, [props.savedTick])
 
   const gatewayDirty =
-    gatewayDraft !== undefined && (JSON.stringify(gatewayDraft) !== gatewayKey || clientSecret.length > 0 || passphrase.length > 0)
+    gatewayDraft !== undefined && (JSON.stringify(gatewayDraft) !== gatewayKey || clientSecret.length > 0 || passphrase.length > 0 || basicValue.trim().length > 0)
   const dirty = JSON.stringify(draft) !== savedKey || token.trim().length > 0 || gatewayDirty
   const set = (change: Partial<AtlassianSettingsView>): void => {
     setSaved(false)
@@ -163,8 +173,10 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       : viaGateway
         ? props.gateway?.hasClientSecret !== true
           ? 'Enter the gateway consumer secret and save.'
-          : props.gateway.sendBasic && (!props.hasToken || (props.settings.defaults['username'] ?? '').trim().length === 0)
-            ? 'Enter the AutoSys username and password and save — the gateway is set to pass them on.'
+          : props.gateway.sendBasic &&
+              props.gateway.hasBasicValue !== true &&
+              (!props.hasToken || (props.settings.defaults['username'] ?? '').trim().length === 0)
+            ? 'Enter the AutoSys username and password, or paste the sign-in header value, and save — the gateway is set to pass a sign-in on.'
             : undefined
         : props.hasToken
           ? undefined
@@ -202,6 +214,18 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
         <input type="checkbox" checked={draft.enabled} onChange={(event) => set({ enabled: event.target.checked })} />
         <span>Let the assistant use {info.label}</span>
       </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={draft.readOnly === true}
+          onChange={(event) => set({ readOnly: event.target.checked })}
+        />
+        <span>My access is read-only</span>
+      </label>
+      <span style={{ ...hintStyle, marginTop: 0 }}>
+        The assistant then gets only the tools that read {info.label} - the ones that change something are left out - and is
+        told the access is read-only, so it explains what someone with access would need to do instead of trying.
+      </span>
 
       <label htmlFor={id('url')} style={labelStyle()}>
         Site address
@@ -220,7 +244,9 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
       {viaGateway && (
         <span style={hintStyle}>
           {props.gateway?.sendBasic === true
-            ? 'Signing in through the API gateway below. The token is got with the consumer key and secret; this username and password go with each AutoSys call.'
+            ? props.gateway.hasBasicValue === true
+              ? 'Signing in through the API gateway below. The token is got with the consumer key and secret; your saved sign-in header value goes with each AutoSys call, so the username and password here are not used.'
+              : 'Signing in through the API gateway below. The token is got with the consumer key and secret; this username and password go with each AutoSys call.'
             : 'Signing in through the API gateway below — the username and password are not used.'}
         </span>
       )}
@@ -290,6 +316,12 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
           }}
           hasClientSecret={props.gateway.hasClientSecret}
           hasPassphrase={props.gateway.hasPassphrase}
+          basicValue={basicValue}
+          onBasicValue={(value) => {
+            setSaved(false)
+            setBasicValue(value)
+          }}
+          hasBasicValue={props.gateway.hasBasicValue === true}
           onClearSecret={props.onClearGatewaySecret}
         />
       )}
@@ -308,6 +340,7 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
                     settings: gatewayDraft,
                     ...(clientSecret.trim().length > 0 ? { clientSecret: clientSecret.trim() } : {}),
                     ...(passphrase.length > 0 ? { passphrase } : {}),
+                    ...(basicValue.trim().length > 0 ? { basicValue: basicValue.trim() } : {}),
                   }
                 : undefined,
             )
@@ -346,6 +379,57 @@ export function AtlassianSection(props: AtlassianSectionProps): ReactElement {
           {props.test.detail}
         </span>
       )}
+      {props.test?.diagnostics !== undefined && <TestDetails text={props.test.diagnostics} failed={!props.test.ok} />}
     </Panel>
+  )
+}
+
+/**
+ * Every request Test connection made and what came back - address, status, headers, the start of the
+ * body - credentials masked host-side (`platform/httpTrace.ts`). Asked for after a 403 seen in Postman
+ * showed here as a different sentence: the sentence is a reading of the failure; this is what it was
+ * read from, and what to send whoever runs the service. Open by default when the test failed.
+ */
+function TestDetails(props: { text: string; failed: boolean }): ReactElement {
+  const [copied, setCopied] = useState(false)
+  return (
+    <details open={props.failed} style={{ marginTop: 6 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 12 }}>Details - every request and what came back</summary>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}>
+        <button
+          type="button"
+          style={secondaryButtonStyle()}
+          onClick={() => {
+            void navigator.clipboard?.writeText(props.text).then(
+              () => {
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              },
+              () => setCopied(false),
+            )
+          }}
+        >
+          {copied ? 'Copied' : 'Copy details'}
+        </button>
+        <span style={{ color: colors.muted, fontSize: 11 }}>Passwords, tokens and secrets are masked.</span>
+      </div>
+      <pre
+        style={{
+          margin: 0,
+          padding: 8,
+          maxHeight: 360,
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'anywhere',
+          fontSize: 11,
+          fontFamily: 'var(--vscode-editor-font-family, monospace)',
+          background: colors.inputBackground,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 4,
+        }}
+      >
+        {props.text}
+      </pre>
+    </details>
   )
 }

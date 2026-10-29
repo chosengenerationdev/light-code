@@ -233,14 +233,19 @@ export function describeAtlassianFailure(product: AtlassianProduct, doing: strin
           : '')
       )
     case 401:
-      return (
-        `${label} did not accept the personal access token while ${doing}. It may have expired or ` +
-        `been revoked: create a new one and save it in Settings → DevOps → ${label}.`
-      )
+      return product === 'autosys' || product === 'jenkins'
+        ? `${label} answered HTTP 401 (not signed in) while ${doing}: it did not accept the credentials sent.${said} ` +
+            `Check the user and password or token in Settings → DevOps → ${label} - and, through an API gateway, its consumer key and secret. Test connection's Details show exactly what was sent.`
+        : `${label} answered HTTP 401 (not signed in) while ${doing}: it did not accept the personal access token.${said} ` +
+            `It may have expired or been revoked: create a new one and save it in Settings → DevOps → ${label}.`
     case 403:
-      return `The token's owner is not allowed to do this (${doing}).${said} Ask an administrator for permission.`
+      return (
+        `${label} answered HTTP 403 (forbidden) while ${doing}: the sign-in was recognised, but the account it was sent as ` +
+        `is not allowed to do this.${said} Ask the ${label} administrators to grant that account access - Test connection's ` +
+        'Details show which account and address were used.'
+      )
     case 404:
-      return `${label} found nothing while ${doing}.${said} Check the key, id or path.`
+      return `${label} answered HTTP 404 (not found) while ${doing}.${said} Check the key, id or path - or, for an address that differs on this server, the site address.`
     case 409:
       return (
         `Someone changed it while ${doing}, so nothing was overwritten.${said} Read it again and ` +

@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
-import { AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView, withBasicCredentials } from '../atlassian/autosysGateway.js'
-import type { AddonView, AutosysGatewaySettings } from '../agent/protocol.js'
-import type { TlsOptions } from '../platform/http.js'
+import { AUTOSYS_BASIC_VALUE_REF, AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView, withBasicCredentials, withHeader } from '../atlassian/autosysGateway.js'
+import type { AddonView, AutosysGatewaySecret, AutosysGatewaySettings, DeleteEverywherePlan, TeamRepoRetire, TeamRepoSettings, TeamRepoStatus, TeamSkillState } from '../agent/protocol.js'
+import type { HttpClient, TlsOptions } from '../platform/http.js'
 import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
@@ -32,6 +32,7 @@ import {
 } from '../agent/codebaseInstructions.js'
 import { readToolCredential } from '../python/toolCredentials.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
+import { cleanSkillDefaults, findPlaceholders, renderSkillDefaults, skillDefaultsReadNote } from '../skills/defaults.js'
 import { createHubTools, describePull } from '../jupyter/tools.js'
 import { hubGitCommitPush, hubGitDiff, hubGitPull, hubGitStatus } from '../jupyter/hubGit.js'
 import { createHubBrowseTool, type BrowsableHub } from '../jupyter/browse.js'
@@ -142,6 +143,18 @@ import {
 } from '../atlassian/bitbucket.js'
 import { createJenkinsTools, JenkinsClient } from '../atlassian/jenkins.js'
 import { AutosysClient, createAutosysTools, type AutosysPaths } from '../atlassian/autosys.js'
+import { createAutosysAddressTools } from '../atlassian/autosysAddresses.js'
+import { monitorToolRefusal } from '../monitoring/channel.js'
+import { declaredToolCalls } from '../python/declaredCredentials.js'
+import { MonitorHistoryStore, type CheckDocument, type MonitorRevision } from '../monitoring/history.js'
+import { explainMessages } from '../monitoring/explain.js'
+import { createMonitorCheckToolTool, createMonitorControlTool, createMonitorHistoryTool, createMonitorCreateTool, createMonitorShowTool, createMonitorStatusTool } from '../monitoring/tools.js'
+import { toolsForAccess } from '../atlassian/readOnly.js'
+import { isSafeSegment, isSafeTagName } from '../atlassian/bitbucket.js'
+import { copySetupFiles, currentBranchOf, listWorktrees, mainCheckoutOf, setupMarkerFor } from '../git/worktrees.js'
+import { checkCoverage, releaseFromRecord, repoFilesOf, syncTeamRepo, TEAM_REPO_STATE_FILE, tombstoneInRepo, type TeamRepoFiles } from '../teamrepo/sync.js'
+import type { Problem } from '../usage/dashboard.js'
+import { renderTrace, tracingHttpClient, type TraceEntry } from '../platform/httpTrace.js'
 import { createJiraProjectTool, createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
 import { ATLASSIAN_PRODUCTS, atlassianProduct } from '../atlassian/products.js'
 import { AtlassianError, type AtlassianConnection } from '../atlassian/rest.js'
@@ -254,6 +267,7 @@ import {
   createCallToolTool,
   createForgetDocsTool,
   PythonManager,
+  type PythonStatus,
   createWriteSkillTool,
   createDeleteSkillTool,
   createUseSkillFileTool,
@@ -274,7 +288,9 @@ import {
   createS3Tools,
   mirrorFolder,
   removeSkillFromBucket,
+  removeToolFromBucket,
   skillKeysInBucket,
+  toolKeysInBucket,
   syncFromS3,
   uploadToS3,
   targetById,
@@ -598,11 +614,27 @@ export interface ChatBridge {
 
 export function wireChatBridge(services: HostServices): ChatBridge {
   const { transport, secrets, ui, workspaceRoot, storageDir } = services
+  /*
+   * The project a folder belongs to: the repository's main checkout when this folder is a branch folder (a
+   * git worktree, git/worktrees.ts), else the folder itself. Per-project settings, "always allow" approvals
+   * and codebase instructions are filed under it, so every branch of a repository shares them - the user's
+   * choice when branch folders were built. The workspace (what the agent may touch) stays this folder.
+   */
+  const projectRoot = workspaceRoot !== undefined ? (mainCheckoutOf(workspaceRoot) ?? workspaceRoot) : undefined
+  /** The branch checked out here, read once; shown under the chat's name. */
+  const workspaceBranch = workspaceRoot !== undefined ? currentBranchOf(workspaceRoot) : undefined
   const machineApprovals =
     services.machineApprovalsFile !== undefined ? new FileMachineApprovals(services.machineApprovalsFile) : undefined
   // Where bucket folders are copied: shared by every codebase in Fire Code, so a tool approved once
   // is approved everywhere on this machine (approval lives in the folder's .registry.json).
   const mirrorRoot = services.mirrorRoot ?? storageDir
+  /*
+   * The user's own skills and tools, kept only on this machine and used in every project - the "Only me"
+   * choice when one is created. Never uploaded, committed or sent to the team pool. Absent on a shared
+   * server (`HostServices.personalDir`), where there is no one person to keep them for.
+   */
+  const personalSkillsDir = services.personalDir !== undefined ? path.join(services.personalDir, 'skills') : undefined
+  const personalToolsDir = services.personalDir !== undefined ? path.join(services.personalDir, 'tools') : undefined
   const logger = new Logger({ level: 'debug', sink: services.logSink })
   /*
    * What the Rust helper answers, asked once. A host may be pointed at an installed Fire Code older than
@@ -618,7 +650,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
-  const configManager = new ConfigManager(services.configStore, services.workspaceRoot)
+  const configManager = new ConfigManager(services.configStore, projectRoot)
   /*
    * The proxy environment is honoured here too, not only on the Node host.
    *
@@ -667,7 +699,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   const manifestsRoot = services.codebaseDir ?? storageDir
   /** What every chat on this codebase is told; see `agent/codebaseInstructions.ts`. */
-  const codebaseInstructionsFile = codebaseInstructionsPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot })
+  const codebaseInstructionsFile = codebaseInstructionsPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot: projectRoot })
   if (services.codebaseDir !== undefined) {
     const shared = path.join(services.codebaseDir, 'index-manifests')
     void fs
@@ -679,6 +711,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   const python: PythonManager = new PythonManager({
     workspaceRoot,
     storageDir,
+    ...(personalToolsDir !== undefined ? { personalToolsDir, sharedWith: () => sharedWith('tools') } : {}),
     ...(services.codebaseDir !== undefined ? { venvRoot: services.codebaseDir } : {}),
     logger,
     // Fire Code: one review per tool's code on this machine, however many codebases hold it.
@@ -715,6 +748,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      */
     attribution: () => cachedAttribution,
     onToolSaved: async (name: string, source: string) => {
+      scheduleTeamRepoPush()
       const publishTo = cachedToolMirrors.find(
         (mirror) => mirror.enabled === true && mirror.publish === true,
       )
@@ -736,13 +770,6 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * anybody present to answer a prompt. `callPolicy.ts` holds the rule and the reasoning.
      */
     callTool: async (name, args, caller) => {
-      if (!pythonNestedCallsAllowed) {
-        throw new Error(
-          'This run cannot call other tools from a Python tool: it is unattended, so nobody is ' +
-            'here to approve one.',
-        )
-      }
-
       const registry = currentToolRegistry()
       const tool = registry.get(name) ?? registry.get(`py__${name}`)
       if (tool === undefined) {
@@ -751,7 +778,39 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             'MCP tool is named with its server, like `filesystem__read_file`.',
         )
       }
-      if (!mayPythonToolCall(tool.name, tool.group)) throw new Error(PYTHON_CALL_DENIED)
+      // What the calling tool declares it calls, read from its file as approved (a changed file declares nothing).
+      const declared = await declaredCallsOf(caller)
+      const isDeclared = declared.some((d) => d === tool.name || `py__${d}` === tool.name)
+
+      /*
+       * A Fire Code monitor's check, running with nobody there. Its Python tool may call what it declares
+       * in __tool_calls__ - part of the approved bytes, so that is the approval - and only what a monitor
+       * may run itself (`monitorToolRefusal`): reading, MCP and approved Python tools.
+       *
+       * The same rule when the agent tries a monitor in a chat (monitor_create, monitor_check_tool), not
+       * the chat's per-call prompts: a check that passed in the chat by being approved call by call then
+       * failed when Fire Code ran it in the background, which is the opposite of what trying it is for.
+       */
+      if (monitorRunContext !== undefined) {
+        if (!isDeclared) {
+          throw new Error(
+            `${caller} calls "${tool.name}" without declaring it. Add it to the tool's __tool_calls__ list ` +
+              `(e.g. __tool_calls__ = [${[...declared, tool.name].map((d) => JSON.stringify(d)).join(', ')}]); the tool is then approved again.`,
+          )
+        }
+        const refusal = monitorToolRefusal(tool, tool.name)
+        if (refusal !== undefined) throw new Error(refusal)
+        const result = await tool.execute(args as never, monitorRunContext)
+        if (result.isError === true) throw new Error(String(result.content))
+        return result.content
+      }
+      if (!pythonNestedCallsAllowed) {
+        throw new Error(
+          'This run cannot call other tools from a Python tool: it is unattended, so nobody is ' +
+            'here to approve one.',
+        )
+      }
+      if (!mayPythonToolCall(tool.name, tool.group, isDeclared)) throw new Error(PYTHON_CALL_DENIED)
 
       /*
        * Approved exactly as the model's own call would be, showing the tool's own preview.
@@ -991,6 +1050,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             if (skillWatchTimer !== undefined) clearTimeout(skillWatchTimer)
             skillWatchTimer = setTimeout(() => {
               void postSkills()
+              // A skill written or edited here reaches the team repository soon, not only at the next tick.
+              scheduleTeamRepoPush()
             }, 300)
           }),
         )
@@ -1004,7 +1065,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function postSkills(): Promise<void> {
     // The folder list lives in config and is refreshed here, not only per turn — otherwise
     // adding a folder in Settings would show no change until the next message.
-    await loadSettings()
+    const skillsConfig = await loadSettings()
     await refreshSkills()
     post({
       type: 'skills',
@@ -1026,6 +1087,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           // Names only, same rule as the pictures — and here it is not even a choice, since a
           // template is measured in megabytes and nothing in the tab would show its contents.
           const files = await listSkillFiles(skill.filePath, { readdir })
+          // Offered as boxes for defaults in the tab; a file that cannot be read offers none.
+          const placeholders = findPlaceholders(await fs.readFile(skill.filePath, 'utf8').catch(() => ''))
           return {
             name: skill.name,
             description: skill.description,
@@ -1033,6 +1096,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             ...(images.length > 0 ? { images } : {}),
             ...(files.length > 0 ? { files } : {}),
             ...(skill.sourceDir !== undefined ? { sourceDir: skill.sourceDir } : {}),
+            ...(placeholders.length > 0 ? { placeholders } : {}),
+            ...(isPersonalSkill(skill) ? { personal: true } : {}),
             ...(skill.always === true ? { always: true } : {}),
             ...(skill.author !== undefined ? { author: skill.author } : {}),
             ...(skill.project !== undefined ? { project: skill.project } : {}),
@@ -1049,6 +1114,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       issues: skillIssues,
       ...(skillsDir !== undefined ? { skillsDir } : {}),
       extraDirs: extraSkillDirs,
+      keepPrivate: [...new Set([...(skillsConfig.teamSkills?.keepPrivate ?? []), ...skills.filter(isPersonalSkill).map((skill) => skill.name)])],
+      skillDefaults: skillsConfig.skillDefaults ?? {},
     })
     // Skills are part of the corpus, so a written, deleted or relocated one makes the index
     // stale. Debounced and fingerprinted, so the usual case costs nothing.
@@ -1365,13 +1432,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   function pythonFolders(config: LightCodeConfig): { toolsDir?: string; extraToolDirs: string[] } {
     const configured = config.python?.toolsDir?.trim()
-    const publish =
-      configured !== undefined && configured.length > 0 ? undefined : publishFolder('tools', config.s3?.tools ?? [])
-    if (publish === undefined) return { extraToolDirs: mirroredToolsDirs }
+    const chosen = configured !== undefined && configured.length > 0
+    const team = chosen ? undefined : teamRepoPlan(config)
+    // A bucket folder marked "Publish" first; else, while the team repository is on, its own folder outside
+    // the project (the same rule as skills - see loadSettings).
+    const publish = chosen
+      ? undefined
+      : (publishFolder('tools', config.s3?.tools ?? []) ?? (team !== undefined && 'own' in team ? team.own.tools : undefined))
+    // The host's own additions (Fire Code's monitoring executor reads every codebase's tools), read only and last.
+    const personal = [...(personalToolsDir !== undefined ? [personalToolsDir] : [])]
+    const added = services.extraToolDirs ?? []
+    if (publish === undefined) return { extraToolDirs: [...personal, ...mirroredToolsDirs, ...added] }
     const local = localToolsDir(config)
     return {
       toolsDir: publish,
-      extraToolDirs: [...(local !== undefined ? [local] : []), ...mirroredToolsDirs.filter((dir) => !samePath(dir, publish))],
+      extraToolDirs: [...personal, ...(local !== undefined ? [local] : []), ...mirroredToolsDirs.filter((dir) => !samePath(dir, publish)), ...added],
     }
   }
 
@@ -1892,14 +1967,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (
         existing !== undefined &&
         existing.sourceDir !== undefined &&
-        existing.sourceDir !== skillsDir
+        existing.sourceDir !== skillsDir &&
+        // The user's own skills are theirs to delete.
+        !samePath(existing.sourceDir, personalSkillsDir)
       ) {
         throw new Error(
           `"${name}" lives in ${existing.sourceDir}, which is a read-only skills folder. Delete the file there, or remove the folder in Settings.`,
         )
       }
 
-      await fs.rm(path.join(skillsDir, skillFileName(name)), { force: true })
+      const from = existing?.sourceDir !== undefined && samePath(existing.sourceDir, personalSkillsDir) ? existing.sourceDir : skillsDir
+      await fs.rm(path.join(from, skillFileName(name)), { force: true })
       await postSkills()
     } catch (error) {
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
@@ -2267,7 +2345,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   let scheduleToolAccess: ((toolName: string) => boolean) | undefined
 
-  const approvalsKey = workspaceRoot ?? '__no_workspace__'
+  const approvalsKey = projectRoot ?? '__no_workspace__'
 
   /**
    * Finds this workspace's approvals however its path happens to be spelled.
@@ -3076,6 +3154,28 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}),
         }),
       )
+    /*
+     * The team repository's copy, read-only like a bucket folder: your own skills and tools still win a
+     * name, an identical copy is silent, and a tool from it still needs approving here (§13).
+     */
+    const team = teamRepoPlan(config)
+    cachedTeamRepoLabel = 'dirs' in team ? `${team.settings.project}/${team.settings.repo} (${team.settings.branch})` : undefined
+    if ('dirs' in team) {
+      extraSkillDirs.push(team.dirs.skills)
+      mirroredToolsDirs.push(team.dirs.tools)
+      /*
+       * While the team repository is on, new skills are saved in its own folder, outside the project - asked
+       * for: they are the team's, not this repository's, and must not land in its git. A folder chosen in
+       * skills.dir, or a bucket folder marked "Publish", still wins. The project folder stays readable (and
+       * is still committed), so what is already there keeps working.
+       */
+      if (config.skills?.dir === undefined && publishSkills === undefined) {
+        skillsDir = team.own.skills
+        extraSkillDirs.unshift(...(localSkillsDir !== undefined ? [localSkillsDir] : []))
+      }
+    }
+    // The user's own skills, right after the save folder: theirs win a name over anything shared.
+    if (personalSkillsDir !== undefined) extraSkillDirs.unshift(personalSkillsDir)
 
     return config
   }
@@ -3234,14 +3334,22 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     offersOffice: boolean
     exportsSource: boolean
     picksFiles: boolean
+    savesFiles: boolean
     hostModels: boolean
+    workspaceBranch?: string
+    branchFolderOf?: string
   } {
     return {
+      // The branch this window or tab works on, shown under the chat's name; and the repository, when this
+      // folder is one of its branch folders (git/worktrees.ts).
+      ...(workspaceBranch !== undefined ? { workspaceBranch } : {}),
+      ...(projectRoot !== undefined && workspaceRoot !== undefined && projectRoot !== workspaceRoot ? { branchFolderOf: path.basename(projectRoot) } : {}),
       // The GitHub Copilot preset, offered only where VS Code's models can be reached.
       hostModels: services.languageModels !== undefined,
       nativeGuide: ui.openWalkthrough !== undefined,
       exportsSource: services.sourceArchive !== undefined,
       picksFiles: ui.pickContextFiles !== undefined,
+      savesFiles: ui.savesFiles === true,
       /*
        * Whether this host has a theme of its own to follow.
        *
@@ -3651,6 +3759,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         skillsDir,
         onChanged: refreshSkills,
         attribution: () => cachedAttribution,
+        // "Only me": the user's own skills, never shared. Absent on a shared server.
+        ...(personalSkillsDir !== undefined ? { personalSkillsDir, sharedWith: () => sharedWith('skills') } : {}),
         /*
          * Every loaded skill, so `use_skill_file` can reach a template in a read-only shared
          * folder. A closure over the live array rather than a copy: the folders are watched, and
@@ -3699,23 +3809,41 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const skillTarget =
         publishTo === undefined ? undefined : targetById(cachedS3, publishTo.connectionId)
       const mirrorPrefix = publishTo?.prefix
-      combined.register(
-        createWriteSkillTool({
-          ...context,
-          ...(skillTarget !== undefined && skillTarget.readOnly !== true
-            ? {
-                onSaved: async (name: string, content: string, relativePath: string) => {
-                  await uploadToS3({
-                    target: skillTarget,
-                    ...(mirrorPrefix !== undefined ? { prefix: mirrorPrefix } : {}),
-                    relative: relativePath.length > 0 ? relativePath : `${name}.md`,
-                    contents: Buffer.from(content, 'utf8'),
-                  })
-                },
-              }
-            : {}),
-        }),
-      )
+      const writeSkill = createWriteSkillTool({
+        ...context,
+        ...(skillTarget !== undefined && skillTarget.readOnly !== true
+          ? {
+              onSaved: async (name: string, content: string, relativePath: string) => {
+                await uploadToS3({
+                  target: skillTarget,
+                  ...(mirrorPrefix !== undefined ? { prefix: mirrorPrefix } : {}),
+                  relative: relativePath.length > 0 ? relativePath : `${name}.md`,
+                  contents: Buffer.from(content, 'utf8'),
+                })
+              },
+            }
+          : {}),
+      })
+      combined.register(writeSkill)
+      /*
+       * Fire Code's monitoring, while it is on. A monitor is a skill, so it is written by this very
+       * write_skill - the same folders, publishing and approval - and its tool is tried by the rule the
+       * executor runs it by (`executeForMonitor`).
+       */
+      if (services.monitoring !== undefined) {
+        const monitorOptions = {
+          channel: services.monitoring,
+          writeSkill,
+          runTool: (name: string, args: Record<string, unknown>, toolContext: ToolExecutionContext) => executeForMonitor(name, args, toolContext),
+          hasModule: async (module: string) => (await python.hasModules([module]))?.[module],
+        }
+        combined.register(createMonitorCreateTool(monitorOptions))
+        combined.register(createMonitorStatusTool(monitorOptions))
+        combined.register(createMonitorShowTool(monitorOptions))
+        combined.register(createMonitorCheckToolTool(monitorOptions))
+        combined.register(createMonitorHistoryTool(monitorOptions))
+        combined.register(createMonitorControlTool(monitorOptions))
+      }
       combined.register(createDeleteSkillTool(context))
       // Registered beside them because it is the same feature: a skill that carries a template
       // is worth nothing if there is no way to get the template out of it.
@@ -3918,33 +4046,62 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         client: confluenceClient,
         ...(cachedConfluence.defaultSpace !== undefined ? { defaultSpace: cachedConfluence.defaultSpace } : {}),
       }
-      combined.register(createConfluenceSearchTool(confluenceOptions))
-      combined.register(createConfluenceReadPageTool(confluenceOptions))
-      combined.register(createConfluenceWritePageTool(confluenceOptions))
+      // A read-only connection registers its readers alone, each saying so (`atlassian/readOnly.ts`).
+      for (const tool of toolsForAccess(
+        [createConfluenceSearchTool(confluenceOptions), createConfluenceReadPageTool(confluenceOptions), createConfluenceWritePageTool(confluenceOptions)] as unknown as Tool<never>[],
+        cachedConfluence.readOnly === true,
+        'Confluence',
+      )) {
+        combined.register(tool)
+      }
     }
     if (cachedJira?.enabled === true && cachedJira.baseUrl !== undefined) {
       const jiraOptions = {
         client: jiraClient,
         ...(cachedJira.defaultProject !== undefined ? { defaultProject: cachedJira.defaultProject } : {}),
       }
-      combined.register(createJiraSearchTool(jiraOptions))
-      combined.register(createJiraReadIssueTool(jiraOptions))
-      combined.register(createJiraProjectTool(jiraOptions))
-      combined.register(createJiraWriteIssueTool(jiraOptions))
+      for (const tool of toolsForAccess(
+        [createJiraSearchTool(jiraOptions), createJiraReadIssueTool(jiraOptions), createJiraProjectTool(jiraOptions), createJiraWriteIssueTool(jiraOptions)] as unknown as Tool<never>[],
+        cachedJira.readOnly === true,
+        'Jira',
+      )) {
+        combined.register(tool)
+      }
     }
     if (cachedJenkins?.enabled === true && cachedJenkins.baseUrl !== undefined) {
-      for (const tool of createJenkinsTools({
-        client: jenkinsClient,
-        ...(cachedJenkins.defaultJob !== undefined ? { defaultJob: cachedJenkins.defaultJob } : {}),
-      })) {
+      for (const tool of toolsForAccess(
+        createJenkinsTools({
+          client: jenkinsClient,
+          ...(cachedJenkins.defaultJob !== undefined ? { defaultJob: cachedJenkins.defaultJob } : {}),
+        }),
+        cachedJenkins.readOnly === true,
+        'Jenkins',
+      )) {
         combined.register(tool)
       }
     }
     if (cachedAutosys?.enabled === true && cachedAutosys.baseUrl !== undefined) {
-      for (const tool of createAutosysTools({
-        client: autosysClient,
+      const autosysDefaults = {
         ...(cachedAutosys.defaultPattern !== undefined ? { defaultPattern: cachedAutosys.defaultPattern } : {}),
-      })) {
+        ...(cachedAutosys.testJob !== undefined ? { testJob: cachedAutosys.testJob } : {}),
+      }
+      for (const tool of toolsForAccess(
+        [
+          ...createAutosysTools({ client: autosysClient, ...autosysDefaults }),
+          // Finding and keeping the addresses this server answers at; saving is `edit`, so read-only leaves it out.
+          ...createAutosysAddressTools({
+            client: autosysClient,
+            ...autosysDefaults,
+            currentPaths: async () =>
+              Object.fromEntries(
+                Object.entries((await configManager.load()).config.autosys?.paths ?? {}).filter(([, value]) => value !== undefined),
+              ) as Partial<AutosysPaths>,
+            savePaths: saveAutosysPaths,
+          }),
+        ],
+        cachedAutosys.readOnly === true,
+        'AutoSys',
+      )) {
         combined.register(tool)
       }
     }
@@ -3954,11 +4111,19 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(cachedBitbucket.defaultProject !== undefined ? { defaultProject: cachedBitbucket.defaultProject } : {}),
         ...(cachedBitbucket.defaultRepo !== undefined ? { defaultRepo: cachedBitbucket.defaultRepo } : {}),
       }
-      combined.register(createBitbucketPullRequestsTool(bitbucketOptions))
-      combined.register(createBitbucketReadPullRequestTool(bitbucketOptions))
-      combined.register(createBitbucketReadFileTool(bitbucketOptions))
-      combined.register(createBitbucketWritePullRequestTool(bitbucketOptions))
-      combined.register(createBitbucketMergePullRequestTool(bitbucketOptions))
+      for (const tool of toolsForAccess(
+        [
+          createBitbucketPullRequestsTool(bitbucketOptions),
+          createBitbucketReadPullRequestTool(bitbucketOptions),
+          createBitbucketReadFileTool(bitbucketOptions),
+          createBitbucketWritePullRequestTool(bitbucketOptions),
+          createBitbucketMergePullRequestTool(bitbucketOptions),
+        ] as unknown as Tool<never>[],
+        cachedBitbucket.readOnly === true,
+        'Bitbucket',
+      )) {
+        combined.register(tool)
+      }
     }
 
     /*
@@ -4095,6 +4260,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    */
   const addonRoot = services.codebaseDir ?? storageDir
 
+  /**
+   * Why starting MCP servers failed when the panel opened, if it did. Kept to show on the Add-ons tab:
+   * the log alone was all there was, and the add-on's tab never appeared with nothing saying why.
+   */
+  let mcpStartProblem: string | undefined
+
+  /** An error as one line for the panel; with `stack`, its first frames too, for the log. */
+  function describeFailure(error: unknown, stack = false): string {
+    if (!(error instanceof Error)) return String(error)
+    const code = (error as { code?: unknown }).code
+    const head = `${error.message}${typeof code === 'string' && !error.message.includes(code) ? ` (${code})` : ''}`
+    if (!stack || error.stack === undefined) return head
+    return `${head}\n${error.stack.split('\n').slice(1, 6).join('\n')}`
+  }
+
   /** The user's `.npmrc`, for where `npm i -g` puts packages when its prefix was changed. */
   function readUserNpmrc(): string | undefined {
     try {
@@ -4130,15 +4310,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     for (const addon of installedAddons) {
       if (addon.page === undefined) continue
       const settings = config.addons?.settings?.[addon.package]
-      const stored = new Set<string>()
-      for (const ref of possibleSecretRefs(addon, settings)) if ((await secrets.get(ref)) !== undefined) stored.add(ref)
-      const delivery = deliveryFor(addonRoot, addon, settings, stored)
+      // All of it inside the try: one add-on whose secret store or folder misbehaves must not stop
+      // every MCP server starting - which is what "Could not start MCP servers" was.
       try {
+        const stored = new Set<string>()
+        for (const ref of possibleSecretRefs(addon, settings)) if ((await secrets.get(ref)) !== undefined) stored.add(ref)
+        const delivery = deliveryFor(addonRoot, addon, settings, stored)
         await writeFileAtomically(delivery.file, JSON.stringify(delivery.contents, null, 2))
         await fs.mkdir(addonDownloadsDir(addonRoot, addon), { recursive: true })
         delivered.set(addon.package, delivery.env)
       } catch (error) {
-        logger.warn(`Could not write the settings for add-on ${addon.package}: ${error instanceof Error ? error.message : String(error)}`)
+        logger.warn(`Could not prepare the settings for add-on ${addon.package}: ${describeFailure(error)}`)
       }
     }
     await mcp.configure(
@@ -4357,7 +4539,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       })),
       folders: folders.configured,
       defaultFolders: folders.defaults,
-      ...(error !== undefined ? { error } : {}),
+      ...((): { error?: string } => {
+        const shown = error ?? mcpStartProblem
+        return shown !== undefined ? { error: shown } : {}
+      })(),
     })
   }
 
@@ -4380,10 +4565,37 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     const next: McpServersConfig = { ...servers, [addon.server]: addonServerEntry(addon, existing) }
     await configManager.save('user', { mcpServers: next })
     setMcpServersState(next)
-    await configureMcp(next)
-    postMcp()
-    await postAddons()
-    await mcp.ensureConnected()
+    mcpStartProblem = undefined
+    /*
+     * Saved, so it is enabled whatever happens next - and the list goes back to the panel either way.
+     * Reported from real use: starting threw, the list was never sent, so no Linux tab appeared and the
+     * reason went to the chat, behind the Settings page being looked at.
+     */
+    try {
+      await configureMcp(next)
+      postMcp()
+      await postAddons()
+      await mcp.ensureConnected()
+    } catch (error) {
+      logger.warn(`Starting add-on ${addon.package} failed: ${describeFailure(error, true)}`)
+      postMcp()
+      await postAddons(`${addon.displayName} is enabled, but starting it failed: ${describeFailure(error)}. To retry, press Disable and then Enable.`)
+      return
+    }
+    /*
+     * Said on the tab where Enable was pressed, with the add-on's own last words. A start that
+     * failed was recorded on the server and nowhere else: the Node host (Fire Code) sends warnings
+     * to its log file, so pressing Enable there looked like nothing happened. The SDK's own error
+     * is usually just "connection closed"; the reason is in what the add-on printed before exiting.
+     */
+    const started = mcp.states_().find((server) => server.name === addon.server)
+    if (started?.status === 'failed') {
+      const said = started.logs.filter((line) => !/^(Starting |Failed: )/.test(line)).slice(-3).join(' | ')
+      await postAddons(
+        `${addon.displayName} was enabled but could not start: ${started.error ?? 'no reason given'}` +
+          `${said.length > 0 ? ` - it said: ${said}` : ''}. Its full log is under Log on its row below.`,
+      )
+    }
   }
 
   async function handleRemoveAddon(server: string): Promise<void> {
@@ -4926,14 +5138,20 @@ export function wireChatBridge(services: HostServices): ChatBridge {
          * the *other* skills are listed or searched for; it does not get to withhold a standing
          * instruction, which by definition has to be present before the model decides anything.
          */
-        skills: skillsSearchable
-          ? [
-              renderAlwaysSkills(turnSkills),
-              renderSkillsHintForPrompt(skills.filter((skill) => skill.always !== true).length),
-            ]
-              .filter((section) => section.length > 0)
-              .join('\n\n')
-          : renderSkillsForPrompt(turnSkills),
+        skills: [
+          skillsSearchable
+            ? [
+                renderAlwaysSkills(turnSkills),
+                renderSkillsHintForPrompt(skills.filter((skill) => skill.always !== true).length),
+              ]
+                .filter((section) => section.length > 0)
+                .join('\n\n')
+            : renderSkillsForPrompt(turnSkills),
+          // The user's answers to skills' placeholders, so a skill does not stop to ask (`skills/defaults.ts`).
+          renderSkillDefaults(config.skillDefaults, turnSkills.map((skill) => skill.name)),
+        ]
+          .filter((section) => section.length > 0)
+          .join('\n\n'),
         skillsSearchable,
         canWriteSkills: skillsDir !== undefined,
         codebaseInstructions,
@@ -5090,6 +5308,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // read_file must reach them without asking, or the rest of a cut-off file is out of reach.
         readRoots: [
           ...cachedReadRoots,
+          /*
+           * Every folder skills and Python tools load from. A skill's body is read with read_file, and
+           * skills outside the project - S3 bucket folders, the team repository's copy and the folder new
+           * ones are saved in while it is on - were outside every root: VS Code asked to read each one, and
+           * Fire Code refused them as inside its own data folder. Reading only; they are written through
+           * write_skill and the Python tools, which ask with the content shown.
+           */
+          ...skillSearchPath(),
+          ...python.toolDirectories(),
           ...(services.siblings ?? []).map((s) => s.path),
           droppedFilesRoot,
           mailAttachmentsRoot,
@@ -5099,7 +5326,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
         // Resolved per turn by the host, so an edit applies to the next command rather than
         // needing a new session. Absent in the extension, where there is nothing to resolve.
-        ...(services.sessionEnv !== undefined ? { sessionEnv: services.sessionEnv() } : {}),
+        // The host's own values, and this branch folder's (LIGHT_CODE_BRANCH, LIGHT_CODE_PORT_OFFSET).
+        ...(services.sessionEnv !== undefined || Object.keys(branchEnv).length > 0 ? { sessionEnv: { ...(services.sessionEnv?.() ?? {}), ...branchEnv } } : {}),
         /*
          * Omitted for a scheduled run: there is nobody to answer, and a run that could grant
          * itself new filesystem access would defeat the point of its allowlist.
@@ -5108,6 +5336,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         // Also withheld from a scheduled run: nobody is there to fill a form in, and a job
         // that stops to wait for one would never finish.
         ...(schedule === undefined ? { requestForm } : {}),
+        // A skill read with the user's defaults for its placeholders carries them (`skills/defaults.ts`).
+        annotateRead: (realPath: string) => {
+          const fold = (value: string): string => (process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value))
+          const skill = skills.find((each) => fold(each.filePath) === fold(realPath))
+          return skill === undefined ? undefined : skillDefaultsReadNote(skill.name, config.skillDefaults?.[skill.name])
+        },
         // So `wait` ends the moment the user types or reacts, rather than after its full time.
         hasNewUserInput: () => queuedMessages.length > 0 || pendingReactions.size > 0,
         // What the user has said, for `http_request`'s host rule. Not the images a tool returned (labelled
@@ -8249,6 +8483,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function autosysGatewayAuth(
     config: LightCodeConfig,
     tls: TlsOptions | undefined,
+    http: HttpClient = httpClient,
   ): Promise<ApigeeMtlsAuthStrategy> {
     const auth = config.autosys?.auth ?? {}
     if (auth.tokenUrl === undefined) {
@@ -8258,10 +8493,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       throw new AtlassianError('AutoSys uses the API gateway but the client id or secret is missing. Settings → DevOps → AutoSys → API gateway: enter both and save.')
     }
     const key = JSON.stringify({ auth, baseUrl: config.autosys?.baseUrl, tls: tls === undefined ? 0 : createHash('sha256').update(JSON.stringify(tls)).digest('hex') })
-    if (autosysGateway?.key === key) return autosysGateway.strategy
+    // A test passes its own recording client and gets a fresh strategy, so its token request is seen too.
+    const testing = http !== httpClient
+    if (!testing && autosysGateway?.key === key) return autosysGateway.strategy
     const secretRef = auth.clientSecretRef
     const strategy = new ApigeeMtlsAuthStrategy(
-      httpClient,
+      http,
       {
         tokenUrl: auth.tokenUrl,
         clientId: auth.clientId,
@@ -8283,11 +8520,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       // The same certificate for the token request as for the API: one gateway, one identity.
       async () => tls,
     )
-    autosysGateway = { key, strategy }
+    if (!testing) autosysGateway = { key, strategy }
     return strategy
   }
 
-  async function atlassianConnection(product: AtlassianProductId): Promise<AtlassianConnection> {
+  async function atlassianConnection(product: AtlassianProductId, http: HttpClient = httpClient): Promise<AtlassianConnection> {
     const info = atlassianProduct(product)
     const { config } = await configManager.load()
     const settings = config[product]
@@ -8324,8 +8561,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         baseUrl: settings.baseUrl,
         token: '',
         auth: await (async () => {
-          const gatewayAuth = await autosysGatewayAuth(config, tls)
+          const gatewayAuth = await autosysGatewayAuth(config, tls, http)
           if (auth.sendBasic !== true) return gatewayAuth
+          // A value the user made themselves (`Basic <base64>`), sent as stored; no username or password needed.
+          if (auth.basicHeaderValueRef !== undefined) {
+            const value = (await secrets.get(auth.basicHeaderValueRef))?.trim() ?? ''
+            if (value.length === 0) {
+              throw new AtlassianError(
+                'AutoSys is set to send a saved header value through the gateway, but none is stored. Settings → DevOps → AutoSys → API gateway: paste it and save.',
+              )
+            }
+            return withHeader(gatewayAuth, auth.basicHeaderName ?? 'Authorization', value)
+          }
           // The gateway's token and AutoSys's own username and password, in separate headers.
           const username = config.autosys?.username?.trim() ?? ''
           const password = config.autosys?.tokenRef !== undefined ? await secrets.get(config.autosys.tokenRef) : undefined
@@ -8374,22 +8621,221 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function confluenceClient(): Promise<ConfluenceClient> {
-    return new ConfluenceClient(httpClient, await atlassianConnection('confluence'))
+  // Each takes the HTTP client to send through: the shared one, or Test connection's recording one.
+  async function confluenceClient(http: HttpClient = httpClient): Promise<ConfluenceClient> {
+    return new ConfluenceClient(http, await atlassianConnection('confluence', http))
   }
-  async function jiraClient(): Promise<JiraClient> {
-    return new JiraClient(httpClient, await atlassianConnection('jira'))
+  async function jiraClient(http: HttpClient = httpClient): Promise<JiraClient> {
+    return new JiraClient(http, await atlassianConnection('jira', http))
   }
-  async function bitbucketClient(): Promise<BitbucketClient> {
-    return new BitbucketClient(httpClient, await atlassianConnection('bitbucket'))
+  async function bitbucketClient(http: HttpClient = httpClient): Promise<BitbucketClient> {
+    return new BitbucketClient(http, await atlassianConnection('bitbucket', http))
   }
-  async function jenkinsClient(): Promise<JenkinsClient> {
-    return new JenkinsClient(httpClient, await atlassianConnection('jenkins'))
+  async function jenkinsClient(http: HttpClient = httpClient): Promise<JenkinsClient> {
+    return new JenkinsClient(http, await atlassianConnection('jenkins', http))
   }
-  async function autosysClient(): Promise<AutosysClient> {
+  async function autosysClient(http: HttpClient = httpClient): Promise<AutosysClient> {
     const { config } = await configManager.load()
     const paths = Object.fromEntries(Object.entries(config.autosys?.paths ?? {}).filter(([, value]) => value !== undefined)) as Partial<AutosysPaths>
-    return new AutosysClient(httpClient, await atlassianConnection('autosys'), paths)
+    return new AutosysClient(http, await atlassianConnection('autosys', http), paths)
+  }
+  /**
+   * Runs the tool a Fire Code monitor names, once - for the executor's checks, and for `monitor_create`'s
+   * first try. One function, so the two cannot apply different rules (`monitorToolRefusal`): reading tools,
+   * MCP tools and approved Python tools only, never anything that edits, runs commands or always asks.
+   *
+   * Outside a turn there is no turn's context, so a plain one is built: the workspace, the deny list and
+   * the read roots a turn has, with nothing that could ask the user anything - nobody is there.
+   */
+  let monitorSettingsLoaded = false
+  /** While a monitor's check runs: the context its tool's own `call_tool` calls run in. Counted, so overlapping checks share it. */
+  let monitorRunContext: ToolExecutionContext | undefined
+  let monitorRuns = 0
+
+  /** The tools a loaded Python tool declares it calls (`__tool_calls__`), from its file only while it is the approved one. */
+  async function declaredCallsOf(caller: string): Promise<string[]> {
+    const found = python.findTool(caller)
+    if (found === undefined) return []
+    try {
+      const source = await fs.readFile(found.filePath, 'utf8')
+      return hashSource(source) === found.hash ? declaredToolCalls(source) : []
+    } catch {
+      return []
+    }
+  }
+  /**
+   * A monitor's tool as this computer has it, or why it cannot run here: the one lookup a check and a probe share,
+   * so "ready here" can never say yes to something a check would refuse.
+   */
+  async function monitorToolHere(name: string): Promise<{ tool: Tool } | { refusal: string }> {
+    const { config } = await configManager.load()
+    if (!monitorSettingsLoaded) {
+      monitorSettingsLoaded = true
+      await loadSettings()
+    }
+    await syncMcpFromConfig(config)
+    await mcp.ensureConnected()
+    await python.configure({ ...(config.python ?? {}), ...pythonFolders(config) })
+    const registry = currentToolRegistry()
+    const tool = registry.get(name) ?? registry.get(`py__${name}`)
+    if (tool === undefined) {
+      // Said in terms of what to do: a Python tool here but not approved is the common case for a team monitor.
+      const bare = name.replace(/^py__/, '')
+      const waiting = python.status().issues.find((issue) => issue.name === bare)
+      if (waiting !== undefined) return { refusal: `${name} is on this computer but not loaded: ${waiting.detail}` }
+    }
+    const refusal = monitorToolRefusal(tool, name)
+    if (refusal !== undefined || tool === undefined) return { refusal: refusal ?? `No tool called "${name}".` }
+    return { tool }
+  }
+
+  async function executeForMonitor(name: string, args: Record<string, unknown>, given?: ToolExecutionContext, signal?: AbortSignal): Promise<ToolResult> {
+    const here = await monitorToolHere(name)
+    if ('refusal' in here) return { content: here.refusal, isError: true }
+    const tool = here.tool
+    const parsed = tool.parametersSchema.safeParse(args)
+    if (!parsed.success) return { content: `The arguments do not fit ${tool.name}: ${parsed.error.message}`, isError: true }
+    const context: ToolExecutionContext = given ?? {
+      fs: new NodeFileSystem(),
+      terminal: new NodeTerminal(cachedCommandRules.shell),
+      workspaceRoot: workspaceRoot ?? services.storageDir,
+      denylist,
+      readFiles: new Set<string>(),
+      readRoots: [...cachedReadRoots, ...skillSearchPath(), ...python.toolDirectories()],
+      ...(services.fileReach === 'anywhere' ? { reach: 'anywhere' as const } : {}),
+      ...(signal !== undefined ? { signal } : {}),
+      ...((): { ripgrepPath?: string } => {
+        const resolved = services.ripgrepPath()
+        return resolved !== undefined ? { ripgrepPath: resolved } : {}
+      })(),
+    }
+    // Published for the run, so the tool's own call_tool reaches what it declares (see callTool).
+    monitorRuns += 1
+    monitorRunContext = context
+    try {
+      return await tool.execute(parsed.data as never, context)
+    } finally {
+      monitorRuns -= 1
+      if (monitorRuns === 0) monitorRunContext = undefined
+    }
+  }
+
+  /** The team's monitoring history, by the connection Settings → Monitoring names in this host's settings. */
+  const monitorStores = new Map<string, MonitorHistoryStore>()
+  async function monitorStore(storeId: string, index: string): Promise<MonitorHistoryStore> {
+    const key = `${storeId}\u0000${index}`
+    const cached = monitorStores.get(key)
+    if (cached !== undefined) return cached
+    const { config } = await configManager.load()
+    const store = config.vectorStores?.[storeId]
+    if (store === undefined) throw new Error(`There is no search connection "${storeId}" in the settings monitoring runs with.`)
+    if (store.kind !== 'opensearch') throw new Error(`"${store.label || storeId}" is not an OpenSearch connection; team monitoring keeps its history in OpenSearch.`)
+    if (!monitorSettingsLoaded) {
+      monitorSettingsLoaded = true
+      await loadSettings()
+    }
+    const by = cachedAttribution.author ?? os.userInfo().username
+    const made = new MonitorHistoryStore(httpClient, await vectorStoreConnectionFor(store, storeId), index, by)
+    monitorStores.set(key, made)
+    return made
+  }
+
+  async function answerMonitorStore(op: string, store: MonitorHistoryStore, args: Record<string, unknown>): Promise<unknown> {
+    const monitor = typeof args['monitor'] === 'string' ? args['monitor'] : ''
+    switch (op) {
+      case 'claim':
+        return store.claim(monitor, Number(args['slot'] ?? 0), Number(args['attempt'] ?? 1))
+      case 'write':
+        await store.write(args['record'] as Omit<CheckDocument, 'by'>)
+        return { by: store.by }
+      case 'writeGrid':
+        await store.writeGrid(monitor, String(args['hash'] ?? ''), args['evaluation'])
+        return { by: store.by }
+      case 'grid':
+        return (await store.grid(monitor, String(args['hash'] ?? ''))) ?? null
+      case 'latest':
+        return store.latest(Array.isArray(args['monitors']) ? (args['monitors'] as string[]) : [])
+      case 'history':
+        return store.history(monitor, Number(args['since'] ?? 0), Number(args['limit'] ?? 500), typeof args['until'] === 'number' ? args['until'] : undefined)
+      case 'prune':
+        return { deleted: await store.prune(Number(args['before'] ?? 0), monitor.length > 0 ? monitor : undefined, args['revisions'] === true) }
+      case 'writeRevision':
+        await store.writeRevision(monitor, args['revision'] as MonitorRevision)
+        return { by: store.by }
+      case 'revisions':
+        return store.revisions(monitor, Number(args['limit'] ?? 200))
+      case 'deleteCheck':
+        return { deleted: await store.deleteCheck(monitor, Number(args['at'] ?? 0)) }
+      case 'test':
+        await store.ensureIndex()
+        return { index: store.index, by: store.by }
+      default:
+        throw new Error(`"${op}" is not a monitoring history operation.`)
+    }
+  }
+
+  /** One alert explained by this host's model (`monitoring/explain.ts`). */
+  async function explainForMonitor(context: Record<string, unknown>): Promise<string> {
+    const config = await loadSettings()
+    const profile = resolveActiveProfile(config)
+    const provider = createChatProvider(profile, httpClient, authStrategyFor(config, profile), logger, services.languageModels)
+    let text = ''
+    for await (const chunk of provider.streamChat(explainMessages(JSON.parse(redact(JSON.stringify(context), cachedSecretValues)) as Record<string, unknown>))) {
+      if (chunk.type === 'text') text += chunk.text
+      if (chunk.type === 'error') throw new Error(chunk.error)
+    }
+    if (text.trim().length === 0) throw new Error('The model replied with nothing.')
+    return text.trim()
+  }
+
+  // Fire Code's monitoring executor: its checks' tools, the team's history, and explanations - as Fire Code asks.
+  services.monitorExecutor?.serve(async (request) => {
+    try {
+      switch (request.kind) {
+        case 'fetch': {
+          const result = await executeForMonitor(request.tool, request.args, undefined, AbortSignal.timeout(Math.max(5000, request.timeoutMs)))
+          return result.isError === true ? { ok: false, error: result.content.slice(0, 4000) } : { ok: true, data: result.content }
+        }
+        case 'store':
+          return { ok: true, data: await answerMonitorStore(request.op, await monitorStore(request.storeId, request.index), request.args) }
+        case 'explain':
+          return { ok: true, data: await explainForMonitor(request.context) }
+        case 'probe': {
+          const here = await monitorToolHere(request.tool)
+          return { ok: true, data: 'refusal' in here ? { ready: false, reason: here.refusal } : { ready: true } }
+        }
+        case 'sync': {
+          const config = await loadSettings()
+          const synced: string[] = []
+          for (const kind of ['skills', 'tools'] as const) {
+            if (!(config.s3?.[kind] ?? []).some((mirror) => mirror.enabled === true)) continue
+            await handleSyncS3(kind)
+            if (!synced.includes('the bucket')) synced.push('the bucket')
+          }
+          if (config.teamRepo?.enabled === true) {
+            await handleTeamRepoSync('monitoring refresh')
+            synced.push('the team repository')
+          }
+          return { ok: true, data: { synced } }
+        }
+        case 'skill': {
+          const done = request.op === 'write' ? await writeTeamMonitorSkill(request.file, request.content ?? '') : await deleteEverywhere(await planDeleteEverywhere('skill', request.name))
+          return done.ok ? { ok: true, data: done.message } : { ok: false, error: done.message }
+        }
+      }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  /** `autosys_set_addresses`' save: only `paths` changes; the rest of the block is carried as it is. */
+  async function saveAutosysPaths(paths: Partial<AutosysPaths>): Promise<void> {
+    const { config } = await configManager.load()
+    const { paths: _old, ...rest } = config.autosys ?? {}
+    void _old
+    await configManager.save('user', { autosys: { ...rest, ...(Object.keys(paths).length > 0 ? { paths } : {}) } })
+    await loadSettings()
+    await postAtlassian()
   }
 
   /** The Atlassian tab's view of all three products. Tokens never cross — only whether one is stored (invariant 7). */
@@ -8403,6 +8849,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         tokenRef?: string
         caFile?: string
         rejectUnauthorized?: boolean
+        readOnly?: boolean
       } & Record<string, unknown>
       const hasToken = settings.tokenRef !== undefined && ((await secrets.get(settings.tokenRef)) ?? '').length > 0
       const defaults: Record<string, string> = {}
@@ -8416,6 +8863,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           baseUrl: settings.baseUrl ?? '',
           caFile: settings.caFile ?? '',
           rejectUnauthorized: settings.rejectUnauthorized !== false,
+          readOnly: settings.readOnly === true,
           defaults,
         },
         hasToken,
@@ -8425,6 +8873,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 config.autosys?.auth,
                 ((await secrets.get(AUTOSYS_CLIENT_SECRET_REF)) ?? '').length > 0,
                 ((await secrets.get(AUTOSYS_PASSPHRASE_REF)) ?? '').length > 0,
+                ((await secrets.get(AUTOSYS_BASIC_VALUE_REF)) ?? '').length > 0,
               ),
             }
           : {}),
@@ -8441,7 +8890,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     product: AtlassianProductId,
     input: AtlassianSettingsView,
     token: string | undefined,
-    gateway?: { settings: AutosysGatewaySettings; clientSecret?: string; passphrase?: string },
+    gateway?: { settings: AutosysGatewaySettings; clientSecret?: string; passphrase?: string; basicValue?: string },
   ): Promise<void> {
     /*
      * Refusals go to the panel the user is looking at. Posted as an 'error' they landed in the chat
@@ -8489,12 +8938,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           ...(input.caFile.trim().length > 0 ? { caFile: input.caFile.trim() } : {}),
           // Stored only when switched off, so the default stays the safe one.
           ...(input.rejectUnauthorized ? {} : { rejectUnauthorized: false }),
+          // Stored only when ticked; an older panel that sends no value keeps full access.
+          ...(input.readOnly === true ? { readOnly: true } : {}),
         },
       } as never)
       // After the site settings, in the same handler: two messages saving one block concurrently
       // would each write what the other had not seen yet.
       if (product === 'autosys' && gateway !== undefined) {
-        const problem = await saveAutosysGateway(gateway.settings, gateway.clientSecret, gateway.passphrase)
+        const problem = await saveAutosysGateway(gateway.settings, gateway.clientSecret, gateway.passphrase, gateway.basicValue)
         if (problem !== undefined) {
           await loadSettings()
           await postAtlassian()
@@ -8515,12 +8966,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     input: AutosysGatewaySettings,
     clientSecret: string | undefined,
     passphrase: string | undefined,
+    basicValue?: string | undefined,
   ): Promise<string | undefined> {
     if (clientSecret !== undefined && clientSecret.trim().length > 0) await secrets.set(AUTOSYS_CLIENT_SECRET_REF, clientSecret.trim())
     if (passphrase !== undefined && passphrase.length > 0) await secrets.set(AUTOSYS_PASSPHRASE_REF, passphrase)
+    if (basicValue !== undefined && basicValue.trim().length > 0) await secrets.set(AUTOSYS_BASIC_VALUE_REF, basicValue.trim())
     const result = gatewayFromSettings(input, {
       clientSecret: ((await secrets.get(AUTOSYS_CLIENT_SECRET_REF)) ?? '').length > 0,
       passphrase: ((await secrets.get(AUTOSYS_PASSPHRASE_REF)) ?? '').length > 0,
+      basicValue: ((await secrets.get(AUTOSYS_BASIC_VALUE_REF)) ?? '').length > 0,
     })
     if ('error' in result) return result.error
     const { config } = await configManager.load()
@@ -8535,9 +8989,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     input: AutosysGatewaySettings,
     clientSecret: string | undefined,
     passphrase: string | undefined,
+    basicValue?: string | undefined,
   ): Promise<void> {
     try {
-      const problem = await saveAutosysGateway(input, clientSecret, passphrase)
+      const problem = await saveAutosysGateway(input, clientSecret, passphrase, basicValue)
       await loadSettings()
       await postAtlassian()
       if (problem !== undefined) post({ type: 'atlassianTest', product: 'autosys', ok: false, detail: `Not saved: ${problem}` })
@@ -8547,12 +9002,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
-  async function handleClearAutosysGatewaySecret(which: 'clientSecret' | 'passphrase'): Promise<void> {
-    await secrets.delete(which === 'clientSecret' ? AUTOSYS_CLIENT_SECRET_REF : AUTOSYS_PASSPHRASE_REF)
+  async function handleClearAutosysGatewaySecret(which: AutosysGatewaySecret): Promise<void> {
+    await secrets.delete(
+      which === 'clientSecret' ? AUTOSYS_CLIENT_SECRET_REF : which === 'passphrase' ? AUTOSYS_PASSPHRASE_REF : AUTOSYS_BASIC_VALUE_REF,
+    )
     const { config } = await configManager.load()
     const auth = config.autosys?.auth
     if (auth !== undefined) {
-      const { [which === 'clientSecret' ? 'clientSecretRef' : 'passphraseRef']: _dropped, ...rest } = auth
+      const { [which === 'clientSecret' ? 'clientSecretRef' : which === 'passphrase' ? 'passphraseRef' : 'basicHeaderValueRef']: _dropped, ...rest } = auth
       void _dropped
       // Without its secret the gateway cannot sign in; switching back to basic says so plainly.
       const next = which === 'clientSecret' ? { ...rest, type: 'basic' as const } : rest
@@ -8577,23 +9034,80 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   }
 
   /** Test connection: who the token belongs to, or the step and reason it failed. */
+  /**
+   * AutoSys's half of Test connection. With a job to check, it reads that job's definition (`job/{name}`) -
+   * the call a person makes by hand in Postman. Without one it asks for the status of a made-up job, which
+   * reads nothing real but needs `job-run-info`; reported: a server that has `job/{name}` and no
+   * `job-run-info` answered 404 there, so a 404 now says to name a job.
+   */
+  async function testAutosys(http: HttpClient, config: LightCodeConfig): Promise<string> {
+    const client = await autosysClient(http)
+    const who = config.autosys?.auth?.type === 'apigee' ? `the gateway client ${config.autosys.auth.clientId ?? ''}` : (config.autosys?.username ?? '')
+    const testJob = config.autosys?.testJob?.trim()
+    if (testJob !== undefined && testJob.length > 0) {
+      try {
+        await client.job(testJob)
+      } catch (error) {
+        if (error instanceof AtlassianError && error.status === 404) {
+          throw new AtlassianError(
+            `${error.message} The sign-in was not refused; ${client.base}${client.addresses.job.replace('{job}', testJob)} is not where this server keeps job definitions. Ask the assistant to "find the AutoSys addresses" - it tries the usual layouts with ${testJob}, and what your wiki says about the AutoSys REST service, and saves the ones that answer once you approve.`,
+            404,
+          )
+        }
+        throw error
+      }
+      return `${who} - read the definition of ${testJob}`
+    }
+    try {
+      return await client.probe(who)
+    } catch (error) {
+      if (error instanceof AtlassianError && error.status === 404) {
+        throw new AtlassianError(
+          `${error.message} Enter a job you can read in "Job to check in Test connection" - the test then reads that one job - and ask the assistant to "find the AutoSys addresses": it tries the usual layouts (and what your wiki says about the AutoSys REST service) with that job, and saves the ones that answer once you approve.`,
+          404,
+        )
+      }
+      throw error
+    }
+  }
+
+  /**
+   * Test connection, recorded. Every request it makes - the gateway's token request included - goes
+   * through `tracingHttpClient`, and the record comes back as `diagnostics` for the panel's Details,
+   * credentials masked. Asked for after a 403 seen in Postman arrived here as a different sentence:
+   * the sentence is our reading, the record is what it was read from.
+   */
   async function handleTestAtlassian(product: AtlassianProductId): Promise<void> {
+    const entries: TraceEntry[] = []
+    const { config } = await configManager.load()
+    // Whatever this product could send, blanked wherever it appears in the record.
+    const settings = config[product] as { tokenRef?: string } | undefined
+    const refs = [
+      settings?.tokenRef,
+      ...(product === 'autosys' ? [config.autosys?.auth?.clientSecretRef, config.autosys?.auth?.basicHeaderValueRef, config.autosys?.auth?.passphraseRef] : []),
+    ].filter((ref): ref is string => ref !== undefined)
+    const knownSecrets = (await Promise.all(refs.map(async (ref) => (await secrets.get(ref)) ?? ''))).filter((value) => value.length >= 4)
+    const http = tracingHttpClient(httpClient, entries, knownSecrets)
     try {
       const who =
         product === 'confluence'
-          ? await (await confluenceClient()).currentUser()
+          ? await (await confluenceClient(http)).currentUser()
           : product === 'jira'
-            ? await (await jiraClient()).currentUser()
+            ? await (await jiraClient(http)).currentUser()
             : product === 'jenkins'
-              ? await (await jenkinsClient()).currentUser()
+              ? await (await jenkinsClient(http)).currentUser()
               : product === 'autosys'
-                ? (await configManager.load()).config.autosys?.auth?.type === 'apigee'
-                  ? `the gateway client ${(await (await autosysClient()).probe((await configManager.load()).config.autosys?.auth?.clientId ?? ''))}`
-                  : await (await autosysClient()).probe((await configManager.load()).config.autosys?.username ?? '')
-                : await (await bitbucketClient()).currentUser()
-      post({ type: 'atlassianTest', product, ok: true, detail: `Connected as ${who}.` })
+                ? await testAutosys(http, config)
+                : await (await bitbucketClient(http)).currentUser()
+      post({ type: 'atlassianTest', product, ok: true, detail: `Connected as ${who}.`, diagnostics: renderTrace(entries) })
     } catch (error) {
-      post({ type: 'atlassianTest', product, ok: false, detail: error instanceof Error ? error.message : String(error) })
+      post({
+        type: 'atlassianTest',
+        product,
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+        diagnostics: renderTrace(entries),
+      })
     }
   }
 
@@ -8786,6 +9300,599 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  // ---- Background problems, for "Needs attention" on the usage dashboard and the panels that own them ----
+
+  /**
+   * What went wrong behind the scenes and nobody was looking: a sync that failed, a conflict, a skill
+   * deleted here that the repository still holds. Asked for: "if any of this breaking behind the scenes,
+   * show in need attention section in dashboard". Keyed by source, replaced on each run, cleared on success.
+   */
+  const backgroundProblems = new Map<string, Problem>()
+  function noteProblem(id: string, problem: Problem | undefined): void {
+    if (problem === undefined) backgroundProblems.delete(id)
+    else backgroundProblems.set(id, problem)
+  }
+
+  /** Python tools refused for a banned call, or broken - live from the registry, so a fixed tool drops out. */
+  function pythonProblems(): Problem[] {
+    const issues = python.status().issues.filter((issue) => issue.kind === 'invalid' || /banned/i.test(issue.detail))
+    if (issues.length === 0) return []
+    const banned = issues.filter((issue) => /banned/i.test(issue.detail))
+    return [
+      {
+        severity: 'warning',
+        id: 'python-tools',
+        title: banned.length > 0 ? `${String(banned.length)} Python tool(s) refused for using a banned call` : `${String(issues.length)} Python tool(s) cannot load`,
+        detail: 'These tools are not loaded. Settings -> Python lists them with the reason; rewrite or remove each one.',
+        items: issues.map((issue) => ({ kind: 'tool' as const, name: issue.name, filePath: issue.filePath, note: issue.detail.slice(0, 300) })),
+      },
+    ]
+  }
+
+  // ---- The team repository for skills and tools (teamrepo/sync.ts) ----
+
+  function teamRepoSettings(config: LightCodeConfig): TeamRepoSettings {
+    const team = config.teamRepo ?? {}
+    return {
+      enabled: team.enabled === true,
+      project: team.project ?? '',
+      repo: team.repo ?? '',
+      branch: team.branch ?? 'main',
+      folder: team.folder ?? '',
+      syncMinutes: team.syncMinutes ?? 15,
+    }
+  }
+
+  /** Where the team copy lives and what to sync, or why it cannot be used. One owner for both questions. */
+  function teamRepoPlan(config: LightCodeConfig): { reason: string } | { dirs: { skills: string; tools: string }; own: { skills: string; tools: string }; stateFile: string; settings: TeamRepoSettings } {
+    const settings = teamRepoSettings(config)
+    const bitbucket = config.bitbucket
+    if (bitbucket?.enabled !== true || bitbucket.baseUrl === undefined || bitbucket.tokenRef === undefined) {
+      return { reason: 'Set up Bitbucket above first - its site address and token - and switch it on. The team repository uses that connection.' }
+    }
+    if (!settings.enabled) return { reason: 'Off.' }
+    if (!isSafeSegment(settings.project) || !isSafeSegment(settings.repo)) return { reason: 'Enter the project key and repository slug.' }
+    const digest = createHash('sha256')
+      .update(JSON.stringify([bitbucket.baseUrl, settings.project, settings.repo, settings.branch, settings.folder]).toLowerCase())
+      .digest('hex')
+      .slice(0, 12)
+    const root = path.join(mirrorRoot, 'teamrepo', `${settings.project}-${settings.repo}-${digest}`.toLowerCase())
+    return {
+      dirs: { skills: path.join(root, 'skills'), tools: path.join(root, 'tools') },
+      // Where new skills and tools are saved while the repository is on - see loadSettings and pythonFolders.
+      own: { skills: path.join(root, 'saved-here', 'skills'), tools: path.join(root, 'saved-here', 'tools') },
+      stateFile: path.join(root, TEAM_REPO_STATE_FILE),
+      settings,
+    }
+  }
+
+  let teamRepoStatus: TeamRepoStatus | undefined
+  let teamRepoSyncing = false
+  let lastTeamRepoSync = 0
+  let teamRepoPushSoon: ReturnType<typeof setTimeout> | undefined
+
+  async function postTeamRepo(saveError?: string): Promise<void> {
+    const { config } = await configManager.load()
+    const plan = teamRepoPlan(config)
+    const bitbucketReady = config.bitbucket?.enabled === true && config.bitbucket.baseUrl !== undefined && config.bitbucket.tokenRef !== undefined
+    post({
+      type: 'teamRepo',
+      settings: teamRepoSettings(config),
+      available: bitbucketReady,
+      ...('reason' in plan ? { reason: plan.reason } : {}),
+      ...(teamRepoStatus !== undefined ? { status: teamRepoStatus } : {}),
+      syncing: teamRepoSyncing,
+      ...(saveError !== undefined ? { saveError } : {}),
+      bucketFolders: bucketFolderLabels(config),
+      // Where new skills and tools land while it is on - outside the project, unless a folder was chosen.
+      ...('dirs' in plan
+        ? { savedIn: { ...(skillsDir !== undefined ? { skills: skillsDir } : {}), ...((pythonFolders(config).toolsDir ?? localToolsDir(config)) !== undefined ? { tools: pythonFolders(config).toolsDir ?? localToolsDir(config) } : {}) } }
+        : {}),
+      ...(teamRepoRetire !== undefined ? { retire: teamRepoRetire } : {}),
+    })
+  }
+
+  /** The team repository's file API, over the Bitbucket connection and its token. */
+  async function teamRepoFiles(settings: TeamRepoSettings): Promise<TeamRepoFiles> {
+    const repoRef = { project: settings.project, repo: settings.repo }
+    const client = await bitbucketClient()
+    return {
+      branchHead: (branch) => client.branchHead(repoRef, branch),
+      defaultBranch: () => client.defaultBranch(repoRef),
+      createBranch: (name, startPoint) => client.createBranch(repoRef, name, startPoint),
+      listFiles: (folder, at) => client.listFiles(repoRef, folder, at),
+      changes: (since, until) => client.changes(repoRef, since, until),
+      readBytes: (file, at) => client.readBytes(repoRef, file, at),
+      commitFile: (file) => client.commitFile(repoRef, file),
+    }
+  }
+
+  // ---- "Delete everywhere" (asked for: "a force delete skill or tool even from repo or s3 bucket") ----
+
+  /**
+   * What deleting a skill or tool everywhere would remove: every copy on this computer in the folders
+   * Light Code loads from, the objects in each S3 bucket folder, and its files in the team repository
+   * (replaced by a deletion marker - Bitbucket Data Center cannot delete over REST; see teamrepo/sync.ts).
+   * Lists; changes nothing. Folders configured by hand (skills.paths) are named in the notes, not touched.
+   */
+  async function planDeleteEverywhere(kind: 'skill' | 'tool', name: string): Promise<DeleteEverywherePlan> {
+    const plan: DeleteEverywherePlan = { kind, name, local: [], buckets: [], repo: [], notes: [] }
+    const valid = kind === 'skill' ? isValidSkillName(name) : isValidToolName(name)
+    if (!valid) return { ...plan, error: `"${name}" is not a valid ${kind} name.` }
+    const config = await loadSettings()
+    const team = teamRepoPlan(config)
+    const teamCopy = 'dirs' in team ? (kind === 'skill' ? team.dirs.skills : team.dirs.tools) : undefined
+    const unique = (dirs: readonly (string | undefined)[]): string[] => {
+      const out: string[] = []
+      for (const dir of dirs) if (dir !== undefined && !samePath(dir, teamCopy) && !out.some((seen) => samePath(seen, dir))) out.push(dir)
+      return out
+    }
+    const has = async (target: string): Promise<boolean> => fs.stat(target).then(() => true, () => false)
+    if (kind === 'skill') {
+      for (const dir of unique([skillsDir, localSkillsDir, personalSkillsDir, ...mirroredSkillsDirs])) {
+        if (await has(path.join(dir, skillFileName(name)))) plan.local.push(path.join(dir, skillFileName(name)))
+        if (await has(path.join(dir, name, 'SKILL.md'))) plan.local.push(path.join(dir, name))
+      }
+      for (const extra of config.skills?.paths ?? []) {
+        const dir = resolveSkillDir(extra)
+        if (dir !== undefined && ((await has(path.join(dir, skillFileName(name)))) || (await has(path.join(dir, name, 'SKILL.md'))))) {
+          plan.notes.push(`Also in ${dir}, a folder you added in Settings -> Skills - not removed; delete it there.`)
+        }
+      }
+    } else {
+      for (const dir of unique([pythonFolders(config).toolsDir, localToolsDir(config), personalToolsDir, ...mirroredToolsDirs])) {
+        if (await has(path.join(dir, toolFileName(name)))) plan.local.push(path.join(dir, toolFileName(name)))
+      }
+    }
+    const mirrors = (kind === 'skill' ? cachedSkillMirrors : cachedToolMirrors).filter((mirror) => mirror.enabled === true)
+    for (const mirror of mirrors) {
+      const target = targetById(cachedS3, mirror.connectionId)
+      if (target === undefined) {
+        plan.notes.push(`The bucket connection "${mirror.connectionId}" is unusable - its copy, if any, cannot be checked.`)
+        continue
+      }
+      try {
+        const options = { target, ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}), name }
+        const keys = kind === 'skill' ? await skillKeysInBucket(options) : await toolKeysInBucket(options)
+        if (keys.length === 0) continue
+        if (target.readOnly === true) {
+          plan.notes.push(`In ${target.label}, which is configured read-only - not removed there.`)
+          continue
+        }
+        plan.buckets.push({ connectionId: mirror.connectionId, ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}), label: target.label, keys })
+      } catch (error) {
+        plan.notes.push(`${target.label} could not be listed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    if ('dirs' in team) {
+      plan.repo = await repoFilesOf({ folder: team.settings.folder, stateFile: team.stateFile, mirror: team.dirs, kind: kind === 'skill' ? 'skills' : 'tools', name })
+      plan.repoLabel = `${team.settings.project}/${team.settings.repo} (${team.settings.branch})`
+    }
+    if (plan.local.length === 0 && plan.buckets.length === 0 && plan.repo.length === 0) plan.error = `No ${kind} called "${name}" was found to delete.`
+    return plan
+  }
+
+  async function handlePreviewDeleteEverywhere(kind: 'skill' | 'tool', name: string): Promise<void> {
+    post({ type: 'deleteEverywherePlan', plan: await planDeleteEverywhere(kind, name) })
+  }
+
+  /**
+   * Removes exactly what the plan listed, each entry re-checked against a fresh plan - the request comes
+   * from the panel, and "the panel would not send that" is not a boundary. The repository goes first:
+   * if it refuses (a colleague's change in between), nothing else is touched, because removing the bucket
+   * and local copies while the repository still held the file would have the next sync bring it back.
+   */
+  async function handleDeleteEverywhere(requested: DeleteEverywherePlan): Promise<void> {
+    const { kind, name } = requested
+    const result = await deleteEverywhere(requested)
+    post({ type: 'deleteEverywhereDone', kind, name, ok: result.ok, message: result.message })
+  }
+
+  /** The work of "Delete everywhere", answering in words: Settings → Skills' button and Fire Code's dashboard. */
+  async function deleteEverywhere(requested: DeleteEverywherePlan): Promise<{ ok: boolean; message: string }> {
+    const { kind, name } = requested
+    if (requested.error !== undefined) return { ok: false, message: requested.error }
+    let answer: { ok: boolean; message: string } = { ok: false, message: 'Nothing was done.' }
+    const done = (ok: boolean, message: string): void => {
+      answer = { ok, message }
+    }
+    try {
+      const config = await loadSettings()
+      const team = teamRepoPlan(config)
+      if ('dirs' in team && requested.repo.length > 0) await handleTeamRepoSync('before deleting everywhere')
+      const fresh = await planDeleteEverywhere(kind, name)
+      const parts: string[] = []
+      if ('dirs' in team) {
+        const repoPaths = requested.repo.filter((repoPath) => fresh.repo.includes(repoPath))
+        if (repoPaths.length > 0) {
+          const result = await tombstoneInRepo({
+            api: await teamRepoFiles(team.settings),
+            branch: team.settings.branch,
+            folder: team.settings.folder,
+            stateFile: team.stateFile,
+            mirror: team.dirs,
+            repoPaths,
+            who: cachedAttribution.author ?? 'someone',
+          })
+          if (result.failed !== undefined) {
+            done(false, `Not deleted: the repository refused ${result.failed.path} (${result.failed.problem}). Nothing else was removed, so it stays consistent - try again.`)
+            return answer
+          }
+          parts.push(`Marked deleted in the team repository ${fresh.repoLabel ?? ''} (${String(result.done.length)} file(s)); colleagues' copies go at their next sync.`)
+        }
+      }
+      for (const bucket of requested.buckets) {
+        const mirror = (kind === 'skill' ? cachedSkillMirrors : cachedToolMirrors).find(
+          (entry) => entry.connectionId === bucket.connectionId && (entry.prefix ?? '') === (bucket.prefix ?? ''),
+        )
+        const target = mirror !== undefined ? targetById(cachedS3, mirror.connectionId) : undefined
+        if (mirror === undefined || target === undefined) {
+          parts.push(`${bucket.label}: no longer configured - skipped.`)
+          continue
+        }
+        const options = { target, ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}), name, keys: bucket.keys }
+        const result = kind === 'skill' ? await removeSkillFromBucket(options) : await removeToolFromBucket(options)
+        parts.push(`${target.label}: removed ${String(result.removed.length)} object(s)${result.failed.length > 0 ? `, ${String(result.failed.length)} failed (${result.failed.map((each) => each.key).join(', ')})` : ''}.`)
+      }
+      const local = requested.local.filter((entry) => fresh.local.some((allowed) => samePath(allowed, entry)))
+      const localProblems: string[] = []
+      for (const entry of local) {
+        try {
+          await fs.rm(entry, { recursive: true, force: true })
+          if (kind === 'tool') await forgetTool(path.dirname(entry), name).catch(() => undefined)
+        } catch (error) {
+          localProblems.push(`${entry} (${error instanceof Error ? error.message : String(error)})`)
+        }
+      }
+      if (local.length > 0) parts.push(`Removed ${String(local.length - localProblems.length)} cop${local.length === 1 ? 'y' : 'ies'} on this computer.`)
+      if (localProblems.length > 0) parts.push(`Could not remove: ${localProblems.join('; ')}.`)
+      if (kind === 'skill') {
+        await refreshSkills()
+        void postSkills()
+      } else {
+        await python.refresh()
+        await postPython()
+      }
+      await postTeamRepo()
+      logger.info(`delete everywhere: ${kind} ${name} - ${parts.join(' ')}`)
+      done(localProblems.length === 0, parts.length > 0 ? parts.join(' ') : 'Nothing was left to remove.')
+    } catch (error) {
+      done(false, error instanceof Error ? error.message : String(error))
+    }
+    return answer
+  }
+
+  /**
+   * A monitor's skill file that is a team copy, changed on Fire Code's dashboard (its schedule): written where the
+   * team keeps it, so the next sync does not put the old one back.
+   *
+   * - In a bucket folder: written there and uploaded to that bucket (refused for a read-only connection).
+   * - In the team repository's copy, which is pull-only: written to the folder new skills are saved in, which the
+   *   repository sync pushes from - then synced now, and a conflict reported rather than overwritten.
+   * The file path comes from Fire Code, and is still held to those folders.
+   */
+  async function writeTeamMonitorSkill(file: string, content: string): Promise<{ ok: boolean; message: string }> {
+    const config = await loadSettings()
+    const norm = (value: string): string => (process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value))
+    const inside = (dir: string): string | undefined => {
+      const target = norm(file)
+      const root = norm(dir)
+      return target.startsWith(root + path.sep) ? path.relative(path.resolve(dir), path.resolve(file)) : undefined
+    }
+    /** Writes into a folder, uploading when that folder is a bucket's. */
+    const saveIn = async (dir: string, relative: string): Promise<string> => {
+      const destination = path.join(dir, relative)
+      // mirroredSkillsDirs is the enabled mirrors' folders, in their order (loadSettings).
+      const enabled = cachedSkillMirrors.filter((each) => each.enabled === true)
+      const mirror = enabled.find((_, i) => samePath(mirroredSkillsDirs[i], dir))
+      const target = mirror !== undefined ? targetById(cachedS3, mirror.connectionId) : undefined
+      if (mirror !== undefined && (target === undefined || target.readOnly === true)) {
+        throw new Error(`${target?.label ?? mirror.connectionId} is read-only here, so this team monitor cannot be changed from this computer - ask whoever owns that bucket.`)
+      }
+      await fs.mkdir(path.dirname(destination), { recursive: true })
+      await writeFileAtomically(destination, content)
+      if (mirror !== undefined && target !== undefined) {
+        await uploadToS3({ target, ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}), relative: relative.split(path.sep).join('/'), contents: Buffer.from(content, 'utf8') })
+        return `uploaded to the bucket ${target.label}`
+      }
+      return `saved in ${dir}`
+    }
+    try {
+      for (const dir of mirroredSkillsDirs) {
+        const relative = inside(dir)
+        if (relative !== undefined) {
+          const where = await saveIn(dir, relative)
+          await refreshSkills()
+          return { ok: true, message: `Saved and ${where}; colleagues get it at their next sync and approve it once.` }
+        }
+      }
+      const team = teamRepoPlan(config)
+      if ('dirs' in team) {
+        const relative = inside(team.dirs.skills)
+        if (relative !== undefined) {
+          if (skillsDir === undefined) throw new Error('There is no folder to save skills in, so the change cannot reach the team repository.')
+          const where = await saveIn(skillsDir, relative)
+          await handleTeamRepoSync('a monitor changed on the dashboard')
+          const problem = teamRepoStatus?.error ?? teamRepoStatus?.conflicts.find((c) => c.path.endsWith(relative.split(path.sep).join('/')))?.reason
+          if (problem !== undefined) {
+            return { ok: false, message: `Saved here (${where}), but not committed to the team repository: ${problem}. Nothing was overwritten - see Settings → DevOps → Team repository.` }
+          }
+          await refreshSkills()
+          return { ok: true, message: `Saved and committed to the team repository ${cachedTeamRepoLabel ?? ''}; colleagues get it at their next sync and approve it once.` }
+        }
+      }
+      return {
+        ok: false,
+        message:
+          `${file} is not in a bucket folder or the team repository that the settings monitoring runs with know about. ` +
+          'Choose the codebase that has them in Fire Code → Settings → Monitoring ("Run tools with the settings of").',
+      }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** The team repository, as the approval prompt names it, while it is on. Refreshed by loadSettings. */
+  let cachedTeamRepoLabel: string | undefined
+
+  /**
+   * Where a skill or tool written "for the team" goes, in a few words for the approval prompt: uploaded to
+   * a bucket folder marked Publish, committed to the team repository, or - with neither - only this project.
+   */
+  function sharedWith(kind: 'skills' | 'tools'): string {
+    const mirrors = kind === 'skills' ? cachedSkillMirrors : cachedToolMirrors
+    const publish = mirrors.find((mirror) => mirror.enabled === true && mirror.publish === true)
+    const bucket = publish !== undefined ? targetById(cachedS3, publish.connectionId) : undefined
+    const parts = [
+      ...(bucket !== undefined && bucket.readOnly !== true ? [`uploaded to the S3 bucket ${bucket.label}${publish?.prefix !== undefined ? ` / ${publish.prefix}` : ''}`] : []),
+      ...(cachedTeamRepoLabel !== undefined ? [`committed to the team repository ${cachedTeamRepoLabel}`] : []),
+    ]
+    return parts.length > 0 ? parts.join(', and ') : "saved in this project's folder - no team sharing is set up, so nobody else gets it yet"
+  }
+
+  /** A skill kept in the user's personal folder: never sent to the team pool. */
+  function isPersonalSkill(skill: { filePath: string }): boolean {
+    if (personalSkillsDir === undefined) return false
+    const norm = (value: string): string => (process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value))
+    return norm(skill.filePath).startsWith(norm(personalSkillsDir) + path.sep)
+  }
+
+  /** The S3 bucket folders switched on, for skills and tools, as the panel names them. */
+  function bucketFolderLabels(config: LightCodeConfig): string[] {
+    const label = (kind: string, mirror: { connectionId: string; prefix?: string | undefined }): string => {
+      const name = targetById(cachedS3, mirror.connectionId)?.label ?? mirror.connectionId
+      return `${kind}: ${name}${mirror.prefix !== undefined ? ` / ${mirror.prefix}` : ''}`
+    }
+    return [
+      ...(config.s3?.skills ?? []).filter((mirror) => mirror.enabled === true).map((mirror) => label('Skills', mirror)),
+      ...(config.s3?.tools ?? []).filter((mirror) => mirror.enabled === true).map((mirror) => label('Tools', mirror)),
+    ]
+  }
+
+  /**
+   * Switching the S3 bucket folders off once the team repository holds everything they do (asked for:
+   * "provide an option to safely switch s3 bucket off when repository is added cleanly and updated with all
+   * the skills and tools").
+   *
+   * Safe means: a sync runs first and must finish with no error and no conflict; then every skill and tool in
+   * every bucket folder must be in the repository with the same content (or a newer version of an unchanged
+   * copy). Only then may the switch be pressed - and pressing it checks again, since a bucket sync can bring
+   * something new in between. Switching off only unticks the folders: nothing is deleted in the bucket or on
+   * disk, and ticking them again undoes it. New skills and tools are then saved in the project's own folders
+   * and committed to the repository; what came from the bucket keeps loading from the team copy.
+   */
+  let teamRepoRetire: TeamRepoRetire | undefined
+  async function handleRetireS3Buckets(confirm: boolean): Promise<void> {
+    const config = await loadSettings()
+    const plan = teamRepoPlan(config)
+    const folders = bucketFolderLabels(config)
+    const refuse = async (problems: string[]): Promise<void> => {
+      teamRepoRetire = { ready: false, folders, covered: { skills: 0, tools: 0 }, problems }
+      await postTeamRepo()
+    }
+    if ('reason' in plan) return refuse([`The team repository is not set up: ${plan.reason}`])
+    if (folders.length === 0) return refuse(['No S3 bucket folders are switched on for skills or tools.'])
+    teamRepoRetire = { ready: false, folders, covered: { skills: 0, tools: 0 }, problems: [], checking: true }
+    await postTeamRepo()
+    // The bucket's newest first, then the repository: the check is of what is true now.
+    await Promise.all([handleSyncS3('skills'), handleSyncS3('tools')]).catch(() => undefined)
+    await handleTeamRepoSync(confirm ? 'switching bucket folders off' : 'checking before switching bucket folders off')
+    const status = teamRepoStatus
+    if (status?.error !== undefined) return refuse([`The sync failed: ${status.error}`])
+    if (status !== undefined && status.conflicts.length > 0) {
+      return refuse(status.conflicts.map((conflict) => `${conflict.path} - ${conflict.reason}`))
+    }
+    const bucketDirs = {
+      skills: mirroredSkillsDirs.filter((dir) => !samePath(dir, plan.dirs.skills)),
+      tools: mirroredToolsDirs.filter((dir) => !samePath(dir, plan.dirs.tools)),
+    }
+    const coverage = await checkCoverage({ folder: plan.settings.folder, stateFile: plan.stateFile, mirror: plan.dirs, dirs: bucketDirs })
+    if (coverage.problems.length > 0) {
+      teamRepoRetire = { ready: false, folders, covered: coverage.covered, problems: coverage.problems }
+      await postTeamRepo()
+      return
+    }
+    if (!confirm) {
+      teamRepoRetire = { ready: true, folders, covered: coverage.covered, problems: [] }
+      await postTeamRepo()
+      return
+    }
+    const off = <T extends { enabled?: boolean | undefined }>(mirrors: readonly T[] | undefined): T[] | undefined =>
+      mirrors?.map((mirror) => {
+        const rest = { ...mirror }
+        delete rest.enabled
+        return rest
+      })
+    const s3 = { ...(config.s3 ?? {}) }
+    const skillMirrors = off(s3.skills)
+    const toolMirrors = off(s3.tools)
+    if (skillMirrors !== undefined) s3.skills = skillMirrors
+    if (toolMirrors !== undefined) s3.tools = toolMirrors
+    await configManager.save('user', { s3 } as never)
+    // Files that only the bucket folders held stop loading from here, so they are no longer "ours" -
+    // otherwise each would be reported as deleted here. They keep loading from the team copy.
+    const stillHere = await checkCoverage({
+      folder: plan.settings.folder,
+      stateFile: plan.stateFile,
+      mirror: plan.dirs,
+      dirs: { skills: [localSkillsDir].filter((dir): dir is string => dir !== undefined), tools: [localToolsDir(config)].filter((dir): dir is string => dir !== undefined) },
+    })
+    await releaseFromRecord(plan.stateFile, coverage.repoPaths.filter((repoPath) => !stillHere.repoPaths.includes(repoPath)))
+    await loadSettings()
+    await configurePythonFromSettings()
+    await refreshSkills()
+    void postSkills()
+    await postPython()
+    await postS3()
+    teamRepoRetire = {
+      ready: false,
+      folders,
+      covered: coverage.covered,
+      problems: [],
+      done: `Switched off: ${folders.join('; ')}. ${String(coverage.covered.skills)} skill file(s) and ${String(coverage.covered.tools)} tool(s) now load from the team repository. Nothing was deleted - tick the folders in Settings -> S3 to switch them back on.`,
+    }
+    logger.info(`team repository: S3 bucket folders switched off (${folders.join('; ')})`)
+    await handleTeamRepoSync('bucket folders switched off')
+  }
+
+  async function handleSaveTeamRepo(input: TeamRepoSettings): Promise<void> {
+    const project = input.project.trim()
+    const repo = input.repo.trim().toLowerCase()
+    const branch = input.branch.trim() || 'main'
+    const folder = input.folder.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    if (input.enabled && (!isSafeSegment(project) || !isSafeSegment(repo))) {
+      await postTeamRepo('Enter the project key and the repository slug, as they appear in the repository address.')
+      return
+    }
+    if (!isSafeTagName(branch)) {
+      await postTeamRepo(`"${branch}" is not a valid branch name.`)
+      return
+    }
+    if (folder.split('/').some((part) => part === '..' || part.startsWith('.'))) {
+      await postTeamRepo('The folder must be a plain path inside the repository, e.g. light-code.')
+      return
+    }
+    await configManager.save('user', {
+      teamRepo: {
+        enabled: input.enabled,
+        ...(project.length > 0 ? { project } : {}),
+        ...(repo.length > 0 ? { repo } : {}),
+        branch,
+        folder,
+        syncMinutes: Math.min(24 * 60, Math.max(1, Math.round(input.syncMinutes || 15))),
+      },
+    })
+    await loadSettings()
+    await refreshSkills()
+    void postSkills()
+    // Switched on: the existing skills and tools go up now, as asked, rather than at the next tick.
+    if (input.enabled) void handleTeamRepoSync('settings saved')
+    else await postTeamRepo()
+  }
+
+  /** One sync - pull, then push - never two at once. Reported on the panel and in "Needs attention". */
+  async function handleTeamRepoSync(reason: string): Promise<void> {
+    if (teamRepoSyncing) return
+    const config = await loadSettings()
+    const plan = teamRepoPlan(config)
+    if ('reason' in plan) {
+      noteProblem('teamrepo', undefined)
+      await postTeamRepo()
+      return
+    }
+    teamRepoSyncing = true
+    await postTeamRepo()
+    try {
+      const api = await teamRepoFiles(plan.settings)
+      const report = await syncTeamRepo({
+        api,
+        branch: plan.settings.branch,
+        folder: plan.settings.folder,
+        // Every folder skills and tools load from here, in the order they win a name: the save folder,
+        // the project's own folder, and S3 bucket folders - never the team copy itself.
+        local: {
+          skills: [skillsDir, localSkillsDir, ...mirroredSkillsDirs].filter((dir) => !samePath(dir, plan.dirs.skills)),
+          tools: [pythonFolders(config).toolsDir, localToolsDir(config), ...mirroredToolsDirs].filter((dir) => !samePath(dir, plan.dirs.tools)),
+        },
+        mirror: plan.dirs,
+        stateFile: plan.stateFile,
+        author: cachedAttribution.author ?? 'someone',
+        // Folders Light Code syncs itself: an unchanged copy there of something deleted for the team goes.
+        removable: [
+          ...mirroredSkillsDirs.filter((dir) => !samePath(dir, plan.dirs.skills)),
+          ...mirroredToolsDirs.filter((dir) => !samePath(dir, plan.dirs.tools)),
+          plan.own.skills,
+          plan.own.tools,
+        ],
+      })
+      lastTeamRepoSync = Date.now()
+      teamRepoStatus = {
+        at: lastTeamRepoSync,
+        branch: report.branch,
+        ...(report.branchCreated !== undefined ? { branchCreated: report.branchCreated } : {}),
+        pushed: report.pushed,
+        pulled: report.pulled,
+        removed: report.removed,
+        conflicts: report.conflicts,
+        behind: report.behind,
+        deletedHere: report.deletedHere,
+      }
+      logger.info(`team repository sync (${reason}): ${String(report.pushed.length)} pushed, ${String(report.pulled.length)} pulled, ${String(report.conflicts.length)} conflict(s)`)
+      const where = `${plan.settings.project}/${plan.settings.repo} (${plan.settings.branch})`
+      noteProblem(
+        'teamrepo',
+        report.conflicts.length > 0 || report.deletedHere.length > 0
+          ? {
+              severity: report.conflicts.length > 0 ? 'warning' : 'info',
+              id: 'teamrepo',
+              title: report.conflicts.length > 0
+                ? `${String(report.conflicts.length)} skill or tool file(s) not synced with the team repository`
+                : `${String(report.deletedHere.length)} deleted here but still in the team repository`,
+              detail: `${where}. Nothing was overwritten. Compare the team copy with yours, then change one of them; files deleted here are removed in Bitbucket by hand.`,
+              items: [
+                ...report.conflicts.map((conflict) => ({ kind: (conflict.path.includes('/tools/') ? 'tool' : 'skill') as 'skill' | 'tool', name: conflict.path, note: conflict.reason })),
+                ...report.deletedHere.map((file) => ({ kind: (file.includes('/tools/') ? 'tool' : 'skill') as 'skill' | 'tool', name: file, note: 'deleted here; still in the repository' })),
+              ],
+            }
+          : undefined,
+      )
+      // What came down is in the search path: pick it up, like a bucket sync does.
+      if (report.pulled.length > 0 || report.removed.length > 0) {
+        await refreshSkills()
+        void postSkills()
+        await python.refresh()
+        await postPython()
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      teamRepoStatus = { at: Date.now(), pushed: [], pulled: [], removed: [], conflicts: [], deletedHere: [], error: detail }
+      logger.warn('team repository sync failed', detail)
+      noteProblem('teamrepo', {
+        severity: 'error',
+        id: 'teamrepo',
+        title: 'The team repository could not be synced',
+        detail: `${plan.settings.project}/${plan.settings.repo} (${plan.settings.branch}): ${detail}`,
+        items: [],
+      })
+    } finally {
+      teamRepoSyncing = false
+      await postTeamRepo()
+    }
+  }
+
+  /** Soon after a skill or tool is saved here, so a change reaches the team without waiting for the timer. */
+  function scheduleTeamRepoPush(): void {
+    if (teamRepoPushSoon !== undefined) clearTimeout(teamRepoPushSoon)
+    teamRepoPushSoon = setTimeout(() => {
+      teamRepoPushSoon = undefined
+      // A sync a moment ago already carried it; the timer covers anything later.
+      if (Date.now() - lastTeamRepoSync < 15_000) return
+      void configManager.load().then(({ config }) => {
+        if (config.teamRepo?.enabled === true) void handleTeamRepoSync('saved here')
+      })
+    }, 10_000)
+  }
+
   const mirrorSyncInFlight = new Set<'skills' | 'tools'>()
   let mirrorSyncTimer: ReturnType<typeof setInterval> | undefined
   let lastAutoMirrorSync = 0
@@ -8803,6 +9910,72 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * A tick is one config read; a sync with nothing new is one listing per folder (see the
    * manifest in `s3/sync.ts`).
    */
+  // ---- Branch folders (git worktrees, git/worktrees.ts) ----
+
+  /**
+   * What commands in this folder are told about its branch: `LIGHT_CODE_BRANCH`, and `LIGHT_CODE_PORT_OFFSET` -
+   * 0 for the main checkout, 1, 2... for each branch folder - so a dev server on two branches can use
+   * different ports. Never written into a file in the repository.
+   */
+  const branchEnv: Record<string, string> = {}
+
+  /**
+   * A branch folder's one-time setup: the files git does not track that it needs (`branches.copyFiles`, from
+   * the main checkout) and the setup command (`branches.setupCommand`, e.g. pnpm install). Runs when a
+   * session first opens the folder after Light Code or Fire Code created it - marked beside git's own record
+   * of the worktree, never in the folder - and never again: the marker goes first, whatever happens.
+   */
+  async function prepareBranchFolder(): Promise<void> {
+    if (workspaceRoot === undefined) return
+    try {
+      if (workspaceBranch !== undefined) branchEnv['LIGHT_CODE_BRANCH'] = workspaceBranch
+      if (projectRoot !== undefined && projectRoot !== workspaceRoot) {
+        const list = await listWorktrees(workspaceRoot).catch(() => [])
+        const index = list.findIndex((each) => samePath(each.path, workspaceRoot))
+        branchEnv['LIGHT_CODE_PORT_OFFSET'] = String(Math.max(index, 1))
+      } else if (workspaceBranch !== undefined) {
+        branchEnv['LIGHT_CODE_PORT_OFFSET'] = '0'
+      }
+      const marker = setupMarkerFor(workspaceRoot)
+      if (marker === undefined || !(await fs.stat(marker).then(() => true, () => false))) return
+      await fs.rm(marker, { force: true })
+      const { config } = await configManager.load()
+      const parts: string[] = []
+      const copy = config.branches?.copyFiles ?? []
+      if (copy.length > 0 && projectRoot !== undefined && projectRoot !== workspaceRoot) {
+        const result = await copySetupFiles(projectRoot, workspaceRoot, copy)
+        if (result.copied.length > 0) parts.push(`copied ${result.copied.join(', ')} from the main checkout`)
+        if (result.skipped.length > 0) parts.push(`not copied: ${result.skipped.join(', ')}`)
+      }
+      const command = config.branches?.setupCommand?.trim()
+      if (command !== undefined && command.length > 0) {
+        const label = workspaceBranch ?? path.basename(workspaceRoot)
+        if (ui.runInTerminal !== undefined) {
+          ui.runInTerminal({ name: `Set up ${label}`, command, cwd: workspaceRoot, env: branchEnv })
+          parts.push(`running "${command}" in a terminal`)
+        } else {
+          ui.showInfo(`Setting up branch ${label}: running "${command}"…`)
+          const child = new NodeTerminal(cachedCommandRules.shell).run(command, { cwd: workspaceRoot, env: branchEnv })
+          let tail = ''
+          child.onData((chunk) => {
+            tail = (tail + chunk).slice(-2000)
+          })
+          child.onExit((code) => {
+            const last = tail.trim().split(/\r?\n/).slice(-5).join('\n')
+            if (code === 0) ui.showInfo(`Branch ${label} is set up ("${command}" finished).`)
+            else ui.showWarning(`Setting up branch ${label}: "${command}" ended with code ${String(code)}.${last.length > 0 ? `\n${last}` : ''}`)
+          })
+        }
+      }
+      if (parts.length > 0) {
+        logger.info(`branch folder setup: ${parts.join('; ')}`)
+        if (ui.runInTerminal !== undefined || copy.length > 0) ui.showInfo(`Setting up this branch folder: ${parts.join('; ')}.`)
+      }
+    } catch (error) {
+      logger.warn('branch folder setup failed', error instanceof Error ? error.message : String(error))
+    }
+  }
+
   function startMirrorSync(): void {
     const tick = async (): Promise<void> => {
       const { config } = await configManager.load()
@@ -8814,8 +9987,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         await handleSyncS3(kind)
       }
     }
+    const teamTick = async (): Promise<void> => {
+      const { config } = await configManager.load()
+      if (config.teamRepo?.enabled !== true) return
+      if (Date.now() - lastTeamRepoSync < (config.teamRepo.syncMinutes ?? 15) * 60_000) return
+      await handleTeamRepoSync('timer')
+    }
     const run = (): void => {
       tick().catch((error: unknown) => logger.warn('automatic bucket sync failed', String(error)))
+      teamTick().catch((error: unknown) => logger.warn('automatic team repository sync failed', String(error)))
     }
     // Fire-and-forget after a moment, so a slow bucket never delays the panel rendering (§11).
     mirrorSyncStartup = setTimeout(run, 5_000)
@@ -8877,11 +10057,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * blanket failure is not.
      */
     const lines: string[] = []
+    const troubles: { name: string; note: string }[] = []
     for (const mirror of mirrors) {
       const target = targetById(cachedS3, mirror.connectionId)
       const where = `${mirror.connectionId}/${mirror.prefix ?? ''}`
       if (target === undefined) {
         lines.push(`${where}: connection unusable - check its key above`)
+        troubles.push({ name: where, note: 'connection unusable - check its key in Settings -> S3' })
         continue
       }
 
@@ -8912,11 +10094,25 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         lines.push(`${target.label}${mirror.prefix === undefined ? '' : `/${mirror.prefix}`}: ${parts.join(', ')}`)
         for (const failure of result.failed) {
           logger.warn(`s3 ${kind}: ${failure.key}`, failure.problem)
+          troubles.push({ name: failure.key, note: failure.problem })
         }
       } catch (error) {
         lines.push(`${target.label}: ${error instanceof Error ? error.message : String(error)}`)
+        troubles.push({ name: where, note: error instanceof Error ? error.message : String(error) })
       }
     }
+    noteProblem(
+      `s3-${kind}`,
+      troubles.length === 0
+        ? undefined
+        : {
+            severity: 'error',
+            id: `s3-${kind}`,
+            title: `The bucket sync of ${kind} had ${String(troubles.length)} problem(s)`,
+            detail: 'Files that could not be brought down are missing here until the next sync works. Settings -> S3 shows the last sync.',
+            items: troubles.slice(0, 50).map((trouble) => ({ kind: kind === 'skills' ? 'skill' : 'tool', name: trouble.name, note: trouble.note })),
+          },
+    )
 
     lastSync = { ...lastSync, [kind]: `${new Date().toLocaleTimeString()} - ${lines.join('; ')}` }
 
@@ -9084,8 +10280,41 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return 'Could not build the embedding model. Check the embedder settings in Settings → Search.'
   }
 
-  async function handlePublishTeamSkills(): Promise<void> {
+  /** Names compared as the loader keys them; trimmed and de-duplicated so a stored list stays tidy. */
+  function cleanSkillNames(names: readonly string[]): string[] {
+    return [...new Set(names.map((name) => name.trim()).filter((name) => name.length > 0))].sort()
+  }
+
+  /** Saves which skills stay out of the team pool. A top-level key of its own, carried whole. */
+  async function saveKeepPrivate(names: readonly string[]): Promise<void> {
+    const { config } = await configManager.load()
+    await configManager.save('user', { teamSkills: { ...(config.teamSkills ?? {}), keepPrivate: cleanSkillNames(names) } })
+  }
+
+  async function handleSaveSkillDefaults(skill: string, values: Record<string, string>): Promise<void> {
+    const name = skill.trim()
+    if (name.length === 0) return
+    const { config } = await configManager.load()
+    const next = { ...(config.skillDefaults ?? {}) }
+    const cleaned = cleanSkillDefaults(values)
+    if (Object.keys(cleaned).length === 0) delete next[name]
+    else next[name] = cleaned
+    await configManager.save('user', { skillDefaults: next })
+    await postSkills()
+  }
+
+  /**
+   * Sends this machine's skills to the team pool - all but the ones kept private (asked for: "user
+   * should be able to select which skills should go, as some skills he can keep for himself").
+   *
+   * A skill kept private that an earlier Send put in the pool is **taken back** in the same act:
+   * leaving it there would mean the tick did not do what it says. Only from this machine's own
+   * collection, by its `skill:<name>` path, so nothing of a colleague's can be reached.
+   */
+  async function handlePublishTeamSkills(keepPrivateNow?: readonly string[]): Promise<void> {
+    if (keepPrivateNow !== undefined) await saveKeepPrivate(keepPrivateNow)
     const config = await loadSettings()
+    const keepPrivate = new Set([...(config.teamSkills?.keepPrivate ?? []), ...skills.filter(isPersonalSkill).map((skill) => skill.name)])
     const collection = skillsIndexName(config)
     const search = await resolveSearch(config)
     const embedder = await resolveEmbedder(config)
@@ -9102,10 +10331,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
 
     const signal = beginIndexing('teamSkills')
-    reportIndexing('teamSkills', 'Reading skills', { detail: `${String(skills.length)} skill(s)` })
+    const sending = skills.filter((skill) => !keepPrivate.has(skill.name))
+    reportIndexing('teamSkills', 'Reading skills', { detail: `${String(sending.length)} skill(s)` })
     try {
       const withBodies: { skill: Skill; body: string }[] = []
-      for (const skill of skills) {
+      for (const skill of sending) {
         let body = ''
         try {
           body = await fs.readFile(skill.filePath, 'utf8')
@@ -9119,12 +10349,13 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
       const owner = indexOwner(config)
       const project = indexProject(config)
+      const writer = createVectorIndexWriter(
+        httpClient,
+        search.store,
+        await vectorStoreConnectionFor(search.store, search.id),
+      )
       const count = await indexTeamSkills({
-        writer: createVectorIndexWriter(
-          httpClient,
-          search.store,
-          await vectorStoreConnectionFor(search.store, search.id),
-        ),
+        writer,
         embedder,
         collection,
         aliases: skillAliases(config),
@@ -9138,9 +10369,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         },
       })
 
-      post({ type: 'teamSkillsPublished', count, collection })
+      // Take back what is now kept private. Only paths that are actually there, so a first Send
+      // with private skills deletes nothing.
+      let withdrawn = 0
+      if (keepPrivate.size > 0) {
+        const present = new Set(await writer.listPaths(collection, { signal }))
+        const paths = [...keepPrivate].map((name) => teamSkillPath({ name })).filter((each) => present.has(each))
+        if (paths.length > 0) {
+          await deleteInBatches(writer, collection, paths, (done, total) => reportIndexing('teamSkills', 'Taking back private skills', { done, total }), signal)
+          withdrawn = paths.length
+        }
+      }
+
+      post({ type: 'teamSkillsPublished', count, collection, ...(withdrawn > 0 ? { withdrawn } : {}) })
       reportIndexing('teamSkills', 'Finished', {
-        detail: `Sent ${String(count)} skill(s).`,
+        detail: `Sent ${String(count)} skill(s)${withdrawn > 0 ? `, took back ${String(withdrawn)} kept private` : ''}.`,
         running: false,
       })
     } catch (error) {
@@ -9278,9 +10521,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         cursor = page.next
       } while (cursor !== undefined)
 
+      const keepPrivate = new Set([...(config.teamSkills?.keepPrivate ?? []), ...skills.filter(isPersonalSkill).map((skill) => skill.name)])
       const entries = await Promise.all(
-        skills.map(async (skill) => {
+        skills.map(async (skill): Promise<{ name: string; state: TeamSkillState }> => {
           const sent = stored.get(teamSkillPath(skill))
+          // Kept private: either not there (as wanted) or still there from an earlier Send.
+          if (keepPrivate.has(skill.name)) return { name: skill.name, state: sent === undefined ? 'private' : 'withdraw' }
           if (sent === undefined) return { name: skill.name, state: 'missing' as const }
           let body: string
           try {
@@ -10820,6 +12066,57 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * settings. Cheap to repeat: an unchanged environment keeps its worker. Skipped mid-turn, because
    * reconfiguring may restart the worker a turn is using.
    */
+  /**
+   * The Python tab: what is known at once (approved tools, from disk), then the real status once Python is
+   * up. Starting uv and Python can take seconds on a managed machine, and the tab used to wait for both.
+   */
+  async function showPythonTab(): Promise<void> {
+    if (!python.status().ready && !userTurnRunning && runningScheduleId === undefined) {
+      const config = await loadSettings()
+      if (config.python?.dynamicTools === 'on') await postPython(await python.previewStatus(pythonFolders(config)))
+    }
+    await configurePythonFromSettings()
+    await postPython()
+  }
+
+  /**
+   * "Check for new team tools": the bucket's tool folders and the team repository, now rather than at the
+   * next timer (15 minutes by default), then the tool list reloaded - so a colleague's new tool is offered
+   * for approval straight away. Asked for: the approval window did not show soon enough.
+   */
+  async function handleCheckTeamTools(): Promise<void> {
+    const { config } = await configManager.load()
+    const bucket = (config.s3?.tools ?? []).some((mirror) => mirror.enabled === true)
+    const repo = config.teamRepo?.enabled === true
+    if (!bucket && !repo) {
+      post({ type: 'teamToolsChecked', ok: false, message: 'No team bucket folder for tools (Settings → S3) and no team repository (Settings → DevOps) is set up here, so there is nothing to pull.' })
+      return
+    }
+    const waitingBefore = new Set(python.status().issues.filter((issue) => issue.recoverable).map((issue) => issue.filePath))
+    const notes: string[] = []
+    if (bucket) {
+      await handleSyncS3('tools')
+      if (lastSync.tools !== undefined) notes.push(lastSync.tools)
+    }
+    if (repo) {
+      await handleTeamRepoSync('checked by hand')
+      if (teamRepoStatus?.error !== undefined) notes.push(`Team repository: ${teamRepoStatus.error}`)
+      else if (teamRepoStatus !== undefined) notes.push(`Team repository: ${String(teamRepoStatus.pulled.length)} file(s) came down.`)
+    }
+    await configurePythonFromSettings()
+    await python.refresh()
+    await postPython()
+    const waiting = python.status().issues.filter((issue) => issue.recoverable)
+    const fresh = waiting.filter((issue) => !waitingBefore.has(issue.filePath))
+    const summary =
+      fresh.length > 0
+        ? `${String(fresh.length)} new tool(s) to review: ${fresh.map((issue) => issue.name).join(', ')}.`
+        : waiting.length > 0
+          ? `Nothing new; ${String(waiting.length)} tool(s) still waiting for your approval.`
+          : 'No new tools waiting for approval.'
+    post({ type: 'teamToolsChecked', ok: true, message: [summary, ...notes].join(' ') })
+  }
+
   async function configurePythonFromSettings(): Promise<void> {
     if (userTurnRunning || runningScheduleId !== undefined) return
     const config = await loadSettings()
@@ -11419,13 +12716,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       profiles,
       ...(message.timezoneOffsetMinutes !== undefined ? { timezoneOffsetMinutes: message.timezoneOffsetMinutes } : {}),
     })
+    // What broke behind the scenes leads "Needs attention" (sync failures, conflicts, refused tools).
+    const withBackground = { ...dashboard, problems: [...backgroundProblems.values(), ...pythonProblems(), ...dashboard.problems] }
     post({
       type: 'usage',
       settings,
       options,
       storeLabel: data.storeLabel,
       ...(storeProblem !== undefined ? { storeProblem } : {}),
-      dashboard,
+      dashboard: withBackground,
     })
   }
 
@@ -11461,7 +12760,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     if (usageCollecting()) void pushUsageNow()
   }
 
-  async function postPython(): Promise<void> {
+  async function postPython(preview?: PythonStatus): Promise<void> {
     const saved =
       (await configManager.load().then(
         (loaded) => loaded.config.python,
@@ -11469,7 +12768,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       )) ?? {}
     post({
       type: 'python',
-      status: python.status(),
+      status: preview ?? python.status(),
       settings: {
         dynamicTools: saved.dynamicTools ?? 'off',
         ...(saved.uvPath !== undefined ? { uvPath: saved.uvPath } : {}),
@@ -11477,6 +12776,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         ...(saved.venvPath !== undefined ? { venvPath: saved.venvPath } : {}),
         ...(saved.interpreterPath !== undefined ? { interpreterPath: saved.interpreterPath } : {}),
         ...(saved.libraryFolders !== undefined ? { libraryFolders: saved.libraryFolders } : {}),
+        ...(saved.bannedCalls !== undefined ? { bannedCalls: saved.bannedCalls } : {}),
         // Sent so nothing the form cannot edit is invisible *and* silently rewritten.
         ...(saved.extraIndexUrls !== undefined ? { extraIndexUrls: saved.extraIndexUrls } : {}),
         ...(saved.indexUrl !== undefined ? { indexUrl: saved.indexUrl } : {}),
@@ -11615,6 +12915,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             ? input.libraryFolders.some((folder) => folder.trim().length > 0)
               ? { libraryFolders: input.libraryFolders.map((folder) => folder.trim()).filter((folder) => folder.length > 0) }
               : { libraryFolders: undefined }
+            : {}),
+          ...(input.bannedCalls !== undefined
+            ? input.bannedCalls.some((entry) => entry.trim().length > 0)
+              ? { bannedCalls: [...new Set(input.bannedCalls.map((entry) => entry.trim()).filter((entry) => entry.length > 0))] }
+              : { bannedCalls: undefined }
             : {}),
           ...(input.timeoutSeconds !== undefined ? { timeoutSeconds: input.timeoutSeconds } : {}),
           ...(input.indexUrl !== undefined
@@ -12275,6 +13580,40 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * something assembled now: the extension has no repository to read, and a zip made at build time
    * is exactly the source of the build that is running.
    */
+  /** Largest file the panel may hand over to be saved: a diagram PNG is a few hundred KB. */
+  const SAVE_FILE_LIMIT = 20 * 1024 * 1024
+
+  /**
+   * Saves a file the panel made - a diagram as SVG or PNG - where the user picks, through the host's
+   * own Save dialog. The name is the panel's suggestion only; the path is whatever the dialog returns.
+   */
+  async function handleSaveFile(requestId: string, name: string, base64: string): Promise<void> {
+    const answer = (result: { path?: string; error?: string }): void => post({ type: 'fileSaved', requestId, ...result })
+    const bytes = Buffer.from(base64, 'base64')
+    if (bytes.length === 0 || bytes.length > SAVE_FILE_LIMIT) {
+      answer({ error: bytes.length === 0 ? 'There was nothing to save.' : 'That file is too large to save from here.' })
+      return
+    }
+    // Only the dialog's suggestion, never a path: no folders, nothing Windows refuses in a file name.
+    const safeName =
+      [...path.basename(name)].map((c) => (c.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(c) ? '-' : c)).join('') || 'file'
+    const extension = path.extname(safeName).slice(1)
+    try {
+      const target = await ui.showSaveDialog({
+        defaultName: workspaceRoot !== undefined ? path.join(workspaceRoot, safeName) : safeName,
+        ...(extension.length > 0 ? { extensions: [extension] } : {}),
+      })
+      if (target === undefined) {
+        answer({})
+        return
+      }
+      await fs.writeFile(target, bytes)
+      answer({ path: target })
+    } catch (error) {
+      answer({ error: `Could not save it: ${error instanceof Error ? error.message : String(error)}` })
+    }
+  }
+
   async function handleExportSource(): Promise<void> {
     const archive = services.sourceArchive
     if (archive === undefined) return
@@ -12379,6 +13718,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       for (const section of SHARE_SECTIONS) {
         if (!chosen.includes(section.id) || section.id === 'project') continue
         for (const key of section.keys) patch[key] = key === 'profiles' && merged.profiles !== undefined ? reconciled : merged[key]
+        // A nested section writes its whole block back; `applyImport` changed only its path inside it.
+        for (const path of section.nested ?? []) {
+          const head = path.split('.')[0] as keyof LightCodeConfig
+          patch[head] = merged[head]
+        }
       }
       await configManager.save('user', patch as LightCodeConfig)
       if (chosen.includes('project')) {
@@ -12771,7 +14115,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       post({
         type: 'projectSettings',
         workspaceOpen: workspaceRoot !== undefined,
-        overridden: describeOverrides(overridesFor(stored, workspaceRoot)),
+        overridden: describeOverrides(overridesFor(stored, projectRoot)),
       })
     } catch (error) {
       logger.warn(`could not read this project's settings: ${String(error)}`)
@@ -13298,6 +14642,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * The message names the operation, because "something failed" sends somebody looking
    * everywhere, and the log line carries the same thing for a terminal nobody is watching live.
    */
+  /*
+   * Add-on work fails on the tab it was started from. Through `reportFailure` it went to the chat
+   * transcript - behind the Settings page being looked at, so in Fire Code nothing seemed to happen.
+   */
+  function reportAddonFailure(operation: string, work: Promise<unknown>, pkg?: string): void {
+    work.catch(async (error: unknown) => {
+      logger.warn(`${operation} failed: ${describeFailure(error, true)}`)
+      const said = `${operation} failed: ${describeFailure(error)}`
+      try {
+        if (pkg !== undefined) await postAddonPage(pkg, { error: said })
+        else await postAddons(said)
+      } catch {
+        post({ type: 'error', message: said })
+      }
+    })
+  }
+
   function reportFailure(operation: string, work: Promise<unknown>): void {
     work.catch((error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error)
@@ -13549,6 +14910,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleDuplicateMcpServer', handleDuplicateMcpServer(message.name))
     } else if (message.type === 'deleteMcpServer') {
       reportFailure('handleDeleteMcpServer', handleDeleteMcpServer(message.name))
+    } else if (message.type === 'saveFile') {
+      reportFailure('handleSaveFile', handleSaveFile(message.requestId, message.name, message.base64))
     } else if (message.type === 'browseForPath') {
       reportFailure('handleBrowseForPath', handleBrowseForPath(message.purpose, message.kind, message.extensions))
     } else if (message.type === 'probePythonEnv') {
@@ -13631,21 +14994,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'requestAddonPage') {
       reportFailure('postAddonPage', postAddonPage(message.package))
     } else if (message.type === 'saveAddonRecord') {
-      reportFailure('handleSaveAddonRecord', handleSaveAddonRecord(message))
+      reportAddonFailure('Saving', handleSaveAddonRecord(message), message.package)
     } else if (message.type === 'deleteAddonRecord') {
-      reportFailure('handleDeleteAddonRecord', handleDeleteAddonRecord(message.package, message.id))
+      reportAddonFailure('Removing', handleDeleteAddonRecord(message.package, message.id), message.package)
     } else if (message.type === 'saveAddonValues') {
-      reportFailure('handleSaveAddonValues', handleSaveAddonValues(message))
+      reportAddonFailure('Saving', handleSaveAddonValues(message), message.package)
     } else if (message.type === 'runAddonAction') {
-      reportFailure('handleRunAddonAction', handleRunAddonAction(message.package, message.id, message.tool))
+      reportAddonFailure(message.tool, handleRunAddonAction(message.package, message.id, message.tool), message.package)
     } else if (message.type === 'requestAddons') {
       reportFailure('postAddons', postAddons())
     } else if (message.type === 'enableAddon') {
-      reportFailure('handleEnableAddon', handleEnableAddon(message.package))
+      reportAddonFailure('Enabling', handleEnableAddon(message.package))
     } else if (message.type === 'removeAddon') {
-      reportFailure('handleRemoveAddon', handleRemoveAddon(message.server))
+      reportAddonFailure('Disabling', handleRemoveAddon(message.server))
     } else if (message.type === 'saveAddonFolders') {
-      reportFailure('handleSaveAddonFolders', handleSaveAddonFolders(message.folders))
+      reportAddonFailure('Saving the folders', handleSaveAddonFolders(message.folders))
     } else if (message.type === 'openCodebaseInstructions') {
       reportFailure('handleOpenCodebaseInstructions', handleOpenCodebaseInstructions())
     } else if (message.type === 'requestAtlassian') {
@@ -13653,7 +15016,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'saveAtlassian') {
       reportFailure('handleSaveAtlassian', handleSaveAtlassian(message.product, message.settings, message.token, message.gateway))
     } else if (message.type === 'saveAutosysGateway') {
-      reportFailure('handleSaveAutosysGateway', handleSaveAutosysGateway(message.gateway, message.clientSecret, message.passphrase))
+      reportFailure('handleSaveAutosysGateway', handleSaveAutosysGateway(message.gateway, message.clientSecret, message.passphrase, message.basicValue))
     } else if (message.type === 'clearAutosysGatewaySecret') {
       reportFailure('handleClearAutosysGatewaySecret', handleClearAutosysGatewaySecret(message.which))
     } else if (message.type === 'clearAtlassianToken') {
@@ -13712,7 +15075,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'attachTeamAlias') {
       reportFailure('handleAttachTeamAlias', handleAttachTeamAlias())
     } else if (message.type === 'publishTeamSkills') {
-      reportFailure('handlePublishTeamSkills', handlePublishTeamSkills())
+      reportFailure('handlePublishTeamSkills', handlePublishTeamSkills(message.keepPrivate))
+    } else if (message.type === 'requestTeamRepo') {
+      reportFailure('postTeamRepo', postTeamRepo())
+    } else if (message.type === 'saveTeamRepo') {
+      reportFailure('handleSaveTeamRepo', handleSaveTeamRepo(message.settings))
+    } else if (message.type === 'syncTeamRepo') {
+      reportFailure('handleTeamRepoSync', handleTeamRepoSync('asked'))
+    } else if (message.type === 'previewDeleteEverywhere') {
+      reportFailure('handlePreviewDeleteEverywhere', handlePreviewDeleteEverywhere(message.kind, message.name))
+    } else if (message.type === 'deleteEverywhere') {
+      reportFailure('handleDeleteEverywhere', handleDeleteEverywhere(message.plan))
+    } else if (message.type === 'retireS3Buckets') {
+      reportFailure('handleRetireS3Buckets', handleRetireS3Buckets(message.confirm))
+    } else if (message.type === 'saveTeamSkillSelection') {
+      reportFailure('saveTeamSkillSelection', saveKeepPrivate(message.keepPrivate).then(postSkills))
+    } else if (message.type === 'saveSkillDefaults') {
+      reportFailure('handleSaveSkillDefaults', handleSaveSkillDefaults(message.skill, message.values))
     } else if (message.type === 'syncMail') {
       reportFailure('runMailSync', runMailSync('requested'))
     } else if (message.type === 'pruneMail') {
@@ -13919,7 +15298,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     } else if (message.type === 'deleteSkillFile') {
       reportFailure('handleDeleteSkillFile', handleDeleteSkillFile(message.name))
     } else if (message.type === 'requestPython') {
-      reportFailure('postPython', configurePythonFromSettings().then(postPython))
+      reportFailure('postPython', showPythonTab())
+    } else if (message.type === 'checkTeamTools') {
+      reportFailure('handleCheckTeamTools', handleCheckTeamTools())
     } else if (message.type === 'setPython') {
       reportFailure('handleSetPython', handleSetPython(message))
     } else if (message.type === 'requestUsage') {
@@ -14178,10 +15559,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       const { config } = await configManager.load()
       await syncMcpFromConfig(config)
       await mcp.ensureConnected()
+      mcpStartProblem = undefined
     } catch (error) {
-      logger.warn(
-        `Could not start MCP servers: ${error instanceof Error ? error.message : String(error)}`,
-      )
+      logger.warn(`Could not start MCP servers: ${describeFailure(error, true)}`)
+      mcpStartProblem = `Starting MCP servers and add-ons failed when Light Code opened: ${describeFailure(error)}`
+      await postAddons().catch(() => undefined)
     }
   })()
 
@@ -15050,6 +16432,7 @@ ${contents}
   if (services.runsSchedules !== false) startScheduleTimer()
   // Same lifetime, same reason: bucket folders are brought down while this bridge is alive.
   startMirrorSync()
+  void prepareBranchFolder()
   startApprovalWatch()
   startHubSync()
 
@@ -15124,6 +16507,7 @@ ${contents}
       // Nor a bucket sync, which would post to a dead webview and hold a connection open.
       if (mirrorSyncTimer !== undefined) clearInterval(mirrorSyncTimer)
       if (mirrorSyncStartup !== undefined) clearTimeout(mirrorSyncStartup)
+      if (teamRepoPushSoon !== undefined) clearTimeout(teamRepoPushSoon)
       if (approvalWatch !== undefined) clearInterval(approvalWatch)
       // Nothing left running on the hub: the kernel is shut down with the session.
       if (hubSyncTimer !== undefined) clearInterval(hubSyncTimer)

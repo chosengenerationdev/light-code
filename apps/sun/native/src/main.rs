@@ -10,10 +10,14 @@
 
 mod configs;
 mod environment;
+mod files;
+mod branches;
 mod git;
 mod hub;
 mod reports;
 mod host;
+mod monitor;
+mod monitoring;
 mod state;
 mod system;
 mod share;
@@ -39,12 +43,18 @@ use host::{HostEvent, HostProcess, LaunchSpec};
 use state::{ConfigMode, Paths, Project, State};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// WebView2 options. Every webview sharing the data folder must be created with the same ones, or WebView2 refuses
+/// the second - which is how a monitor's grid window once failed to open.
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disk-cache-size=33554432";
 /// What the page's own origin is on Windows, where wry maps `sun://` to `http://sun.localhost`.
 const SHELL_ORIGIN: &str = "http://sun.localhost";
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const SHELL_CSS: &str = include_str!("../ui/shell.css");
 const SHELL_JS: &str = include_str!("../ui/shell.js");
+const MONITOR_HTML: &str = include_str!("../ui/monitor.html");
+const MONITOR_CSS: &str = include_str!("../ui/monitor.css");
+const MONITOR_JS: &str = include_str!("../ui/monitor.js");
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
 
 enum UserEvent {
@@ -63,6 +73,19 @@ enum UserEvent {
     Git(Vec<(String, Option<git::GitCounts>)>),
     /// A commit-and-push or pull finished: which codebase, whether it worked, and what to say.
     GitDone { id: String, ok: bool, text: String },
+    /// The Rust helper read a monitor's SQLite or file source: for the check or drill-down `id`.
+    MonitorFetched { id: String, result: Result<Value, String> },
+    /// A monitoring notification, or one of its buttons, was clicked.
+    MonitorToast { name: String, action: Option<String> },
+    /// A message from a monitor's grid window.
+    GridIpc { window: tao::window::WindowId, body: String },
+}
+
+/// One monitor's grid, in a window of its own.
+struct GridWindow {
+    name: String,
+    window: Window,
+    webview: WebView,
 }
 
 /// Where the startup script is. Agents asked to start while it runs wait for it, so none starts
@@ -158,6 +181,9 @@ struct App {
     git: HashMap<String, git::GitCounts>,
     /// One refresh at a time: a slow repository must not pile up processes behind it.
     git_busy: Arc<std::sync::atomic::AtomicBool>,
+    monitoring: monitoring::Monitoring,
+    /// The theme or accent changed: the grid windows follow it.
+    appearance_changed: bool,
 }
 
 #[derive(Deserialize)]
@@ -229,16 +255,48 @@ enum Command {
     PickEnvFolder { index: usize },
     /// Every running agent stopped and started again, to take a new environment.
     RestartAll,
-    /// Another chat on a codebase: its own agent, same folder, settings and keys.
-    NewChat { id: String },
-    /// Close an extra chat: its agent stops; its history stays in its folder.
-    CloseChat { id: String },
+    /// Another chat on a codebase: its own agent, same folder, settings and keys. Blank, or an
+    /// archived chat (`archived`, its number) brought back with its history.
+    NewChat { id: String, #[serde(default)] archived: Option<u32> },
+    /// Close an extra chat: its agent stops. `archive` keeps it (history in its folder, offered by
+    /// New chat); false deletes its folder. Absent means archive - the choice that loses nothing.
+    CloseChat { id: String, #[serde(default)] archive: Option<bool> },
+    /// Delete an archived chat and its folder for good.
+    DeleteArchivedChat { id: String, chat: u32 },
     RenameChat { id: String, name: String },
+    /// The branches of a codebase, for "New chat on a branch": local, remote, and those open in folders.
+    ListBranches { id: String },
+    /// A chat on a branch, in its own folder (a git worktree beside the repository): an existing branch,
+    /// a remote one, or - with `from` - a new branch made from `from`. A branch already open in a folder
+    /// is opened there instead (git allows one folder per branch).
+    NewBranchChat { id: String, branch: String, #[serde(default)] from: Option<String> },
+    /// What closing a branch chat's folder would lose: uncommitted files, commits not pushed.
+    CheckBranch { id: String },
+    /// Close a branch chat: its agent stops, its folder is removed (never the branch), and the chat is
+    /// deleted. `force` removes a folder with uncommitted changes, after the page showed them.
+    CloseBranch { id: String, #[serde(default)] force: bool },
+    /// A Save button in a chat page (a diagram's SVG or PNG): a download link does nothing in this
+    /// window, so Fire Code asks where with a Windows Save dialog and writes the bytes (base64) there.
+    #[serde(rename_all = "camelCase")]
+    SaveFile { id: String, request_id: String, name: String, data: String },
     /// A Browse button in a chat page: the Node host has no dialog of its own, so Fire Code opens one.
     PickPath { id: String, purpose: String, kind: String, #[serde(default)] extensions: Vec<String> },
     /// The codebase instructions every chat on it is told: read for the dialog, and saved from it.
     Instructions { id: String },
     SaveInstructions { id: String, text: String },
+    /// The dashboard: one monitoring operation (`monitoring::monitor_op`), answered as `monitorReply`.
+    Monitor { op: String, #[serde(default)] args: Value },
+}
+
+/// The 3-second timer everything periodic hangs off - monitoring's scheduler among it. Started once; started
+/// again by the dashboard's Start when it has stopped ticking (`monitoring` `schedulerStart`).
+pub(crate) fn spawn_ticker(proxy: EventLoopProxy<UserEvent>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(3));
+        if proxy.send_event(UserEvent::Tick).is_err() {
+            break;
+        }
+    });
 }
 
 fn main() {
@@ -248,6 +306,9 @@ fn main() {
     }
     let _ = std::fs::create_dir_all(&paths.root);
     system::record_helper(&paths.root);
+    // Tool approvals are one list per Windows user now, shared with the VS Code extension; bring in what
+    // Fire Code approved before (its old list stays, unread, for anybody going back a version).
+    system::merge_approvals(&paths.root.join("approved-tools.json"), &system::shared_approvals_file());
     let mut state = State::load(&paths);
     let mut moved = false;
     for old in paths.previous_roots() {
@@ -330,7 +391,7 @@ fn main() {
         // Every page here comes from this machine, so a cache saves almost nothing, and WebView2's
         // grows into the hundreds of megabytes in the data folder. Capped at 32 MB. Setting these
         // replaces wry's defaults, which are repeated first.
-        .with_additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disk-cache-size=33554432")
+        .with_additional_browser_args(BROWSER_ARGS)
         .with_default_context_menus(cfg!(debug_assertions))
         .with_custom_protocol("sun".into(), |_id, request| serve(request))
         .with_ipc_handler(move |request: Request<String>| {
@@ -355,6 +416,7 @@ fn main() {
         });
 
     state.projects.retain(|p| !p.id.is_empty());
+    let monitoring_root = paths.root.join("monitoring");
 
     let mut app = App {
         paths,
@@ -375,6 +437,8 @@ fn main() {
         waiting: Vec::new(),
         git: HashMap::new(),
         git_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        monitoring: monitoring::Monitoring::new(monitoring_root),
+        appearance_changed: false,
     };
     // Before anything can start, so the first agent already has what the script sets.
     app.update_report_roots();
@@ -394,20 +458,36 @@ fn main() {
 
     // Memory, status and the sleep check run on a timer rather than per event, so a busy agent
     // streaming hundreds of chunks never costs the window anything.
-    {
-        let proxy = proxy.clone();
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(3));
-            if proxy.send_event(UserEvent::Tick).is_err() {
-                break;
-            }
-        });
-    }
+    spawn_ticker(proxy.clone());
 
     let mut shown = false;
-    event_loop.run(move |event, _target, control_flow| {
+    let mut grids: Vec<GridWindow> = Vec::new();
+    let main_id = window.id();
+    event_loop.run(move |event, target, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
+            Event::UserEvent(UserEvent::MonitorFetched { id, result }) => app.answered(&id, result, &webview),
+            Event::UserEvent(UserEvent::MonitorToast { name, action }) => {
+                window.set_minimized(false);
+                window.set_visible(true);
+                window.set_focus();
+                app.monitor_toast(&name, action.as_deref(), &webview);
+            }
+            Event::UserEvent(UserEvent::GridIpc { window: from, body }) => {
+                if let Some(at) = grids.iter().position(|g| g.window.id() == from) {
+                    let name = grids[at].name.clone();
+                    if body.contains("\"cmd\":\"close\"") {
+                        grids.remove(at);
+                    } else if let Some(answer) = monitoring::grid_command(&mut app, &name, &body, &webview) {
+                        send(&grids[at].webview, answer);
+                    }
+                }
+            }
+            Event::WindowEvent { window_id, event, .. } if window_id != main_id => {
+                if let WindowEvent::CloseRequested = event {
+                    grids.retain(|g| g.window.id() != window_id);
+                }
+            }
             Event::NewEvents(StartCause::Init) => {}
             Event::UserEvent(UserEvent::Ipc(body)) => {
                 if !shown {
@@ -473,6 +553,8 @@ fn main() {
                     app.state.save(&app.paths);
                     // Dropping each host ends its job, and with it every process it started.
                     app.runtime.clear();
+                    app.monitoring.executor = None;
+                    grids.clear();
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Focused(focused) => app.focused = focused,
@@ -481,7 +563,84 @@ fn main() {
             },
             _ => {}
         }
+
+        // What monitoring asked for while handling that: grid windows to open, messages for open ones,
+        // the dashboard brought on screen, the taskbar flashed.
+        for name in std::mem::take(&mut app.monitoring.grid_open) {
+            if let Some(open) = grids.iter().find(|g| g.name == name) {
+                // Already open: a sheet asked for reaches it as a message, not when it is next ready.
+                app.monitoring.open_sheet.remove(&name);
+                open.window.set_minimized(false);
+                open.window.set_focus();
+                continue;
+            }
+            match open_grid(target, &mut web_context, &proxy, &app, &name) {
+                Ok(grid) => grids.push(grid),
+                Err(text) => send(&webview, json!({ "type": "notice", "level": "error", "text": text })),
+            }
+        }
+        for message in std::mem::take(&mut app.monitoring.shell_out) {
+            window.set_minimized(false);
+            window.set_focus();
+            send(&webview, message);
+        }
+        for (name, message) in std::mem::take(&mut app.monitoring.grid_out) {
+            for grid in grids.iter().filter(|g| g.name == name) {
+                send(&grid.webview, message.clone());
+            }
+        }
+        if std::mem::take(&mut app.appearance_changed) {
+            for grid in &grids {
+                apply_theme(&grid.window, &app.state.settings.theme);
+                send(&grid.webview, json!({ "type": "appearance", "theme": app.state.settings.theme, "accent": app.state.settings.accent }));
+            }
+        }
+        if std::mem::take(&mut app.monitoring.show_dashboard) {
+            window.set_minimized(false);
+            window.set_visible(true);
+            send(&webview, json!({ "type": "showMonitoring" }));
+        }
+        if std::mem::take(&mut app.monitoring.flash) {
+            window.request_user_attention(Some(tao::window::UserAttentionType::Critical));
+        }
     });
+}
+
+/// A monitor's grid, in its own Fire Code window: the same `sun://` pages, theme and accent as the shell.
+fn open_grid(
+    target: &tao::event_loop::EventLoopWindowTarget<UserEvent>,
+    web_context: &mut WebContext,
+    proxy: &EventLoopProxy<UserEvent>,
+    app: &App,
+    name: &str,
+) -> Result<GridWindow, String> {
+    let title = app.monitoring.found.iter().find(|f| f.name == name).map(|f| f.title()).unwrap_or_else(|| name.to_string());
+    let mut builder = WindowBuilder::new()
+        .with_title(format!("{title} — Fire Code monitoring"))
+        .with_min_inner_size(LogicalSize::new(560.0, 360.0))
+        .with_inner_size(LogicalSize::new(1180.0, 720.0));
+    if let Ok(icon) = Icon::from_resource(1, None) {
+        builder = builder.with_window_icon(Some(icon));
+    }
+    let window = builder.build(target).map_err(|e| format!("Could not open the monitor's window: {e}"))?;
+    apply_theme(&window, &app.state.settings.theme);
+    let (from, proxy) = (window.id(), proxy.clone());
+    let encoded: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+    let webview = WebViewBuilder::new_with_web_context(web_context)
+        .with_url(format!("sun://localhost/monitor.html?m={encoded}"))
+        .with_additional_browser_args(BROWSER_ARGS)
+        .with_devtools(cfg!(debug_assertions))
+        .with_browser_accelerator_keys(false)
+        .with_default_context_menus(cfg!(debug_assertions))
+        .with_custom_protocol("sun".into(), |_id, request| serve(request))
+        .with_ipc_handler(move |request: Request<String>| {
+            let _ = proxy.send_event(UserEvent::GridIpc { window: from, body: request.body().clone() });
+        })
+        .with_navigation_handler(|url| url.starts_with(SHELL_ORIGIN) || url.starts_with("sun:") || url == "about:blank")
+        .with_new_window_req_handler(|_url, _features| NewWindowResponse::Deny)
+        .build(&window)
+        .map_err(|e| format!("Could not show the monitor's window: {e}"))?;
+    Ok(GridWindow { name: name.to_string(), window, webview })
 }
 
 /// The shell's own files, from inside the exe. Nothing is fetched (invariant 4).
@@ -511,6 +670,9 @@ fn serve(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/" | "/index.html" => (INDEX_HTML, "text/html; charset=utf-8"),
         "/shell.css" => (SHELL_CSS, "text/css; charset=utf-8"),
         "/shell.js" => (SHELL_JS, "text/javascript; charset=utf-8"),
+        "/monitor.html" => (MONITOR_HTML, "text/html; charset=utf-8"),
+        "/monitor.css" => (MONITOR_CSS, "text/css; charset=utf-8"),
+        "/monitor.js" => (MONITOR_JS, "text/javascript; charset=utf-8"),
         "/icon.png" => {
             return Response::builder()
                 .header(header::CONTENT_TYPE, "image/png")
@@ -581,6 +743,8 @@ impl App {
                         "keepAwake": p.keep_awake,
                         "accent": p.accent,
                         "chats": p.chats,
+                        // Put away with Archive, offered by New chat; newest first.
+                        "archived": p.archived.iter().rev().collect::<Vec<_>>(),
                         // The first chat's name once renamed. Missing here, a rename was saved and never shown.
                         "firstChatName": p.first_chat_name,
                         "hasWorkspaceConfig": configs::has_workspace_config(&p.path),
@@ -678,6 +842,10 @@ impl App {
                 send(webview, self.statuses());
                 send(webview, self.script_status());
                 send(webview, self.git_message());
+                if self.monitoring.settings.enabled {
+                    self.monitor_scan();
+                }
+                self.push_monitors(webview);
                 self.refresh_git(None);
                 self.start_on_launch();
             }
@@ -797,6 +965,36 @@ impl App {
                     send(webview, json!({ "type": "pathPicked", "id": id, "purpose": purpose, "path": path.to_string_lossy() }));
                 }
             }
+            Command::SaveFile { id, request_id, name, data } => {
+                if !self.state.has_chat(&id) {
+                    return;
+                }
+                let answer = |path: Option<String>, error: Option<String>| {
+                    send(webview, json!({ "type": "fileSaved", "id": id, "requestId": request_id, "path": path, "error": error }));
+                };
+                // Generous for a diagram (a PNG is a few hundred KB) and a bound on what the page may hand over.
+                if data.len() > 28 * 1024 * 1024 {
+                    return answer(None, Some("That file is too large to save from here.".into()));
+                }
+                let Some(bytes) = files::decode_base64(&data) else {
+                    return answer(None, Some("The file arrived damaged - try again.".into()));
+                };
+                let name = files::safe_file_name(&name);
+                let mut dialog = rfd::FileDialog::new().set_parent(window).set_title("Save as").set_file_name(&name);
+                if let Some(extension) = Path::new(&name).extension().and_then(|e| e.to_str()) {
+                    dialog = dialog.add_filter(&extension.to_uppercase(), &[extension]);
+                }
+                if let Some(dir) = dirs_downloads() {
+                    dialog = dialog.set_directory(dir);
+                }
+                match dialog.save_file() {
+                    None => answer(None, None),
+                    Some(path) => match std::fs::write(&path, &bytes) {
+                        Ok(()) => answer(Some(path.to_string_lossy().into_owned()), None),
+                        Err(error) => answer(None, Some(format!("Could not write {}: {error}", path.display()))),
+                    },
+                }
+            }
             Command::PickEnvFolder { index } => {
                 let picked = rfd::FileDialog::new().set_title("Choose a folder to put on PATH").set_parent(window).pick_folder();
                 if let Some(folder) = picked {
@@ -874,6 +1072,7 @@ impl App {
                 }
                 if let Ok(settings) = serde_json::from_value::<state::Settings>(current) {
                     let theme_changed = settings.theme != self.state.settings.theme;
+                    self.appearance_changed |= theme_changed || settings.accent != self.state.settings.accent;
                     self.state.settings = settings;
                     self.state.save(&self.paths);
                     if theme_changed {
@@ -881,6 +1080,25 @@ impl App {
                     }
                 }
                 send(webview, json!({ "type": "settings", "settings": self.state.settings }));
+            }
+            Command::Monitor { op, args } => {
+                let was_on = self.monitoring.settings.enabled;
+                let answer = self.monitor_op(&op, &args, monitoring::Origin::User, webview);
+                send(
+                    webview,
+                    match &answer {
+                        Ok(data) => json!({ "type": "monitorReply", "op": op, "ok": true, "data": data }),
+                        Err(error) => json!({ "type": "monitorReply", "op": op, "ok": false, "error": error }),
+                    },
+                );
+                // Switched on or off: idle chats start again with (or without) the monitoring tools.
+                if self.monitoring.settings.enabled != was_on {
+                    self.monitoring_switched(webview);
+                    if self.monitoring.settings.enabled {
+                        self.monitor_scan();
+                    }
+                    self.push_monitors(webview);
+                }
             }
             Command::KeepAwake { id, on } => {
                 if let Some(p) = self.state.project_mut(&id) {
@@ -931,9 +1149,10 @@ impl App {
                     Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
                 }
             }
+            // A chat key opens that chat's own folder - a branch chat's branch folder - so it can be run and debugged there.
             Command::OpenVsCode { id } => {
-                if let Some(p) = self.state.project(&id) {
-                    if !system::open_in_vscode(&p.path) {
+                if let Some(folder) = self.state.chat_folder(&id) {
+                    if !system::open_in_vscode(&folder) {
                         send(webview, json!({ "type": "notice", "level": "error", "text": "VS Code's `code` command was not found on PATH." }));
                     }
                 }
@@ -941,8 +1160,8 @@ impl App {
             Command::GitCommitPush { id, message } => self.git_action(&id, Some(message)),
             Command::GitPull { id } => self.git_action(&id, None),
             Command::OpenExplorer { id } => {
-                if let Some(p) = self.state.project(&id) {
-                    system::open_in_explorer(&p.path);
+                if let Some(folder) = self.state.chat_folder(&id) {
+                    system::open_in_explorer(&folder);
                 }
             }
             Command::OpenLog { id } => {
@@ -1060,23 +1279,129 @@ impl App {
                     Err(text) => send(webview, json!({ "type": "notice", "level": "error", "text": text })),
                 }
             }
-            Command::NewChat { id } => {
+            Command::NewChat { id, archived } => {
+                let _ = self.new_chat(&id, archived, None, webview);
+            }
+            Command::CloseChat { id, archive } => {
+                let Some(chat) = state::chat_of(&id).and_then(|c| c.parse::<u32>().ok()) else { return };
+                let archive = archive != Some(false);
+                // The tab beside it takes its place, as in a browser: the one to its right, else the one to its left.
+                let next = self.state.project(&id).map(|p| state::tab_after_close(p, chat)).unwrap_or_else(|| state::project_of(&id).to_string());
+                self.stop(&id, Phase::Stopped);
+                self.runtime.remove(&id);
+                if let Some(p) = self.state.project_mut(&id) {
+                    if let Some(closed) = p.chats.iter().find(|c| c.id == chat).cloned() {
+                        p.last_chat = p.last_chat.max(chat);
+                        if archive {
+                            p.archived.push(state::ArchivedChat { id: chat, name: closed.name, archived_at: state::now_millis(), folder: closed.folder, branch: closed.branch });
+                        }
+                    }
+                    p.chats.retain(|c| c.id != chat);
+                }
+                if !archive {
+                    self.delete_chat_folder(&id, webview);
+                }
+                if self.active.as_deref() == Some(id.as_str()) {
+                    self.select(&next, webview);
+                    send(webview, json!({ "type": "select", "id": next }));
+                }
+                self.state.save(&self.paths);
+                self.push_projects(webview);
+                send(webview, json!({ "type": "removed", "id": id }));
+                send(webview, self.statuses());
+            }
+            Command::DeleteArchivedChat { id, chat } => {
                 let Some(p) = self.state.project_mut(&id) else { return };
-                let next = p.chats.iter().map(|c| c.id).max().unwrap_or(1) + 1;
-                p.chats.push(state::Chat { id: next, name: format!("Chat {next}") });
-                let key = format!("{}~{}", p.id, next);
+                if !p.archived.iter().any(|c| c.id == chat) {
+                    return;
+                }
+                p.archived.retain(|c| c.id != chat);
+                p.last_chat = p.last_chat.max(chat);
+                let key = format!("{}~{}", p.id, chat);
+                self.delete_chat_folder(&key, webview);
+                self.state.save(&self.paths);
+                self.push_projects(webview);
+            }
+            Command::ListBranches { id } => {
+                let Some(p) = self.state.project(&id) else { return };
+                let repo = PathBuf::from(&p.path);
+                match branches::list(&repo) {
+                    Ok(list) => send(webview, json!({ "type": "branches", "id": id, "branches": list })),
+                    Err(text) => send(webview, json!({ "type": "branches", "id": id, "error": format!("Could not read the branches of {}: {text}", p.name) })),
+                }
+            }
+            Command::NewBranchChat { id, branch, from } => {
+                let Some(p) = self.state.project(&id).cloned() else { return };
+                let repo = PathBuf::from(&p.path);
+                let fail = |webview: &WebView, text: String| send(webview, json!({ "type": "branchFailed", "id": p.id, "error": text }));
+                // Open already? Its chat if it has one, else a new chat on that folder.
+                let open = branches::list(&repo).ok().and_then(|l| l.open.into_iter().find(|o| o.branch == branch && from.is_none()));
+                let (folder, local) = match open {
+                    Some(o) if o.main => {
+                        let first = p.id.clone();
+                        self.select(&first, webview);
+                        send(webview, json!({ "type": "select", "id": first }));
+                        return;
+                    }
+                    Some(o) => {
+                        let same = |a: &str| a.to_lowercase().replace('/', "\\") == o.path.to_lowercase();
+                        if let Some(chat) = p.chats.iter().find(|c| c.folder.as_deref().map(same).unwrap_or(false)) {
+                            let key = format!("{}~{}", p.id, chat.id);
+                            self.select(&key, webview);
+                            send(webview, json!({ "type": "select", "id": key }));
+                            return;
+                        }
+                        (o.path.clone(), o.branch.clone())
+                    }
+                    None => {
+                        let chosen = branches::chosen_root(Path::new(&p.config_file));
+                        let target = branches::folder_for(&repo, &branch, chosen.as_deref());
+                        match branches::add(&repo, &branch, from.as_deref(), &target) {
+                            Ok((made, local)) => {
+                                if let Err(text) = branches::mark_for_setup(&made) {
+                                    send(webview, json!({ "type": "notice", "level": "error", "text": text }));
+                                }
+                                (made.to_string_lossy().into_owned(), local)
+                            }
+                            Err(text) => return fail(webview, format!("Could not open {branch}: {text}")),
+                        }
+                    }
+                };
+                let on_disk = state::chat_numbers_on_disk(&self.paths.project_dir(&p.id));
+                let Some(project) = self.state.project_mut(&p.id) else { return };
+                let next = project.next_chat_id(&on_disk);
+                project.last_chat = next;
+                project.chats.push(state::Chat { id: next, name: format!("Chat {next}"), folder: Some(folder), branch: Some(local) });
+                let key = format!("{}~{}", project.id, next);
                 self.state.save(&self.paths);
                 self.push_projects(webview);
                 self.select(&key, webview);
                 send(webview, json!({ "type": "select", "id": key }));
             }
-            Command::CloseChat { id } => {
+            Command::CheckBranch { id } => {
+                let Some(folder) = self.branch_folder(&id) else { return };
+                match branches::status(Path::new(&folder)) {
+                    Ok(status) => send(webview, json!({ "type": "branchCheck", "id": id, "folder": folder, "status": status })),
+                    Err(text) => send(webview, json!({ "type": "branchCheck", "id": id, "folder": folder, "error": text })),
+                }
+            }
+            Command::CloseBranch { id, force } => {
+                let Some(folder) = self.branch_folder(&id) else { return };
+                let Some(repo) = self.state.project(&id).map(|p| PathBuf::from(&p.path)) else { return };
                 let Some(chat) = state::chat_of(&id).and_then(|c| c.parse::<u32>().ok()) else { return };
+                // The agent first: its terminals and processes would hold the folder open.
                 self.stop(&id, Phase::Stopped);
                 self.runtime.remove(&id);
+                if let Err(text) = branches::remove(&repo, Path::new(&folder), force) {
+                    send(webview, json!({ "type": "notice", "level": "error", "text": format!("Could not remove {folder}: {text}. If a program still has it open, close that first.") }));
+                    send(webview, self.statuses());
+                    return;
+                }
                 if let Some(p) = self.state.project_mut(&id) {
+                    p.last_chat = p.last_chat.max(chat);
                     p.chats.retain(|c| c.id != chat);
                 }
+                self.delete_chat_folder(&id, webview);
                 let first = state::project_of(&id).to_string();
                 if self.active.as_deref() == Some(id.as_str()) {
                     self.select(&first, webview);
@@ -1086,6 +1411,7 @@ impl App {
                 self.push_projects(webview);
                 send(webview, json!({ "type": "removed", "id": id }));
                 send(webview, self.statuses());
+                send(webview, json!({ "type": "notice", "level": "info", "text": format!("Closed the branch folder {folder}. The branch is still in the repository.") }));
             }
             Command::RenameChat { id, name } => {
                 // Any chat, the first included - it is the codebase's own id, and its name is kept on the
@@ -1217,6 +1543,8 @@ impl App {
             chats: Vec::new(),
             first_chat_name: None,
             hub: None,
+            archived: Vec::new(),
+            last_chat: 0,
         });
         self.state.save(&self.paths);
         self.push_projects(webview);
@@ -1277,6 +1605,8 @@ impl App {
             chats: Vec::new(),
             first_chat_name: None,
             hub: Some(settings),
+            archived: Vec::new(),
+            last_chat: 0,
         });
         self.state.save(&self.paths);
         self.push_projects(webview);
@@ -1350,9 +1680,14 @@ impl App {
             send(webview, self.statuses());
             return;
         }
-        if !Path::new(&project.path).is_dir() {
+        let workspace = self.state.chat_folder(id).unwrap_or_else(|| project.path.clone());
+        if !Path::new(&workspace).is_dir() {
             rt.phase = Phase::Failed;
-            rt.error = Some(format!("The folder {} no longer exists. Remove it from Fire Code, or restore the folder.", project.path));
+            rt.error = Some(if workspace != project.path {
+                format!("The branch folder {workspace} no longer exists. Close this chat, or open the branch again with New chat on a branch.")
+            } else {
+                format!("The folder {} no longer exists. Remove it from Fire Code, or restore the folder.", project.path)
+            });
             send(webview, self.statuses());
             return;
         }
@@ -1377,7 +1712,7 @@ impl App {
             generation: rt.generation,
             node: system::node_executable(),
             host_script: system::host_script(),
-            workspace: project.path.clone(),
+            workspace,
             data_dir: self.paths.project_dir(id),
             config_file: project.config_file.clone(),
             secrets_file: self.paths.secrets_file(),
@@ -1394,7 +1729,7 @@ impl App {
             change_ledger: self.paths.project_dir(state::project_of(id)).join("changes.jsonl"),
             mirror_dir: self.paths.root.join("mirrors"),
             codebase_dir: self.paths.codebase_dir(id),
-            approved_tools: self.paths.root.join("approved-tools.json"),
+            approved_tools: system::shared_approvals_file(),
             jupyter_hub: match &project.hub {
                 Some(settings) => {
                     let file = self.paths.project_dir(state::project_of(id)).join("jupyterhub.json");
@@ -1453,6 +1788,9 @@ impl App {
                     .map(|(p, (_, name))| (name, p.path.clone()))
                     .collect()
             },
+            monitoring: self.monitoring.settings.enabled,
+            monitor_executor: false,
+            extra_tool_folders: Vec::new(),
         };
         match host::launch(spec, move |event| {
             let _ = proxy.send_event(UserEvent::Host(event));
@@ -1468,6 +1806,60 @@ impl App {
 
     /// Ends the codebase's whole process tree. The generation moves on first, so the exit that
     /// follows is recognised as asked-for rather than reported as a crash.
+    /// Deletes a closed chat's folder - its conversations, reports and log. Only an extra chat's
+    /// (`<id>~<n>`, under `projects/<id>/chats/`), never a codebase's own. In the background with
+    /// retries: the agent was just stopped and Windows keeps its files locked for a moment. A folder
+    /// that cannot be deleted is left; its number is never handed out again, so it is never reopened.
+    /// A branch chat's folder; None for a chat working in the codebase's own folder.
+    /// Another chat on a codebase - blank, or an archived one (`archived`, its number) brought back - opened on
+    /// screen. `name` names a blank one ("Alert: ..." from monitoring). Its key, `<id>~<n>`.
+    pub fn new_chat(&mut self, id: &str, archived: Option<u32>, name: Option<String>, webview: &WebView) -> Option<String> {
+        let on_disk = state::chat_numbers_on_disk(&self.paths.project_dir(state::project_of(id)));
+        let p = self.state.project_mut(id)?;
+        let next = match archived.and_then(|n| p.archived.iter().position(|c| c.id == n)) {
+            // Back from the archive under its own number, so its folder - and conversation - come with it.
+            Some(at) => {
+                let chat = p.archived.remove(at);
+                p.chats.push(state::Chat { id: chat.id, name: chat.name, folder: chat.folder, branch: chat.branch });
+                chat.id
+            }
+            // Blank: a number no chat has ever had, so no old folder is opened.
+            None => {
+                let next = p.next_chat_id(&on_disk);
+                p.last_chat = next;
+                p.chats.push(state::Chat { id: next, name: name.unwrap_or_else(|| format!("Chat {next}")), folder: None, branch: None });
+                next
+            }
+        };
+        let key = format!("{}~{}", p.id, next);
+        self.state.save(&self.paths);
+        self.push_projects(webview);
+        self.select(&key, webview);
+        send(webview, json!({ "type": "select", "id": key }));
+        Some(key)
+    }
+
+    fn branch_folder(&self, key: &str) -> Option<String> {
+        let p = self.state.project(key)?;
+        let chat = state::chat_of(key)?;
+        p.chats.iter().find(|c| c.id.to_string() == chat)?.folder.clone()
+    }
+
+    fn delete_chat_folder(&self, key: &str, _webview: &WebView) {
+        if state::chat_of(key).and_then(|c| c.parse::<u32>().ok()).is_none() {
+            return;
+        }
+        let dir = self.paths.project_dir(key);
+        std::thread::spawn(move || {
+            for _ in 0..40 {
+                if !dir.exists() || std::fs::remove_dir_all(&dir).is_ok() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        });
+    }
+
     fn stop(&mut self, id: &str, phase: Phase) {
         if let Some(rt) = self.runtime.get_mut(id) {
             rt.generation += 1;
@@ -1483,6 +1875,11 @@ impl App {
 
     fn handle_host(&mut self, event: HostEvent, webview: &WebView) {
         match event {
+            HostEvent::Monitor { id, generation, payload } => self.monitor_line(&id, generation, payload, webview),
+            // The executor has no page and no sidebar row: only its exit matters.
+            HostEvent::Url { id, .. } if id == monitoring::EXECUTOR_ID => {}
+            HostEvent::Notify { id, .. } if id == monitoring::EXECUTOR_ID => {}
+            HostEvent::Exited { id, generation, tail, .. } if id == monitoring::EXECUTOR_ID => self.executor_exited(generation, &tail, webview),
             HostEvent::Url { id, generation, url } => {
                 let Some(rt) = self.runtime.get_mut(&id) else { return };
                 if rt.generation != generation {
@@ -1592,11 +1989,20 @@ impl App {
     /// "Fire Code — 2 waiting" in the title bar and taskbar, while any agent is waiting for you.
     fn update_title(&self, window: &Window) {
         let waiting = self.runtime.values().filter(|r| r.process.is_some() && r.agent == "attention").count();
-        window.set_title(&if waiting == 0 { "Fire Code".to_string() } else { format!("Fire Code — {waiting} waiting for you") });
+        let alerts = self.monitor_alert_count();
+        let mut parts = Vec::new();
+        if waiting > 0 {
+            parts.push(format!("{waiting} waiting for you"));
+        }
+        if alerts > 0 {
+            parts.push(format!("{alerts} alert{}", if alerts == 1 { "" } else { "s" }));
+        }
+        window.set_title(&if parts.is_empty() { "Fire Code".to_string() } else { format!("Fire Code — {}", parts.join(" · ")) });
     }
 
     fn tick(&mut self, window: &Window, webview: &WebView) {
         self.update_title(window);
+        self.monitor_tick(webview);
         self.ticks += 1;
         for rt in self.runtime.values_mut() {
             rt.memory = rt.process.as_ref().map(|p| p.memory()).unwrap_or(0);
@@ -1900,7 +2306,8 @@ mod command_tests {
         let s = state.find("pub struct Project {").unwrap();
         let fields = &state[s..s + state[s..].find("\n}").unwrap()];
         // Not for the page: when it was last opened is Rust's own bookkeeping.
-        let not_sent = ["last_used"];
+        // `last_chat`: the highest chat number handed out, so none is reused - Rust's too.
+        let not_sent = ["last_used", "last_chat"];
         for line in fields.lines().map(str::trim).filter(|l| l.starts_with("pub ") && !l.contains("struct ")) {
             let name = line.trim_start_matches("pub ").split(':').next().unwrap();
             if not_sent.contains(&name) {
@@ -1931,4 +2338,11 @@ mod command_tests {
         assert!(matches!(serde_json::from_str::<Command>(r#"{"cmd":"pickEnvFolder","index":2}"#), Ok(Command::PickEnvFolder { index: 2 })));
         assert!(matches!(serde_json::from_str::<Command>(r#"{"cmd":"restartAll"}"#), Ok(Command::RestartAll)));
     }
+}
+
+/// The user's Downloads folder, where a Save dialog starts: where people look for a saved file.
+fn dirs_downloads() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("USERPROFILE")?;
+    let downloads = std::path::Path::new(&home).join("Downloads");
+    downloads.is_dir().then_some(downloads)
 }

@@ -460,7 +460,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         ) : shown === 'schedules' ? (
           <SchedulesTab {...props.schedules} />
         ) : shown === 'skills' ? (
-          <SkillsTab {...props.skills} />
+          <SkillsTab {...props.skills} transport={props.transport} />
         ) : shown === 'usage' && props.transport !== undefined ? (
           <UsageTab transport={props.transport} />
         ) : shown === 'tools' ? (
@@ -472,7 +472,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         ) : shown === 'customData' ? (
           <CustomDataTab {...props.customData} onOpenPython={() => setActive('python')} />
         ) : shown === 'python' ? (
-          <PythonTab {...props.python} />
+          <PythonTab {...props.python} transport={props.transport} />
         ) : shown === 'project' ? (
           <ProjectTab {...props.project} />
         ) : shown === 'network' ? (

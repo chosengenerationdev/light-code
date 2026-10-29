@@ -1,5 +1,181 @@
 # @chosengeneration/fire-code
 
+## 0.68.0
+
+- **Checks start on time, and say why when they do not.** A tile says **waiting…** with the reason on hover (checking it can run here, its turn behind 4 running checks, a colleague's window, the executor starting) or **due N min ago**; the grid window says the same. The monitoring executor starts as soon as a monitor uses a tool, not when a check falls due, and a tool's timeout counts from when the executor is up. A share path is checked in the background, so an unreachable share no longer holds the window up. A check marked running with nothing in flight is let go rather than never running again.
+- **A window whose winner never reports is taken over** - once, by one other member, three minutes past the check's timeout - so a colleague's Fire Code closing mid-check no longer leaves it unchecked.
+- **Is the scheduler working?** A line at the top of the dashboard: running and when it last looked, with **Stop**; stopped, with **Start**; not responding, with **Start again**, which lets go of anything stuck and restarts its timer. Stopped stays stopped after a restart; Run now still works.
+- **Refresh** on the dashboard syncs the team's bucket folders and repository now, reads the folders again, and says which monitors are new and which are gone.
+- **Who wrote it, who changed it, and when**: in the tile's tooltip and the grid window's header, and **Changes** lists every version - when, by whom, what changed, and the monitor as it was. Team monitors' changes are shared in the team index, so everyone sees the same list. Editing the schedule on the dashboard labels the skill like any other save.
+- **The grid window's buttons are icons with tooltips**, wrapping in a narrow window instead of being cut off.
+- **Underscores in replies are kept.** `job_status_flag`, `PAY_*_USD`, `__init__` and other names with underscores lost them in a formatted reply, read as italics or bold. An underscore inside a word, or around a single dunder name, is now text; `_this_` and `__these words__` still emphasise.
+- **Skills and Python tools record who saved them last** (`updated_by:` / `__updated_by__`), beside the author, version and time they already carried. The author stays whoever wrote it.
+
+## 0.67.0
+
+(0.66.0 is skipped.)
+
+- **Delete history older than N days**: right-click a tile → Delete its history… offers everything, or checks older than 7, 30, 90 or any number of days; **Clean up…** in Monitoring settings takes the same choice for every monitor. Both remove checks here (with their grids) and your own records in the team index; colleagues’ stay theirs.
+
+## 0.65.0
+
+- **Every member sees every row of a team check.** The computer that runs it shares its whole grid in the team index, once per distinct grid and day, and the others fetch it: the newest check and past ones in History, whoever ran them. (Before, others saw only the alerted rows.) A grid over 5,000 rows or about 2 MB stays alerted-rows-only.
+- **Big grids are drawn as you scroll**: 200 rows at once, more as you near the bottom; filters, search and sorting still cover every row. Before, the grid stopped drawing at 3,000 rows.
+- **Clicking a check in History shows its whole grid straight away**, under the bars - every row, coloured as it was - with **Open in grid view** for filters and sorting. No button to press first. A check without a whole grid says why in one line: recorded before 0.64.0, or run on a colleague’s computer.
+
+## 0.64.0
+
+- **Show the grid as it was**: a check chosen in History opens its whole grid - every row, coloured as it was - read-only, with Back to now. Kept on the computer that ran it, once per distinct grid, for as long as its history.
+- **Delete this check**: one check out of the history, here and your own record of it in the team index.
+- **Monitors can use Fire Code’s Rust tools directly** (`records: true`): a feed file late, ERROR lines across logs, a table filtered - no Python in between.
+
+## 0.63.0
+
+- **History on a chosen day**: a date box beside 24 h / 7 d / 14 d / 30 d / 90 d.
+- **A check chosen in History shows its details where you clicked**: under the bars, with the time, result, who ran it, rows read, how long it took and its alerts; a clear check says why it has no rows. It used to appear below the alert patterns, out of sight.
+- **The card’s Run history button** no longer has a cut-off label; the tooltip says what it does.
+- **Interval checks run on the clock**: every 10 minutes is once in each 10-minute window (10:00, 10:10 …), not 10 minutes after each machine’s own last run. Team members who started at different times now always claim the same window, so a check can no longer run twice around a window’s edge.
+- **Only a computer that can run a team check claims it**: the source's path is reachable, or its tool exists, is approved here and is allowed - checked without running it. One that cannot shows **Runs elsewhere** (reason on hover) and leaves it to colleagues. After a check fails here, colleagues get the next windows for a while, unless nobody else is running it.
+- **Team checks keep running offline**: without the team history, the check still runs here (tile: **Offline · N not shared**); once it is reachable, each offline check is written only if no colleague already checked that window.
+- **Team checks are collected once**: Run now on a team check claims a two-minute slot, so several people pressing it together make one check and see it, instead of one each. Each computer keeps only the newest 200 checks of a team monitor; the full history is stored once, in the team index.
+
+## 0.62.0
+
+- **Context menus close on a click outside them** again, even after a click inside (a disabled item, a separator). Before, that first click used up the listener and only Esc closed the menu.
+- **Team monitors can be edited and deleted**: a monitor that is a copy from the team’s bucket or team repository was greyed out in the menu and its Save did nothing. A schedule change is now uploaded to the bucket or committed to the repository; Delete removes it there and here, for everyone. The window says where it is saving and waits for the answer.
+- **Check for new team tools** (Settings → Python): a colleague’s new tool is offered for approval at once.
+- **The Python tab opens straight away** with the tools already approved, while Python starts.
+- **Review all…**: monitors waiting for your review are listed together, each definition shown, and the ticked ones approved.
+- **Snooze until…** a date and time, on a tile and in its window; and **snooze one row** of the grid (right-click it, or Snooze row in its details).
+- **Run history button**: the bars across the bottom of a tile are one wide button that opens the monitor’s History (earlier days too); a bar opens that check.
+- Monitoring tools are told to use Polars when it is installed, and the tool template’s call to another tool works (it passed a dict).
+
+## 0.61.0
+
+- **Edit a check’s schedule**: **Schedule** in its window, or right-click a tile → Edit schedule… - every N minutes or hours, only between two times, at set times of day, on chosen days. Only those fields of the skill file change, and an approved monitor stays approved.
+- **Delete a monitor for good**: right-click a tile → Delete this monitor… (or ⋯ → Delete in its window), after a confirmation naming what goes: its skill file, results and history here, and your own checks in the team history. A copy synced from the team’s bucket or repository says why it cannot be changed here.
+- **Personal checks need nothing set up**: an agent asked for a check makes a personal one when team history is not configured.
+- **Monitoring tools that call other tools** work in the background check when they call another Python tool more than once.
+- **Closing a chat shows the tab beside it** (to its right, else its left) instead of the codebase’s first chat.
+
+## 0.60.0
+
+- **Team monitors keep their history in the team’s OpenSearch index** (Settings → Monitoring → Team history) and need it. Every member may run a team monitor, but each check slot is claimed first, so it runs once across the team; everyone sees the newest check and who ran it. Writes never overwrite and cleanup removes only your own.
+- **When checks run**: every N minutes within a run window (or from/until a time), at exact times of day ("07:30", or several), on chosen days.
+- **History**: the grid’s History view - a bar per check, each alert’s pattern (new, ongoing, recurring at a time, comes and goes), and any past check’s rows. Kept 90 days by default; Clean up now; Delete its history per monitor.
+- **Alerts explained**: double-click a coloured row for the author’s advice and the agent’s explanation; **Start a chat** opens a chat named after the alert in the codebase you pick, with what is known already typed in.
+- Snoozed or paused monitors no longer colour the Monitoring button. Less memory: only summaries are kept, rows are read when a grid opens.
+- Python tools may call the tools they declare (`__tool_calls__`): MCP tools, other Python tools and Fire Code’s reading tools - in a monitor’s check without a prompt.
+- Test connection Details now lead with the likely cause; AutoSys says when its server pages an answer (a pattern finding only some jobs).
+
+## 0.59.0
+
+- **Monitoring.** A full-window dashboard of glowing tiles, one per monitor, under Team alerts and Personal, with search and filters by colour: red (failure), amber (warning), purple (no fresh data), blue (information), green (all clear), grey (paused, or waiting for your review). Hover a tile for what it watches; click it for its grid in a window of its own - cells and rows coloured by its alert rules, filters on every column, double-click a row for its breakdown, acknowledge an alert until it gets worse.
+- **Run by Fire Code itself (Rust).** Monitors are skills holding a `monitor` block: what to read, how often, the columns and the alert rules. Fire Code finds them (personal, codebases, buckets, team repository), checks them on schedule with no model call, keeps their history and sends Windows notifications. SQLite and CSV/Excel sources are read by the Rust helper; a Python or MCP tool runs in a background agent with no window.
+- **Notifications at your level**, per colour: off, counted on the dashboard, silent, with sound, staying on screen, or a looping alarm - with reminders, quiet hours and a per-monitor override. A team monitor runs only after you approve it on this computer.
+- **Agents create and control monitors**: they reuse or write the tool, create the monitor (you approve the file), read its alerts and rows, run it, open it, and - with your approval - pause, snooze or acknowledge. Settings → Monitoring switches it on.
+
+## 0.58.0
+
+- **AutoSys on a server with its own addresses.** A pattern such as `JOB*UK` now works where the server has no pattern status address: the matching jobs are listed and each one's status read in turn (one job falls back to a definition carrying its status). Test connection passes on the job list too, and a 404 says what to do next.
+- **The assistant finds and keeps the addresses.** `autosys_check_addresses` tries the saved addresses, the usual layouts (`/v1`, `/AEWS`, `/AEWS/v1`, `/api/v1`) and anything read on the office wiki, with a job you name, and shows what each answered. `autosys_set_addresses` saves the working ones after you approve - always asked, each changed address tried live in the prompt, paths on your own site only, never in a schedule or with read-only access.
+- **Share them with the team**: Settings → Export → **AutoSys addresses** carries only `autosys.paths`; importing it changes nothing else of the importer's.
+
+## 0.57.0
+
+- **Open a branch chat's folder in VS Code to run and debug it.** Right-click a chat tab → **Open this branch in VS Code** (or **Open in File Explorer**) opens that chat's own folder - for a branch chat, its branch folder - where VS Code runs and debugs that branch. The agent in Fire Code can read the paused debug session from there. The sidebar's Open in VS Code still opens the codebase's own folder.
+- **Copying a folder into a new branch folder.** `branches.copyFiles` now takes folders as well as files - for example an uncommitted `.vscode` - copying only what the branch does not already have. Help explains .vscode and virtualenvs in branch folders (a venv is never copied: it records absolute paths).
+
+## 0.56.0
+
+- **A repository with no commits yet now says so** when you open a branch, instead of showing an empty list and an empty "starting from" box. Git makes a branch with the first commit, so make one (Commit and push, or ask the agent) and the branches appear. Make branch is also disabled, with the reason on hover, whenever there is nothing to start from.
+
+## 0.55.0
+
+- **A new branch starts from the main branch by default.** In VS Code's New branch… and Fire Code's New chat on a branch, the "starting from" choice now defaults to the repository's main branch - the one the remote marks as default, else main, else master - instead of whatever branch is checked out. Any other branch can still be picked; the list marks the main branch and the one the codebase is on.
+
+## 0.54.0
+
+- **Every chat tab shows its branch.** Chats working in the codebase's own folder show the codebase's branch under their name, as the first chat does; a branch chat shows its own.
+- **The + button offers New chat on a branch.** It always opens a small menu - New blank chat, New chat on a branch…, and any archived chats - instead of making a blank chat straight away when nothing was archived. Ctrl+T is still a quick blank chat. The codebase's right-click menu in the sidebar has New chat on a branch too.
+
+## 0.53.0
+
+- **Several branches of one repository at once.** VS Code: **Light Code: Open Branch in New Window** (also a branch button in Source Control) opens a branch - existing, fetched from the remote, or new - in its own folder beside the repository and its own VS Code window, where running, debugging, terminals and Light Code all use that branch. **Light Code: Branches** lists the branch folders with their state and closes one safely. Fire Code: **New chat on a branch…** opens a branch as a chat tab working in its own folder; each tab shows its chat name with the branch underneath (trimmed when long, keeping a Jira key whole, full name on hover) and renaming a chat never changes its branch; **Close branch…** removes the folder. Git keeps it safe: one branch in one folder at a time, a close checks for uncommitted and unpushed work first, and the branch itself is never deleted. Optional per project: files to copy into a new branch folder (such as .env) and a setup command (such as pnpm install), run once. Commands and debug sessions get LIGHT_CODE_BRANCH and LIGHT_CODE_PORT_OFFSET so two branches can run at once. Codebase instructions, settings and approvals are shared by a repository's branches.
+
+## 0.52.0
+
+- **Create, copy and change Jenkins jobs.** `jenkins_write_job` creates a job, copies an existing job into a new one, or changes a job - most often its parameters: add one, change a default, its choices or its description, or remove one (string, text, boolean and choice parameters). Anything else - script path, branch, schedule, agent label - is an exact edit of the job's configuration. "A job like platform/api but with a hotfix branch parameter" is one copy with new parameters. It always asks first, showing the diff of the configuration Jenkins will be sent, and cannot be set to always allow. It never deletes a job, never creates or copies over an existing one, refuses to save if the job was edited on Jenkins after you were shown the change, and is removed by "My access is read-only".
+
+## 0.51.0
+
+- **New skills and tools are for the team by default.** The assistant no longer asks; a skill or tool becomes personal only when you say so ("just for me", "keep it private").
+- **Delete everywhere.** Each skill (Settings → Skills) and tool (Settings → Python) has **Delete everywhere**: the first press lists exactly what will go - every copy on this computer, the objects in each S3 bucket folder and its files in the team repository - and the second removes them. Bitbucket cannot delete a file through its REST API, so each repository file is replaced by a one-line "deleted by you on <date>" marker; history keeps the old version, and every Light Code treats it as gone - colleagues' unchanged copies in folders Light Code syncs are removed at their next sync, while a copy someone changed or keeps in their own project folder is reported in red rather than removed. The repository goes first, and if it refuses (someone changed the file meanwhile) nothing else is removed. Writing a new one of the same name brings it back. A button only - the assistant cannot delete for the team; on a shared server only an admin can.
+
+## 0.50.0
+
+- **Choose "Only me" or "The team" when a skill or Python tool is created.** The assistant asks who it is for (unless you said). **Only me** keeps it in your personal folder on this computer (%LOCALAPPDATA%\light-code\personal), used in every project in VS Code, Fire Code and the Node host, and never uploaded to a bucket, committed to the team repository or sent to the team skills pool. **The team** saves it where your team shares - the team repository and/or the bucket folder marked "Publish". The approval prompt says which before anything is written, and updating one keeps it where it is. Personal skills are marked **only you** in Settings → Skills and can be removed there. Not offered on a shared Node server.
+
+## 0.49.0
+
+- **New skills and Python tools are saved outside the project while the team repository is on**, in a folder of the repository's own (the panel shows the path), so they never land in the project's git. A folder you chose in Settings → Skills or Settings → Python, or an S3 bucket folder marked "Publish", still takes precedence. Skills and tools already in the project's .lightcode folders keep loading and are still committed.
+- **Fixed: the agent could not read skills kept outside the project.** Skills in S3 bucket folders or the team repository's copy were outside every folder the agent may read: VS Code asked permission for each one, and Fire Code refused them. Every skill and tool folder is now readable without asking.
+- **Fixed: after switching the S3 bucket folders off, editing a skill that came from the bucket showed as a conflict.** It is now committed as an ordinary update.
+- The team repository needs no S3 bucket: a new user can set up Bitbucket, fill in the panel and press Sync now.
+- **Hitting the model's context limit now suggests a new chat with a handoff.** The error offers **New chat with a handoff** (beside + at the top) alongside Compact now: the assistant writes up the chat - goal, decisions, what is done, next steps - and a new chat starts from it, so the work carries on.
+
+## 0.48.0
+
+- **Switch the S3 bucket folders off safely once the team repository has everything.** Settings → DevOps → Team repository → *Use the repository instead of the S3 bucket*. **Check** syncs the bucket and the repository, then confirms every skill and tool in the bucket folders is in the repository with the same content, and lists anything that is not (not committed yet, or different). **Switch bucket folders off** is offered only after a clean check, and checks once more before acting. It switches the skills and tools bucket folders off together, and only unticks them: nothing is deleted in the bucket or on disk, and ticking them again in Settings → S3 undoes it. Afterwards new skills and tools are saved in the project's folders and committed to the repository, and what came from the bucket keeps loading from the repository's copy. Both buttons are disabled, with the reason, when no bucket folder is syncing skills or tools.
+
+## 0.47.0
+
+- **Fixed: the team repository panel showed false "Not synced - changed both here and in the repository" warnings.** When a colleague's edit reached the repository before your S3 bucket sync brought it to your machine, your unchanged copy was reported as a clash. Now only a file changed on both sides is red. A file that is newer in the repository while yours is unchanged is listed in grey as "Newer in the repository" and clears once the bucket catches up. Line-ending differences (Windows CRLF against LF) and a leading byte-order mark no longer count as changes. Existing sync records carry over; the next sync clears the false warnings.
+
+## 0.46.0
+
+- **Fixed: the team repository committed almost nothing when skills and tools live in an S3 bucket.** It committed only the folder new skills are saved in and skipped every file a bucket sync had brought down, so a team keeping its skills and tools in a bucket saw one skill and no tools reach the repository. It now commits everything skills and tools load from - the save folder, the project's `.lightcode` folders and every S3 bucket folder (never the repository's own copy). Two people committing the same bucket file agree rather than conflict, and an edit made in the bucket is committed by the next sync. The same name in two folders on one machine: identical is one file; if they differ, the one Light Code uses is committed and the other is listed under Needs attention. Press **Sync now** once after updating.
+
+## 0.45.0
+
+- **AutoSys: runs today or in the last N hours, and who started them.** `autosys_runs` takes a list of jobs and reports each run's start, end, status and exit code, and whether it ran on its schedule, was started **by hand** (with who sent the start and when) or was an automatic retry. It reads the server's run history and event history; where your server keeps those elsewhere, set `autosys.paths.runHistory` / `eventHistory` - the tool says which is missing. A run with no event record is reported as "not known", never guessed.
+- **AutoSys Test connection can check a named job.** Fill in *Job to check in Test connection* and the test reads that job's definition - the same request as `<site>/job/<name>` in Postman.
+- **Python tools that always ask.** A tool with `__always_ask__ = True` at module level asks before every run for everyone who has it: no "Always allow", and no auto-approve covers it. Ask the assistant to add it when it creates the tool.
+- **Banned calls for Python tools.** Settings → Python → *Banned calls*: functions or modules no tool may use (`os.system`, `subprocess`, `someLib.someFunction`). Every tool is checked when it loads and before each call, through import aliases, and refused with the line named.
+- **A team repository for skills and tools.** Settings → DevOps → *Team repository for skills and tools*, offered once Bitbucket is set up and using its token: a project, repository, branch (created from the default branch if main is protected) and folder. Existing skills and tools are committed on the first sync, changes are committed as you make them, and colleagues' are brought back every few minutes. Nothing is overwritten - a file changed on both sides is listed, not replaced; a deleted skill or tool stays in the repository. Only your own files are committed, never copies synced from an S3 bucket, so the two syncs cannot bounce files. Included in export/import under DevOps.
+- **"Needs attention" shows background failures**: a team repository or bucket sync that failed or skipped a file, and Python tools that did not load, first in Settings → Usage.
+- **Fixed: a tool approved in VS Code had to be approved again in Fire Code.** Approved tool code is now one list per Windows user (`%LOCALAPPDATA%light-codeapprovals`), shared by the extension, the Node host and Fire Code; Fire Code's earlier approvals are carried over.
+- A skill identical in two folders (yours and a synced copy) is no longer reported as shadowed.
+
+## 0.44.0
+
+- **Fixed: AutoSys requests went to the wrong address (HTTP 404).** Every request added /AEWS to the site address, so an address that already ended in /AEWS asked for /AEWS/AEWS/... . The site address is now used exactly as you type it - include the web services prefix, e.g. https://autosys.example.com:9443/AEWS - and only the resource and its query are added (/job-run-info?filter=...). Test connection's Details show the exact address used. If you set request paths by hand in config (autosys.paths), they are unchanged.
+
+## 0.43.0
+
+- **"My access is read-only" on every DevOps connection** (AutoSys, Jira, Confluence, Bitbucket, Jenkins). Ticked, the tools that would change something there are left out entirely and the reading tools tell the assistant the access is read-only - so it explains what someone with access would need to do instead of trying, and you are never asked to approve a change the server would refuse.
+- **More ways to read AutoSys.** Status can be narrowed by machine ("what is running on host X"), by time ("what failed in the last 6 hours") and to long runners ("running longer than 2 hours", with how long). Finding jobs can be narrowed by machine, owner, box, type, calendar or text in the command ("which jobs call load_gl.sh"). New: `autosys_machines` (machines like autorep -M, with the jobs running on and defined on one), `autosys_schedule` (what starts in a time window or on a day, from start times, days and run calendars), `autosys_calendar` (a calendar's dates, or whether a day is in it) and `autosys_global_variables` (like autorep -G). A server that answers one of these somewhere else is told which address setting to change.
+- **Test connection shows its details.** Under the result, **Details** lists every request it made - the gateway's token request first - with the address, HTTP status, response headers and the start of the body; passwords, tokens and secrets are masked, and **Copy details** puts it on the clipboard for whoever runs the service. It opens by itself when the test fails.
+- **Clearer sign-in errors from DevOps sites**: messages now name the HTTP status (401 not signed in, 403 forbidden) so they can be compared with Postman, and AutoSys and Jenkins are no longer told about a "personal access token" they do not use.
+
+## 0.42.0
+
+- **Fixed: Save SVG and Save PNG on a diagram did nothing** in VS Code and Fire Code. They used a browser download link, which neither window acts on. They now open a Save dialog (VS Code's own; a Windows one in Fire Code, starting in Downloads), show "Saving…" while it works, then say where the file went - or why it could not be saved. In a plain browser they still download.
+- **Buttons show they are working.** A button that sends something to Light Code (Save, Test connection, Sync, Send…) now shows a small spinner and a busy cursor until the answer comes back, instead of looking like nothing happened for a few seconds.
+- **Fire Code's own buttons press visibly**: dialog buttons sink and darken when clicked (the secondary ones did not react at all).
+
+## 0.41.0
+
+- **Close or archive a chat, and new chats start blank.** Fixed: a new chat could open showing an earlier chat's conversation - it was given the number of a closed chat and so opened that chat's folder. Numbers are never reused now. Closing a tab (×, middle-click, Ctrl+W, right-click) asks **Archive** (keeps the conversation and takes the tab away) or **Close and delete** (removes its conversations, reports and log). With chats archived, + offers *New blank chat* or any archived chat, which opens where it was left; archived chats can also be deleted from there. Ctrl+T is always blank.
+- **Choose which skills go to the team.** Settings → Project → Team skills → *Choose which skills to send*: untick a skill to keep it to yourself. The choice is remembered, the Send button counts what goes, and a skill you untick after sending it is taken back from the pool on the next Send (only your own copy). Check status shows it as "kept to yourself".
+- **Defaults for a skill's inputs.** Settings → Skills → a skill → *Defaults for its inputs*: placeholders written `{{name}}` or `<NAME>` are offered as boxes, and any other input can be added by name. The assistant uses them instead of stopping to ask, says which it used, and still asks for anything without a default; a value you give in the chat wins. Kept in your own settings, never in the skill.
+- **Fixed: codebase instructions were easy for the model to ignore.** They sat in the middle of a long prompt, followed by thousands of words of tool and mode guidance. They now come last (before only a chat's plan) and are named at the very start, with plainer wording that they apply to every reply.
+- **AutoSys through a gateway: paste the sign-in header value yourself.** With *Also send an AutoSys sign-in header* ticked, a new *Header value* field takes the whole value (for example `Basic ` + base64 of username:password). It is sent exactly as stored on every AutoSys call, beside the gateway's Bearer token, in the header you name (for example `x-api-authorization-header-for-service-provider`), and kept in secure storage - the username and password are then not needed.
+
+## 0.40.0
+
+- **Fixed: enabling an add-on could fail out of sight and leave no tab.** If starting it threw, the add-on list never came back to Settings, so no Linux tab appeared, and the reason went to the chat behind the Settings page (Fire Code showed nothing at all). Now the add-on stays enabled and its tab appears whatever happens; the reason is shown on the Add-ons tab, with the add-on's log and a **Start again** button; a failure preparing one add-on no longer stops the other MCP servers starting; and a start-up failure when Light Code opens is shown on the Add-ons tab too, with the full error in the log.
+
 ## 0.39.0
 
 - **Set up SSH key**, one press on a Linux machine that signs in with a password: makes one key for this PC (`.ssh\light-code_ed25519`, reused for every machine), adds its public half to the machine's `authorized_keys` using the stored password, proves the key works, then switches the machine to it. A button only - the assistant cannot call it.

@@ -16,6 +16,7 @@ them as the tool's own output rather than corrupting the channel.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import inspect
 import io
@@ -415,8 +416,106 @@ def _kernel_run(client: Any, code: str, timeout: float) -> dict[str, Any]:
     return answer
 
 
+def _banned() -> list[str]:
+    """The calls no tool may use, set in Settings -> Python (python.bannedCalls)."""
+    try:
+        listed = json.loads(os.environ.get("LIGHT_CODE_BANNED_CALLS", "[]"))
+    except ValueError:
+        return []
+    return [str(entry).strip() for entry in listed if str(entry).strip()]
+
+
+def banned_uses(source: str, banned: list[str]) -> list[str]:
+    """Where a tool's code uses a banned function or module, as 'line N: name' - empty when it does not.
+
+    Read with Python's own parser, so comments and strings never count and aliases are followed:
+    ``import certainLib as c`` then ``c.certainFunction(...)``, ``from certainLib import
+    certainFunction as f``, a reference passed along without being called, ``getattr(c, "name")``,
+    and ``importlib.import_module("certainLib")``. An entry naming a module bans all of it.
+    """
+    if not banned:
+        return []
+    tree = ast.parse(source)
+    aliases: dict[str, str] = {}
+    found: list[str] = []
+
+    def hit(dotted: str) -> str | None:
+        for entry in banned:
+            if dotted == entry or dotted.startswith(entry + "."):
+                return entry
+        return None
+
+    def report(node: ast.AST, dotted: str) -> None:
+        entry = hit(dotted)
+        if entry is not None:
+            found.append(f"line {getattr(node, 'lineno', '?')}: {dotted}" + (f" (banned: {entry})" if entry != dotted else ""))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for name in node.names:
+                aliases[name.asname or name.name.split(".")[0]] = name.name if name.asname else name.name.split(".")[0]
+                report(node, name.name)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for name in node.names:
+                if name.name == "*":
+                    if any(entry.startswith(node.module + ".") for entry in banned):
+                        found.append(f"line {node.lineno}: from {node.module} import * (could reach a banned name)")
+                    continue
+                aliases[name.asname or name.name] = f"{node.module}.{name.name}"
+                report(node, f"{node.module}.{name.name}")
+
+    def dotted_of(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            base = dotted_of(node.value)
+            return f"{base}.{node.attr}" if base is not None else None
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
+            dotted = dotted_of(node)
+            # Only the outermost attribute of a chain is reported, so c.f.g is one finding, not three.
+            if dotted is not None and not isinstance(getattr(node, "_lc_parent", None), ast.Attribute):
+                report(node, dotted)
+        # A module imported by name at run time: importlib.import_module("x"), __import__("x").
+        if (
+            isinstance(node, ast.Call)
+            and dotted_of(node.func) in ("importlib.import_module", "__import__")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            report(node, node.args[0].value)
+        # An attribute fetched by name: getattr(c, "certainFunction").
+        if isinstance(node, ast.Call) and dotted_of(node.func) == "getattr" and len(node.args) > 1:
+            base = dotted_of(node.args[0])
+            attr = node.args[1]
+            if base is not None and isinstance(attr, ast.Constant) and isinstance(attr.value, str):
+                report(node, f"{base}.{attr.value}")
+        for child in ast.iter_child_nodes(node):
+            child._lc_parent = node  # type: ignore[attr-defined]
+    # One line each, in source order, without repeats.
+    return sorted(set(found), key=lambda line: int(line.split()[1].rstrip(":")) if line.split()[1].rstrip(":").isdigit() else 0)
+
+
+def _check_banned(path: str) -> None:
+    """Refuses a tool whose code uses a banned call, naming each use."""
+    banned = _banned()
+    if not banned:
+        return
+    uses = banned_uses(Path(path).read_text(encoding="utf-8"), banned)
+    if uses:
+        raise PermissionError(
+            "This tool uses calls that are banned in Settings -> Python (Banned calls), so it is not loaded: "
+            + "; ".join(uses)
+            + ". Rewrite it without them."
+        )
+
+
 def _load(name: str, path: str) -> Any:
     """Imports a tool module from an explicit path, replacing any previous version."""
+    _check_banned(path)
     _install_helper_module()
     spec = importlib.util.spec_from_file_location(f"light_code_tool_{name}", path)
     if spec is None or spec.loader is None:
@@ -523,6 +622,24 @@ def _describe(name: str, path: str) -> dict[str, Any]:
 
 
 def _handle(request: dict[str, Any]) -> dict[str, Any]:
+    """Serves one request, putting back which tool is running when it ends.
+
+    A tool that calls another Python tool has that call served here while it waits (see
+    ``_ask_host``), and the call records the *callee* as the running tool. Without putting the
+    caller back, every later ``call_tool`` from the caller was sent as if the callee asked - so
+    it was judged against the callee's ``__tool_calls__``, which declares nothing, and a
+    monitor's check failed on its second call. The first call always worked, which is what made
+    it look like an approval problem rather than a bookkeeping one.
+    """
+    global _CURRENT_TOOL
+    previous = _CURRENT_TOOL
+    try:
+        return _serve(request)
+    finally:
+        _CURRENT_TOOL = previous
+
+
+def _serve(request: dict[str, Any]) -> dict[str, Any]:
     method = request.get("method")
     params = request.get("params") or {}
 
@@ -554,6 +671,8 @@ def _handle(request: dict[str, Any]) -> dict[str, Any]:
         global _CURRENT_TOOL
         _CURRENT_TOOL = name
 
+        # Before either place it could run: a banned call is refused in a kernel as much as here.
+        _check_banned(params["path"])
         if _kernel_connection_file():
             """Run it where the user's own session is.
 

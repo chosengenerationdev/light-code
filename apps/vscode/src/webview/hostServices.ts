@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import * as path from 'node:path'
 import * as vscode from 'vscode'
-import { findFireCodeHelper, Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
+import { findFireCodeHelper, personalLibraryDir, sharedMachineApprovalsFile, Logger, mentionExcludeGlob, mentionGlob, type HostServices, type HostUi, type OpenDialogOptions } from '@light-code/core'
 import { VSCodeConfigStore } from '../platform/config.js'
 import { createVSCodeDiagnostics } from '../platform/diagnostics.js'
 import { readDebugSession, startTrackingDebugSessions } from '../platform/debugSession.js'
@@ -91,6 +91,16 @@ export function createVSCodeHostServices(
      * current one ticked - what somebody means most of the time - then every workspace file from
      * the editor's index, which honours files.exclude. Capped so a huge repository stays quick.
      */
+    // A real Save dialog, so the panel's diagram Save buttons go through it (a webview ignores downloads).
+    savesFiles: true,
+
+    // A new branch folder's setup command, where it can be watched - and stopped.
+    runInTerminal(options) {
+      const terminal = vscode.window.createTerminal({ name: options.name, cwd: options.cwd, env: options.env })
+      terminal.show(true)
+      terminal.sendText(options.command)
+    },
+
     async pickContextFiles() {
       const active = vscode.window.activeTextEditor?.document.uri
       const open = vscode.window.tabGroups.all
@@ -207,6 +217,11 @@ export function createVSCodeHostServices(
     })(),
     // GitHub Copilot as signed in to here, for a profile using the Copilot preset (providers/hostModels.ts).
     ...(vscodeLanguageModels() !== undefined ? { languageModels: vscodeLanguageModels()! } : {}),
+    // Python tool code approved on this machine - the same list Fire Code reads, so a tool approved in
+    // one is not asked about again in the other (platform/node/sharedApprovals.ts).
+    machineApprovalsFile: sharedMachineApprovalsFile(),
+    // Skills and tools the user keeps to themself, in every project and in Fire Code too.
+    personalDir: personalLibraryDir(),
     // Built into dist/ by esbuild.mjs; the header offers to save it (scripts/source-archive.mjs).
     sourceArchive: {
       path: path.join(context.extensionPath, 'dist', 'source.zip'),

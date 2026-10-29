@@ -24,7 +24,7 @@ describe('every change to the MCP server set', () => {
 
 describe('codebase instructions', () => {
   it('reach the prompt every turn and the shared codebase folder when there is one', () => {
-    expect(bridge).toContain('codebaseInstructionsPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot })')
+    expect(bridge).toContain('codebaseInstructionsPath({ codebaseDir: services.codebaseDir, storageDir, workspaceRoot: projectRoot })')
     expect(bridge).toMatch(/const codebaseInstructions = renderCodebaseInstructions\(await readCodebaseInstructions\(codebaseInstructionsFile\)\)/)
     expect(bridge).toMatch(/\n\s+codebaseInstructions,\n/)
   })

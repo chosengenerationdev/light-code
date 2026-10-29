@@ -1,5 +1,7 @@
 import type { PythonEnvVariable, PythonSettings, PythonStatus } from '@light-code/core/browser'
 import { useEffect, useState, type ReactElement } from 'react'
+
+import { CheckTeamTools } from './CheckTeamTools.js'
 import {
   colors,
   fontFamily,
@@ -12,6 +14,8 @@ import { Select } from '../Select.js'
 import { PathField, type BrowseRequest } from './PathField.js'
 import { MigrateFolder, type MigrateFolderProps } from './MigrateFolder.js'
 import { S3Section, type S3SectionProps } from './S3Section.js'
+import { DeleteEverywhere } from './DeleteEverywhere.js'
+import type { Transport } from '@light-code/core/browser'
 import { Panel } from './Panel.js'
 import { SecretInput } from './CredentialPicker.js'
 
@@ -34,6 +38,7 @@ export interface PythonTabProps {
     venvPath: string
     interpreterPath: string
     libraryFolders: string[]
+    bannedCalls: string[]
     timeoutSeconds: number
     indexUrl: string
     offline: boolean
@@ -60,6 +65,8 @@ export interface PythonTabProps {
   }
   /** Names the exact file: two folders can hold one name, and only one row was clicked. */
   onDeleteTool: (name: string, filePath: string) => void
+  /** For "Delete everywhere", which talks to the host itself. Absent: not offered. */
+  transport?: Transport | undefined
   /**
    * Hides the version of a bucket tool on offer now, deleting nothing. The only honest "remove"
    * for a copy the next sync would bring straight back. Absent: the button is not shown.
@@ -109,6 +116,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
   const [venvPath, setVenvPath] = useState('')
   const [interpreterPath, setInterpreterPath] = useState('')
   const [libraryFolders, setLibraryFolders] = useState('')
+  const [bannedCalls, setBannedCalls] = useState('')
   const [enabled, setEnabled] = useState(false)
   const [uvPath, setUvPath] = useState('')
   const [toolsDir, setToolsDir] = useState('')
@@ -144,6 +152,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
     setVenvPath(saved.venvPath ?? '')
     setInterpreterPath(saved.interpreterPath ?? '')
     setLibraryFolders((saved.libraryFolders ?? []).join('\n'))
+    setBannedCalls((saved.bannedCalls ?? []).join('\n'))
     setIndexUrl(saved.indexUrl ?? '')
     setOffline(saved.offline === true)
     setEnvVars((saved.env ?? []).map(toRow))
@@ -314,6 +323,26 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               Folders holding your own Python libraries and the DLLs behind them (pricing libraries, say). The assistant
               uses them with <code>python_library</code> when you do not name a folder: added to the module path and the
               DLL search path, and every call still asks first. Works in Fire Code, and in VS Code when Fire Code is installed.
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <label htmlFor="lc-py-banned" style={labelStyle()}>
+              Banned calls
+            </label>
+            <textarea
+              id="lc-py-banned"
+              value={bannedCalls}
+              rows={3}
+              placeholder={'One per line, e.g.\ncertainLib.certainFunction\nos.system\nsubprocess'}
+              onChange={(event) => setBannedCalls(event.target.value)}
+              style={{ ...textFieldStyle(), width: '100%', fontFamily: monospace, resize: 'vertical' }}
+            />
+            <div style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>
+              Functions no Python tool may use - <code>module.function</code>, or a whole module. A tool that uses one is refused
+              when it is created, changed, synced or loaded, with the line named. Aliases are followed (
+              <code>import certainLib as c</code> then <code>c.certainFunction()</code>), and comments and strings do not count.
+              Exported with the Python settings, so a team can share one list.
             </div>
           </div>
 
@@ -574,6 +603,7 @@ export function PythonTab(props: PythonTabProps): ReactElement {
               venvPath: venvPath.trim(),
               interpreterPath: interpreterPath.trim(),
               libraryFolders: libraryFolders.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0),
+              bannedCalls: bannedCalls.split(/[\r\n,]+/).map((line) => line.trim()).filter((line) => line.length > 0),
               timeoutSeconds: Number.isFinite(parsed) ? parsed : 30,
               indexUrl: indexUrl.trim(),
               offline,
@@ -623,11 +653,13 @@ function ToolsStatus(
             style={{
               fontSize: 11,
               marginTop: 4,
-              color: status.ready ? colors.muted : status.enabled ? colors.error : colors.muted,
+              color: status.ready || status.starting === true ? colors.muted : status.enabled ? colors.error : colors.muted,
             }}
           >
             {status.detail}
           </div>
+
+          {status.enabled && props.transport !== undefined && <CheckTeamTools transport={props.transport} />}
 
           {status.enabled && (
             <div style={{ fontSize: 11, color: colors.muted, marginTop: 6, fontFamily: monospace }}>
@@ -830,6 +862,11 @@ function ToolsStatus(
                     <span style={{ display: 'block', color: colors.muted, fontSize: 11 }}>
                       {tool.description}
                     </span>
+                  )}
+                  {props.transport !== undefined && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 4 }}>
+                      <DeleteEverywhere transport={props.transport} kind="tool" name={tool.name} />
+                    </div>
                   )}
                   {(tool.author !== undefined || tool.project !== undefined || tool.version !== undefined) && (
                     <span style={{ display: 'block', color: colors.muted, fontSize: 10 }}>

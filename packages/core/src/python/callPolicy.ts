@@ -31,13 +31,21 @@
  * indication of who wants it is exactly the prompt people click through.
  */
 export const PYTHON_CALL_DENIED =
-  'A Python tool may only call other Python tools and MCP tools. Built-in tools — running ' +
-  'commands, editing files, creating tools or writing skills — are deliberately out of reach: ' +
-  'a tool body is model-authored, and approving one must not silently grant the rest.'
+  'A Python tool may call other Python tools, MCP tools, and the built-in reading tools it declares in ' +
+  '__tool_calls__ = ["name", ...]. Built-in tools that run commands, edit files, create tools or write ' +
+  'skills are deliberately out of reach: a tool body is model-authored, and approving one must not ' +
+  'silently grant the rest.'
 
-export function mayPythonToolCall(name: string, group: string | undefined): boolean {
+/**
+ * Whether a Python tool may call this tool at all. **Built-in reading tools** (AutoSys and Jira reads,
+ * file search, ...) were added for monitoring - "tools created can access existing mcp tools and inbuilt
+ * tools of firecode" - but only when the tool *declares* them (`__tool_calls__`), so the reviewer sees
+ * it, and only the `read` group: everything that changes something stays out of reach as before.
+ */
+export function mayPythonToolCall(name: string, group: string | undefined, declared = false): boolean {
   if (name.startsWith('py__')) return true
-  return group === 'mcp'
+  if (group === 'mcp') return true
+  return declared && group === 'read'
 }
 
 /** What the approval prompt says, so the user knows who is asking rather than only what for. */

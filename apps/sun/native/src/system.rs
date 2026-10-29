@@ -57,6 +57,62 @@ pub fn notify(
     let _ = toast.show();
 }
 
+/// How hard a monitoring notification tries to get attention (`monitor::Mode`, past "off" and "dashboard").
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ToastStyle {
+    /// No sound.
+    Silent,
+    /// The usual sound, gone after a few seconds.
+    Normal,
+    /// Stays on screen until dismissed, with the reminder sound.
+    Urgent,
+    /// Stays on screen with a looping alarm until dismissed.
+    Alarm,
+}
+
+/// A monitoring notification: `notify` with a style. Buttons carry their action back to `on_click`.
+pub fn notify_styled(
+    title: &str,
+    body: &str,
+    detail: Option<&str>,
+    icon: &Path,
+    buttons: &[(&str, &str)],
+    style: ToastStyle,
+    on_click: impl Fn(Option<String>) + Send + 'static,
+) {
+    use tauri_winrt_notification::{LoopableSound, Scenario, Sound};
+    let mut toast = Toast::new(APP_ID).title(title).text1(body);
+    toast = match style {
+        ToastStyle::Silent => toast.duration(Duration::Short).sound(None),
+        ToastStyle::Normal => toast.duration(Duration::Short),
+        ToastStyle::Urgent => toast.duration(Duration::Long).scenario(Scenario::Reminder).sound(Some(Sound::Reminder)),
+        ToastStyle::Alarm => toast.duration(Duration::Long).scenario(Scenario::Alarm).sound(Some(Sound::Loop(LoopableSound::Alarm))),
+    };
+    if let Some(detail) = detail {
+        toast = toast.text2(detail);
+    }
+    if icon.is_file() {
+        toast = toast.icon(icon, tauri_winrt_notification::IconCrop::Square, "Fire Code");
+    }
+    for (label, action) in buttons {
+        toast = toast.add_button(label, action);
+    }
+    let toast = toast.on_activated(move |action| {
+        on_click(action);
+        Ok(())
+    });
+    let _ = toast.show();
+}
+
+/// The user's personal skills, shared with the VS Code extension and the Node host
+/// (core's `personalLibraryDir`): where an "only me" monitor is kept.
+pub fn personal_skills_dir() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join("AppData").join("Local"));
+    base.join("light-code").join("personal").join("skills")
+}
+
 /// The Windows accent colour as `#rrggbb`, read where Windows keeps it.
 pub fn accent_colour() -> Option<String> {
     let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Software\\Microsoft\\Windows\\DWM").ok()?;
@@ -241,4 +297,78 @@ pub fn base64_encode(bytes: &[u8]) -> String {
         out.push(if chunk.len() > 2 { ALPHABET[n as usize & 63] as char } else { '=' });
     }
     out
+}
+
+/// The machine's list of approved Python tool code, shared with the VS Code extension and the Node host
+/// (core `platform/node/sharedApprovals.ts`): `%LOCALAPPDATA%\light-code\approvals\approved-tools.json`.
+/// It used to live in Fire Code's own data folder, which the extension never read - so a tool approved
+/// in one was asked about again in the other.
+pub fn shared_approvals_file() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join("AppData").join("Local"));
+    base.join("light-code").join("approvals").join("approved-tools.json")
+}
+
+/// Copies the hashes in Fire Code's earlier list into the shared one, so nothing approved before is asked
+/// about again. Adds, never replaces: an entry already in the shared list is kept as it is. Returns how
+/// many were added; a missing or unreadable earlier list adds none.
+pub fn merge_approvals(old: &Path, shared: &Path) -> usize {
+    let read = |file: &Path| -> serde_json::Map<String, serde_json::Value> {
+        std::fs::read_to_string(file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| value.get("hashes").and_then(|h| h.as_object()).cloned())
+            .unwrap_or_default()
+    };
+    let earlier = read(old);
+    if earlier.is_empty() {
+        return 0;
+    }
+    let mut hashes = read(shared);
+    let mut added = 0;
+    for (hash, entry) in earlier {
+        if !hashes.contains_key(&hash) {
+            hashes.insert(hash, entry);
+            added += 1;
+        }
+    }
+    if added > 0 {
+        let text = serde_json::json!({ "version": 1, "hashes": hashes }).to_string();
+        if crate::state::write_atomic(shared, &text).is_err() {
+            return 0;
+        }
+    }
+    added
+}
+
+#[cfg(test)]
+mod approvals_tests {
+    use super::*;
+
+    #[test]
+    fn the_shared_list_is_where_core_looks() {
+        let core = include_str!("../../../../packages/core/src/platform/node/sharedApprovals.ts");
+        assert!(core.contains("path.join('light-code', 'approvals')"));
+        assert!(core.contains("SHARED_APPROVALS_FILE = 'approved-tools.json'"));
+        let file = shared_approvals_file();
+        assert!(file.ends_with(Path::new("light-code").join("approvals").join("approved-tools.json")));
+    }
+
+    #[test]
+    fn earlier_approvals_are_added_and_nothing_is_replaced() {
+        let dir = std::env::temp_dir().join(format!("fire-approvals-{}", crate::state::now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("old.json");
+        let shared = dir.join("shared").join("approved-tools.json");
+        std::fs::write(&old, r#"{"version":1,"hashes":{"aaa":{"name":"one","at":"x"},"bbb":{"name":"two","at":"x"}}}"#).unwrap();
+        crate::state::write_atomic(&shared, r#"{"version":1,"hashes":{"bbb":{"name":"kept","at":"y"}}}"#).unwrap();
+        assert_eq!(merge_approvals(&old, &shared), 1);
+        let merged: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&shared).unwrap()).unwrap();
+        assert_eq!(merged["hashes"]["aaa"]["name"], "one");
+        assert_eq!(merged["hashes"]["bbb"]["name"], "kept");
+        assert_eq!(merge_approvals(&old, &shared), 0);
+        assert_eq!(merge_approvals(&dir.join("missing.json"), &shared), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

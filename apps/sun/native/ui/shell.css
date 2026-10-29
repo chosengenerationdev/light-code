@@ -852,8 +852,10 @@ kbd {
   filter: brightness(1.07);
 }
 
-.primary:active {
-  transform: translateY(1px);
+/* A press you can see: the button sinks and darkens, so a click visibly registered. */
+.primary:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+  filter: brightness(0.9);
 }
 
 .primary:disabled {
@@ -878,6 +880,11 @@ kbd {
 
 .secondary:hover {
   background: var(--surface-2);
+}
+
+.secondary:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+  background: var(--line-strong);
 }
 
 .link {
@@ -2121,4 +2128,469 @@ input[type='password']:focus {
   display: flex;
   justify-content: flex-end;
   margin-top: 6px;
+}
+
+/* New chat's archive list: a row is the chat to open and, at its end, a delete. */
+.menu-row {
+  display: flex;
+  align-items: stretch;
+}
+.menu-row > button:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.menu-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-row-when {
+  margin-left: auto;
+  padding-left: 12px;
+  opacity: 0.65;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.menu .menu-row-delete {
+  flex: 0 0 auto;
+  width: 30px;
+  justify-content: center;
+}
+.modal footer .secondary.danger {
+  color: var(--bad);
+}
+
+/* A chat tab: its name, and under it, small, the branch it works on (trimmed; the full name on hover). */
+.tab-text { display: inline-flex; flex-direction: column; min-width: 0; line-height: 1.1; }
+.tab-text .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-branch { font-size: 10px; color: var(--text-3); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* New chat on a branch. */
+.branch-new { display: flex; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.branch-new input { flex: 1; min-width: 0; }
+.branch-list { display: flex; flex-direction: column; max-height: 320px; overflow: auto; border: 1px solid var(--line-strong); border-radius: 6px; }
+.branch-row { display: flex; justify-content: space-between; gap: 12px; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line-strong); padding: 7px 10px; cursor: pointer; color: inherit; }
+.branch-row:last-child { border-bottom: 0; }
+.branch-row:hover { background: var(--hover); }
+.branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-note { opacity: 0.65; font-size: 11px; white-space: nowrap; }
+
+/* ─── Monitoring ──────────────────────────────────────────────────────────────
+ * The dashboard over the whole window, its tiles, and the sidebar button. Alert colours are tokens,
+ * redefined for dark; everything else is the shell's own tokens, so it follows the theme and accent. */
+
+:root {
+  --lv-red: #e5484d;
+  --lv-amber: #f0a020;
+  --lv-purple: #8e4ec6;
+  --lv-blue: #3b82f6;
+  --lv-green: #2fa66b;
+  --lv-grey: #8b8d98;
+  --dash-bg: #f1f1f4;
+}
+:root.dark {
+  --lv-red: #ff6369;
+  --lv-amber: #ffb224;
+  --lv-purple: #b47ff0;
+  --lv-blue: #5b9dff;
+  --lv-green: #3dd68c;
+  --dash-bg: #141416;
+}
+.lv-red { --lv: var(--lv-red); }
+.lv-amber { --lv: var(--lv-amber); }
+.lv-purple { --lv: var(--lv-purple); }
+.lv-blue { --lv: var(--lv-blue); }
+.lv-green { --lv: var(--lv-green); }
+.lv-grey { --lv: var(--lv-grey); }
+
+.orb {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--lv) 30%, white) 0%, var(--lv) 55%, color-mix(in srgb, var(--lv) 70%, black) 100%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lv) 18%, transparent), 0 0 12px 1px color-mix(in srgb, var(--lv) 50%, transparent);
+  animation: mon-glow 3.2s ease-in-out infinite;
+}
+.orb.small { width: 9px; height: 9px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--lv) 18%, transparent); animation: none; }
+.orb.big { width: 22px; height: 22px; }
+.orb.lv-red { animation-duration: 1.1s; }
+.orb.lv-amber { animation-duration: 1.8s; }
+.orb.lv-grey { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--lv) 14%, transparent); }
+@keyframes mon-glow {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lv) 18%, transparent), 0 0 8px 1px color-mix(in srgb, var(--lv) 38%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--lv) 10%, transparent), 0 0 18px 5px color-mix(in srgb, var(--lv) 62%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb, .tile-glow { animation: none !important; }
+}
+
+/* The way in, in the sidebar. */
+.monitor-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 12px 6px;
+  padding: 0 10px;
+  height: 34px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  transition: box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.monitor-btn[hidden] { display: none; }
+.monitor-btn:hover { box-shadow: 0 0 0 1px var(--line-strong), 0 2px 8px rgba(0, 0, 0, 0.06); }
+.monitor-btn:active { transform: scale(0.99); }
+.monitor-btn-label { flex: 1; }
+.monitor-count {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  text-align: center;
+  color: white;
+  background: var(--lv, var(--accent));
+}
+.monitor-count[hidden] { display: none; }
+.monitor-count.review { background: var(--surface-2); color: var(--text-2); box-shadow: 0 0 0 1px var(--line); }
+.rail-monitor[hidden] { display: none; }
+
+/* The dashboard: the whole window, above the codebases, below the dialogs. */
+.dashboard {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(1200px 500px at 15% -10%, var(--accent-soft), transparent 60%),
+    radial-gradient(900px 400px at 110% 0%, color-mix(in srgb, var(--lv-blue) 8%, transparent), transparent 60%),
+    var(--dash-bg);
+  animation: dash-in 0.22s var(--ease);
+}
+.dashboard[hidden] { display: none; }
+@keyframes dash-in {
+  from { opacity: 0; transform: scale(0.99); }
+}
+.dash-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 28px 10px;
+}
+.dash-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-right: auto;
+}
+.dash-brand h1 {
+  margin: 0;
+  font: 600 24px/1.15 var(--font-display);
+  letter-spacing: -0.015em;
+}
+.dash-brand .sub { margin: 2px 0 0; color: var(--text-2); font-size: 12.5px; }
+.dash-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 32vw);
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.dash-search:focus-within { box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+.dash-search svg { width: 15px; height: 15px; fill: none; stroke: var(--text-3); stroke-width: 1.5; }
+.dash-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }
+.dash-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+.tab-n { font-size: 11px; color: var(--text-3); font-weight: 400; }
+.dash-tools { display: flex; gap: 4px; }
+
+.dash-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 28px 12px;
+}
+.level-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.level-chip .mon-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lv); box-shadow: 0 0 6px var(--lv); }
+.level-chip.on { color: var(--text); font-weight: 600; background: color-mix(in srgb, var(--lv) 14%, var(--surface)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--lv) 55%, transparent); }
+
+.dash-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 28px 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lv) 12%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lv) 35%, transparent);
+}
+.dash-body { flex: 1; overflow: auto; padding: 4px 28px 24px; }
+.dash-section { margin-bottom: 22px; }
+.dash-section h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0 12px;
+  font: 600 13px/1.2 var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+.dash-section-n { color: var(--text-3); font-weight: 400; }
+.dash-section-hint { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-3); font-size: 12px; }
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 14px;
+}
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 1;
+  padding: 14px;
+  border: 0;
+  border-radius: 16px;
+  text-align: left;
+  overflow: hidden;
+  isolation: isolate;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease);
+}
+.tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lv) 45%, var(--line)), 0 10px 28px color-mix(in srgb, var(--lv) 18%, transparent);
+}
+.tile:active { transform: translateY(0) scale(0.99); }
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The colour, glowing from the corner: brighter and faster the more it needs you. */
+.tile-glow {
+  position: absolute;
+  top: -45%;
+  right: -45%;
+  width: 120%;
+  height: 120%;
+  z-index: -1;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--lv) 32%, transparent), transparent 72%);
+  opacity: 0.55;
+  animation: tile-breathe 4s ease-in-out infinite;
+}
+.tile.lv-red .tile-glow { opacity: 0.95; animation-duration: 1.4s; }
+.tile.lv-amber .tile-glow { opacity: 0.8; animation-duration: 2.2s; }
+.tile.lv-green .tile-glow { opacity: 0.45; }
+.tile.lv-grey .tile-glow { opacity: 0.25; animation: none; }
+@keyframes tile-breathe {
+  0%, 100% { transform: scale(0.92); }
+  50% { transform: scale(1.06); }
+}
+.tile.lv-red { box-shadow: 0 0 0 1px color-mix(in srgb, var(--lv) 40%, transparent), 0 6px 24px color-mix(in srgb, var(--lv) 16%, transparent); }
+.tile.review { background: repeating-linear-gradient(135deg, var(--surface) 0 10px, var(--surface-2) 10px 20px); }
+.tile.paused { opacity: 0.7; }
+.tile-top { display: flex; align-items: center; justify-content: space-between; height: 22px; }
+.tile-top .orb { width: 16px; height: 16px; }
+.tile-flag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface-2);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.tile-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: center;
+  color: white;
+  background: var(--lv);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--lv) 40%, transparent);
+}
+.tile-title {
+  margin-top: auto;
+  font: 600 15px/1.25 var(--font-display);
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tile-headline {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--lv) 55%, var(--text-2));
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tile-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.spark i { width: 3px; height: 100%; border-radius: 2px; background: var(--lv); opacity: 0.85; }
+/* The run history across the bottom of a tile: a wide button, its bars the last checks. */
+.spark-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--hover);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background 0.12s, border-color 0.12s;
+}
+.spark-btn:hover { background: var(--press); border-color: var(--line-strong); }
+.spark-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.spark-btn .spark { flex: 1; height: 18px; gap: 3px; }
+.spark-btn .spark i { flex: 1; max-width: 9px; min-width: 3px; cursor: pointer; }
+.spark-btn .spark i:hover { opacity: 1; outline: 1px solid var(--text-2); outline-offset: 1px; }
+.spark-label { font-size: 11px; color: var(--text-2); white-space: nowrap; }
+.spark i.lv-green, .spark i.lv-blue { height: 45%; opacity: 0.55; }
+.spark i.lv-grey { height: 25%; opacity: 0.4; }
+.spark i.lv-purple { height: 70%; }
+.tile-when { white-space: nowrap; }
+.tile.running .tile-when { color: var(--accent); }
+
+.dash-tip {
+  position: fixed;
+  z-index: 45;
+  width: 300px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--modal-shadow);
+  font-size: 12.5px;
+  pointer-events: none;
+  animation: dash-in 0.12s var(--ease);
+}
+.dash-tip[hidden] { display: none; }
+.dash-tip .tip-head { display: flex; align-items: center; gap: 8px; }
+.dash-tip .tip-level { margin-left: auto; font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--lv) 70%, var(--text)); }
+.dash-tip p { margin: 8px 0 0; }
+.dash-tip .tip-summary { color: var(--text); }
+.dash-tip .tip-headline { color: color-mix(in srgb, var(--lv) 60%, var(--text-2)); font-weight: 600; }
+.dash-tip dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 10px 0 0; color: var(--text-2); }
+.dash-tip dt { color: var(--text-3); }
+.dash-tip dd { margin: 0; }
+.dash-tip .tip-hint { color: var(--text-3); font-size: 11.5px; }
+
+.dash-empty { max-width: 640px; margin: 8vh auto; text-align: center; color: var(--text-2); }
+.dash-empty.small { margin: 6vh auto; }
+.dash-empty h2 { color: var(--text); font: 600 20px/1.2 var(--font-display); }
+.dash-empty ul { text-align: left; display: inline-flex; flex-direction: column; gap: 6px; padding-left: 18px; }
+.dash-empty-orbs { display: flex; justify-content: center; gap: 14px; margin-bottom: 8px; }
+.dash-empty-orbs .orb { width: 18px; height: 18px; }
+.dash-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 10px 28px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.dash-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.mon-spec { font: 12px/1.45 var(--mono); background: var(--surface-2); border-radius: var(--radius); padding: 12px; max-height: 45vh; overflow: auto; white-space: pre-wrap; box-shadow: 0 0 0 1px var(--line); }
+.modal h3.group { margin: 18px 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+.modal h3.group:first-child { margin-top: 0; }
+.inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.check-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.choice-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice-list button { height: 28px; padding: 0 12px; border-radius: 999px; box-shadow: 0 0 0 1px var(--line-strong); font-size: 12px; }
+.choice-list button.on { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); font-weight: 600; }
+.segmented.small button { padding: 0 8px; font-size: 11.5px; }
+
+/* Reviewing several monitors at once. */
+.review-list { display: flex; flex-direction: column; gap: 10px; max-height: min(60vh, 640px); overflow: auto; }
+.review-all { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.review-item { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.review-pick { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.review-pick input, .review-all input { accent-color: var(--accent); width: 16px; height: 16px; }
+.review-summary { margin: 4px 0 6px 24px; color: var(--text-2); }
+.review-item .mon-spec { margin: 6px 0 0 24px; max-height: 220px; overflow: auto; }
+.dash-banner .spacer { flex: 1; }
+.dash-banner button.small { padding: 4px 10px; }
+.modal input[type='datetime-local'] { font: inherit; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--text); color-scheme: inherit; }
+
+/* Secondary text in a dialog or list: what to know, not what to do. */
+.muted {
+  color: var(--text-3);
+}
+
+/* "Older than N days" in the history dialogs. */
+.older-picker { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.older-custom { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.older-custom.on { color: var(--text); }
+.older-custom .days-box { width: 80px; font: inherit; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--text); }
+
+/* The dashboard's refresh, turning while the team's skills sync. */
+.icon-btn.spinning svg {
+  animation: spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.spinning svg {
+    animation: none;
+  }
+}
+/* A check waiting, or past when it should have started. */
+.tile-when.late {
+  color: var(--lv-amber, #d97706);
+}
+
+/* Whether the scheduler is starting checks: a quiet line when it is, a call to act when not. */
+.dash-scheduler {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 6px 12px;
+  border-radius: var(--radius, 8px);
+  color: var(--text-2, inherit);
+  font-size: 12.5px;
+}
+.dash-scheduler .spacer {
+  flex: 1;
+}
+.dash-scheduler.stopped,
+.dash-scheduler.stale {
+  background: color-mix(in srgb, var(--lv-amber, #d97706) 12%, transparent);
+  color: var(--text, inherit);
 }

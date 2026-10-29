@@ -59,6 +59,8 @@ export interface AtlassianSettingsView {
   baseUrl: string
   caFile: string
   rejectUnauthorized: boolean
+  /** Read access only: the tools that change things on this site are left out (`atlassian/readOnly.ts`). */
+  readOnly?: boolean
   defaults: Record<string, string>
 }
 
@@ -101,6 +103,76 @@ export interface AutosysGatewaySettings {
 export interface AutosysGatewayView extends AutosysGatewaySettings {
   hasClientSecret: boolean
   hasPassphrase: boolean
+  /** A pasted value for the Basic header is stored, so the username and password are not used. */
+  hasBasicValue?: boolean
+}
+
+/** The gateway's secrets, write-only (invariant 7). */
+export type AutosysGatewaySecret = 'clientSecret' | 'passphrase' | 'basicValue'
+
+/**
+ * A skill's place in the team pool. `indexed`, `stale` (sent, changed since), `missing` (never
+ * sent); `private` - kept to yourself and not in the pool; `withdraw` - kept to yourself but an
+ * earlier copy is still there, taken back by the next Send.
+ */
+export type TeamSkillState = 'indexed' | 'stale' | 'missing' | 'private' | 'withdraw'
+
+/** The team repository's settings as the panel edits them. */
+export interface TeamRepoSettings {
+  enabled: boolean
+  project: string
+  repo: string
+  branch: string
+  folder: string
+  syncMinutes: number
+}
+
+/** How the last team-repository sync went. */
+export interface TeamRepoStatus {
+  at: number
+  branch?: string
+  branchCreated?: string
+  pushed: string[]
+  pulled: string[]
+  removed: string[]
+  conflicts: { path: string; reason: string }[]
+  /** Newer in the repository, unchanged here - waiting on the bucket or a pull, not a clash. */
+  behind?: string[]
+  deletedHere: string[]
+  error?: string
+}
+
+/**
+ * "Delete everywhere" for one skill or tool: exactly what would be removed, shown before anything is
+ * (invariant 8). The confirmation sends it back; the host re-checks every entry before acting.
+ */
+export interface DeleteEverywherePlan {
+  kind: 'skill' | 'tool'
+  name: string
+  /** Files and folders on this computer. */
+  local: string[]
+  /** Objects in S3 bucket folders, as listed from each bucket. */
+  buckets: { connectionId: string; prefix?: string | undefined; label: string; keys: string[] }[]
+  /** Files in the team repository, replaced by a deletion marker. */
+  repo: string[]
+  repoLabel?: string | undefined
+  /** What will not be removed, and why. */
+  notes: string[]
+  error?: string | undefined
+}
+
+/** The check before S3 bucket folders are switched off in favour of the team repository. */
+export interface TeamRepoRetire {
+  /** Checked and nothing is missing: the switch may be pressed. */
+  ready: boolean
+  /** The bucket folders that would be switched off. */
+  folders: string[]
+  covered: { skills: number; tools: number }
+  /** Why it is not ready, one line each. */
+  problems: string[]
+  checking?: boolean
+  /** Set once they were switched off. */
+  done?: string
 }
 
 export type ProbeTarget = 'codebase' | 'docs' | 'mail' | 'data' | 'teamSkills'
@@ -394,6 +466,8 @@ export interface PythonSettings {
   interpreterPath?: string
   /** Folders of the user's own libraries and their DLLs, for `python_library`. */
   libraryFolders?: string[]
+  /** Functions and modules no tool may use (`python.bannedCalls`). */
+  bannedCalls?: string[]
   dynamicTools: 'off' | 'on'
   uvPath?: string
   toolsDir?: string
@@ -628,6 +702,12 @@ export type UiToHostMessage =
   /** The composer's "Add files to context": ask the editor for a multi-select file list. */
   | { type: 'pickContextFiles' }
   /**
+   * Save a file the panel made (a diagram as SVG or PNG) where the user chooses, through the host's
+   * own Save dialog. A webview and Fire Code's window ignore a browser download link, so the Save
+   * buttons did nothing there. `base64` is the bytes; answered with `fileSaved`.
+   */
+  | { type: 'saveFile'; requestId: string; name: string; base64: string }
+  /**
    * A dropped or attached file the panel cannot read itself (too big, or not text: PDF, Office,
    * an Outlook message). `data` is base64. Answered with `attachmentStaged` carrying the same id.
    */
@@ -804,7 +884,28 @@ export type UiToHostMessage =
    * and repeat when they have something worth sending — not something that happens because a
    * tool list changed.
    */
-  | { type: 'publishTeamSkills' }
+  | {
+      type: 'publishTeamSkills'
+      /**
+       * The skills to keep to yourself, as ticked when the button was pressed. Saved first, then
+       * everything else is sent and any earlier copy of these is taken back. Absent: the saved choice.
+       */
+      keepPrivate?: string[]
+    }
+  /** The team repository for skills and tools: its settings, or a sync now. */
+  | { type: 'requestTeamRepo' }
+  | { type: 'saveTeamRepo'; settings: TeamRepoSettings }
+  | { type: 'syncTeamRepo' }
+  /** Check that the repository holds everything the S3 bucket folders do, and on `confirm` switch them off. */
+  | { type: 'retireS3Buckets'; confirm: boolean }
+  /** List what "Delete everywhere" would remove for a skill or tool; changes nothing. */
+  | { type: 'previewDeleteEverywhere'; kind: 'skill' | 'tool'; name: string }
+  /** Remove exactly what the plan listed - re-checked by the host. A person presses this; no tool sends it. */
+  | { type: 'deleteEverywhere'; plan: DeleteEverywherePlan }
+  /** Which skills stay out of the team pool, saved as ticked (no sending). */
+  | { type: 'saveTeamSkillSelection'; keepPrivate: string[] }
+  /** One skill's placeholder defaults, replacing what was stored for it; empty removes them. */
+  | { type: 'saveSkillDefaults'; skill: string; values: Record<string, string> }
   /**
    * Removes everything this machine published to the shared skills pool.
    *
@@ -942,12 +1043,12 @@ export type UiToHostMessage =
       product: AtlassianProductId
       settings: AtlassianSettingsView
       token?: string
-      gateway?: { settings: AutosysGatewaySettings; clientSecret?: string; passphrase?: string }
+      gateway?: { settings: AutosysGatewaySettings; clientSecret?: string; passphrase?: string; basicValue?: string }
     }
   | { type: 'clearAtlassianToken'; product: AtlassianProductId }
   /** Blank secrets mean "keep the stored one" (invariant 7); removing is its own message. */
-  | { type: 'saveAutosysGateway'; gateway: AutosysGatewaySettings; clientSecret?: string; passphrase?: string }
-  | { type: 'clearAutosysGatewaySecret'; which: 'clientSecret' | 'passphrase' }
+  | { type: 'saveAutosysGateway'; gateway: AutosysGatewaySettings; clientSecret?: string; passphrase?: string; basicValue?: string }
+  | { type: 'clearAutosysGatewaySecret'; which: AutosysGatewaySecret }
   | { type: 'testAtlassian'; product: AtlassianProductId }
   /**
    * Creates the standing-instructions skill and opens it, or just opens it if it exists.
@@ -1126,6 +1227,8 @@ export type UiToHostMessage =
   /** Replaces the whole skills folder configuration. Empty `dir` restores the default. */
   | { type: 'saveSkillDirs'; dir: string; paths: string[] }
   | { type: 'requestPython' }
+  /** Pull the team's bucket tool folders and the team repository now, so new tools are offered for approval. */
+  | { type: 'checkTeamTools' }
   | {
       type: 'setPython'
       dynamicTools: 'off' | 'on'
@@ -1149,6 +1252,8 @@ export type UiToHostMessage =
       interpreterPath?: string
       /** Folders of the user's own libraries and DLLs. Empty clears them. */
       libraryFolders?: string[]
+      /** Functions and modules no tool may use. Empty clears the list. */
+      bannedCalls?: string[]
       timeoutSeconds?: number
       indexUrl?: string
       offline?: boolean
@@ -1517,6 +1622,12 @@ export type HostToUiMessage =
       exportsSource?: boolean
       /** The host is an editor with a file list to pick from; the composer offers "Add files". */
       picksFiles?: boolean
+      /** The host has a Save dialog of its own, so the panel saves files through it (`saveFile`). */
+      savesFiles?: boolean
+      /** The git branch checked out in this workspace, shown under the chat's name. */
+      workspaceBranch?: string
+      /** Set when this workspace is a branch folder (a git worktree) of that repository. */
+      branchFolderOf?: string
       /** GitHub Copilot is reachable through VS Code here, so the Copilot preset is offered. */
       hostModels?: boolean
       /** True where the host has no theme of its own, so the user picks one. */
@@ -1670,6 +1781,15 @@ export type HostToUiMessage =
   | { type: 'pythonEnvProbe'; interpreter?: string; venvDir?: string; detail: string }
   /** Nothing is sent when the dialog is cancelled — a dismissed picker changes no field. */
   | { type: 'pathPicked'; purpose: string; path: string }
+  /**
+   * The team repository: its settings, whether it can be used (it needs the Bitbucket connection and its
+   * token), why not, and how the last sync went. `saveError` is a refused save, shown on the panel.
+   */
+  | { type: 'deleteEverywherePlan'; plan: DeleteEverywherePlan }
+  | { type: 'deleteEverywhereDone'; kind: 'skill' | 'tool'; name: string; ok: boolean; message: string }
+  | { type: 'teamRepo'; settings: TeamRepoSettings; available: boolean; reason?: string; status?: TeamRepoStatus; syncing?: boolean; saveError?: string; bucketFolders?: string[]; retire?: TeamRepoRetire; savedIn?: { skills?: string | undefined; tools?: string | undefined } }
+  /** How a `saveFile` went: `path` when written, `error` when not, neither when the dialog was cancelled. */
+  | { type: 'fileSaved'; requestId: string; path?: string; error?: string }
   | { type: 'mcpSaveError'; message: string }
   /** `awaitingAnswer`: the turn ended with a question to the user (Fire Code marks the codebase as waiting). */
   | { type: 'done'; awaitingAnswer?: boolean }
@@ -1724,6 +1844,11 @@ export type HostToUiMessage =
    * editor's "Add to Light Code chat" menu. Workspace-relative where possible.
    */
   | { type: 'addContextFiles'; paths: string[] }
+  /**
+   * Text put in the message box for the user to send - Fire Code's "Start a chat" from a monitoring alert,
+   * which opens a chat named after the alert with what is known about it. Never sent by itself.
+   */
+  | { type: 'prefillComposer'; text: string }
   /** The host's reading of a staged file: its text for the message, and where it was saved. */
   | { type: 'attachmentStaged'; id: string; name: string; path?: string; text?: string; error?: string }
   /** Whether the active model accepts images, from the capability table (§9). */
@@ -1782,6 +1907,8 @@ export type HostToUiMessage =
       saveError?: string
       saved?: boolean
     }
+  /** The answer to `checkTeamTools`: what came down, in words. */
+  | { type: 'teamToolsChecked'; ok: boolean; message: string }
   | {
       type: 'python'
       /** Resolved reality: which interpreter is in use, which tools loaded, what was refused. */
@@ -1890,9 +2017,17 @@ export type HostToUiMessage =
          * with `reason` saying so rather than the button silently doing nothing.
          */
         bucket?: { label: string; canDelete: boolean; reason?: string }
+        /** Placeholders found in its text (`{{name}}`, `<NAME>`), offered for defaults. */
+        placeholders?: string[]
+        /** Kept in the user's personal folder: "only me", never shared. */
+        personal?: boolean
       }[]
       /** Files that could not be offered, and why. Shown, not just logged. */
       issues: { filePath: string; detail: string }[]
+      /** Skills this user keeps out of the team pool, by name (`teamSkills.keepPrivate`). */
+      keepPrivate?: string[]
+      /** This user's answers to skills' placeholders, by skill then placeholder (`skillDefaults`). */
+      skillDefaults?: Record<string, Record<string, string>>
       /** Where skills are written. Undefined when no folder is open, so the tab can say why. */
       skillsDir?: string
       /** Additional read-only folders, in precedence order after `skillsDir`. */
@@ -1986,6 +2121,8 @@ export type HostToUiMessage =
       collection?: string
       /** How many were removed, when this reports a clear rather than a publish. */
       cleared?: number
+      /** On a publish: how many earlier copies of skills now kept private were taken back. */
+      withdrawn?: number
       error?: string
     }
   /**
@@ -1995,14 +2132,18 @@ export type HostToUiMessage =
   /** Never carries the token — only whether one is stored (invariant 7). */
   | { type: 'atlassian'; products: Record<AtlassianProductId, AtlassianProductStatus> }
   | { type: 'atlassianSaved'; product: AtlassianProductId }
-  | { type: 'atlassianTest'; product: AtlassianProductId; ok: boolean; detail: string }
+  /**
+   * Test connection's answer. `diagnostics` is every request it made and what came back - address,
+   * status, headers, the start of the body - with credentials masked (`platform/httpTrace.ts`).
+   */
+  | { type: 'atlassianTest'; product: AtlassianProductId; ok: boolean; detail: string; diagnostics?: string }
   | {
       type: 'teamSkillsIndexStatus'
       /**
        * `indexed` — the team copy matches the file now. `stale` — sent, but the file has changed
        * since, so colleagues are reading an older version. `missing` — never sent.
        */
-      entries?: { name: string; state: 'indexed' | 'stale' | 'missing' }[]
+      entries?: { name: string; state: TeamSkillState }[]
       error?: string
     }
   | {

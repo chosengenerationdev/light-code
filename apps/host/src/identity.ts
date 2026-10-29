@@ -80,6 +80,11 @@ export class SingleUserIdentity implements IdentityProvider {
       principal === undefined ? 'single user (local)' : `single user — ${principal.id}`
   }
 
+  /** The one person this server is for: whose session Fire Code's monitoring executor opens at start. */
+  get localPrincipal(): Principal {
+    return this.principal
+  }
+
   get launchToken(): string {
     if (this.handoffToken === undefined) throw new Error('handoff token already consumed')
     return this.handoffToken

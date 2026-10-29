@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from 'react'
+import { useContext, useMemo, useState, type ReactElement } from 'react'
 import { displayMaxWidth,
   diagramDataUri,
   diagramSvg,
@@ -7,6 +7,7 @@ import { displayMaxWidth,
   type DiagramSpec,
 } from '@light-code/core/browser'
 import { colors, secondaryButtonStyle } from '../theme.js'
+import { SaveFileContext, type SaveOutcome } from './saveFile.js'
 
 /**
  * A diagram in the transcript.
@@ -30,6 +31,27 @@ import { colors, secondaryButtonStyle } from '../theme.js'
 export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
   const [copied, setCopied] = useState(false)
   const [saveError, setSaveError] = useState<string | undefined>(undefined)
+  const [saved, setSaved] = useState<string | undefined>(undefined)
+  const [saving, setSaving] = useState<'svg' | 'png' | undefined>(undefined)
+  const saveFile = useContext(SaveFileContext)
+  /** One path for both buttons: says it is working, then where the file went, or why not. */
+  const save = (kind: 'svg' | 'png', make: () => Promise<Blob>): void => {
+    setSaving(kind)
+    setSaveError(undefined)
+    setSaved(undefined)
+    const name = `${fileNameFor(props.diagram.title)}.${kind}`
+    void make()
+      .then((blob) => saveFile(name, blob))
+      .then(
+        (outcome: SaveOutcome) => {
+          if (outcome.error !== undefined) setSaveError(outcome.error)
+          else if (outcome.path !== undefined) setSaved(`Saved to ${outcome.path}`)
+          else if (outcome.downloaded === true) setSaved(`Downloaded ${name}`)
+        },
+        () => setSaveError(kind === 'png' ? 'Could not make a PNG here — use Save SVG, or copy it.' : 'Could not save it here — use Copy SVG.'),
+      )
+      .finally(() => setSaving(undefined))
+  }
 
   // One vocabulary with charts: see `display/size.ts`.
   const requested = displayMaxWidth(props.diagram.size)
@@ -110,49 +132,29 @@ export function Diagram(props: { diagram: DiagramSpec }): ReactElement {
           type="button"
           style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
           title="Save as SVG — vector, so it stays sharp at any size"
-          onClick={() => {
-            download(`${fileNameFor(props.diagram.title)}.svg`, new Blob([svg], { type: 'image/svg+xml' }))
-          }}
+          disabled={saving !== undefined}
+          onClick={() => save('svg', async () => new Blob([svg], { type: 'image/svg+xml' }))}
         >
-          Save SVG
+          {saving === 'svg' ? 'Saving…' : 'Save SVG'}
         </button>
         <button
           type="button"
           style={{ ...secondaryButtonStyle(), fontSize: 10, padding: '1px 6px' }}
           title="Save as PNG, at twice the drawn size, for somewhere that cannot take an SVG"
-          onClick={() => {
-            void toPng(uri, width, height).then(
-              (blob) => download(`${fileNameFor(props.diagram.title)}.png`, blob),
-              () => setSaveError('Could not make a PNG here — use Save SVG, or copy it.'),
-            )
-          }}
+          disabled={saving !== undefined}
+          onClick={() => save('png', () => toPng(uri, width, height))}
         >
-          Save PNG
+          {saving === 'png' ? 'Saving…' : 'Save PNG'}
         </button>
       </div>
       {saveError !== undefined && (
-        <div style={{ color: colors.muted, fontSize: 11, marginTop: 4 }}>{saveError}</div>
+        <div role="alert" style={{ color: colors.error, fontSize: 11, marginTop: 4 }}>{saveError}</div>
+      )}
+      {saved !== undefined && (
+        <div style={{ color: colors.muted, fontSize: 11, marginTop: 4, overflowWrap: 'anywhere' }}>{saved}</div>
       )}
     </div>
   )
-}
-
-/**
- * Hands a file to the browser.
- *
- * An object URL rather than a `data:` one: a large PNG as a data URI is a megabytes-long string in
- * an attribute, and some hosts cap how long an href may be. Revoked on the next frame, because
- * revoking immediately can beat the download starting.
- */
-function download(name: string, blob: Blob): void {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = name
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 /** A filename from the title, or a plain one. Nothing a title contains may steer a path. */

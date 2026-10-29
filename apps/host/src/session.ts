@@ -1,5 +1,5 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
-import type { CredentialSummary, JupyterHubSpec } from '@light-code/core'
+import type { CredentialSummary, JupyterHubSpec, MonitorExecutorChannel, MonitoringChannel } from '@light-code/core'
 import { CredentialPointerStore, createRelayDebugReader, createRelayLanguageModels, replaceFile, runFastFs } from '@light-code/core'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -349,6 +349,11 @@ export interface SessionOptions {
    * stdout prefixed `light-code-notify:`. Light Code Fire Code shows them as Windows notifications.
    */
   desktopNotify?: boolean
+  /** Fire Code's monitoring: the engine an agent asks, and - for the background executor - its fetches. */
+  monitoring?: MonitoringChannel
+  monitorExecutor?: MonitorExecutorChannel
+  /** More Python tool folders, read only: the executor reads every codebase's. */
+  extraToolDirs?: string[]
   /** Fire Code: read any drive or share, write anywhere with approval each time. */
   reachAnywhere?: boolean
   /** Other chats share this codebase (Fire Code's chat tabs): Rollback undoes only this chat's files. */
@@ -529,6 +534,10 @@ export async function createSession(
      */
     ...(options.shared !== true ? { readDebugSession: createRelayDebugReader() } : {}),
     ...(options.sharedWorkspace === true ? { sharedWorkspace: true } : {}),
+    // Fire Code's monitoring - one person's own machine only, like the rest of what Fire Code passes.
+    ...(options.monitoring !== undefined && options.shared !== true ? { monitoring: options.monitoring } : {}),
+    ...(options.monitorExecutor !== undefined && options.shared !== true ? { monitorExecutor: options.monitorExecutor } : {}),
+    ...(options.extraToolDirs !== undefined && options.extraToolDirs.length > 0 ? { extraToolDirs: options.extraToolDirs } : {}),
     ...(options.noSchedules === true ? { runsSchedules: false } : {}),
     ...(options.siblings !== undefined && options.siblings.length > 0 ? { siblings: options.siblings } : {}),
     ...(options.changeLedger !== undefined ? { changeLedger: options.changeLedger } : {}),

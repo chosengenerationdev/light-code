@@ -7,6 +7,7 @@ import type { Transport } from '../platform/transport.js'
 import type { DebugSessionSnapshot } from '../tools/debugSession.js'
 import type { JupyterHubSpec } from '../jupyter/spec.js'
 import type { CredentialSummary } from '../secrets/credentials.js'
+import type { MonitorExecutorChannel, MonitoringChannel } from '../monitoring/channel.js'
 
 /**
  * Everything the chat bridge needs from its host.
@@ -89,6 +90,12 @@ export interface HostUi {
    */
   openFile?(filePath: string): Promise<void>
   /**
+   * Runs a command where the user can watch it - VS Code's integrated terminal. Used once, for a new branch
+   * folder's setup command (`branches.setupCommand`). Absent elsewhere: the command then runs in the
+   * background and its result is reported.
+   */
+  runInTerminal?(options: { name: string; command: string; cwd: string; env: Record<string, string> }): void
+  /**
    * True where the host has no editor of its own (Fire Code, the browser host): skills and tools are
    * then edited in the panel's own editor instead of `openFile`, which there can only show the text.
    */
@@ -100,6 +107,8 @@ export interface HostUi {
    * there is no editor (the browser, Fire Code), and the button is then not shown.
    */
   pickContextFiles?(): Promise<string[] | undefined>
+  /** True where `showSaveDialog` really opens one (VS Code). The browser host's resolves undefined. */
+  savesFiles?: boolean
   showSaveDialog(options: {
     defaultName: string
     extensions?: string[] | undefined
@@ -232,6 +241,11 @@ export interface HostServices {
    */
   machineApprovalsFile?: string
   /**
+   * The user's own skills and Python tools (`skills/`, `tools/` inside), kept to themself and used in every
+   * project - the "Only me" choice. Absent on a shared server, where every user would be the same account.
+   */
+  personalDir?: string
+  /**
    * Shared by every chat on this codebase (Fire Code): which chat changed which file, so a rollback
    * can ask before undoing another chat's work. `chat` is how the user knows this one.
    */
@@ -254,6 +268,15 @@ export interface HostServices {
    */
   languageModels?: HostLanguageModels
   desktopNotify?: (notification: { message: string; level: 'info' | 'warning'; reportPath?: string }) => void
+  /**
+   * Fire Code's monitoring engine, while monitoring is on (`--monitoring`): the agent gets the monitor
+   * tools. Absent everywhere else - there is no dashboard to show anything on. See `monitoring/channel.ts`.
+   */
+  monitoring?: MonitoringChannel
+  /** This host is monitoring's background executor (`--monitor-executor`): it runs the tools monitors name. */
+  monitorExecutor?: MonitorExecutorChannel
+  /** More Python tool folders, read only (`--extra-tool-folder`): the executor reads every codebase's. */
+  extraToolDirs?: string[]
   secrets: SecretStore
   configStore: ConfigStore
   ui: HostUi

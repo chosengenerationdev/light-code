@@ -1,4 +1,4 @@
-import type { AutosysGatewaySettings, AutosysGatewayView } from '@light-code/core/browser'
+import type { AutosysGatewaySecret, AutosysGatewaySettings, AutosysGatewayView } from '@light-code/core/browser'
 import type { ReactElement } from 'react'
 
 import { colors, labelStyle, secondaryButtonStyle, textFieldStyle } from '../theme.js'
@@ -16,9 +16,10 @@ import { SecretInput } from './CredentialPicker.js'
 const hintStyle = { display: 'block', color: colors.muted, fontSize: 11, margin: '4px 0 10px' } as const
 
 export function gatewayDraftFrom(view: AutosysGatewayView): AutosysGatewaySettings {
-  const { hasClientSecret: _secret, hasPassphrase: _passphrase, ...settings } = view
+  const { hasClientSecret: _secret, hasPassphrase: _passphrase, hasBasicValue: _basic, ...settings } = view
   void _secret
   void _passphrase
+  void _basic
   return settings
 }
 
@@ -37,7 +38,11 @@ export function AutosysGatewaySection(props: {
   onPassphrase: (value: string) => void
   hasClientSecret: boolean
   hasPassphrase: boolean
-  onClearSecret: (which: 'clientSecret' | 'passphrase') => void
+  /** The pasted header value: optional so older callers and tests need not pass it. */
+  basicValue?: string
+  onBasicValue?: (value: string) => void
+  hasBasicValue?: boolean
+  onClearSecret: (which: AutosysGatewaySecret) => void
 }): ReactElement {
   const draft = props.draft
   const set = (change: Partial<AutosysGatewaySettings>): void => {
@@ -129,16 +134,35 @@ export function AutosysGatewaySection(props: {
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 4px', cursor: 'pointer' }}>
         <input type="checkbox" checked={draft.sendBasic} onChange={(event) => set({ sendBasic: event.target.checked })} />
-        <span>Also send the AutoSys username and password with each job call (HTTP Basic)</span>
+        <span>Also send an AutoSys sign-in header with each job call (HTTP Basic)</span>
       </label>
       <span style={hintStyle}>
         For an AutoSys that wants its own sign-in as well as the gateway&apos;s token, for job status, details and
-        actions. Uses the username and password entered above, on AutoSys calls only - never on the token
-        request. The token and the sign-in go in different headers, because one header cannot hold both.
+        actions - on AutoSys calls only, never on the token request. Either paste the whole header value below,
+        or leave it empty and the username and password entered above are sent as Basic. The token and the
+        sign-in go in different headers, because one header cannot hold both.
       </span>
       {draft.sendBasic && (
         <>
-          {field('basicHeaderName', 'Header for the username and password', 'Authorization')}
+          {field('basicHeaderName', 'Header name for the sign-in', 'Authorization', 'Exactly as your gateway team gave it, e.g. x-api-authorization-header-for-service-provider.')}
+          {props.onBasicValue !== undefined && (
+            <>
+              <label htmlFor="lc-autosys-gw-basic-value" style={labelStyle()}>
+                Header value <span style={{ color: colors.muted, fontWeight: 400 }}>(optional)</span>
+              </label>
+              <SecretInput
+                id="lc-autosys-gw-basic-value"
+                value={props.basicValue ?? ''}
+                placeholder={props.hasBasicValue === true ? 'Stored — leave blank to keep it' : 'Basic dXNlcm5hbWU6cGFzc3dvcmQ='}
+                onChange={props.onBasicValue}
+              />
+              <span style={hintStyle}>
+                Sent exactly as typed, so include the prefix: <code>Basic </code> followed by the base64 of
+                username:password (Python: <code>&quot;Basic &quot; + base64.b64encode(b&quot;user:pass&quot;).decode()</code>).
+                When stored, the username and password above are not needed. Kept in secure storage.
+              </span>
+            </>
+          )}
           {/* Said before saving, where it can still be fixed, rather than as a refusal afterwards. */}
           {(draft.basicHeaderName.trim() || 'Authorization').toLowerCase() === (draft.tokenHeaderName.trim() || 'Authorization').toLowerCase() && (
             <span role="alert" style={{ display: 'block', color: colors.error, fontSize: 11, margin: '-4px 0 10px' }}>
@@ -216,7 +240,7 @@ export function AutosysGatewaySection(props: {
         />
       </details>
 
-      {(props.hasClientSecret || props.hasPassphrase) && (
+      {(props.hasClientSecret || props.hasPassphrase || props.hasBasicValue === true) && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {props.hasClientSecret && (
             <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('clientSecret')}>
@@ -226,6 +250,11 @@ export function AutosysGatewaySection(props: {
           {props.hasPassphrase && (
             <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('passphrase')}>
               Remove passphrase
+            </button>
+          )}
+          {props.hasBasicValue === true && (
+            <button type="button" style={secondaryButtonStyle()} onClick={() => props.onClearSecret('basicValue')}>
+              Remove sign-in header value
             </button>
           )}
         </div>

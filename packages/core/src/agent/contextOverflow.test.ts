@@ -89,6 +89,6 @@ describe('when the provider says the conversation is too long', () => {
       onError: (message) => errors.push(message),
     })
     expect(errors.length).toBe(1)
-    expect(errors[0]).toMatch(/could not be shortened enough.*new chat/s)
+    expect(errors[0]).toMatch(/could not be shortened enough.*New chat with a handoff/s)
   })
 })

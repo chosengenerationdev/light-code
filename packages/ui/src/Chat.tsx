@@ -81,6 +81,7 @@ export interface ChatProps {
   stageFile?: StageFile | undefined
   onPickFiles?: (() => void) | undefined
   addedFiles?: { paths: string[]; nonce: number } | undefined
+  prefill?: { text: string; nonce: number } | undefined
   expertSpend: {
     usd: number
     consultations: number
@@ -384,6 +385,7 @@ export function Chat(props: ChatProps): ReactElement {
         stageFile={props.stageFile}
         onPickFiles={props.onPickFiles}
         addedFiles={props.addedFiles}
+        prefill={props.prefill}
       />
     </div>
   )
