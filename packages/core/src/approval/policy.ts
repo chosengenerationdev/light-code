@@ -146,6 +146,8 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
    * prompt would look right afterwards, because both would be reading the new plan.
    */
   'update_plan',
+  // The contracts a strategy's hand-overs are checked against: the user sees and approves every change.
+  'set_strategy_contracts',
   /*
    * A role's prompt is prose injected into a model that then advises on this repository's code —
    * the reason `agents` is user-scope only. Softening a reviewer does not error; it approves

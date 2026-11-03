@@ -42,6 +42,8 @@ import { ALWAYS_AVAILABLE_TO_SCHEDULES, type Schedule } from './types.js'
  * wrapping it, so the policy gate — and that list — never runs.
  */
 export const NEVER_AVAILABLE_TO_SCHEDULES: readonly string[] = [
+  // A run rewriting the contracts it is checked against would be bound by nothing (the plan's reasoning).
+  'set_strategy_contracts',
   // Mass copies and moves need a person reading the plan; an unattended run has none.
   'transfer_files',
   'archive_files',

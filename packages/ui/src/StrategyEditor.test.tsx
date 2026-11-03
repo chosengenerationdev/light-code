@@ -126,5 +126,28 @@ describe('the Strategy window', () => {
     expect(saved.strategy.edges).toHaveLength(1)
     expect(saved.strategy.edges[0]!.twoWay).toBe(true)
   })
+
+  it('saves the required items of a connector, without the blank lines typed between them', () => {
+    const { posted, deliver } = setup()
+    deliver({ type: 'strategies', library: [], progress: {}, problems: [], roles, processes: [] })
+    const button = (text: string): HTMLButtonElement => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith(text)) as HTMLButtonElement
+    act(() => button('Programmer').click())
+    act(() => button('Tester').click())
+    const boxes = [...container.querySelectorAll('svg rect[width="168"]')]
+    const press = (element: Element): void => act(() => void element.dispatchEvent(new Event('pointerdown', { bubbles: true })))
+    press(boxes[0]!)
+    act(() => button('Connect to').click())
+    press(boxes[1]!)
+    const items = container.querySelector('#strategy-edge-requires') as HTMLTextAreaElement
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    act(() => {
+      setter.call(items, 'Changed files\n\n Tests run ')
+      items.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(container.textContent).toContain('contract (2 checked)')
+    act(() => button('Save and use').click())
+    const saved = posted.find((m) => m['type'] === 'saveStrategy') as { strategy: { edges: { requires?: string[] }[] } }
+    expect(saved.strategy.edges[0]!.requires).toEqual(['Changed files', 'Tests run'])
+  })
 })
 

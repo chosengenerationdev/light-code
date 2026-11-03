@@ -68,6 +68,12 @@ export const strategyEdgeSchema = z.object({
    * two specialists is written down rather than left to each model's guess.
    */
   contract: z.string().max(1000).optional(),
+  /**
+   * What the contract requires, item by item ("Changed files", "Tests run") - checked, not hoped for. The sender is
+   * told to give each on a line of its own, "Item: ...", and after it answers Light Code checks every item is there
+   * and asks the same specialist for the missing ones (twice at most) before anything moves on. See `contractCheck`.
+   */
+  requires: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
 })
 
 export const strategySchema = z.object({
@@ -165,7 +171,7 @@ export function describeStrategy(strategy: Strategy, roleName: (role: string) =>
   for (const node of order) {
     const next = strategy.edges
       .filter((edge) => edge.from === node.id && edge.twoWay !== true)
-      .map((edge) => `${label(edge.to)}${edge.contract !== undefined && edge.contract.trim().length > 0 ? ` (passing on: ${firstLine(edge.contract)})` : ''}`)
+      .map((edge) => `${label(edge.to)}${edge.contract !== undefined && edge.contract.trim().length > 0 ? ` (passing on: ${firstLine(edge.contract)})` : ''}${requiredOf(edge).length > 0 ? ` [required: ${requiredOf(edge).join(', ')}]` : ''}`)
     lines.push(
       `${String(number.get(node.id))}. ${roleName(node.role)}${node.readOnly === true ? ' - read-only: may not change anything' : ''}${node.instructions !== undefined && node.instructions.trim().length > 0 ? ` - the user's instructions for it: "${firstLine(node.instructions)}"` : ' - what it does here is yours to plan'}` +
         (next.length > 0 ? `; then ${next.join(' and ')}` : ''),
@@ -180,7 +186,8 @@ export function describeStrategy(strategy: Strategy, roleName: (role: string) =>
         `- ${label(edge.from)} and ${judge}: after ${label(edge.from)}, ${judge} checks; if not done, back to ${label(edge.from)}. ` +
           (edge.until !== undefined && edge.until.trim().length > 0 ? `Repeat until: "${edge.until.trim()}" (judged by ${judge}), ` : 'Repeat ') +
           `at most ${String(roundsOf(edge))} round${roundsOf(edge) === 1 ? '' : 's'}.${edge.label !== undefined ? ` (${edge.label})` : ''}` +
-          (edge.contract !== undefined && edge.contract.trim().length > 0 ? ` Each round ${label(edge.from)} passes on: ${firstLine(edge.contract)}.` : ''),
+          (edge.contract !== undefined && edge.contract.trim().length > 0 ? ` Each round ${label(edge.from)} passes on: ${firstLine(edge.contract)}.` : '') +
+          (requiredOf(edge).length > 0 ? ` Required in every hand-over: ${requiredOf(edge).join(', ')}.` : ''),
       )
     }
   }
@@ -194,6 +201,7 @@ export function describeStrategy(strategy: Strategy, roleName: (role: string) =>
     'How to follow it:',
     '- Before doing anything else in a task, propose a plan with update_plan that carries out every step above in order, naming the role for each step and writing each back-and-forth as one step with its condition and its maximum rounds. Then follow the plan.',
     "- Give each specialist what it needs from the earlier steps: it does not see this conversation, only what you send it. A step's own instructions from the user reach it with every question; plan the steps that have none.",
+    '- Connectors with no contract: before starting, propose what should pass along them with set_strategy_contracts (the user approves it). Light Code checks every required item after each answer, asks the specialist again for what is missing, and tells you if it is still missing - pass on what arrived, and say what did not.',
     "- In a back-and-forth, Light Code counts the rounds and tells you after each answer where the loop stands; it refuses a round past the maximum. If the maximum is reached without the condition, stop and tell the user what is still open rather than working around it.",
     '- A question from the user that is not part of the strategy is answered normally.',
   )
@@ -253,6 +261,18 @@ export function beforeConsult(strategy: Strategy, progress: StrategyProgress, la
           'Judge it against what you can check, and end your answer with exactly one line: `CONDITION: MET` or `CONDITION: NOT MET - <what is still missing>`.',
       )
     }
+  }
+  // Required items, checked after the answer: told to the sender with the one format the check reads.
+  for (const edge of strategy.edges) {
+    const items = requiredOf(edge)
+    const from = strategy.nodes.find((n) => n.id === edge.from)
+    const to = strategy.nodes.find((n) => n.id === edge.to)
+    if (items.length === 0 || from === undefined || to === undefined || role !== from.role) continue
+    notes.push(
+      `Required in your answer for ${roleName(to.role)}, each on a line of its own starting with its name and a colon:\n` +
+        items.map((item) => `${item}: ...`).join('\n') +
+        '\nLight Code checks these and will ask you again for any that are missing.',
+    )
   }
   // What was agreed along each connector, told to both ends.
   for (const edge of strategy.edges) {
@@ -333,6 +353,8 @@ export interface StrategyExchange {
   loops?: { edgeId: string; rounds: number; verdict?: string; met?: boolean }[]
   /** Refused by the strategy (a round past the maximum), with why. */
   refused?: string
+  /** The contracts this answer had to keep: what was required, what was still missing, and how many times it was asked again. */
+  contracts?: { edgeId: string; to: string; required: string[]; missing: string[]; askedAgain: number }[]
 }
 
 export const MAX_EXCHANGES = 200
@@ -344,4 +366,56 @@ export function exchangeOf(role: string, question: string, answer: string, befor
     .filter(([id, state]) => JSON.stringify(state) !== JSON.stringify(before[id]))
     .map(([edgeId, state]) => ({ edgeId, rounds: state.rounds, ...(state.verdict !== undefined ? { verdict: state.verdict } : {}), ...(state.met !== undefined ? { met: state.met } : {}) }))
   return { at: Date.now(), role, question: cap(question), answer: cap(answer), ...(parallel ? { parallel: true } : {}), ...(loops.length > 0 ? { loops } : {}) }
+}
+
+export function requiredOf(edge: StrategyEdge): string[] {
+  return (edge.requires ?? []).map((item) => item.trim()).filter((item) => item.length > 0)
+}
+
+/**
+ * The required items an answer does not give: an item counts when a line starts with its name (any case, bold or a
+ * heading allowed) followed by a colon or a dash, with something after it - or a heading with its name followed by
+ * text on the next lines. Deterministic and cheap: no model is asked whether a contract was kept.
+ */
+export function missingItems(answer: string, items: readonly string[]): string[] {
+  const lines = answer.split(/\r?\n/)
+  const norm = (text: string): string => text.toLowerCase().replace(/[*_`#>]/g, '').replace(/\s+/g, ' ').trim()
+  const given = (wanted: string): boolean =>
+    lines.some((line, i) => {
+      const clean = norm(line)
+      if (!clean.startsWith(wanted)) return false
+      const after = clean.slice(wanted.length).trim()
+      // "Changed files: a.ts" or "Changed files - a.ts"
+      if (/^[:\-–—]\s*\S/.test(after)) return true
+      // "## Changed files" (or "Changed files:") with its content on the next non-empty line, which is not a heading
+      if (after !== '' && after !== ':') return false
+      const next = lines.slice(i + 1).find((l) => l.trim().length > 0)
+      return next !== undefined && !next.trim().startsWith('#')
+    })
+  return items.filter((item) => !given(norm(item)))
+}
+
+/** The contracts `role` sends along, with what its answer leaves out. Only connectors with required items. */
+export function contractCheck(strategy: Strategy, role: string, answer: string): { edgeId: string; to: string; required: string[]; missing: string[] }[] {
+  const out: { edgeId: string; to: string; required: string[]; missing: string[] }[] = []
+  for (const edge of strategy.edges) {
+    const items = requiredOf(edge)
+    const from = strategy.nodes.find((n) => n.id === edge.from)
+    const to = strategy.nodes.find((n) => n.id === edge.to)
+    if (items.length === 0 || from === undefined || to === undefined || from.role !== role) continue
+    out.push({ edgeId: edge.id, to: to.role, required: items, missing: missingItems(answer, items) })
+  }
+  return out
+}
+
+/** What the specialist is asked when its answer left items out. Carries its answer, for one without memory. */
+export function askForMissing(missing: readonly string[], previous: string): string {
+  return [
+    `Your answer is missing what the strategy requires: ${missing.join(', ')}.`,
+    `Give only these now, each on a line of its own starting with its name and a colon (${missing.map((m) => `"${m}: ..."`).join(', ')}).`,
+    'If one does not apply, say so on its line rather than leaving it out.',
+    '',
+    'Your previous answer, for reference:',
+    previous.length > 6_000 ? `${previous.slice(0, 6_000)}…` : previous,
+  ].join('\n')
 }

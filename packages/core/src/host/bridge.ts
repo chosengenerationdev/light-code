@@ -466,8 +466,9 @@ import { ObserverAgent, type ObserverModelSpec, type ObserverRole, type Observer
 import { auditorPrompt, guardPrompt } from '../observers/prompts.js'
 import { createReadAuditTool } from '../observers/tool.js'
 import { RoleProcess } from '../agents/roleProcess.js'
-import { afterConsult, beforeConsult, describeStrategy, exchangeOf, MAX_EXCHANGES, strategyProblems, strategySchema, type Strategy, type StrategyExchange, type StrategyProgress } from '../strategy/strategy.js'
+import { afterConsult, askForMissing, beforeConsult, contractCheck, describeStrategy, exchangeOf, MAX_EXCHANGES, strategyProblems, strategySchema, type Strategy, type StrategyExchange, type StrategyProgress } from '../strategy/strategy.js'
 import { createStrategyHistoryTool } from '../strategy/historyTool.js'
+import { createSetStrategyContractsTool } from '../strategy/contractsTool.js'
 import { mayDecide, mayEditAdmins, normaliseUserId, parseUserIds, reviewNeeded, teamIndexName, TeamStore, windowsUserId, type AdminList, type TeamKind, type TeamReview } from '../team/admins.js'
 import type { SkillToolContext } from '../skills/tools.js'
 import type { UsageConfig, UsageStoreConfig } from '../config/schema.js'
@@ -4236,7 +4237,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         }) as unknown as Tool<never>,
       )
     }
-    if (activeStrategy !== undefined) combined.register(strategyHistoryTool as unknown as Tool<never>)
+    if (activeStrategy !== undefined) {
+      combined.register(strategyHistoryTool as unknown as Tool<never>)
+      combined.register(strategyContractsTool as unknown as Tool<never>)
+    }
 
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
@@ -5161,6 +5165,17 @@ export function wireChatBridge(services: HostServices): ChatBridge {
 
   /** The strategy this chat follows, saved with the chat like its plan. */
   let activeStrategy: Strategy | undefined
+  /** The main agent proposing contracts for this chat's strategy, approved by the user (`strategy/contractsTool.ts`). */
+  const strategyContractsTool = createSetStrategyContractsTool({
+    current: () => activeStrategy,
+    apply: async (next) => {
+      // This chat's copy only, keeping where its loops stand; the library copy is the user's to save.
+      activeStrategy = next
+      await persistActiveTask()
+      await postStrategies()
+    },
+    roleName: (role) => roleInfo(role, cachedAgentDefinitions).name,
+  })
   /** For the main agent to explain the strategy's progress from the record (`strategy/historyTool.ts`). */
   const strategyHistoryTool = createStrategyHistoryTool({
     current: () => ({ strategy: activeStrategy, progress: strategyProgress, exchanges: strategyExchanges }),
@@ -5170,6 +5185,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   let strategyProgress: StrategyProgress = {}
   /** Who was consulted last, so a return to the worker from the judge is recognised as the next round. */
   let strategyLastRole: string | undefined
+  /** How many times a specialist is asked again for the required items it left out, before the agent is told. */
+  const MAX_CONTRACT_RETRIES = 2
   /** The roles being consulted right now - several at once in a parallel box - for the window's "running" steps. */
   const strategyRunning = new Set<string>()
   /** Every consultation under the strategy in this chat (`StrategyExchange`), saved with it. */
@@ -14706,8 +14723,23 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     strategyLastRole = agent.role
     void postStrategies()
     let answer: { advice: string; label: string }
+    /*
+     * Checked contracts: every required item the answer leaves out is asked for again, of the same specialist, twice
+     * at most, before anything moves on - asked for after "will there be any data contract between agents". A plain
+     * text check, so no model is asked whether a contract was kept.
+     */
+    const askedAgain = new Map<string, number>()
+    let checks: ReturnType<typeof contractCheck>
     try {
       answer = await consultAgentNow(agent, { ...request, question }, planned.readOnly)
+      checks = contractCheck(strategy, agent.role, answer.advice)
+      for (let attempt = 0; attempt < MAX_CONTRACT_RETRIES && checks.some((check) => check.missing.length > 0); attempt += 1) {
+        const missing = [...new Set(checks.flatMap((check) => check.missing))]
+        for (const check of checks) if (check.missing.length > 0) askedAgain.set(check.edgeId, (askedAgain.get(check.edgeId) ?? 0) + 1)
+        const more = await consultAgentNow(agent, { ...request, question: askForMissing(missing, answer.advice) }, planned.readOnly)
+        answer = { ...answer, advice: `${answer.advice}\n\n${more.advice}` }
+        checks = contractCheck(strategy, agent.role, answer.advice)
+      }
     } finally {
       strategyRunning.delete(agent.role)
     }
@@ -14716,11 +14748,21 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     strategyProgress = recorded.progress
     // What the main agent asked, not the strategy's notes to the specialist: those are the specialist's instructions,
     // and through `strategy_history` they would reach the main agent's context.
-    recordExchange(exchangeOf(agent.role, request.question, answer.advice, before, recorded.progress, request.parallel === true))
+    const exchange = exchangeOf(agent.role, request.question, answer.advice, before, recorded.progress, request.parallel === true)
+    recordExchange(checks.length > 0 ? { ...exchange, contracts: checks.map((check) => ({ ...check, askedAgain: askedAgain.get(check.edgeId) ?? 0 })) } : exchange)
     strategyLastRole = agent.role
     persistSoon()
     void postStrategies()
-    return recorded.note !== undefined ? { ...answer, advice: `${answer.advice}\n\n${recorded.note}` } : answer
+    // The main agent is told only when a hand-over is incomplete or took asking again - a kept contract needs no words.
+    const contractNotes = checks
+      .filter((check) => check.missing.length > 0 || (askedAgain.get(check.edgeId) ?? 0) > 0)
+      .map((check) =>
+        check.missing.length > 0
+          ? `[Strategy] The hand-over to ${name(check.to)} is incomplete even after asking again: missing ${check.missing.join(', ')}. Pass on what arrived and say plainly what is missing.`
+          : `[Strategy] The hand-over to ${name(check.to)} is complete (${check.required.join(', ')}), after asking ${name(agent.role)} again for what it had left out.`,
+      )
+    const notes = [...contractNotes, ...(recorded.note !== undefined ? [recorded.note] : [])]
+    return notes.length > 0 ? { ...answer, advice: `${answer.advice}\n\n${notes.join('\n')}` } : answer
   }
 
   function recordExchange(exchange: StrategyExchange): void {

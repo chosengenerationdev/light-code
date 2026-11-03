@@ -281,7 +281,16 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
 
   const save = (use: boolean): void => {
     setResult(undefined)
-    transport.post({ type: 'saveStrategy', strategy: draft, use } satisfies UiToHostMessage)
+    const clean: Strategy = {
+      ...draft,
+      edges: draft.edges.map((edge) => {
+        const items = (edge.requires ?? []).map((item) => item.trim()).filter((item) => item.length > 0)
+        const { requires: _r, ...rest } = edge
+        void _r
+        return items.length > 0 ? { ...rest, requires: items } : rest
+      }),
+    }
+    transport.post({ type: 'saveStrategy', strategy: clean, use } satisfies UiToHostMessage)
     setSaved(JSON.stringify(draft))
   }
 
@@ -476,7 +485,11 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                 const caption = loop
                   ? `⇄ ${edge.until !== undefined && edge.until.trim().length > 0 ? `until ${edge.until.trim().slice(0, 40)}${edge.until.trim().length > 40 ? '…' : ''}, ` : ''}max ${String(edge.maxRounds ?? DEFAULT_LOOP_ROUNDS)}${state !== undefined ? ` · round ${String(state.rounds)}${state.met === true ? ' · met' : ''}` : ''}`
                   : (edge.label ?? '')
-                const withContract = edge.contract !== undefined && edge.contract.trim().length > 0 ? `${caption}${caption.length > 0 ? ' · ' : ''}contract` : caption
+                const checked = (edge.requires ?? []).filter((item) => item.trim().length > 0).length
+                const withContract =
+                  (edge.contract !== undefined && edge.contract.trim().length > 0) || checked > 0
+                    ? `${caption}${caption.length > 0 ? ' · ' : ''}contract${checked > 0 ? ` (${String(checked)} checked)` : ''}`
+                    : caption
                 return (
                   <g
                     key={edge.id}
@@ -760,6 +773,24 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                 <span style={{ display: 'block', fontSize: 11, color: colors.muted, marginTop: 4 }}>
                   The first is told its answer must contain this; the second, that it will be given it - and to say what is missing.
                 </span>
+                <label style={{ ...labelStyle(), marginTop: 10 }} htmlFor="strategy-edge-requires">
+                  Required items, one per line (checked)
+                </label>
+                <textarea
+                  id="strategy-edge-requires"
+                  value={(selectedEdge.requires ?? []).join('\n')}
+                  rows={4}
+                  placeholder={'Changed files\nTests run\nResult'}
+                  onChange={(event) => {
+                    const items = event.target.value.split('\n').map((line) => line.slice(0, 80))
+                    // Kept as typed while editing (blank lines too); empty ones are dropped when it is saved.
+                    updateEdge(selectedEdge.id, items.some((item) => item.trim().length > 0) ? { requires: items.slice(0, 10) } : { requires: undefined })
+                  }}
+                  style={{ ...textFieldStyle(), width: '100%', boxSizing: 'border-box', fontFamily: monospaceFamily }}
+                />
+                <span style={{ display: 'block', fontSize: 11, color: colors.muted, marginTop: 4 }}>
+                  After each answer Light Code checks every item is there, and asks the same specialist again for any it left out (twice at most) before it goes on.
+                </span>
                 <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
                   <button type="button" style={secondaryButtonStyle()} onClick={() => updateEdge(selectedEdge.id, { from: selectedEdge.to, to: selectedEdge.from })} title="Swap which side works and which checks">
                     Reverse
@@ -771,11 +802,11 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
               </>
             ) : (
               <div style={{ fontSize: 12, color: colors.muted, lineHeight: 1.6 }}>
-                {draft.edges.some((e) => e.contract !== undefined && e.contract.trim().length > 0) ? (
+                {draft.edges.some((e) => (e.contract !== undefined && e.contract.trim().length > 0) || (e.requires ?? []).length > 0) ? (
                   <div style={{ marginBottom: 12, color: colors.foreground }}>
                     <div style={{ ...labelStyle(), marginBottom: 4 }}>Contracts - what passes between them</div>
                     {draft.edges
-                      .filter((e) => e.contract !== undefined && e.contract.trim().length > 0)
+                      .filter((e) => (e.contract !== undefined && e.contract.trim().length > 0) || (e.requires ?? []).length > 0)
                       .map((e) => (
                         <div
                           key={e.id}
@@ -788,7 +819,8 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                           <strong>
                             {roleName(draft.nodes.find((n) => n.id === e.from)?.role ?? '')} {e.twoWay === true ? '⇄' : '→'} {roleName(draft.nodes.find((n) => n.id === e.to)?.role ?? '')}
                           </strong>
-                          <div style={{ whiteSpace: 'pre-wrap' }}>{e.contract}</div>
+                          {e.contract !== undefined ? <div style={{ whiteSpace: 'pre-wrap' }}>{e.contract}</div> : null}
+                          {(e.requires ?? []).length > 0 ? <div style={{ color: colors.muted }}>Checked: {(e.requires ?? []).join(', ')}</div> : null}
                         </div>
                       ))}
                   </div>
@@ -833,6 +865,12 @@ export function StrategyEditor(props: StrategyEditorProps): ReactElement {
                         {e.parallel === true ? ' ∥' : ''}
                         {e.refused !== undefined ? ' - refused' : ''}
                         {(e.loops ?? []).map((loop) => ` · round ${String(loop.rounds)}${loop.met === true ? ' met' : loop.verdict !== undefined ? ` ${loop.verdict}` : ''}`).join('')}
+                        {(e.contracts ?? []).map((c) => (
+                          <span key={c.edgeId} style={{ color: c.missing.length > 0 ? colors.error : colors.accent }}>
+                            {c.missing.length > 0 ? ` · contract to ${roleName(c.to)} missing ${c.missing.join(', ')}` : ` · contract to ${roleName(c.to)} kept`}
+                            {c.askedAgain > 0 ? ` (asked again ${String(c.askedAgain)}×)` : ''}
+                          </span>
+                        ))}
                       </summary>
                       <div style={{ whiteSpace: 'pre-wrap', margin: '4px 0', color: colors.muted }}>
                         <strong>Asked:</strong> {e.question}

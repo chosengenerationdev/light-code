@@ -68,7 +68,14 @@ async function standInModel(): Promise<{ baseUrl: string; main: Body[]; spec: Bo
       if (body.model === 'spec') {
         spec.push(body)
         const question = text(body.messages.filter((m) => m.role === 'user').at(-1)?.content)
-        reply = { say: question.includes('You are the judge') ? 'Ran both tests.\nCONDITION: NOT MET - test_round fails' : "Changed round() to banker's rounding." }
+        // The programmer leaves the required item out the first time, and gives it when asked again.
+        reply = {
+          say: question.includes('You are the judge')
+            ? 'Ran both tests.\nCONDITION: NOT MET - test_round fails'
+            : question.includes('Your answer is missing what the strategy requires')
+              ? 'Changed functions: round()'
+              : "Changed round() to banker's rounding.",
+        }
       } else {
         main.push(body)
         const step = body.messages.filter((m) => m.role === 'tool').length
@@ -106,7 +113,7 @@ const STRATEGY = {
     { id: 'p', role: 'programmer', x: 40, y: 40, instructions: 'Keep changes minimal.' },
     { id: 't', role: 'tester', x: 300, y: 40, readOnly: true },
   ],
-  edges: [{ id: 'loop', from: 'p', to: 't', twoWay: true, maxRounds: 2, until: 'all tests pass', contract: 'the changed functions and why' }],
+  edges: [{ id: 'loop', from: 'p', to: 't', twoWay: true, maxRounds: 2, until: 'all tests pass', contract: 'the changed functions and why', requires: ['Changed functions'] }],
 }
 
 const helper = [
@@ -209,6 +216,13 @@ function expectStrategyHeld(result: Awaited<ReturnType<typeof run>>): void {
   expect(programmerAsk).toContain('As agreed, it must contain: the changed functions and why')
   expect(programmerAsk).toContain('Keep changes minimal.')
 
+  // Checked contract: the programmer was told the format, left the item out, was asked again, and gave it - every time.
+  expect(programmerAsk).toContain('Changed functions: ...')
+  expect(asked.filter((q) => q.includes('Your answer is missing what the strategy requires: Changed functions'))).toHaveLength(2)
+  const firstResult = text(main.at(-1)!.messages.filter((m) => m.role === 'tool')[0]?.content)
+  expect(firstResult).toContain('Changed functions: round()')
+  expect(firstResult).toContain('The hand-over to Tester is complete (Changed functions), after asking Programmer again')
+
   // 3. Rounds counted from what ran; the third round refused. The fifth call never reached a specialist.
   expect(spec.filter((body) => body.messages.some((m) => text(m.content).includes('One more try.')))).toHaveLength(0)
   const lastMain = main.at(-1)!
@@ -227,6 +241,7 @@ function expectStrategyHeld(result: Awaited<ReturnType<typeof run>>): void {
   }
   expect(latest.progress['loop']).toMatchObject({ rounds: 2, met: false })
   expect(latest.exchanges.map((e) => `${e.role}${e.refused !== undefined ? ':refused' : ''}`)).toEqual(['programmer', 'tester', 'programmer', 'tester', 'programmer:refused'])
+  expect((latest.exchanges[0] as { contracts?: unknown }).contracts).toEqual([{ edgeId: 'loop', to: 'tester', required: ['Changed functions'], missing: [], askedAgain: 1 }])
 
   // 5. Reopened from history, it is all still there.
   const back = reopened as unknown as { active: { name: string }; exchanges: unknown[]; progress: Record<string, { rounds: number }> }

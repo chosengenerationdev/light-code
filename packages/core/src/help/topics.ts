@@ -69,8 +69,11 @@ approval gate in front of everything that acts. It ships with **no default endpo
 install contacts nothing until a provider is configured.
 
 **Settings** is the gear icon in the chat header. It has these tabs: Providers, Project, Approvals,
-MCP, Search, Agents, Schedules, Python, Tools, DevOps, Outlook, Custom data, Skills, Usage, Network and
-Appearance - plus Review and Variables on a shared server (\`light-code --server\`) only.
+MCP, Add-ons, Search, Agents, Schedules, Python, Tools, DevOps, Outlook, Custom data, Skills, Usage, Network and
+Appearance - plus **Team reviews** for team admins and owners with a change to decide, an add-on's own tab while it
+is enabled, and Review and Variables on a shared server (\`light-code --server\`) only. **Project** also holds Team
+admins, the Auditor and the Anti Hallucinator. Beside the mode picker (Auto, Ask, Agent team) is **Strategy**,
+once a specialist is assigned.
 
 **Everything the panel writes goes into one JSON file**, and that file can be hand-edited — the UI
 and the loader share one schema, so a bad hand-edit and a bad save fail identically.
@@ -1331,6 +1334,10 @@ them becomes one notice. With a model chosen, the Auditor also reviews each batc
 alerts. Agents can read the record back with **read_audit_log** (summary first, then records with filters;
 rows go straight into the dataframe tool for custom analysis).
 
+**Their instructions are yours to edit**: each panel has an **Instructions** box (Reset to default puts the shipped
+text back). The reply format and the running notes they must keep are always added after your text, so an edit
+cannot stop the reviews being read or the handoff working.
+
 **The Anti Hallucinator watches the agent's reasoning and results** and, when it states something the evidence
 does not support, contradicts a result, drifts from what you asked or loops, sends it a short note at its next
 step. The note is labelled as the reviewer's, shown in the chat as such, never counts as your words, and grants
@@ -1478,11 +1485,12 @@ delete those from Settings → Skills or Python.
       'rust', 'rust tools', 'fast tools', 'fire code tools', 'fire-fs', 'helper', 'what tools', 'which tools',
       'available tools', 'big file', 'huge log', 'find files', 'grep', 'grep files', 'search contents', 'search shares', 'read many files', 'query table', 'sqlite',
       'dataframe', 'python library', 'copy files', 'move files', 'zip', 'vs code rust', 'tools in vs code',
-      'bundled helper', 'without fire code',
+      'bundled helper', 'without fire code', 'node host rust', 'fire-fs agent', 'fire-fs watch',
     ],
     body: `
 A Rust helper (\`fire-fs.exe\`) runs file and data work on every CPU core. Fire Code ships the full one;
-the Windows VS Code package carries a slim one with every tool below except \`dataframe\`. Its tools:
+the Windows VS Code package and the Windows Node host package carry a slim one with every tool below except
+\`dataframe\`. Its tools:
 
 - \`find_files\` - find files by name, type, size or date across drives and shares; summarise a folder; find
   duplicate files by content.
@@ -1500,15 +1508,23 @@ the Windows VS Code package carries a slim one with every tool below except \`da
 - \`python_library\` - call a Python library's functions many times in parallel processes (pricing DLLs).
 - \`transfer_files\` / \`archive_files\` - copy or move, and zip/unzip, showing the plan before anything changes.
 
+It also runs two kinds of agent as processes of their own, each with its own model and context:
+- **\`fire-fs agent\`** - each specialist of the agent team (tester, programmer, reviewer...) on an OpenAI,
+  Anthropic or Gemini profile: a sub-agent that remembers the chat and hands off its own key points near its
+  context limit; its tool calls come back to Light Code and your approvals (see the Strategy topic).
+- **\`fire-fs watch\`** - the Auditor and the Anti Hallucinator (see the Auditor topic).
+
 **Where they are available**
 - **Fire Code**: always.
 - **VS Code on Windows**: always - every tool but \`dataframe\`, from the helper bundled with the
   extension. With Fire Code installed on the same machine, its full helper is used instead and
   \`dataframe\` is there too. Nothing to configure; reload the VS Code window after installing or
   updating Fire Code.
-- **\`light-code\` run on its own (Node host)**: when Fire Code is installed on the same machine.
-- **Not**: on a shared server (\`--server\`), on a platform other than Windows, or in the Node host
-  without Fire Code. There the built-in tools (read_file, search_files, list_files) do the work.
+- **\`light-code\` run on its own (Node host) on Windows**: always - the slim helper is in the npm package;
+  Fire Code's full one is used instead when Fire Code is installed.
+- **Not**: on a shared server (\`--server\`), or on a platform other than Windows. There the built-in tools
+  (read_file, search_files, list_files) do the work, specialists answer each question on its own, and the
+  Auditor records without a model reviewing.
 
 To see whether they are on right now, look at the tool list in Settings → Tools, or ask "which tools do
 you have?" - the assistant answers from the tools it was actually given.
@@ -2258,7 +2274,17 @@ cannot change anything: it gets no tool that edits or runs commands, and recomme
 
 **A contract on a connector** ("What passes along here"): what one step hands to the next, such as "the failing
 tests, each with file:line". The first is told its answer must contain it, the second that it will be given it and to
-say what is missing - so what was agreed between them is written down. **Where to see it:** click the arrow - the
+say what is missing - so what was agreed between them is written down.
+
+**Checked contracts.** Under the contract, **Required items** (one per line: "Changed files", "Tests run") are
+checked, not hoped for. The sending specialist is told to give each on a line of its own ("Changed files: ...");
+after it answers, Light Code checks every item is there and asks the same specialist again for any it left out -
+twice at most - before anything moves on. The main agent is told if a hand-over is still incomplete, and the exchange
+log marks each contract kept or what was missing. The check reads the text; no model is asked whether it was kept.
+
+**The agent proposes contracts** for connectors you left without one: when it plans, it calls
+set_strategy_contracts with a contract and required items, and you approve it (the prompt shows every change). It
+changes this chat's copy; save in the Strategy window to keep it in your library. **Where to see it:** click the arrow - the
 contract is on the right; with nothing selected, the right-hand panel lists every contract in the strategy, and an
 arrow carrying one is labelled "contract". What was actually sent and answered along it is under "What passed
 between them" (select the arrow to narrow it to those two).

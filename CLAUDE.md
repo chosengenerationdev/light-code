@@ -3734,6 +3734,18 @@ strategies are saved to a library and each chat uses one or none.
   plan comes back with the chat" was never true from disk); it now keeps every field and validates the steering
   ones. And the exchange log recorded the specialist's question with the strategy's notes to it, which
   `strategy_history` then handed to the main agent; it records what the main agent asked.
+- **Checked contracts** (asked for: "will there be any data contract between agents?" - then "implement everything"):
+  an edge's `requires` (up to 10 items) is told to the sender with one format, "Item: ...", and after the answer
+  `contractCheck`/`missingItems` read it - a line starting with the item and a colon or dash with text after it, or a
+  heading with content below; deterministic, no model asked. Missing items are asked of the same specialist again
+  (`askForMissing`, carrying its answer for one without memory), `MAX_CONTRACT_RETRIES` = 2, inside the same
+  consultation (one round, one exchange). The main agent is told only when a hand-over is incomplete or took asking
+  again; the exchange carries `contracts` (required, missing, askedAgain), shown in the window.
+- **Agent-proposed contracts**: `set_strategy_contracts` (`strategy/contractsTool.ts`), `edit` group, in
+  `ALWAYS_ASK_TOOLS` and `NEVER_AVAILABLE_TO_SCHEDULES` (the plan's reasoning: a run rewriting what it is checked
+  against is bound by nothing). A connector is named by its two roles (either way round for a back-and-forth); the
+  preview lists every before → after; it changes the chat's copy only. Registered while a strategy is in use; the
+  strategy text tells the agent to propose contracts for connectors without one before starting.
 - Help: the `strategies` topic is the how-to; `topics.test.ts` routes the questions people ask about it there.
 - Observers' instructions are editable too (`observers.<role>.prompt`; the reply format and running-notes rule
   are always appended, so an edit cannot break parsing or the handoff).

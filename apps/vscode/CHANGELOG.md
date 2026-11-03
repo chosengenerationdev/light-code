@@ -1,5 +1,10 @@
 # light-code-vscode
 
+## 0.205.0
+
+- **Checked contracts.** A connector's **Required items** (one per line) are checked after every hand-over: the specialist is told the format, and Light Code asks it again - twice at most - for any it left out before anything moves on. The main agent is told if a hand-over is still incomplete; the exchange log marks each contract kept or what was missing. **The agent proposes contracts** for connectors without one (`set_strategy_contracts`), and you approve each change.
+- **Help is up to date**: checked contracts and agent-proposed contracts, editable observer instructions, the Rust helper in the Windows Node host and its two agent modes, and the Settings tabs as they are now (Team reviews, Add-ons, Strategy beside the mode picker).
+
 ## 0.204.0
 
 - **A chat reopened from history keeps its strategy and its plan.** Both were dropped when a chat was read back from disk, so after reopening one the agent no longer followed either. **The record of what passed between specialists holds what the main agent asked**, not the specialists' own instructions, so it no longer reaches the main agent's context. A strategy is now tested end to end against a running host - set, followed, its rounds counted and the last refused, recorded, explained, and reopened - with specialists in the host and in their own Rust processes.
