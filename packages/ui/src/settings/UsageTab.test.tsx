@@ -66,6 +66,17 @@ const dashboard: UsageDashboard = {
   problems: [],
   inventory: { skills: 2, tools: 0, authors: 1 },
   eventsInStore: 9,
+  tokens: {
+    total: { input: 300_000, output: 12_000, cached: 100_000, requests: 40 },
+    previous: { input: 100_000, output: 4_000, cached: 0, requests: 10 },
+    estimatedShare: 0,
+    people: [
+      { user: 'ann', displayName: 'Ann Lee', input: 250_000, output: 10_000, cached: 90_000, requests: 30, share: 0.83, lastActive: 1, spark: [1, 2], models: ['qwen3'] },
+      { user: 'bob', input: 50_000, output: 2_000, cached: 10_000, requests: 10, share: 0.17, lastActive: 1, spark: [0, 1], models: ['claude'] },
+    ],
+    models: [{ model: 'qwen3', input: 250_000, output: 10_000, cached: 90_000, requests: 30 }],
+    timeline: [],
+  },
 }
 
 const options = { s3: [], vectorStores: [] }
@@ -98,6 +109,15 @@ describe('the Usage tab', () => {
     expect(container.textContent).toContain('Most used skills')
     expect(container.textContent).toContain('deploy')
     expect(container.textContent).toContain('bob')
+    // Tokens burned, by person (asked for): totals, and each person's share.
+    expect(container.textContent).toContain('Tokens burned')
+    expect(container.textContent).toContain('Ann Lee')
+    expect(container.textContent).toContain('260k')
+    // The total, in full: the KPI and the closing row of the by-person table.
+    expect(container.textContent).toContain('Total tokens')
+    expect(container.textContent).toContain((312_000).toLocaleString())
+    expect(container.textContent).toContain('Total (2 people)')
+    expect(container.textContent).toContain('qwen3')
     const deleteButton = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Delete')!
     act(() => deleteButton.click())
     expect(posted.some((message) => (message as { type: string }).type === 'deleteSkillFile')).toBe(false)

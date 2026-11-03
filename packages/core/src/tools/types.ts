@@ -108,6 +108,8 @@ export interface ToolExecutionContext {
    * found here: the user's own words are the one thing an injected instruction cannot write.
    */
   userText?: () => string
+  /** The user's most recent message alone - what they are asking for now (`monitor_create` reads "personal" in it). */
+  lastUserText?: () => string
   /**
    * Shows the user a form and waits for it.
    *

@@ -77,6 +77,20 @@ export interface SkillToolContext {
    */
   findTeamSkillsNamed?: ((name: string) => Promise<TeamSkillHit[]>) | undefined
   /**
+   * Team ownership (`team/admins.ts`): a skill somebody else owns is not written - the change goes to its owner
+   * (or an admin) for approval, and until then everybody, the author of the change included, keeps the approved
+   * version. `needed` answers for one name, with the skill's current text wherever it is loaded from; absent, or
+   * answering undefined, writes as before.
+   */
+  teamReview?:
+    | {
+        needed(name: string): Promise<{ owner: string; existing: string } | undefined>
+        submit(request: { name: string; content: string; existingContent: string; owner: string }): Promise<string>
+        /** After a write that needed no review: records this user as the owner of a name nobody owns yet. */
+        saved?(name: string): Promise<void>
+      }
+    | undefined
+  /**
    * Publishes a skill that was just written, when skills are kept in a bucket.
    *
    * Absent unless an S3 folder is configured and writable, so writing works exactly as before for
@@ -421,8 +435,9 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
     async preview(params): Promise<ToolPreview> {
       const target = await folderFor(context, params.name, params.audience)
       const filePath = await resolveSkillPath(target.dir, params.name)
-      const before = await readIfPresent(filePath)
-      const note = audienceNote(context, target.personal)
+      const team = target.personal ? undefined : await context.teamReview?.needed(params.name).catch(() => undefined)
+      const before = team?.existing ?? (await readIfPresent(filePath))
+      const note = team !== undefined ? `Owned by ${team.owner}: this is sent to them (or a team admin) for approval and is not used by anyone, you included, until it is approved.` : audienceNote(context, target.personal)
       return {
         kind: 'diff',
         path: filePath,
@@ -458,7 +473,15 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
         const wantsFolder = (params.images ?? []).length > 0 || (params.files ?? []).length > 0
         const target = await folderFor(context, params.name, params.audience)
         const filePath = await resolveSkillPath(target.dir, params.name, wantsFolder)
-        const before = await readIfPresent(filePath)
+        // Asked before anything is copied or written: a change to somebody else's skill writes nothing at all.
+        const team = target.personal ? undefined : await context.teamReview?.needed(params.name)
+        if (team !== undefined && wantsFolder) {
+          return {
+            content: `"${params.name}" belongs to ${team.owner}, so a change goes to them for approval - and a change that adds pictures or files cannot be sent for review yet. Send the text change alone, or ask ${team.owner} to make it.`,
+            isError: true,
+          }
+        }
+        const before = team?.existing ?? (await readIfPresent(filePath))
         const existed = before.length > 0
 
         /*
@@ -502,8 +525,12 @@ export function createWriteSkillTool(context: SkillToolContext): Tool<WriteSkill
             }),
           }
         }
+        if (team !== undefined && context.teamReview !== undefined) {
+          return { content: await context.teamReview.submit({ name: params.name, content: rendered, existingContent: before, owner: team.owner }) }
+        }
 
         await fs.writeFile(filePath, rendered, 'utf8')
+        if (!target.personal) void context.teamReview?.saved?.(params.name).catch(() => undefined)
 
         /*
          * A skill that has just become a folder leaves its flat file behind otherwise.

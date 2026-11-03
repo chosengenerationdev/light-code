@@ -69,7 +69,11 @@ These are non-negotiable. The first two are enforced by ESLint; breaking them fa
    for by the user):** the usage dashboard reads the *company directory* (who a login name is) with Windows'
    own LDAP client - the Rust helper's `directory.rs` (wldap32), **never PowerShell since 0.161.0** -
    bound as the signed-in user to this machine's own domain, search only, eight fields, only while usage
-   collection is on. Nothing else may follow either out (§12af, §12ag).
+   collection is on. **Third recorded exception (0.200.0, chosen by the user after the cost was put to them):** the
+   Auditor's and Anti Hallucinator's model calls are made by the Rust helper (`fire-fs watch`, `observer.rs`, reqwest +
+   rustls, no proxy), to the chosen profile's base URL only. Auth headers are asked of core's `AuthStrategy` before every
+   call and TLS material comes from `resolveConnectionTls`, so neither is reimplemented (§12ap). Nothing else may follow
+   any of these out (§12af, §12ag, §12ap).
 3. **No default endpoints.** A fresh install contacts nothing. Every URL is user-supplied.
 4. **No telemetry, no update checks, no remote assets.** All webview assets are bundled
    locally. CI fails if built output contains an absolute external URL.
@@ -400,10 +404,13 @@ Cheap insurance, and it pairs well with the strict-matching decision.
 Tools belong to groups (`read`, `edit`, `command`, `mcp`, `always`). A mode includes or
 excludes groups.
 
-- **Code** — all groups.
-- **Ask** — `read`, `mcp`, `always`. This *is* the read-only mode; it is not a separate flag.
-- **Auto** — the same groups as Code. Shell-first working; see §12i, including why it is the one
+- **Auto** — all groups, and **the default**. Shell-first working; see §12i, including why it is the one
   mode whose commands take a checkpoint.
+- **Ask** — `read`, `mcp`, `always`. This *is* the read-only mode; it is not a separate flag.
+- **Agent team** — all groups, with specialists consulted (and a Strategy, §12ar).
+- **Code was removed** (VS Code 0.201.0, asked for by the user). A saved `code` resolves to Auto, which has the
+  same groups (`RENAMED` in `modes/builtin.ts`, beside `junior`); `CODE_MODE` survives only as the loop's
+  internal full-access default for headless runs and tests, never offered.
 
 This mechanism doubles as the tool-profile system for context budgeting (§12). Custom
 user-defined modes are deferred.
@@ -3318,6 +3325,9 @@ OpenSearch** (no OpenSearch, no team monitoring); everyone runs, results shared;
   newer half past 20 MB, pruned by `retention_days` every 6 h; `alert_patterns` reads new / ongoing / recurring
   (with the usual hour) / intermittent / cleared - one function for the grid's History, the explanation and the
   agent's `monitor_history`.
+- **"Start a chat" carried nothing** (Fire Code 0.75.0, reported): `deliverPendingAsk` posted `{ source, ask: { ask:
+  'prefill', text } }` and the page reads `data.ask === 'prefill'` with `data.text` - every other ask is a plain word,
+  so only this one broke. An ask with content is spread now, and the page reads both shapes; `shell.test.ts` pins it.
 - **Explanation and chat**: double-click → the executor's model explains from the facts Rust gathers
   (`alert_context`: monitor, the rule's `advice`, `runbook`, row, each alert's pattern; `explain.ts`). **Start a
   chat** → `new_chat` (now a function in main.rs) named "Alert: …" on the chosen codebase, and the text goes to
@@ -3466,6 +3476,267 @@ and changed a monitor, with an audit; a refresh; the grid window's buttons cropp
 - **Grid header buttons are `.hbtn` icons** with `title` = `aria-label`; `.g-head` and `.g-actions` wrap. Tests find
   them by title.
 - **Underscores**: `parseInline` treats `_`/`__` touching a letter or digit, and `__dunder__`, as text.
+
+**Crashes that lost work (same release)** - reported: the agent crashed in Fire Code, typed messages and the
+investigation in progress were gone, and Windows showed "python.exe stopped working".
+- **No child stdin had an 'error' listener.** A write to a worker that had just died raised EPIPE as an unheard
+  'error' event, which ends a Node process - the Python crash became the host's. Now every spawn that writes to stdin
+  listens (`python/worker.ts`, lsp, office, fastFs, fireHelper, negotiateHttp, terminal), and the host's `cli.ts` logs
+  `uncaughtException`/`unhandledRejection` as "kept running" instead of exiting. `workerCrash.test.ts` raises the pipe
+  error directly (when Windows reports it is timing no test controls) and fails without the listener - checked.
+- **Saved during the turn** (`persistSoon`, 3 s throttle, serialised) from `onContextUpdate` (just before every
+  request: after the user's message and each tool result) and `onToolResult`. `midTurnSave.test.ts` reads `bridge.ts`.
+- **The draft is kept by the host** (`saveComposerDraft` / `requestComposerDraft` / `composerDraft`,
+  `<storageDir>/drafts/<workspace digest>.txt`): the page's localStorage is per origin, and a restarted host has a new
+  port. Restored through `prefill` only into an empty box. `composerDraft.test.ts` restarts a real server.
+- **Worker exits are explained** (`describeWorkerExit`: NTSTATUS codes in words, the stderr tail) and Python runs
+  with `PYTHONFAULTHANDLER=1`. Fire Code calls `SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)` at start
+  (declared directly, no windows-sys feature): inherited by every host and its Python, so WER no longer keeps a
+  crashed worker alive behind a dialog. The cause of the office's Python crashes is not known - the next one is named.
+
+**Tokens by person (VS Code 0.199.0, host 0.174.0, Fire Code 0.72.0)**: `UsageEvent.k` gains `tokens` (`n` the model,
+`i`/`o`/`c` input/output/cached, `e: 1` when estimated), recorded by the bridge's `recordTokens` from the loop's
+`onUsage` (the provider's count, else the calibrated estimate). Same shards, push and roll-up as skill and tool events;
+`computeDashboard` splits them off first (`isTokenEvent`) into `tokens` (`tokenStats`) so uses are unchanged.
+`usage_store.rs` accepts the kind. Scheduled runs count too: every turn goes through the one `runAgentTurn` call.
+
+**Token counts are the provider's (VS Code 0.198.0, host 0.173.0, Fire Code 0.71.0)** - reported: the bar read 175k of
+262k and the gateway refused for length. `applyReportedUsage` existed and nothing called it, and no adapter reported
+usage, so the bar was always `estimateTokens` (chars/4), which undercounts code, JSON and logs.
+- `StreamChunk` has `usage` (`inputTokens` includes cached). OpenAI sends `stream_options: {include_usage: true}`
+  (dropped and remembered per base URL, `NO_STREAM_USAGE`, when a gateway 4xx-es naming it) and reads `usage` from any
+  chunk (`usageFrom`); after `finish_reason: tool_calls` it reads on up to 5 s for the usage chunk instead of returning.
+  Anthropic: `message_start` usage (input + cache read + cache creation). Gemini: `usageMetadata`.
+- The loop (`RequestMeter`) records each request's raw estimate; the reported count, or `promptTokensFromError` from an
+  overflow refusal, is shown (`applyReportedUsage`) and `calibrate(usageKey)` keeps a ratio (0.5-4, weighted to the
+  latest) that `scaleBreakdown` applies to later estimates and to the compaction trigger. `usageKey` is
+  `<baseUrl>|<model>` from the bridge.
+- **AutoSys patterns**: `fill` sends `name=@X*` for a value with `*` (the AutoSys wildcard match), `==` otherwise.
+- **`autosys` is its own share section** (keys `autosys`, strip `autosys.username`); DevOps (`atlassian`) no longer owns
+  it. `autosysAddresses` is still nested under `autosys.paths` for addresses only.
+
+**Sixth round (Fire Code 0.69.0, host 0.172.0, JetBrains 0.4.63)** - reported from real use:
+- **Who changed it, from history** (asked: "if the bitbucket repo is where the skill or tool lives, take it from git"):
+  `sharing/provenance.ts` (`gitFileHistory`, `git log --follow`, `status` for uncommitted, both `--no-optional-locks`)
+  and `BitbucketClient.fileCommits` (`/commits?path=&until=`). The bridge answers executor `kind: history`
+  (`fileHistory`): the team repository when the file sits under a skills or tools folder (mapped with `repoPathFor`,
+  the path the sync commits), else git. Rust asks per file on change of mtime (`file_history`, only while the
+  executor runs; opening Changes may start it), and `provenance()` prefers the newest commit unless uncommitted.
+  **`Labels::saved_by` is `updated_by` alone** - it fell back to the author, which showed the author as the updater.
+- **`next_run` is never in the past**; `overdue_since` (the due slot's start) drives "Due since" / "due N min ago".
+- **The grid header cropping was the grid column**, not the buttons: `.grid-app` had no
+  `grid-template-columns`, so its one `auto` column took the table's min-content width and `overflow: hidden` on the
+  body clipped the right edge. `minmax(0, 1fr)` plus `min-width: 0` on the rows; `grid.test.ts` reads the CSS.
+- **The host's control channel parses every request kind** (`sync` was missing - Refresh's sync was refused);
+  `controlChannel.test.ts` checks the bridge's cases against the parser.
+- **`scheduler_stopped` is cleared at launch** (the user's call: a stopped scheduler starts with Fire Code).
+- **`askedAudience`**: the user's latest message (`ToolExecutionContext.lastUserText`) saying personal/private/just
+  for me makes `monitor_create` personal whatever the agent passed; saying team makes an unset audience team.
+- **Copying from the grid** (`copyOut`, `gridText`): cell selection `state.cellSel` (click, Shift+click a block), Ctrl+C via
+  the document `copy` event, right-click items, a header button. TSV + an HTML table, in the shown order and shown text;
+  the whole grid is `state.drawing.list` (every filtered row, drawn or not). `document.execCommand('copy')` in the gesture,
+  `navigator.clipboard` as the fallback.
+- **The grid engine** (Fire Code 0.70.0): `colCache` (shown text, lower case, number - a time's ms - per column, once
+  per check), `compileFilter` (conditions, cached per text), `filteredIndices` (optionally ignoring one column, for its
+  value list's counts), windowed `renderWindow` (spacer rows, `ROW_H` measured once, `BUFFER` rows either side, a
+  frame per scroll), `<colgroup>` widths with `table-layout: fixed`, `queueBody` (120 ms), `valuesPopup` and
+  `columnsPopup` (hidden columns in localStorage per monitor). `scrollToRow` replaced `drawUntilRow`; History's past
+  table still draws in `ROW_CHUNK`s. Checked in headless Edge screenshots as well as jsdom.
+- **JetBrains follows the IDE theme**: `tellTheme` (on load end and `LafManagerListener`) calls the page's
+  `__lightCodeIdeTheme`; the client's `applyTheme` uses it when the saved theme is "system".
+
+## 12ap. The Auditor and the Anti Hallucinator (VS Code 0.200.0, host 0.175.0, Fire Code 0.73.0)
+
+Asked for together, under Settings → Project: an **Auditor** that taps into the agent (thought process included),
+records everything to a file and to a user-dedicated OpenSearch index, and notifies on anything dangerous that is not
+allowed (Windows notification in Fire Code); and an **Anti Hallucinator** that watches the thought process and keeps
+the agent focused and truthful. Each with its own model, **as a separate process with its own context, in Rust**,
+handing off to a new process at the context limit. The user's choices when asked: **Rust makes the model calls**
+(invariant 2's third exception, above) and **notes at the next step** rather than a verdict before every tool call.
+Then, mid-build: **tools for agents to read the audit record later** (`read_audit_log`). `packages/core/src/observers/`.
+
+- **Recording does not depend on any model.** `ObserverHub` (one per bridge) writes the journal itself and runs the
+  danger checks itself (`dangerSignals`, deterministic, by Light Code's own refusal wording: risky-command match on an
+  *approved* command, an approved write outside the workspace, `Access to "…" is denied`, `resolves outside the
+  workspace root`, `is not available in … mode`). A denial the user made is recorded, not announced. Notifications are
+  the second caller of `desktopNotify` (after `notify`), else `ui.showWarning`; a run within 20 s becomes one notice.
+- **Events come from the loop's callbacks, never the model's description** (invariant 8's habit): `onApproval` carries
+  the literal preview the gate was given; `onToolRefused` reports calls that never reached a tool. Reasoning and text
+  are reported when a step closes (at its tool call, or the end), exactly one `turnEnd` per turn. Capped once
+  (`capEvent`) and redacted with the known secret values before anything is written or sent to an observer.
+- **The journal**: `<storageDir>/audit/<folder from the case-folded workspace path>/<day>__<session>.jsonl` - one
+  writer per file (the usage-queue lesson), outside the repository, whole day files pruned past
+  `observers.auditor.retentionDays` (90). The **index** is `light-code-audit-<owner slug>`, `_bulk` `create` under ids
+  derived from the record (a retry adds nothing), `dynamic: false` with the record in an unindexed `payload` - a
+  writer of its own (`AuditIndex`), never `OpenSearchClient`. Index failures queue (2,000) and retry; the journal is
+  the source of truth.
+- **The process** (`observer.rs`, a long-running mode of `fire-fs`, so it exists wherever the helper does): JSON lines
+  both ways - `start`, `event`, `flush`, `auth`/`needAuth`, `stop`; out `ready`, `result`, `usage`, `error`, `handoff`.
+  Non-streaming calls for OpenAI (`/chat/completions`), Anthropic (`/messages`, `anthropic-version`) and Gemini
+  (`:generateContent`); Copilot (`vscode-lm`) is refused, it exists only inside VS Code. The guard reviews at every
+  step boundary, the auditor in batches (turn end, 12 events, or 30 s). A failed call keeps its events and backs off
+  (15 s doubling to 10 min); a 401 asks the host once more with `force` (strategy refresh), then reports.
+  Encrypted PEM keys are decrypted host-side; a PFX client certificate cannot be presented and is said so.
+- **The handoff never needs a call at the limit** (the user asked whether a separate process was needed for it). Every
+  reply carries `state`, the observer's running notes; `ObserverAgent` keeps the latest and the last ten findings.
+  Past 70% of the window the process emits `handoff` (state + unreviewed events) and exits; the supervisor starts the
+  next with that in its system prompt and sends the pending events first. Events sent between `handoff` and the new
+  process wait in a buffer (the old one reads nothing more). A crash is the same path from the last state seen.
+  Five starts in ten minutes: stopped, said so. `watch.test.ts` drives the real binary against a loopback model:
+  request shape, per-call auth, the 401 retry, the handoff to a second process with a fresh context.
+- **A note is never the user's words.** It joins the conversation as a user-role message after the user's own queued
+  messages, through `drainObserverNotes` - which, unlike `drainQueuedMessages`, **does not reset the step budget**
+  (an automatic reviewer that could would keep a turn running for ever; `stepBudget.test.ts`). It starts with
+  `OBSERVER_NOTE_PREFIX`, and `isObserverNote` is checked everywhere "what the user typed" is decided: the
+  `http_request` host rule (`userText`/`lastUserText` in the bridge - a note naming a host must not authorise it),
+  compaction's verbatim user messages, handoff facts, and the transcript, which renders it as `observerNote`.
+- **Settings**: `observers` (`auditor`: enabled, profileId, recordReasoning, notify, opensearch, storeId,
+  retentionDays; `antiHallucination`: enabled, profileId). **User-scope only** (a repository could switch auditing
+  off or send every step to its own profile) and per project (`OVERRIDABLE_KEYS`, saved with `saveForWorkspace`);
+  share section `observers`, imported into the open project like `project`. Applied on every settings load
+  (`applyObserverSettings`, keyed so nothing restarts unless the settings or the profile changed). Observers keep
+  their own auth-strategy cache by profile - the chat's is one slot, and sharing it would drop the chat's token.
+- `read_audit_log` (read group, offload family "Audit record") is registered when the Auditor is on or a journal
+  exists; summary or flat rows, local journal or the user's index.
+- **The Node host now carries the slim helper too** (`dist/bin/fire-fs.exe`, asked for: "at least let the Windows
+  Light Code have Rust tools"), used on Windows when Fire Code's is not found; the npm smoke test checks it answers
+  with `watch`. `--export-pkg` still copies the bundle alone, without it.
+- **Not verified against a live gateway** - against a loopback stand-in model and the real binary only. A team
+  member's machine reading another's index is not offered: the index is the user's own.
+
+## 12aq. Team admins, owners and owners' approval (VS Code 0.200.0, host 0.175.0, Fire Code 0.73.0)
+
+Asked for in the same session: a field under Settings → Project naming team admins - "whoever first adds the user id
+for the admin becomes an admin", visible to the whole team, read-only for non-admins - and owners: whoever creates a
+skill or tool owns it, anyone else's change goes back for the owner's (or an admin's) approval, and a tab of pending
+reviews with how long each has waited, for admins. The user's choices: **OpenSearch** holds it; **Windows user ids,
+never names** (authors as recorded); and, corrected mid-build, **until approved everybody - the editor included -
+uses the approved version**. `packages/core/src/team/admins.ts`.
+
+- **One index per project**: `light-code-team-<project slug>` on the active OpenSearch connection (else the first).
+  Documents `admins`, `owner:<kind>:<name>`, `review:<uuid>`; `dynamic: false`, content in an unindexed `payload`.
+- **Many writers, one answer**: the first admin list is `_create`d (a racer gets 409 and is shown the winner's);
+  later changes need an admin and `if_seq_no` (a stale edit is refused, not merged). Owners are `_create`d once - from
+  the file's author label the first time a non-owner touches it, or the writer on a save that needed no review - so
+  editing the `author:` line does not move ownership. A decision is claimed with `if_seq_no` before publishing (two
+  approvers cannot both publish); a publish that fails marks the review rejected with the reason.
+- **The check sits in the write tools, before anything is written** (`teamReview` on `SkillToolContext` and
+  `PythonToolContext`, beside the shared server's `submitForReview`): `needed(name)` answers with the owner and the
+  current text wherever the item is loaded from, and the change is labelled against that text (version + 1) and
+  submitted instead of written. Personal items are never checked. A skill change adding pictures or files is refused
+  for now (the review carries text). **Delete everywhere** is refused to a non-owner too. With no admins, nothing
+  changes - the feature is off until a list exists.
+- **Publishing an approval** goes through the paths a save takes: `writeTeamMonitorSkill` (bucket upload or team
+  repository commit) for skills, else the project folder; tools are written in place and uploaded to their bucket
+  mirror. Colleagues get it at their next sync; a tool's code is still approved once per machine (§13).
+- **Windows user id** = `os.userInfo().username`, lower case, domain dropped (`windowsUserId`, `normaliseUserId`).
+  Not `identity.owner`, which anyone can type. Authors are compared lower case; a label holding a display name
+  matches nobody, so only admins can approve changes to it.
+- **UI**: `TeamAdminsSection` in the Project tab (read-only unless `mayEditAdmins`, warns when your own id is left
+  out), and the **Team reviews** tab (`teamReviews`), shown when the host says `showTab` (admins, or an owner with a
+  pending decision): waiting time, the diff (Approve is enabled only once it is shown), approve/reject with reason,
+  and the last 30 days decided. Messages `requestTeam`, `saveTeamAdmins`, `decideTeamReview`; `team`, `teamResult`.
+- **These are Light Code's checks, not access control** - anyone with write access to the cluster, bucket or
+  repository can change files by hand, and the handbook says so. `admins.test.ts` runs the store against a stand-in
+  OpenSearch that enforces create-once and `if_seq_no`; `ownedWrites.test.ts` pins that nothing is written.
+  **Not verified against a live cluster.**
+
+## 12ar. Strategies, and each specialist in its own process (VS Code 0.201.0, host 0.176.0, Fire Code 0.74.0)
+
+Asked for: a **Strategy** button in Agent team mode opening a window to draw a flow chart of how the main agent
+uses its specialists - each node an agent role, connectors between them, back-and-forth connectors with a maximum
+number of rounds or "until a condition is satisfied" (the tester/programmer case); the main agent planning so the
+plan "satisfies the strategy completely"; a role markable read-only; and **each specialist in its own Rust
+process with its own context, handing off its key points by itself near the limit, the main agent's context
+holding none of it** - in any mode, Auto included. The user's choices: specialists keep their tools (run by Light
+Code, approved by the user, the prompt naming who asks); Claude CLI and Copilot roles keep their own sessions;
+strategies are saved to a library and each chat uses one or none.
+
+- **The model** (`strategy/strategy.ts`): nodes (role, position, `readOnly`, `instructions`) and edges (`from`, `to`,
+  `twoWay`, `maxRounds`, `until`, label); a two-way edge means `from` works and `to` judges. Library in config
+  `strategies` (user-scope only, share section `strategies`); the chat's strategy and its loop progress are saved
+  on the task beside the plan, restored with it, cleared by a new chat.
+- **Guided vs enforced.** The order is guided: `describeStrategy` goes into the system prompt (Agent team mode
+  only, just before the plan) with the instruction to propose an `update_plan` that carries out every step. The
+  loops are enforced in `consultAgent`, from consultations that ran (never from what the agent says): the judging
+  role is asked for a `CONDITION: MET` / `NOT MET - why` line (`readVerdict`), a round is the worker then the
+  judge, a return to the worker past `maxRounds` (default 10 with only a condition) is refused, and every answer in
+  a loop comes back with where it stands. A read-only step gets `canWrite: false` and no librarian `write_skill`.
+- **Each specialist in its own process** (`fire-fs agent`, `role_agent.rs`; supervisor `agents/roleProcess.ts`),
+  for a role on an OpenAI/Anthropic/Gemini profile wherever the helper has `agent`; otherwise the in-process
+  `runConsultation` as before. The process holds the conversation for the chat (one per role, stopped on a new or
+  restored chat - a specialist remembering another chat would leak context between them), tool calls in each
+  wire's own shape (host-converted with `toOpenAITools` and siblings; Gemini's id-less calls get made-up ids), and
+  `tool_choice: none` at the step cap rather than dropping the tools (Anthropic needs them declared once used).
+  **Tool calls come back to the host** (`needTool`) and run through `runConsultTool` - lifted out of
+  `runConsultation` so both paths share one rule: reads free, everything else through the approval gate, which now
+  carries `requestedBy` so the prompt says which specialist asks.
+- **The handoff, by itself**: after an answer past 70% of the window it asks its own model for key points (tools
+  forbidden) while there is room, clears its conversation and continues with them in its instructions - the same
+  process. If that fails, its last answers stand in. The supervisor keeps the key points, so a crashed process,
+  or one replaced because its tools changed (a step made read-only), starts from them.
+- **The prompt split**: the role, preamble and briefing become the process's instructions once; each consultation
+  sends only the question (and strategy notes) - otherwise the briefing would be repeated into its own context on
+  every question.
+- **The window** (`ui/StrategyEditor.tsx`): click a role to add it, drag to move, drag from a step's dot to another
+  to connect (drawn back the other way: a back-and-forth), inspector on the right, Delete removes the selection,
+  Esc closes; the library select, Save, Save and use, Stop using, Delete. Loop rounds are drawn on the connectors.
+- **Instructions per step** (asked for: a small button beside each node): the ✎ on a step opens its
+  `instructions`, sent to that specialist with every question asked under the strategy (`beforeConsult`); a step
+  with none is described to the main agent as "yours to plan" - the user's words: "if not given, master agent can
+  come with relevant plan according to strategy".
+- **Parallel boxes** (asked for: steps in a box "should be executed parallely with a rust process"):
+  `groups` on the strategy, a step's `group` set by the window from where it is dropped (`withMembership`). The
+  strategy text tells the agent to consult a box's steps in ONE `ask_agents` call (`tools/askAgent.ts`, 2-6
+  requests through the same `consult` as `ask_agent`, run with `Promise.all`; each specialist is its own process,
+  so they really run at once). A role twice in one box is a problem (one process answers one question at a time).
+  **Approvals from specialists are queued** (`agentApprovalQueue`): the panel shows one approval at a time, and
+  two parallel requests would otherwise replace each other on screen.
+- **Contracts and the exchange log** (asked for: "data structure and data contract agreed between agents ... see
+  what was agreed ... why it goes back and forth, at least master agent to explain"): a connector's `contract` is
+  told to both ends (`beforeConsult`: the sender's answer must contain it; the receiver is told what it gets and to
+  name what is missing). Every consultation under the strategy - question, answer, loop round and verdict,
+  parallel or refused - is a `StrategyExchange`, saved with the chat (last 200), shown in the window per selected
+  step or connector, and readable by the main agent with `strategy_history` (registered while a strategy is in
+  use), so it explains from the record. "Ask the agent why" puts that question in the message box.
+- **What is running** (asked for: "an option to view which part of strategy is currently being executed"): the
+  bridge marks the role being consulted (`strategyRunning`) and the last to answer, sent as `current`; the window
+  glows that step (moving while it works), its "Now" panel names it with each loop's round and verdict, and the
+  header button reads "Strategy: name · Tester…" while a specialist works.
+- `roleProcess.test.ts` drives the real binary against a loopback model: a tool call run by the host, the context
+  kept across questions, the handoff with a fresh conversation in the same process, the step cap. **Not verified
+  against a live gateway, nor the window's dragging in a real webview** (jsdom has no layout).
+- **The Strategy window as an editor tab** (VS Code, asked for: "in the code editor place"): `HostUi.openStrategyWindow`
+  → command `lightCode.openStrategy` → `StrategyPanel` (`chatViewProvider.ts`), the same webview bundle started with
+  `data-view="strategy"` (`main.tsx`), on the same bridge through `WebviewTransport.attachExtra` (extra webviews get
+  every message and their messages reach the bridge like the panel's). Capability `strategyInEditor`; elsewhere the
+  window opens over the panel. Its "Ask the agent why" posts `askInChat`, which the bridge turns into
+  `prefillComposer` and reveals the panel.
+- **Agent team mode needs any specialist, not the expert** (asked for): `Mode.requiresExpert` now means "a role is
+  assigned", read in the picker from the `agents` roles (`teamAvailable`). The bridge's team guidance never
+  needed the expert; only the picker did.
+- **Connecting by clicks** (reported: "i dont know how to add steps and connectors"): a step's **Connect to...**
+  then a click on the other step, beside the drag from its dot; the empty chart lists the steps.
+- **The strategy reaches the agent in every mode** (reported: "why chat agent doesnt know about the strategy"): it
+  was Agent team only, and the Strategy button now shows in every mode once a specialist is assigned. Two wiring
+  faults found at the same time: **a scheduled run cleared the chat's plan and strategy** (`startNewTask`) and
+  restored only the conversation - every scheduled job silently stripped both from the chat it set aside; and **New
+  chat with handoff** dropped the strategy of the work it continues. `strategy/wiring.test.ts` reads the bridge for
+  all three. With nothing selected, the window lists every connector's contract.
+- **End to end** (`apps/host/src/strategyEndToEnd.test.ts`, asked for: "make sure application of strategy is working
+  end to end fine"): a running host and one loopback model playing the main agent (`main`, streamed, scripted) and
+  the specialists (`spec`). It sets the strategy with the window's own message, then checks the prompt (contract,
+  loop rules, a step's instructions), what each specialist is told, rounds counted and the third refused before any
+  model sees it, `strategy_history`, the window's exchanges, reopening from history, and that the main agent's
+  context never holds a specialist's - once in-process, once with real `fire-fs agent` processes (own context
+  checked). **It found two faults**: `parseTask` (`platform/node/taskStore.ts`) rebuilt a task from seven fields, so
+  **every chat reopened from history had lost its plan and its strategy** (the plan since the plan existed - "the
+  plan comes back with the chat" was never true from disk); it now keeps every field and validates the steering
+  ones. And the exchange log recorded the specialist's question with the strategy's notes to it, which
+  `strategy_history` then handed to the main agent; it records what the main agent asked.
+- Help: the `strategies` topic is the how-to; `topics.test.ts` routes the questions people ask about it there.
+- Observers' instructions are editable too (`observers.<role>.prompt`; the reply format and running-notes rule
+  are always appended, so an edit cannot break parsing or the handoff).
 
 ## 13. Python interop and skills (phase 9)
 

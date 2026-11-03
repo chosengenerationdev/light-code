@@ -251,6 +251,14 @@ async function* parseAnthropicStream(
         }
 
         const eventType = parsed.type
+        if (eventType === 'message_start') {
+          const usage = (parsed.message as { usage?: { input_tokens?: unknown; cache_read_input_tokens?: unknown; cache_creation_input_tokens?: unknown } } | undefined)?.usage
+          if (typeof usage?.input_tokens === 'number') {
+            const cached = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0
+            const created = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0
+            yield { type: 'usage', inputTokens: usage.input_tokens + cached + created, cachedTokens: cached }
+          }
+        }
         if (eventType === 'content_block_start') {
           const index = typeof parsed.index === 'number' ? parsed.index : 0
           const block = parsed.content_block as { type?: string; id?: string; name?: string } | undefined

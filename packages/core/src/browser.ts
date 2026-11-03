@@ -175,6 +175,11 @@ export type { AddonField, AddonPage } from './addons/page.js'
 export { cleanAddonValues, isShown } from './addons/page.js'
 export type { ScheduleToolInfo, SchedulerStatus } from './agent/protocol.js'
 export type { IndexRenamesMessage, ProjectMessage, ProjectStampEntry, ProjectStampMessage } from './agent/protocol.js'
+export type { ObserversMessage, StrategiesMessage, TeamMessage, TeamReviewView } from './agent/protocol.js'
+export { DEFAULT_LOOP_ROUNDS, strategyOrder, type Strategy, type StrategyEdge, type StrategyExchange, type StrategyGroup, type StrategyNode, type StrategyProgress } from './strategy/strategy.js'
+export type { ObserverPanelState } from './observers/hub.js'
+export type { ObserverStatus } from './observers/process.js'
+export { DEFAULT_AUDITOR_INSTRUCTIONS, DEFAULT_GUARD_INSTRUCTIONS, MAX_INSTRUCTIONS } from './observers/prompts.js'
 export type { PythonStatus } from './python/manager.js'
 
 export {

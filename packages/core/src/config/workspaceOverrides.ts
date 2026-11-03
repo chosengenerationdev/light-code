@@ -51,6 +51,8 @@ export const OVERRIDABLE_KEYS = [
   'project',
   /** Branch folders: one project's setup is pnpm install, another's uv sync. */
   'branches',
+  /** The Auditor and the Anti Hallucinator: watched in one project, not in a scratch one. */
+  'observers',
 ] as const
 
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number]

@@ -24,6 +24,7 @@ class NodeTerminalProcess implements TerminalProcess {
   }
 
   write(data: string): void {
+    if (this.child.stdin !== null && this.child.stdin.listenerCount('error') === 0) this.child.stdin.on('error', () => undefined)
     this.child.stdin?.write(data)
   }
 

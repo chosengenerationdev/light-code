@@ -299,7 +299,28 @@ pub(crate) fn spawn_ticker(proxy: EventLoopProxy<UserEvent>) {
     });
 }
 
+/// Windows' "has stopped working" box for a crashed child (reported as python.exe crash notifications) is turned
+/// off for everything Fire Code starts - the error mode is inherited down to each host's Python and tools. With the
+/// box, a crashed worker stays alive until somebody dismisses it, and the agent waits out its timeout; without it the
+/// crash ends the process at once, and the host reports the crash code and Python's own stack (PYTHONFAULTHANDLER).
+fn quiet_crash_dialogs() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn SetErrorMode(mode: u32) -> u32;
+        }
+        const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+        const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+        // SAFETY: a process-wide flag with no pointers; called once, before any child exists.
+        unsafe {
+            SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        }
+    }
+}
+
 fn main() {
+    quiet_crash_dialogs();
     let paths = Paths::new();
     if system::hand_over_to_running_instance(&paths.root) {
         return;

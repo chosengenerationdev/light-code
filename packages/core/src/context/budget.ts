@@ -39,6 +39,54 @@ export interface TokenBreakdown {
   estimated: boolean
 }
 
+/**
+ * How far off the 4-characters estimate is for one model, learned from what its provider reports.
+ *
+ * Reported from real use: the bar read 175k of 262k and the gateway refused the request as too long. Code, JSON,
+ * paths, logs and non-English text take more tokens per character than English prose, and the OpenAI-compatible
+ * adapter had never asked for the real count - so the bar was the estimate alone, always. Now the provider's count
+ * replaces it after every reply, and the ratio between the two corrects the estimate until the next one: before a
+ * reply, and for the compaction trigger. Kept per provider and model, for the session.
+ */
+const calibrations = new Map<string, number>()
+
+/** Records a request's real size against its estimate. Ratios outside 0.5-4 are taken as noise. */
+export function calibrate(key: string, estimated: number, reported: number): void {
+  if (!(estimated > 0) || !(reported > 0)) return
+  const ratio = reported / estimated
+  if (ratio < 0.5 || ratio > 4) return
+  const previous = calibrations.get(key)
+  // Weighted to the latest, which reflects what the conversation now holds.
+  calibrations.set(key, previous === undefined ? ratio : previous * 0.3 + ratio * 0.7)
+}
+
+export function calibrationFor(key: string): number | undefined {
+  return calibrations.get(key)
+}
+
+/** A breakdown scaled by a calibration ratio: still an estimate, but nearer the real count. */
+export function scaleBreakdown(breakdown: TokenBreakdown, ratio: number | undefined): TokenBreakdown {
+  if (ratio === undefined || ratio === 1) return breakdown
+  const s = (n: number): number => Math.round(n * ratio)
+  return { ...breakdown, system: s(breakdown.system), toolDefinitions: s(breakdown.toolDefinitions), history: s(breakdown.history), results: s(breakdown.results), total: s(breakdown.total) }
+}
+
+/** The prompt size a refusal states ("your prompt contains at least 270123 input tokens", "prompt is too long: 270123 tokens > ..."). */
+export function promptTokensFromError(error: string): number | undefined {
+  const patterns = [
+    /prompt contains (?:at least )?([\d,]+) (?:input )?tokens/i,
+    /prompt is too long:?\s*([\d,]+)\s*tokens/i,
+    /(?:requested|resulted in|have)\s+([\d,]+)\s+tokens?\b[^.]*(?:messages|prompt|input)/i,
+    /input (?:length|tokens?)[^\d]{0,20}([\d,]+)/i,
+  ]
+  for (const pattern of patterns) {
+    const m = pattern.exec(error)
+    const n = m?.[1] !== undefined ? Number(m[1].replace(/,/g, '')) : NaN
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return undefined
+}
+
 export function computeBreakdown(
   messages: readonly ChatMessage[],
   tools: readonly ToolDefinition[],

@@ -71,6 +71,11 @@ export const OFFLOAD_FAMILIES: readonly OffloadFamily[] = [
     matches: named('usage_stats', 'record_user_profile'),
   },
   {
+    label: 'Audit record',
+    about: "the Auditor's record of what agents did - requests, reasoning, tool calls, approvals, results, alerts, notes",
+    matches: named('read_audit_log'),
+  },
+  {
     label: 'Skills and schedules',
     about: 'copy a skill’s template file, delete a skill, schedule a prompt, export the configuration',
     matches: named('use_skill_file', 'delete_skill', 'schedule_prompt', 'light_code_export_config'),

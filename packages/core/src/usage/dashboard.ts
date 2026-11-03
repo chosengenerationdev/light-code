@@ -1,4 +1,4 @@
-import type { UsageEvent } from './events.js'
+import { isTokenEvent, type UsageEvent } from './events.js'
 import { shardSegment, type UsageProfile } from './store.js'
 
 /**
@@ -162,10 +162,97 @@ export interface UsageDashboard {
   inventory: { skills: number; tools: number; authors: number }
   /** How many events the range held, before scope filtering - "0" with a store is worth knowing. */
   eventsInStore: number
+  /** Tokens burned, by person and by model (asked for: "statistics on tokens burned by each team member"). */
+  tokens: TokenStats
+}
+
+export interface TokenCount {
+  input: number
+  output: number
+  cached: number
+  requests: number
+}
+
+export interface TokenStats {
+  total: TokenCount
+  previous: TokenCount
+  /** Requests whose count was estimated because the provider did not report one, 0-1. */
+  estimatedShare: number
+  people: (TokenCount & { user: string; displayName?: string; team?: string; share: number; lastActive: number; spark: number[]; models: string[] })[]
+  models: (TokenCount & { model: string })[]
+  timeline: { start: number; input: number; output: number }[]
 }
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
+
+const zeroTokens = (): TokenCount => ({ input: 0, output: 0, cached: 0, requests: 0 })
+function addTokens(into: TokenCount, event: UsageEvent): void {
+  into.input += event.i ?? 0
+  into.output += event.o ?? 0
+  into.cached += event.c ?? 0
+  into.requests += 1
+}
+
+/** Tokens burned in the range: totals against the period before, by person (with a trend), by model, over time. */
+function tokenStats(
+  events: readonly UsageEvent[],
+  o: { from: number; to: number; previousFrom: number; scope: UsageScope; me: string; starts: number[]; who: (user: string) => { displayName?: string; team?: string } },
+): TokenStats {
+  const inScope = (event: UsageEvent): boolean => o.scope === 'team' || event.u === o.me
+  const current = events.filter((event) => event.t >= o.from && event.t <= o.to && inScope(event))
+  const total = zeroTokens()
+  const previous = zeroTokens()
+  for (const event of events) if (event.t >= o.previousFrom && event.t < o.from && inScope(event)) addTokens(previous, event)
+  const people = new Map<string, TokenCount & { lastActive: number; spark: number[]; models: Set<string> }>()
+  const models = new Map<string, TokenCount>()
+  const timeline = o.starts.map((start) => ({ start, input: 0, output: 0 }))
+  let estimated = 0
+  for (const event of current) {
+    addTokens(total, event)
+    if (event.e === 1) estimated += 1
+    let person = people.get(event.u)
+    if (person === undefined) {
+      person = { ...zeroTokens(), lastActive: 0, spark: new Array<number>(o.starts.length).fill(0), models: new Set() }
+      people.set(event.u, person)
+    }
+    addTokens(person, event)
+    person.lastActive = Math.max(person.lastActive, event.t)
+    person.models.add(event.n)
+    const at = bucketIndex(o.starts, event.t)
+    person.spark[at] = (person.spark[at] ?? 0) + (event.i ?? 0) + (event.o ?? 0)
+    const bucket = timeline[at]
+    if (bucket !== undefined) {
+      bucket.input += event.i ?? 0
+      bucket.output += event.o ?? 0
+    }
+    const model = models.get(event.n) ?? zeroTokens()
+    addTokens(model, event)
+    models.set(event.n, model)
+  }
+  const grand = total.input + total.output
+  return {
+    total,
+    previous,
+    estimatedShare: current.length === 0 ? 0 : estimated / current.length,
+    people: [...people.entries()]
+      .map(([user, p]) => ({
+        user,
+        ...o.who(user),
+        input: p.input,
+        output: p.output,
+        cached: p.cached,
+        requests: p.requests,
+        share: grand === 0 ? 0 : (p.input + p.output) / grand,
+        lastActive: p.lastActive,
+        spark: p.spark,
+        models: [...p.models].sort(),
+      }))
+      .sort((a, b) => b.input + b.output - (a.input + a.output)),
+    models: [...models.entries()].map(([model, m]) => ({ model, ...m })).sort((a, b) => b.input + b.output - (a.input + a.output)),
+    timeline,
+  }
+}
 
 const toolLabel = (name: string): string => (name.startsWith('py__') ? name.slice(4) : name)
 
@@ -251,7 +338,10 @@ function count(events: readonly UsageEvent[]): {
   return { uses: events.length, skillUses, toolUses, failures, people: people.size, skillsUsed: skills.size, toolsUsed: tools.size }
 }
 
-export function computeDashboard(input: DashboardInput): UsageDashboard {
+export function computeDashboard(given: DashboardInput): UsageDashboard {
+  // Token counts are not uses of a skill or tool: counted on their own, and kept out of everything else here.
+  const tokenEvents = given.events.filter(isTokenEvent)
+  const input: DashboardInput = { ...given, events: given.events.filter((event) => !isTokenEvent(event)) }
   const { from, to, scope, me } = input
   // Exact first, then without case: the directory is asked in lower case, labels keep theirs.
   const profileOf = (user: string): UsageProfile | undefined =>
@@ -306,7 +396,7 @@ export function computeDashboard(input: DashboardInput): UsageDashboard {
       const item = installed.get(inventoryKey(event))
       const author = event.a ?? item?.author
       entry = {
-        kind: event.k,
+        kind: event.k === 'skill' ? 'skill' : 'tool',
         name: event.n,
         label: event.k === 'tool' ? toolLabel(event.n) : event.n,
         uses: 0,
@@ -490,6 +580,7 @@ export function computeDashboard(input: DashboardInput): UsageDashboard {
     })
     .sort((a, b) => b.uses - a.uses)
 
+  const tokens = tokenStats(tokenEvents, { from, to, previousFrom, scope, me, starts, who })
   return {
     scope,
     me,
@@ -522,6 +613,7 @@ export function computeDashboard(input: DashboardInput): UsageDashboard {
       authors: new Set(input.inventory.map((item) => item.author).filter((author) => author !== undefined)).size,
     },
     eventsInStore: allInRange.length,
+    tokens,
   }
 }
 

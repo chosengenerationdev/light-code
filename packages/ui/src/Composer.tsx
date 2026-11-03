@@ -198,7 +198,21 @@ function readDraft(): string {
   }
 }
 
+/**
+ * Somewhere outside the page to keep the draft as well (the app sends it to the host): the page's own storage is
+ * tied to its address, which changes when the host restarts on a new port.
+ */
+let draftSink: ((text: string) => void) | undefined
+export function setDraftSink(sink: ((text: string) => void) | undefined): void {
+  draftSink = sink
+}
+/** The page's own copy, for the app deciding whether the host's is needed. */
+export function localDraft(): string {
+  return readDraft()
+}
+
 function keepDraft(text: string): void {
+  draftSink?.(text)
   try {
     if (text.length > 0) window.localStorage.setItem(DRAFT_KEY, text)
     else window.localStorage.removeItem(DRAFT_KEY)

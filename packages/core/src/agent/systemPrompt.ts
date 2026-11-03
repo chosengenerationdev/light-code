@@ -76,6 +76,8 @@ export interface SystemPromptOptions {
   modeGuidance?: string
   /** The plan the user set for this chat. See `agent/plan.ts`. */
   plan?: string
+  /** The strategy this chat follows, already rendered (`strategy/strategy.ts` `describeStrategy`). */
+  strategy?: string
 }
 
 /**
@@ -437,6 +439,8 @@ export function buildSystemPrompt(
    * round. Recency helps too: what is nearest the end is what a model weighs most when deciding
    * its next step, which is exactly the moment drift happens.
    */
+  // The strategy just before the plan: the plan is how the strategy is carried out in this task.
+  if (options.strategy !== undefined && options.strategy.trim().length > 0) lines.push('', options.strategy)
   const plan = buildPlanGuidance(options.plan)
   if (plan.length > 0) lines.push('', plan)
 

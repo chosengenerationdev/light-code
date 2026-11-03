@@ -61,7 +61,7 @@ describe('reading conditions', () => {
 
 describe('AutoSys tools', () => {
   it('signs in with the username and password as HTTP Basic', async () => {
-    const { calls, client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name==LIGHTCODE_PROBE_NO_SUCH_JOB*': { json: [] } })
+    const { calls, client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name=@LIGHTCODE_PROBE_NO_SUCH_JOB*': { json: [] } })
     await (await client()).probe('jsmith')
     expect(calls[0]?.options.headers?.['Authorization']).toBe(`Basic ${Buffer.from('jsmith:secret').toString('base64')}`)
   })
@@ -80,7 +80,7 @@ describe('AutoSys tools', () => {
 
   it('lists only failed jobs when asked', async () => {
     const { client } = fakeAutosys({
-      'GET /AEWS/job-run-info?filter=name==PAY_*': { json: [{ name: 'PAY_A', status: 'SUCCESS' }, { name: 'PAY_B', status: 'FAILURE', exitCode: 2 }] },
+      'GET /AEWS/job-run-info?filter=name=@PAY_*': { json: [{ name: 'PAY_A', status: 'SUCCESS' }, { name: 'PAY_B', status: 'FAILURE', exitCode: 2 }] },
     })
     const result = await createAutosysStatusTool({ client, defaultPattern: 'PAY_*' }).execute({ only: 'FAILURE' }, NONE)
     expect(result.content).toContain('PAY_B: FAILURE')
@@ -116,7 +116,7 @@ describe('AutoSys tools', () => {
   it('finds the jobs that wait on this one', async () => {
     const { client } = fakeAutosys({
       'GET /AEWS/job/PAY_LOAD': { json: { name: 'PAY_LOAD', jobType: 'CMD' } },
-      'GET /AEWS/job?filter=name==PAY_*': {
+      'GET /AEWS/job?filter=name=@PAY_*': {
         json: [
           { name: 'PAY_REPORT', condition: 's(PAY_LOAD) & d(PAY_AUDIT)' },
           { name: 'PAY_OTHER', condition: 's(PAY_LOADER)' },
@@ -174,7 +174,7 @@ describe('AutoSys tools', () => {
   it('reports many jobs at once — names and patterns together — counted by status, failures first', async () => {
     const { client } = fakeAutosys({
       'GET /AEWS/job-run-info/PAY_LOAD': run('PAY_LOAD', 'SUCCESS'),
-      'GET /AEWS/job-run-info?filter=name==GL_*': {
+      'GET /AEWS/job-run-info?filter=name=@GL_*': {
         json: [
           { name: 'GL_A', status: 'SUCCESS' },
           { name: 'GL_B', status: 'FAILURE', exitCode: 3 },
@@ -194,7 +194,7 @@ describe('AutoSys tools', () => {
 
   it('reads every job a pattern matches, only the attributes asked for, each with its status', async () => {
     const { client } = fakeAutosys({
-      'GET /AEWS/job?filter=name==PAY_*': {
+      'GET /AEWS/job?filter=name=@PAY_*': {
         json: [
           { name: 'PAY_A', command: '/bin/a.sh', machine: 'host1', owner: 'ops', startTimes: '02:00' },
           { name: 'PAY_B', command: '/bin/b.sh', machine: 'host2', owner: 'ops' },

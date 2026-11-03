@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, createPrivateKey, randomBytes, randomUUID } from 'node:crypto'
 import { ApigeeMtlsAuthStrategy } from '../providers/auth/apigeeMtls.js'
 import { AUTOSYS_BASIC_VALUE_REF, AUTOSYS_CLIENT_SECRET_REF, AUTOSYS_PASSPHRASE_REF, gatewayFromSettings, gatewayView, withBasicCredentials, withHeader } from '../atlassian/autosysGateway.js'
 import type { AddonView, AutosysGatewaySecret, AutosysGatewaySettings, DeleteEverywherePlan, TeamRepoRetire, TeamRepoSettings, TeamRepoStatus, TeamSkillState } from '../agent/protocol.js'
@@ -56,7 +56,7 @@ import {
   type ShareSectionId,
 } from '../config/share.js'
 import os from 'node:os'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   droppedFilesRoot as droppedFilesRootDir,
@@ -107,7 +107,8 @@ import {
   type RolePromptAccess,
 } from '../tools/roleTools.js'
 import { buildAgentBriefing } from '../agents/briefing.js'
-import { runConsultation, toolsForConsultation } from '../agents/consult.js'
+import { CONSULT_MAX_STEPS, runConsultation, runConsultTool, toolsForConsultation } from '../agents/consult.js'
+import { toAnthropicTools, toGeminiTools, toOpenAITools } from '../providers/schema.js'
 import { toToolDefinitions } from '../tools/registry.js'
 import {
   allRoles,
@@ -152,7 +153,8 @@ import { createMonitorCheckToolTool, createMonitorControlTool, createMonitorHist
 import { toolsForAccess } from '../atlassian/readOnly.js'
 import { isSafeSegment, isSafeTagName } from '../atlassian/bitbucket.js'
 import { copySetupFiles, currentBranchOf, listWorktrees, mainCheckoutOf, setupMarkerFor } from '../git/worktrees.js'
-import { checkCoverage, releaseFromRecord, repoFilesOf, syncTeamRepo, TEAM_REPO_STATE_FILE, tombstoneInRepo, type TeamRepoFiles } from '../teamrepo/sync.js'
+import { checkCoverage, releaseFromRecord, repoFilesOf, repoPathFor, syncTeamRepo, TEAM_REPO_STATE_FILE, tombstoneInRepo, type TeamRepoFiles } from '../teamrepo/sync.js'
+import { gitFileHistory, type FileHistory } from '../sharing/provenance.js'
 import type { Problem } from '../usage/dashboard.js'
 import { renderTrace, tracingHttpClient, type TraceEntry } from '../platform/httpTrace.js'
 import { createJiraProjectTool, createJiraReadIssueTool, createJiraSearchTool, createJiraWriteIssueTool, JiraClient } from '../atlassian/jira.js'
@@ -221,7 +223,7 @@ import {
   readAttribution,
   type Attribution,
 } from '../sharing/attribution.js'
-import { identityConfigSchema, projectConfigSchema } from '../config/schema.js'
+import { identityConfigSchema, observersConfigSchema, projectConfigSchema } from '../config/schema.js'
 import { isTranscriptMessage } from './backgroundMessages.js'
 import {
   ConfigManager,
@@ -258,6 +260,7 @@ import {
   type CodeGenerator,
   createAskExpertTool,
   createAskAgentTool,
+  createAskAgentsTool,
   createRecallExpertTool,
   type ExpertConsultationRecord,
   createSearchOpensearchTool,
@@ -455,6 +458,18 @@ import { createUsageStatsTool, type UsageData } from '../usage/statsTool.js'
 import { RECORD_USER_PROFILE, createRecordUserProfileTool, userInfoSkillCandidates, userInfoToolCandidates, userProfileGuidance } from '../usage/profileTool.js'
 import { lookupDirectory, profileFromPerson, type DirectoryPerson } from '../usage/directory.js'
 import { runFastFs } from '../tools/fastFs.js'
+import { AuditIndex, auditIndexName } from '../observers/auditIndex.js'
+import { isObserverNote, noteForAgent, previewText } from '../observers/events.js'
+import { ObserverHub, type ObserverSettings } from '../observers/hub.js'
+import { newSessionId, pruneAudit, workspaceAuditFolder } from '../observers/journal.js'
+import { ObserverAgent, type ObserverModelSpec, type ObserverRole, type ObserverStatus } from '../observers/process.js'
+import { auditorPrompt, guardPrompt } from '../observers/prompts.js'
+import { createReadAuditTool } from '../observers/tool.js'
+import { RoleProcess } from '../agents/roleProcess.js'
+import { afterConsult, beforeConsult, describeStrategy, exchangeOf, MAX_EXCHANGES, strategyProblems, strategySchema, type Strategy, type StrategyExchange, type StrategyProgress } from '../strategy/strategy.js'
+import { createStrategyHistoryTool } from '../strategy/historyTool.js'
+import { mayDecide, mayEditAdmins, normaliseUserId, parseUserIds, reviewNeeded, teamIndexName, TeamStore, windowsUserId, type AdminList, type TeamKind, type TeamReview } from '../team/admins.js'
+import type { SkillToolContext } from '../skills/tools.js'
 import type { UsageConfig, UsageStoreConfig } from '../config/schema.js'
 
 /**
@@ -642,12 +657,27 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * helper lacks would only fail. Until the answer arrives every tool is offered.
    */
   let fastFsOps: ReadonlySet<string> | undefined
-  if (services.fastFs !== undefined) {
-    void fastFsCapabilities(services.fastFs).then((answer) => {
-      fastFsOps = answer?.ops ?? new Set()
-      logger.info(`Rust helper ${services.fastFs ?? ''}: ${answer === undefined ? 'did not answer; its tools are off' : `version ${answer.version ?? 'unknown'}, ${String(answer.ops.size)} operations`}`)
-    })
-  }
+  // The same answer as a promise, for what must wait for it rather than assume (the observers' `watch`).
+  const fastFsAnswered: Promise<ReadonlySet<string> | undefined> =
+    services.fastFs === undefined
+      ? Promise.resolve(undefined)
+      : fastFsCapabilities(services.fastFs).then((answer) => {
+          fastFsOps = answer?.ops ?? new Set()
+          logger.info(`Rust helper ${services.fastFs ?? ''}: ${answer === undefined ? 'did not answer; its tools are off' : `version ${answer.version ?? 'unknown'}, ${String(answer.ops.size)} operations`}`)
+          return fastFsOps
+        })
+  /*
+   * The Auditor's record, for `read_audit_log` (`observers/tool.ts`). Up here, before anything can build a tool
+   * registry; whether it is offered is settled by `applyObserverSettings` on the first settings load.
+   */
+  let observerIndex: AuditIndex | undefined
+  let auditRecordExists = false
+  const readAuditTool = createReadAuditTool({
+    storageDir,
+    workspace: workspaceRoot,
+    workspaceId: workspaceRoot !== undefined ? workspaceAuditFolder(workspaceRoot) : undefined,
+    index: () => observerIndex,
+  })
   // Given the open project, so per-project settings apply to every read without each call site
   // having to remember — one owner, as with every default in this file.
   const configManager = new ConfigManager(services.configStore, projectRoot)
@@ -880,6 +910,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             services.submitForReview?.({ kind: 'python-tool', ...request }) ?? Promise.resolve(''),
         }
       : {}),
+    // A tool somebody else owns goes to them for approval (team admins, `team/admins.ts`).
+    teamReview: teamReviewFor('tool'),
     /*
      * A resolver, not a generator: the tool's *parameters* change shape depending on whether one
      * is configured — specification versus source — so the answer is needed when the tool list is
@@ -3177,6 +3209,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // The user's own skills, right after the save folder: theirs win a name over anything shared.
     if (personalSkillsDir !== undefined) extraSkillDirs.unshift(personalSkillsDir)
 
+    // Starts, stops or restarts the Auditor and the Anti Hallucinator to match; nothing when unchanged.
+    void applyObserverSettings(config).catch((error: unknown) => logger.warn(`observers: ${error instanceof Error ? error.message : String(error)}`))
+    // The team index, so a write to somebody else's skill or tool is checked from the first turn.
+    void resolveTeamStore(config).then((store) => (teamStore = store))
     return config
   }
 
@@ -3335,6 +3371,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     exportsSource: boolean
     picksFiles: boolean
     savesFiles: boolean
+    strategyInEditor: boolean
     hostModels: boolean
     workspaceBranch?: string
     branchFolderOf?: string
@@ -3350,6 +3387,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       exportsSource: services.sourceArchive !== undefined,
       picksFiles: ui.pickContextFiles !== undefined,
       savesFiles: ui.savesFiles === true,
+      // The Strategy window opens as an editor tab where the host has one (VS Code).
+      strategyInEditor: ui.openStrategyWindow !== undefined,
       /*
        * Whether this host has a theme of its own to follow.
        *
@@ -3672,6 +3711,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Advertised, not dispatch-only: "which skills do we use most" does not look like a reason to go searching
     // for a tool. With a documentation index it is offloaded like any family (tools/offload.ts).
     if (usageCollecting()) combined.register(usageStatsTool)
+    // The Auditor's record, for analysis later - wherever there is one, whether or not it is still recording.
+    if (auditRecordExists) combined.register(readAuditTool)
     // Fire Code's parallel file tools, where the host ships the helper.
     if (services.fastFs !== undefined) {
       for (const tool of createFastFsTools(services.fastFs, fastFsOps, { readResult: (handle) => truncationStore.read(handle, 0, Number.MAX_SAFE_INTEGER) }))
@@ -3788,6 +3829,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
                 Promise.resolve(''),
             }
           : {}),
+        // A skill somebody else owns goes to them for approval (team admins, `team/admins.ts`).
+        teamReview: teamReviewFor('skill'),
       }
       /*
        * Published back to the bucket when skills are kept in one.
@@ -4184,7 +4227,16 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           consult: async (agent, request) => consultAgent(agent, request),
         }) as unknown as Tool<never>,
       )
+      // Several at once - a strategy's parallel box - each specialist in its own process.
+      combined.register(
+        createAskAgentsTool({
+          agents: () => cachedTeam,
+          onAdvice: (record) => expertAdvice.push(record),
+          consult: async (agent, request) => consultAgent(agent, request),
+        }) as unknown as Tool<never>,
+      )
     }
+    if (activeStrategy !== undefined) combined.register(strategyHistoryTool as unknown as Tool<never>)
 
     // Registered only when the CLI is actually runnable, so the model is never told about
     // a tool that would fail — the same rule mode filtering follows.
@@ -4669,6 +4721,585 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     return strategy
   }
 
+  // ─── The Auditor and the Anti Hallucinator (Settings → Project; `observers/`) ───────────────────
+
+  /**
+   * Their own strategies, by profile, not the chat's one-slot cache: an observer on another profile must
+   * not throw away the chat's Apigee token on every call, nor the chat throw away the observer's.
+   */
+  const observerAuth = new Map<string, { key: string; strategy: AuthStrategy }>()
+  function observerStrategy(config: LightCodeConfig, profile: ProviderProfile): AuthStrategy {
+    const key = `${profile.baseUrl}|${JSON.stringify(profile.auth)}|${JSON.stringify(profile.tls ?? {})}|${config.certDir ?? ''}|${JSON.stringify(config.tls ?? {})}`
+    const cached = observerAuth.get(profile.id)
+    if (cached !== undefined && cached.key === key) return cached.strategy
+    const strategy = createAuthStrategy(profile.auth, buildAuthContext(config, profile))
+    observerAuth.set(profile.id, { key, strategy })
+    return strategy
+  }
+
+  /**
+   * The TLS material for the Rust process, from the strategy - so from `resolveConnectionTls`, the one
+   * resolver (§10). As PEM text: rustls takes no PFX and no encrypted key, so an encrypted key is decrypted
+   * here with its passphrase, and a PFX is left out with a reason.
+   */
+  async function observerTls(strategy: AuthStrategy): Promise<{ tls?: ObserverModelSpec['tls']; warning?: string }> {
+    const tls = await strategy.tls?.()
+    if (tls === undefined) return {}
+    const out: NonNullable<ObserverModelSpec['tls']> = {}
+    if (tls.ca !== undefined) out.ca = tls.ca.map((pem) => pem.toString('utf8'))
+    if (tls.rejectUnauthorized === false) out.rejectUnauthorized = false
+    let warning: string | undefined
+    if (tls.cert !== undefined && tls.key !== undefined) {
+      out.cert = tls.cert.toString('utf8')
+      const key = createPrivateKey(tls.passphrase !== undefined ? { key: tls.key, passphrase: tls.passphrase } : { key: tls.key })
+      out.key = key.export({ type: 'pkcs8', format: 'pem' }).toString()
+    } else if (tls.pfx !== undefined) {
+      warning = 'The client certificate is a .pfx, which the observer process cannot present; it connects without one. If the gateway requires it, use a PEM certificate and key.'
+    }
+    return { tls: out, ...(warning !== undefined ? { warning } : {}) }
+  }
+
+  async function resolveAuditIndex(config: LightCodeConfig): Promise<AuditIndex | undefined> {
+    const auditor = config.observers?.auditor
+    if (auditor?.enabled !== true || auditor.opensearch === false) return undefined
+    const stores = config.vectorStores ?? {}
+    const active = config.activeVectorStoreId !== undefined && stores[config.activeVectorStoreId]?.kind === 'opensearch' ? config.activeVectorStoreId : undefined
+    const id = auditor.storeId ?? active ?? Object.keys(stores).find((key) => stores[key]?.kind === 'opensearch')
+    const store = id !== undefined ? stores[id] : undefined
+    if (id === undefined || store === undefined || store.kind !== 'opensearch') return undefined
+    const name = auditIndexName(cachedAttribution.author ?? os.userInfo().username)
+    if (observerIndex !== undefined && observerIndex.index === name) return observerIndex
+    try {
+      return new AuditIndex(httpClient, await vectorStoreConnectionFor(store, id), name)
+    } catch (error) {
+      logger.warn(`audit index: ${error instanceof Error ? error.message : String(error)}`)
+      return undefined
+    }
+  }
+
+  async function startObserver(
+    role: ObserverRole,
+    hooks: { onResult: (reply: unknown, raw: string) => void; onStatus: (status: ObserverStatus) => void },
+  ): Promise<ObserverAgent | { problem: string }> {
+    const config = (await configManager.load()).config
+    const settings = role === 'auditor' ? config.observers?.auditor : config.observers?.antiHallucination
+    const name = role === 'auditor' ? 'The Auditor' : 'The Anti Hallucinator'
+    if (settings?.profileId === undefined) {
+      return { problem: role === 'auditor' ? 'Recording only: choose a model for the Auditor to have each step reviewed and judged as well.' : 'Choose a model for the Anti Hallucinator.' }
+    }
+    const profile = (config.profiles ?? []).find((p) => p.id === settings.profileId)
+    if (profile === undefined) return { problem: `${name}'s provider profile no longer exists. Choose another.` }
+    if (profile.wireFormat === 'vscode-lm') return { problem: `${name} runs in its own process and cannot use GitHub Copilot through VS Code. Choose a profile that talks OpenAI, Anthropic or Gemini.` }
+    const exe = services.fastFs
+    const ops = await fastFsAnswered
+    if (exe === undefined || ops === undefined || !ops.has('watch')) {
+      return {
+        problem: `${name} runs on the Rust helper (fire-fs ${exe === undefined ? 'is not available in this host' : 'here is older than this build and has no "watch"'}). It ships with Fire Code and the Windows VS Code extension, and the Node host uses Fire Code's when it is installed.`,
+      }
+    }
+    const strategy = observerStrategy(config, profile)
+    let tls: Awaited<ReturnType<typeof observerTls>>
+    try {
+      tls = await observerTls(strategy)
+    } catch (error) {
+      return { problem: `${name} could not load the profile's certificates: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    if (tls.warning !== undefined) logger.warn(`${name}: ${tls.warning}`)
+    const capabilities = withReportedWindow(resolveModelCapabilities(profile.model, profile.modelCapabilities), await reportedWindowFor(config, profile), profile.modelCapabilities)
+    const context = { workspace: workspaceRoot ?? '(no folder)', project: projectName(config, workspaceRoot) ?? 'unnamed', user: cachedAttribution.author ?? os.userInfo().username }
+    return new ObserverAgent({
+      exe,
+      role,
+      system: role === 'auditor' ? auditorPrompt({ ...context, instructions: settings.prompt }) : guardPrompt({ ...context, instructions: settings.prompt }),
+      window: capabilities.contextWindow,
+      model: {
+        wire: profile.wireFormat,
+        baseUrl: profile.baseUrl,
+        model: profile.model,
+        ...(profile.maxTokens !== undefined ? { maxTokens: profile.maxTokens } : {}),
+        ...(profile.headers !== undefined ? { headers: profile.headers } : {}),
+        ...(tls.tls !== undefined ? { tls: tls.tls } : {}),
+      },
+      async resolveAuth(force) {
+        if (force) await strategy.onUnauthorized?.()
+        return strategy.resolveHeaders()
+      },
+      onResult: hooks.onResult,
+      onStatus: hooks.onStatus,
+      log: (message) => logger.info(message),
+    })
+  }
+
+  let observersPostTimer: ReturnType<typeof setTimeout> | undefined
+  const observerHub = new ObserverHub({
+    storageDir,
+    workspace: workspaceRoot ?? storageDir,
+    workspaceId: workspaceAuditFolder(workspaceRoot ?? storageDir),
+    session: newSessionId(),
+    user: () => cachedAttribution.author ?? os.userInfo().username,
+    project: () => cachedAttribution.project ?? 'unnamed',
+    task: () => activeTaskId,
+    secretValues: () => cachedSecretValues,
+    riskyRules: () => cachedRiskyCommands,
+    /*
+     * The second caller of `desktopNotify` after the `notify` tool, asked for in these words: "if in firecode, it
+     * can notify with windows notification". A warning toast where there is no desktop notification.
+     */
+    notify: (message) => (services.desktopNotify !== undefined ? services.desktopNotify({ message, level: 'warning' }) : ui.showWarning(message)),
+    log: (message) => logger.warn(message),
+    changed: () => {
+      if (observersPostTimer !== undefined) return
+      observersPostTimer = setTimeout(() => {
+        observersPostTimer = undefined
+        void postObservers()
+      }, 300)
+      observersPostTimer.unref?.()
+    },
+    index: () => observerIndex,
+    startAgent: startObserver,
+  })
+
+  let observerKey = ''
+  let observerModelKey = ''
+  let auditPruned = false
+  /** Brings the observers in line with the settings. Cheap when nothing changed; called on every settings load. */
+  async function applyObserverSettings(given?: LightCodeConfig): Promise<void> {
+    const config = given ?? (await configManager.load()).config
+    const o = config.observers ?? {}
+    const settings: ObserverSettings = {
+      auditor: { enabled: o.auditor?.enabled === true, recordReasoning: o.auditor?.recordReasoning !== false, notify: o.auditor?.notify !== false },
+      guard: { enabled: o.antiHallucination?.enabled === true },
+    }
+    observerIndex = await resolveAuditIndex(config)
+    const profileOf = (id: string | undefined): unknown => (config.profiles ?? []).find((p) => p.id === id)
+    // The prompts too: an edited one takes effect by starting the process afresh with it.
+    const modelKey = JSON.stringify([profileOf(o.auditor?.profileId), profileOf(o.antiHallucination?.profileId), config.tls ?? null, config.certDir ?? null, o.auditor?.prompt ?? '', o.antiHallucination?.prompt ?? ''])
+    const key = `${JSON.stringify(settings)}|${modelKey}`
+    if (key === observerKey) return
+    const restart = observerKey !== '' && modelKey !== observerModelKey
+    observerKey = key
+    observerModelKey = modelKey
+    await observerHub.configure(settings)
+    if (restart) await observerHub.restart()
+    auditRecordExists = settings.auditor.enabled || existsSync(observerHub.journalFolder)
+    if (settings.auditor.enabled && !auditPruned) {
+      auditPruned = true
+      void pruneAudit(storageDir, o.auditor?.retentionDays ?? 90).then((n) => {
+        if (n > 0) logger.info(`audit journal: removed ${String(n)} day file(s) past retention`)
+      })
+    }
+  }
+
+  async function postObservers(): Promise<void> {
+    const config = (await configManager.load()).config
+    const ops = await fastFsAnswered
+    post({
+      type: 'observers',
+      hasWorkspace: workspaceRoot !== undefined,
+      config: config.observers ?? {},
+      state: observerHub.panel(observerIndex?.index),
+      profiles: (config.profiles ?? []).map((p) => ({ id: p.id, label: p.label, model: p.model, usable: p.wireFormat !== 'vscode-lm' })),
+      helper: services.fastFs !== undefined && ops !== undefined && ops.has('watch'),
+      opensearch: Object.values(config.vectorStores ?? {}).some((store) => store.kind === 'opensearch'),
+    })
+  }
+
+  async function handleSaveObservers(input: unknown): Promise<void> {
+    const parsed = observersConfigSchema.safeParse(input)
+    if (!parsed.success) {
+      post({ type: 'observersError', message: `Not saved: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}` })
+      return
+    }
+    const value = Object.keys(parsed.data).length > 0 ? parsed.data : undefined
+    // Per project, under the Project tab: watching one project is not watching all of them.
+    if (workspaceRoot !== undefined) await configManager.saveForWorkspace({ observers: value })
+    else await configManager.save('user', { observers: value } as LightCodeConfig)
+    await applyObserverSettings()
+    await postObservers()
+  }
+
+  /** The newest journal file, in the editor where there is one; otherwise the panel already shows the folder. */
+  async function handleOpenAuditFolder(): Promise<void> {
+    const folder = observerHub.journalFolder
+    const names = (await fs.readdir(folder).catch(() => [] as string[])).filter((name) => name.endsWith('.jsonl')).sort()
+    const newest = names.at(-1)
+    if (newest === undefined) {
+      ui.showInfo(`Nothing recorded yet. The journal will be in ${folder}`)
+      return
+    }
+    if (ui.openFile !== undefined) await ui.openFile(path.join(folder, newest))
+    else ui.showInfo(`The audit journal is in ${folder} (newest: ${newest}).`)
+  }
+
+  // ─── Team admins and owners' approval (Settings → Project, Settings → Team reviews; `team/admins.ts`) ───
+
+  /** The Windows user id - never a name typed in settings - for admins, owners and who changed what. */
+  const teamMe = windowsUserId()
+  let teamStore: TeamStore | undefined
+  let teamStoreProblem: string | undefined
+  let teamAdminsCache: { list: AdminList | undefined; at: number } | undefined
+
+  /** The team's index on the active OpenSearch connection (else the first one), named after the project. */
+  async function resolveTeamStore(config: LightCodeConfig): Promise<TeamStore | undefined> {
+    const stores = config.vectorStores ?? {}
+    const active = config.activeVectorStoreId !== undefined && stores[config.activeVectorStoreId]?.kind === 'opensearch' ? config.activeVectorStoreId : undefined
+    const id = active ?? Object.keys(stores).find((key) => stores[key]?.kind === 'opensearch')
+    const store = id !== undefined ? stores[id] : undefined
+    if (id === undefined || store === undefined || store.kind !== 'opensearch') {
+      teamStoreProblem = 'Team admins and reviews are kept in OpenSearch: connect one in Settings → Search first.'
+      return undefined
+    }
+    const index = teamIndexName(projectSlug(projectName(config, workspaceRoot)))
+    if (teamStore !== undefined && teamStore.index === index) return teamStore
+    try {
+      teamStoreProblem = undefined
+      teamAdminsCache = undefined
+      return new TeamStore(httpClient, await vectorStoreConnectionFor(store, id), index)
+    } catch (error) {
+      teamStoreProblem = error instanceof Error ? error.message : String(error)
+      return undefined
+    }
+  }
+
+  /** The admin list, at most a minute old: it decides every write to a shared skill or tool. */
+  async function teamAdminList(fresh = false): Promise<AdminList | undefined> {
+    const store = teamStore
+    if (store === undefined) return undefined
+    if (!fresh && teamAdminsCache !== undefined && Date.now() - teamAdminsCache.at < 60_000) return teamAdminsCache.list
+    const list = await store.admins()
+    teamAdminsCache = { list, at: Date.now() }
+    return list
+  }
+
+  /** Where a skill or tool of this name is loaded from here, if anywhere. */
+  function teamItemFile(kind: TeamKind, name: string): string | undefined {
+    if (kind === 'skill') {
+      const found = skills.find((skill) => skill.name === name)
+      return found !== undefined && !isPersonalSkill(found) ? found.filePath : undefined
+    }
+    return python.findTool(name)?.filePath
+  }
+
+  /**
+   * The hook the write tools call (`teamReview`): undefined - write as before - unless the team has admins and
+   * somebody else owns this name. An owner not yet recorded is taken from the file's author label, once.
+   */
+  function teamReviewFor(kind: TeamKind): NonNullable<SkillToolContext['teamReview']> {
+    return {
+      needed: async (name) => {
+        const store = teamStore
+        if (store === undefined) return undefined
+        const admins = await teamAdminList()
+        if (admins === undefined || admins.ids.length === 0) return undefined
+        const file = teamItemFile(kind, name)
+        const existing = file !== undefined ? await fs.readFile(file, 'utf8').catch(() => '') : ''
+        let owner = await store.owner(kind, name)
+        if (owner === undefined && existing.length > 0) {
+          const author = readAttribution(kind, existing).author
+          if (author !== undefined) owner = await store.registerOwner(kind, name, author)
+        }
+        if (owner === undefined && existing.length === 0) return undefined
+        if (!reviewNeeded(admins, owner, teamMe)) return undefined
+        return { owner: owner ?? 'a team admin', existing }
+      },
+      submit: async (request) => {
+        const store = teamStore
+        if (store === undefined) throw new Error('The team index is not reachable, so the change could not be sent for review. Nothing was written.')
+        const owner = request.owner === 'a team admin' ? '' : request.owner
+        await store.submit({ kind, name: request.name, owner, by: teamMe, content: request.content, existingContent: request.existingContent })
+        void postTeam()
+        return (
+          `Not saved: "${request.name}" belongs to ${request.owner}, so the change was sent to them (or a team admin) for approval. ` +
+          'Nobody uses it - you included - until it is approved; then it reaches everyone at their next sync. Tell the user this; do not try to write it another way.'
+        )
+      },
+      saved: async (name) => {
+        // A new skill or tool, or the owner's own: the first save records who owns it, once.
+        if (teamStore === undefined || (await teamAdminList()) === undefined) return
+        await teamStore.registerOwner(kind, name, teamMe).catch((error: unknown) => logger.warn(`team: could not record the owner of ${name}: ${String(error)}`))
+      },
+    }
+  }
+
+  /**
+   * Publishes an approved change where the team keeps it: a bucket folder (uploaded), the team repository
+   * (committed), or the project folder - through the same paths a save takes, so colleagues get it on their sync.
+   */
+  async function publishTeamChange(review: TeamReview): Promise<{ ok: boolean; message: string }> {
+    const file = teamItemFile(review.kind, review.name)
+    if (file === undefined) return { ok: false, message: `"${review.name}" is not loaded here any more, so there is nothing to update. Reject it, or restore it first.` }
+    if (review.kind === 'skill') {
+      const shared = await writeTeamMonitorSkill(file, review.content)
+      if (shared.ok || !shared.message.includes('is not in a bucket folder')) return shared
+      await writeFileAtomically(file, review.content)
+      scheduleTeamRepoPush()
+      await refreshSkills()
+      return { ok: true, message: `Saved in ${file}; it reaches colleagues through this project's own sharing.` }
+    }
+    const enabled = cachedToolMirrors.filter((each) => each.enabled === true)
+    const index = mirroredToolsDirs.findIndex((dir) => samePath(path.dirname(file), dir))
+    try {
+      await writeFileAtomically(file, review.content)
+      const mirror = index >= 0 ? enabled[index] : undefined
+      if (mirror !== undefined) {
+        const target = targetById(cachedS3, mirror.connectionId)
+        if (target === undefined || target.readOnly === true) return { ok: false, message: `${target?.label ?? mirror.connectionId} is read-only here, so the approved tool cannot be published from this computer.` }
+        await uploadToS3({ target, ...(mirror.prefix !== undefined ? { prefix: mirror.prefix } : {}), relative: path.basename(file), contents: Buffer.from(review.content, 'utf8') })
+        return { ok: true, message: `Uploaded to the bucket ${target.label}; colleagues get it at their next sync and approve its code once, as for any tool.` }
+      }
+      scheduleTeamRepoPush()
+      return { ok: true, message: `Saved in ${file}; colleagues get it through the team's sharing and approve its code once, as for any tool.` }
+    } finally {
+      await python.refresh().catch(() => undefined)
+    }
+  }
+
+  async function postTeam(): Promise<void> {
+    const config = (await configManager.load()).config
+    teamStore = await resolveTeamStore(config)
+    const base = { type: 'team' as const, me: teamMe, hasWorkspace: workspaceRoot !== undefined }
+    if (teamStore === undefined) {
+      post({ ...base, available: false, problem: teamStoreProblem ?? 'Not available.', canEditAdmins: false, isAdmin: false, reviews: [], showTab: false })
+      return
+    }
+    try {
+      const admins = await teamAdminList(true)
+      const isAdmin = admins?.ids.includes(teamMe) ?? false
+      const all = await teamStore.reviews()
+      // An admin sees every review; anyone else what they own or sent.
+      const mine = all.filter((r) => isAdmin || normaliseUserId(r.owner) === teamMe || r.by === teamMe)
+      post({
+        ...base,
+        available: true,
+        index: teamStore.index,
+        ...(admins !== undefined ? { admins: { ids: admins.ids, by: admins.by, at: admins.at } } : {}),
+        canEditAdmins: mayEditAdmins(admins, teamMe),
+        isAdmin,
+        reviews: mine.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          name: r.name,
+          owner: r.owner,
+          by: r.by,
+          at: r.at,
+          status: r.status,
+          content: r.content,
+          existingContent: r.existingContent,
+          canDecide: r.status === 'pending' && mayDecide(r, admins, teamMe),
+          ...(r.decidedBy !== undefined ? { decidedBy: r.decidedBy } : {}),
+          ...(r.decidedAt !== undefined ? { decidedAt: r.decidedAt } : {}),
+          ...(r.reason !== undefined ? { reason: r.reason } : {}),
+        })),
+        showTab: isAdmin || mine.some((r) => r.status === 'pending' && mayDecide(r, admins, teamMe)),
+      })
+    } catch (error) {
+      post({ ...base, available: false, problem: error instanceof Error ? error.message : String(error), canEditAdmins: false, isAdmin: false, reviews: [], showTab: false })
+    }
+  }
+
+  async function handleSaveTeamAdmins(text: string): Promise<void> {
+    if (teamStore === undefined) await postTeam()
+    const store = teamStore
+    if (store === undefined) {
+      post({ type: 'teamResult', ok: false, message: teamStoreProblem ?? 'The team index is not reachable.' })
+      return
+    }
+    const ids = parseUserIds(text)
+    if (ids.length === 0) {
+      post({ type: 'teamResult', ok: false, message: 'Name at least one Windows user id.' })
+      return
+    }
+    const current = await teamAdminList(true)
+    // Checked here as well as in the panel: the panel greying a field is not what stops a non-admin.
+    if (!mayEditAdmins(current, teamMe)) {
+      post({ type: 'teamResult', ok: false, message: `Only an admin (${current?.ids.join(', ') ?? ''}) can change the team's admins.` })
+      return
+    }
+    const result = await store.saveAdmins(ids, teamMe, current)
+    teamAdminsCache = { list: result.list, at: Date.now() }
+    post({ type: 'teamResult', ok: result.saved, message: result.message })
+    await postTeam()
+  }
+
+  async function handleDecideTeamReview(id: string, decision: 'approved' | 'rejected', reason: string | undefined): Promise<void> {
+    const store = teamStore
+    if (store === undefined) return
+    const admins = await teamAdminList(true)
+    const review = (await store.reviews()).find((r) => r.id === id)
+    if (review === undefined || review.status !== 'pending') {
+      post({ type: 'teamResult', ok: false, message: 'That change was already decided.' })
+      await postTeam()
+      return
+    }
+    if (!mayDecide(review, admins, teamMe)) {
+      post({ type: 'teamResult', ok: false, message: `Only ${review.owner || 'its owner'} or a team admin can decide on "${review.name}".` })
+      return
+    }
+    // Claimed first, so two approvers cannot both publish it; put back if publishing fails.
+    if (!(await store.decide(review, decision, teamMe, reason))) {
+      post({ type: 'teamResult', ok: false, message: 'Somebody decided on that change a moment ago.' })
+      await postTeam()
+      return
+    }
+    if (decision === 'approved') {
+      const published = await publishTeamChange(review)
+      if (!published.ok) {
+        const reread = (await store.reviews()).find((r) => r.id === id)
+        if (reread !== undefined) await store.decide({ ...reread }, 'rejected', teamMe, `Approved, but could not be published: ${published.message}`).catch(() => false)
+        post({ type: 'teamResult', ok: false, message: `Approved, but not published: ${published.message} It is marked as not published; the author can send it again.` })
+        await postTeam()
+        return
+      }
+      post({ type: 'teamResult', ok: true, message: `Approved "${review.name}" from ${review.by}. ${published.message}` })
+    } else {
+      post({ type: 'teamResult', ok: true, message: `Rejected the change to "${review.name}" from ${review.by}.` })
+    }
+    await postTeam()
+  }
+
+  // ─── Strategies (Agent team mode's Strategy window) and the specialists' own processes ───────────────
+
+  /** The strategy this chat follows, saved with the chat like its plan. */
+  let activeStrategy: Strategy | undefined
+  /** For the main agent to explain the strategy's progress from the record (`strategy/historyTool.ts`). */
+  const strategyHistoryTool = createStrategyHistoryTool({
+    current: () => ({ strategy: activeStrategy, progress: strategyProgress, exchanges: strategyExchanges }),
+    roleName: (role) => roleInfo(role, cachedAgentDefinitions).name,
+  })
+  /** Where each back-and-forth stands in this chat. */
+  let strategyProgress: StrategyProgress = {}
+  /** Who was consulted last, so a return to the worker from the judge is recognised as the next round. */
+  let strategyLastRole: string | undefined
+  /** The roles being consulted right now - several at once in a parallel box - for the window's "running" steps. */
+  const strategyRunning = new Set<string>()
+  /** Every consultation under the strategy in this chat (`StrategyExchange`), saved with it. */
+  let strategyExchanges: StrategyExchange[] = []
+  /** Approvals asked by specialists, one at a time: parallel ones would otherwise replace each other on screen. */
+  let agentApprovalQueue: Promise<unknown> = Promise.resolve()
+
+  /**
+   * One process per specialist, for the chat: its context lives there for as long as the chat does. A new or
+   * restored chat stops them all - a specialist that remembered another conversation would be a context leaking
+   * between chats. Replaced, with its key points carried over, when its model, instructions or tools change.
+   */
+  const roleProcesses = new Map<string, { key: string; process: RoleProcess }>()
+
+  async function roleProcessFor(
+    agent: ResolvedAgent,
+    profile: ProviderProfile,
+    config: LightCodeConfig,
+    exe: string,
+    system: string,
+    tools: readonly Tool[],
+  ): Promise<RoleProcess> {
+    const definitions = toToolDefinitions([...tools])
+    const key = JSON.stringify([profile.id, profile.baseUrl, profile.model, profile.maxTokens ?? null, createHash('sha256').update(system).digest('hex'), definitions.map((d) => d.name)])
+    const existing = roleProcesses.get(agent.role)
+    if (existing !== undefined && existing.key === key) return existing.process
+    const strategy = observerStrategy(config, profile)
+    const tls = await observerTls(strategy)
+    if (tls.warning !== undefined) logger.warn(`${agent.label}: ${tls.warning}`)
+    const capabilities = withReportedWindow(resolveModelCapabilities(profile.model, profile.modelCapabilities), await reportedWindowFor(config, profile), profile.modelCapabilities)
+    const wire = profile.wireFormat === 'anthropic' ? 'anthropic' : profile.wireFormat === 'gemini' ? 'gemini' : 'openai'
+    const process = new RoleProcess({
+      exe,
+      role: agent.role,
+      system,
+      window: capabilities.contextWindow,
+      model: {
+        wire,
+        baseUrl: profile.baseUrl,
+        model: profile.model,
+        ...(profile.maxTokens !== undefined ? { maxTokens: profile.maxTokens } : {}),
+        ...(profile.headers !== undefined ? { headers: profile.headers } : {}),
+        ...(tls.tls !== undefined ? { tls: tls.tls } : {}),
+      },
+      tools: definitions.length === 0 ? [] : wire === 'anthropic' ? toAnthropicTools(definitions) : wire === 'gemini' ? toGeminiTools(definitions) : toOpenAITools(definitions),
+      async resolveAuth(force) {
+        if (force) await strategy.onUnauthorized?.()
+        return strategy.resolveHeaders()
+      },
+      log: (message) => logger.info(message),
+    })
+    if (existing !== undefined) {
+      // The same specialist with new tools or instructions: it carries on from what it knew.
+      process.keyPoints = existing.process.keyPoints
+      existing.process.stop()
+    }
+    roleProcesses.set(agent.role, { key, process })
+    return process
+  }
+
+  function stopRoleProcesses(): void {
+    for (const { process } of roleProcesses.values()) process.stop()
+    roleProcesses.clear()
+  }
+
+  /** The library as stored, plus what this chat uses, with the roles a node can be. */
+  async function postStrategies(): Promise<void> {
+    const config = (await configManager.load()).config
+    const roles = knownRoles(cachedAgentDefinitions)
+    const assigned = new Set(cachedTeam.filter((agent) => agent.available).map((agent) => agent.role))
+    post({
+      type: 'strategies',
+      library: config.strategies ?? [],
+      ...(activeStrategy !== undefined ? { active: activeStrategy } : {}),
+      progress: strategyProgress,
+      // Which part is being carried out: the role working now, else the one that answered last.
+      ...(strategyLastRole !== undefined
+        ? { current: { role: strategyLastRole, running: strategyRunning.has(strategyLastRole) } }
+        : {}),
+      runningRoles: [...strategyRunning],
+      exchanges: strategyExchanges,
+      problems: activeStrategy !== undefined ? strategyProblems(activeStrategy, new Set(roles), assigned) : [],
+      roles: roles.map((role) => {
+        const info = roleInfo(role, cachedAgentDefinitions)
+        const agent = cachedTeam.find((each) => each.role === role)
+        return {
+          id: role,
+          name: info.name,
+          summary: info.summary,
+          assigned: assigned.has(role),
+          ...(agent !== undefined ? { label: agent.label } : {}),
+          ...(agent !== undefined && agent.kind === 'profile' ? { ownProcess: true } : {}),
+        }
+      }),
+      processes: [...roleProcesses.values()].map(({ process }) => ({ ...process.status })),
+    })
+  }
+
+  /** Saves a strategy into the library (replacing one with its id) and, when asked, uses it in this chat. */
+  async function handleSaveStrategy(input: unknown, use: boolean): Promise<void> {
+    const parsed = strategySchema.safeParse(input)
+    if (!parsed.success) {
+      post({ type: 'strategyResult', ok: false, message: `Not saved: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}` })
+      return
+    }
+    const strategy = { ...parsed.data, updatedAt: Date.now() }
+    const config = (await configManager.load()).config
+    const library = [...(config.strategies ?? []).filter((each) => each.id !== strategy.id), strategy].sort((a, b) => a.name.localeCompare(b.name))
+    await configManager.save('user', { strategies: library.slice(0, 100) } as LightCodeConfig)
+    if (use) await useStrategy(strategy)
+    post({ type: 'strategyResult', ok: true, message: use ? `Saved "${strategy.name}" and using it in this chat.` : `Saved "${strategy.name}".` })
+    await postStrategies()
+  }
+
+  async function handleDeleteStrategy(id: string): Promise<void> {
+    const config = (await configManager.load()).config
+    await configManager.save('user', { strategies: (config.strategies ?? []).filter((each) => each.id !== id) } as LightCodeConfig)
+    await postStrategies()
+  }
+
+  /** Puts a strategy to use in this chat (or none), starting its loops afresh, and saves the chat at once. */
+  async function useStrategy(strategy: Strategy | undefined): Promise<void> {
+    activeStrategy = strategy
+    strategyProgress = {}
+    strategyExchanges = []
+    strategyLastRole = undefined
+    await persistActiveTask()
+    await postStrategies()
+  }
+
   /**
    * Assembles what core needs to build an auth strategy. Kept in one place so the chat
    * turn, the model list, and Test Connection all authenticate identically — a divergence
@@ -4744,6 +5375,40 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /*
+   * Saved during a turn, not only at its end (reported: the agent crashed and "my recent investigation conversations
+   * are gone" - an investigation is one long turn, and everything since the last message was in memory only). At
+   * most every 3 seconds, one save at a time; the end-of-turn save still runs and has the last word.
+   */
+  let persistTimer: ReturnType<typeof setTimeout> | undefined
+  let persisting: Promise<void> = Promise.resolve()
+  function persistSoon(): void {
+    if (persistTimer !== undefined) return
+    persistTimer = setTimeout(() => {
+      persistTimer = undefined
+      persisting = persisting.then(() => persistActiveTask()).catch(() => undefined)
+    }, 3000)
+    persistTimer.unref?.()
+  }
+
+  /** Where this workspace's half-typed message is kept (per chat in Fire Code, whose chats have their own storage). */
+  function composerDraftFile(): string {
+    const id = createHash('sha256').update((workspaceRoot ?? '').toLowerCase()).digest('hex').slice(0, 16)
+    return path.join(storageDir, 'drafts', `${id}.txt`)
+  }
+  let draftWrites: Promise<void> = Promise.resolve()
+  function saveComposerDraft(text: string): Promise<void> {
+    const kept = text.slice(0, 200_000)
+    draftWrites = draftWrites
+      .then(() => (kept.length === 0 ? fs.rm(composerDraftFile(), { force: true }) : writeFileAtomically(composerDraftFile(), kept)))
+      .catch((error: unknown) => logger.warn('could not keep the draft', String(error)))
+    return draftWrites
+  }
+  async function readComposerDraft(): Promise<string> {
+    await draftWrites
+    return fs.readFile(composerDraftFile(), 'utf8').catch(() => '')
+  }
+
   /** Writes the current conversation. Called after every turn, not only at the end. */
   async function persistActiveTask(): Promise<void> {
     if (workspaceRoot === undefined || conversation.isEmpty()) return
@@ -4765,6 +5430,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       resultHandles: truncationStore.spilledHandles(),
       ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
       ...(Object.keys(activePlanProgress).length > 0 ? { planProgress: activePlanProgress } : {}),
+      // The strategy this chat follows and where its loops stand, restored with it like the plan.
+      ...(activeStrategy !== undefined ? { strategy: activeStrategy, strategyProgress, strategyExchanges } : {}),
     }
 
     try {
@@ -4827,11 +5494,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // Pruned on the way in as well as on the way out: a task saved before a plan was edited by
     // hand in the config file could otherwise restore progress for steps that no longer exist.
     activePlanProgress = pruneProgress(activePlan, task.planProgress)
+    // Its strategy too; the specialists' processes belong to the chat they were in, so they start afresh.
+    activeStrategy = task.strategy
+    strategyProgress = task.strategyProgress ?? {}
+    strategyExchanges = task.strategyExchanges ?? []
+    strategyLastRole = undefined
+    stopRoleProcesses()
     await setActiveTaskId(task.id)
 
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
     post({ type: 'plan', plan: activePlan ?? '' })
     postPlanProgress()
+    void postStrategies()
     await postTasks()
   }
 
@@ -4851,11 +5525,18 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     // constrain work nobody had scoped yet.
     activePlan = undefined
     activePlanProgress = {}
+    // A new chat starts with no strategy (one is chosen from the library) and fresh specialists.
+    activeStrategy = undefined
+    strategyProgress = {}
+    strategyExchanges = []
+    strategyLastRole = undefined
+    stopRoleProcesses()
     await setActiveTaskId(undefined)
 
     post({ type: 'taskRestored', taskId: undefined, entries: [] })
     post({ type: 'plan', plan: '' })
     postPlanProgress()
+    void postStrategies()
     await postTasks()
   }
 
@@ -4940,7 +5621,12 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       if (note.trim().length === 0) throw new Error('The model replied with nothing, so there is no handoff to start from.')
 
       progress('starting')
+      // The same work continues in the new chat, so its strategy and what passed under it come too.
+      const carried = { strategy: activeStrategy, progress: strategyProgress, exchanges: strategyExchanges }
       await startNewTask()
+      activeStrategy = carried.strategy
+      strategyProgress = carried.progress
+      strategyExchanges = carried.exchanges
       conversation.addUserMessage(composeHandoff(note, facts, previousTitle))
       await persistActiveTask()
       post({ type: 'taskRestored', taskId: activeTaskId, entries: toTranscript(conversation.toArray()) })
@@ -4981,6 +5667,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     truncationStore.startTask(task.resultHandles)
     post({ type: 'taskRestored', taskId: task.id, entries: toTranscript(task.messages) })
   }
+
+  /** The running turn's end report for the observers, so the `finally` and `catch` reach it. */
+  let observeTurnEnd: ((ending: 'done' | 'question' | 'error' | 'cancelled', error?: string) => void) | undefined
 
   async function handleSendMessage(
     text: string,
@@ -5157,6 +5846,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         codebaseInstructions,
         // Last in the prompt, and the most specific thing in it — see `agent/plan.ts`.
         ...(activePlan !== undefined && activePlan.trim().length > 0 ? { plan: activePlan } : {}),
+        /*
+         * The user's strategy, in every mode. It was Agent team only, so with a strategy set and the mode on Auto the
+         * agent was never told of it - reported as "why chat agent doesnt know about the strategy that is setup".
+         * A strategy in use belongs to the chat, like its plan; specialists are consulted in any mode.
+         */
+        ...(activeStrategy !== undefined
+          ? { strategy: describeStrategy(activeStrategy, (role) => roleInfo(role, cachedAgentDefinitions).name) }
+          : {}),
         // Only when a pool actually exists: telling the model about a tool it has not been given
         // is how it comes to report that it looked somewhere it could not reach.
         teamSkillsAvailable: 'options' in teamSkillsResolved,
@@ -5349,9 +6046,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         userText: () =>
           conversation
             .toArray()
-            .filter((message) => message.role === 'user' && !message.content.startsWith('[Images returned by ') && message.content !== CONTINUE_PROMPT)
+            .filter((message) => message.role === 'user' && !message.content.startsWith('[Images returned by ') && message.content !== CONTINUE_PROMPT && !isObserverNote(message.content))
             .map((message) => message.content)
             .join('\n'),
+        lastUserText: () =>
+          conversation
+            .toArray()
+            .filter((message) => message.role === 'user' && !message.content.startsWith('[Images returned by ') && message.content !== CONTINUE_PROMPT && !isObserverNote(message.content))
+            .at(-1)?.content ?? '',
         signal: activeAbortController.signal,
         /*
           * Supplied by the host, not imported by core: the binary is platform-specific and
@@ -5417,6 +6119,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         contextWindow: capabilities.contextWindow,
         // A guessed window must not drive compaction - see `contextWindowKnown`.
         contextWindowKnown: capabilities.contextWindowKnown !== false,
+        // The provider's real token counts correct the estimate for this model (`context/budget.ts`).
+        usageKey: `${profile.baseUrl}|${profile.model}`,
         // So images a tool returns (a Confluence page's pictures) reach a model that can see them.
         supportsVision: capabilities.supportsVision,
         // CLAUDE.md §5 has called this configurable since Phase 0; until now it was not.
@@ -5603,6 +6307,28 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         scheduleToolAccess = (name) => granted.has(name)
       }
 
+      /*
+       * What the Auditor and the Anti Hallucinator see of this turn (`observers/`), from the loop's own
+       * callbacks. Reasoning and text are reported when a step closes - at its tool call, or at the end -
+       * because that is when they are whole. Exactly one turnEnd, whichever way the turn finishes.
+       */
+      let observedEnd = false
+      const observeStep = (): void => {
+        if (cumulativeReasoning.trim().length > 0) observerHub.event({ kind: 'reasoning', at: Date.now(), text: cumulativeReasoning })
+        if (cumulativeText.trim().length > 0) observerHub.event({ kind: 'assistant', at: Date.now(), text: cumulativeText })
+      }
+      const observeEnd = (ending: 'done' | 'question' | 'error' | 'cancelled', error?: string): void => {
+        if (observedEnd) return
+        observedEnd = true
+        observerHub.event({ kind: 'turnEnd', at: Date.now(), ending, ...(error !== undefined ? { error } : {}) })
+      }
+      observeTurnEnd = observeEnd
+      observerHub.event({ kind: 'turnStart', at: Date.now(), text: messageText, mode: activeMode.name, model: profile.model })
+      turnOptions.drainObserverNotes = () => {
+        const notes = observerHub.takeNotes()
+        return notes.length > 0 ? noteForAgent(notes) : undefined
+      }
+
       await runAgentTurn(
         provider,
         conversation,
@@ -5612,8 +6338,11 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         {
           onContextUpdate: (breakdown, supersededCount, compactedCount) => {
             post({ type: 'contextUsage', usage: { ...breakdown, supersededCount, compactedCount } })
+            // Before every request - so just after your message and after each tool result: saved as it goes.
+            persistSoon()
           },
           onCompacted: (summarisedCount) => post({ type: 'compacted', summarisedCount }),
+          onUsage: (counted) => recordTokens(profile.model, counted),
           onContextWindowLearned: (tokens) => {
             if (profile.modelCapabilities?.contextWindow !== undefined) return
             reportedWindows.set(`${profile.baseUrl}|${profile.model}`, tokens)
@@ -5663,6 +6392,9 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           },
           onToolCall: (toolCall) => {
             noteToolStarted(toolCall)
+            // Before the reset below: the step's reasoning and text are whole now.
+            observeStep()
+            observerHub.event({ kind: 'toolCall', at: Date.now(), tool: toolCall.name, args: toolCall.arguments })
             textBeforeControlTool = CONTROL_TOOLS.has(toolCall.name) ? cumulativeText : ''
             // Each tool call starts a fresh assistant text block in the transcript.
             cumulativeText = ''
@@ -5711,6 +6443,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           },
           onToolResult: (toolCall, result) => {
             recordUsage(toolCall, result)
+            observerHub.event({ kind: 'toolResult', at: Date.now(), tool: toolCall.name, ok: result.isError !== true, text: result.content })
+            persistSoon()
             // The control tools aren't work being done — they're the model addressing the
             // user. Their content is the answer, so render it as a message rather than
             // something the user has to expand a collapsed block to read.
@@ -5774,17 +6508,39 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             taskCheckpoint = checkpoint
             post({ type: 'checkpointAvailable' })
           },
+          onApproval: (toolCall, info) => {
+            observerHub.event({
+              kind: 'approval',
+              at: Date.now(),
+              tool: info.toolName,
+              decision: info.decision === 'approve' ? 'approved' : 'denied',
+              preview: previewText(info.preview),
+              ...(info.preview.kind === 'diff' && info.preview.outsideWorkspace === true ? { outsideWorkspace: true } : {}),
+            })
+            void toolCall
+          },
+          onToolRefused: (toolCall, reason) => observerHub.event({ kind: 'refused', at: Date.now(), tool: toolCall.name, reason }),
+          onObserverNote: (text) => post({ type: 'observerNote', text }),
           onDone: (ending) => {
+            observeStep()
+            observeEnd(ending === 'question' ? 'question' : 'done')
             userTurnWindingDown = true
             post({ type: 'done', ...(ending === 'question' ? { awaitingAnswer: true } : {}) })
           },
-          onError: (message) => post({ type: 'error', message }),
+          onError: (message) => {
+            observeTurnEnd?.('error', message)
+            post({ type: 'error', message })
+          },
         },
         turnOptions,
       )
     } catch (error) {
+      observeTurnEnd?.('error', error instanceof Error ? error.message : String(error))
       post({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     } finally {
+      // A turn that ended by being stopped reports no done and no error; the observers still hear it ended.
+      observeTurnEnd?.(activeAbortController?.signal.aborted === true ? 'cancelled' : 'done')
+      observeTurnEnd = undefined
       // Never leave the loop parked on an approval that can no longer be answered.
       userGate.denyAll()
       settleAllForms()
@@ -8818,6 +9574,8 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           }
           return { ok: true, data: { synced } }
         }
+        case 'history':
+          return { ok: true, data: (await fileHistory(request.file)) ?? null }
         case 'skill': {
           const done = request.op === 'write' ? await writeTeamMonitorSkill(request.file, request.content ?? '') : await deleteEverywhere(await planDeleteEverywhere('skill', request.name))
           return done.ok ? { ok: true, data: done.message } : { ok: false, error: done.message }
@@ -9407,6 +10165,36 @@ export function wireChatBridge(services: HostServices): ChatBridge {
     }
   }
 
+  /**
+   * Who changed a skill or tool, from its history: the team repository's commits when it is kept there, else
+   * the git checkout it sits in (`sharing/provenance.ts`). The file is matched to the repository by its path
+   * inside whichever skills or tools folder holds it - the same path the team sync commits it under.
+   */
+  async function fileHistory(file: string): Promise<FileHistory | undefined> {
+    const config = await loadSettings()
+    const plan = teamRepoPlan(config)
+    if (!('reason' in plan)) {
+      const norm = (value: string): string => (process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value))
+      const folders: [string, 'skills' | 'tools'][] = [
+        ...[plan.dirs.skills, plan.own.skills, ...skillSearchPath()].map((dir): [string, 'skills'] => [dir, 'skills']),
+        ...[plan.dirs.tools, plan.own.tools, ...python.toolDirectories()].map((dir): [string, 'tools'] => [dir, 'tools']),
+      ]
+      const holder = folders.find(([dir]) => norm(file).startsWith(norm(dir) + path.sep))
+      if (holder !== undefined) {
+        const relative = path.relative(path.resolve(holder[0]), path.resolve(file)).split(path.sep).join('/')
+        const where = repoPathFor(plan.settings.folder, holder[1], relative)
+        try {
+          const client = await bitbucketClient()
+          const commits = await client.fileCommits({ project: plan.settings.project, repo: plan.settings.repo }, where, plan.settings.branch)
+          if (commits.length > 0) return { source: 'bitbucket', commits, where: `${plan.settings.project}/${plan.settings.repo} ${where}` }
+        } catch (error) {
+          logger.warn('reading a file history from the team repository failed', error instanceof Error ? error.message : String(error))
+        }
+      }
+    }
+    return gitFileHistory(file)
+  }
+
   // ---- "Delete everywhere" (asked for: "a force delete skill or tool even from repo or s3 bucket") ----
 
   /**
@@ -9492,6 +10280,14 @@ export function wireChatBridge(services: HostServices): ChatBridge {
   async function deleteEverywhere(requested: DeleteEverywherePlan): Promise<{ ok: boolean; message: string }> {
     const { kind, name } = requested
     if (requested.error !== undefined) return { ok: false, message: requested.error }
+    // Deleting somebody else's skill or tool for the whole team is theirs or an admin's to do (team admins).
+    if (teamStore !== undefined) {
+      const admins = await teamAdminList(true).catch(() => undefined)
+      const owner = await teamStore.owner(kind === 'skill' ? 'skill' : 'tool', name).catch(() => undefined)
+      if (admins !== undefined && admins.ids.length > 0 && owner !== undefined && reviewNeeded(admins, owner, teamMe)) {
+        return { ok: false, message: `"${name}" belongs to ${owner}: only they or a team admin (${admins.ids.join(', ')}) can delete it everywhere.` }
+      }
+    }
     let answer: { ok: boolean; message: string } = { ok: false, message: 'Nothing was done.' }
     const done = (ok: boolean, message: string): void => {
       answer = { ok, message }
@@ -12216,6 +13012,30 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       .catch((error: unknown) => logger.warn(`usage: could not record: ${String(error)}`))
   }
 
+  /**
+   * One request's tokens, for the usage dashboard's "tokens by person" (asked for). Counts and the model only -
+   * never the prompt or the reply.
+   */
+  function recordTokens(model: string, counted: { inputTokens: number; outputTokens: number; cachedTokens?: number; estimated: boolean }): void {
+    if (!usageCollecting()) return
+    const project = cachedAttribution.project
+    const event: UsageEvent = {
+      t: Date.now(),
+      u: cachedAttribution.author ?? 'unknown',
+      ...(project !== undefined ? { p: project } : {}),
+      k: 'tokens',
+      n: model,
+      i: Math.max(0, Math.round(counted.inputTokens)),
+      o: Math.max(0, Math.round(counted.outputTokens)),
+      ...(counted.cachedTokens !== undefined && counted.cachedTokens > 0 ? { c: Math.round(counted.cachedTokens) } : {}),
+      ...(counted.estimated ? { e: 1 as const } : {}),
+    }
+    void usageLog
+      .append(event)
+      .then(() => scheduleUsagePush())
+      .catch((error: unknown) => logger.warn(`usage: could not record tokens: ${String(error)}`))
+  }
+
   /** A minute after the last event, so a busy turn sends one batch rather than one per call. */
   function scheduleUsagePush(): void {
     if (usagePushTimer !== undefined) clearTimeout(usagePushTimer)
@@ -13707,7 +14527,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * holds the open project's values, and saving those globally would leak them too — and an
        * imported one is written to this project's own settings.
        */
-      const { project: importedProject } = merged
+      const { project: importedProject, observers: importedObservers } = merged
       /*
        * Only the chosen sections are written. `existing` is the *merged* view — global settings with
        * this project's own values and the repository's settings file laid over them — so saving all
@@ -13716,7 +14536,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        */
       const patch: Record<string, unknown> = {}
       for (const section of SHARE_SECTIONS) {
-        if (!chosen.includes(section.id) || section.id === 'project') continue
+        if (!chosen.includes(section.id) || section.id === 'project' || section.id === 'observers') continue
         for (const key of section.keys) patch[key] = key === 'profiles' && merged.profiles !== undefined ? reconciled : merged[key]
         // A nested section writes its whole block back; `applyImport` changed only its path inside it.
         for (const path of section.nested ?? []) {
@@ -13731,6 +14551,15 @@ export function wireChatBridge(services: HostServices): ChatBridge {
         } else {
           await configManager.saveForWorkspace({ project: importedProject ?? undefined })
           await postProject()
+        }
+      }
+      // Per project for the same reason, and never globally: auditing one project is not auditing all.
+      if (chosen.includes('observers')) {
+        if (workspaceRoot === undefined) {
+          ui.showWarning('The Auditor and Anti Hallucinator settings were not imported: no folder is open to apply them to.')
+        } else {
+          await configManager.saveForWorkspace({ observers: importedObservers ?? undefined })
+          await applyObserverSettings()
         }
       }
       await postProfiles()
@@ -13853,10 +14682,60 @@ export function wireChatBridge(services: HostServices): ChatBridge {
    * or a gateway. Folding that into one function is what keeps it true — two assemblies would
    * drift, and the symptom would be a role subtly better on one backend than the other.
    */
+  /**
+   * A consultation, under the chat's strategy when one is set (`strategy/strategy.ts`): a round past a loop's
+   * maximum is refused, the judging role is told the condition and asked for its verdict, a read-only step gets no
+   * tool that changes anything, and the answer comes back with where the loop stands - counted from consultations
+   * that actually ran here, never from what the agent says.
+   */
   async function consultAgent(
     agent: ResolvedAgent,
-    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined },
+    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined; parallel?: boolean | undefined },
   ): Promise<{ advice: string; label: string }> {
+    const strategy = activeStrategy
+    if (strategy === undefined) return consultAgentNow(agent, request, false)
+    const name = (role: string): string => roleInfo(role, cachedAgentDefinitions).name
+    const planned = beforeConsult(strategy, strategyProgress, strategyLastRole, agent.role, name)
+    if (planned.refuse !== undefined) {
+      recordExchange({ at: Date.now(), role: agent.role, question: request.question.slice(0, 4_000), answer: '', refused: planned.refuse })
+      throw new Error(planned.refuse)
+    }
+    const question = planned.addToPrompt.length > 0 ? `${request.question}\n\n${planned.addToPrompt}` : request.question
+    // Shown as running in the Strategy window and on its button while it works.
+    strategyRunning.add(agent.role)
+    strategyLastRole = agent.role
+    void postStrategies()
+    let answer: { advice: string; label: string }
+    try {
+      answer = await consultAgentNow(agent, { ...request, question }, planned.readOnly)
+    } finally {
+      strategyRunning.delete(agent.role)
+    }
+    const before = strategyProgress
+    const recorded = afterConsult(strategy, strategyProgress, agent.role, answer.advice, name)
+    strategyProgress = recorded.progress
+    // What the main agent asked, not the strategy's notes to the specialist: those are the specialist's instructions,
+    // and through `strategy_history` they would reach the main agent's context.
+    recordExchange(exchangeOf(agent.role, request.question, answer.advice, before, recorded.progress, request.parallel === true))
+    strategyLastRole = agent.role
+    persistSoon()
+    void postStrategies()
+    return recorded.note !== undefined ? { ...answer, advice: `${answer.advice}\n\n${recorded.note}` } : answer
+  }
+
+  function recordExchange(exchange: StrategyExchange): void {
+    strategyExchanges = [...strategyExchanges, exchange].slice(-MAX_EXCHANGES)
+    persistSoon()
+    void postStrategies()
+  }
+
+  async function consultAgentNow(
+    resolved: ResolvedAgent,
+    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined },
+    readOnly: boolean,
+  ): Promise<{ advice: string; label: string }> {
+    // A read-only step of the strategy: nothing that changes anything, whatever the role may do elsewhere.
+    const agent: ResolvedAgent = readOnly ? { ...resolved, canWrite: false } : resolved
     const prompt = buildAgentPrompt({
       prompt: agent.prompt,
       question: request.question,
@@ -14007,22 +14886,74 @@ export function wireChatBridge(services: HostServices): ChatBridge {
      * installing a macro is authorising a capability rather than making a change, and §13 wants a
      * human reading the source in a context less hurried than mid-consultation.
      */
-    const extraTools = new Set<string>(agent.role === 'librarian' ? ['write_skill'] : [])
+    const extraTools = new Set<string>(agent.role === 'librarian' && !readOnly ? ['write_skill'] : [])
     if (agent.canWrite) {
       extraTools.add('write_to_file')
       extraTools.add('apply_diff')
       extraTools.add('write_skill')
     }
 
-    const readOnly = agent.usesTools
+    const allowedTools = agent.usesTools
       ? toolsForConsultation(agentBriefingTools?.() ?? [], extraTools)
       : []
     const context = consultationContext?.()
+    const approveForAgent = async (tool: Tool, args: unknown): Promise<boolean> => {
+      // One prompt at a time: specialists working in parallel would otherwise replace each other's on screen.
+      const turn = agentApprovalQueue.then(() => askForAgent(tool, args))
+      agentApprovalQueue = turn.catch(() => undefined)
+      return turn
+    }
+    const askForAgent = async (tool: Tool, args: unknown): Promise<boolean> => {
+      const preview = await tool
+        .preview?.(args as never, context ?? ({} as ToolExecutionContext))
+        .catch(() => undefined)
+      const decision = await approvalGate.requestApproval({
+        id: `agent-${agent.role}-${String(Date.now())}-${tool.name}`,
+        toolName: tool.name,
+        group: tool.group,
+        preview: preview ?? { kind: 'text', text: `The ${agent.role} wants to run ${tool.name}.` },
+        // Said on the prompt: the user is being asked by a specialist, not by the agent they are talking to.
+        requestedBy: agent.label,
+      })
+      return decision === 'approve'
+    }
+
+    /*
+     * Its own process and its own context, where the Rust helper can run one (`fire-fs agent`, `roleProcess.ts`).
+     * Asked for: each specialist with "its own rust process and its own context", handing off by itself near the
+     * limit, and the main agent's context holding none of it. The in-process consultation below remains for a
+     * host without the helper.
+     */
+    const exe = services.fastFs
+    if (exe !== undefined && seatProfile.wireFormat !== 'vscode-lm' && (await fastFsAnswered)?.has('agent') === true) {
+      const system = buildAgentPrompt({
+        prompt: agent.prompt,
+        question: '',
+        usesTools: agent.usesTools,
+        canWrite: agent.canWrite,
+        briefing: buildAgentBriefing({ tools: agentBriefingTools?.() ?? [], skills, team: cachedTeam, self: agent.role }),
+      })
+      const question = prompt.startsWith(system) ? prompt.slice(system.length).trimStart() : prompt
+      const process = await roleProcessFor(agent, seatProfile, config, exe, system, context === undefined ? [] : allowedTools)
+      const byName = new Map(allowedTools.map((tool) => [tool.name, tool]))
+      const answer = await process.consult({
+        prompt: question,
+        maxSteps: CONSULT_MAX_STEPS,
+        tools: context !== undefined && allowedTools.length > 0,
+        runTool: (name, argumentsText) =>
+          runConsultTool(name, argumentsText, byName, { approve: approveForAgent, context: context ?? ({} as ToolExecutionContext) }),
+        onStep: (name) => logger.info(`${agent.role} looked up ${name}`),
+        signal: request.signal,
+      })
+      if (answer.truncated) logger.info(`${agent.role} reached its lookup limit and answered with what it had`)
+      return { advice: answer.text, label: agent.label }
+    }
+
     const result = await runConsultation({
       provider,
       prompt,
-      tools: readOnly,
-      definitions: context === undefined ? [] : toToolDefinitions(readOnly),
+      tools: allowedTools,
+      definitions: context === undefined ? [] : toToolDefinitions(allowedTools),
       // With no context there is nothing to read *with*, so it answers from the question alone
       // rather than being offered tools that would fail.
       context: context ?? ({} as ToolExecutionContext),
@@ -14031,21 +14962,7 @@ export function wireChatBridge(services: HostServices): ChatBridge {
        * indistinguishable from one raised by the assistant — same prompt, same ground truth, same
        * always-ask rule. A second approval path would be a second place for the rule to be wrong.
        */
-      approve: async (tool, args) => {
-        const preview = await tool
-          .preview?.(args as never, context ?? ({} as ToolExecutionContext))
-          .catch(() => undefined)
-        const decision = await approvalGate.requestApproval({
-          id: `agent-${agent.role}-${String(Date.now())}-${tool.name}`,
-          toolName: tool.name,
-          group: tool.group,
-          preview: preview ?? {
-            kind: 'text',
-            text: `The ${agent.role} wants to run ${tool.name}.`,
-          },
-        })
-        return decision === 'approve'
-      },
+      approve: approveForAgent,
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
       onStep: (name) => logger.info(`${agent.role} looked up ${name}`),
     })
@@ -14705,6 +15622,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
           userTurnWindingDown = false
         }
       })()
+    } else if (message.type === 'saveComposerDraft') {
+      void saveComposerDraft(message.text)
+    } else if (message.type === 'requestComposerDraft') {
+      void readComposerDraft().then((text) => post({ type: 'composerDraft', text }))
     } else if (message.type === 'compactConversation') {
       reportFailure('handleCompactConversation', handleCompactConversation())
     } else if (message.type === 'pickContextFiles') {
@@ -14963,6 +15884,46 @@ export function wireChatBridge(services: HostServices): ChatBridge {
       reportFailure('handleTestSearchConnection', handleTestSearchConnection(message.connection))
     } else if (message.type === 'requestProject') {
       reportFailure('postProject', postProject())
+    } else if (message.type === 'openStrategyWindow') {
+      reportFailure('openStrategyWindow', ui.openStrategyWindow?.() ?? Promise.resolve())
+    } else if (message.type === 'askInChat') {
+      // From the Strategy tab: the question goes into the chat's message box, and the chat comes to the front.
+      post({ type: 'prefillComposer', text: message.text })
+      void ui.revealPanel()
+    } else if (message.type === 'requestStrategies') {
+      reportFailure('postStrategies', postStrategies())
+    } else if (message.type === 'saveStrategy') {
+      handleSaveStrategy(message.strategy, message.use === true).catch((error: unknown) =>
+        post({ type: 'strategyResult', ok: false, message: error instanceof Error ? error.message : String(error) }),
+      )
+    } else if (message.type === 'deleteStrategy') {
+      reportFailure('deleteStrategy', handleDeleteStrategy(message.id))
+    } else if (message.type === 'useStrategy') {
+      reportFailure(
+        'useStrategy',
+        (async () => {
+          const config = (await configManager.load()).config
+          await useStrategy(message.id === undefined ? undefined : (config.strategies ?? []).find((each) => each.id === message.id))
+        })(),
+      )
+    } else if (message.type === 'requestTeam') {
+      reportFailure('postTeam', postTeam())
+    } else if (message.type === 'saveTeamAdmins') {
+      handleSaveTeamAdmins(message.ids).catch((error: unknown) => post({ type: 'teamResult', ok: false, message: error instanceof Error ? error.message : String(error) }))
+    } else if (message.type === 'decideTeamReview') {
+      handleDecideTeamReview(message.id, message.decision, message.reason).catch((error: unknown) =>
+        post({ type: 'teamResult', ok: false, message: error instanceof Error ? error.message : String(error) }),
+      )
+    } else if (message.type === 'requestObservers') {
+      reportFailure('postObservers', postObservers())
+    } else if (message.type === 'saveObservers') {
+      handleSaveObservers(message.observers).catch((error: unknown) =>
+        post({ type: 'observersError', message: error instanceof Error ? error.message : String(error) }),
+      )
+    } else if (message.type === 'restartObservers') {
+      reportFailure('restartObservers', observerHub.restart().then(() => postObservers()))
+    } else if (message.type === 'openAuditFolder') {
+      reportFailure('openAuditFolder', handleOpenAuditFolder())
     } else if (message.type === 'saveProjectNaming') {
       reportFailure(
         'handleSaveProjectNaming',
@@ -15672,6 +16633,10 @@ export function wireChatBridge(services: HostServices): ChatBridge {
             ...(diagram.note === undefined ? [] : ['', diagram.note]),
           ].join('\n'),
         )
+      } else if (entry.kind === 'observerNote') {
+        lines.push(`## Anti Hallucinator (sent to the agent, not from the user)
+
+${entry.content}`)
       } else {
         const call = entry.toolCall
         lines.push(
@@ -16117,6 +17082,17 @@ ${contents}
       messages: conversation.toArray(),
       taskId: activeTaskId,
       createdAt: activeTaskCreatedAt,
+      /*
+       * The chat's plan and strategy, which `startNewTask` below clears. They were not put back afterwards, so every
+       * scheduled run silently took them off the user's chat - found while answering "why chat agent doesnt know
+       * about the strategy that is setup".
+       */
+      plan: activePlan,
+      planProgress: activePlanProgress,
+      strategy: activeStrategy,
+      strategyProgress,
+      strategyExchanges,
+      strategyLastRole,
       handles: truncationStore.spilledHandles(),
       readFiles: [...readFiles],
       checkpoint: taskCheckpoint,
@@ -16165,12 +17141,21 @@ ${contents}
        */
       conversation.restore(saved.messages)
       activeTaskCreatedAt = saved.createdAt
+      activePlan = saved.plan
+      activePlanProgress = saved.planProgress
+      activeStrategy = saved.strategy
+      strategyProgress = saved.strategyProgress
+      strategyExchanges = saved.strategyExchanges
+      strategyLastRole = saved.strategyLastRole
       truncationStore.startTask(saved.handles)
       readFiles.clear()
       for (const file of saved.readFiles) readFiles.add(file)
       taskCheckpoint = saved.checkpoint
       backgroundRun = false
       await setActiveTaskId(saved.taskId)
+      post({ type: 'plan', plan: activePlan ?? '' })
+      postPlanProgress()
+      void postStrategies()
 
       runningScheduleId = undefined
       runStartedAt = undefined
@@ -16515,6 +17500,10 @@ ${contents}
       void hub?.kernel.dispose()
       // Nothing may outlive the bridge, least of all something that spends money.
       stopKeepAlive()
+      // The observer processes call a model too; the journal's last records are written first.
+      void observerHub.dispose()
+      // And each specialist's own process.
+      stopRoleProcesses()
       unsubscribe()
     },
   }

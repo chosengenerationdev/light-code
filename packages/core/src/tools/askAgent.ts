@@ -30,7 +30,7 @@ export interface AskAgentOptions {
   /** Consults one specialist. Supplied by the host, which owns providers and the CLI. */
   consult: (
     agent: ResolvedAgent,
-    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined },
+    request: { question: string; files?: string[] | undefined; signal?: AbortSignal | undefined; parallel?: boolean | undefined },
   ) => Promise<{ advice: string; label: string }>
   /** Keeps the answer so it can be re-read for free — see `recall_expert_advice`. */
   onAdvice?: (record: { at: number; question: string; advice: string }) => void
@@ -63,8 +63,8 @@ export function createAskAgentTool(options: AskAgentOptions): Tool<AskAgentParam
       'Consult a specialist model about the work: plan a hard change (expert), have a finished ' +
       'change reviewed (reviewer), find out what would break it (tester), write a piece of code ' +
       '(programmer), or ask how this codebase does something (librarian). ' +
-      'The specialist cannot see this conversation, cannot read files and does not remember ' +
-      'earlier consultations — put everything it needs in the question, including the actual code. ' +
+      'The specialist cannot see this conversation and may not be able to read files; it may remember what ' +
+      'you asked it earlier in this chat, but put everything it needs in the question, including the actual code. ' +
       'What comes back is advice: check it against the real code before acting on it.',
     parametersSchema: paramsSchema,
 
@@ -224,4 +224,54 @@ function trailerFor(agent: ResolvedAgent, team: readonly ResolvedAgent[]): strin
   }
 
   return lines.join('\n')
+}
+
+const manySchema = z.object({
+  requests: z
+    .array(paramsSchema)
+    .min(2)
+    .max(6)
+    .describe('Two to six consultations, each with its role and its own complete question. They run at the same time.'),
+})
+export type AskAgentsParams = z.infer<typeof manySchema>
+
+/**
+ * Several specialists at once - a strategy's parallel box, or any independent questions (a reviewer and a tester
+ * looking at the same change). Asked for: steps in a parallel box "should be executed parallely with a rust
+ * process". Each specialist runs in its own process, so the answers really are worked out at the same time; the
+ * main loop still makes one tool call per message (§5), which is why this is one tool and not several calls.
+ *
+ * The same rules per consultation as `ask_agent` - it calls the same `consult` - so nothing here is a second path:
+ * an unknown or unassigned role is answered as an error for that request alone, and the others still run.
+ */
+export function createAskAgentsTool(options: AskAgentOptions): Tool<AskAgentsParams> {
+  const single = createAskAgentTool(options)
+  return {
+    name: 'ask_agents',
+    group: 'read',
+    description:
+      'Consult several specialists at the same time, each with its own question - for steps a strategy puts in a ' +
+      'parallel box, or for questions that do not depend on each other. Returns every answer, labelled. Use ask_agent ' +
+      'for one, or when one answer should shape the next question.',
+    parametersSchema: manySchema,
+    async preview(params, context) {
+      const parts = await Promise.all(params.requests.map(async (request) => single.preview?.(request, context)))
+      return { kind: 'text' as const, text: parts.map((part) => (part !== undefined && part.kind === 'text' ? part.text : '')).join('\n\n───\n\n') }
+    },
+    async execute(params, context): Promise<ToolResult> {
+      const answers = await Promise.all(
+        params.requests.map(async (request) => {
+          // The single tool, with the consultation marked parallel for the strategy's record.
+          const one = createAskAgentTool({ ...options, consult: (agent, req) => options.consult(agent, { ...req, parallel: true }) })
+          const result = await one.execute(request, context)
+          return { role: request.role, result }
+        }),
+      )
+      const failed = answers.filter((answer) => answer.result.isError === true).length
+      return {
+        content: answers.map((answer) => `## ${answer.role}${answer.result.isError === true ? ' (failed)' : ''}\n\n${answer.result.content}`).join('\n\n'),
+        ...(failed === answers.length ? { isError: true } : {}),
+      }
+    },
+  }
 }

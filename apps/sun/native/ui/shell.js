@@ -1279,7 +1279,13 @@ function deliverPendingAsk(key) {
   if (ask === undefined || frame?.contentWindow == null || url === undefined || frame.dataset.ready !== 'true') return
   delete pendingAsks[key]
   deliveredAsks[key] = { ask, at: Date.now() }
-  frame.contentWindow.postMessage({ source: 'sun', ask }, new URL(url).origin)
+  /*
+   * A request with content (the alert's text for "Start a chat") is spread out, so the page reads `ask` and `text`
+   * where it looks for them. Sent as `{ ask: { ask, text } }` it matched nothing on the page, and the chat opened with
+   * an empty box - reported: "it started the new chat, but it didnt carry any info about the alert".
+   */
+  const message = typeof ask === 'object' && ask !== null ? { source: 'sun', ...ask } : { source: 'sun', ask }
+  frame.contentWindow.postMessage(message, new URL(url).origin)
 }
 /*
  * An unloaded page comes back with its spent launch link, says it is ready, and is then replaced by
@@ -3418,7 +3424,7 @@ function tile(m) {
     ),
     el('span', { class: 'tile-title', text: m.title }),
     el('span', { class: 'tile-headline', text: m.headline }),
-    el('span', { class: 'tile-foot' }, el('span', { class: `tile-when${m.waitingFor || monLate(m) ? ' late' : ''}`, text: m.waitingFor ? 'waiting…' : m.running ? 'checking…' : monLate(m) ? `due ${monAgo(m.nextRun)}` : monAgo(m.lastRun), title: m.waitingFor || '' })),
+    el('span', { class: 'tile-foot' }, el('span', { class: `tile-when${m.waitingFor || monLate(m) ? ' late' : ''}`, text: m.waitingFor ? 'waiting…' : m.running ? 'checking…' : monLate(m) ? `due ${monAgo(m.overdueSince)}` : monAgo(m.lastRun), title: m.waitingFor || '' })),
     historyStrip(m),
   )
   node.addEventListener('contextmenu', (e) => {
@@ -3432,7 +3438,7 @@ function tile(m) {
 
 /** A check more than a minute and a half past when it should have started, and not running: said on the tile. */
 function monLate(m) {
-  return !m.running && !m.paused && m.approved && m.nextRun && m.nextRun < Date.now() / 1000 - 90
+  return !m.running && !m.paused && m.approved && m.overdueSince && m.overdueSince < Date.now() / 1000 - 90
 }
 
 function showTileTip(m, node) {
@@ -3448,9 +3454,9 @@ function showTileTip(m, node) {
       el('dt', { text: 'For' }),
       el('dd', { text: `${m.team ? 'The team' : 'You only'} · ${m.origin}` }),
       m.source ? [el('dt', { text: 'Reads' }), el('dd', { text: m.source })] : null,
-      m.schedule ? [el('dt', { text: 'Checks' }), el('dd', { text: `${m.schedule} · last ${monAgo(m.lastRun)}${m.lastBy ? ` by ${m.lastBy}` : ''}${m.nextRun ? ` · next ${monAgo(m.nextRun)}` : ''}` })] : null,
+      m.schedule ? [el('dt', { text: 'Checks' }), el('dd', { text: `${m.schedule} · last ${monAgo(m.lastRun)}${m.lastBy ? ` by ${m.lastBy}` : ''}${monLate(m) ? ` · due since ${monAgo(m.overdueSince)}` : m.nextRun ? ` · next ${m.nextRun <= Date.now() / 1000 + 30 ? 'now' : monAgo(m.nextRun)}` : ''}` })] : null,
       m.waitingFor ? [el('dt', { text: 'Waiting' }), el('dd', { text: m.waitingFor })] : null,
-      m.author || m.updatedBy ? [el('dt', { text: 'Written by' }), el('dd', { text: `${m.author ?? 'not named'}${m.updatedAt || m.updatedBy ? ` · updated ${m.updatedAt ? monAgo(m.updatedAt) : ''}${m.updatedBy ? ` by ${m.updatedBy}` : ''}` : ''}${m.version ? ` · v${m.version}` : ''}` })] : null,
+      m.author || m.updatedBy ? [el('dt', { text: 'Written by' }), el('dd', { text: `${m.author ?? 'not named'}${m.updatedAt || m.updatedBy ? ` · updated ${m.updatedAt ? monAgo(m.updatedAt) : ''}${m.updatedBy ? ` by ${m.updatedBy}` : ''}${m.updatedFrom ? ` (${m.updatedFrom})` : ''}` : ''}${m.version ? ` · v${m.version}` : ''}` })] : null,
       m.snoozeUntil ? [el('dt', { text: 'Snoozed' }), el('dd', { text: `until ${new Date(m.snoozeUntil * 1000).toLocaleTimeString()}` })] : null,
       m.mode ? [el('dt', { text: 'Notifies' }), el('dd', { text: MON_MODES.find(([id]) => id === m.mode)?.[2] ?? m.mode })] : null,
     ),

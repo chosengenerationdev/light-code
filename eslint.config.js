@@ -99,6 +99,12 @@ export default tseslint.config(
       'packages/core/src/tools/http.test.ts',
       // A stand-in model on loopback for the handoff test. Ingress only; the host reaches it through HttpClient.
       'apps/host/src/handoff.test.ts',
+      // The same, for a strategy end to end: the main agent and its specialists played by one loopback model.
+      'apps/host/src/strategyEndToEnd.test.ts',
+      // A stand-in model on loopback for the real `fire-fs watch` to call. Ingress only.
+      'packages/core/src/observers/watch.test.ts',
+      // A stand-in model on loopback for the real `fire-fs agent`. Ingress only.
+      'packages/core/src/agents/roleProcess.test.ts',
     ],
     rules: { 'no-restricted-imports': 'off' },
   },
@@ -132,8 +138,11 @@ export default tseslint.config(
       'apps/host/src/choosesTheme.test.ts',
       'apps/host/src/localTabs.test.ts',
       'apps/host/src/panelEditor.test.ts',
+      // The draft kept across a host restart: a second server on the same data folder.
+      'apps/host/src/composerDraft.test.ts',
       'apps/host/src/addonEnable.test.ts',
       'apps/host/src/handoff.test.ts',
+      'apps/host/src/strategyEndToEnd.test.ts',
     ],
     rules: { 'no-restricted-globals': 'off' },
   },

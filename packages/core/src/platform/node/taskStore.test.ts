@@ -170,3 +170,29 @@ describe('JsonTaskStore', () => {
     expect(await store.list('/repo')).toEqual([])
   })
 })
+
+/*
+ * A chat read back from disk keeps everything it was saved with. The reader rebuilt it from seven fields, so the plan,
+ * its progress and the strategy were dropped on every reopen - found by apps/host's strategyEndToEnd.test.ts.
+ */
+describe('reading a task back', () => {
+  it('keeps the plan, the strategy and its log, and drops a strategy a hand edit broke', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lc-tasks-roundtrip-'))
+    try {
+      const store = new JsonTaskStore(root, new FakeTruncationStore())
+      const strategy = { id: 's', name: 'TDD', updatedAt: 1, nodes: [{ id: 'n', role: 'tester', x: 0, y: 0 }], edges: [] }
+      await store.save(task({ plan: '1. Fix it', planProgress: { abc: { status: 'done' } } as never, strategy, strategyProgress: { e: { rounds: 1 } }, strategyExchanges: [{ at: 1, role: 'tester', question: 'q', answer: 'a' }] }))
+      const back = await store.load(ID_A)
+      expect(back).toMatchObject({ plan: '1. Fix it', strategy: { name: 'TDD' }, strategyProgress: { e: { rounds: 1 } }, strategyExchanges: [{ role: 'tester' }] })
+      expect(back?.planProgress).toEqual({ abc: { status: 'done' } })
+
+      await store.save(task({ id: ID_B, strategy: { name: '' } as never, strategyExchanges: [] }))
+      const broken = await store.load(ID_B)
+      expect(broken?.strategy).toBeUndefined()
+      expect(broken?.strategyExchanges).toBeUndefined()
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
+})
+

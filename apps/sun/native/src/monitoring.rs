@@ -71,6 +71,8 @@ enum Pending {
     Latest { started: Instant },
     History { name: String, days: u32, key: Option<String>, alert: Option<String>, range: Option<(i64, i64)>, target: Target, started: Instant },
     ExplainHistory { name: String, row: usize, started: Instant },
+    /// A monitor file's version history, asked of the executor (`kind: history`).
+    FileHistory { name: String, modified: std::time::SystemTime, started: Instant },
     /// The team's record of a monitor's changes, for its grid window.
     Revisions { name: String, started: Instant },
     /// The dashboard's refresh: the host syncing the team's skills; `before` is what was here when it was pressed.
@@ -99,7 +101,7 @@ impl Pending {
             Pending::Claim { started, .. } | Pending::Write { started } | Pending::Latest { started } => (started, 60),
             Pending::Prune { started } => (started, 300),
             Pending::SkillChange { started, .. } | Pending::Sync { started, .. } => (started, 180),
-            Pending::Probe { started, .. } | Pending::Backfill { started, .. } | Pending::TeamGrid { started, .. } | Pending::PastGrid { started, .. } => (started, 60),
+            Pending::Probe { started, .. } | Pending::FileHistory { started, .. } | Pending::Backfill { started, .. } | Pending::TeamGrid { started, .. } | Pending::PastGrid { started, .. } => (started, 60),
         };
         started.elapsed() > Duration::from_secs(limit)
     }
@@ -158,6 +160,9 @@ pub struct Monitoring {
     waiting_for: HashMap<String, String>,
     /// When the scheduler last looked for due checks (epoch seconds): the dashboard says whether it is working.
     last_tick_at: Option<i64>,
+    /// Each monitor file's version history (`sharing/provenance.ts`: the team repository, else git), by the
+    /// file's modified time when it was read - asked again only when the file changes.
+    file_history: HashMap<String, (std::time::SystemTime, Value)>,
     /// The last change of each monitor recorded here (`Revision`), so a scan notices the next.
     revision_seen: HashMap<String, monitor::Revision>,
     pending: HashMap<String, Pending>,
@@ -202,8 +207,15 @@ impl Monitoring {
     pub fn new(root: PathBuf) -> Monitoring {
         let store = monitor::Store::new(root);
         let offline_queue = store.offline_queue();
+        // A scheduler stopped from the dashboard starts again with Fire Code (asked for: "when Fire Code starts,
+        // if the scheduler is down, it should be started automatically"). Stop lasts until the next launch.
+        let mut settings = store.settings();
+        if settings.scheduler_stopped {
+            settings.scheduler_stopped = false;
+            let _ = store.save_settings(&settings);
+        }
         Monitoring {
-            settings: store.settings(),
+            settings,
             states: store.states(),
             store,
             found: Vec::new(),
@@ -216,6 +228,7 @@ impl Monitoring {
             waiting_for: HashMap::new(),
             revision_seen: HashMap::new(),
             last_tick_at: None,
+            file_history: HashMap::new(),
             pending: HashMap::new(),
             queued: Vec::new(),
             executor: None,
@@ -550,6 +563,47 @@ impl App {
         self.monitoring.found = found;
         self.monitoring.last_scan = Some(Instant::now());
         self.note_revisions();
+        if self.monitoring.executor.is_some() {
+            self.ask_file_histories();
+        }
+    }
+
+    /// Asks the executor for the history of every monitor file that changed since it was last read.
+    fn ask_file_histories(&mut self) {
+        let wanted: Vec<(String, PathBuf, std::time::SystemTime)> = self
+            .monitoring
+            .found
+            .iter()
+            .filter_map(|f| {
+                let modified = std::fs::metadata(&f.file).ok()?.modified().ok()?;
+                let known = self.monitoring.file_history.get(&f.name).map(|(m, _)| *m == modified).unwrap_or(false);
+                let asking = self.monitoring.pending.values().any(|p| matches!(p, Pending::FileHistory { name, .. } if *name == f.name));
+                (!known && !asking).then(|| (f.name.clone(), f.file.clone(), modified))
+            })
+            .collect();
+        for (name, file, modified) in wanted {
+            let _ = self.exec_request(json!({ "kind": "history", "file": file.to_string_lossy() }), Pending::FileHistory { name, modified, started: Instant::now() });
+        }
+    }
+
+    /// Who changed a monitor last and when: its newest commit (team repository or git) unless the file has
+    /// changes no commit holds; else its labels. Who wrote it: the label, else the first commit when the whole
+    /// history was read.
+    fn provenance(&self, f: &Found) -> (Option<String>, Option<i64>, Option<String>, Option<&'static str>) {
+        let history = self.monitoring.file_history.get(&f.name).map(|(_, h)| h).filter(|h| !h.is_null());
+        let commits = history.and_then(|h| h.get("commits")).and_then(Value::as_array);
+        let uncommitted = history.and_then(|h| h.get("uncommitted")).and_then(Value::as_bool).unwrap_or(false);
+        let source = history.and_then(|h| h.get("source")).and_then(Value::as_str).map(|s| if s == "bitbucket" { "Bitbucket" } else { "git" });
+        let newest = commits.and_then(|c| c.first());
+        let (by, at) = match newest {
+            Some(c) if !uncommitted => (c.get("by").and_then(Value::as_str).map(String::from), c.get("at").and_then(Value::as_i64)),
+            _ => (f.labels.saved_by(), f.labels.updated_at().or_else(|| self.monitoring.revision_seen.get(&f.name).map(|r| r.at))),
+        };
+        let author = f.labels.author.clone().or_else(|| {
+            let all = commits?;
+            (all.len() < 50).then(|| all.last()?.get("by")?.as_str().map(String::from)).flatten()
+        });
+        (by, at, author, newest.filter(|_| !uncommitted).and(source))
     }
 
     /// Records each monitor's new version, as it arrives - saved here, by an agent, or synced from a colleague: who
@@ -619,7 +673,17 @@ impl App {
         if team {
             let _ = self.store_request("revisions", json!({ "monitor": name }), Pending::Revisions { name: name.to_string(), started: Instant::now() });
         }
-        json!({ "type": "revisions", "revisions": local, "teamPending": team })
+        // The file's commits too, asked for now if not known (this is a user opening Changes: the executor may start).
+        let history = self.monitoring.file_history.get(name).map(|(_, h)| h.clone());
+        let history_missing = history.is_none();
+        if history_missing {
+            if let Some(f) = self.monitoring.found(name).cloned() {
+                if let Some(modified) = std::fs::metadata(&f.file).ok().and_then(|m| m.modified().ok()) {
+                    let _ = self.exec_request(json!({ "kind": "history", "file": f.file.to_string_lossy() }), Pending::FileHistory { name: f.name.clone(), modified, started: Instant::now() });
+                }
+            }
+        }
+        json!({ "type": "revisions", "revisions": local, "teamPending": team, "history": history.unwrap_or(Value::Null), "historyPending": history_missing })
     }
 
     // ─── The team's history ──────────────────────────────────────────────────
@@ -1039,6 +1103,13 @@ impl App {
                     message = format!("{message} The team's skills could not be synced: {error}");
                 }
                 self.monitoring.shell_out.push(json!({ "type": "monitorReply", "op": "refresh", "ok": true, "data": { "message": message, "refreshed": true } }));
+            }
+            Pending::FileHistory { name, modified, .. } => {
+                // A failure is kept as "nothing known", so it is not asked again until the file changes.
+                let history = result.unwrap_or(Value::Null);
+                self.monitoring.file_history.insert(name.clone(), (modified, history.clone()));
+                self.monitoring.grid_out.push((name, json!({ "type": "fileHistory", "history": history })));
+                self.push_monitors(webview);
             }
             Pending::Revisions { name, .. } => {
                 let message = match result {
@@ -1750,6 +1821,7 @@ impl App {
         let (level, status) = self.display(f, now, local);
         let m = f.monitor.as_ref().ok();
         let history: Vec<Value> = self.monitoring.spark.get(&f.name).map(|p| p.iter().map(|(at, l)| json!([at, l])).collect()).unwrap_or_default();
+        let provenance = self.provenance(f);
         json!({
             "name": f.name,
             "title": f.title(),
@@ -1776,6 +1848,8 @@ impl App {
             "lastRun": summary.map(|s| s.at),
             "lastBy": summary.and_then(|s| s.by.clone()),
             "nextRun": m.and_then(|m| m.next_run(summary.map(|s| s.at), now, local)),
+            // A due check that has not started: since when (the tile and grid say "Due since", not "Next ... ago").
+            "overdueSince": m.and_then(|m| m.overdue_since(summary.map(|s| s.at), now, local)).filter(|_| !state.paused),
             "every": m.map(|m| m.every_secs),
             "schedule": m.map(schedule_words),
             // The schedule as written, for the editor, and why it cannot be changed here when it cannot.
@@ -1791,10 +1865,12 @@ impl App {
             "teamCopy": is_team_copy(f).then(|| team_place(f)),
             "running": self.monitoring.running.contains_key(&f.name),
             "waitingFor": self.waiting_reason(f),
-            "author": f.labels.author,
+            "author": provenance.2,
             "version": f.labels.version,
-            "updatedAt": f.labels.updated_at().or_else(|| self.monitoring.revision_seen.get(&f.name).map(|r| r.at)),
-            "updatedBy": f.labels.saved_by(),
+            "updatedAt": provenance.1,
+            "updatedBy": provenance.0,
+            // Where "updated by" came from: "Bitbucket" or "git" when from a commit, absent when from the labels.
+            "updatedFrom": provenance.3,
             "approved": self.monitoring.approved(f),
             // What approving it would let run, shown on the review card (invariant 8: the spec itself).
             "block": (!self.monitoring.approved(f)).then(|| f.block.clone()),

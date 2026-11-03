@@ -32,7 +32,40 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 }
 
-function renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+/**
+ * The Strategy window as an editor tab: the same bundle, started in its strategy-only view, on the same bridge
+ * through the transport's extra webview. One tab at a time; asking again brings it forward.
+ */
+export class StrategyPanel {
+  private static current: vscode.WebviewPanel | undefined
+
+  static open(context: vscode.ExtensionContext, transport: WebviewTransport): void {
+    if (StrategyPanel.current !== undefined) {
+      StrategyPanel.current.reveal(vscode.ViewColumn.Active)
+      return
+    }
+    const panel = vscode.window.createWebviewPanel('lightCode.strategy', 'Strategy', vscode.ViewColumn.Active, {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist')],
+    })
+    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'activity-bar-icon.svg')
+    panel.webview.html = renderHtml(panel.webview, context.extensionUri, 'strategy')
+    const attached = transport.attachExtra(panel.webview)
+    // The page closes itself with its Close button.
+    const closing = panel.webview.onDidReceiveMessage((message: { type?: string }) => {
+      if (message?.type === 'closeStrategyWindow') panel.dispose()
+    })
+    panel.onDidDispose(() => {
+      attached.dispose()
+      closing.dispose()
+      StrategyPanel.current = undefined
+    })
+    StrategyPanel.current = panel
+  }
+}
+
+function renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri, view?: 'strategy'): string {
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.js'))
   const nonce = crypto.randomBytes(16).toString('base64')
 
@@ -70,7 +103,7 @@ function renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   <title>Light Code</title>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"${view !== undefined ? ` data-view="${view}"` : ''}></div>
   <script nonce="${nonce}" src="${scriptUri.toString()}"></script>
 </body>
 </html>`

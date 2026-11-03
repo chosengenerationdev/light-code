@@ -285,6 +285,11 @@ async function main(): Promise<void> {
   control?.start(stdinRest)
   const extraToolDirs = args.flatMap((arg, i) => (arg === '--extra-tool-folder' && args[i + 1] !== undefined ? [path.resolve(args[i + 1] as string)] : []))
   const fastFsArg = valueOf(args, '--fast-fs')
+  /** The slim helper this package carries on Windows (`dist/bin`), used when Fire Code's is not installed. */
+  const bundledHelper = (): string | undefined => {
+    const candidate = path.join(__dirname, 'bin', 'fire-fs.exe')
+    return process.platform === 'win32' && existsSync(candidate) ? candidate : undefined
+  }
   /*
    * Fire Code passes its helper. Run on its own, on a machine where Fire Code is installed, the host uses
    * that install's helper (it records where it is) - but never on a shared server, where the helper of
@@ -294,7 +299,7 @@ async function main(): Promise<void> {
     fastFsArg !== undefined && existsSync(fastFsArg)
       ? path.resolve(fastFsArg)
       : fastFsArg === undefined && !args.includes('--server')
-        ? findFireCodeHelper()
+        ? (findFireCodeHelper() ?? bundledHelper())
         : undefined
   const changeLedgerFile = valueOf(args, '--change-ledger')
   const mirrorDir = valueOf(args, '--mirror-dir')
@@ -1148,7 +1153,21 @@ else. Read docs/hosting.md before sharing it.
 const isEntryPoint =
   typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module
 
+/*
+ * The host is the agent: if it ends, the chat ends mid-investigation (reported: "agent suddenly crashes"). One stray
+ * error - a write to a child process that just died, a socket that closed under a reply - is an 'error' event or a
+ * rejection nothing caught, and Node's default for those is to stop the process. Here they are written to the log
+ * (Fire Code keeps the previous run's as host.previous.log) and the host carries on: every turn and tool call has
+ * its own error handling, and losing the whole session for one of them is the worse outcome.
+ */
+function keepRunning(kind: string, error: unknown): void {
+  const text = error instanceof Error ? `${error.name}: ${error.message}\n${error.stack ?? ''}` : String(error)
+  process.stderr.write(`[error] ${kind}, kept running: ${text}\n`)
+}
+
 if (isEntryPoint) {
+  process.on('uncaughtException', (error) => keepRunning('uncaught exception', error))
+  process.on('unhandledRejection', (reason) => keepRunning('unhandled rejection', reason))
   void main().catch((error: unknown) => {
     process.stderr.write(`light-code: ${error instanceof Error ? error.message : String(error)}\n`)
     process.exit(1)

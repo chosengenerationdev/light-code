@@ -21,6 +21,7 @@ export interface Mode {
    * whose prompt keeps telling it to consult something that does not exist. Better to
    * disable it in the picker and say why.
    */
+  /** Since 0.202.0: needs at least one specialist assigned - any role, not only the expert (the name is kept). */
   requiresExpert?: boolean
   /**
    * This mode does its editing with `execute_command`, so a command may change the workspace.

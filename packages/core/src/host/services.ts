@@ -109,6 +109,12 @@ export interface HostUi {
   pickContextFiles?(): Promise<string[] | undefined>
   /** True where `showSaveDialog` really opens one (VS Code). The browser host's resolves undefined. */
   savesFiles?: boolean
+  /**
+   * Opens the Strategy window as its own editor tab, where there is an editor area (VS Code). Asked for: the chart
+   * was squeezed into the sidebar - "is it not possible to show in a bigger view? may be in the code editor place?".
+   * Absent elsewhere, and the window opens over the panel instead.
+   */
+  openStrategyWindow?(): Promise<void>
   showSaveDialog(options: {
     defaultName: string
     extensions?: string[] | undefined

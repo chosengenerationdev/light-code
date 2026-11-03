@@ -2,7 +2,7 @@ import { CONTINUE_PROMPT, looksUnfinished, MAX_CONTINUE_NUDGES } from './unfinis
 import { requiresApproval, type ApprovalGate } from '../approval/types.js'
 import { repairUnansweredToolCalls } from './repairHistory.js'
 import type { Checkpoint, ShadowGit } from '../checkpoints/shadowGit.js'
-import { computeBreakdown, type TokenBreakdown } from '../context/budget.js'
+import { applyReportedUsage, calibrate, calibrationFor, computeBreakdown, estimateTokens, promptTokensFromError, scaleBreakdown, type TokenBreakdown } from '../context/budget.js'
 import { compactHistory, isContextOverflow, isSummaryMessage, shouldCompact, type CompactionOptions } from '../context/compact.js'
 import { dropSupersededReads } from '../context/supersede.js'
 import { dropEvictedDocs } from '../context/evict.js'
@@ -37,6 +37,8 @@ export interface AgentTurnEvents {
   onCheckpoint?(checkpoint: Checkpoint): void
   /** Per-request token accounting for the UI (§12: "instrument it"). */
   onContextUpdate?(breakdown: TokenBreakdown, supersededCount: number, compactedCount: number): void
+  /** One model request's tokens - the provider's count, or an estimate when it gave none (`estimated`). */
+  onUsage?(usage: { inputTokens: number; outputTokens: number; cachedTokens?: number; estimated: boolean }): void
   /** Fired when history was summarised, so the UI can say so rather than silently losing detail. */
   onCompacted?(summarisedCount: number): void
   /** A queued message has entered the conversation; the UI moves it out of the queue. */
@@ -56,6 +58,15 @@ export interface AgentTurnEvents {
   onRetry?(info: RetryInfo): void
   /** The provider's refusal stated the model's real context window; the host remembers it. */
   onContextWindowLearned?(tokens: number): void
+  /**
+   * The approval gate answered - with the literal preview the user was, or would have been, shown. For the
+   * Auditor (`observers/`): what was approved is ground truth, what the model said it would do is not.
+   */
+  onApproval?(toolCall: ToolCall, info: { toolName: string; group: string; preview: ToolPreview; decision: 'approve' | 'deny' }): void
+  /** The call never reached its tool: unknown, outside the mode, or malformed. The reason as the model is told it. */
+  onToolRefused?(toolCall: ToolCall, reason: string): void
+  /** An observer's note joined the conversation (`drainObserverNotes`). */
+  onObserverNote?(text: string): void
 }
 
 export interface RetryInfo {
@@ -103,6 +114,11 @@ export interface RunAgentTurnOptions {
    * which is the one signal that is never a guess. Omitted means known.
    */
   contextWindowKnown?: boolean
+  /**
+   * Which provider and model the token estimate is calibrated for (`context/budget.ts`): their reported counts
+   * correct the 4-characters estimate for later requests. Usually "<base url>|<model>".
+   */
+  usageKey?: string
   /** Overrides for when compaction triggers and how much stays verbatim. */
   compaction?: CompactionOptions
   /** Set false to disable compaction entirely for this turn. */
@@ -149,6 +165,15 @@ export interface RunAgentTurnOptions {
    * arrives without its text — or text without its screenshot — is worse than either alone.
    */
   drainQueuedMessages?: () => { text: string; images?: ImageAttachment[] }[]
+  /**
+   * The Anti Hallucinator's notes, taken at the same boundary as queued messages - as one labelled message,
+   * or undefined when there is none.
+   *
+   * Kept apart from `drainQueuedMessages` on purpose: a message the user types resets the step budget, because
+   * somebody typing is evidence that this is not an unattended loop. A reviewer's note is not that evidence,
+   * and resetting on it would let an automatic process keep a turn running indefinitely.
+   */
+  drainObserverNotes?: () => string | undefined
 }
 
 const DEFAULT_MAX_ITERATIONS = 25
@@ -163,6 +188,8 @@ function stallDescription(seconds: number): string {
 
 interface StreamOutcome {
   text: string
+  /** The prompt's real size, when the provider said. */
+  usage?: { inputTokens: number; outputTokens?: number; cachedTokens?: number }
   toolCall?: ToolCall
   error?: string
   /** The watchdog stopped it: nothing arrived for `stallSeconds`. */
@@ -229,6 +256,8 @@ async function consumeStream(
       } else if (chunk.type === 'toolCall') {
         // "One tool call per assistant message" (CLAUDE.md §5) — ignore extras defensively.
         if (outcome.toolCall === undefined) outcome.toolCall = chunk.toolCall
+      } else if (chunk.type === 'usage') {
+        outcome.usage = { inputTokens: chunk.inputTokens, ...(chunk.outputTokens !== undefined ? { outputTokens: chunk.outputTokens } : {}), ...(chunk.cachedTokens !== undefined ? { cachedTokens: chunk.cachedTokens } : {}) }
       } else if (chunk.type === 'error') {
         outcome.error = chunk.error
       } else if (chunk.type === 'done') {
@@ -282,14 +311,23 @@ const MAX_CONSECUTIVE_MISTAKES = 3
  * no point superseding a read that is about to be summarised away. Superseding runs on
  * every request rather than being written back, so the full result stays in the transcript.
  */
+/** What a request's prompt was estimated at, before calibration - kept to calibrate against the real count. */
+interface RequestMeter {
+  estimated: number
+  breakdown?: TokenBreakdown
+  dropped: number
+}
+
 async function prepareModelMessages(
   conversation: Conversation,
   provider: ChatProvider,
   tools: ReturnType<typeof toToolDefinitions>,
   options: RunAgentTurnOptions,
   events: AgentTurnEvents,
+  meter?: RequestMeter,
 ): Promise<ReturnType<Conversation['toModelMessages']>> {
   const contextWindow = options.contextWindow ?? 0
+  const ratio = calibrationFor(options.usageKey ?? '')
   /*
    * Repaired on the way out, so a conversation broken before this fix existed heals when it is
    * reopened rather than staying unusable for ever. See `repairHistory.ts`.
@@ -302,7 +340,8 @@ async function prepareModelMessages(
     contextWindow > 0 &&
     options.contextWindowKnown !== false
   ) {
-    const estimated = computeBreakdown(messages, tools, contextWindow).total
+    // Calibrated: the raw estimate undercounts code, JSON and logs, and compaction must not wait for the refusal.
+    const estimated = scaleBreakdown(computeBreakdown(messages, tools, contextWindow), ratio).total
     if (shouldCompact(messages, estimated, contextWindow, options.compaction ?? {})) {
       const result = await compactHistory(messages, provider, {
         // Keep recent history by size as well as by count, so a long window keeps a long tail.
@@ -329,11 +368,16 @@ async function prepareModelMessages(
    * because superseding is the cheaper, always-on pass.
    */
   const evicted = dropEvictedDocs(superseded.messages)
-  const breakdown = computeBreakdown(evicted.messages, tools, contextWindow)
+  const raw = computeBreakdown(evicted.messages, tools, contextWindow)
+  if (meter !== undefined) {
+    meter.estimated = raw.total
+    meter.breakdown = raw
+    meter.dropped = superseded.supersededCount + evicted.evictedCount
+  }
   // Reported as one number: the UI's question is "how much was dropped", and splitting
   // "superseded" from "released" would be a distinction the reader cannot act on.
   events.onContextUpdate?.(
-    breakdown,
+    scaleBreakdown(raw, ratio),
     superseded.supersededCount + evicted.evictedCount,
     conversation.compactedCount(),
   )
@@ -484,7 +528,10 @@ async function runOneToolCall(
   mode: Mode,
 ): Promise<ToolResult> {
   const prepared = prepareToolCall(toolCall, registry, mode)
-  if (!prepared.ok) return prepared.result
+  if (!prepared.ok) {
+    events.onToolRefused?.(toolCall, prepared.result.content)
+    return prepared.result
+  }
 
   const { tool, params } = prepared
 
@@ -531,6 +578,7 @@ async function runOneToolCall(
       // A tool that must ask every time (a Python tool's `__always_ask__ = True`): no standing grant applies.
       ...(tool.alwaysAsk === true ? { alwaysAsk: true } : {}),
     })
+    events.onApproval?.(toolCall, { toolName: tool.name, group: tool.group, preview, decision })
 
     if (decision === 'deny') {
       // Told to the model as a normal tool result rather than aborting the turn, so it can
@@ -667,7 +715,8 @@ export async function runAgentTurn(
 
     // What the model sees is derived per request; the conversation itself keeps the full
     // record (§12, and the Phase 6b rule that compaction must not destroy stored history).
-    const modelMessages = await prepareModelMessages(conversation, provider, tools, options, events)
+    const meter: RequestMeter = { estimated: 0, dropped: 0 }
+    const modelMessages = await prepareModelMessages(conversation, provider, tools, options, events, meter)
 
     /*
      * One request, sent again when it fails in a way a second attempt usually gets past - a dropped
@@ -695,6 +744,23 @@ export async function runAgentTurn(
     const assistantText = outcome.text
     const toolCall: ToolCall | undefined = outcome.toolCall
     let streamError: string | undefined = outcome.error
+    /*
+     * The real size of what was just sent: shown instead of the estimate, and used to correct the estimate for the
+     * next request. From the provider's count, or from a refusal that states it ("your prompt contains at least N
+     * input tokens") - reported as the bar reading 175k of 262k while the gateway refused for length.
+     */
+    const reportedInput = outcome.usage?.inputTokens ?? (streamError !== undefined && isContextOverflow(streamError) ? promptTokensFromError(streamError) : undefined)
+    if (reportedInput !== undefined && meter.breakdown !== undefined) {
+      calibrate(options.usageKey ?? '', meter.estimated, reportedInput)
+      events.onContextUpdate?.(applyReportedUsage(meter.breakdown, { inputTokens: reportedInput }), meter.dropped, conversation.compactedCount())
+    }
+    // Tokens burned by this request, for the usage dashboard: counted, or estimated when the provider is silent.
+    if (outcome.usage !== undefined) {
+      events.onUsage?.({ inputTokens: outcome.usage.inputTokens, outputTokens: outcome.usage.outputTokens ?? estimateTokens(assistantText), ...(outcome.usage.cachedTokens !== undefined ? { cachedTokens: outcome.usage.cachedTokens } : {}), estimated: outcome.usage.outputTokens === undefined })
+    } else if (streamError === undefined && meter.breakdown !== undefined) {
+      const output = estimateTokens(assistantText) + (toolCall !== undefined ? estimateTokens(toolCall.name + toolCall.arguments) : 0)
+      events.onUsage?.({ inputTokens: scaleBreakdown(meter.breakdown, calibrationFor(options.usageKey ?? '')).total, outputTokens: output, estimated: true })
+    }
     if (outcome.stalled && !cancelled()) {
       streamError =
         `${stallDescription(stallSeconds)}, so the request was stopped` +
@@ -888,6 +954,12 @@ The conversation is longer than this model accepts. Press **Compact now** under 
     if (queued.length > 0) {
       iteration = -1
       refunded = 0
+    }
+    // After the user's own words, so a reviewer's note never reads as the reply to them; no budget reset.
+    const observerNote = options.drainObserverNotes?.()
+    if (observerNote !== undefined && observerNote.length > 0) {
+      conversation.addUserMessage(observerNote)
+      events.onObserverNote?.(observerNote)
     }
 
     if (toolCall.name === 'attempt_completion' || toolCall.name === 'ask_followup_question') {

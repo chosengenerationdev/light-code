@@ -23,6 +23,30 @@ export interface WorkerCallResult {
   stdout: string
 }
 
+/**
+ * Why a worker process ended, in words. On Windows a crash is an NTSTATUS code as the exit code - the same crash
+ * Windows reports as "python.exe has stopped working" - so the common ones are named.
+ */
+export function describeWorkerExit(code: number | null, signal: NodeJS.Signals | null): string {
+  if (signal !== null) return `The Python worker was stopped (${signal}).`
+  if (code === null) return 'The Python worker exited.'
+  const unsigned = code < 0 ? code + 0x1_0000_0000 : code
+  const hex = `0x${unsigned.toString(16).toUpperCase().padStart(8, '0')}`
+  const known: Record<string, string> = {
+    '0xC0000005': 'an access violation inside Python or a library it loaded (a native extension, or a DLL it found on PATH)',
+    '0xC00000FD': 'a stack overflow - usually deep recursion in a tool',
+    '0xC0000409': 'a security check failure in native code',
+    '0xC0000374': 'heap corruption in native code',
+    '0xC000001D': 'an illegal instruction - a library built for a newer CPU',
+    '0xC0000135': 'a DLL it needs could not be found',
+    '0xC0000017': 'it ran out of memory',
+    '0xC000013A': 'it was interrupted (Ctrl+C)',
+  }
+  if (known[hex] !== undefined) return `The Python worker crashed (${hex}: ${known[hex]}).`
+  if (unsigned >= 0xc0000000) return `The Python worker crashed (Windows code ${hex}).`
+  return `The Python worker exited with code ${String(code)}.`
+}
+
 export class PythonWorkerError extends Error {
   constructor(
     message: string,
@@ -77,6 +101,9 @@ export class PythonWorker {
 
   constructor(private readonly options: PythonWorkerOptions) {}
 
+  /** The worker's last stderr, for saying why it crashed. */
+  private stderrTail = ''
+
   private start(): ChildProcessWithoutNullStreams {
     if (this.child !== undefined && this.child.exitCode === null && !this.child.killed) return this.child
 
@@ -98,15 +125,26 @@ export class PythonWorker {
      * partway through work. The same trap as MCP stdio servers in §11.
      */
     child.stderr.on('data', (chunk: Buffer) => {
-      this.options.logger.warn('python worker stderr', chunk.toString('utf8').trimEnd())
+      const text = chunk.toString('utf8').trimEnd()
+      this.options.logger.warn('python worker stderr', text)
+      // Kept for the crash report below: a native crash's traceback (PYTHONFAULTHANDLER) lands here.
+      this.stderrTail = `${this.stderrTail}\n${text}`.slice(-4000)
     })
+    /*
+     * Writing to a worker that has just died fails on its input pipe, and an 'error' event nobody listens to ends the
+     * whole host process (reported: the agent crashing with "python.exe stopped working" from Windows). The call is
+     * failed by the exit handler below; this only keeps the error from becoming the host's.
+     */
+    child.stdin.on('error', (error) => this.options.logger.warn('python worker input closed', String(error)))
 
     child.on('exit', (code, signal) => {
       // Every in-flight call is now unanswerable. Rejecting is the only honest outcome —
       // leaving them pending would hang the turn on a process that no longer exists.
       const reason = new PythonWorkerError(
-        `The Python worker exited (${signal ?? code ?? 'unknown'}). It will restart on the next call.`,
+        `${describeWorkerExit(code, signal)} It will restart on the next call.${this.stderrTail.trim() ? `\n\nIts last output:\n${this.stderrTail.trim().split('\n').slice(-15).join('\n')}` : ''}`,
       )
+      if (code !== 0 && code !== null) this.options.logger.warn('python worker crashed', describeWorkerExit(code, signal))
+      this.stderrTail = ''
       for (const [, entry] of this.pending) {
         clearTimeout(entry.timer)
         entry.reject(reason)

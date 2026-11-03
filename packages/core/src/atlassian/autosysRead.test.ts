@@ -106,7 +106,7 @@ describe('the schedule in a definition', () => {
 
 describe('more AutoSys reading', () => {
   it('finds jobs by what their definitions say', async () => {
-    const { client } = fakeAutosys({ 'GET /AEWS/job?filter=name==PAY_*': { json: JOBS } })
+    const { client } = fakeAutosys({ 'GET /AEWS/job?filter=name=@PAY_*': { json: JOBS } })
     const tool = createAutosysFindJobsTool({ client, defaultPattern: 'PAY_*' })
     const onA = await tool.execute({ machine: 'hostA' }, NONE)
     expect(onA.content).toContain('PAY_LOAD')
@@ -119,7 +119,7 @@ describe('more AutoSys reading', () => {
   })
 
   it('answers "what is running on host A", and long runners with how long', async () => {
-    const { client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name==PAY_*': { json: RUNS } })
+    const { client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name=@PAY_*': { json: RUNS } })
     const tool = createAutosysStatusTool({ client, defaultPattern: 'PAY_*' })
     const running = await tool.execute({ machine: 'hostA', only: 'RUNNING' }, NONE)
     expect(running.content).toContain('PAY_LOAD: RUNNING')
@@ -135,7 +135,7 @@ describe('more AutoSys reading', () => {
   })
 
   it('says so when status answers carry no machine, rather than "nothing runs there"', async () => {
-    const { client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name==PAY_*': { json: [{ name: 'PAY_LOAD', status: 'RUNNING' }] } })
+    const { client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name=@PAY_*': { json: [{ name: 'PAY_LOAD', status: 'RUNNING' }] } })
     const result = await createAutosysStatusTool({ client, defaultPattern: 'PAY_*' }).execute({ machine: 'hostA' }, NONE)
     expect(result.content).toContain('do not say which machine')
   })
@@ -143,8 +143,8 @@ describe('more AutoSys reading', () => {
   it('shows a machine with the jobs defined on it and running on it now', async () => {
     const { client } = fakeAutosys({
       'GET /AEWS/machine/hostA': { json: { name: 'hostA', status: 'ONLINE', type: 'a', maxLoad: 100 } },
-      'GET /AEWS/job?filter=name==PAY_*': { json: JOBS },
-      'GET /AEWS/job-run-info?filter=name==PAY_*': { json: RUNS },
+      'GET /AEWS/job?filter=name=@PAY_*': { json: JOBS },
+      'GET /AEWS/job-run-info?filter=name=@PAY_*': { json: RUNS },
     })
     const result = await createAutosysMachinesTool({ client, defaultPattern: 'PAY_*' }).execute({ machine: 'hostA' }, NONE)
     expect(result.content).toContain('status: ONLINE')
@@ -154,7 +154,7 @@ describe('more AutoSys reading', () => {
   })
 
   it('names the setting to change when a server has no machine endpoint, and still lists the jobs', async () => {
-    const { client } = fakeAutosys({ 'GET /AEWS/job?filter=name==PAY_*': { json: JOBS }, 'GET /AEWS/job-run-info?filter=name==PAY_*': { json: RUNS } })
+    const { client } = fakeAutosys({ 'GET /AEWS/job?filter=name=@PAY_*': { json: JOBS }, 'GET /AEWS/job-run-info?filter=name=@PAY_*': { json: RUNS } })
     const result = await createAutosysMachinesTool({ client, defaultPattern: 'PAY_*' }).execute({ machine: 'hostB' }, NONE)
     expect(result.content).toContain('paths.machine')
     expect(result.content).toContain('PAY_REPORT')
@@ -162,7 +162,7 @@ describe('more AutoSys reading', () => {
 
   it('reads global variables and calendars', async () => {
     const { client } = fakeAutosys({
-      'GET /AEWS/global-variable?filter=name==RUN_*': { json: [{ name: 'RUN_DATE', value: '20261022', lastChanged: '10/22/2026 00:00:01' }] },
+      'GET /AEWS/global-variable?filter=name=@RUN_*': { json: [{ name: 'RUN_DATE', value: '20261022', lastChanged: '10/22/2026 00:00:01' }] },
       'GET /AEWS/calendar/standard/BUSDAYS': { json: { name: 'BUSDAYS', dates: ['10/22/2026', '10/23/2026', '10/26/2026'] } },
     })
     expect((await createAutosysGlobalVariablesTool({ client }).execute({ name: 'RUN_*' }, NONE)).content).toContain('RUN_DATE = 20261022')
@@ -172,7 +172,7 @@ describe('more AutoSys reading', () => {
   })
 
   it('lists what starts in a window, in order, and counts what only a condition starts', async () => {
-    const { client } = fakeAutosys({ 'GET /AEWS/job?filter=name==PAY_*': { json: JOBS }, 'GET /AEWS/job-run-info?filter=name==PAY_*': { json: RUNS } })
+    const { client } = fakeAutosys({ 'GET /AEWS/job?filter=name=@PAY_*': { json: JOBS }, 'GET /AEWS/job-run-info?filter=name=@PAY_*': { json: RUNS } })
     const result = await createAutosysScheduleTool({ client, defaultPattern: 'PAY_*' }).execute({ from: '01:00', to: '04:00', withStatus: true }, NONE)
     const text = result.content
     expect(text.indexOf('02:00  PAY_LOAD')).toBeGreaterThan(-1)
@@ -244,9 +244,9 @@ describe('runs and how they started', () => {
  */
 describe('the site address', () => {
   it('is used as typed, with only the resource and query added', async () => {
-    const { calls, client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name==LIGHTCODE_PROBE_NO_SUCH_JOB*': { json: [] } })
+    const { calls, client } = fakeAutosys({ 'GET /AEWS/job-run-info?filter=name=@LIGHTCODE_PROBE_NO_SUCH_JOB*': { json: [] } })
     await (await client()).probe('jsmith')
-    expect(calls[0]?.target).toBe('/AEWS/job-run-info?filter=name==LIGHTCODE_PROBE_NO_SUCH_JOB*')
+    expect(calls[0]?.target).toBe('/AEWS/job-run-info?filter=name=@LIGHTCODE_PROBE_NO_SUCH_JOB*')
     expect(calls[0]?.target).not.toContain('/AEWS/AEWS')
   })
 })

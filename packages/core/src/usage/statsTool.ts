@@ -48,7 +48,7 @@ const params = z.object({
   to: z.string().optional().describe('End date, YYYY-MM-DD (inclusive; default today).'),
   scope: z.enum(['me', 'team']).optional().describe('me: only the current user\'s use. Default team.'),
   user: z.string().optional().describe('events: only this user (login or display name, any case).'),
-  kind: z.enum(['skill', 'tool']).optional().describe('events: only skill uses or only tool calls.'),
+  kind: z.enum(['skill', 'tool', 'tokens']).optional().describe('events: only skill uses, only tool calls, or only token counts (one row per model request: model, inputTokens, outputTokens, cachedTokens, estimated).'),
   name: z.string().optional().describe('events: only skills or tools whose name contains this (any case).'),
   team: z.string().optional().describe('events: only people in this team or department (any case).'),
   limit: z.number().int().min(1).max(200_000).optional().describe('events: at most this many rows, newest first (default 20000).'),
@@ -91,6 +91,7 @@ export function renderSummary(d: UsageDashboard, storeLabel: string): string {
     `- Skill uses: ${String(d.totals.skillUses.value)}${pct(d.totals.skillUses.value, d.totals.skillUses.previous)}; skills in use ${String(d.totals.skillsUsed.value)} of ${String(d.inventory.skills)} installed`,
     `- Tool calls: ${String(d.totals.toolUses.value)}${pct(d.totals.toolUses.value, d.totals.toolUses.previous)}; failed ${String(d.totals.failures.value)}`,
     `- Active people: ${String(d.totals.people.value)}${pct(d.totals.people.value, d.totals.people.previous)}`,
+    `- Tokens: ${(d.tokens.total.input + d.tokens.total.output).toLocaleString('en')} (${d.tokens.total.input.toLocaleString('en')} in, ${d.tokens.total.output.toLocaleString('en')} out, ${d.tokens.total.cached.toLocaleString('en')} of the input cached) over ${String(d.tokens.total.requests)} requests${pct(d.tokens.total.input + d.tokens.total.output, d.tokens.previous.input + d.tokens.previous.output)}${d.tokens.estimatedShare > 0 ? `; ${String(Math.round(d.tokens.estimatedShare * 100))}% of requests estimated` : ''}`,
     `- Your contribution: ${String(d.myImpact.skills)} skills and ${String(d.myImpact.tools)} tools, used ${String(d.myImpact.uses)} times by ${String(d.myImpact.reached)} people`,
   ]
   const table = (title: string, header: string, rows: string[]): void => {
@@ -120,6 +121,13 @@ export function renderSummary(d: UsageDashboard, storeLabel: string): string {
     )
     table('Teams', '| Team | People | Uses | Skill uses | Top skill |', d.teams.map((t) => `| ${t.team} | ${String(t.people)} | ${String(t.uses)} | ${String(t.skillUses)} | ${t.topSkill ?? ''} |`))
   }
+  const n = (v: number): string => v.toLocaleString('en')
+  table(
+    'Tokens by person',
+    '| Person | Team | Total | Input | Output | Cached | Requests | Share | Models |',
+    d.tokens.people.slice(0, 30).map((p) => `| ${name(p.user, p.displayName)} | ${p.team ?? ''} | ${n(p.input + p.output)} | ${n(p.input)} | ${n(p.output)} | ${n(p.cached)} | ${n(p.requests)} | ${String(Math.round(p.share * 100))}% | ${p.models.join(', ')} |`),
+  )
+  table('Tokens by model', '| Model | Total | Input | Output | Requests |', d.tokens.models.slice(0, 15).map((m) => `| ${m.model} | ${n(m.input + m.output)} | ${n(m.input)} | ${n(m.output)} | ${n(m.requests)} |`))
   if (d.problems.length > 0) {
     lines.push('', '## Needs attention')
     for (const problem of d.problems) lines.push(`- **${problem.severity}**: ${problem.title} - ${problem.items.slice(0, 8).map((item) => item.name).join(', ')}${problem.items.length > 8 ? ', ...' : ''}`)
@@ -223,6 +231,7 @@ export function createUsageStatsTool(deps: UsageStatsDeps): Tool<UsageStatsParam
           project: event.p ?? null,
           failed: event.ok === false,
           ms: event.d ?? null,
+          ...(event.k === 'tokens' ? { model: event.n, inputTokens: event.i ?? 0, outputTokens: event.o ?? 0, cachedTokens: event.c ?? 0, estimated: event.e === 1 } : {}),
         }))
       if (rows.length === 0) return { content: `No usage matched in ${new Date(range.from).toISOString().slice(0, 10)} to ${new Date(range.to).toISOString().slice(0, 10)}.${note}` }
       return { content: JSON.stringify(rows) + note }

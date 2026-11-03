@@ -1,5 +1,49 @@
 # light-code-vscode
 
+## 0.204.0
+
+- **A chat reopened from history keeps its strategy and its plan.** Both were dropped when a chat was read back from disk, so after reopening one the agent no longer followed either. **The record of what passed between specialists holds what the main agent asked**, not the specialists' own instructions, so it no longer reaches the main agent's context. A strategy is now tested end to end against a running host - set, followed, its rounds counted and the last refused, recorded, explained, and reopened - with specialists in the host and in their own Rust processes.
+
+## 0.203.0
+
+- **The agent now knows the strategy in every mode**, from your next message: it was given only in Agent team mode, so with Auto selected it was never told. The Strategy button shows in every mode once a specialist is assigned. **Fixed: a scheduled run removed the chat's plan and strategy** - it put the conversation back afterwards but not those two. **New chat with handoff keeps the strategy.** The window lists every contract when nothing is selected.
+
+## 0.202.0
+
+- **The Strategy window opens as its own editor tab**, with room for the chart (also: "Light Code: Open Strategy (Agent team)"). The side panels narrow in a narrow window.
+- **Agent team mode no longer needs the expert**: any assigned specialist enables it.
+- **Help knows strategies**: ask Light Code how to draw one, connect steps, set a back-and-forth, use a parallel box or see what the specialists agreed (`light_code_help`, topic Strategy).
+- **Connecting steps is easier to find.** Select a step and press **Connect to…**, then click the step it should lead to (connect them again the other way for a back-and-forth). Dragging from the dot still works. An empty chart lists the steps to follow.
+
+## 0.201.0
+
+- **Code mode is gone; Auto is the default.** Auto has the same tools; a chat or setting that used Code opens as Auto.
+- **Strategy** (Agent team mode, beside the mode picker): draw how the main agent uses its specialists - click a role to add it as a step, drag to arrange, drag from a step's dot to another to connect them. A two-way connector is a back-and-forth (the programmer works, the tester checks, and back) that repeats until a condition you write is met, or at most N rounds. A step can be read-only - it cannot change anything. Strategies are saved and reusable; each chat uses one or none. With one in use, the agent first proposes a plan that follows it, and Light Code counts each loop's rounds from the consultations that ran, asks the judging role for a verdict, and stops a loop at its maximum.
+- **Each step can carry your instructions** (the ✎ on it), sent to that specialist whenever it is consulted under the strategy; a step without them is left to the main agent's plan. **The window shows what is running**: the step at work glows, the Now panel names it with each loop's round and verdict, and the Strategy button shows who is working.
+- **Parallel boxes**: draw a box and drop steps into it; those specialists are consulted at the same time, each in its own process (`ask_agents`). **Contracts**: a connector can say what passes along it, and both specialists are told. **What passed between them**: every consultation under the strategy - what was asked, answered, the loop's round and verdict - is kept with the chat and shown in the window per step or connector; "Ask the agent why" has the main agent explain it from that record (`strategy_history`). Approvals from specialists working in parallel are shown one at a time.
+- **Each specialist works in its own process with its own context**, in every mode: it remembers earlier questions in the chat, and near its context limit it writes its own key points and starts a fresh session with them. The main agent sees only its answers. Its tool calls run through your approvals, and the prompt names which specialist is asking.
+- **The Auditor's and Anti Hallucinator's instructions can be edited** (Settings → Project), with Reset to default; the reply format they must follow is always added, so an edit cannot break them.
+
+## 0.200.0
+
+- **Team admins and owners' approval** (Settings → Project → Team admins, kept in the team's OpenSearch index): the first admin list saved for a project wins, and after that only an admin can change it - read-only for everyone else. Ids are Windows user ids, never names. Whoever creates a skill or tool owns it; a change by anybody else is not written but sent to the owner or an admin, and nobody - its author included - uses it until it is approved. **Settings → Team reviews** (admins, and owners with something to decide) lists what waits, for how long, with the diff, to approve and publish or reject.
+- **Auditor** (Settings → Project, per project): records everything the agent does - your requests, its reasoning, every tool call, every approval with the literal action you were shown, every result, how each turn ended - to a journal on this machine with secrets removed, and to your own OpenSearch index (`light-code-audit-<you>`) when OpenSearch is connected. It tells you at once when the agent does something dangerous or not allowed (a command marked risky, a change outside the workspace, a refused path, a tool outside the mode) - a warning notification. With a model chosen it also reviews each batch of steps and raises its own alerts.
+- **Anti Hallucinator** (Settings → Project): watches the agent's reasoning and results, and when it states something the evidence does not support, contradicts a result, drifts from what you asked or loops, sends it a short note at its next step - shown in the chat as the reviewer's, never counted as your words, granting no permission.
+- **Each runs as its own process with its own context and its own model** (Rust: `fire-fs watch`), using the chosen profile's auth and certificates exactly as the chat does. Every reply carries the observer's running notes, so near its context limit a fresh process starts from them - nothing has to be written when the context is full. A process that keeps failing is stopped and said so; recording never depends on it.
+- **`read_audit_log`**: agents can read the audit record back for later analysis - a summary (counts by tool and day, alerts, sessions), then the records with filters; rows go straight into the dataframe tool.
+
+## 0.199.0
+
+- **A crashing Python tool no longer crashes the agent.** When `python.exe` crashed (Windows' "stopped working"), the next request written to the dead worker raised an error nothing listened for, and that ended the whole agent. Every program Light Code starts now has that error handled, and the agent logs a stray error and keeps running instead of stopping. The failed call says why the worker crashed - the Windows code in words and Python's last lines (`PYTHONFAULTHANDLER` is on for tools).
+- **Nothing typed or done is lost to a crash.** The conversation is saved during a turn - after your message and after each tool result - not only when it ends, and the message you are typing is kept by the agent as well as the page, so a restart on a new port brings it back.
+- **Tokens burned by each team member**, in Settings → Usage: input, output and cached tokens by person - with each person's share, a trend line and their models - and by model, against the previous period. The providers' own counts (estimated, and said to be, where a provider gives none). Recorded only into the team's usage store, like the rest of the dashboard: counts and the model, never the text. `usage_stats` can return them as rows.
+
+## 0.198.0
+
+- **The token bar shows the real count.** It read 175k of 262k while the gateway refused the request as too long: the bar was a 4-characters-per-token estimate, and code, JSON, paths and logs take more tokens than that. OpenAI-compatible gateways and vLLM are now asked for their count (Anthropic and Gemini already send it), the bar shows it after every reply, and it corrects the estimate for that model - so the bar, and the point where compaction starts, follow what the model really holds. A refusal that states the prompt's size corrects it too. A gateway that rejects the usage request is asked again without it.
+- **AutoSys patterns use `=@`**: `JOB*UK` is sent as `filter=name=@JOB*UK`. It was sent as `name==JOB*UK`, an exact match, and found nothing. A single job name keeps `==`.
+- **Export and import AutoSys on its own**: a new **AutoSys** section carries the site, addresses, gateway, test job and read-only setting - not your user name or any secret. Imported alone it replaces only the importer's AutoSys settings. DevOps now covers Confluence, Jira, Bitbucket, Jenkins and the team repository.
+
 ## 0.197.0
 
 - **Underscores in replies are kept.** `job_status_flag`, `PAY_*_USD`, `__init__` and other names with underscores lost them in a formatted reply, read as italics or bold. An underscore inside a word, or around a single dunder name, is now text; `_this_` and `__these words__` still emphasise.

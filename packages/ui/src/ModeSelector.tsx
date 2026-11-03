@@ -7,11 +7,12 @@ export interface ModeSelectorProps {
   disabled: boolean
   onChange: (modeId: string) => void
   /**
-   * Junior mode delegates its thinking to the Claude CLI, so without one configured it is an
-   * ordinary Code session whose prompt keeps referring to an expert that is not there.
-   * Disabled rather than hidden, so the feature is discoverable and says what it needs.
+   * Whether any specialist is assigned (Settings → Agents) - any role, not only the expert. Agent team mode
+   * consults whoever is there, and since its strategies (0.201.0) a tester and a programmer are a team on their
+   * own; it used to wait for the expert, which the user reported no longer made sense.
+   * Disabled rather than hidden, so the mode is discoverable and says what it needs.
    */
-  expertAvailable: boolean
+  teamAvailable: boolean
 }
 
 export function ModeSelector(props: ModeSelectorProps): ReactElement {
@@ -28,8 +29,8 @@ export function ModeSelector(props: ModeSelectorProps): ReactElement {
       options={BUILTIN_MODES.map((option) => ({
         value: option.id,
         label: option.name,
-        ...(option.requiresExpert === true && !props.expertAvailable
-          ? { disabled: true, detail: 'needs the expert' }
+        ...(option.requiresExpert === true && !props.teamAvailable
+          ? { disabled: true, detail: 'assign a specialist in Settings → Agents' }
           : {}),
       }))}
     />

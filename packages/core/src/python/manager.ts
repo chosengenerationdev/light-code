@@ -217,6 +217,8 @@ export interface PythonManagerOptions {
   /** The user's own tools folder and where team tools go; see `PythonToolContext.personalToolsDir`. */
   personalToolsDir?: string | undefined
   sharedWith?: (() => string) | undefined
+  /** Team ownership; see `PythonToolContext.teamReview`. */
+  teamReview?: PythonToolContext['teamReview']
 }
 
 export class PythonManager {
@@ -776,6 +778,7 @@ export class PythonManager {
       ...(this.options.attribution !== undefined ? { attribution: this.options.attribution } : {}),
       ...(this.options.personalToolsDir !== undefined ? { personalToolsDir: this.options.personalToolsDir } : {}),
       ...(this.options.sharedWith !== undefined ? { sharedWith: this.options.sharedWith } : {}),
+      ...(this.options.teamReview !== undefined ? { teamReview: this.options.teamReview } : {}),
       /*
        * No installing against an interpreter we do not own.
        *
@@ -945,6 +948,11 @@ export class PythonManager {
       ...(this.jupyterConnectionFile !== undefined
         ? { [JUPYTER_CONNECTION_ENV]: this.jupyterConnectionFile }
         : {}),
+      /*
+       * A native crash - "python.exe has stopped working" - prints the Python stack it happened in to stderr, which
+       * the worker keeps and reports. Without it the only trace was Windows' dialog. A user setting wins.
+       */
+      PYTHONFAULTHANDLER: '1',
       ...resolved.env,
       // Last, so nothing declared in python.env can replace the list the worker enforces.
       LIGHT_CODE_BANNED_CALLS: JSON.stringify(this.bannedCalls),

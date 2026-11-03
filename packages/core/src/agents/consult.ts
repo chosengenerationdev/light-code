@@ -133,79 +133,7 @@ export async function runConsultation(options: ConsultationOptions): Promise<Con
     options.onStep?.(call.name)
     steps += 1
 
-    const tool = byName.get(call.name)
-    if (tool === undefined) {
-      /*
-       * Answered as a tool result rather than thrown.
-       *
-       * A specialist reaching for `execute_command` has simply misjudged what it has; telling it
-       * so and letting it carry on is worth more than ending the consultation, and the sentence
-       * names what it *can* use so the next step is not another guess.
-       */
-      messages.push({
-        role: 'tool',
-        toolCallId: call.id,
-        content:
-          `You have no "${call.name}". You are read-only here: ${[...byName.keys()].join(', ')}. ` +
-          'Anything else, recommend and the assistant will do it.',
-      })
-      continue
-    }
-
-    try {
-      const parsed = tool.parametersSchema.safeParse(JSON.parse(call.arguments || '{}'))
-
-      /*
-       * A tool that would normally stop and ask still stops and asks, even here.
-       *
-       * Consultation calls deliberately bypass the approval gate: prompting for every file a
-       * reviewer opens would train the user to click through prompts, and a read is harmless
-       * enough to make that trade worth it. `write_skill` is neither frequent nor harmless — a
-       * skill is prose injected into every later prompt, and §13 requires a human to see the
-       * source. Asking once, for something rare that matters, is not what that blanket rule was
-       * arguing against.
-       *
-       * With no approver the call is refused rather than quietly allowed, the same direction
-       * `requestPathAccess` fails in when there is nobody to answer.
-       */
-      /*
-       * Anything that is not a read is asked about.
-       *
-       * The first rule here was `ALWAYS_ASK_TOOLS.has(name)`, which was right while the only
-       * extra was `write_skill` — and quietly wrong the moment a role could be given
-       * `write_to_file`, because an ordinary edit is *not* on that list. It would have run with
-       * nobody asked, in the one path that asks nobody by default.
-       *
-       * The group is the honest test: the filter admits `read` and nothing else, so any other
-       * group present at all arrived through `extra` and is privileged by definition. A tool
-       * added to the read group later stays free, and one added anywhere else is gated without
-       * anybody remembering to list it.
-       */
-      const permitted =
-        (tool.group === 'read' && !ALWAYS_ASK_TOOLS.has(tool.name)) ||
-        (options.approve !== undefined && (await options.approve(tool, parsed.data)))
-
-      const result = !permitted
-        ? {
-            content:
-              `The user did not approve ${tool.name}. Say what you would have written and why, ` +
-              'and let the assistant put it to them instead.',
-          }
-        : parsed.success
-        ? await tool.execute(parsed.data as never, options.context)
-        : {
-            content: `Those arguments are not valid: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
-          }
-      messages.push({ role: 'tool', toolCallId: call.id, content: String(result.content) })
-    } catch (error) {
-      // A failed lookup is information, not the end of the consultation: "that file is not there"
-      // is often exactly what the specialist needed to know.
-      messages.push({
-        role: 'tool',
-        toolCallId: call.id,
-        content: `That failed: ${error instanceof Error ? error.message : String(error)}`,
-      })
-    }
+    messages.push({ role: 'tool', toolCallId: call.id, content: await runConsultTool(call.name, call.arguments, byName, options) })
 
     if (steps >= limit) {
       messages.push({
@@ -215,5 +143,45 @@ export async function runConsultation(options: ConsultationOptions): Promise<Con
           'what you could not check.',
       })
     }
+  }
+}
+
+/**
+ * One tool call a specialist made, run under the consultation's rules, answered as the text it is shown. Shared by
+ * `runConsultation` and the Rust specialist processes (`roleProcess.ts`), so the two cannot disagree about what
+ * runs unasked: reads, and nothing else; every other tool goes to `approve` - the user's approval gate - and is
+ * refused when there is nobody to ask. Failures are answers too: "that file is not there" is often what it needed.
+ */
+export async function runConsultTool(
+  name: string,
+  argumentsText: string,
+  byName: ReadonlyMap<string, Tool>,
+  options: Pick<ConsultationOptions, 'approve' | 'context'>,
+): Promise<string> {
+  const tool = byName.get(name)
+  if (tool === undefined) {
+    // A specialist reaching for a tool it lacks has misjudged what it has: said so, with what it can use.
+    return `You have no "${name}". You can use: ${[...byName.keys()].join(', ') || 'nothing here'}. Anything else, recommend and the assistant will do it.`
+  }
+  try {
+    const parsed = tool.parametersSchema.safeParse(JSON.parse(argumentsText || '{}'))
+    /*
+     * Anything that is not a plain read is asked about. The group is the honest test: the consultation filter
+     * admits `read` and nothing else, so any other group arrived through an explicit extra and is privileged by
+     * definition - a tool added to the read group later stays free, one added anywhere else is gated. With no
+     * approver it is refused, the direction `requestPathAccess` fails in when there is nobody to answer.
+     */
+    const permitted =
+      (tool.group === 'read' && !ALWAYS_ASK_TOOLS.has(tool.name)) ||
+      (options.approve !== undefined && (await options.approve(tool, parsed.data)))
+    const result = !permitted
+      ? { content: `The user did not approve ${tool.name}. Say what you would have done and why, and let the assistant put it to them instead.` }
+      : parsed.success
+        ? await tool.execute(parsed.data as never, options.context)
+        : { content: `Those arguments are not valid: ${parsed.error.issues.map((i) => i.message).join('; ')}` }
+    return String(result.content)
+  } catch (error) {
+    // A failed lookup is information, not the end of the consultation.
+    return `That failed: ${error instanceof Error ? error.message : String(error)}`
   }
 }

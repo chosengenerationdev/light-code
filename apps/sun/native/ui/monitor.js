@@ -31,6 +31,9 @@ const ICON = {
   file: '<path d="M3.75 1.75h6l2.5 2.5v10H3.75z"/>',
   clock: '<circle cx="8" cy="8" r="5.75"/><path d="M8 4.75V8l2.25 1.5"/>',
   changes: '<path d="M4.5 2.25h7M4.5 13.75h7"/><path d="M8 4.75v6.5"/><path d="m5.75 9 2.25 2.25L10.25 9"/>',
+  funnel: '<path d="M2.25 3h11.5L9.25 8.5v4.25l-2.5 1V8.5z"/>',
+  columns: '<rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.25"/><path d="M6 2.75v10.5M10 2.75v10.5"/>',
+  copy: '<rect x="5.25" y="5.25" width="8" height="8.5" rx="1.25"/><path d="M10.75 5.25V3.5c0-.7-.55-1.25-1.25-1.25H3.5c-.7 0-1.25.55-1.25 1.25v6.25c0 .7.55 1.25 1.25 1.25h1.75"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9"/>',
 }
 const svg = (name) => {
@@ -175,14 +178,31 @@ const every = (s) => (s === undefined || s === null ? '' : s % 86400 === 0 ? `${
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
-function columns() {
+/** Every column the monitor defines. */
+function allColumns() {
   const e = state.data?.record?.evaluation
   if (e?.columns?.length) return e.columns
   return (state.data?.columns ?? []).length ? state.data.columns : []
 }
+/** The columns shown: all but those hidden with the column chooser (never none). */
+function columns() {
+  const all = allColumns()
+  const hidden = hiddenColumns()
+  const shown = all.filter((c) => !hidden.has(c.key))
+  return shown.length ? shown : all.slice(0, 1)
+}
 
-/** Alerts by row, and by row and cell. */
+/** Alerts by row, and by row and cell - worked out once per check. */
+let alertIndexFor
+let alertIndexMemo
 function alertIndex() {
+  const alerts = state.data?.record?.evaluation?.alerts
+  if (alertIndexMemo !== undefined && alertIndexFor === alerts) return alertIndexMemo
+  alertIndexFor = alerts
+  alertIndexMemo = buildAlertIndex()
+  return alertIndexMemo
+}
+function buildAlertIndex() {
   const byRow = new Map()
   const byCell = new Map()
   for (const a of state.data?.record?.evaluation?.alerts ?? []) {
@@ -200,59 +220,6 @@ const worst = (alerts) => {
   const open = alerts.filter((a) => !a.acknowledged)
   const list = open.length ? open : alerts
   return LEVELS.find((l) => list.some((a) => a.level === l))
-}
-
-function visibleRows(index) {
-  const rows = state.data?.record?.evaluation?.rows ?? []
-  const cols = columns()
-  const needle = state.search.trim().toLowerCase()
-  let list = rows.map((row, i) => ({ row, i }))
-  if (state.only === 'alerts') list = list.filter(({ i }) => (index.byRow.get(i) ?? []).some((a) => !a.acknowledged))
-  else if (LEVELS.includes(state.only)) list = list.filter(({ i }) => (index.byRow.get(i) ?? []).some((a) => a.level === state.only))
-  if (needle) list = list.filter(({ row }) => Object.values(row).some((v) => textOf(v).toLowerCase().includes(needle)))
-  for (const [key, wanted] of Object.entries(state.filters)) {
-    const w = wanted.trim().toLowerCase()
-    if (!w) continue
-    // `>10`, `<5`, `=x` compare; anything else is "contains".
-    const cmp = /^(>=|<=|>|<|=|!=)\s*(.+)$/.exec(w)
-    list = list.filter(({ row }) => {
-      const v = cellOf(row, key)
-      if (cmp) {
-        const [, op, rhs] = cmp
-        const a = asNumber(v)
-        const b = asNumber(rhs)
-        if (a !== undefined && b !== undefined) {
-          return op === '>' ? a > b : op === '<' ? a < b : op === '>=' ? a >= b : op === '<=' ? a <= b : op === '!=' ? a !== b : a === b
-        }
-        const t = textOf(v).toLowerCase()
-        return op === '!=' ? t !== rhs : op === '=' ? t === rhs : true
-      }
-      return textOf(v).toLowerCase().includes(w)
-    })
-  }
-  if (state.sort) {
-    const { key, dir } = state.sort
-    const kind = cols.find((c) => c.key === key)?.format
-    list.sort((x, y) => {
-      const a = cellOf(x.row, key)
-      const b = cellOf(y.row, key)
-      const na = asNumber(a)
-      const nb = asNumber(b)
-      let r
-      if (na !== undefined && nb !== undefined) r = na - nb
-      else if (kind === 'datetime' && asDate(a) && asDate(b)) r = asDate(a) - asDate(b)
-      else r = textOf(a).localeCompare(textOf(b), undefined, { numeric: true })
-      return dir === 'asc' ? r : -r
-    })
-  } else {
-    // Unsorted: the alerted rows first, worst first - what somebody opening this came to see.
-    const rank = (i) => {
-      const l = worst(index.byRow.get(i) ?? [])
-      return l === undefined ? LEVELS.length : LEVELS.indexOf(l)
-    }
-    list.sort((x, y) => rank(x.i) - rank(y.i) || x.i - y.i)
-  }
-  return list
 }
 
 /** History's "as it was": the grid shows that check, read-only, until "Back to now". */
@@ -291,6 +258,7 @@ function renderHeader() {
     icon('bell', m.snoozeUntil ? `Snoozed - ends ${ago(m.snoozeUntil)}. Click to change` : 'Snooze notifications', (e) => snoozeMenu(e.currentTarget), { on: Boolean(m.snoozeUntil) }),
     icon('clock', m.schedule ? `Schedule: runs ${m.schedule} - click to change` : 'Schedule - change when it runs', openSchedule),
     icon('changes', 'Changes - who changed this monitor, and when', openChanges),
+    icon('copy', 'Copy the grid - every row the filters show, with headers (Ctrl+C copies selected cells)', copyWholeGrid),
     icon('more', 'More - pause, notifications, the skill file, delete', (e) => moreMenu(e.currentTarget)),
   )
   const meta = $('#g-meta')
@@ -300,12 +268,20 @@ function renderHeader() {
     el('span', {}, 'From ', el('b', { text: m.origin })),
     m.every ? el('span', {}, 'Every ', el('b', { text: every(m.every) })) : null,
     el('span', {}, 'Checked ', el('b', { text: ago(m.lastRun) }), record?.durationMs !== undefined ? ` in ${(record.durationMs / 1000).toFixed(1)} s` : ''),
-    m.waitingFor ? el('span', { class: 'waiting', title: m.waitingFor }, 'Waiting: ', el('b', { text: m.waitingFor })) : m.nextRun ? el('span', {}, 'Next ', el('b', { text: ago(m.nextRun) })) : null,
+    m.waitingFor
+      ? el('span', { class: 'waiting', title: m.waitingFor }, 'Waiting: ', el('b', { text: m.waitingFor }))
+      : m.running
+        ? null
+        : m.overdueSince && m.overdueSince < Date.now() / 1000 - 90
+          ? el('span', { class: 'waiting', title: 'Due and not started yet - the dashboard’s Scheduler line says whether checks are being started' }, 'Due since ', el('b', { text: when(m.overdueSince) }))
+          : m.nextRun
+            ? el('span', {}, 'Next ', el('b', { text: m.nextRun <= Date.now() / 1000 + 30 ? 'now' : ago(m.nextRun) }))
+            : null,
     m.source ? el('span', { title: m.source }, 'Reads ', el('b', { text: m.source.length > 60 ? m.source.slice(0, 60) + '…' : m.source })) : null,
     m.author ? el('span', {}, 'By ', el('b', { text: m.author })) : null,
     m.updatedAt || m.updatedBy
       ? el('button', { class: 'meta-link', title: 'Every change, and who made it', onclick: openChanges },
-          'Updated ', m.updatedAt ? el('b', { text: ago(m.updatedAt), title: when(m.updatedAt) }) : null, m.updatedBy ? [' by ', el('b', { text: m.updatedBy })] : null, m.version ? ` · v${m.version}` : '')
+          'Updated ', m.updatedAt ? el('b', { text: ago(m.updatedAt), title: when(m.updatedAt) }) : null, m.updatedBy ? [' by ', el('b', { text: m.updatedBy })] : null, m.updatedFrom ? ` (${m.updatedFrom})` : '', m.version ? ` · v${m.version}` : '')
       : null,
     m.paused ? el('span', { class: 'pill lv-grey', text: 'Paused' }) : null,
     m.mode ? el('span', { class: 'pill', text: `Notifies: ${m.mode}` }) : null,
@@ -348,58 +324,324 @@ function renderChips(index) {
   )
 }
 
-const ROW_CHUNK = 200
+// ─── The grid's engine ──────────────────────────────────────────────────────
+//
+// Asked for: filters under every column, a value list to tick or search, conditions such as > 50, a column chooser,
+// and "an efficient datagrid with good performance including lazy loading". Three things make it fast:
+//   - each column's shown text, its lower case and its number are worked out once per check (`colCache`), so a
+//     filter or a search compares prepared values instead of formatting every cell again on every key;
+//   - typing in a filter waits 120 ms for the next key before filtering (`queueBody`);
+//   - only the rows in view, and a margin either side, are in the page (`renderWindow`): spacer rows stand in for
+//     the rest, at a fixed row height, with fixed column widths so a scroll never reflows the table. Before, rows
+//     were appended as the bottom came near and never removed, so a long scroll built the whole table.
 
-/** Draws the next `count` rows of the table being shown; called again as the bottom is scrolled near. */
-function drawMoreRows(count) {
-  const d = state.drawing
-  if (!d) return
-  const until = Math.min(d.list.length, d.next + count)
-  for (; d.next < until; d.next += 1) {
-    const { row, i } = d.list[d.next]
-    const index = d.index
-    const cols = d.cols
-    const rowAlerts = index.byRow.get(i) ?? []
-    const whole = rowAlerts.filter((a) => a.wholeRow)
-    const rowLevel = whole.length ? worst(whole) : undefined
-    const tr = el('tr', {
-      class: [rowLevel ? `row-alert lv-${rowLevel}` : '', whole.length && whole.every((a) => a.acknowledged) ? 'acked' : '', state.selected === i ? 'selected' : ''].filter(Boolean).join(' '),
-      'data-row': i,
-    })
-    for (const c of cols) {
-      const v = cellOf(row, c.key)
-      const cellAlerts = index.byCell.get(`${i}|${c.key}`) ?? []
-      const level = cellAlerts.length ? worst(cellAlerts) : undefined
-      const numeric = ['number', 'percent', 'bytes', 'duration'].includes(c.format) || (c.format === undefined && typeof v === 'number')
-      tr.append(
-        el('td', {
-          class: [numeric ? 'num' : '', level ? `cell-alert lv-${level}` : '', cellAlerts.length && cellAlerts.every((a) => a.acknowledged) ? 'acked' : ''].filter(Boolean).join(' '),
-          text: format(v, c.format),
-          'data-col': c.key,
-        }),
-      )
-    }
-    d.body.append(tr)
-  }
+/** History's past-check table draws this many rows at a time as it is scrolled. */
+const ROW_CHUNK = 200
+const ROW_H = 29
+const BUFFER = 30
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+let cache = { ev: undefined, cols: new Map(), rowText: undefined, filters: new Map() }
+/** The cache of the check on screen; a new check starts a new one. */
+function freshCache() {
+  const ev = state.data?.record?.evaluation
+  if (cache.ev !== ev) cache = { ev, cols: new Map(), rowText: undefined, filters: new Map() }
+  return cache
 }
 
-/** Draws rows until row `i` is in the table, so jumping to an alert far down finds it drawn. */
-function drawUntilRow(i) {
+/** One column's values, prepared: what the grid shows, in lower case, and as a number (a time: its ms). */
+function colCache(c) {
+  const k = freshCache()
+  let entry = k.cols.get(c.key)
+  if (entry) return entry
+  const rows = k.ev?.rows ?? []
+  const text = new Array(rows.length)
+  const lower = new Array(rows.length)
+  const num = new Array(rows.length)
+  for (let i = 0; i < rows.length; i += 1) {
+    const v = cellOf(rows[i], c.key)
+    const t = format(v, c.format)
+    text[i] = t
+    lower[i] = t.toLowerCase()
+    const n = asNumber(v)
+    num[i] = n !== undefined ? n : c.format === 'datetime' ? asDate(v)?.getTime() : undefined
+  }
+  entry = { text, lower, num }
+  k.cols.set(c.key, entry)
+  return entry
+}
+
+/** Every row's shown text, in lower case, for the search box - across every column, shown or hidden. */
+function rowTexts() {
+  const k = freshCache()
+  if (k.rowText) return k.rowText
+  const rows = k.ev?.rows ?? []
+  const caches = allColumns().map(colCache)
+  k.rowText = rows.map((row, i) => {
+    const parts = caches.map((cc) => cc.lower[i])
+    // Fields no column names are searched too.
+    for (const [key, value] of Object.entries(row ?? {})) if (!allColumns().some((c) => c.key === key)) parts.push(textOf(value).toLowerCase())
+    return parts.join('\u0001')
+  })
+  return k.rowText
+}
+
+/**
+ * A column filter, typed: text to find, or a condition.
+ *   >50  >=50  <50  <=50  =x  !=x      compare (as numbers when both are; a time column compares times)
+ *   10..50                             between, inclusive
+ *   !text                              does not contain
+ *   "exact"                            is exactly
+ *   =   /   !=                         is empty / is not empty
+ *   a, b                               either (OR)        >10 & <50    both (AND)
+ * Case does not matter. Returns (lowerText, number) => boolean, or undefined for an empty filter.
+ */
+function compileFilter(expr, isTime) {
+  const source = String(expr ?? '').trim()
+  if (!source) return undefined
+  const k = freshCache()
+  const id = `${isTime ? 't' : 'n'}:${source}`
+  if (k.filters.has(id)) return k.filters.get(id)
+  const value = (s) => {
+    const n = asNumber(s)
+    if (n !== undefined) return n
+    return isTime ? asDate(s)?.getTime() : undefined
+  }
+  const term = (raw) => {
+    const s = raw.trim()
+    let m
+    if ((m = /^(.+?)\s*\.\.\s*(.+)$/.exec(s))) {
+      const a = value(m[1])
+      const b = value(m[2])
+      if (a !== undefined && b !== undefined) {
+        const lo = Math.min(a, b)
+        const hi = Math.max(a, b)
+        return (_t, n) => n !== undefined && n >= lo && n <= hi
+      }
+    }
+    if ((m = /^(>=|<=|!=|>|<|=)\s*(.*)$/.exec(s))) {
+      const op = m[1]
+      const rhs = m[2].trim()
+      if (rhs === '') return op === '=' ? (t) => t === '' : op === '!=' ? (t) => t !== '' : () => true
+      const rn = value(rhs)
+      const rt = rhs.replace(/^"(.*)"$/, '$1').toLowerCase()
+      return (t, n) => {
+        if (rn !== undefined && n !== undefined) {
+          return op === '>' ? n > rn : op === '<' ? n < rn : op === '>=' ? n >= rn : op === '<=' ? n <= rn : op === '!=' ? n !== rn : n === rn
+        }
+        const c = collator.compare(t, rt)
+        return op === '>' ? c > 0 : op === '<' ? c < 0 : op === '>=' ? c >= 0 : op === '<=' ? c <= 0 : op === '!=' ? t !== rt : t === rt
+      }
+    }
+    if (s.length > 1 && s.startsWith('!')) {
+      const w = s.slice(1).trim().toLowerCase()
+      return (t) => !t.includes(w)
+    }
+    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+      const w = s.slice(1, -1).toLowerCase()
+      return (t) => t === w
+    }
+    const w = s.toLowerCase()
+    return (t) => t.includes(w)
+  }
+  const ors = source
+    .split(',')
+    .map((part) => part.split('&').map((s) => s.trim()).filter(Boolean).map(term))
+    .filter((ands) => ands.length > 0)
+  const fn = ors.length === 0 ? undefined : (t, n) => ors.some((ands) => ands.every((p) => p(t, n)))
+  k.filters.set(id, fn)
+  return fn
+}
+
+/** Which filters are in force, for the count line and the funnels. */
+const filterActive = (f) => f !== undefined && ((f.text ?? '').trim() !== '' || f.values !== undefined)
+const activeFilterCount = () => Object.values(state.filters).filter(filterActive).length + (state.search.trim() ? 1 : 0)
+
+/** The rows the chips, the search and every column filter leave, sorted - optionally ignoring one column's filter. */
+function filteredIndices(index, exceptKey) {
+  const rows = freshCache().ev?.rows ?? []
+  let idx = []
+  for (let i = 0; i < rows.length; i += 1) idx.push(i)
+  if (state.only === 'alerts') idx = idx.filter((i) => (index.byRow.get(i) ?? []).some((a) => !a.acknowledged))
+  else if (LEVELS.includes(state.only)) idx = idx.filter((i) => (index.byRow.get(i) ?? []).some((a) => a.level === state.only))
+  const needle = state.search.trim().toLowerCase()
+  if (needle) {
+    const texts = rowTexts()
+    idx = idx.filter((i) => texts[i].includes(needle))
+  }
+  for (const c of allColumns()) {
+    if (c.key === exceptKey) continue
+    const f = state.filters[c.key]
+    if (!filterActive(f)) continue
+    const cc = colCache(c)
+    if (f.values !== undefined) {
+      const wanted = f.values
+      idx = idx.filter((i) => wanted.has(cc.text[i]))
+    }
+    const pred = compileFilter(f.text, c.format === 'datetime')
+    if (pred) idx = idx.filter((i) => pred(cc.lower[i], cc.num[i]))
+  }
+  return idx
+}
+
+function visibleRows(index) {
+  const rows = freshCache().ev?.rows ?? []
+  const idx = filteredIndices(index)
+  if (state.sort) {
+    const col = allColumns().find((c) => c.key === state.sort.key)
+    if (col) {
+      const cc = colCache(col)
+      const dir = state.sort.dir === 'asc' ? 1 : -1
+      idx.sort((x, y) => {
+        const a = cc.num[x]
+        const b = cc.num[y]
+        const r = a !== undefined && b !== undefined ? a - b : collator.compare(cc.text[x], cc.text[y])
+        return r * dir || x - y
+      })
+    }
+  } else {
+    // Unsorted: the alerted rows first, worst first - what somebody opening this came to see.
+    const rank = (i) => {
+      const l = worst(index.byRow.get(i) ?? [])
+      return l === undefined ? LEVELS.length : LEVELS.indexOf(l)
+    }
+    idx.sort((x, y) => rank(x) - rank(y) || x - y)
+  }
+  return idx.map((i) => ({ row: rows[i], i }))
+}
+
+/** A column's width from its header and a sample of its values, so the table never reflows as it scrolls. */
+function columnWidth(c) {
+  if (c.width) return c.width
+  const cc = colCache(c)
+  const step = Math.max(1, Math.floor(cc.text.length / 400))
+  let longest = (c.label ?? c.key).length + 3
+  for (let i = 0; i < cc.text.length; i += step) longest = Math.max(longest, cc.text[i].length)
+  return Math.max(84, Math.min(440, Math.round(longest * 7.4 + 26)))
+}
+
+/** One row of the table. */
+function rowNode({ row, i }, d) {
+  const rowAlerts = d.index.byRow.get(i) ?? []
+  const whole = rowAlerts.filter((a) => a.wholeRow)
+  const rowLevel = whole.length ? worst(whole) : undefined
+  const tr = el('tr', {
+    class: [rowLevel ? `row-alert lv-${rowLevel}` : '', whole.length && whole.every((a) => a.acknowledged) ? 'acked' : '', state.selected === i ? 'selected' : ''].filter(Boolean).join(' '),
+    'data-row': i,
+  })
+  for (const c of d.cols) {
+    const cc = colCache(c)
+    const shownText = cc.text[i]
+    const cellAlerts = d.index.byCell.get(`${i}|${c.key}`) ?? []
+    const level = cellAlerts.length ? worst(cellAlerts) : undefined
+    const numeric = ['number', 'percent', 'bytes', 'duration'].includes(c.format) || (c.format === undefined && typeof cellOf(row, c.key) === 'number')
+    tr.append(
+      el('td', {
+        class: [numeric ? 'num' : '', level ? `cell-alert lv-${level}` : '', cellAlerts.length && cellAlerts.every((a) => a.acknowledged) ? 'acked' : ''].filter(Boolean).join(' '),
+        text: shownText,
+        'data-col': c.key,
+        // A value wider than its column can be read whole on hover.
+        ...(shownText.length > 48 ? { title: shownText } : {}),
+      }),
+    )
+  }
+  return tr
+}
+
+const spacerRow = (height, span) => el('tr', { class: 'g-spacer', 'aria-hidden': 'true' }, el('td', { colspan: String(span), style: `height:${height}px;padding:0;border:0` }))
+
+/** Puts the rows in view (and a margin) in the page; the rest are spacers of the right height. */
+function renderWindow(force) {
+  const d = state.drawing
+  if (!d) return
+  const wrap = $('#g-table-wrap')
+  const view = wrap.clientHeight || 600
+  const top = Math.max(0, wrap.scrollTop - d.headH)
+  const first = Math.max(0, Math.floor(top / d.rowH) - BUFFER)
+  const last = Math.min(d.list.length, Math.ceil((top + view) / d.rowH) + BUFFER)
+  if (!force && first === d.first && last === d.last) return
+  d.first = first
+  d.last = last
+  const frag = document.createDocumentFragment()
+  if (first > 0) frag.append(spacerRow(first * d.rowH, d.cols.length))
+  for (let p = first; p < last; p += 1) frag.append(rowNode(d.list[p], d))
+  if (last < d.list.length) frag.append(spacerRow((d.list.length - last) * d.rowH, d.cols.length))
+  d.body.replaceChildren(frag)
+  // The real row height, once: a font or zoom other than expected must not leave the spacers wrong.
+  if (!d.measured) {
+    d.measured = true
+    const real = d.body.querySelector('tr[data-row]')?.getBoundingClientRect?.().height ?? 0
+    const head = d.body.parentElement?.querySelector('thead')?.getBoundingClientRect?.().height ?? 0
+    if (head > 0) d.headH = head
+    if (real > 4 && Math.abs(real - d.rowH) > 0.5) {
+      d.rowH = real
+      renderWindow(true)
+      return
+    }
+  }
+  if (state.cellSel) paintSelection()
+}
+
+/** Scrolls row `i` into the middle of the view, drawing it - an alert chosen far down the grid. */
+function scrollToRow(i) {
   const d = state.drawing
   if (!d) return
   const at = d.list.findIndex((entry) => entry.i === i)
-  if (at >= d.next) drawMoreRows(at - d.next + ROW_CHUNK)
+  if (at < 0) return
+  const wrap = $('#g-table-wrap')
+  wrap.scrollTop = Math.max(0, d.headH + at * d.rowH - (wrap.clientHeight || 600) / 2)
+  renderWindow(true)
+}
+
+/** The rows again after a filter, the search or a sort changed - the header (and a filter being typed in) stays. */
+function renderBody() {
+  const table = $('#g-table')
+  const index = alertIndex()
+  const cols = columns()
+  const list = visibleRows(index)
+  const total = freshCache().ev?.rows?.length ?? 0
+  const count = $('#g-count')
+  const filters = activeFilterCount()
+  put(count,
+    el('span', { text: list.length === total ? `${total} row${total === 1 ? '' : 's'}` : `${list.length} of ${total} rows` }),
+    filters > 0 ? el('button', { class: 'link-btn', title: 'Clear every column filter and the search', onclick: clearFilters }, `Clear ${filters} filter${filters === 1 ? '' : 's'}`) : null,
+  )
+  let body = table.querySelector('tbody')
+  if (!body) {
+    body = el('tbody')
+    table.append(body)
+  }
+  const old = state.drawing
+  state.drawing = { list, index, cols, body, first: -1, last: -1, rowH: old?.rowH ?? ROW_H, headH: old?.headH ?? 62, measured: old?.measured ?? false }
+  renderWindow(true)
+  for (const th of table.querySelectorAll('th[data-col]')) {
+    const f = state.filters[th.dataset.col]
+    th.classList.toggle('filtered', filterActive(f))
+  }
+  renderEmpty(total, list.length)
+}
+
+let bodyTimer
+/** Typing in a filter: the rows follow once the typing pauses, not on every key. */
+function queueBody() {
+  clearTimeout(bodyTimer)
+  bodyTimer = setTimeout(renderBody, 120)
+}
+
+function clearFilters() {
+  state.filters = {}
+  state.search = ''
+  $('#g-search').value = ''
+  renderTable()
 }
 
 function renderTable() {
   const index = alertIndex()
   renderChips(index)
   const cols = columns()
-  const list = visibleRows(index)
-  const total = state.data?.record?.evaluation?.rows?.length ?? 0
-  $('#g-count').textContent = list.length === total ? `${total} row${total === 1 ? '' : 's'}` : `${list.length} of ${total} rows`
   const table = $('#g-table')
   const focused = document.activeElement?.dataset?.filter
+  const colgroup = el('colgroup', {}, ...cols.map((c) => el('col', { style: `width:${columnWidth(c)}px` })))
   const head = el(
     'thead',
     {},
@@ -408,29 +650,45 @@ function renderTable() {
       {},
       ...cols.map((c) => {
         const sorted = state.sort?.key === c.key ? (state.sort.dir === 'asc' ? '▲' : '▼') : ''
-        const input = el('input', { type: 'text', placeholder: 'Filter', value: state.filters[c.key] ?? '', 'data-filter': c.key, spellcheck: 'false', title: 'Text to find, or >10, <5, =value, !=value' })
+        const f = state.filters[c.key]
+        const input = el('input', {
+          type: 'text',
+          placeholder: 'Filter',
+          value: f?.text ?? '',
+          'data-filter': c.key,
+          spellcheck: 'false',
+          title: 'Text to find, or a condition: >50  >=50  <50  10..50  =x  !=x  !text  "exact"  = (empty)  != (not empty).  a, b for either; >10 & <50 for both.',
+        })
         input.addEventListener('input', () => {
-          state.filters[c.key] = input.value
-          renderTable()
+          state.filters[c.key] = { ...(state.filters[c.key] ?? {}), text: input.value }
+          queueBody()
         })
         return el(
           'th',
-          { style: c.width ? `min-width: ${c.width}px` : '' },
-          el('div', { class: 'h', onclick: () => sortBy(c.key) }, c.label ?? c.key, el('span', { class: 'sort', text: sorted })),
+          { 'data-col': c.key, class: filterActive(f) ? 'filtered' : '' },
+          el('div', { class: 'h' },
+            el('span', { class: 'h-label', onclick: () => sortBy(c.key), title: 'Sort by this column (again for descending, a third time to stop)' }, c.label ?? c.key, el('span', { class: 'sort', text: sorted })),
+            el('button', { class: 'funnel', title: 'Filter by value: tick the values to show, search them, or write a condition', 'aria-label': `Filter ${c.label ?? c.key}`, onclick: (e) => (e.stopPropagation(), valuesPopup(c, e.currentTarget)) }, svg('funnel')),
+          ),
           input,
         )
       }),
     ),
   )
-  const body = el('tbody')
-  // Drawn as it is scrolled to (asked for): the first rows now, the next as the bottom comes near - filters, sort
-  // and counts still cover every row, since all of them are here; only drawing is staged. It used to draw at most
-  // 3000 rows and never the rest.
-  state.drawing = { list, index, cols, body, next: 0 }
-  drawMoreRows(ROW_CHUNK)
-  put(table, head, body)
-  const empty = $('#g-empty')
+  put(table, colgroup, head, el('tbody'))
+  table.style.width = `${cols.reduce((sum, c) => sum + columnWidth(c), 0)}px`
+  renderBody()
+  if (focused !== undefined) {
+    const again = table.querySelector(`input[data-filter="${CSS.escape(focused)}"]`)
+    if (again) {
+      again.focus()
+      again.setSelectionRange(again.value.length, again.value.length)
+    }
+  }
+}
 
+function renderEmpty(total, shownCount) {
+  const empty = $('#g-empty')
   if (!state.data.monitor.approved) {
     empty.hidden = false
     put(empty,
@@ -442,22 +700,171 @@ function renderTable() {
   } else if (total === 0) {
     empty.hidden = false
     put(empty, el('p', { text: state.data.record ? 'The last check returned no rows.' : 'Waiting for the first check…' }))
-  } else if (list.length === 0) {
+  } else if (shownCount === 0) {
     empty.hidden = false
-    put(empty, el('p', { text: 'No rows match the filters.' }))
+    put(empty, el('p', {}, 'No rows match the filters. ', el('button', { class: 'link-btn', onclick: clearFilters }, 'Clear them')))
   } else empty.hidden = true
-  if (focused !== undefined) {
-    const again = table.querySelector(`input[data-filter="${CSS.escape(focused)}"]`)
-    if (again) {
-      again.focus()
-      again.setSelectionRange(again.value.length, again.value.length)
-    }
-  }
 }
 
 function sortBy(key) {
   state.sort = state.sort?.key !== key ? { key, dir: 'asc' } : state.sort.dir === 'asc' ? { key, dir: 'desc' } : undefined
   renderTable()
+}
+
+// ─── Popups: a column's values, and the column chooser ─────────────────────
+
+let popup
+function closePopup() {
+  popup?.remove()
+  popup = undefined
+}
+document.addEventListener('mousedown', (e) => {
+  if (popup && !popup.contains(e.target) && !e.target.closest?.('.funnel, .cols-btn')) closePopup()
+})
+
+function placePopup(node, anchor) {
+  closePopup()
+  popup = node
+  document.body.append(node)
+  const r = anchor.getBoundingClientRect()
+  const w = node.offsetWidth || 300
+  node.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`
+  node.style.top = `${Math.min(r.bottom + 4, Math.max(8, innerHeight - (node.offsetHeight || 360) - 8))}px`
+}
+
+/**
+ * A column's values, Excel's way: each distinct value with how many rows have it (among the rows the other filters
+ * leave), a search box over them, ticks, and the column's condition. Ticking applies at once.
+ */
+function valuesPopup(c, anchor) {
+  const cc = colCache(c)
+  const others = filteredIndices(alertIndex(), c.key)
+  const counts = new Map()
+  for (const i of others) counts.set(cc.text[i], (counts.get(cc.text[i]) ?? 0) + 1)
+  const all = [...counts.entries()].sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]))
+  const f = () => state.filters[c.key] ?? {}
+  const isOn = (v) => f().values === undefined || f().values.has(v)
+  const setValues = (values) => {
+    state.filters[c.key] = { ...f(), values }
+    renderBody()
+  }
+  const search = el('input', { type: 'search', placeholder: `Search ${all.length} value${all.length === 1 ? '' : 's'}`, spellcheck: 'false', class: 'pop-search' })
+  const condition = el('input', { type: 'text', placeholder: 'Condition: >50, 10..50, !text', value: f().text ?? '', spellcheck: 'false', class: 'pop-search' })
+  condition.addEventListener('input', () => {
+    state.filters[c.key] = { ...f(), text: condition.value }
+    const inline = $(`#g-table input[data-filter="${CSS.escape(c.key)}"]`)
+    if (inline) inline.value = condition.value
+    queueBody()
+  })
+  const list = el('div', { class: 'pop-list', role: 'listbox' })
+  const LIMIT = 500
+  const matching = () => {
+    const q = search.value.trim().toLowerCase()
+    return q ? all.filter(([v]) => (v || '(empty)').toLowerCase().includes(q)) : all
+  }
+  const draw = () => {
+    const shown = matching()
+    put(list,
+      ...shown.slice(0, LIMIT).map(([v, n]) => {
+        const box = el('input', { type: 'checkbox', checked: isOn(v) })
+        box.addEventListener('change', () => {
+          const values = new Set(f().values ?? all.map(([x]) => x))
+          if (box.checked) values.add(v)
+          else values.delete(v)
+          setValues(values.size === all.length ? undefined : values)
+        })
+        return el('label', { class: 'pop-item' }, box, el('span', { class: v ? '' : 'muted', text: v || '(empty)' }), el('span', { class: 'pop-count', text: String(n) }))
+      }),
+      shown.length > LIMIT ? el('p', { class: 'muted pop-more', text: `${shown.length - LIMIT} more - type to narrow them down.` }) : null,
+      shown.length === 0 ? el('p', { class: 'muted pop-more', text: 'No value matches.' }) : null,
+    )
+  }
+  search.addEventListener('input', draw)
+  draw()
+  const node = el('div', { class: 'pop', role: 'dialog', 'aria-label': `Filter ${c.label ?? c.key}` },
+    el('div', { class: 'pop-head' }, el('b', { text: c.label ?? c.key }), el('button', { class: 'icon-btn', title: 'Close (Esc)', 'aria-label': 'Close', onclick: closePopup }, svg('close'))),
+    condition,
+    search,
+    el('div', { class: 'pop-actions' },
+      el('button', { class: 'link-btn', onclick: () => (setValues(undefined), draw()) }, 'Select all'),
+      el('button', { class: 'link-btn', onclick: () => (setValues(new Set()), draw()) }, 'Clear'),
+      el('button', { class: 'link-btn', title: 'Show only the values the search found', onclick: () => (setValues(new Set(matching().map(([v]) => v))), draw()) }, 'Only these'),
+      el('button', { class: 'link-btn', title: "Remove this column's filter", onclick: () => { delete state.filters[c.key]; closePopup(); renderTable() } }, 'Reset'),
+    ),
+    list,
+  )
+  placePopup(node, anchor)
+  search.focus()
+}
+
+/** Which columns are shown, remembered per monitor on this computer. */
+const hiddenKey = () => `fire-code.grid.hidden.${state.data?.monitor?.name ?? ''}`
+function hiddenColumns() {
+  if (state.hiddenFor !== hiddenKey()) {
+    state.hiddenFor = hiddenKey()
+    try {
+      state.hidden = new Set(JSON.parse(localStorage.getItem(hiddenKey()) ?? '[]'))
+    } catch {
+      state.hidden = new Set()
+    }
+  }
+  return state.hidden
+}
+function saveHidden() {
+  try {
+    localStorage.setItem(hiddenKey(), JSON.stringify([...hiddenColumns()]))
+  } catch {
+    // Storage refused: the choice lasts while the window is open.
+  }
+}
+
+function columnsPopup(anchor) {
+  const all = allColumns()
+  const hidden = hiddenColumns()
+  const search = el('input', { type: 'search', placeholder: `Search ${all.length} columns`, spellcheck: 'false', class: 'pop-search' })
+  const list = el('div', { class: 'pop-list' })
+  const summary = el('span', { class: 'muted' })
+  const changed = () => {
+    saveHidden()
+    renderTable()
+    draw()
+  }
+  const draw = () => {
+    const q = search.value.trim().toLowerCase()
+    summary.textContent = `${all.length - [...hidden].filter((k) => all.some((c) => c.key === k)).length} of ${all.length} shown`
+    put(list,
+      ...all
+        .filter((c) => !q || (c.label ?? c.key).toLowerCase().includes(q) || c.key.toLowerCase().includes(q))
+        .map((c) => {
+          const box = el('input', { type: 'checkbox', checked: !hidden.has(c.key) })
+          box.addEventListener('change', () => {
+            if (box.checked) hidden.delete(c.key)
+            else if (all.filter((x) => !hidden.has(x.key)).length > 1) hidden.add(c.key)
+            else box.checked = true
+            changed()
+          })
+          return el('label', { class: 'pop-item' }, box, el('span', { text: c.label ?? c.key }), c.label && c.label !== c.key ? el('span', { class: 'pop-count', text: c.key }) : null)
+        }),
+    )
+  }
+  search.addEventListener('input', draw)
+  draw()
+  const node = el('div', { class: 'pop', role: 'dialog', 'aria-label': 'Columns' },
+    el('div', { class: 'pop-head' }, el('b', { text: 'Columns' }), summary, el('button', { class: 'icon-btn', title: 'Close (Esc)', 'aria-label': 'Close', onclick: closePopup }, svg('close'))),
+    search,
+    el('div', { class: 'pop-actions' },
+      el('button', { class: 'link-btn', onclick: () => (hidden.clear(), changed()) }, 'Show all'),
+      el('button', { class: 'link-btn', title: 'Only the columns with an alert in them, and the first', onclick: () => {
+        const alerted = new Set((state.data?.record?.evaluation?.alerts ?? []).map((a) => a.column).filter(Boolean))
+        hidden.clear()
+        all.forEach((c, n) => { if (n > 0 && !alerted.has(c.key)) hidden.add(c.key) })
+        changed()
+      } }, 'Only alerted'),
+    ),
+    list,
+  )
+  placePopup(node, anchor)
+  search.focus()
 }
 
 function render() {
@@ -485,10 +892,7 @@ function selectRow(i, scroll) {
   // The agent explains an alerted row - the author's advice, the row and the alert's history.
   if (alerted) send('explain', { row: i })
   if (state.data.hasDetails) send('details', { row: i })
-  if (scroll) {
-    drawUntilRow(i)
-    document.querySelector(`tr[data-row="${i}"]`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-  }
+  if (scroll) scrollToRow(i)
 }
 
 function renderDrawer() {
@@ -893,13 +1297,19 @@ function snoozeMenu(anchor) {
 
 /** A row's alerts, snoozed together: quiet until then - unless one gets worse, which counts again at once. */
 function rowSnoozeMenu(anchor, row) {
+  const items = rowSnoozeItems(row)
+  if (items.length === 0) return notice('This row has no alerts to snooze.')
+  showMenu(anchor, items)
+}
+
+function rowSnoozeItems(row) {
   const ids = (alertIndex().byRow.get(row) ?? []).map((a) => a.id)
-  if (ids.length === 0) return notice('This row has no alerts to snooze.')
+  if (ids.length === 0) return []
   const at = (minutes) => () => send('ack', { ids, minutes, note: 'snoozed' })
   const tomorrow = new Date()
   tomorrow.setDate(tomorrow.getDate() + 1)
   tomorrow.setHours(9, 0, 0, 0)
-  showMenu(anchor, [
+  return [
     ['Snooze this row 1 hour', at(60)],
     ['Snooze this row 4 hours', at(240)],
     ['Snooze this row until tomorrow 09:00', () => send('ack', { ids, until: Math.floor(tomorrow.getTime() / 1000), note: 'snoozed' })],
@@ -907,8 +1317,123 @@ function rowSnoozeMenu(anchor, row) {
     '-',
     ['Acknowledge this row', () => send('ack', { ids })],
     ['Undo acknowledge / snooze', () => send('unack', { ids })],
-  ])
+  ]
 }
+
+// ─── Copying ────────────────────────────────────────────────────────────────
+//
+// Asked for: "data should be selectable and copyable from the datagrid, a cell or the full grid". Click a cell to
+// select it, Shift+click another to select the block between, Ctrl+C to copy; right-click for a cell, its row, its
+// column or the whole grid; the header's copy button takes the whole grid. The whole grid is every row the filters
+// and sort leave, drawn or not, with the headers. Copied as tab-separated text (Excel pastes it into cells) and as
+// an HTML table (Word, Outlook, OneNote), in the text the grid shows.
+
+/** Rows in the order shown, and the columns: what positions in a selection refer to. */
+const shown = () => ({ list: state.drawing?.list ?? [], cols: state.drawing?.cols ?? [] })
+
+/** The selected block as list positions and column indexes, or undefined. */
+function selectionBox() {
+  const s = state.cellSel
+  if (!s) return undefined
+  const { list, cols } = shown()
+  const pos = (i) => list.findIndex((entry) => entry.i === i)
+  const col = (key) => cols.findIndex((c) => c.key === key)
+  const a = { r: pos(s.anchor.row), c: col(s.anchor.col) }
+  const b = { r: pos(s.focus.row), c: col(s.focus.col) }
+  if (a.r < 0 || b.r < 0 || a.c < 0 || b.c < 0) return undefined
+  return { r0: Math.min(a.r, b.r), r1: Math.max(a.r, b.r), c0: Math.min(a.c, b.c), c1: Math.max(a.c, b.c) }
+}
+
+/** Marks the selected cells among those drawn. */
+function paintSelection() {
+  for (const td of document.querySelectorAll('#g-table td.cell-on, #g-table td.cell-range')) td.classList.remove('cell-on', 'cell-range')
+  const box = selectionBox()
+  if (!box) return
+  const { list, cols } = shown()
+  for (let r = box.r0; r <= box.r1; r += 1) {
+    const tr = document.querySelector(`#g-table tr[data-row="${list[r].i}"]`)
+    if (!tr) continue
+    for (let c = box.c0; c <= box.c1; c += 1) {
+      const td = tr.querySelector(`td[data-col="${CSS.escape(cols[c].key)}"]`)
+      td?.classList.add(box.r0 === box.r1 && box.c0 === box.c1 ? 'cell-on' : 'cell-range')
+    }
+  }
+}
+
+/** A block of the grid as text and as a table. `withHeads`: the column names first. */
+function gridText(r0, r1, c0, c1, withHeads) {
+  const { list, cols } = shown()
+  const use = cols.slice(c0, c1 + 1)
+  const rows = list.slice(r0, r1 + 1).map(({ row }) => use.map((c) => format(cellOf(row, c.key), c.format)))
+  const heads = use.map((c) => c.label ?? c.key)
+  const tsvCell = (v) => String(v ?? '').replace(/[\t\r\n]+/g, ' ')
+  const text = [...(withHeads ? [heads] : []), ...rows].map((line) => line.map(tsvCell).join('\t')).join('\r\n')
+  const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const cell = (tag, v) => `<${tag} style="border:1px solid #bbb;padding:2px 6px;text-align:left">${esc(v)}</${tag}>`
+  const html =
+    '<table style="border-collapse:collapse">' +
+    (withHeads ? `<tr>${heads.map((h) => cell('th', h)).join('')}</tr>` : '') +
+    rows.map((line) => `<tr>${line.map((v) => cell('td', v)).join('')}</tr>`).join('') +
+    '</table>'
+  return { text, html, cells: rows.length * use.length, rows: rows.length }
+}
+
+let pendingCopy
+/** Puts text and a table on the clipboard, from a click or a key - WebView2 allows copying in a user's gesture. */
+function copyOut(payload, said) {
+  pendingCopy = payload
+  let done
+  try {
+    done = document.execCommand('copy')
+  } catch {
+    done = false
+  }
+  pendingCopy = undefined
+  if (!done && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(payload.text).then(() => notice(said), () => notice('Could not copy - the clipboard refused.'))
+    return
+  }
+  notice(done ? said : 'Could not copy - the clipboard refused.')
+}
+document.addEventListener('copy', (e) => {
+  let payload = pendingCopy
+  // Ctrl+C with cells selected and no text selected by hand: the cells.
+  if (!payload && state.cellSel && String(window.getSelection?.() ?? '').length === 0 && !e.target.closest?.('input, textarea')) {
+    const box = selectionBox()
+    if (box) {
+      payload = gridText(box.r0, box.r1, box.c0, box.c1, false)
+      setTimeout(() => notice(payload.cells === 1 ? 'Copied the cell.' : `Copied ${payload.cells} cells.`))
+    }
+  }
+  if (!payload) return
+  e.preventDefault()
+  e.clipboardData?.setData('text/plain', payload.text)
+  e.clipboardData?.setData('text/html', payload.html)
+})
+
+function copyWholeGrid() {
+  const { list, cols } = shown()
+  if (list.length === 0 || cols.length === 0) return notice('There are no rows to copy.')
+  const out = gridText(0, list.length - 1, 0, cols.length - 1, true)
+  copyOut(out, `Copied ${out.rows} row${out.rows === 1 ? '' : 's'} with their headers${list.length < (state.data?.record?.evaluation?.rows?.length ?? 0) ? ' - the rows the filters show' : ''}.`)
+}
+
+/** The copy items for a right-click on a cell. */
+function copyItems(i, key) {
+  const { list, cols } = shown()
+  const r = list.findIndex((entry) => entry.i === i)
+  const c = cols.findIndex((col) => col.key === key)
+  if (r < 0) return []
+  const box = selectionBox()
+  return [
+    ...(c >= 0 ? [['Copy cell', () => copyOut(gridText(r, r, c, c, false), 'Copied the cell.')]] : []),
+    ...(box && (box.r0 !== box.r1 || box.c0 !== box.c1) ? [['Copy selected cells', () => { const out = gridText(box.r0, box.r1, box.c0, box.c1, false); copyOut(out, `Copied ${out.cells} cells.`) }]] : []),
+    ['Copy row', () => copyOut(gridText(r, r, 0, cols.length - 1, true), 'Copied the row with its headers.')],
+    ...(c >= 0 ? [['Copy column', () => { const out = gridText(0, list.length - 1, c, c, true); copyOut(out, `Copied the column - ${out.rows} rows.`) }]] : []),
+    ['Copy whole grid', copyWholeGrid],
+  ]
+}
+
 
 /** "Until…": a date and a time, tomorrow 09:00 to start from, at most 30 days ahead (Rust checks it too). */
 function openUntil(title, about, pick) {
@@ -1045,7 +1570,7 @@ function openDelete() {
 function openChanges() {
   if (!state.data || state.data.missing) return
   closeMenu()
-  state.sheet = { kind: 'changes', local: undefined, team: undefined, teamPending: false, teamError: undefined }
+  state.sheet = { kind: 'changes', local: undefined, team: undefined, teamPending: false, teamError: undefined, history: undefined, historyPending: false }
   send('revisions')
   renderSheet()
 }
@@ -1121,6 +1646,29 @@ function mergedRevisions(s) {
   return rows.filter((r, i) => !(r.change.startsWith('First seen') && rows.some((o, j) => j !== i && o.hash === r.hash && o.version === r.version && !o.change.startsWith('First seen'))))
 }
 
+/**
+ * The file's commits, from where it is kept (asked: "if the Bitbucket repo is where the skill or tool lives, take
+ * it from git"): the team repository, else the git checkout holding it. Who and when are the commit's.
+ */
+function commitsSection(s) {
+  const h = s.history
+  if (s.historyPending && !h) return el('p', { class: 'muted', text: 'Reading its history in the repository\u2026' })
+  if (!h || !Array.isArray(h.commits) || h.commits.length === 0) return null
+  const from = h.source === 'bitbucket' ? 'the team repository (Bitbucket)' : 'git'
+  return el('section', { class: 'sheet-sec' },
+    el('h3', { text: `Commits in ${from}` }),
+    el('p', { class: 'sheet-hint', text: `${h.where}${h.uncommitted ? ' \u00b7 changed here since the newest commit' : ''}` }),
+    el('ol', { class: 'changes' },
+      ...h.commits.slice(0, 50).map((c) =>
+        el('li', {},
+          el('div', { class: 'change-head' }, el('b', { text: when(c.at) }), el('span', { text: ` \u00b7 ${c.by}`, title: c.email ?? '' }), el('span', { class: 'pill', text: c.id })),
+          c.message ? el('div', { class: 'change-what', text: c.message }) : null,
+        ),
+      ),
+    ),
+  )
+}
+
 function changesBody(m, s) {
   const rows = s.local === undefined ? undefined : mergedRevisions(s)
   return [
@@ -1129,8 +1677,10 @@ function changesBody(m, s) {
       m.author ? ['Written by ', el('b', { text: m.author })] : 'No author on the skill',
       m.updatedAt ? [' · last saved ', el('b', { text: when(m.updatedAt) })] : null,
       m.updatedBy ? [' by ', el('b', { text: m.updatedBy })] : null,
+      m.updatedFrom ? ` (from ${m.updatedFrom})` : null,
       m.version ? ` · version ${m.version}` : null,
     ),
+    commitsSection(s),
     rows === undefined
       ? el('p', { class: 'muted', text: 'Reading…' })
       : rows.length === 0
@@ -1140,7 +1690,7 @@ function changesBody(m, s) {
               el('li', {},
                 el('div', { class: 'change-head' },
                   el('b', { text: when(r.at) }),
-                  el('span', { text: r.by ? ` · ${r.by}` : ' · someone unnamed' }),
+                  el('span', { text: r.by ? ` · ${r.by}` : ' · who saved it is not recorded' }),
                   r.version ? el('span', { class: 'pill', text: `v${r.version}` }) : null,
                 ),
                 el('div', { class: 'change-what', text: r.change }),
@@ -1255,19 +1805,37 @@ $('#g-table').addEventListener('dblclick', (e) => {
   const tr = e.target.closest('tr[data-row]')
   if (tr) selectRow(Number(tr.dataset.row), false)
 })
-// More rows as the bottom of the table comes near.
-$('#g-table-wrap').addEventListener('scroll', (e) => {
-  const wrap = e.currentTarget
-  if (wrap.scrollTop + wrap.clientHeight > wrap.scrollHeight - 400) drawMoreRows(ROW_CHUNK)
+// The rows in view follow the scroll (`renderWindow`); a frame at a time, however fast the wheel turns.
+let scrollFrame
+$('#g-table-wrap').addEventListener('scroll', () => {
+  if (scrollFrame !== undefined) return
+  const next = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 0)
+  scrollFrame = next(() => {
+    scrollFrame = undefined
+    renderWindow(false)
+  })
 })
+// The column chooser sits in the toolbar, after the search box.
+$('.g-search').after(el('button', { class: 'btn small cols-btn', title: 'Choose the columns shown - remembered for this monitor', onclick: (e) => columnsPopup(e.currentTarget) }, svg('columns'), 'Columns'))
 $('#g-table').addEventListener('contextmenu', (e) => {
   const tr = e.target.closest('tr[data-row]')
   if (!tr) return
   e.preventDefault()
-  rowSnoozeMenu({ getBoundingClientRect: () => ({ right: e.clientX + 200, bottom: e.clientY }) }, Number(tr.dataset.row))
+  const i = Number(tr.dataset.row)
+  const key = e.target.closest('td')?.dataset.col
+  const snooze = state.past ? [] : rowSnoozeItems(i)
+  showMenu({ getBoundingClientRect: () => ({ right: e.clientX + 200, bottom: e.clientY }) }, [...copyItems(i, key), ...(snooze.length ? ['-', ...snooze] : [])])
 })
 $('#g-table').addEventListener('click', (e) => {
   const tr = e.target.closest('tr[data-row]')
+  const td = e.target.closest('td[data-col]')
+  if (tr && td) {
+    const here = { row: Number(tr.dataset.row), col: td.dataset.col }
+    // Shift+click: the block from the first cell chosen to this one.
+    state.cellSel = e.shiftKey && state.cellSel ? { anchor: state.cellSel.anchor, focus: here } : { anchor: here, focus: here }
+    if (e.shiftKey) window.getSelection?.()?.removeAllRanges()
+    paintSelection()
+  }
   if (tr && state.selected !== undefined) selectRow(Number(tr.dataset.row), false)
 })
 
@@ -1291,7 +1859,8 @@ $('#g-table').addEventListener('mouseleave', () => (tip.hidden = true))
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (menu) closeMenu()
+    if (popup) closePopup()
+    else if (menu) closeMenu()
     else if (state.sheet) {
       if (!state.sheet.saving) closeSheet()
     } else if (state.selected !== undefined) closeDrawer()
@@ -1339,7 +1908,18 @@ window.__sun = {
           if (message.revisions) state.sheet.local = message.revisions
           if (message.team) state.sheet.team = message.team
           if (message.teamError) state.sheet.teamError = message.teamError
+          if ('history' in message) {
+            state.sheet.history = message.history ?? undefined
+            state.sheet.historyPending = Boolean(message.historyPending)
+          }
           state.sheet.teamPending = Boolean(message.teamPending)
+          renderSheet()
+        }
+        break
+      case 'fileHistory':
+        if (state.sheet?.kind === 'changes') {
+          state.sheet.history = message.history ?? undefined
+          state.sheet.historyPending = false
           renderSheet()
         }
         break

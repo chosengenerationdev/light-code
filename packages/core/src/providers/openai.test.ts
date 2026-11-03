@@ -245,3 +245,61 @@ describe('reasoning', () => {
     expect(chunks.filter((c) => c.type === 'reasoning')).toEqual([{ type: 'reasoning', text: 'hmm' }])
   })
 })
+
+// Reported: the token bar read 175k of 262k and the gateway refused the request as too long - the bar was the
+// 4-characters estimate, because this adapter never asked for the real count.
+describe('the real token count', () => {
+  const sse = (objects: unknown[]) => objects.map((o) => `data: ${JSON.stringify(o)}\n\n`).concat(['data: [DONE]\n\n'])
+
+  it('asks for usage and reports it, after a tool call too', async () => {
+    let sent: Record<string, unknown> = {}
+    const client = new FakeHttpClient((_url, options) => {
+      sent = JSON.parse(String(options?.body)) as Record<string, unknown>
+      return okResponse(
+        streamFromChunks(
+          sse([
+            { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'read_file', arguments: '{}' } }] } }] },
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+            { choices: [], usage: { prompt_tokens: 231_000, completion_tokens: 40, prompt_tokens_details: { cached_tokens: 200_000 } } },
+          ]),
+        ),
+      )
+    })
+    const chunks = await collect(new OpenAIProvider(client, { ...profile, baseUrl: 'https://usage.example.com/v1' }, new NoAuthStrategy()).streamChat([]))
+    expect(sent['stream_options']).toEqual({ include_usage: true })
+    expect(chunks.map((c) => c.type)).toEqual(['toolCall', 'usage', 'done'])
+    expect(chunks.find((c) => c.type === 'usage')).toEqual({ type: 'usage', inputTokens: 231_000, outputTokens: 40, cachedTokens: 200_000 })
+  })
+
+  it('asks again without it when a gateway refuses the field, and remembers', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const client = new FakeHttpClient((_url, options) => {
+      const body = JSON.parse(String(options?.body)) as Record<string, unknown>
+      bodies.push(body)
+      if (body['stream_options'] !== undefined) return { ...okResponse(null), status: 400, text: async () => '{"error":"Unrecognized request argument supplied: stream_options"}' }
+      return okResponse(streamFromChunks(sse([{ choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }] }])))
+    })
+    const strict = { ...profile, baseUrl: 'https://strict.example.com/v1' }
+    const first = await collect(new OpenAIProvider(client, strict, new NoAuthStrategy()).streamChat([]))
+    expect(first.filter((c) => c.type === 'text')).toEqual([{ type: 'text', text: 'hi' }])
+    await collect(new OpenAIProvider(client, strict, new NoAuthStrategy()).streamChat([]))
+    expect(bodies.map((b) => b['stream_options'] !== undefined)).toEqual([true, false, false])
+  })
+
+  it('does not wait for ever for a stream that stays open after a tool call', async () => {
+    const encoder = new TextEncoder()
+    let sentFinish = false
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sentFinish) return new Promise(() => undefined)
+        sentFinish = true
+        controller.enqueue(encoder.encode(sse([{ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'x', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] }])[0]!))
+        return undefined
+      },
+    })
+    const started = Date.now()
+    const chunks = await collect(new OpenAIProvider(new FakeHttpClient(() => okResponse(body)), { ...profile, baseUrl: 'https://open.example.com/v1' }, new NoAuthStrategy()).streamChat([]))
+    expect(chunks.map((c) => c.type)).toEqual(['toolCall', 'done'])
+    expect(Date.now() - started).toBeLessThan(7000)
+  }, 10_000)
+})

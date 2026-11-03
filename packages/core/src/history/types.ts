@@ -1,4 +1,5 @@
 import type { PlanProgress } from '../agent/checkpoints.js'
+import type { Strategy, StrategyExchange, StrategyProgress } from '../strategy/strategy.js'
 import type { ChatMessage } from '../providers/types.js'
 
 /**
@@ -33,6 +34,11 @@ export interface Task {
    * was for would be worse than no plan at all.
    */
   plan?: string
+  /** The strategy this chat follows (Agent team mode), and where its back-and-forth loops stand. */
+  strategy?: Strategy
+  strategyProgress?: StrategyProgress
+  /** Every consultation made under it: what was asked, answered and decided (`StrategyExchange`). */
+  strategyExchanges?: StrategyExchange[]
   /**
    * How far through that plan this chat got, keyed by checkpoint id.
    *

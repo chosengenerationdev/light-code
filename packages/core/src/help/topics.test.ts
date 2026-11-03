@@ -89,7 +89,7 @@ describe('the handbook describes the real product', () => {
     const ids = new Set(BUILTIN_MODES.map((mode) => mode.id))
     const modes = HELP_TOPICS.find((topic) => topic.id === 'modes')
     expect(modes).toBeDefined()
-    for (const id of ['code', 'ask', 'auto', 'agent-team']) {
+    for (const id of ['ask', 'auto', 'agent-team']) {
       expect(ids.has(id), `${id} is described but is not a built-in mode`).toBe(true)
     }
   })
@@ -257,6 +257,10 @@ describe('finding the right topic', () => {
       ['run a monitor once a day at a specific time', 'monitoring'],
       ['is this alert recurring or new', 'monitoring'],
       ['how do I change the schedule of a monitor check', 'monitoring'],
+      ['who changed this monitor, from bitbucket or git', 'monitoring'],
+      ['how do I copy rows from the monitoring grid', 'monitoring'],
+      ['how do I filter the monitoring grid for values above 50', 'monitoring'],
+      ['the agent crashed and python.exe stopped working', 'troubleshooting'],
       ['my monitoring checks are not triggered on time', 'monitoring'],
       ['is the monitoring scheduler running, how do I start it', 'monitoring'],
       ['who last updated this monitoring check', 'monitoring'],
@@ -294,6 +298,22 @@ describe('finding the right topic', () => {
       ['group and join two csv files with polars', 'dataframe'],
       ['combine data from different sources', 'dataframe'],
       ['can it join data from different sources by itself', 'dataframe'],
+      ['how do I draw a strategy for the agent team', 'strategies'],
+      ['run the reviewer and tester in parallel in the strategy', 'strategies'],
+      ['i dont know how to add steps and connectors', 'strategies'],
+      ['the agent doesnt know about the strategy i set up', 'strategies'],
+      ['where can i see the data contract between agents', 'strategies'],
+      ['how do I see what the agents agreed', 'strategies'],
+      ['which step of the strategy is running now', 'strategies'],
+      ['do the specialists have their own context', 'strategies'],
+      ['make the tester and programmer go back and forth until the tests pass', 'strategies'],
+      ['how do I make someone a team admin', 'team-admins'],
+      ['who can approve changes to my skill', 'team-admins'],
+      ['where do I see pending reviews', 'team-admins'],
+      ['how do I audit everything the agent does', 'auditor'],
+      ['stop the agent from hallucinating', 'auditor'],
+      ['notify me if the agent does something dangerous', 'auditor'],
+      ['where is the audit log kept', 'auditor'],
       ['which skill is used the most', 'usage-dashboard'],
       ['how do I find unused skills to delete', 'usage-dashboard'],
       ['who contributes the most skills and tools', 'usage-dashboard'],

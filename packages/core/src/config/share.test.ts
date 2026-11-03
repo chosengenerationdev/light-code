@@ -301,7 +301,8 @@ describe('the project section', () => {
     const path = await import('node:path')
     const bridge = fs.readFileSync(path.join(import.meta.dirname, '..', 'host', 'bridge.ts'), 'utf8')
     const handler = bridge.slice(bridge.indexOf('async function handleImportConfig('))
-    expect(handler).toContain('const { project: importedProject } = merged')
+    expect(handler).toContain('const { project: importedProject, observers: importedObservers } = merged')
+    expect(handler).toContain('await configManager.saveForWorkspace({ observers: importedObservers ?? undefined })')
     expect(handler).toContain('await configManager.saveForWorkspace({ project: importedProject ?? undefined })')
   })
 
@@ -315,8 +316,36 @@ describe('the project section', () => {
     const path = await import('node:path')
     const bridge = fs.readFileSync(path.join(import.meta.dirname, '..', 'host', 'bridge.ts'), 'utf8')
     const handler = bridge.slice(bridge.indexOf('async function handleImportConfig('))
-    expect(handler).toContain("if (!chosen.includes(section.id) || section.id === 'project') continue")
+    expect(handler).toContain("if (!chosen.includes(section.id) || section.id === 'project' || section.id === 'observers') continue")
     expect(handler).toContain("await configManager.save('user', patch as LightCodeConfig)")
     expect(handler).not.toContain('...merged,')
+  })
+})
+
+// Asked for: "a way to export only the AutoSys config and import only that".
+describe('AutoSys on its own', () => {
+  const mine = {
+    confluence: { enabled: true, baseUrl: 'https://wiki.example.test', tokenRef: 'confluence:token' },
+    autosys: { enabled: true, baseUrl: 'https://autosys.example.test/AEWS', username: 'ana', tokenRef: 'autosys:password', paths: { runInfo: '/v1/job-run-info?filter={filter:name}' }, testJob: 'PAY_LOAD' },
+  } as unknown as LightCodeConfig
+
+  it('exports the AutoSys block alone, without the user name, naming the password to enter', () => {
+    const exported = buildExport(mine, ['autosys']) as Record<string, unknown>
+    expect(Object.keys(exported)).toEqual(['autosys'])
+    expect(exported['autosys']).toEqual({ enabled: true, baseUrl: 'https://autosys.example.test/AEWS', tokenRef: 'autosys:password', paths: { runInfo: '/v1/job-run-info?filter={filter:name}' }, testJob: 'PAY_LOAD' })
+    const summary = describeSections(exported as LightCodeConfig).find((s) => s.id === 'autosys')
+    expect(summary?.present).toBe(true)
+    expect(summary?.secretRefs).toEqual(['AutoSys: username and password'])
+    // DevOps is not in the file, so it is not offered on import.
+    expect(describeSections(exported as LightCodeConfig).find((s) => s.id === 'atlassian')?.present).toBe(false)
+  })
+
+  it("imports only AutoSys, keeping the importer's other DevOps settings and own user name", () => {
+    const theirs = { confluence: { enabled: true, baseUrl: 'https://other-wiki.example.test' }, autosys: { enabled: true, baseUrl: 'https://old.example.test', username: 'bo' } } as unknown as LightCodeConfig
+    const merged = applyImport(theirs, buildExport(mine, ['autosys']), ['autosys']) as Record<string, { baseUrl?: string; username?: string; testJob?: string }>
+    expect(merged['confluence']?.baseUrl).toBe('https://other-wiki.example.test')
+    expect(merged['autosys']?.baseUrl).toBe('https://autosys.example.test/AEWS')
+    expect(merged['autosys']?.testJob).toBe('PAY_LOAD')
+    expect(merged['autosys']?.username).toBe('bo')
   })
 })

@@ -68,6 +68,8 @@ export class LspClient {
       for (const p of this.pending.values()) p.reject(error)
       this.pending.clear()
     })
+    // A server that died must not take the host with it through its input pipe.
+    this.child.stdin?.on('error', () => undefined)
     this.child.on('exit', (code) => {
       this.exited = true
       this.lastError ??= `exited with code ${String(code)}`

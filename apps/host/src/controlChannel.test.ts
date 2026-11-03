@@ -47,6 +47,24 @@ describe('Fire Code asking for a team monitor to be changed', () => {
     expect(bridge).toMatch(/async function executeForMonitor[\s\S]{0,200}const here = await monitorToolHere\(name\)/)
   })
 
+  // Every kind Fire Code sends must be one this host parses: the dashboard's Refresh ("sync") was refused
+  // when it was added to Rust and the bridge but not here.
+  it('passes on every kind of request the bridge answers', async () => {
+    const control = new StdioControl(() => undefined)
+    const asked: MonitorRequest[] = []
+    control.executor().serve(async (request) => {
+      asked.push(request)
+      return { ok: true, data: null }
+    })
+    control.feed(`${JSON.stringify({ type: 'monitorRequest', id: 's1', kind: 'sync' })}\n`)
+    control.feed(`${JSON.stringify({ type: 'monitorRequest', id: 'h1', kind: 'history', file: 'C:/x/disks.md' })}\n`)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(asked).toEqual([{ kind: 'sync', id: 's1' }, { kind: 'history', id: 'h1', file: 'C:/x/disks.md' }])
+    const bridge = fs.readFileSync(path.join(__dirname, '../../../packages/core/src/host/bridge.ts'), 'utf8')
+    const answered = [...bridge.matchAll(/^\s{8}case '([a-z]+)':/gm)].map((m) => m[1])
+    for (const kind of ['fetch', 'store', 'explain', 'probe', 'sync', 'history', 'skill']) expect(answered).toContain(kind)
+  })
+
   it('is answered with the same delete everywhere the Skills tab uses, and a write held to the team folders', () => {
     // Read from the source: one deletion path for both, so the dashboard cannot delete a different way.
     const bridge = fs.readFileSync(path.join(__dirname, '../../../packages/core/src/host/bridge.ts'), 'utf8')

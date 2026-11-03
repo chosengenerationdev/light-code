@@ -422,3 +422,26 @@ describe('checkpoints', () => {
     expect(results[0]?.content).toMatch(/checkpoint/i)
   })
 })
+
+/* What the Auditor records: the gate's answer with the preview that was shown, and calls that never got that far. */
+describe('approval and refusal events', () => {
+  it('reports the decision with the literal preview', async () => {
+    const registry = new ToolRegistry()
+    registry.register(spyTool('write_to_file', 'edit'))
+    const { events } = recordingEvents()
+    const seen: { decision: string; kind: string }[] = []
+    events.onApproval = (_call, info) => seen.push({ decision: info.decision, kind: info.preview.kind })
+    await runAgentTurn(new ScriptedProvider(callThen('write_to_file')), new Conversation(), 'x', registry, toolContext(), events, { approvalGate: new FixedGate('deny') })
+    expect(seen).toEqual([{ decision: 'deny', kind: 'text' }])
+  })
+
+  it('reports a call that never reached its tool, with the reason the model is given', async () => {
+    const registry = new ToolRegistry()
+    const { events } = recordingEvents()
+    const refused: string[] = []
+    events.onToolRefused = (call, reason) => refused.push(`${call.name}: ${reason}`)
+    await runAgentTurn(new ScriptedProvider(callThen('no_such_tool')), new Conversation(), 'x', registry, toolContext(), events, {})
+    expect(refused).toEqual(['no_such_tool: Unknown tool "no_such_tool".'])
+  })
+})
+

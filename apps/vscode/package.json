@@ -3,7 +3,7 @@
   "displayName": "Light Code",
   "description": "A minimal agentic coding assistant. Bring your own model. No telemetry, no default endpoints.",
   "private": true,
-  "version": "0.197.0",
+  "version": "0.204.0",
   "publisher": "ChosenGeneration",
   "license": "MIT",
   "repository": {
@@ -50,6 +50,11 @@
       {
         "command": "lightCode.openPanel",
         "title": "Light Code: Open Panel"
+      },
+      {
+        "command": "lightCode.openStrategy",
+        "title": "Open Strategy (Agent team)",
+        "category": "Light Code"
       },
       {
         "command": "lightCode.addToContext",

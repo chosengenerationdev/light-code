@@ -82,7 +82,7 @@ fn write_atomically(target: &Path, text: &str) -> Result<(), String> {
 fn valid_event(value: &Value) -> bool {
     value.get("t").map_or(false, Value::is_number)
         && value.get("u").map_or(false, Value::is_string)
-        && matches!(value.get("k").and_then(Value::as_str), Some("skill" | "tool"))
+        && matches!(value.get("k").and_then(Value::as_str), Some("skill" | "tool" | "tokens"))
         && value.get("n").map_or(false, Value::is_string)
 }
 

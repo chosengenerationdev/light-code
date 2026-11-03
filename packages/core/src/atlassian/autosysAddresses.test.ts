@@ -65,7 +65,7 @@ describe('an address template', () => {
 
 describe('a pattern on a server with no pattern status address', () => {
   const routes = {
-    'GET /job?filter=name==JOB*UK': { json: [{ name: 'JOB_A_UK' }, { name: 'JOB_B_UK' }] },
+    'GET /job?filter=name=@JOB*UK': { json: [{ name: 'JOB_A_UK' }, { name: 'JOB_B_UK' }] },
     'GET /job-run-info/JOB_A_UK': { json: { name: 'JOB_A_UK', status: 'SUCCESS' } },
     'GET /job-run-info/JOB_B_UK': { json: { name: 'JOB_B_UK', status: 'FAILURE' } },
   }
@@ -76,7 +76,7 @@ describe('a pattern on a server with no pattern status address', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content).toContain('JOB_A_UK: SUCCESS')
     expect(result.content).toContain('JOB_B_UK: FAILURE')
-    expect(calls[0]).toBe('GET /job-run-info?filter=name==JOB*UK')
+    expect(calls[0]).toBe('GET /job-run-info?filter=name=@JOB*UK')
   })
 
   it('reads a status carried by the definition when there is no one-job status address either', async () => {
@@ -85,14 +85,14 @@ describe('a pattern on a server with no pattern status address', () => {
   })
 
   it('lets Test connection pass on the job list, and says what to do when neither answers', async () => {
-    await expect(fakeServer({ 'GET /job?filter=name==LIGHTCODE_PROBE_NO_SUCH_JOB*': { json: [] } }).make().probe('jsmith')).resolves.toBe('jsmith')
+    await expect(fakeServer({ 'GET /job?filter=name=@LIGHTCODE_PROBE_NO_SUCH_JOB*': { json: [] } }).make().probe('jsmith')).resolves.toBe('jsmith')
     await expect(fakeServer({}).make().probe('jsmith')).rejects.toThrow(/autosys_check_addresses/)
   })
 })
 
 describe('a server that pages its answers', () => {
   it('is noticed, and the status says some jobs are missing and what to change', async () => {
-    const { make } = fakeServer({ 'GET /job-run-info?filter=name==JOB*USD': { json: { totalCount: 230, jobRunInfo: [{ name: 'JOB_1_USD', status: 'SUCCESS' }, { name: 'JOB_2_USD', status: 'FAILURE' }] } } })
+    const { make } = fakeServer({ 'GET /job-run-info?filter=name=@JOB*USD': { json: { totalCount: 230, jobRunInfo: [{ name: 'JOB_1_USD', status: 'SUCCESS' }, { name: 'JOB_2_USD', status: 'FAILURE' }] } } })
     const result = await createAutosysStatusTool({ client: async () => make() }).execute({ jobs: ['JOB*USD'] }, NONE)
     expect(result.content).toContain('JOB_2_USD: FAILURE')
     expect(result.content).toMatch(/answered 2 statuses for JOB\*USD of 230 - it pages/)
@@ -108,9 +108,9 @@ describe('a server that pages its answers', () => {
 describe('autosys_check_addresses', () => {
   // The office server: everything under /v1, nothing at the documented addresses.
   const office = {
-    'GET /v1/job?filter=name==PAY_LOAD*': { json: [{ name: 'PAY_LOAD' }] },
+    'GET /v1/job?filter=name=@PAY_LOAD*': { json: [{ name: 'PAY_LOAD' }] },
     'GET /v1/job/PAY_LOAD': { json: { name: 'PAY_LOAD', jobType: 'CMD' } },
-    'GET /v1/job-run-info?filter=name==PAY_LOAD*': { json: [{ name: 'PAY_LOAD', status: 'SUCCESS' }] },
+    'GET /v1/job-run-info?filter=name=@PAY_LOAD*': { json: [{ name: 'PAY_LOAD', status: 'SUCCESS' }] },
     'GET /v1/job-run-info/PAY_LOAD': { json: { name: 'PAY_LOAD', status: 'SUCCESS' } },
   }
 

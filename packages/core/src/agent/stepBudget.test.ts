@@ -153,3 +153,31 @@ describe('a form the user filled in', () => {
     expect(provider.calls).toBe(3)
   })
 })
+
+/*
+ * The Anti Hallucinator's note joins at the same boundary, but is not somebody typing: an automatic reviewer
+ * that reset the budget could keep a turn running for ever. It must reach the model, and change nothing else.
+ */
+describe("an observer's note", () => {
+  it('reaches the conversation, is reported, and does not reset the budget', async () => {
+    const provider = new ScriptedProvider([callTool('work')])
+    const registry = new ToolRegistry()
+    registry.register(fakeTool('work', async () => ({ content: 'ok' })))
+    const { events } = collect()
+    const delivered: string[] = []
+    events.onObserverNote = (text) => delivered.push(text)
+    const conversation = new Conversation()
+    let step = 0
+    await runAgentTurn(provider, conversation, 'go', registry, context(), events, {
+      maxIterations: 3,
+      drainObserverNotes: () => {
+        step += 1
+        return step === 1 ? '[Anti Hallucinator - note] check a.ts' : undefined
+      },
+    })
+    expect(provider.calls).toBe(3)
+    expect(delivered).toEqual(['[Anti Hallucinator - note] check a.ts'])
+    expect(conversation.toArray().some((m) => m.role === 'user' && m.content === '[Anti Hallucinator - note] check a.ts')).toBe(true)
+  })
+})
+

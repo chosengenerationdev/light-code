@@ -708,10 +708,40 @@ impl Monitor {
         None
     }
 
+    /// When the check that is due now should have started, if it has not: its window's start, or the time of
+    /// day. None when nothing is due.
+    pub fn overdue_since(&self, last_run: Option<i64>, now: i64, local: LocalNow) -> Option<i64> {
+        let slot = self.due_slot(last_run, now, local)?;
+        // A time of day's slot is its instant; an interval's is its window number.
+        Some(if self.every_secs > 0 && slot < 1_000_000_000 { slot * self.every_secs as i64 } else { slot })
+    }
+
     /// When the next check is expected, for the tile: the interval's next, or the next time of day.
+    /// Never in the past (reported: "Next 36 min ago"): a window already due and not yet checked is due *now*
+    /// (`overdue_since` says since when), and outside the active hours or days it is the next window they allow.
     pub fn next_run(&self, last_run: Option<i64>, now: i64, local: LocalNow) -> Option<i64> {
+        // The local clock and weekday at another instant, in this zone.
+        let at = |t: i64| {
+            let l = t + local.offset_secs;
+            LocalNow { weekday: (l.div_euclid(86_400) + 3).rem_euclid(7) as u8, minutes: (l.rem_euclid(86_400) / 60) as u16, offset_secs: local.offset_secs }
+        };
         // The next window's start (see due_slot).
-        let by_interval = (self.every_secs > 0).then(|| last_run.map(|l| (l.div_euclid(self.every_secs as i64) + 1) * self.every_secs as i64).unwrap_or(now));
+        let by_interval = (self.every_secs > 0).then(|| {
+            let every = self.every_secs as i64;
+            let mut start = last_run.map(|l| (l.div_euclid(every) + 1) * every).unwrap_or(now);
+            if start <= now {
+                if self.active(local) {
+                    return now;
+                }
+                start = (now.div_euclid(every) + 1) * every;
+            }
+            // At most eight days of windows: past that, the schedule allows nothing (no day ticked).
+            let limit = start + 8 * 86_400;
+            while start < limit && !self.active(at(start)) {
+                start += every;
+            }
+            start
+        });
         let midnight = now - (local.minutes as i64) * 60 - (now + local.offset_secs).rem_euclid(60);
         let by_time = (0..8).find_map(|d: i64| {
             let weekday = ((local.weekday as i64 + d) % 7) as u8;
@@ -1186,9 +1216,10 @@ impl Labels {
     pub fn updated_at(&self) -> Option<i64> {
         self.updated.as_ref().and_then(|u| parse_datetime(&Value::String(u.clone()), 0))
     }
-    /// Who made the last save: who the label says, else the author.
+    /// Who made the last save, when a label says - never the author standing in for it: a file saved before
+    /// `updated_by` existed showed its author as the last to change it (reported as the wrong person).
     pub fn saved_by(&self) -> Option<String> {
-        self.updated_by.clone().or_else(|| self.author.clone())
+        self.updated_by.clone()
     }
 }
 
@@ -2270,6 +2301,13 @@ mod tests {
         assert_eq!(morning.due_slot(Some(now - 30), now, local), None);
         assert_eq!(morning.due_slot(Some(now - 300), now, local), Some(now / 900));
         assert_eq!(morning.next_run(Some(now - 30), now, local), Some((now / 900 + 1) * 900));
+        // Never "next … ago" (reported): a window due and not checked is due now, and says since when.
+        assert_eq!(morning.next_run(Some(now - 2400), now, local), Some(now));
+        assert_eq!(morning.overdue_since(Some(now - 2400), now, local), Some((now / 900) * 900));
+        assert_eq!(morning.overdue_since(Some(now - 30), now, local), None);
+        // Before the active hours, the next is when they open - not the window after the last check.
+        let (early, early_local) = at(6 * 60);
+        assert_eq!(morning.next_run(Some(early - 86_400), early, early_local), Some(midnight + 9 * 3600));
         // Saying neither is a sentence, not a default.
         assert!(compile(&json!({ "source": { "tool": "py__x" } }).to_string()).unwrap_err().contains("Say when to check"));
         assert!(compile(&json!({ "at": "25:00", "source": { "tool": "py__x" } }).to_string()).is_err());

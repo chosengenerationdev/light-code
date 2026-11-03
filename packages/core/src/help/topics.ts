@@ -93,24 +93,34 @@ project has overridden.
   },
   {
     id: 'modes',
-    title: 'Modes: Code, Ask, Auto and Agent team',
-    keywords: ['mode', 'switch', 'read only', 'shell first', 'auto mode', 'junior', 'team'],
+    title: 'Modes: Auto, Ask and Agent team',
+    keywords: ['mode', 'switch', 'read only', 'shell first', 'auto mode', 'junior', 'team', 'code mode'],
     body: `
 The mode picker sits **above the message box**, next to the profile picker. Mode is resolved once
 per turn, so switching takes effect on your next message.
 
-- **Code** — everything: read, edit, run commands, MCP tools.
 - **Ask** — read-only. It can inspect and answer but cannot edit or run anything. This *is* the
   read-only mode; there is no separate switch.
-- **Auto** — the same powers as Code, worked differently: it reads with \`cat\`, searches with
+- **Auto** — the default: everything (read, edit, run commands, MCP tools), and it reads with \`cat\`, searches with
   \`grep\`, and makes mechanical changes in the shell, keeping \`apply_diff\` for edits worth
   reading as a diff. **It is the only mode where read-only commands run without asking.**
 - **Agent team** — you lead and specialists are consulted. Needs at least one agent configured in
-  the Agents tab, or it is an ordinary Code session being told to consult somebody who is not
-  there.
+  the Agents tab. The **Strategy** button beside the mode picker draws how they are used: roles as
+  steps, connectors between them, a back-and-forth that repeats until a condition holds or a maximum
+  number of rounds, and a step marked read-only that cannot change anything. Strategies are saved and
+  reusable; each chat uses one or none. With one in use the agent first proposes a plan that follows it,
+  and Light Code counts each back-and-forth's rounds and stops one at its maximum.
+
+**Each specialist works in its own process with its own context**, in any mode (the Rust helper's
+\`fire-fs agent\`, for a role on an OpenAI, Anthropic or Gemini profile): it remembers earlier questions in
+the chat, and near its context limit it writes its own key points and starts a fresh session with them. The
+main agent sees only its answers. Its tool calls run through your approvals, labelled with who is asking. A
+role on the Claude CLI keeps the CLI's own session; without the helper, each question is answered on its own.
+
+**Code mode was removed**; Auto has the same tools. A saved \`code\` opens as Auto.
 
 The stored value is config:modeId. If it names a mode that no longer exists, it falls back to
-Code. \`junior\` is an old name that now resolves to Agent team.
+Auto. \`junior\` is an old name that now resolves to Agent team, and \`code\` to Auto.
 
 **What Auto mode trades:** \`apply_diff\` shows you what will change and you approve *that*;
 \`sed -i 's/a/b/' file\` is ground truth about the command and says nothing about the file
@@ -851,11 +861,15 @@ what the page names, since a wiki page can be out of date and the server cannot.
 then saves the ones that answered: it asks **every time**, the prompt shows the addresses before and after
 with each changed one tried live, and it is never available to a schedule or with read-only access.
 Addresses must be paths on your site (\`/v1/job/{job}\`) - never another host - and the ones that send
-(events, JIL) are never tried. Placeholders: {job}, {pattern}, {filter:name} (\`name==PAY_*\`), {runNum},
+(events, JIL) are never tried. Placeholders: {job}, {pattern}, {filter:name} (\`name==PAY_LOAD\` for one job, \`name=@PAY_*\` for a pattern - \`=@\` is how AutoSys matches a wildcard), {runNum},
 {type}, {machine}, {calendar}. Even without any of this, a **pattern** works on a server with no pattern
 status address: the jobs are listed and each one's status read in turn.
 
-**Share them with the team**: Settings → Export, tick only **AutoSys addresses**; colleagues import the
+**Share all of AutoSys**: Settings → Export, tick only **AutoSys** - the site, addresses, gateway (token address, client
+id, headers), test job and read-only setting, without your user name or any password or secret; importing it with only
+**AutoSys** ticked replaces the importer's AutoSys settings and nothing else, keeping their own user name.
+
+**Share only the addresses**: Settings → Export, tick only **AutoSys addresses**; colleagues import the
 file with that section ticked. It carries config:autosys (paths) alone, so their own site, sign-in and
 other DevOps settings are not touched. The assistant can write the same file (\`light_code_export_config\`
 with the section \`autosysAddresses\`), for example next to an onboarding page.
@@ -1254,6 +1268,84 @@ data is empty, not 0. Needs Fire Code's helper (Fire Code, or VS Code with Fire 
 `,
   },
   {
+    id: 'team-admins',
+    title: 'Team admins, owners and team reviews of shared skills and tools',
+    keywords: [
+      'admin', 'admins', 'team admin', 'owner', 'ownership', 'owns', 'approve a change', 'approval of changes',
+      'team reviews', 'pending review', 'pending reviews', 'waiting for approval', 'who can change', 'modify a skill',
+      'someone changed my skill', 'changed my tool', 'review a change', 'readonly', 'read-only', 'windows user id',
+      'approve changes', 'who can approve', 'changes to my skill', 'changes to my tool',
+    ],
+    body: `
+**Settings → Project → Team admins**, kept in the team's OpenSearch index (\`light-code-team-<project>\`, on the
+active OpenSearch connection), so everybody on the project sees the same list. Ids are **Windows user ids** (the
+signed-in account, lower case, any \`DOMAIN\\\` dropped) - never a name typed in settings.
+
+**The first list saved wins**: whoever saves it first decides it (two at once: one wins, the other is shown the winner's
+list). From then on only an admin can change it - for everyone else the field is read-only. Saving a list without your
+own id means you cannot change it afterwards; the panel warns.
+
+**Whoever creates a skill or tool owns it.** The owner is recorded in the team index the first time it is saved or
+seen (from its author label), once - editing the author line later does not move it. While the team has admins, a
+change by anybody else - through write_skill, create/update_python_tool, or Delete everywhere - is **not written**: it
+goes to the owner (or any admin) for approval, and **nobody, the person who made it included, uses it until it is
+approved**. An approved change is published where the team keeps it (bucket folder, team repository, or the project
+folder) and reaches everyone at their next sync; a tool's code is still approved once on each computer, as always.
+A change that adds pictures or files to a skill cannot be sent for review yet. With no admins, nothing needs approval.
+
+**Settings → Team reviews** lists the changes waiting, how long each has waited, and the diff; **Approve and publish** or
+**Reject** (with a reason). It is shown to admins, and to an owner with something to decide. Two people approving at
+once: one wins, the other is told.
+
+These are Light Code's checks, not access control: somebody with write access to the cluster, bucket or repository can
+still change files by hand.
+`,
+  },
+  {
+    id: 'auditor',
+    title: 'Auditor and Anti Hallucinator: recording, reviewing and steering the agent',
+    keywords: [
+      'auditor', 'audit', 'audit log', 'audit trail', 'record everything', 'recording', 'compliance',
+      'dangerous', 'not allowed', 'alert me', 'anti hallucinator', 'anti hallucination', 'hallucinate',
+      'hallucinating', 'hallucination', 'focused', 'stay focused', 'making things up', 'watch the agent',
+      'second model', 'reviewer', 'read_audit_log', 'audit index', 'handoff', 'observer',
+      'audit everything', 'everything the agent does', 'what the agent did', 'audit the agent',
+      'something dangerous', 'does something dangerous', 'dangerous command', 'not allowed to', 'from hallucinating', 'is hallucinating', 'hallucinates', 'makes things up', 'keep the agent focused', 'audit log',
+    ],
+    body: `
+**Settings → Project → Auditor** and **Anti Hallucinator**, saved for the open project (\`observers\` in
+config, user-scope only - a repository cannot switch either on or off, or choose their model).
+
+**The Auditor records everything the agent does** in this project: your requests, its reasoning (unless
+"Record the agent's reasoning too" is off), every tool call, every approval with the literal action you were
+shown, every result, and how each turn ended. The record is written by Light Code itself, so it is complete
+even with no model chosen. It goes to a journal on this machine (one file per session and day, under Light
+Code's storage folder, outside the repository; kept 90 days, \`observers.auditor.retentionDays\`), with
+secrets removed, and - when an OpenSearch connection exists - also to **your own index**,
+\`light-code-audit-<your name>\` (untick "Also record in my own OpenSearch index" to stop that).
+
+**It tells you at once when the agent does something dangerous or not allowed**: runs a command marked risky,
+changes a file outside the workspace, is refused a path on the deny list or outside the workspace, or calls a
+tool the mode does not allow. That is a Windows notification in Fire Code and a warning in VS Code; a run of
+them becomes one notice. With a model chosen, the Auditor also reviews each batch of steps and raises its own
+alerts. Agents can read the record back with **read_audit_log** (summary first, then records with filters;
+rows go straight into the dataframe tool for custom analysis).
+
+**The Anti Hallucinator watches the agent's reasoning and results** and, when it states something the evidence
+does not support, contradicts a result, drifts from what you asked or loops, sends it a short note at its next
+step. The note is labelled as the reviewer's, shown in the chat as such, never counts as your words, and grants
+no permission. It stays silent otherwise.
+
+**Each runs as its own process with its own context** - the Rust helper's \`fire-fs watch\`, which calls the
+model you chose (an OpenAI, Anthropic or Gemini profile; GitHub Copilot cannot be used here). Its auth and
+certificates are the profile's, exactly as for the chat. Every reply carries the observer's running notes, so
+when its context passes 70% Light Code starts a fresh process seeded with those notes - nothing has to be
+written at the limit. A process that keeps failing is stopped after five starts in ten minutes; **Restart
+processes** starts both afresh. The helper ships with Fire Code and the Windows VS Code extension; elsewhere the
+Auditor still records but nothing reviews.
+`,
+  },
+  {
     id: 'usage-dashboard',
     title: 'Usage dashboard: most used skills, contributors, unused and duplicate skills and tools',
     keywords: [
@@ -1263,11 +1355,18 @@ data is empty, not 0. Needs Fire Code's helper (Fire Code, or VS Code with Fire 
       'where are statistics stored', 'user details', 'whoami', 'by team', 'user info tool', 'get_user_info',
       'employee lookup', 'create whoami', 'leaderboard', 'company directory', 'active directory',
       'who wrote the most skills', 'most contributions', 'usage_stats', 'custom metrics', 'usage data',
+      'tokens burned', 'token usage', 'tokens by person', 'tokens per user', 'token spend', 'who uses the most tokens',
     ],
     body: `
 **Settings → Usage** shows which skills and tools are used, by whom, who writes them, and what needs
 attention - for **Me** or the whole **Team**, over the last 24 hours, 7 days, 30 days, 90 days, a year,
 or a **custom** date range. Every figure is compared with the previous period of the same length.
+
+**Tokens burned**: every model request's tokens - input (cached included), output, and how much of the input the
+provider served from its cache - by person (with each person's share of the team's tokens, a trend line and the
+models they used) and by model. The counts are the providers' own; a request whose provider gave no count is
+estimated, and the section says what share was. Counts and the model only, never the prompt or the reply. The
+\`usage_stats\` tool's \`events\` with kind \`tokens\` gives one row per request for your own sums.
 
 **Collection is automatic** wherever the team already shares a store: an **OpenSearch** connection
 first, then **any other vector store** (Qdrant, Chroma - from Settings → Search, in a collection named
@@ -1467,7 +1566,7 @@ one with an \`ac:image\` element naming the attachment.
     body: `
 **Export once, import on each machine.** Settings → Providers → Share settings with your team →
 **Export** writes a JSON file of the sections you tick — providers, MCP servers, search, skills,
-Python, buckets, Confluence and more. The assistant can write the same file with
+Python, buckets, DevOps (Confluence, Jira, Bitbucket, Jenkins), AutoSys on its own, and more. The assistant can write the same file with
 \`light_code_export_config\` for a guide or a page.
 
 **Never in the file**: any secret (API keys, passwords, tokens), approvals, other per-project settings,
@@ -1582,7 +1681,10 @@ edits made outside the agent (in VS Code, say) are saved with \`hub_sync\` "push
       'not on time', 'not triggered', 'late check', 'check is late', 'waiting', 'scheduler', 'scheduler stopped',
       'start the scheduler', 'stop the scheduler', 'is the scheduler running', 'refresh monitors', 'new checks',
       'deleted checks', 'who wrote the monitor', 'author of the monitor', 'last updated by', 'who changed the monitor',
-      'monitor changes', 'changes to the monitor', 'audit of changes', 'updated_by', 'takeover',
+      'monitor changes', 'changes to the monitor', 'audit of changes', 'updated_by', 'takeover', 'due since',
+      'who changed this monitor', 'commits', 'bitbucket history', 'git history', 'personal check created as team',
+      'copy from the grid', 'copy cell', 'copy the grid', 'copy rows',
+      'filter the grid', 'column filter', 'filter by value', 'column chooser', 'hide columns', 'greater than', 'between',
     ],
     body: `
 **Fire Code only.** Settings → Monitoring switches it on; a Monitoring button then appears at the top of the
@@ -1678,7 +1780,8 @@ a window, when it tries again rather than leave it unrun.
 
 **When a check has not run on time**, its tile says so: **waiting…** with the reason on hover (making sure it can run
 here first, its turn behind 4 checks already running, a colleague's Fire Code has this window, the monitoring
-executor still starting), or **due N min ago** when it is past its time. The executor is started as soon as a monitor
+executor still starting), or **due N min ago** when it is past its time; its grid window says **Due since** the time
+it should have started (never "Next … ago"). The executor is started as soon as a monitor
 uses a tool, not when the check falls due, and a tool's timeout counts from when the executor is up. A file or
 database path on a share is checked in the background, so a share that does not answer never holds the dashboard up.
 **If the colleague who won a window never reports** (their Fire Code closed or failed mid-check), one other member
@@ -1687,20 +1790,35 @@ takes the window over once its timeout and three more minutes have passed - by a
 **Is the scheduler working?** A line at the top of the dashboard says **Scheduler running** and when it last looked
 (every 3 seconds), with **Stop**; stopped, it says so, with **Start**; not heard from for 90 seconds it says **not
 responding**, with **Start again**, which lets go of anything stuck and restarts its timer. Stopped means no check
-starts by itself - Run now still works and colleagues' checks still show - and it stays stopped after a restart until
-started. Only you stop or start it, never an agent.
+starts by itself - Run now still works and colleagues' checks still show - until you start it again or Fire Code
+restarts: **it always starts with Fire Code**. Only you stop or start it, never an agent.
 
 **Refresh** (the circular arrow at the top of the dashboard) brings the team's skills down now - its bucket folders and
 the team repository - instead of at the next timed sync, reads the folders again, and says which monitors are new
 and which are gone.
 
-**Who wrote it, and who changed it**: every save Light Code or Fire Code makes labels a skill with \`version\`,
-\`updated\` and \`updated_by\` (who saved it), and a new one with its \`author\`. The tile's tooltip and the grid
-window's header show them; **Changes** (the grid window's arrow button, or "Updated … by …" in its header) lists every
+**Who wrote it, and who changed it** come from the file's history first: its commits in the **team repository
+(Bitbucket)** when it is kept there, else in the **git checkout** holding it - the newest commit says who changed it
+and when, unless the file has changed here since. Otherwise from its labels: every save Light Code or Fire Code makes
+labels a skill with \`version\`, \`updated\` and \`updated_by\` (who saved it), and a new one with its \`author\`; a
+file saved before \`updated_by\` existed shows no "by" rather than its author. The tile's tooltip and the grid
+window's header show them, with "(Bitbucket)" or "(git)" when from a commit; **Changes** (the grid window's arrow button, or "Updated … by …" in its header) lists every
 version - when, by whom, what changed (the schedule, which fields, or only the text around the monitor) and the
-monitor as it was. Each Fire Code records a version as it arrives; a team monitor's changes are also kept in the team
+monitor as it was - and the file's commits, with who, when and the commit message. Each Fire Code records a version as it arrives; a team monitor's changes are also kept in the team
 index, so every member sees the same list however long their Fire Code was closed. Cleaning up history keeps them;
 deleting the monitor removes your own record of it. The grid window's buttons are icons - hover one to see what it does.
+
+**Filtering the grid**: every column has a filter box under its name - text to find, or a condition: \`>50\`, \`>=50\`,
+\`<50\`, \`10..50\` (between), \`=x\`, \`!=x\`, \`!text\` (does not contain), \`"exact"\`, \`=\` (empty), \`!=\` (not empty);
+\`a, b\` for either and \`>10 & <50\` for both. A time column compares times. The funnel beside a column's name lists its
+values with how many rows have each - search them, tick the ones to show, **Only these** for what the search found.
+**Columns** in the toolbar chooses the columns shown, remembered for that monitor. Only the rows in view are drawn, so
+a grid of 100,000 rows filters, sorts and scrolls quickly; the count says how many rows the filters leave, with
+**Clear filters**.
+
+**Copying from the grid**: click a cell to select it, Shift+click another for the block between, Ctrl+C to copy;
+right-click a cell for Copy cell / row / column / whole grid; the grid window's copy button takes every row the filters
+show, with headers. It pastes into Excel as cells and into Word or Outlook as a table, in the text the grid shows.
 
 **Offline**: when the team history cannot be reached, a team monitor still runs on this computer - its tile, colours
 and notifications stay current - and the tile says **Offline · N not shared**. Once the history answers again, each
@@ -1708,7 +1826,8 @@ offline check claims its window: written if nobody had it, dropped if a colleagu
 most 50 per monitor are kept for this, on disk.
 
 **Personal monitors need nothing set up.** Ask for "a personal check" (or just a check, before team history exists)
-and the agent makes one only on this computer.
+and the agent makes one only on this computer. Your own words decide: a request saying personal, private or just
+for me is made personal whatever the agent passes.
 
 **Team monitors need OpenSearch** (Settings → Monitoring → Team history): choose an OpenSearch connection from the
 codebase monitoring runs with, and an index name the whole team shares. Without it a team monitor stays grey
@@ -2095,11 +2214,89 @@ morning, by which time a toast is long gone. The run log keeps a Report button.
 `,
   },
   {
+    id: 'strategies',
+    title: 'Strategy: drawing how the agent team works, step by step',
+    keywords: [
+      'strategy', 'strategies', 'flow chart', 'flowchart', 'chart', 'draw', 'node', 'nodes', 'step', 'steps', 'connector',
+      'connectors', 'arrow', 'connect', 'back and forth', 'loop', 'rounds', 'until', 'parallel', 'parallel box', 'contract',
+      'read-only role', 'instructions for a role', 'what passed between', 'why did it go back', 'which step is running',
+      'add steps', 'add a step', 'add connectors', 'how do i connect', 'sub agent', 'subagent', 'sub agents', 'own process',
+      'in the strategy', 'strategy window', 'strategy button', 'a strategy', 'the strategy', 'strategy for', 'agents agreed', 'what was agreed', 'agreed between', 'specialists have', 'their own context', 'own context', 'specialist', 'specialists', 'data contract', 'contract between', 'between agents', 'know about the strategy', 'doesnt know about the strategy',
+    ],
+    body: `
+A strategy is a flow chart of how the main agent uses its specialists: which role does what, in which order, which
+pairs go back and forth until a condition holds, and which work at the same time. Saved strategies are reusable;
+each chat uses one or none.
+
+**Opening it.** Assign at least one specialist in Settings → Agents (any role - the expert is no longer required);
+a **Strategy** button then appears beside the mode picker above the message box, in every mode. In VS Code it opens
+as its own editor tab, where the chart has room; in Fire Code and the browser it opens over the chat. The command
+"Light Code: Open Strategy (Agent team)" opens it too.
+
+**Adding a step.** Click a role in the list on the left (Programmer, Tester...). It appears on the chart as a box.
+Drag a box to move it. A role with no model yet is marked and has to be assigned before the strategy can run it.
+
+**Connecting two steps.** Select a step and press **Connect to...** on the right, then click the step it should lead
+to (Esc cancels). Or drag from the coloured dot on a step's right edge onto the other step. Click a connector to
+change it; Delete removes whatever is selected.
+
+**A back-and-forth** (the programmer changes it, the tester checks, and back): connect the two steps again the other
+way, or tick **Back and forth** on the connector. Then write **Until** - the condition that ends it, judged by the
+step the arrow points to ("every test passes and the tester has no concerns") - and **At most this many rounds**
+(10 when left alone). **Reverse** swaps which side works and which judges. Light Code counts the rounds from the
+consultations that actually ran, asks the judging role to end its answer with CONDITION: MET or NOT MET and why, and
+refuses a round past the maximum - the agent then stops and tells you what is still open.
+
+**A parallel box.** Press **Add a parallel box** on the left and drop steps into it: they are consulted at the same
+time, each specialist in its own process, and the strategy carries on when all have answered (the agent uses one
+ask_agents call). Drag the box to move it with its steps, its corner to resize it. One role belongs in a box once.
+If several of them need your approval at once, the prompts come one at a time.
+
+**Each step:** the ✎ on a box opens **Instructions for this specialist**, sent to it with every question it is asked
+under this strategy - leave it empty and the main agent decides what to ask it, from its plan. **Read-only** means it
+cannot change anything: it gets no tool that edits or runs commands, and recommends instead.
+
+**A contract on a connector** ("What passes along here"): what one step hands to the next, such as "the failing
+tests, each with file:line". The first is told its answer must contain it, the second that it will be given it and to
+say what is missing - so what was agreed between them is written down. **Where to see it:** click the arrow - the
+contract is on the right; with nothing selected, the right-hand panel lists every contract in the strategy, and an
+arrow carrying one is labelled "contract". What was actually sent and answered along it is under "What passed
+between them" (select the arrow to narrow it to those two).
+
+**Using it.** **Save** only keeps it in your library; **Save and use in this chat** puts it to work here - the
+button then reads "Strategy: <name>". The list at the top opens a saved one; **Stop using** takes it off this chat.
+
+**When the agent knows it:** from your next message, in any mode. The strategy goes into the agent's instructions
+each time you send something, so a strategy set while a reply is running applies from the next one. If the agent
+seems not to know it, check the button says "Strategy: <name>" - Save alone does not use it. A new chat starts with
+none (choose it from the list); New chat with handoff keeps it. With a strategy in use, the agent first proposes a
+plan with update_plan that carries out every step, then follows it. A question of yours that is not part of the
+strategy is answered normally.
+
+**Watching it run.** The step at work glows (moving while it works), its box says "working now" or "answered last",
+and the **Now** panel names it with every loop's round and verdict. The Strategy button shows who is working.
+**What passed between them** lists every consultation - what was asked, what came back, the round and verdict -
+for the whole strategy or for the selected step or connector. **Ask the agent why** puts a question in the chat for
+the main agent, which answers from that record (the strategy_history tool), even after the chat was compacted.
+
+**Each specialist is a sub-agent with its own process and its own memory**, in every mode, Auto included - the Rust
+helper's fire-fs agent, for a role on an OpenAI, Anthropic or Gemini profile. It remembers earlier questions in the
+chat; near its context limit it writes its own key points and starts a fresh session with them by itself. The main
+agent sees only its answers, never its working. Its tool calls run through your approvals, and the prompt says which
+specialist is asking. A new chat starts every specialist afresh. A role on the Claude CLI keeps the CLI's own session;
+where the helper is missing, each question is answered on its own. Strategies are saved in config:strategies and can
+be shared through export (the Strategies section).
+`,
+  },
+  {
     id: 'agents',
     title: 'The expert and the agent team',
-    keywords: ['expert', 'agent', 'team', 'role', 'reviewer', 'consult', 'claude', 'cost', 'budget'],
+    keywords: ['expert', 'agent', 'team', 'role', 'reviewer', 'consult', 'claude', 'cost', 'budget', ],
     body: `
 **Settings → Agents.** Off by default; nothing is spawned and nothing is spent until you enable it.
+
+**Strategies** - a flow chart of how the specialists are used, each running as its own sub-agent process - have
+their own topic: ask about strategies.
 
 A cheaper model does the work and consults a stronger one on hard problems. The specialist can be
 **the Claude command line** or **any provider profile you have configured** — on a server there is
@@ -2185,9 +2382,13 @@ called at all.
     ],
     body: `
 The token bar under the composer shows where the window is going — system prompt, tool
-definitions, history, results — plus the cache hit rate. The numbers are **estimates** and say so:
-a real tokeniser would be a large download and would still be wrong for a gateway that rewrites
-the prompt, and what matters is the proportion.
+definitions, history, results — plus the cache hit rate. Before a reply the numbers are **estimates**: a real tokeniser would be a large download and
+would still be wrong for a gateway that rewrites the prompt. **After each reply the total is the
+provider's own count** (OpenAI-compatible gateways and vLLM are asked for it; Anthropic and Gemini
+send it), and that count corrects the estimate for the same model from then on - so the bar, and
+the point where compaction starts, follow what the model really holds. Code, JSON, paths and logs
+take more tokens per character than prose, which is why an estimate alone read 175k while the
+gateway already counted over 262k. A refusal for length that states the prompt's size corrects it too.
 
 **Results dominate**, not the prompt. So an oversized tool result is capped, the full output is
 written to disk, and a handle is returned that the model can re-read with an offset. Nothing is
@@ -2413,7 +2614,7 @@ transcript was written.
       'guide', 'tour', 'help',
       // Phrases, which score above their words: "dark mode" would otherwise go to Modes, where
       // "mode" is a keyword and the subject is something else entirely.
-      'dark mode', 'light mode', 'change the colour', 'change the color',
+      'dark mode', 'light mode', 'change the colour', 'change the color', 'pycharm dark', 'intellij dark',
       'copy', 'paste', 'word', 'onenote', 'copy table', 'paste into word', 'formatting',
     ],
     body: `
@@ -2438,6 +2639,10 @@ in VS Code the editor's theme is the answer and a second control would fight it.
 is \`system\`, \`light\` or \`dark\`, because \`prefers-color-scheme\` follows the *browser's*
 setting, and a corporate browser pinned to light shows a light panel on a dark desktop with no way
 out.
+
+**In IntelliJ and PyCharm the panel follows the IDE's theme**, and changes with it (plugin 0.4.63 on).
+There \`system\` means the IDE's theme - the embedded browser on its own always reports light - and
+Light or Dark in Settings → Appearance overrides it.
 
 Everything else follows the editor's theme through its own CSS variables, so Light Code tracks
 whatever you have active rather than a fixed palette.
@@ -2466,8 +2671,19 @@ walkthrough, whose steps link straight into the tab each one is about. On the No
       // Settings saved in one window and missing in another: a window runs the version it started with.
       'another window', 'other window', 'second window', 'not reflecting', 'not showing',
       'greyed out', 'grayed out', 'disabled', 'cannot click', 'not clickable',
+      'python.exe crashed', 'python crashed', 'stopped working', 'agent crashed', 'conversation lost', 'draft lost',
+      'typed message gone', 'host.log',
     ],
     body: `
+**The agent crashed, or python.exe "stopped working".** A Python tool's worker that crashes is restarted on the
+next call, and the call that hit it says why - the Windows crash code in words (an access violation in a native
+library, a stack overflow, a missing DLL) and Python's own last lines, which it now prints on a native crash. It no
+longer takes the agent down with it (it used to, through the worker's closed input). Fire Code also stops Windows
+showing its "stopped working" box for the programs it starts, which kept a crashed worker alive until dismissed. The
+conversation is saved as the turn goes - after your message and after each tool result - and what you were typing is
+kept by the agent as well, so a restart loses neither. Each chat's log is \`host.log\` in its data folder, with the
+run before as \`host.previous.log\`: an error the agent survived is written there as "kept running".
+
 **A button is greyed out.** Hover over it: every control that can be disabled says why in its
 tooltip - nothing changed since the last save, a field still empty, a reply still running, a
 feature switched off elsewhere - and usually what to do about it.

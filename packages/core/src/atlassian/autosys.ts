@@ -114,7 +114,10 @@ function fill(template: string, values: Record<string, string>): string {
     if (filter !== undefined) {
       // FIQL: `name==PAY_*`. The value is checked before it gets here, so only encoding remains.
       // `job` last, so a one-job address written as a filter (`/job?filter={filter:name}`) works too.
-      return encodeURIComponent(`${key}==${values['pattern'] ?? values[key] ?? values['job'] ?? ''}`)
+      // A pattern matches with `=@` (`name=@JOB*UK`): `==` is an exact match and finds nothing for a wildcard
+      // (reported: `JOB*UK` found no jobs while one job's name worked).
+      const value = values['pattern'] ?? values[key] ?? values['job'] ?? ''
+      return encodeURIComponent(`${key}${value.includes('*') ? '=@' : '=='}${value}`)
     }
     return encodeURIComponent(values[key] ?? '')
   })

@@ -55,6 +55,8 @@ function runHelper(exe: string, request: object, signal?: AbortSignal): Promise<
         reject(new Error(`The file helper gave no answer${err.length > 0 ? `: ${err.slice(0, 300)}` : '.'}`))
       }
     })
+    // A helper that exits before reading must not take the host with it through its input pipe.
+    child.stdin.on('error', () => undefined)
     child.stdin.end(JSON.stringify(request))
   })
 }

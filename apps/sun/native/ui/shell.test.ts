@@ -87,6 +87,21 @@ describe('a Browse button in a chat page', () => {
 })
 
 /*
+ * Reported: "Start a chat" from a monitoring alert opened a chat with nothing about the alert in it. The text went to
+ * the page nested inside `ask`, where the page never looks; it must arrive as `ask: 'prefill'` with `text` beside it.
+ */
+describe('a chat started from a monitoring alert', () => {
+  it("delivers the alert's text to the new chat's page where the page reads it", () => {
+    const frame = frameOf('p1~2')!
+    const delivered: { message: unknown; origin: string }[] = []
+    Object.defineProperty(frame, 'contentWindow', { value: { postMessage: (message: unknown, origin: string) => delivered.push({ message, origin }) }, configurable: true })
+    fromPage(frame, { ready: true })
+    receive({ type: 'prefillChat', id: 'p1~2', text: 'Help me investigate this monitoring alert' })
+    expect(delivered.at(-1)?.message).toEqual({ source: 'sun', ask: 'prefill', text: 'Help me investigate this monitoring alert' })
+  })
+})
+
+/*
  * Reported: a new chat "always picks and shows previous chat info", and closing should offer to
  * archive. Numbers are now never reused (Rust, state.rs); here, what the window asks and sends.
  */

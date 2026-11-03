@@ -65,6 +65,7 @@ export function fastFsCapabilities(exe: string, timeoutMs = 5000): Promise<{ ver
         done(undefined)
       }
     })
+    child.stdin.on('error', () => undefined)
     child.stdin.end(JSON.stringify({ op: 'capabilities' }))
   })
 }

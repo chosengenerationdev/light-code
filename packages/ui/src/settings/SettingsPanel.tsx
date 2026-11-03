@@ -54,6 +54,8 @@ import {
   ChartIcon,
 } from '../icons.js'
 import { UsageTab } from './UsageTab.js'
+import { ObserversSection } from './ObserversSection.js'
+import { TeamAdminsSection, TeamReviewsTab, useTeamTabVisible } from './TeamSections.js'
 import { AddonsSection } from './AddonsSection.js'
 import { AddonPageTab } from './AddonPageTab.js'
 import type { Transport } from '@light-code/core/browser'
@@ -168,6 +170,7 @@ export interface SettingsPanelProps extends ProvidersTabProps {
 
 type TabId =
   | 'providers'
+  | 'teamReviews'
   | 'approvals'
   | 'mcp'
   | 'search'
@@ -234,6 +237,8 @@ const TABS: { id: TabId; label: string; Icon: (props: { size?: number }) => Reac
   { id: 'skills', label: 'Skills', Icon: BookIcon },
   // Beside Skills: it is about skills and tools, read rather than configured.
   { id: 'usage', label: 'Usage', Icon: ChartIcon },
+  // Changes to the team's skills and tools waiting for their owner: shown to admins and owners with one to decide.
+  { id: 'teamReviews', label: 'Team reviews', Icon: ReviewIcon },
   { id: 'network', label: 'Network', Icon: GlobeIcon },
   { id: 'reviews', label: 'Review', Icon: ReviewIcon },
   { id: 'variables', label: 'Variables', Icon: VariablesIcon },
@@ -255,6 +260,11 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
    */
   const [addonTabs, setAddonTabs] = useState<{ package: string; title: string; icon?: string }[]>([])
   const transport = props.transport
+  const teamTabVisible = useTeamTabVisible(transport)
+  useEffect(() => {
+    // Asked once, so the Team reviews tab can appear without the Project tab being opened first.
+    transport?.post({ type: 'requestTeam' } satisfies UiToHostMessage)
+  }, [transport])
   useEffect(() => {
     if (transport === undefined) return
     const unsubscribe = transport.onMessage((raw) => {
@@ -289,6 +299,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
     outlook: props.offersOffice !== false,
     usage: props.transport !== undefined,
     addons: props.transport !== undefined,
+    teamReviews: teamTabVisible,
   }
   const builtIn = TABS.filter((tab) => present[tab.id] ?? true)
   const visible: { id: string; label: string; Icon: (props: { size?: number }) => ReactElement }[] = [
@@ -461,6 +472,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           <SchedulesTab {...props.schedules} />
         ) : shown === 'skills' ? (
           <SkillsTab {...props.skills} transport={props.transport} />
+        ) : shown === 'teamReviews' && props.transport !== undefined ? (
+          <TeamReviewsTab transport={props.transport} />
         ) : shown === 'usage' && props.transport !== undefined ? (
           <UsageTab transport={props.transport} />
         ) : shown === 'tools' ? (
@@ -474,7 +487,11 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         ) : shown === 'python' ? (
           <PythonTab {...props.python} transport={props.transport} />
         ) : shown === 'project' ? (
-          <ProjectTab {...props.project} />
+          <>
+            <ProjectTab {...props.project} />
+            {props.transport !== undefined ? <TeamAdminsSection transport={props.transport} /> : null}
+            {props.transport !== undefined ? <ObserversSection transport={props.transport} /> : null}
+          </>
         ) : shown === 'network' ? (
           <NetworkTab {...props.network} onBrowse={props.onBrowse} pickedPath={props.pickedPath} />
         ) : shown === 'agents' ? (

@@ -1,4 +1,5 @@
 import { datasetConfigSchema } from '../dataset/types.js'
+import { strategySchema } from '../strategy/strategy.js'
 import { z } from 'zod'
 import { mcpServersSchema } from '../mcp/types.js'
 import { schedulesSchema } from '../schedule/types.js'
@@ -830,6 +831,47 @@ export const projectConfigSchema = z
 export type ProjectConfig = z.infer<typeof projectConfigSchema>
 
 /**
+ * The Auditor and the Anti Hallucinator (Settings → Project; `observers/`). Each is its own process
+ * (`fire-fs watch`) with its own model and its own context, handed off to a new process near the limit.
+ *
+ * **User-scope only**, and per project through `workspaces`: a repository able to set it could switch
+ * auditing off before you looked, or point the observers at a profile of its choosing and so send every
+ * step of your work - reasoning and tool results included - to that model.
+ */
+const observerAgentConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    /** Which provider profile answers. Its auth, certificates and headers are used exactly as for the chat. */
+    profileId: z.string().min(1),
+    /**
+     * The user's own instructions, replacing the shipped ones (`observers/prompts.ts`). The reply format and the
+     * running-notes rule are always appended after them, so an edit cannot break parsing or the handoff.
+     */
+    prompt: z.string().max(20_000),
+  })
+  .partial()
+export const observersConfigSchema = z
+  .object({
+    auditor: observerAgentConfigSchema
+      .extend({
+        /** Record the model's reasoning too (default on). Off: actions, approvals and results only. */
+        recordReasoning: z.boolean(),
+        /** Notify about dangerous or refused actions (default on): Windows in Fire Code, a warning in VS Code. */
+        notify: z.boolean(),
+        /** Also write to this user's own OpenSearch index (default on, when OpenSearch is configured). */
+        opensearch: z.boolean(),
+        /** Which OpenSearch connection; absent: the active one if OpenSearch, else the first OpenSearch one. */
+        storeId: z.string().min(1),
+        /** How long the journal on this machine is kept (default 90 days). The index is the cluster's to manage. */
+        retentionDays: z.number().int().min(1).max(3650),
+      })
+      .partial(),
+    antiHallucination: observerAgentConfigSchema,
+  })
+  .partial()
+export type ObserversConfig = z.infer<typeof observersConfigSchema>
+
+/**
  * Indexing Outlook mail so it can be investigated.
  *
  * Off by default and **user-scope only**, like the rest of `office`: this reads the contents of
@@ -1067,6 +1109,13 @@ export const configSchema = z
     identity: identityConfigSchema,
     /** User-scope only, set per project. See `projectConfigSchema`. */
     project: projectConfigSchema,
+    /** The Auditor and the Anti Hallucinator. User-scope only, set per project. See `observersConfigSchema`. */
+    observers: observersConfigSchema,
+    /**
+     * The user's saved strategies (Agent team mode's Strategy window): reusable in any chat. User-scope only - a
+     * strategy steers which specialists act and how - and shared through export. See `strategy/strategy.ts`.
+     */
+    strategies: z.array(strategySchema).max(100),
     /** User-scope only: a workspace able to add a trusted root could enable interception. */
     tls: globalTlsSchema,
     /**

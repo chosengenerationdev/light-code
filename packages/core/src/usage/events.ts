@@ -21,8 +21,12 @@ export interface UsageEvent {
   u: string
   /** Which project, when known. */
   p?: string
-  k: 'skill' | 'tool'
-  /** The skill name, or the tool name as registered (`py__x` for a Python tool). */
+  /**
+   * `tokens`: one model request's token count (asked for: "statistics on tokens burned by each team member") -
+   * `n` is the model, `i`/`o`/`c` the input, output and cached-input tokens. Counts, never the text.
+   */
+  k: 'skill' | 'tool' | 'tokens'
+  /** The skill name, the tool name as registered (`py__x` for a Python tool), or for `tokens` the model. */
   n: string
   /** The skill's or tool's author from its own label, so contribution is countable across machines. */
   a?: string
@@ -30,7 +34,16 @@ export interface UsageEvent {
   ok?: false
   /** How long a tool call took, in milliseconds. */
   d?: number
+  /** `tokens`: input tokens (cached included), output tokens, and how many of the input were cached. */
+  i?: number
+  o?: number
+  c?: number
+  /** `tokens`: 1 when estimated, because the provider did not report its count. */
+  e?: 1
 }
+
+/** A token count, not a use of a skill or tool - kept apart wherever uses are counted. */
+export const isTokenEvent = (event: UsageEvent): boolean => event.k === 'tokens'
 
 export function isUsageEvent(value: unknown): value is UsageEvent {
   if (value === null || typeof value !== 'object') return false
@@ -38,7 +51,7 @@ export function isUsageEvent(value: unknown): value is UsageEvent {
   return (
     typeof event['t'] === 'number' &&
     typeof event['u'] === 'string' &&
-    (event['k'] === 'skill' || event['k'] === 'tool') &&
+    (event['k'] === 'skill' || event['k'] === 'tool' || event['k'] === 'tokens') &&
     typeof event['n'] === 'string'
   )
 }

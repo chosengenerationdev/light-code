@@ -98,3 +98,24 @@ describe('WebviewTransport', () => {
     expect(first.posted).toEqual([])
   })
 })
+
+describe('an extra webview (the Strategy editor tab)', () => {
+  it('gets every message, and its messages reach the bridge, until it is detached', () => {
+    const transport = new WebviewTransport()
+    const panel = fakeWebview()
+    const tab = fakeWebview()
+    transport.attach(panel as never)
+    const extra = transport.attachExtra(tab as never)
+    const heard: unknown[] = []
+    transport.onMessage((message) => heard.push(message))
+    transport.post({ type: 'strategies' })
+    expect(tab.posted).toEqual([{ type: 'strategies' }])
+    expect(panel.posted).toEqual([{ type: 'strategies' }])
+    tab.emit({ type: 'saveStrategy' })
+    expect(heard).toEqual([{ type: 'saveStrategy' }])
+    extra.dispose()
+    transport.post({ type: 'later' })
+    expect(tab.posted).toHaveLength(1)
+  })
+})
+

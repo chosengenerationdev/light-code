@@ -89,7 +89,7 @@ const createSchema = z.object({
   audience: z
     .enum(['me', 'team'])
     .optional()
-    .describe('"me": a Personal monitor, only on this computer - always possible. "team": shown under Team alerts and shared where the team shares skills; needs the team\'s OpenSearch history (Settings → Monitoring). Left out: team when that history is set up, otherwise personal. Use "me" when the user says it is just for them.'),
+    .describe('"me": a Personal monitor, only on this computer - always possible. "team": shown under Team alerts and shared where the team shares skills; needs the team\'s OpenSearch history (Settings → Monitoring). Left out: team when that history is set up, otherwise personal. Use "me" whenever the user says personal, private, just for me or similar - and a request worded that way is made personal whatever is passed.'),
   every: z
     .union([z.string(), z.number()])
     .optional()
@@ -199,6 +199,19 @@ function describeEvaluation(e: Evaluated): string {
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
+/**
+ * Whether the user's own message asks for a personal or a team monitor - "personal", "just for me", "private",
+ * "only on my machine"; or "team", "shared", "for everyone". Both or neither: undefined (the agent's choice and
+ * the default stand). Words only: what the user typed, never anything a tool returned.
+ */
+export function askedAudience(text: string): 'me' | 'team' | undefined {
+  const personal = /\b(personal|private|privately|just (for )?me|only (for )?me|for myself|my own|only on (this|my) (computer|machine|pc|laptop))\b/i.test(text)
+  const team = /\b(team|shared|for everyone|for the team|colleagues)\b/i.test(text.replace(/\bteam (history|index|opensearch)\b/gi, ''))
+  if (personal && !team) return 'me'
+  if (team && !personal) return 'team'
+  return undefined
+}
+
 export function createMonitorCreateTool(options: MonitorToolOptions): Tool<CreateParams> {
   const skillParams = (params: CreateParams, block: string, audience: 'me' | 'team') => ({
     name: params.name,
@@ -211,8 +224,13 @@ export function createMonitorCreateTool(options: MonitorToolOptions): Tool<Creat
    * personal - a personal monitor needs nothing configured, and refusing over a setting the user never
    * asked about was reported as "the agent cannot create personal checks".
    */
-  const audienceFor = async (params: CreateParams): Promise<{ audience: 'me' | 'team'; note?: string }> => {
+  const audienceFor = async (params: CreateParams, context?: ToolExecutionContext): Promise<{ audience: 'me' | 'team'; note?: string }> => {
+    // The user's own words win (reported: asked for a personal check, got a team one - the agent left
+    // audience out, and out means team once team history exists).
+    const asked = askedAudience(context?.lastUserText?.() ?? '')
+    if (asked === 'me' && params.audience !== 'me') return { audience: 'me', note: 'Personal (only on this computer), as you asked.' }
     if (params.audience !== undefined) return { audience: params.audience }
+    if (asked === 'team') return { audience: 'team' }
     try {
       const listed = (await options.channel.request('list')) as { teamReady?: boolean }
       if (listed.teamReady === true) return { audience: 'team' }
@@ -256,7 +274,7 @@ export function createMonitorCreateTool(options: MonitorToolOptions): Tool<Creat
       'check - no model is involved - so make them exact. ASK THE AUTHOR (ask_user_form, one field per rule plus a general one) what each ' +
       'alert means and what to do about it, unless they already said, and put it in each rule\'s "advice" and in "runbook": that is what ' +
       'an agent tells whoever meets the alert later. A team monitor needs the team\'s OpenSearch history set in Fire Code → Settings → ' +
-      'Monitoring; without it the monitor is created personal (only on this computer), which always works - say so to the user.The user approves the skill file; the result shows what the first check found. ' +
+      'Monitoring; without it the monitor is created personal (only on this computer), which always works - say so to the user. The user approves the skill file; the result shows what the first check found. ' +
       MONITOR_TOOL_FORMAT,
     parametersSchema: createSchema,
 
@@ -268,7 +286,7 @@ export function createMonitorCreateTool(options: MonitorToolOptions): Tool<Creat
           text: `Try the monitor "${params.name}" once - nothing is saved:\n\n${'tool' in params.source ? `Run ${params.source.tool}(${JSON.stringify(params.source.args ?? {})})` : `Read ${JSON.stringify(params.source)}`}`,
         }
       }
-      const { audience, note: forWhom } = await audienceFor(params)
+      const { audience, note: forWhom } = await audienceFor(params, context)
       const tried = await tryIt(block, audience === 'team')
       if (!tried.ok) {
         return { kind: 'text', text: `This monitor cannot be created as written - nothing will be saved:\n\n${tried.error}` }
@@ -282,7 +300,7 @@ export function createMonitorCreateTool(options: MonitorToolOptions): Tool<Creat
 
     async execute(params, context): Promise<ToolResult> {
       const block = monitorBlock(params)
-      const { audience, note: forWhom } = params.tryOnly === true ? { audience: 'me' as const, note: undefined } : await audienceFor(params)
+      const { audience, note: forWhom } = params.tryOnly === true ? { audience: 'me' as const, note: undefined } : await audienceFor(params, context)
       const tried = await tryIt(block, audience === 'team')
       if (!tried.ok) return { content: `Not created: ${tried.error}`, isError: true }
       if (params.tryOnly === true) {

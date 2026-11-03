@@ -18,6 +18,8 @@ export interface ApprovalRequest {
   alwaysScope?: 'folder'
   /** The tool says every call must ask (`Tool.alwaysAsk`): no standing grant applies, and none is offered. */
   alwaysAsk?: boolean
+  /** A specialist of the agent team asked, not the agent the user is talking to - named on the prompt. */
+  requestedBy?: string
 }
 
 export type ApprovalDecision = 'approve' | 'deny'

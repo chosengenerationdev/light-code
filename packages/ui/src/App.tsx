@@ -1,4 +1,5 @@
 import type { DatasetStatus } from './settings/CustomDataTab.js'
+import { localDraft, setDraftSink } from './Composer.js'
 import { CUSTOM_ROLE_LIMIT, composeUserText, skillAliases, type MessageQuote, type Reaction, branchLabel } from '@light-code/core/browser'
 import type { CredentialSummary, SchedulerStatus } from '@light-code/core/browser'
 import type { LanguageServersState } from './settings/LanguageServersSection.js'
@@ -61,6 +62,7 @@ import type { MailFolderNode } from './settings/FolderTree.js'
 import type { IndexingProgressState } from './settings/IndexingProgress.js'
 import type { MailStatusState } from './settings/OutlookTab.js'
 import { ModeSelector } from './ModeSelector.js'
+import { StrategyButton } from './StrategyEditor.js'
 import { Guide } from './guide/Guide.js'
 import type { ReviewItem } from './settings/ReviewsTab.js'
 import { SettingsPanel } from './settings/SettingsPanel.js'
@@ -144,6 +146,8 @@ export function App(props: AppProps): ReactElement {
   const [picksFiles, setPicksFiles] = useState(false)
   // The host has a Save dialog, so the panel's Save buttons go through it (`diagrams/saveFile.ts`).
   const [savesFiles, setSavesFiles] = useState(false)
+  /** The Strategy window opens as an editor tab here (VS Code). */
+  const [strategyInEditor, setStrategyInEditor] = useState(false)
   /** A skill or tool open in the panel's own editor (hosts with no editor - Fire Code, the browser). */
   const [editorFile, setEditorFile] = useState<EditorFile | undefined>(undefined)
   const [editorSaved, setEditorSaved] = useState<FileEditorProps['saved']>(undefined)
@@ -605,6 +609,9 @@ export function App(props: AppProps): ReactElement {
         // From the picker or the editor's "Add to Light Code chat": back to the chat to see them.
         setAddedFiles({ paths: message.paths, nonce: Date.now() })
         setView('chat')
+      } else if (message.type === 'composerDraft') {
+        // Only into an empty box: this page's own draft, when it has one, is the newer.
+        if (message.text.trim().length > 0 && localDraft().trim().length === 0) setPrefill({ text: message.text, nonce: Date.now() })
       } else if (message.type === 'prefillComposer') {
         // Fire Code's "Start a chat" from an alert: the box holds it, the user sends it.
         setPrefill({ text: message.text, nonce: Date.now() })
@@ -659,6 +666,7 @@ export function App(props: AppProps): ReactElement {
         setExportsSource(message.exportsSource === true)
         setPicksFiles(message.picksFiles === true)
         setSavesFiles(message.savesFiles === true)
+        setStrategyInEditor(message.strategyInEditor === true)
         setHostModels(message.hostModels === true)
         setBranch(
           message.workspaceBranch === undefined
@@ -832,6 +840,8 @@ export function App(props: AppProps): ReactElement {
         ])
       } else if (message.type === 'chartError') {
         setMessages((prev) => [...prev, { kind: 'chartError', message: message.message }])
+      } else if (message.type === 'observerNote') {
+        setMessages((prev) => [...prev, { kind: 'observerNote', content: message.text }])
       } else if (message.type === 'diagram') {
         // Placed exactly as a chart is, and for the same reason: the host decided this was a
         // diagram with the same function the transcript uses, so this only puts it on screen.
@@ -1128,6 +1138,17 @@ export function App(props: AppProps): ReactElement {
         setCanRollback(false)
       }
     })
+
+    /*
+     * The draft is kept by the host as well, half a second after typing pauses, and asked for once: a host that
+     * restarted on a new port gives this page fresh storage, and the draft must not go with the old one.
+     */
+    let draftTimer: ReturnType<typeof setTimeout> | undefined
+    setDraftSink((text) => {
+      clearTimeout(draftTimer)
+      draftTimer = setTimeout(() => props.transport.post({ type: 'saveComposerDraft', text } satisfies UiToHostMessage), 500)
+    })
+    props.transport.post({ type: 'requestComposerDraft' } satisfies UiToHostMessage)
 
     // Fetch once on mount so the fresh-install CTA (or the chat) can render correctly
     // without the user having to open Settings first.
@@ -1817,9 +1838,12 @@ export function App(props: AppProps): ReactElement {
               modeId={modeId}
               disabled={isStreaming}
               onChange={changeMode}
-              expertAvailable={expertEnabled}
+              teamAvailable={agents.roles.some((role) => role.kind !== undefined && role.available)}
             />
           )}
+          {/* Agent team mode's flow chart of how the specialists are used (`StrategyEditor.tsx`). */}
+          {/* In every mode once a specialist is assigned: a strategy in use applies to the chat, whatever the mode. */}
+          {view === 'chat' && agents.roles.some((role) => role.kind !== undefined && role.available) && <StrategyButton transport={props.transport} inEditor={strategyInEditor} onAsk={(text) => setPrefill({ text, nonce: Date.now() })} />}
           {/*
             Beside the mode selector because choosing Junior mode and deciding what the expert
             may spend are the same thought, and both belong to this conversation rather than to

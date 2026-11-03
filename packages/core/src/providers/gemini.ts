@@ -235,6 +235,15 @@ async function* parseGeminiStream(
           continue
         }
 
+        const usage = parsed.usageMetadata as { promptTokenCount?: unknown; candidatesTokenCount?: unknown; cachedContentTokenCount?: unknown } | undefined
+        if (typeof usage?.promptTokenCount === 'number') {
+          yield {
+            type: 'usage',
+            inputTokens: usage.promptTokenCount,
+            ...(typeof usage.candidatesTokenCount === 'number' ? { outputTokens: usage.candidatesTokenCount } : {}),
+            ...(typeof usage.cachedContentTokenCount === 'number' ? { cachedTokens: usage.cachedContentTokenCount } : {}),
+          }
+        }
         const candidates = parsed.candidates
         if (!Array.isArray(candidates) || candidates.length === 0) continue
         const candidate = candidates[0] as { content?: { parts?: unknown } } | undefined

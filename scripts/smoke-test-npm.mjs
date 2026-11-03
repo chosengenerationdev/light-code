@@ -12,7 +12,7 @@
  * running `npx` gets, and pnpm's isolated layout would mask a missing dependency
  * differently.
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -84,6 +84,18 @@ try {
   })
 
   const installed = path.join(project, 'node_modules', manifest.name)
+
+  // The slim Rust helper (fast file tools, the observers' `watch`), so Windows needs no Fire Code for them.
+  if (process.platform === 'win32') {
+    check('the slim Rust helper is in the package and answers, with watch and without dataframe', () => {
+      const helper = path.join(installed, 'dist', 'bin', 'fire-fs.exe')
+      if (!fs.existsSync(helper)) throw new Error('dist/bin/fire-fs.exe is missing - run pnpm --filter light-code-vscode build:helper, then build the host')
+      const answer = spawnSync(helper, [], { input: JSON.stringify({ op: 'capabilities' }), encoding: 'utf8', timeout: 10000 })
+      const ops = JSON.parse(answer.stdout).ops ?? []
+      if (!ops.includes('watch') || !ops.includes('find') || ops.includes('dataframe')) throw new Error(`unexpected operations: ${ops.join(', ')}`)
+      return `${(fs.statSync(helper).size / 1048576).toFixed(1)} MB, ${String(ops.length)} operations`
+    })
+  }
 
   check('the package is one self-contained file', () => {
     /*

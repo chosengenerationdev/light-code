@@ -310,6 +310,129 @@ export interface UsageTabProps {
   transport: Transport
 }
 
+/** Tokens as people read them: 1.2M, 340k, 812. */
+function tokensWord(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 100_000 ? 0 : 1)}k`
+  return String(n)
+}
+
+/**
+ * Tokens burned, by person and by model (asked for: "statistics on tokens burned by each team member"). The
+ * provider's own counts where it reports them; requests it did not count are estimated, and said to be.
+ */
+function TokensSection(props: { dashboard: UsageDashboard; team: boolean }): ReactElement | null {
+  const t = props.dashboard.tokens
+  if (t === undefined) return null
+  const total = t.total.input + t.total.output
+  const before = t.previous.input + t.previous.output
+  return (
+    <Section
+      title="Tokens burned"
+      hint={t.estimatedShare > 0 ? `${String(Math.round(t.estimatedShare * 100))}% of requests estimated - their provider did not report a count` : "the providers' own counts"}
+    >
+      {t.total.requests === 0 ? (
+        <div style={{ color: colors.muted }}>No model requests recorded in this range. Counting starts with Light Code 0.199.0 / Fire Code 0.72.0.</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            <Kpi label="Total tokens" value={total.toLocaleString()} previous={{ value: total, previous: before }} invert hint={`Input plus output: ${tokensWord(total)}`} />
+            <Kpi label="Input" value={tokensWord(t.total.input)} hint={`${t.total.input.toLocaleString()} - what was sent, history and tool results included`} />
+            <Kpi label="Output" value={tokensWord(t.total.output)} hint={`${t.total.output.toLocaleString()} - what the models wrote`} />
+            <Kpi label="Cached input" value={t.total.input === 0 ? '—' : `${String(Math.round((t.total.cached / t.total.input) * 100))}%`} hint={`${t.total.cached.toLocaleString()} input tokens served from the provider's cache`} />
+            <Kpi label="Requests" value={t.total.requests.toLocaleString()} />
+          </div>
+          {props.team ? (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92em' }}>
+              <thead>
+                <tr style={{ color: colors.muted }}>
+                  <th style={tableCell}>Person</th>
+                  <th style={tableCell} title="Input plus output">Total</th>
+                  <th style={tableCell}>In</th>
+                  <th style={tableCell}>Out</th>
+                  <th style={tableCell} title="Input served from the provider's cache">Cached</th>
+                  <th style={tableCell}>Requests</th>
+                  <th style={tableCell}>Share</th>
+                  <th style={tableCell}>Trend</th>
+                  <th style={tableCell}>Models</th>
+                </tr>
+              </thead>
+              <tbody>
+                {t.people.slice(0, 30).map((person) => (
+                  <tr key={person.user}>
+                    <td style={tableCell} title={person.user}>
+                      {person.displayName ?? person.user}
+                      {person.team !== undefined ? <div style={{ color: colors.muted, fontSize: '0.85em' }}>{person.team}</div> : null}
+                    </td>
+                    <td style={{ ...tableCell, fontWeight: 600 }} title={(person.input + person.output).toLocaleString()}>{tokensWord(person.input + person.output)}</td>
+                    <td style={tableCell} title={person.input.toLocaleString()}>{tokensWord(person.input)}</td>
+                    <td style={tableCell} title={person.output.toLocaleString()}>{tokensWord(person.output)}</td>
+                    <td style={{ ...tableCell, color: colors.muted }}>{person.input === 0 ? '—' : `${String(Math.round((person.cached / person.input) * 100))}%`}</td>
+                    <td style={tableCell}>{person.requests.toLocaleString()}</td>
+                    <td style={tableCell} title={`${String(Math.round(person.share * 100))}% of the team's tokens`}>
+                      <div style={{ width: 70, height: 6, borderRadius: 3, background: colors.border }}>
+                        <div style={{ width: `${String(Math.max(2, Math.round(person.share * 100)))}%`, height: '100%', borderRadius: 3, background: colors.accent }} />
+                      </div>
+                    </td>
+                    <td style={tableCell}>
+                      <Sparkline values={person.spark} width={60} />
+                    </td>
+                    <td style={{ ...tableCell, fontFamily: monospaceFamily, color: colors.muted, fontSize: '0.85em' }}>{person.models.join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 600 }}>
+                  <td style={tableCell}>Total{t.people.length > 1 ? ` (${String(t.people.length)} people)` : ''}</td>
+                  <td style={tableCell} title={total.toLocaleString()}>{total.toLocaleString()}</td>
+                  <td style={tableCell} title={t.total.input.toLocaleString()}>{tokensWord(t.total.input)}</td>
+                  <td style={tableCell} title={t.total.output.toLocaleString()}>{tokensWord(t.total.output)}</td>
+                  <td style={{ ...tableCell, color: colors.muted }}>{t.total.input === 0 ? '—' : `${String(Math.round((t.total.cached / t.total.input) * 100))}%`}</td>
+                  <td style={tableCell}>{t.total.requests.toLocaleString()}</td>
+                  <td style={tableCell} colSpan={3} />
+                </tr>
+              </tfoot>
+            </table>
+          ) : null}
+          {t.models.length > 0 ? (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92em', marginTop: 10 }}>
+              <thead>
+                <tr style={{ color: colors.muted }}>
+                  <th style={tableCell}>Model</th>
+                  <th style={tableCell}>Total</th>
+                  <th style={tableCell}>In</th>
+                  <th style={tableCell}>Out</th>
+                  <th style={tableCell}>Requests</th>
+                </tr>
+              </thead>
+              <tbody>
+                {t.models.slice(0, 12).map((m) => (
+                  <tr key={m.model}>
+                    <td style={{ ...tableCell, fontFamily: monospaceFamily }}>{m.model}</td>
+                    <td style={{ ...tableCell, fontWeight: 600 }}>{tokensWord(m.input + m.output)}</td>
+                    <td style={tableCell}>{tokensWord(m.input)}</td>
+                    <td style={tableCell}>{tokensWord(m.output)}</td>
+                    <td style={tableCell}>{m.requests.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 600 }}>
+                  <td style={tableCell}>Total</td>
+                  <td style={tableCell}>{total.toLocaleString()}</td>
+                  <td style={tableCell}>{tokensWord(t.total.input)}</td>
+                  <td style={tableCell}>{tokensWord(t.total.output)}</td>
+                  <td style={tableCell}>{t.total.requests.toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+          ) : null}
+        </>
+      )}
+    </Section>
+  )
+}
+
 export function UsageTab(props: UsageTabProps): ReactElement {
   const { transport } = props
   const [message, setMessage] = useState<UsageMessage | undefined>(undefined)
@@ -796,6 +919,8 @@ export function UsageTab(props: UsageTabProps): ReactElement {
           </Section>
         )}
       </div>
+
+      <TokensSection dashboard={dashboard} team={scope === 'team'} />
 
       {scope === 'team' && dashboard.teams.length > 0 ? (
         <Section title="By team" hint="From the details each person's user-info tool gave">

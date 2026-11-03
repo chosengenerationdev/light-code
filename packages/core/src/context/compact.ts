@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatProvider } from '../providers/types.js'
 import { CONTINUE_PROMPT } from '../agent/unfinished.js'
+import { isObserverNote } from '../observers/events.js'
 import { estimateTokens } from './budget.js'
 
 /**
@@ -154,7 +155,7 @@ function userMessagesOf(messages: readonly ChatMessage[]): string[] {
     }
     const text = message.content.trim()
     // The loop's own nudge is user-role but nobody typed it.
-    if (text.length === 0 || text === CONTINUE_PROMPT) continue
+    if (text.length === 0 || text === CONTINUE_PROMPT || isObserverNote(text)) continue
     out.push(text.length > USER_MESSAGE_LIMIT ? `${text.slice(0, USER_MESSAGE_LIMIT)} …[clipped]` : text)
   }
   return out

@@ -1,8 +1,12 @@
 import type { Mode } from './types.js'
 
 /**
- * Two built-in modes (CLAUDE.md §8). **Ask *is* the read-only mode** — it is not a
- * separate flag layered on top of Code. Custom user-defined modes are deferred.
+ * The built-in modes (CLAUDE.md §8): Auto, Ask and Agent team. **Ask *is* the read-only mode** — it is not
+ * a separate flag. Custom user-defined modes are deferred.
+ *
+ * **Code mode was removed** (VS Code 0.201.0, asked for by the user). `CODE_MODE` stays as the loop's internal
+ * full-access default for headless runs and tests, and is never offered: a saved `code` resolves to Auto, which
+ * has the same tool groups.
  *
  * This mechanism doubles as the tool-profile system for context budgeting (§12), which is
  * why selection happens at mode boundaries rather than per turn: swapping tool
@@ -133,21 +137,21 @@ export const AUTO_MODE: Mode = {
    */
 }
 
-export const BUILTIN_MODES: readonly Mode[] = [CODE_MODE, ASK_MODE, AUTO_MODE, AGENT_TEAM_MODE]
+export const BUILTIN_MODES: readonly Mode[] = [AUTO_MODE, ASK_MODE, AGENT_TEAM_MODE]
 
-export const DEFAULT_MODE_ID = CODE_MODE.id
+export const DEFAULT_MODE_ID = AUTO_MODE.id
 
 /**
  * What `junior` used to mean.
  *
  * Kept as an alias rather than dropped: the id is written into every existing config file and
- * every per-project override, and an unknown id falls back to Code — so removing it would
+ * every per-project override, and an unknown id falls back to Auto — so removing it would
  * silently move people to a different mode, with nothing to say why their assistant had stopped
  * consulting anyone.
  */
-const RENAMED: Record<string, string> = { junior: AGENT_TEAM_MODE.id }
+const RENAMED: Record<string, string> = { junior: AGENT_TEAM_MODE.id, code: AUTO_MODE.id }
 
 export function findMode(id: string | undefined): Mode {
   const resolved = id !== undefined ? (RENAMED[id] ?? id) : id
-  return BUILTIN_MODES.find((mode) => mode.id === resolved) ?? CODE_MODE
+  return BUILTIN_MODES.find((mode) => mode.id === resolved) ?? AUTO_MODE
 }

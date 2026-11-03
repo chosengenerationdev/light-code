@@ -1014,7 +1014,7 @@ checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
 name = "fire-code"
-version = "0.68.0"
+version = "0.77.0"
 dependencies = [
  "aes-gcm",
  "embed-resource",
@@ -1034,7 +1034,7 @@ dependencies = [
 
 [[package]]
 name = "fire-fs"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "calamine",
  "chrono",
@@ -1046,6 +1046,7 @@ dependencies = [
  "polars",
  "rayon",
  "regex",
+ "reqwest",
  "rusqlite",
  "serde_json",
  "sha2",
@@ -3602,6 +3603,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

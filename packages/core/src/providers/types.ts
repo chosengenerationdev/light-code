@@ -281,6 +281,11 @@ export type StreamChunk =
    */
   | { type: 'reasoning'; text: string }
   | { type: 'toolCall'; toolCall: ToolCall }
+  /**
+   * What the provider says the request cost, when it says: the prompt's real size, which the token bar shows
+   * and the estimate is calibrated against (`context/budget.ts`). `inputTokens` includes cached tokens.
+   */
+  | { type: 'usage'; inputTokens: number; outputTokens?: number; cachedTokens?: number }
   | { type: 'done' }
   | { type: 'error'; error: string }
 

@@ -86,6 +86,10 @@ export class StdioControl {
               ? { kind, id, context: (message['context'] ?? {}) as Record<string, unknown> }
               : kind === 'probe'
                 ? { kind, id, tool: String(message['tool'] ?? '') }
+              : kind === 'sync'
+                ? { kind, id }
+              : kind === 'history'
+                ? { kind, id, file: String(message['file'] ?? '') }
               : kind === 'skill' && (message['op'] === 'write' || message['op'] === 'delete')
                 ? {
                     kind,

@@ -290,6 +290,32 @@ export class BitbucketClient {
   // --- A repository as a store of files: the team repository for skills and tools (`teamrepo/sync.ts`). ---
   // Every call is REST under /rest/, so the personal access token authenticates it like the rest (no git, no web URL).
 
+  /**
+   * The commits that changed one file on a branch, newest first - who changed a team skill or tool, and when
+   * (`sharing/provenance.ts`). Empty when the file is not in the repository.
+   */
+  async fileCommits(repo: BitbucketRepo, file: string, branch: string, limit = 50, signal?: AbortSignal): Promise<{ id: string; by: string; email?: string; at: number; message: string }[]> {
+    try {
+      const page = await this.rest.json<{ values?: { displayId?: string; id?: string; author?: { name?: string; displayName?: string; emailAddress?: string }; authorTimestamp?: number; message?: string }[] }>(
+        `reading the history of ${file}`,
+        `${this.repoPath(repo)}/commits?${new URLSearchParams({ path: file, until: `refs/heads/${branch}`, limit: String(limit) }).toString()}`,
+        { method: 'GET' },
+        signal,
+      )
+      return (page.values ?? []).map((c) => ({
+        id: c.displayId ?? (c.id ?? '').slice(0, 11),
+        by: c.author?.displayName ?? c.author?.name ?? 'unknown',
+        ...(c.author?.emailAddress !== undefined ? { email: c.author.emailAddress } : {}),
+        at: Math.floor((c.authorTimestamp ?? 0) / 1000),
+        // The first line: the subject of the commit.
+        message: (c.message ?? '').split(/\r?\n/)[0] ?? '',
+      }))
+    } catch (error) {
+      if (error instanceof AtlassianError && (error.status === 404 || error.status === 400)) return []
+      throw error
+    }
+  }
+
   /** The newest commit on a branch, or undefined when the branch does not exist. */
   async branchHead(repo: BitbucketRepo, branch: string, signal?: AbortSignal): Promise<string | undefined> {
     try {

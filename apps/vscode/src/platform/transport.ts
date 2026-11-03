@@ -29,8 +29,28 @@ export class WebviewTransport implements Transport {
   /** Proven by an inbound message. A view that has spoken can certainly listen. */
   private live = false
   private readonly listeners = new Set<(message: unknown) => void>()
+  /**
+   * Further webviews on the same bridge - the Strategy editor tab. They get every message the panel gets (each
+   * ignores what is not its own) and their messages reach the bridge exactly as the panel's do: one bridge, one
+   * set of state, however many windows look at it.
+   */
+  private readonly extras = new Map<vscode.Webview, { dispose(): void }>()
 
   constructor(private readonly logger?: Logger) {}
+
+  /** A plain object, not `vscode.Disposable`: this file imports `vscode` for types only, so tests can load it. */
+  attachExtra(webview: vscode.Webview): { dispose(): void } {
+    const subscription = webview.onDidReceiveMessage((message: unknown) => {
+      for (const listener of this.listeners) listener(message)
+    })
+    this.extras.set(webview, subscription)
+    return {
+      dispose: () => {
+        subscription.dispose()
+        this.extras.delete(webview)
+      },
+    }
+  }
 
   /** Points the transport at a newly created view. Any previous one is dropped. */
   attach(webview: vscode.Webview): void {
@@ -84,6 +104,7 @@ export class WebviewTransport implements Transport {
 
   post(message: unknown): void {
     for (const observer of this.observers) observer(message)
+    for (const extra of this.extras.keys()) void extra.postMessage(message)
     const webview = this.webview
     if (webview === undefined) return
     webview.postMessage(message).then((delivered) => {

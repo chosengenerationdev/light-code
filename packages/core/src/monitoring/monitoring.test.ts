@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import type { Tool, ToolExecutionContext } from '../tools/types.js'
 import { monitorToolRefusal, type MonitoringChannel } from './channel.js'
-import { createMonitorCheckToolTool, createMonitorControlTool, createMonitorCreateTool, monitorBlock, monitorSkillBody } from './tools.js'
+import { askedAudience, createMonitorCheckToolTool, createMonitorControlTool, createMonitorCreateTool, monitorBlock, monitorSkillBody } from './tools.js'
 import { checkMonitorRows, describeRowsCheck, MONITOR_TOOL_TEMPLATE } from './rowsCheck.js'
 
 const tool = (name: string, group: Tool['group']): Tool =>
@@ -161,6 +161,38 @@ describe('a team monitor', () => {
     expect(result.isError).toBeUndefined()
     expect(audience).toBe('me')
     expect(result.content).toMatch(/Personal \(only on this computer\)/)
+  })
+
+  // Reported: asked for a personal check, got a team one - the agent left audience out (or said team), and with
+  // team history set up that meant team. The user's own latest message decides.
+  it('is personal when the user asked for a personal one, whatever the agent passed', async () => {
+    const audiences: unknown[] = []
+    const channel: MonitoringChannel = {
+      request: async (op) => {
+        if (op === 'list') return { teamReady: true }
+        if (op === 'evaluate') return { level: 'green', meaning: 'All clear', headline: 'All clear', rows: 0, columns: [], alerts: [], sourceKind: 'sqlite' }
+        return {}
+      },
+    }
+    const writeSkill = {
+      name: 'write_skill',
+      group: 'edit',
+      description: '',
+      parametersSchema: z.object({}),
+      execute: async (p: { audience?: unknown }) => (audiences.push(p.audience), { content: 'Recorded the skill.' }),
+    } as unknown as Parameters<typeof createMonitorCreateTool>[0]['writeSkill']
+    const create = createMonitorCreateTool({ channel, writeSkill, runTool: async () => ({ content: '' }) })
+    const asking = (text: string) => ({ lastUserText: () => text }) as unknown as ToolExecutionContext
+    await create.execute(params, asking('create a personal check for the nightly batch'))
+    await create.execute({ ...params, audience: 'team' }, asking('just for me please, watch the disk'))
+    // Not said: the default stands (team, since the team has history); said "team": team.
+    await create.execute(params, asking('watch the disk every 10 minutes'))
+    await create.execute(params, asking('make it a team check'))
+    expect(audiences).toEqual(['me', 'me', 'team', 'team'])
+    expect(askedAudience('only on my machine')).toBe('me')
+    expect(askedAudience('personal check, and set up the team history later')).toBe('me')
+    expect(askedAudience('share it with the team')).toBe('team')
+    expect(askedAudience('personal or team, you choose')).toBeUndefined()
   })
 
   it('keeps the author\'s advice in the block', () => {

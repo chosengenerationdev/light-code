@@ -19,6 +19,9 @@ import javax.swing.SwingConstants
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLifeSpanHandlerAdapter
+import org.cef.handler.CefLoadHandlerAdapter
+import com.intellij.ide.ui.LafManagerListener
+import com.intellij.ui.JBColor
 
 /**
  * The Light Code panel.
@@ -36,7 +39,7 @@ import org.cef.handler.CefLifeSpanHandlerAdapter
  * ## What is deliberately not here
  *
  * IDE-native touches: opening a file at a line from the chat, using IntelliJ's own diff viewer for
- * an approval, following the IDE theme. Those need a channel from the page back into Kotlin
+ * an approval. (The IDE theme *is* followed: see `tellTheme`.) Those need a channel from the page back into Kotlin
  * (`JBCefJSQuery` is the one), and each is an addition rather than a rewrite. The product works
  * without them; it is simply less woven in than the VS Code extension is.
  */
@@ -118,9 +121,31 @@ class LightCodePanel(private val project: Project) : Disposable {
       },
       view.cefBrowser,
     )
+    /*
+     * Follow the IDE's theme. JCEF reports `prefers-color-scheme: light` whatever PyCharm or IntelliJ is
+     * showing, so a dark IDE got a light panel (reported). The page is told the IDE's theme once it has
+     * loaded, and again on every theme change; its Appearance "System" then means this one.
+     */
+    view.jbCefClient.addLoadHandler(
+      object : CefLoadHandlerAdapter() {
+        override fun onLoadEnd(browser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
+          if (frame?.isMain == true) tellTheme(view)
+        }
+      },
+      view.cefBrowser,
+    )
+    ApplicationManager.getApplication().messageBus.connect(this).subscribe(
+      LafManagerListener.TOPIC,
+      LafManagerListener { tellTheme(view) },
+    )
     Disposer.register(this, view)
     browser = view
     wrapper.setContent(view.component)
+  }
+
+  private fun tellTheme(view: JBCefBrowser) {
+    val theme = if (JBColor.isBright()) "light" else "dark"
+    view.cefBrowser.executeJavaScript("window.__lightCodeIdeTheme && window.__lightCodeIdeTheme('$theme')", view.cefBrowser.url, 0)
   }
 
   private fun message(text: String): JComponent =

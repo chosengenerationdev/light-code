@@ -199,16 +199,120 @@ describe('a monitor\'s grid window', () => {
     expect(view?.textContent).toContain('Nothing was alerting')
   })
 
-  it('draws a large grid as it is scrolled, every row reachable - it used to stop at 3000', () => {
+  it('keeps only the rows in view in the page, every row reachable by scrolling - it used to build the whole table', async () => {
     const rows = Array.from({ length: 3450 }, (_, n) => ({ job: `J${n}`, status: n === 3400 ? 'FAILURE' : 'OK' }))
     receive({ ...grid, record: { ...grid.record, partial: false, evaluation: { ...grid.record.evaluation, rows, alerts: [{ id: 'far', row: 3400, key: 'J3400', level: 'red', column: 'status', wholeRow: false, message: 'J3400 failed', acknowledged: false }] } } })
-    expect(document.querySelectorAll('#g-table tbody tr').length).toBe(200)
+    const drawn = () => document.querySelectorAll('#g-table tbody tr[data-row]').length
+    expect(drawn()).toBeLessThan(120)
     expect(document.querySelector('#g-count')?.textContent).toBe('3450 rows')
-    document.querySelector('#g-table-wrap')?.dispatchEvent(new Event('scroll'))
-    expect(document.querySelectorAll('#g-table tbody tr').length).toBe(400)
-    // An alert far down: choosing it draws down to it.
+    // Spacers stand in for the rest, so the scroll bar is the whole grid's.
+    expect(document.querySelectorAll('#g-table tbody tr.g-spacer').length).toBe(1)
+    // Scrolled far down: those rows, and still only a window of them.
+    const wrap = document.querySelector<HTMLElement>('#g-table-wrap')!
+    wrap.scrollTop = 62 + 2000 * 29
+    wrap.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(document.querySelector('tr[data-row="2001"]')).not.toBeNull()
+    expect(document.querySelector('tr[data-row="5"]')).toBeNull()
+    expect(drawn()).toBeLessThan(120)
+    // An alert far down: choosing it scrolls to it.
     document.querySelector<HTMLButtonElement>('#g-alerts .alert-chip')?.click()
     expect(document.querySelector('tr[data-row="3400"] td.cell-alert')?.textContent).toBe('FAILURE')
+  })
+
+  // Asked for: filters under the columns with values to tick or search, conditions such as > 50, a column chooser.
+  const many = Array.from({ length: 300 }, (_, n) => ({ job: `J${n}`, status: n % 3 === 0 ? 'FAILURE' : n % 3 === 1 ? 'OK' : 'LATE', minutes: n }))
+  const showMany = () =>
+    receive({
+      ...grid,
+      record: { ...grid.record, partial: false, evaluation: { ...grid.record.evaluation, columns: [{ key: 'job' }, { key: 'status' }, { key: 'minutes', format: 'number' }], rows: many, alerts: [] } },
+    })
+  const typeFilter = async (col: string, text: string) => {
+    const input = document.querySelector<HTMLInputElement>(`#g-table input[data-filter="${col}"]`)!
+    input.value = text
+    input.dispatchEvent(new Event('input'))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  const count = () => document.querySelector('#g-count span')?.textContent
+
+  it('filters a column by condition: more than, between, either, not, empty', async () => {
+    showMany()
+    await typeFilter('minutes', '>250')
+    expect(count()).toBe('49 of 300 rows')
+    await typeFilter('minutes', '10..19')
+    expect(count()).toBe('10 of 300 rows')
+    await typeFilter('minutes', '<5, >=298')
+    expect(count()).toBe('7 of 300 rows')
+    await typeFilter('minutes', '>10 & <20')
+    expect(count()).toBe('9 of 300 rows')
+    await typeFilter('minutes', '')
+    await typeFilter('status', '!ok')
+    expect(count()).toBe('200 of 300 rows')
+    await typeFilter('status', '"late"')
+    expect(count()).toBe('100 of 300 rows')
+    await typeFilter('status', '=')
+    expect(count()).toBe('0 of 300 rows')
+    // Clearing every filter at once.
+    await typeFilter('status', 'fail')
+    ;[...document.querySelectorAll<HTMLButtonElement>('#g-count button')].find((b) => b.textContent?.startsWith('Clear'))?.click()
+    expect(count()).toBe('300 rows')
+  })
+
+  it("filters by ticking a column's values, searched, with each value's count", () => {
+    showMany()
+    document.querySelector<HTMLButtonElement>('th[data-col="status"] .funnel')?.click()
+    const items = () => [...document.querySelectorAll<HTMLLabelElement>('.pop .pop-item')]
+    expect(items().map((l) => l.textContent)).toEqual(['FAILURE100', 'LATE100', 'OK100'])
+    // Untick OK: the other two stay.
+    const ok = items().find((l) => l.textContent?.startsWith('OK'))!.querySelector('input')!
+    ok.checked = false
+    ok.dispatchEvent(new Event('change'))
+    expect(count()).toBe('200 of 300 rows')
+    expect(document.querySelector('th[data-col="status"]')?.classList.contains('filtered')).toBe(true)
+    // Search the values, then keep only what the search found.
+    const search = document.querySelectorAll<HTMLInputElement>('.pop .pop-search')[1]!
+    search.value = 'lat'
+    search.dispatchEvent(new Event('input'))
+    expect(items().map((l) => l.textContent)).toEqual(['LATE100'])
+    ;[...document.querySelectorAll<HTMLButtonElement>('.pop .link-btn')].find((b) => b.textContent === 'Only these')?.click()
+    expect(count()).toBe('100 of 300 rows')
+    // Another column's values are counted among the rows this filter leaves.
+    document.querySelector<HTMLButtonElement>('th[data-col="job"] .funnel')?.click()
+    expect(document.querySelectorAll('.pop .pop-item').length).toBe(100)
+  })
+
+  it('chooses the columns shown, remembered for this monitor, never none', () => {
+    showMany()
+    const heads = () => [...document.querySelectorAll('#g-table th[data-col]')].map((th) => (th as HTMLElement).dataset.col)
+    expect(heads()).toEqual(['job', 'status', 'minutes'])
+    document.querySelector<HTMLButtonElement>('.cols-btn')?.click()
+    const box = (key: string) => [...document.querySelectorAll<HTMLLabelElement>('.pop .pop-item')].find((l) => l.textContent?.startsWith(key))!.querySelector('input')!
+    box('minutes').checked = false
+    box('minutes').dispatchEvent(new Event('change'))
+    expect(heads()).toEqual(['job', 'status'])
+    expect(localStorage.getItem('fire-code.grid.hidden.batch')).toBe('["minutes"]')
+    box('status').checked = false
+    box('status').dispatchEvent(new Event('change'))
+    box('job').checked = false
+    box('job').dispatchEvent(new Event('change'))
+    // The last column cannot be hidden.
+    expect(heads()).toEqual(['job'])
+    ;[...document.querySelectorAll<HTMLButtonElement>('.pop .link-btn')].find((b) => b.textContent === 'Show all')?.click()
+    expect(heads()).toEqual(['job', 'status', 'minutes'])
+    localStorage.clear()
+  })
+
+  it('filters and sorts 100,000 rows quickly', async () => {
+    const rows = Array.from({ length: 100_000 }, (_, n) => ({ job: `J${n}`, status: n % 7 === 0 ? 'FAILURE' : 'OK', minutes: n % 500 }))
+    receive({ ...grid, record: { ...grid.record, partial: false, evaluation: { ...grid.record.evaluation, columns: [{ key: 'job' }, { key: 'status' }, { key: 'minutes' }], rows, alerts: [] } } })
+    const started = performance.now()
+    await typeFilter('minutes', '>450')
+    document.querySelector<HTMLElement>('th[data-col="minutes"] .h-label')?.click()
+    const took = performance.now() - started - 150
+    expect(count()).toBe('9800 of 100000 rows')
+    expect(document.querySelectorAll('#g-table tbody tr[data-row]').length).toBeLessThan(120)
+    // Generous for a slow test machine; the point is that it is not seconds.
+    expect(took).toBeLessThan(1500)
   })
 
   it('says plainly why an old check has no whole grid', () => {
@@ -305,5 +409,50 @@ describe('a monitor\'s grid window', () => {
     // Newest first, one row per version however many members recorded it.
     expect(rows).toEqual(['Schedule changed (every)', 'Changed: rules', 'First seen on this computer'])
     expect(sheet?.textContent).toContain('chen')
+  })
+
+  // jsdom has no layout, so the rule is checked in the stylesheet: without it the page's one grid column grew to
+  // the table's width and the window cut off the header's buttons (reported twice).
+  it('keeps its column the width of the window, so the header buttons are never cut off', () => {
+    const css = fs.readFileSync(path.join(ui, 'monitor.css'), 'utf8')
+    expect(css).toMatch(/\.grid-app \{[^}]*grid-template-columns: minmax\(0, 1fr\)/)
+    expect(css).toMatch(/\.grid-app > \* \{\s*min-width: 0;/)
+    expect(css).toMatch(/\.g-head \{[^}]*flex-wrap: wrap/)
+    expect(css).toMatch(/\.g-actions \{[^}]*flex-wrap: wrap/)
+  })
+
+  // Asked for: "data should be selectable and copyable from the datagrid, a cell or the full grid".
+  it('copies a cell, a block of cells and the whole grid, as text Excel pastes into cells and as a table', () => {
+    const copied: { text: string; html: string }[] = []
+    // jsdom has no clipboard: a copy is the copy event the page fills, as WebView2 delivers it.
+    ;(document as unknown as { execCommand: (c: string) => boolean }).execCommand = () => {
+      const data: Record<string, string> = {}
+      const event = new Event('copy', { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown }
+      event.clipboardData = { setData: (type: string, value: string) => (data[type] = value) }
+      document.dispatchEvent(event)
+      copied.push({ text: data['text/plain'] ?? '', html: data['text/html'] ?? '' })
+      return true
+    }
+    const cell = (row: number, col: string) => document.querySelector<HTMLElement>(`tr[data-row="${row}"] td[data-col="${col}"]`)
+    const rightClick = (target: HTMLElement | null) => target?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }))
+    const pick = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('.menu button')].find((b) => b.textContent === label)?.click()
+
+    rightClick(cell(1, 'status'))
+    pick('Copy cell')
+    expect(copied.at(-1)?.text).toBe('FAILURE')
+
+    // Click one cell, Shift+click another: the block between them; Ctrl+C copies it.
+    cell(0, 'job')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    cell(1, 'status')?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+    expect(document.querySelectorAll('td.cell-range').length).toBe(4)
+    document.execCommand('copy')
+    // In the order shown: alerting rows first.
+    expect(copied.at(-1)?.text).toBe('B\tFAILURE\r\nA\tOK')
+
+    // The header's button: every row, with the headers.
+    ;[...document.querySelectorAll<HTMLButtonElement>('#g-actions .hbtn')].find((b) => b.title.startsWith('Copy the grid'))?.click()
+    expect(copied.at(-1)?.text).toBe('job\tstatus\r\nB\tFAILURE\r\nA\tOK')
+    expect(copied.at(-1)?.html).toContain('<th style')
+    expect(copied.at(-1)?.html).toContain('>FAILURE</td>')
   })
 })

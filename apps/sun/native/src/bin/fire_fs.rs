@@ -24,6 +24,10 @@ mod dataframe;
 mod usage_store;
 #[path = "../directory.rs"]
 mod directory;
+#[path = "../observer.rs"]
+mod observer;
+#[path = "../role_agent.rs"]
+mod role_agent;
 
 use rayon::prelude::*;
 use serde_json::{json, Map, Value};
@@ -36,6 +40,17 @@ use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 fn main() {
+    // `fire-fs watch`: the one long-running mode - an observer agent (Auditor or Anti Hallucinator) with
+    // its own context, fed by the host line by line. See `observer.rs`.
+    if std::env::args().nth(1).as_deref() == Some("watch") {
+        observer::run();
+        return;
+    }
+    // `fire-fs agent`: one specialist of the agent team, with its own context and tool calls run by the host.
+    if std::env::args().nth(1).as_deref() == Some("agent") {
+        role_agent::run();
+        return;
+    }
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let answer = match serde_json::from_str::<Value>(&input) {
@@ -48,10 +63,10 @@ fn main() {
 
 /// Every operation `run` answers. A host asks with `capabilities` and offers only matching tools.
 #[cfg(feature = "dataframe")]
-const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "dataframe", "search", "usage", "directory", "capabilities"];
+const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "dataframe", "search", "usage", "directory", "watch", "agent", "capabilities"];
 /// The slim helper bundled with the VS Code extension: everything but Polars.
 #[cfg(not(feature = "dataframe"))]
-const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "search", "usage", "directory", "capabilities"];
+const OPS: &[&str] = &["find", "summary", "duplicates", "readMany", "inspect", "lines", "tail", "grep", "table", "transfer", "archive", "names", "sqlite", "pypool", "search", "usage", "directory", "watch", "agent", "capabilities"];
 
 fn run(r: &Value) -> Result<Value, String> {
     match r.get("op").and_then(Value::as_str).unwrap_or("") {

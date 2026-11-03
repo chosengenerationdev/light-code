@@ -36,6 +36,8 @@ export type DisplayMessage =
   /* A diagram and its failure, derived from `show_diagram` the same way. */
   | Extract<TranscriptEntry, { kind: 'diagram' }>
   | Extract<TranscriptEntry, { kind: 'diagramError' }>
+  /* The Anti Hallucinator's note as the agent received it - shown as the reviewer's, never as yours. */
+  | Extract<TranscriptEntry, { kind: 'observerNote' }>
 
 export interface MessageListProps {
   messages: DisplayMessage[]
@@ -535,6 +537,22 @@ export function MessageList(props: MessageListProps): ReactElement {
           >
             <strong style={{ color: colors.foreground }}>Chart not drawn.</strong> {message.message}
           </div>
+        ) : message.kind === 'observerNote' ? (
+          <div
+            key={index}
+            style={{
+              borderLeft: `3px solid ${colors.expert}`,
+              padding: '6px 10px',
+              margin: '8px 0',
+              fontSize: 11,
+              color: colors.muted,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            <strong style={{ color: colors.foreground }}>Anti Hallucinator</strong> (sent to the agent, not from you)
+            {'\n'}
+            {observerNoteBody(message.content)}
+          </div>
         ) : message.kind === 'reasoning' ? (
           <ReasoningBlock
             key={index}
@@ -577,4 +595,10 @@ export function MessageList(props: MessageListProps): ReactElement {
       )}
     </div>
   )
+}
+
+/** The note's points without its framing lines: the label above already says who it is from. */
+function observerNoteBody(content: string): string {
+  const lines = content.split('\n')
+  return lines.filter((line) => line.startsWith('- ')).join('\n') || content
 }

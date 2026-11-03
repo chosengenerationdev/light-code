@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
+import { StrategyEditor } from './StrategyEditor.js'
 import { applyAccent, applyExpert, DEFAULT_ACCENT, DEFAULT_EXPERT, installStyles } from './styles.js'
 import { VsCodeTransport } from './transport.js'
 
@@ -22,4 +23,20 @@ installStyles()
 applyAccent(DEFAULT_ACCENT)
 applyExpert(DEFAULT_EXPERT)
 
-createRoot(rootElement).render(<App transport={new VsCodeTransport()} />)
+/*
+ * The Strategy editor tab (VS Code) is this same bundle, started in its own view: the chart alone, filling the tab,
+ * on the same bridge. Its Close closes the tab; "Ask the agent why" sends the question to the chat.
+ */
+const transport = new VsCodeTransport()
+if (rootElement.dataset['view'] === 'strategy') {
+  createRoot(rootElement).render(
+    <StrategyEditor
+      transport={transport}
+      standalone
+      onClose={() => transport.post({ type: 'closeStrategyWindow' })}
+      onAsk={(text) => transport.post({ type: 'askInChat', text })}
+    />,
+  )
+} else {
+  createRoot(rootElement).render(<App transport={transport} />)
+}

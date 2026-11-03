@@ -32,9 +32,30 @@ const setStatus = (text: string, level: StatusLevel = 'error'): void => {
  * Mirrored into localStorage so a reload paints correctly on the first frame instead of
  * flashing light while the socket connects — the flash is small and it looks like a bug.
  */
+/*
+ * The editor's theme, when the page sits inside one that says (the JetBrains plugin calls
+ * `__lightCodeIdeTheme` at load and on every theme change). "System" then means the IDE's theme:
+ * JCEF's own `prefers-color-scheme` stays light under a dark PyCharm, which was reported as the
+ * panel ignoring dark mode. An explicit Light or Dark in Appearance still wins.
+ */
+let ideTheme: 'light' | 'dark' | undefined
+let chosenTheme: string | undefined
+;(window as unknown as { __lightCodeIdeTheme?: (theme: string) => void }).__lightCodeIdeTheme = (theme: string): void => {
+  ideTheme = theme === 'dark' ? 'dark' : theme === 'light' ? 'light' : undefined
+  applyTheme(chosenTheme)
+}
+
 const applyTheme = (theme: string | undefined): void => {
+  chosenTheme = theme
   const root = document.documentElement
-  if (theme === 'light' || theme === 'dark') {
+  if (theme !== 'light' && theme !== 'dark' && ideTheme !== undefined) {
+    root.dataset.theme = ideTheme
+    try {
+      localStorage.removeItem('lightcode.theme')
+    } catch {
+      /* as below */
+    }
+  } else if (theme === 'light' || theme === 'dark') {
     root.dataset.theme = theme
     try {
       localStorage.setItem('lightcode.theme', theme)
@@ -231,9 +252,12 @@ if (embedder !== undefined) {
       transport.post({ type: 'suggestCommitMessage' })
       return
     }
-    // Fire Code's "Start a chat" from a monitoring alert: the alert's context, put in the box to send.
-    if (data.ask === 'prefill' && typeof data.text === 'string') {
-      transport.redeliver({ type: 'prefillComposer', text: data.text.slice(0, 20_000) })
+    // Fire Code's "Start a chat" from a monitoring alert: the alert's context, put in the box to send. Read in both
+    // shapes: Fire Code before 0.75.0 sent it nested (`ask: { ask: 'prefill', text }`), which matched nothing here.
+    const nested = typeof data.ask === 'object' && data.ask !== null ? (data.ask as { ask?: unknown; text?: unknown }) : undefined
+    const prefill = data.ask === 'prefill' ? data.text : nested?.ask === 'prefill' ? nested.text : undefined
+    if (typeof prefill === 'string') {
+      transport.redeliver({ type: 'prefillComposer', text: prefill.slice(0, 20_000) })
       return
     }
     // Fire Code's instructions dialog: the standing instructions are a skill only this host can find.

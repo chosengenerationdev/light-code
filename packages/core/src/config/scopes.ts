@@ -17,6 +17,11 @@ export const USER_SCOPE_ONLY_KEYS = [
   'proxy',
   // Where everybody's usage events are written. A repository able to set it could collect them.
   'usage',
+  // The Auditor and the Anti Hallucinator: a repository could switch auditing off, or send every step of
+  // your work to a profile of its choosing.
+  'observers',
+  // Saved strategies steer which specialists act, read-only or not: the user's, never a repository's.
+  'strategies',
   // Reads the user's mail and their open workbooks. A repository must never switch it on.
   'office',
   // Names language-server programs to run when a file is edited.

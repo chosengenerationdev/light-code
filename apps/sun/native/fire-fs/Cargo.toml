@@ -3,7 +3,7 @@ name = "fire-fs"
 # Its own version, deliberately not Fire Code's. Every Fire Code release bumps that number, and while the
 # helper was a second binary of the same package each bump rebuilt it - Polars and link-time optimisation
 # included - though nothing in it had changed. Raise this only when the helper itself changes.
-version = "1.0.0"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.86"
 description = "fire-fs: the parallel file, table and SQLite helper Light Code and Fire Code call"
@@ -36,6 +36,9 @@ zip = { version = "=2.4.2", default-features = false, features = ["deflate-flate
 rusqlite = { version = "0.40.2", features = ["bundled", "limits"] }
 polars = { version = "=0.49", optional = true, default-features = false, features = ["lazy", "sql", "csv", "strings", "temporal", "dtype-date", "dtype-datetime", "round_series", "is_in"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+# `fire-fs watch` (observer.rs): the Auditor's and Anti Hallucinator's model calls - invariant 2's third recorded
+# exception, chosen by the user. Already in the lock through Polars; rustls with ring, Windows' own roots, no proxy.
+reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls-native-roots"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [

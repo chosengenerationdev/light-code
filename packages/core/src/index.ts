@@ -240,7 +240,7 @@ export {
   type ExpertAnswer,
 } from './expert/claudeCli.js'
 export { createAskExpertTool, type AskExpertParams } from './tools/askExpert.js'
-export { createAskAgentTool, type AskAgentParams } from './tools/askAgent.js'
+export { createAskAgentTool, createAskAgentsTool, type AskAgentParams, type AskAgentsParams } from './tools/askAgent.js'
 export {
   AGENT_ROLES,
   allRoles,

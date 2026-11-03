@@ -95,6 +95,7 @@ export function negotiateRequest(request: NegotiateRequest, signal?: AbortSignal
       }
       resolve({ status: answer.status ?? 0, headers: answer.headers ?? {}, body: Buffer.from(answer.body ?? '', 'base64') })
     })
+    child.stdin.on('error', () => undefined)
     child.stdin.end(JSON.stringify(request))
   })
 }

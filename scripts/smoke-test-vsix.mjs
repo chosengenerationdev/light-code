@@ -99,8 +99,8 @@ try {
       }
     }
     check(
-      'the slim Rust helper is bundled, answers, and leaves out dataframe',
-      ops.includes('directory') && ops.includes('find') && !ops.includes('dataframe'),
+      'the slim Rust helper is bundled, answers, has watch (the observers) and leaves out dataframe',
+      ops.includes('directory') && ops.includes('find') && ops.includes('watch') && !ops.includes('dataframe'),
       fs.existsSync(helper) ? `${(fs.statSync(helper).size / 1048576).toFixed(1)} MB, ${ops.length} operations` : 'missing',
     )
   }

@@ -189,4 +189,21 @@ await esbuild.build({
   define: { __LC_VERSION__: JSON.stringify(version) },
 })
 
+/*
+ * The slim Rust helper, as the Windows VS Code extension carries it (asked for: "at least let the Windows
+ * Light Code have Rust tools"). Without it the Node host had Rust tools only where Fire Code is installed.
+ * Fire Code's full helper (which also has `dataframe`) still wins when it is there. Built with
+ * `pnpm --filter light-code-vscode build:helper`; never fetched. Absent, the package works without it.
+ */
+const SLIM_HELPER = path.join('..', 'sun', 'native', 'target', 'slim', 'release', 'fire-fs.exe')
+const helperOut = path.join(outDir, 'bin', 'fire-fs.exe')
+if (fs.existsSync(SLIM_HELPER)) {
+  fs.mkdirSync(path.dirname(helperOut), { recursive: true })
+  fs.copyFileSync(SLIM_HELPER, helperOut)
+  console.log(`[esbuild] slim Rust helper -> ${helperOut} (${(fs.statSync(helperOut).size / 1048576).toFixed(1)} MB)`)
+} else {
+  fs.rmSync(helperOut, { force: true })
+  console.warn(`[esbuild] no slim Rust helper at ${SLIM_HELPER}; this package has Rust tools only where Fire Code is installed.`)
+}
+
 console.log('[esbuild] host built')

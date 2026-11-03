@@ -94,6 +94,11 @@ export function createVSCodeHostServices(
     // A real Save dialog, so the panel's diagram Save buttons go through it (a webview ignores downloads).
     savesFiles: true,
 
+    // The Strategy window as an editor tab, where the chart has room (asked for: "in the code editor place").
+    async openStrategyWindow() {
+      await vscode.commands.executeCommand('lightCode.openStrategy')
+    },
+
     // A new branch folder's setup command, where it can be watched - and stopped.
     runInTerminal(options) {
       const terminal = vscode.window.createTerminal({ name: options.name, cwd: options.cwd, env: options.env })

@@ -73,6 +73,10 @@ export class OpenAIProvider implements ChatProvider {
       body.tools = toOpenAITools(options.tools)
       body.tool_choice = 'auto'
     }
+    // The real token count, in a last chunk (OpenAI, vLLM, most gateways). A gateway that refuses the field is
+    // asked again without it, and remembered.
+    const usageKey = this.profile.baseUrl.replace(/\/+$/, '')
+    if (!NO_STREAM_USAGE.has(usageKey)) body.stream_options = { include_usage: true }
     if (this.profile.temperature !== undefined) body.temperature = this.profile.temperature
     if (this.profile.topP !== undefined) body.top_p = this.profile.topP
     applyThinking(body, 'openai', this.profile.thinking, this.profile.maxTokens)
@@ -83,6 +87,18 @@ export class OpenAIProvider implements ChatProvider {
       // it is replaced up front rather than discovered halfway through (§10).
       await this.auth.ensureTokenForStream?.()
       response = await this.send(url, body, options.signal)
+
+      if (response.status >= 400 && response.status < 500 && response.status !== 401 && body.stream_options !== undefined) {
+        const text = await response.text().catch(() => '')
+        if (/stream_options|include_usage/i.test(text)) {
+          NO_STREAM_USAGE.add(usageKey)
+          delete body.stream_options
+          response = await this.send(url, body, options.signal)
+        } else {
+          yield { type: 'error', error: `Request to ${url} failed with HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ''}` }
+          return
+        }
+      }
 
       if (response.status === 401 && this.auth.onUnauthorized !== undefined) {
         this.logger?.debug('401 received; asking the auth strategy to refresh once')
@@ -126,6 +142,22 @@ export class OpenAIProvider implements ChatProvider {
     if (signal !== undefined) request.signal = signal
     if (tls !== undefined) request.tls = tls
     return this.http.request(url, request)
+  }
+}
+
+/** Gateways that refused `stream_options`, by base URL: asked without it from then on. */
+const NO_STREAM_USAGE = new Set<string>()
+
+/** The usage an OpenAI-style chunk carries, if any. */
+export function usageFrom(parsed: unknown): Extract<StreamChunk, { type: 'usage' }> | undefined {
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const usage = (parsed as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } } | null }).usage
+  if (usage === undefined || usage === null || typeof usage.prompt_tokens !== 'number') return undefined
+  return {
+    type: 'usage',
+    inputTokens: usage.prompt_tokens,
+    ...(typeof usage.completion_tokens === 'number' ? { outputTokens: usage.completion_tokens } : {}),
+    ...(typeof usage.prompt_tokens_details?.cached_tokens === 'number' ? { cachedTokens: usage.prompt_tokens_details.cached_tokens } : {}),
   }
 }
 
@@ -183,10 +215,32 @@ async function* parseSseStream(
   let buffer = ''
   const thinking = new ThinkTagSplitter()
   const toolCallAccumulators = new Map<number, ToolCallAccumulator>()
+  // After a tool call, the usage chunk is still to come: read on for it, but briefly - a gateway that never
+  // closes the stream must not turn a finished reply into a stalled one.
+  let finishedAt: number | undefined
+  const AFTER_FINISH_MS = 5000
 
   try {
     while (true) {
-      const { done, value } = await reader.read()
+      let next: Awaited<ReturnType<typeof reader.read>> | 'late'
+      if (finishedAt === undefined) next = await reader.read()
+      else {
+        const left = Math.max(0, AFTER_FINISH_MS - (Date.now() - finishedAt))
+        let timer: ReturnType<typeof setTimeout> | undefined
+        next = await Promise.race([
+          reader.read(),
+          new Promise<'late'>((resolve) => {
+            timer = setTimeout(() => resolve('late'), left)
+          }),
+        ])
+        clearTimeout(timer)
+      }
+      if (next === 'late') {
+        void reader.cancel().catch(() => undefined)
+        yield { type: 'done' }
+        return
+      }
+      const { done, value } = next
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
@@ -206,6 +260,8 @@ async function* parseSseStream(
 
         try {
           const parsed: unknown = JSON.parse(data)
+          const usage = usageFrom(parsed)
+          if (usage !== undefined) yield usage
           const choice = extractChoice(parsed)
           if (choice === undefined) continue
 
@@ -235,12 +291,11 @@ async function* parseSseStream(
           }
           accumulateToolCallDeltas(toolCallAccumulators, choice.delta.tool_calls)
 
-          if (choice.finishReason === 'tool_calls') {
+          if (choice.finishReason === 'tool_calls' && finishedAt === undefined) {
             for (const toolCall of completedToolCalls(toolCallAccumulators)) {
               yield { type: 'toolCall', toolCall }
             }
-            yield { type: 'done' }
-            return
+            finishedAt = Date.now()
           }
         } catch {
           // Malformed SSE frame — skip it rather than aborting the whole stream.

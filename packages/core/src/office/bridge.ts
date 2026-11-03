@@ -194,6 +194,8 @@ export class OfficeBridge {
       // worker that never starts becomes a request that merely times out.
       this.options.logger.warn(`office worker: ${String(chunk).trim().slice(0, 500)}`)
     })
+    // A helper that died must not take the host with it through its input pipe.
+    child.stdin?.on('error', () => undefined)
     child.on('exit', (code) => {
       // A helper replaced after a hang exits later; it must not clear its successor.
       if (this.child !== child) return

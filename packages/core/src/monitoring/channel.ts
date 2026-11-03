@@ -49,6 +49,11 @@ export type MonitorRequest =
    * `data` is `{ synced: string[] }`, the places synced.
    */
   | { kind: 'sync'; id: string }
+  /**
+   * Who changed a monitor's skill file, and when: its commits in the team repository, else in the git checkout
+   * holding it. `data` is a `FileHistory` (`sharing/provenance.ts`) or null when neither has it.
+   */
+  | { kind: 'history'; id: string; file: string }
 
 export type MonitorAnswer = { ok: true; data: unknown } | { ok: false; error: string }
 

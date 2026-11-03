@@ -201,3 +201,36 @@ describe('the dashboard', () => {
     expect(year.timeline.buckets.reduce((sum, bucket) => sum + bucket.skills + bucket.tools, 0)).toBe(events.length)
   })
 })
+
+// Asked for: "statistics on tokens burned by each team member".
+describe('tokens burned', () => {
+  const tok = (u: string, model: string, i: number, o: number, daysAgo: number, extra: Partial<UsageEvent> = {}): UsageEvent => ({ t: now - daysAgo * DAY, u, k: 'tokens', n: model, i, o, ...extra })
+  const events = [
+    tok('ann', 'qwen3', 100_000, 2_000, 1, { c: 80_000 }),
+    tok('ann', 'qwen3', 120_000, 3_000, 2),
+    tok('bob', 'claude', 50_000, 1_000, 1, { e: 1 }),
+    tok('bob', 'qwen3', 10_000, 500, 9),
+    { t: now - DAY, u: 'ann', k: 'skill' as const, n: 'deploy' },
+  ]
+  const base = { events, inventory: [], me: 'ann', from: now - 7 * DAY, to: now }
+
+  it('totals them by person and model, against the period before, and keeps them out of uses', () => {
+    const d = computeDashboard({ ...base, scope: 'team' })
+    expect(d.tokens.total).toEqual({ input: 270_000, output: 6_000, cached: 80_000, requests: 3 })
+    expect(d.tokens.previous.requests).toBe(1)
+    expect(d.tokens.estimatedShare).toBeCloseTo(1 / 3)
+    expect(d.tokens.people.map((p) => [p.user, p.input + p.output, p.requests, p.models])).toEqual([
+      ['ann', 225_000, 2, ['qwen3']],
+      ['bob', 51_000, 1, ['claude']],
+    ])
+    expect(d.tokens.people[0]!.share).toBeCloseTo(225_000 / 276_000)
+    expect(d.tokens.models.map((m) => m.model)).toEqual(['qwen3', 'claude'])
+    // Token counts are not uses of a skill or tool.
+    expect(d.totals.uses.value).toBe(1)
+    expect(d.totals.toolUses.value).toBe(0)
+    // On your own: only yours.
+    expect(computeDashboard({ ...base, scope: 'me' }).tokens.total.requests).toBe(2)
+    // Read back from a shard like any other event.
+    expect(parseUsageLines(events.map((e) => JSON.stringify(e)).join('\n'))).toHaveLength(5)
+  })
+})

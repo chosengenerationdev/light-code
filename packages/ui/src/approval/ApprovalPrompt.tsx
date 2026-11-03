@@ -13,6 +13,8 @@ export interface PendingApproval {
   alwaysScope?: 'folder'
   /** Asked every time; no "Always allow" is offered. */
   alwaysAsk?: boolean
+  /** A specialist asked, not the main agent. */
+  requestedBy?: string
 }
 
 export interface ApprovalPromptProps {
@@ -121,6 +123,7 @@ export function ApprovalPrompt(props: ApprovalPromptProps): ReactElement {
       }}
     >
       <div style={{ marginBottom: 8, fontSize: 12 }}>
+        {approval.requestedBy !== undefined ? <strong style={{ marginRight: 6 }}>{approval.requestedBy} asks:</strong> : null}
         <span style={{ fontFamily: monospace }}>{approval.toolName}</span>{' '}
         <span style={{ color: colors.muted }}>{describeGroup(approval.group)}</span>
       </div>

@@ -40,11 +40,12 @@ describe('toolsForMode', () => {
 describe('findMode', () => {
   it('resolves known ids', () => {
     expect(findMode('ask').id).toBe('ask')
-    expect(findMode('code').id).toBe('code')
+    // Code mode was removed; a saved `code` opens as Auto, which has the same tools.
+    expect(findMode('code').id).toBe('auto')
   })
 
-  it('falls back to Code for unknown or missing ids', () => {
-    expect(findMode(undefined).id).toBe('code')
-    expect(findMode('nonsense').id).toBe('code')
+  it('falls back to Auto for unknown or missing ids', () => {
+    expect(findMode(undefined).id).toBe('auto')
+    expect(findMode('nonsense').id).toBe('auto')
   })
 })

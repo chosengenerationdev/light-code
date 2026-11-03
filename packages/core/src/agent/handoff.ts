@@ -1,4 +1,5 @@
 import { CONTINUE_PROMPT } from './unfinished.js'
+import { isObserverNote } from '../observers/events.js'
 import type { ChatMessage } from '../providers/types.js'
 
 /**
@@ -50,7 +51,8 @@ export function handoffFacts(messages: readonly ChatMessage[]): HandoffFacts {
   for (const message of messages) {
     if (message.role === 'user') {
       // The loop's own "continue" nudge is user-role, but nobody typed it.
-      if (message.content.trim() !== CONTINUE_PROMPT.trim() && message.content.trim().length > 0) facts.userMessages.push(message.content.trim())
+      // Nor did anybody type a reviewer's note.
+      if (message.content.trim() !== CONTINUE_PROMPT.trim() && message.content.trim().length > 0 && !isObserverNote(message.content)) facts.userMessages.push(message.content.trim())
       continue
     }
     if (message.role !== 'assistant') continue

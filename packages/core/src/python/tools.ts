@@ -90,6 +90,19 @@ export interface PythonToolContext {
    */
   findTool?: ((name: string) => { filePath: string; sourceDir: string } | undefined) | undefined
   /**
+   * Team ownership (`team/admins.ts`), as for skills: a tool somebody else owns is not written - the change goes
+   * to its owner or an admin, and everybody keeps the approved version until then. `existing` is the tool's
+   * current source wherever it is loaded from.
+   */
+  teamReview?:
+    | {
+        needed(name: string): Promise<{ owner: string; existing: string } | undefined>
+        submit(request: { name: string; content: string; existingContent: string; owner: string }): Promise<string>
+        /** After a write that needed no review: records this user as the owner of a name nobody owns yet. */
+        saved?(name: string): Promise<void>
+      }
+    | undefined
+  /**
    * Publishes a tool that was just written, when tools are kept in a bucket.
    *
    * Absent unless a folder is configured and writable, so writing works exactly as before for
@@ -324,7 +337,8 @@ function makeWriteTool(
     async preview(params): Promise<ToolPreview> {
       const target = toolFolder(context, params.name, params.audience)
       const filePath = await resolveToolPath(target.dir, params.name)
-      const before = await readIfPresent(filePath)
+      const team = target.personal ? undefined : await context.teamReview?.needed(params.name).catch(() => undefined)
+      const before = team?.existing ?? (await readIfPresent(filePath))
       const generated = await sourceFor(params)
       const source = label(params.name, generated.source, before)
       const producedBy = generated.producedBy
@@ -341,6 +355,7 @@ function makeWriteTool(
         ...(declaredToolCalls(source).length > 0 ? [`Calls tools: ${declaredToolCalls(source).join(', ')}`] : []),
         ...(declaresAlwaysAsk(source) ? ['Always asks before every run, for everyone who has this tool (__always_ask__ = True)'] : []),
         ...[toolAudienceNote(context, target.personal)].filter((note): note is string => note !== undefined),
+        ...(team !== undefined ? [`Owned by ${team.owner}: sent to them (or a team admin) for approval, and not used by anyone, you included, until approved`] : []),
       ]
       return {
         kind: 'diff',
@@ -355,7 +370,9 @@ function makeWriteTool(
       try {
         const target = toolFolder(context, params.name, params.audience)
         const filePath = await resolveToolPath(target.dir, params.name)
-        const before = await readIfPresent(filePath)
+        // Before anything is written: a change to somebody else's tool writes nothing at all.
+        const team = target.personal ? undefined : await context.teamReview?.needed(params.name)
+        const before = team?.existing ?? (await readIfPresent(filePath))
 
         if (options.mustExist && before.length === 0) {
           return {
@@ -390,9 +407,13 @@ function makeWriteTool(
             }),
           }
         }
+        if (team !== undefined && context.teamReview !== undefined) {
+          return { content: await context.teamReview.submit({ name: params.name, content: source, existingContent: before, owner: team.owner }) }
+        }
 
         await fs.mkdir(target.dir, { recursive: true })
         await fs.writeFile(filePath, source, 'utf8')
+        if (!target.personal) void context.teamReview?.saved?.(params.name).catch(() => undefined)
 
         /*
          * Puts the file back as it was. Leaving a broken or unapproved .py behind would sit

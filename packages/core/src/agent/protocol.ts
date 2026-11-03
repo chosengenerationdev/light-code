@@ -1,4 +1,7 @@
 import type { HubGitCounts } from '../jupyter/hubGit.js'
+import type { Strategy, StrategyExchange, StrategyProgress } from '../strategy/strategy.js'
+import type { ObserversConfig } from '../config/schema.js'
+import type { ObserverPanelState } from '../observers/hub.js'
 import type { MessageQuote, Reaction } from './feedback.js'
 import type { CheckpointView } from './checkpoints.js'
 import type { FormField } from '../tools/askUserForm.js'
@@ -435,6 +438,8 @@ export type TranscriptEntry =
   | { kind: 'diagram'; diagram: DiagramSpec; expertInformed?: boolean; informedBy?: string }
   | { kind: 'chartError'; message: string }
   | { kind: 'diagramError'; message: string }
+  /** The Anti Hallucinator's note as it joined the conversation (`observers/events.ts` `noteForAgent`). */
+  | { kind: 'observerNote'; content: string }
 
 /** Enough to render the history list without loading every transcript. */
 export interface TaskListEntry {
@@ -699,6 +704,12 @@ export type UiToHostMessage =
   | { type: 'hubGit'; op: 'status' | 'commit' | 'pull'; message?: string }
   /** The token bar's Compact now: summarise older messages to free context. */
   | { type: 'compactConversation' }
+  /**
+   * The message being typed, kept by the host too (reported: after the agent restarted, what had been typed was gone -
+   * the page's own storage belongs to its address, and a restarted host has a new port). Empty text removes it.
+   */
+  | { type: 'saveComposerDraft'; text: string }
+  | { type: 'requestComposerDraft' }
   /** The composer's "Add files to context": ask the editor for a multi-select file list. */
   | { type: 'pickContextFiles' }
   /**
@@ -1074,6 +1085,30 @@ export type UiToHostMessage =
   | { type: 'syncVectorStore'; fromId: string }
   /** Settings → Project. See `config/project.ts`. */
   | { type: 'requestProject' }
+  /** Settings → Project → Auditor and Anti Hallucinator (`observers/`). */
+  | { type: 'requestObservers' }
+  /** The whole `observers` block, saved for the open project. Checked host-side against the schema. */
+  | { type: 'saveObservers'; observers: unknown }
+  /** Stops both observer processes and starts them again with fresh contexts. */
+  | { type: 'restartObservers' }
+  /** Opens the newest audit journal file. */
+  | { type: 'openAuditFolder' }
+  /** Team admins and owners' approval (`team/admins.ts`). */
+  | { type: 'requestTeam' }
+  /** The admin field as typed: Windows user ids, comma or line separated. Refused host-side for a non-admin. */
+  | { type: 'saveTeamAdmins'; ids: string }
+  | { type: 'decideTeamReview'; id: string; decision: 'approved' | 'rejected'; reason?: string }
+  /** Agent team strategies (`strategy/strategy.ts`): the library, and the one this chat uses. */
+  | { type: 'requestStrategies' }
+  /** Saved into the library (checked against the schema host-side); `use` also puts it to use in this chat. */
+  | { type: 'saveStrategy'; strategy: unknown; use?: boolean }
+  | { type: 'deleteStrategy'; id: string }
+  /** A library strategy for this chat, or none. */
+  | { type: 'useStrategy'; id?: string }
+  /** Opens the Strategy window as an editor tab (`HostUi.openStrategyWindow`). */
+  | { type: 'openStrategyWindow' }
+  /** From the Strategy tab: put this question in the chat's message box. */
+  | { type: 'askInChat'; text: string }
   /** Empty clears it, and the folder name is used again. Saved for this project only. */
   | { type: 'saveProjectName'; name: string }
   /** The default scope of skill and tool searches, for this project. */
@@ -1438,6 +1473,16 @@ export type HostToUiMessage =
   | { type: 'diagram'; diagram: DiagramSpec; expertInformed?: boolean; informedBy?: string }
   | { type: 'diagramError'; message: string }
   | { type: 'chartError'; message: string }
+  /** The Anti Hallucinator's note joined the conversation; the chat shows it as the reviewer's. */
+  | { type: 'observerNote'; text: string }
+  | ObserversMessage
+  | TeamMessage
+  | StrategiesMessage
+  | { type: 'strategyResult'; ok: boolean; message: string }
+  /** The answer to a save or a decision, shown where it was made. */
+  | { type: 'teamResult'; ok: boolean; message: string }
+  /** A save of the observers' settings was refused - shown on the panel, not in the chat. */
+  | { type: 'observersError'; message: string }
   | {
       type: 'toolResult'
       toolCall: ToolCallSummary
@@ -1460,6 +1505,8 @@ export type HostToUiMessage =
       group: ToolGroup
       preview: ToolPreview
       alwaysScope?: 'folder'
+      /** A specialist of the agent team asked, not the main agent: its name, for the prompt. */
+      requestedBy?: string
       /**
        * This tool asks every time, whatever is allowed — it changes something shared or runs code
        * (`ALWAYS_ASK_TOOLS`). The prompt offers no "Always allow" for it.
@@ -1622,6 +1669,8 @@ export type HostToUiMessage =
       exportsSource?: boolean
       /** The host is an editor with a file list to pick from; the composer offers "Add files". */
       picksFiles?: boolean
+      /** The Strategy window opens as an editor tab here (VS Code). */
+      strategyInEditor?: boolean
       /** The host has a Save dialog of its own, so the panel saves files through it (`saveFile`). */
       savesFiles?: boolean
       /** The git branch checked out in this workspace, shown under the chat's name. */
@@ -1821,6 +1870,8 @@ export type HostToUiMessage =
   | { type: 'contextUsage'; usage: ContextUsage }
   /** History was summarised; the UI says so rather than silently losing detail. */
   | { type: 'compacted'; summarisedCount: number }
+  /** The draft the host kept, for a page that has none of its own. */
+  | { type: 'composerDraft'; text: string }
   /** The queue as the host holds it — the UI renders this rather than its own copy. */
   /**
    * What is waiting, for the composer to list.
@@ -2408,6 +2459,75 @@ export type HostToUiMessage =
   | { type: 'taskRestored'; taskId: string | undefined; entries: TranscriptEntry[] }
 
 /** What this project is called, and what that name currently decides. */
+/** The Strategy window: saved strategies, the one in use here, and the roles a step can be. */
+export interface StrategiesMessage {
+  type: 'strategies'
+  library: Strategy[]
+  active?: Strategy
+  progress: StrategyProgress
+  /** The step being carried out: the role consulted now (`running`), or the one that answered last. */
+  current?: { role: string; running: boolean }
+  /** Every role being consulted now - several at once in a parallel box. */
+  runningRoles: string[]
+  /** What passed between the specialists, oldest first: the user's view of what was agreed and why a loop went back. */
+  exchanges: StrategyExchange[]
+  /** Why the strategy in use cannot run as drawn - an unassigned role, a dangling connector. */
+  problems: string[]
+  roles: { id: string; name: string; summary: string; assigned: boolean; label?: string; ownProcess?: boolean }[]
+  /** The specialists' processes in this chat. */
+  processes: { role: string; generation: number; handoffs: number; tokens?: number; window: number; pid?: number }[]
+}
+
+/** Settings → Project's Team admins panel and the Team reviews tab. */
+export interface TeamMessage {
+  type: 'team'
+  /** This user's Windows user id, as everything here compares it. */
+  me: string
+  hasWorkspace: boolean
+  available: boolean
+  problem?: string
+  index?: string
+  admins?: { ids: string[]; by: string; at: number }
+  canEditAdmins: boolean
+  isAdmin: boolean
+  /** Every review for an admin; otherwise those this user owns or sent. Pending first. */
+  reviews: TeamReviewView[]
+  /** The Team reviews tab: for admins, and for an owner with something to decide. */
+  showTab: boolean
+}
+
+export interface TeamReviewView {
+  id: string
+  kind: 'skill' | 'tool'
+  name: string
+  /** Empty when nobody owns it: then only an admin decides. */
+  owner: string
+  by: string
+  at: number
+  status: 'pending' | 'approved' | 'rejected'
+  content: string
+  existingContent: string
+  canDecide: boolean
+  decidedBy?: string
+  decidedAt?: number
+  reason?: string
+}
+
+/** Settings → Project's Auditor and Anti Hallucinator panels. */
+export interface ObserversMessage {
+  type: 'observers'
+  hasWorkspace: boolean
+  /** As stored for this project. */
+  config: ObserversConfig
+  state: ObserverPanelState
+  /** Profiles a model can be chosen from; `usable` false for one the observer process cannot call (Copilot). */
+  profiles: { id: string; label: string; model: string; usable: boolean }[]
+  /** Whether the Rust helper here has `watch`. Without it recording works and reviewing does not. */
+  helper: boolean
+  /** Whether any OpenSearch connection is configured. */
+  opensearch: boolean
+}
+
 export interface ProjectMessage {
   type: 'project'
   /** False when no folder is open: a project name has nothing to belong to. */

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { strategySchema, type StrategyProgress } from '../../strategy/strategy.js'
 import { replaceFile } from './replaceFile.js'
 import path from 'node:path'
 import type { TruncationStore } from '../../agent/truncate.js'
@@ -163,7 +164,18 @@ function parseTask(raw: string): Task | undefined {
   if (typeof task?.id !== 'string' || typeof task.workspaceRoot !== 'string' || !Array.isArray(task.messages)) {
     return undefined
   }
+  /*
+   * Every field the task was saved with comes back - the plan, its progress, the strategy and its exchange log - with
+   * the ones that steer the agent checked. This used to rebuild the task from the seven fields above alone, so a chat
+   * reopened from history lost its plan and its strategy: found by `strategyEndToEnd.test.ts`, asked for as "make sure
+   * application of strategy is working end to end". The bug shape this project keeps recording (§19): a value copied
+   * field by field drops every field added later.
+   */
+  const strategy = task.strategy !== undefined ? strategySchema.safeParse(task.strategy) : undefined
+  const { plan, planProgress, strategy: _strategy, strategyProgress, strategyExchanges, ...rest } = task
+  void _strategy
   return {
+    ...rest,
     id: task.id,
     workspaceRoot: task.workspaceRoot,
     title: typeof task.title === 'string' ? task.title : 'Untitled task',
@@ -171,5 +183,15 @@ function parseTask(raw: string): Task | undefined {
     updatedAt: typeof task.updatedAt === 'number' ? task.updatedAt : Date.now(),
     messages: task.messages,
     resultHandles: Array.isArray(task.resultHandles) ? task.resultHandles.filter((h) => typeof h === 'string') : [],
-  }
+    ...(typeof plan === 'string' ? { plan } : {}),
+    ...(isRecord(planProgress) ? { planProgress } : {}),
+    // A strategy a hand edit broke is left out rather than half-applied.
+    ...(strategy?.success === true ? { strategy: strategy.data } : {}),
+    ...(strategy?.success === true && isRecord(strategyProgress) ? { strategyProgress: strategyProgress as StrategyProgress } : {}),
+    ...(strategy?.success === true && Array.isArray(strategyExchanges) ? { strategyExchanges } : {}),
+  } as Task
+}
+
+function isRecord(value: unknown): value is Record<string, never> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

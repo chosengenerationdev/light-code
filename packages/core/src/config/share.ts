@@ -46,6 +46,8 @@ import type { LightCodeConfig } from './schema.js'
 export type ShareSectionId =
   | 'profiles'
   | 'project'
+  | 'observers'
+  | 'strategies'
   | 'mcpServers'
   | 'search'
   | 'agents'
@@ -56,6 +58,7 @@ export type ShareSectionId =
   | 'mail'
   | 's3'
   | 'atlassian'
+  | 'autosys'
   | 'autosysAddresses'
   | 'datasets'
   | 'schedules'
@@ -135,6 +138,21 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     keys: ['project'],
   },
   {
+    id: 'observers',
+    label: 'Auditor and Anti Hallucinator',
+    description:
+      'Whether this project is audited and watched for hallucination, and by which provider profile. ' +
+      'Imported into the project you have open. The profile must exist here too (share Providers with it).',
+    // Per project, like `project`: the host writes an import back to the open project.
+    keys: ['observers'],
+  },
+  {
+    id: 'strategies',
+    label: 'Strategies',
+    description: "Saved Agent team strategies - the flow charts of which role does what. They name roles, so the importer's team needs the same roles.",
+    keys: ['strategies'],
+  },
+  {
     id: 'mcpServers',
     label: 'MCP servers',
     description: 'Server commands and URLs. Any secret values stay behind their references.',
@@ -207,11 +225,22 @@ export const SHARE_SECTIONS: readonly ShareSection[] = [
     id: 'atlassian',
     label: 'DevOps',
     description:
-      'The Confluence, Jira, Bitbucket, Jenkins and AutoSys sites, their defaults and read-only settings, and the team repository for skills and tools. Tokens and passwords are not included.',
-    keys: ['confluence', 'jira', 'bitbucket', 'jenkins', 'autosys', 'teamRepo'],
+      'The Confluence, Jira, Bitbucket and Jenkins sites, their defaults and read-only settings, and the team repository for skills and tools. Tokens and passwords are not included. AutoSys is its own section, below.',
+    keys: ['confluence', 'jira', 'bitbucket', 'jenkins', 'teamRepo'],
     // A user id names one person: kept out of the file, and the importer's own is kept.
-    strip: ['jenkins.username', 'autosys.username'],
-    stripNote: 'Your Jenkins and AutoSys user names are left out; each person uses their own.',
+    strip: ['jenkins.username'],
+    stripNote: 'Your Jenkins user name is left out; each person uses their own.',
+  },
+  {
+    // Asked for: "export only the AutoSys config and import only that". Its own section, so a file can carry
+    // AutoSys alone, and importing it replaces the AutoSys settings and nothing else.
+    id: 'autosys',
+    label: 'AutoSys',
+    description:
+      "The AutoSys site, its addresses, the API gateway (token address, client id, headers), the test job and read-only setting. Passwords, secrets and certificate passphrases are not included. Alone, an import changes only AutoSys.",
+    keys: ['autosys'],
+    strip: ['autosys.username'],
+    stripNote: 'Your AutoSys user name is left out; each person uses their own.',
   },
   {
     id: 'autosysAddresses',
@@ -387,6 +416,8 @@ function detailFor(section: ShareSection, config: LightCodeConfig): string {
       )
       return sites.length > 0 ? sites.join(', ') : 'not set up'
     }
+    case 'autosys':
+      return config.autosys?.baseUrl ?? 'not set up'
     case 'autosysAddresses':
       return count(Object.keys(config.autosys?.paths ?? {}).length, 'address', 'addresses')
     case 'datasets':
@@ -446,6 +477,8 @@ function secretRefsFor(section: ShareSection, config: LightCodeConfig): string[]
       if (config.jira?.tokenRef !== undefined) refs.push('Jira: personal access token')
       if (config.bitbucket?.tokenRef !== undefined) refs.push('Bitbucket: personal access token')
       if (config.jenkins?.tokenRef !== undefined) refs.push('Jenkins: API token and user id')
+      break
+    case 'autosys':
       if (config.autosys?.auth?.type === 'apigee') {
         refs.push('AutoSys: gateway client secret')
         if (config.autosys.auth.passphraseRef !== undefined) refs.push('AutoSys: client certificate passphrase')

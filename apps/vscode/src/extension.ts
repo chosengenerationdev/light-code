@@ -4,7 +4,7 @@ import { vscodeLanguageModels } from './platform/languageModels.js'
 import { readDebugSession, startTrackingDebugSessions } from './platform/debugSession.js'
 import { VSCodeConfigStore } from './platform/config.js'
 import { WebviewTransport } from './platform/transport.js'
-import { ChatViewProvider } from './webview/chatViewProvider.js'
+import { ChatViewProvider, StrategyPanel } from './webview/chatViewProvider.js'
 import { createVSCodeHostServices } from './webview/hostServices.js'
 import { shareKeysWithSun } from './shareWithSun.js'
 import { registerCommitMessageCommand } from './commitMessage.js'
@@ -81,6 +81,12 @@ export function activate(context: vscode.ExtensionContext): void {
     // rebuild it. The transcript survives a full teardown too now, via `resync`.
     webviewOptions: { retainContextWhenHidden: true },
   })
+
+  const strategyCommand = vscode.commands.registerCommand('lightCode.openStrategy', () => {
+    ensureBridge()
+    StrategyPanel.open(context, transport)
+  })
+  context.subscriptions.push(strategyCommand)
 
   const openCommand = vscode.commands.registerCommand('lightCode.openPanel', () => {
     void vscode.commands.executeCommand('workbench.view.extension.lightCode')
